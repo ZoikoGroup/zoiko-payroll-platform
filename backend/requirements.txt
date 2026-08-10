@@ -1,0 +1,31 @@
+# Zoiko Payroll Platform — backend dependencies
+# Standalone platform: no billing module, no stripe, no alembic (create_all bootstrap).
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+sqlalchemy>=2.0.31
+psycopg[binary]>=3.1.18
+
+python-dotenv==1.0.1
+pydantic[email]>=2.7.1
+pydantic-settings>=2.2.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.9
+pillow>=10.0.0
+pypdf>=4.0.0
+
+# Compliance document text extraction (PDF), OCR (images) and payslip PDF
+# generation. pytesseract also needs the tesseract-ocr system binary.
+pytesseract>=0.3.10
+reportlab>=4.0.0
+
+slowapi
+cachetools
+markupsafe
+openpyxl
+email-validator
+apscheduler>=3.10,<4
+certifi>=2024.2.2
+imapclient>=3.0,<4
+cryptography>=42.0.0

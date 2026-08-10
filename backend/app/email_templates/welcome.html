@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px;">
+  <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table width="600" cellpadding="20" cellspacing="0" style="background: #ffffff; border-radius: 12px;">
+      <tr><td style="background: linear-gradient(135deg, #059669, #10B981); border-radius: 12px 12px 0 0; text-align: center; padding: 24px 20px;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{company_name}}</h1>
+      </td></tr>
+      <tr><td style="padding: 32px 28px;">
+        <h2 style="color: #059669; margin: 0 0 16px 0; font-size: 20px;">Welcome Aboard!</h2>
+        <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Dear {{employee_name}},</p>
+        <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">
+          Your account with <strong style="color: #059669;">{{company_name}}</strong> has been created. Use the
+          temporary password below to log in for the first time.
+        </p>
+        <p style="text-align: center; margin: 30px 0;">
+          <code style="background: #f3f4f6; padding: 12px 24px; border-radius: 8px; font-size: 18px; font-family: monospace; letter-spacing: 2px; border: 1px dashed #d1d5db;">{{temporary_password}}</code>
+        </p>
+        <p style="text-align: center; margin: 30px 0;">
+          <a href="{{login_url}}" style="background: #FF7A00; color: #ffffff; padding: 12px 32px; border-radius: 24px; text-decoration: none; font-weight: bold;">Log In</a>
+        </p>
+        <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">
+          <strong>Important:</strong> You will be asked to change your password after logging in. This temporary
+          password will stop working once you set a new one.
+        </p>
+        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
+        <p style="color: #9CA3AF; font-size: 12px; margin: 0;">
+          This is an automated message from {{company_name}}. Please do not reply directly to this email.
+        </p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body>
+</html>

@@ -1,0 +1,59 @@
+import { Check, Globe2 } from "lucide-react";
+
+const STEPS = [
+  { id: "jurisdictions", label: "Select Jurisdictions" },
+  { id: "contributions", label: "Configure Statutory Contributions" },
+  { id: "tax", label: "Configure Tax Rules" },
+  { id: "review", label: "Review" },
+  { id: "activate", label: "Activate Enterprise Policy" },
+];
+
+export default function EnterpriseOnboardingBanner({ jurisdictions = [], enterpriseStatus }) {
+  const hasJurisdictions = jurisdictions.length > 0;
+  const allConfigured = hasJurisdictions && jurisdictions.every((j) => j.status !== "draft");
+  const isActive = enterpriseStatus === "active";
+
+  // Steps are driven off real state, not hardcoded checkmarks.
+  const completed = {
+    jurisdictions: hasJurisdictions,
+    contributions: allConfigured,
+    tax: allConfigured,
+    review: allConfigured,
+    activate: isActive,
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-[#9D7BF2]/10 to-[#35B6F5]/5 border border-[#9D7BF2]/20 rounded-[18px] p-6">
+      <div className="flex items-center gap-3 mb-1">
+        <div className="h-9 w-9 rounded-[10px] bg-[#9D7BF2] flex items-center justify-center shadow-[0_2px_8px_rgba(157,123,242,0.3)]">
+          <Globe2 size={17} className="text-white" />
+        </div>
+        <h3 className="text-[16px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Enterprise Payroll Setup</h3>
+      </div>
+      <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93] mb-5">
+        Complete your compliance configuration before enabling Enterprise Payroll.
+      </p>
+
+      <div className="flex flex-wrap gap-4">
+        {STEPS.map((step, i) => {
+          const done = completed[step.id];
+          return (
+            <div key={step.id} className="flex items-center gap-2">
+              <div
+                className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
+                  done ? "bg-[#19C58A] text-white" : "bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] text-[#9E9690]"
+                }`}
+              >
+                {done ? <Check size={12} /> : i + 1}
+              </div>
+              <span className={`text-[12px] font-semibold ${done ? "text-[#1A1816] dark:text-[#F0EDE8]" : "text-[#9E9690]"}`}>
+                {step.label}
+              </span>
+              {i < STEPS.length - 1 && <span className="text-[#E5E0D9] dark:text-[#38312D] mx-1">→</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
