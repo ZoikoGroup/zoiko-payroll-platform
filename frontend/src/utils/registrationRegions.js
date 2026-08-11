@@ -1,12 +1,5 @@
 export const REGISTRATION_COUNTRIES = [
-  "India", "United States", "United Kingdom", "United Arab Emirates", "Australia",
-  "Bangladesh", "Bahrain", "Brazil", "Canada", "Switzerland", "China", "Denmark",
-  "Germany", "France", "Ireland", "Netherlands", "Italy", "Spain", "Belgium",
-  "Austria", "Finland", "Portugal", "Greece", "Ghana", "Hong Kong", "Japan",
-  "Kenya", "South Korea", "Kuwait", "Sri Lanka", "Mexico", "Malaysia", "Nigeria",
-  "Norway", "Nepal", "New Zealand", "Oman", "Pakistan", "Qatar", "Rwanda",
-  "Saudi Arabia", "Sweden", "Singapore", "Thailand", "Tanzania", "Uganda",
-  "South Africa",
+  "India", "Germany", "Canada", "United States", "United Kingdom", "Australia",
 ];
 
 const STATES_BY_COUNTRY = {

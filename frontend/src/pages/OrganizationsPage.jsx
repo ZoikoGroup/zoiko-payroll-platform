@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Power, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Power, RefreshCw, Pencil, Building2 } from "lucide-react";
 
 import { apiFetch } from "../api/client";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -14,20 +14,36 @@ const EMPTY_ORG = {
   registration_number: "",
 };
 
+function initialsFor(name) {
+  return (
+    (name || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
 export default function OrganizationsPage() {
   const [orgs, setOrgs] = useState([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
-  const [creating, setCreating] = useState(false);
+  const [modalMode, setModalMode] = useState(null); // null | "create" | "edit"
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_ORG);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
+    setLoading(true);
     apiFetch("/api/organizations", { params: { search, limit: 200 } })
       .then((data) => setOrgs(data.organizations))
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }, [search]);
 
   useEffect(() => {
@@ -68,16 +84,46 @@ export default function OrganizationsPage() {
     }
   }
 
-  async function handleCreate(e) {
+  function openCreate() {
+    setModalMode("create");
+    setEditingId(null);
+    setForm(EMPTY_ORG);
+  }
+
+  function openEdit(org) {
+    setModalMode("edit");
+    setEditingId(org.id);
+    setForm({
+      organization_name: org.organization_name || "",
+      industry: org.industry || "",
+      address: org.address || "",
+      email: org.email || "",
+      phone: org.phone || "",
+      tax_no: org.tax_no || "",
+      registration_number: org.registration_number || "",
+    });
+  }
+
+  function closeModal() {
+    setModalMode(null);
+    setEditingId(null);
+    setForm(EMPTY_ORG);
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      await apiFetch("/api/organizations", { method: "POST", body: form });
-      setNotice(`Organization "${form.organization_name}" created.`);
-      setCreating(false);
-      setForm(EMPTY_ORG);
+      if (modalMode === "edit") {
+        await apiFetch(`/api/organizations/${editingId}`, { method: "PUT", body: form });
+        setNotice(`Organization "${form.organization_name}" updated.`);
+      } else {
+        await apiFetch("/api/organizations", { method: "POST", body: form });
+        setNotice(`Organization "${form.organization_name}" created.`);
+      }
+      closeModal();
       load();
     } catch (err) {
       setError(err.message);
@@ -93,7 +139,12 @@ export default function OrganizationsPage() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Organizations</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Organizations</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {loading ? "Loading…" : `${orgs.length} organization${orgs.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <input
             value={search}
@@ -103,13 +154,15 @@ export default function OrganizationsPage() {
           />
           <button
             onClick={load}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            disabled={loading}
+            title="Refresh list"
+            className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
           >
-            <RefreshCw size={15} />
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             Refresh
           </button>
           <button
-            onClick={() => setCreating(true)}
+            onClick={openCreate}
             className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
           >
             <Plus size={16} />
@@ -136,8 +189,15 @@ export default function OrganizationsPage() {
           </thead>
           <tbody>
             {orgs.map((org) => (
-              <tr key={org.id} className="border-t border-slate-100">
-                <td className="px-4 py-3 font-medium text-slate-800">{org.organization_name}</td>
+              <tr key={org.id} className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors">
+                <td className="px-4 py-3 font-medium text-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-orange-600">
+                      {initialsFor(org.organization_name)}
+                    </span>
+                    {org.organization_name}
+                  </div>
+                </td>
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">{org.organization_code}</td>
                 <td className="px-4 py-3 text-slate-500">{org.industry || "—"}</td>
                 <td className="px-4 py-3 text-slate-600">{org.email || "—"}</td>
@@ -157,6 +217,16 @@ export default function OrganizationsPage() {
                   <div className="flex items-center gap-2">
                     <button
                       disabled={busy}
+                      title="Edit organization"
+                      onClick={() => openEdit(org)}
+                      className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                    >
+                      <Pencil size={12} />
+                      Edit
+                    </button>
+                    <button
+                      disabled={busy}
+                      title={org.is_active ? "Suspend organization" : "Activate organization"}
                       onClick={() => toggleStatus(org)}
                       className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
                         org.is_active
@@ -168,8 +238,10 @@ export default function OrganizationsPage() {
                       {org.is_active ? "Suspend" : "Activate"}
                     </button>
                     <button
+                      disabled={busy}
+                      title="Delete organization"
                       onClick={() => setDeleting(org)}
-                      className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+                      className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-40"
                     >
                       <Trash2 size={12} />
                       Delete
@@ -180,16 +252,23 @@ export default function OrganizationsPage() {
             ))}
           </tbody>
         </table>
-        {orgs.length === 0 && (
-          <p className="px-4 py-6 text-sm text-slate-400">No organizations found.</p>
+        {!loading && orgs.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+            <Building2 size={28} className="text-slate-300" />
+            <p className="text-sm text-slate-400">
+              {search ? `No organizations match "${search}".` : "No organizations found."}
+            </p>
+          </div>
         )}
       </div>
 
-      {creating && (
+      {modalMode && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">New Organization</h3>
-            <form onSubmit={handleCreate} className="grid grid-cols-2 gap-4">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4">
+              {modalMode === "edit" ? "Edit Organization" : "New Organization"}
+            </h3>
+            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
               <label className="block col-span-2">
                 <span className="text-xs font-medium text-slate-600">Name *</span>
                 <input className={INPUT} required value={form.organization_name} onChange={set("organization_name")} />
@@ -221,7 +300,7 @@ export default function OrganizationsPage() {
               <div className="col-span-2 flex justify-end gap-3 mt-2">
                 <button
                   type="button"
-                  onClick={() => setCreating(false)}
+                  onClick={closeModal}
                   disabled={busy}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
                 >
@@ -232,7 +311,9 @@ export default function OrganizationsPage() {
                   disabled={busy}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50"
                 >
-                  {busy ? "Creating…" : "Create"}
+                  {busy
+                    ? modalMode === "edit" ? "Saving…" : "Creating…"
+                    : modalMode === "edit" ? "Save Changes" : "Create"}
                 </button>
               </div>
             </form>

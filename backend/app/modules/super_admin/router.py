@@ -53,6 +53,7 @@ def dashboard_stats(current_user=Depends(get_current_super_admin), db: Session =
         total_organizations=total_orgs,
         active_organizations=active_orgs,
         total_users=total_users,
+        super_admins=db.query(User).filter(User.role == "super_admin").count(),
         org_admins=db.query(User).filter(User.role == "org_admin").count(),
         payroll_admins=db.query(User).filter(User.role == "payroll_admin").count(),
         employees=db.query(User).filter(User.role == "employee").count(),

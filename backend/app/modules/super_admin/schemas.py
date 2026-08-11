@@ -59,6 +59,7 @@ class DashboardStats(BaseModel):
     total_organizations: int
     active_organizations: int
     total_users: int
+    super_admins: int
     org_admins: int
     payroll_admins: int
     employees: int

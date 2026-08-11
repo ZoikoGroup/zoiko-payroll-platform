@@ -258,6 +258,25 @@ def get_organization(
     return org
 
 
+@router.put("/{organization_id}", response_model=OrganizationResponse)
+def update_organization(
+    organization_id: int,
+    data: OrganizationUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.organizations.models import Organization
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise NotFoundException("Organization", "id")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(org, field, value)
+    db.commit()
+    db.refresh(org)
+    logger.info("Super Admin %s updated organization %s", current_user.email, org.organization_code)
+    return org
+
+
 @router.post("/", response_model=OrganizationResponse)
 def create_organization(
     data: OrganizationBase,

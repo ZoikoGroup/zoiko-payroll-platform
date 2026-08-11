@@ -259,38 +259,25 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="address" style={labelStyle}>
-                  Address
-                </label>
-                <textarea
-                  id="address"
-                  required
-                  value={form.address}
-                  onChange={(e) => update("address", e.target.value)}
-                  placeholder="123 Main St, Suite 100"
-                  rows={2}
-                  style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }}
-                  onFocus={e => e.target.style.borderColor = "#FF6B00"}
-                  onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                />
-              </div>
-
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "18px" }}>
                 <div>
-                  <label htmlFor="city" style={labelStyle}>
-                    City
+                  <label htmlFor="country" style={labelStyle}>
+                    Country
                   </label>
-                  <input
-                    id="city"
-                    type="text"
-                    value={form.city}
-                    onChange={(e) => update("city", e.target.value)}
-                    placeholder="New York"
-                    style={fieldStyle}
+                  <select
+                    id="country"
+                    required
+                    value={form.country}
+                    onChange={(e) => handleCountryChange(e.target.value)}
+                    style={selectStyle}
                     onFocus={e => e.target.style.borderColor = "#FF6B00"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
+                  >
+                    <option value="">Select country</option>
+                    {REGISTRATION_COUNTRIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label htmlFor="state" style={labelStyle}>
@@ -314,24 +301,37 @@ export default function RegisterPage() {
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="country" style={labelStyle}>
-                    Country
+                  <label htmlFor="city" style={labelStyle}>
+                    City
                   </label>
-                  <select
-                    id="country"
-                    required
-                    value={form.country}
-                    onChange={(e) => handleCountryChange(e.target.value)}
-                    style={selectStyle}
+                  <input
+                    id="city"
+                    type="text"
+                    value={form.city}
+                    onChange={(e) => update("city", e.target.value)}
+                    placeholder="New York"
+                    style={fieldStyle}
                     onFocus={e => e.target.style.borderColor = "#FF6B00"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  >
-                    <option value="">Select country</option>
-                    {REGISTRATION_COUNTRIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  />
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="address" style={labelStyle}>
+                  Address
+                </label>
+                <textarea
+                  id="address"
+                  required
+                  value={form.address}
+                  onChange={(e) => update("address", e.target.value)}
+                  placeholder="123 Main St, Suite 100"
+                  rows={2}
+                  style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }}
+                  onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                  onBlur={e => e.target.style.borderColor = "#E5E7EB"}
+                />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px" }}>
