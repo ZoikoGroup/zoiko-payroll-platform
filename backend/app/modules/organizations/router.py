@@ -11,13 +11,16 @@ Registration of a brand-new org happens through /auth/register (public),
 which creates the Organization + first org_admin in one transaction.
 """
 
+import base64
 import logging
+import os
+import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.core.exceptions import NotFoundException, ForbiddenException
+from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from app.modules.auth.schemas import SuccessResponse
 from app.core.dependencies import (
     get_current_super_admin,
@@ -40,6 +43,54 @@ from app.modules.organizations.schemas import (
 logger = logging.getLogger("zoiko_payroll.organizations")
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
+
+# Public, unauthenticated endpoint that exposes the jurisdiction tax-field
+# schema used by the Register Page / Compliance tab. The frontend keeps its own
+# mirror (utils/jurisdictionTax.js) so dynamic fields render instantly, but
+# this is the canonical reference for "reuse the existing schema definition"
+# deduplication — clients should never invent their own tax-field shapes.
+jurisdiction_router = APIRouter(prefix="/jurisdictions", tags=["Jurisdictions"])
+
+
+@jurisdiction_router.get("/tax-schemas")
+def list_jurisdiction_tax_schemas():
+    from app.core.jurisdiction import (
+        CODE_TO_COUNTRY_NAME,
+        JURISDICTION_TAX_SCHEMAS,
+    )
+
+    return {
+        "countries": [
+            {"code": code, "name": CODE_TO_COUNTRY_NAME[code]}
+            for code in JURISDICTION_TAX_SCHEMAS
+        ],
+        "schemas": JURISDICTION_TAX_SCHEMAS,
+    }
+
+# Local-disk storage, mirroring the existing pattern already used for
+# Compliance document uploads (see payroll/service.py _COMPLIANCE_DOC_UPLOAD_DIR)
+# — only the file path is stored on the Organization row; bytes never touch the DB.
+_ORG_LOGO_UPLOAD_DIR = os.environ.get(
+    "PAYROLL_ORG_LOGO_UPLOAD_DIR",
+    os.path.join(os.environ.get("UPLOAD_BASE_DIR", "/tmp/uploads"), "organization_logos"),
+)
+_LOGO_ALLOWED_MIME = {"image/jpeg", "image/jpg", "image/svg+xml"}
+_LOGO_ALLOWED_EXT = {".jpg", ".jpeg", ".svg"}
+_LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+def _read_logo_data_uri(logo_path: str | None) -> str | None:
+    """Reused by every response that includes an org's logo, so the frontend
+    can just drop it straight into an <img src> — no separate authenticated
+    image route needed. Safe for SVGs too: browsers never execute script
+    content inside an SVG loaded via <img src>, only inline/object-embedded SVGs."""
+    if not logo_path or not os.path.isfile(logo_path):
+        return None
+    ext = os.path.splitext(logo_path)[1].lower()
+    mime = "image/svg+xml" if ext == ".svg" else "image/jpeg"
+    with open(logo_path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
 
 
 # ── Org-scoped (own organization only) ──────────────────────────────────────
@@ -75,6 +126,44 @@ def update_my_organization(
     db.commit()
     db.refresh(org)
     return org
+
+
+@router.post("/me/logo", response_model=OrganizationDetail)
+async def upload_my_organization_logo(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_org_admin),
+    db: Session = Depends(get_db),
+):
+    from app.core.dependencies import get_organization_id
+    from app.modules.organizations.models import Organization
+
+    org_id = get_organization_id(current_user)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org is None:
+        raise NotFoundException("Organization", "id")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if file.content_type not in _LOGO_ALLOWED_MIME or ext not in _LOGO_ALLOWED_EXT:
+        raise BadRequestException("Logo must be a JPG or SVG image.")
+
+    contents = await file.read()
+    if len(contents) > _LOGO_MAX_BYTES:
+        raise BadRequestException("Logo must be smaller than 2 MB.")
+
+    os.makedirs(_ORG_LOGO_UPLOAD_DIR, exist_ok=True)
+    new_path = os.path.join(_ORG_LOGO_UPLOAD_DIR, f"{uuid.uuid4().hex}{ext}")
+    with open(new_path, "wb") as f:
+        f.write(contents)
+
+    old_path = org.logo_path
+    org.logo_path = new_path
+    db.commit()
+    db.refresh(org)
+
+    if old_path and os.path.isfile(old_path):
+        os.remove(old_path)
+
+    return get_my_organization_detail(current_user=current_user, db=db)
 
 
 @router.get("/me/dashboard-stats", response_model=OrganizationDashboardStats)
@@ -205,7 +294,15 @@ def get_my_organization_detail(
         admin_name=f"{admin.first_name} {admin.last_name}".strip() if admin else None,
         admin_email=admin.email if admin else None,
         industry=org.industry,
+        company_type=org.company_type,
         address=org.address,
+        city=org.city,
+        state=org.state,
+        country=org.country,
+        tax_no=org.tax_no,
+        registration_number=org.registration_number,
+        tax_identifiers=org.tax_identifiers,
+        logo_data_uri=_read_logo_data_uri(org.logo_path),
         created_at=org.created_at,
         total_employees=total_employees,
         active_employees=active_employees,
@@ -284,17 +381,29 @@ def create_organization(
     db: Session = Depends(get_db),
 ):
     from app.core.code_generation import generate_organization_code
+    from app.core.jurisdiction import (
+        primary_tax_value,
+        validate_tax_identifiers_or_raise,
+    )
     from app.modules.organizations.models import Organization
+
+    tax_identifiers = validate_tax_identifiers_or_raise(data.country, data.tax_identifiers) \
+        if data.tax_identifiers else None
 
     code = generate_organization_code(data.organization_name, db)
     org = Organization(
         organization_name=data.organization_name,
         organization_code=code,
         industry=data.industry,
+        company_type=data.company_type,
         address=data.address,
+        city=data.city,
+        state=data.state,
+        country=data.country,
         email=data.email,
         phone=data.phone,
-        tax_no=data.tax_no,
+        tax_no=data.tax_no or primary_tax_value(data.country, tax_identifiers),
+        tax_identifiers=tax_identifiers,
         registration_number=data.registration_number,
         is_active=True,
         created_by_user_id=current_user.id,

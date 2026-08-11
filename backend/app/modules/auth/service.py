@@ -196,13 +196,31 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
     if existing:
         raise AlreadyExistsException("User", "email")
 
+    # Deduplication / reuse rule: only ever persist tax identifiers that match
+    # the selected jurisdiction's schema. Unknown keys and blank values are
+    # dropped rather than stored — so repeated registrations / resubmissions
+    # never create redundant tax records. The org itself is keyed uniquely by
+    # its generated code and the admin email (checked above).
+    from app.core.jurisdiction import primary_tax_value, validate_tax_identifiers_or_raise
+
+    tax_identifiers = validate_tax_identifiers_or_raise(data.country, data.tax_identifiers) \
+        if data.tax_identifiers else None
+    tax_no = data.tax_no or primary_tax_value(data.country, tax_identifiers)
+
     org_code = generate_organization_code(data.organization, db)
 
     org = Organization(
         organization_name=data.organization,
         organization_code=org_code,
         industry=data.industry,
+        company_type=data.company_type,
+        tax_no=tax_no,
+        tax_identifiers=tax_identifiers,
+        registration_number=data.registration_number,
         address=data.address,
+        city=data.city,
+        state=data.state,
+        country=data.country,
         email=data.email,
         phone=data.phone,
         is_active=True,
@@ -270,6 +288,21 @@ def change_password(db: Session, user_id: int, current_password: str, new_passwo
     user.hashed_password = hash_password(new_password)
     db.commit()
     return {"message": "Password changed successfully."}
+
+
+def generate_random_password(db: Session, user_id: int) -> dict:
+    """Self-service: immediately replace the caller's own password with a
+    freshly generated random one and return it once, in-band — for use when
+    email delivery can't be relied on (e.g. SMTP unconfigured). Never stored
+    or logged in plaintext beyond this single response."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise NotFoundException("User", "id")
+    new_password = secrets.token_urlsafe(12)
+    user.hashed_password = hash_password(new_password)
+    db.commit()
+    logger.info("User %s generated a new random password for their own account.", user.email)
+    return {"password": new_password}
 
 
 def invite_user(db: Session, actor, data) -> User:

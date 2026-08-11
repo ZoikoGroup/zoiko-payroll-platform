@@ -2,7 +2,11 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Plus, Trash2, Power, RefreshCw, Pencil, Building2 } from "lucide-react";
 
 import { apiFetch } from "../api/client";
+import { useToast } from "../context/ToastContext";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Modal from "../components/Modal";
+import SearchInput from "../components/SearchInput";
+import StatusPill from "../components/StatusPill";
 
 const EMPTY_ORG = {
   organization_name: "",
@@ -27,10 +31,10 @@ function initialsFor(name) {
 }
 
 export default function OrganizationsPage() {
+  const { addToast } = useToast();
   const [orgs, setOrgs] = useState([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
   const [modalMode, setModalMode] = useState(null); // null | "create" | "edit"
@@ -40,6 +44,7 @@ export default function OrganizationsPage() {
 
   const load = useCallback(() => {
     setLoading(true);
+    setError("");
     apiFetch("/api/organizations", { params: { search, limit: 200 } })
       .then((data) => setOrgs(data.organizations))
       .catch((err) => setError(err.message))
@@ -52,17 +57,15 @@ export default function OrganizationsPage() {
 
   async function toggleStatus(org) {
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       await apiFetch(`/api/organizations/${org.id}/status`, {
         method: "PATCH",
         params: { is_active: !org.is_active },
       });
-      setNotice(`Organization "${org.organization_name}" ${org.is_active ? "suspended" : "activated"}.`);
+      addToast?.(`Organization "${org.organization_name}" ${org.is_active ? "suspended" : "activated"}.`);
       load();
     } catch (err) {
-      setError(err.message);
+      addToast?.(err.message, "error");
     } finally {
       setBusy(false);
     }
@@ -70,15 +73,13 @@ export default function OrganizationsPage() {
 
   async function handleDelete() {
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       await apiFetch(`/api/organizations/${deleting.id}`, { method: "DELETE" });
-      setNotice(`Organization "${deleting.organization_name}" and all of its data deleted.`);
+      addToast?.(`Organization "${deleting.organization_name}" and all of its data deleted.`);
       setDeleting(null);
       load();
     } catch (err) {
-      setError(err.message);
+      addToast?.(err.message, "error");
     } finally {
       setBusy(false);
     }
@@ -113,20 +114,18 @@ export default function OrganizationsPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setBusy(true);
-    setError("");
-    setNotice("");
     try {
       if (modalMode === "edit") {
         await apiFetch(`/api/organizations/${editingId}`, { method: "PUT", body: form });
-        setNotice(`Organization "${form.organization_name}" updated.`);
+        addToast?.(`Organization "${form.organization_name}" updated.`);
       } else {
         await apiFetch("/api/organizations", { method: "POST", body: form });
-        setNotice(`Organization "${form.organization_name}" created.`);
+        addToast?.(`Organization "${form.organization_name}" created.`);
       }
       closeModal();
       load();
     } catch (err) {
-      setError(err.message);
+      addToast?.(err.message, "error");
     } finally {
       setBusy(false);
     }
@@ -146,12 +145,7 @@ export default function OrganizationsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name or code…"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-          />
+          <SearchInput value={search} onChange={setSearch} placeholder="Search name or code…" />
           <button
             onClick={load}
             disabled={loading}
@@ -171,8 +165,11 @@ export default function OrganizationsPage() {
         </div>
       </div>
 
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-      {notice && <p className="mb-3 text-sm text-green-600">{notice}</p>}
+      {error && (
+        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {error}
+        </p>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
@@ -202,13 +199,7 @@ export default function OrganizationsPage() {
                 <td className="px-4 py-3 text-slate-500">{org.industry || "—"}</td>
                 <td className="px-4 py-3 text-slate-600">{org.email || "—"}</td>
                 <td className="px-4 py-3">
-                  <span
-                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                      org.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                    }`}
-                  >
-                    {org.is_active ? "Active" : "Suspended"}
-                  </span>
+                  <StatusPill status={org.is_active ? "active" : "suspended"} />
                 </td>
                 <td className="px-4 py-3 text-slate-500">
                   {new Date(org.created_at).toLocaleDateString()}
@@ -263,62 +254,57 @@ export default function OrganizationsPage() {
       </div>
 
       {modalMode && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">
-              {modalMode === "edit" ? "Edit Organization" : "New Organization"}
-            </h3>
-            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
-              <label className="block col-span-2">
-                <span className="text-xs font-medium text-slate-600">Name *</span>
-                <input className={INPUT} required value={form.organization_name} onChange={set("organization_name")} />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">Industry</span>
-                <input className={INPUT} value={form.industry} onChange={set("industry")} />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">Email</span>
-                <input className={INPUT} type="email" value={form.email} onChange={set("email")} />
-              </label>
-              <label className="block col-span-2">
-                <span className="text-xs font-medium text-slate-600">Address</span>
-                <input className={INPUT} value={form.address} onChange={set("address")} />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">Phone</span>
-                <input className={INPUT} value={form.phone} onChange={set("phone")} />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">Tax No</span>
-                <input className={INPUT} value={form.tax_no} onChange={set("tax_no")} />
-              </label>
-              <label className="block col-span-2">
-                <span className="text-xs font-medium text-slate-600">Registration Number</span>
-                <input className={INPUT} value={form.registration_number} onChange={set("registration_number")} />
-              </label>
-              <div className="col-span-2 flex justify-end gap-3 mt-2">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={busy}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50"
-                >
-                  {busy
-                    ? modalMode === "edit" ? "Saving…" : "Creating…"
-                    : modalMode === "edit" ? "Save Changes" : "Create"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <Modal title={modalMode === "edit" ? "Edit Organization" : "New Organization"} onClose={closeModal}>
+          <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
+            <label className="block col-span-2">
+              <span className="text-xs font-medium text-slate-600">Name *</span>
+              <input className={INPUT} required value={form.organization_name} onChange={set("organization_name")} />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">Industry</span>
+              <input className={INPUT} value={form.industry} onChange={set("industry")} />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">Email</span>
+              <input className={INPUT} type="email" value={form.email} onChange={set("email")} />
+            </label>
+            <label className="block col-span-2">
+              <span className="text-xs font-medium text-slate-600">Address</span>
+              <input className={INPUT} value={form.address} onChange={set("address")} />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">Phone</span>
+              <input className={INPUT} value={form.phone} onChange={set("phone")} />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">Tax No</span>
+              <input className={INPUT} value={form.tax_no} onChange={set("tax_no")} />
+            </label>
+            <label className="block col-span-2">
+              <span className="text-xs font-medium text-slate-600">Registration Number</span>
+              <input className={INPUT} value={form.registration_number} onChange={set("registration_number")} />
+            </label>
+            <div className="col-span-2 flex justify-end gap-3 mt-2">
+              <button
+                type="button"
+                onClick={closeModal}
+                disabled={busy}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={busy}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50"
+              >
+                {busy
+                  ? modalMode === "edit" ? "Saving…" : "Creating…"
+                  : modalMode === "edit" ? "Save Changes" : "Create"}
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {deleting && (
