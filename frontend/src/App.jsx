@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import PayrollShell from "./components/PayrollShell";
+import SuperAdminShell from "./components/SuperAdminShell";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import RegistrationSuccessPage from "./pages/RegistrationSuccessPage";
@@ -14,7 +15,6 @@ import StatutoryRatesPage from "./pages/StatutoryRatesPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import ZoikoPayrollModule from "./modules/payroll";
-import OrgAdminDashboardPage from "./modules/organization-admin/DashboardPage";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "./config/roles";
 
@@ -24,7 +24,7 @@ function LandingRedirect() {
     const target = VALID_ROLES.includes(user.role) ? ROLE_DEFAULT_REDIRECT[user.role] : "/payroll";
     return <Navigate to={target} replace />;
   }
-  return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/super-admin/dashboard" replace />;
 }
 
 export default function App() {
@@ -36,11 +36,55 @@ export default function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="/portal" element={<OrgPortalPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/users" element={<UsersPage />} />
-        <Route path="/statutory-rates" element={<StatutoryRatesPage />} />
-        <Route path="/organizations" element={<OrganizationsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+
+        {/* Super Admin console — canonical routes */}
+        <Route
+          path="/super-admin/dashboard"
+          element={
+            <SuperAdminShell>
+              <DashboardPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/organizations"
+          element={
+            <SuperAdminShell>
+              <OrganizationsPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/users"
+          element={
+            <SuperAdminShell>
+              <UsersPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/statutory-rates"
+          element={
+            <SuperAdminShell>
+              <StatutoryRatesPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/settings"
+          element={
+            <SuperAdminShell>
+              <SettingsPage />
+            </SuperAdminShell>
+          }
+        />
+
+        {/* Legacy paths — permanent redirects so old links/bookmarks keep working */}
+        <Route path="/dashboard" element={<Navigate to="/super-admin/dashboard" replace />} />
+        <Route path="/users" element={<Navigate to="/super-admin/users" replace />} />
+        <Route path="/statutory-rates" element={<Navigate to="/super-admin/statutory-rates" replace />} />
+        <Route path="/organizations" element={<Navigate to="/super-admin/organizations" replace />} />
+        <Route path="/settings" element={<Navigate to="/super-admin/settings" replace />} />
         <Route
           path="/payroll"
           element={
@@ -58,26 +102,10 @@ export default function App() {
           }
         />
         <Route
-          path="/organization-admin/dashboard"
-          element={
-            <PayrollShell>
-              <OrgAdminDashboardPage />
-            </PayrollShell>
-          }
-        />
-        <Route
           path="/organization-admin/organization"
           element={
             <PayrollShell>
               <OrgAdminOrganizationPage />
-            </PayrollShell>
-          }
-        />
-        <Route
-          path="/hr-admin/dashboard"
-          element={
-            <PayrollShell>
-              <OrgAdminDashboardPage />
             </PayrollShell>
           }
         />
@@ -89,6 +117,10 @@ export default function App() {
             </PayrollShell>
           }
         />
+        {/* Dashboard + My Organization consolidated into one module — old
+            dashboard URLs redirect so nothing that linked/bookmarked them breaks. */}
+        <Route path="/organization-admin/dashboard" element={<Navigate to="/organization-admin/organization" replace />} />
+        <Route path="/hr-admin/dashboard" element={<Navigate to="/hr-admin/my-organization" replace />} />
         <Route path="/" element={<LandingRedirect />} />
       </Route>
       <Route path="*" element={<LandingRedirect />} />

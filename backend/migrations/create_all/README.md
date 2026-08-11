@@ -1,8 +1,11 @@
 # Create All — schema bootstrap
 
-The standalone Payroll Platform has **no alembic**. Schema is created fresh,
-in one shot, via `Base.metadata.create_all` against an **empty** database.
-This directory is that bootstrap.
+Schema is created fresh, in one shot, via `Base.metadata.create_all` against
+an **empty** database. This directory is that bootstrap — still the right
+tool for standing up a brand-new empty database (first-time setup, CI,
+scratch/dev). For changing the schema of a database that already has data
+(including the live database), use Alembic instead — see
+`backend/alembic/README.md`.
 
 ## When to run
 
@@ -53,8 +56,15 @@ python -m scripts.seed_org   # demo org + org_admin
 
 ## Schema changes
 
-Any model change takes effect on the next `create_all` run **only for a
-fresh/empty database**. On a DB that already has data, `create_all` is
-additive (new tables/columns are created; existing columns are not altered).
-There is no destructive migration — that is a deliberate trade-off for this
-standalone build.
+`create_all` only ever creates **missing tables** — it does **not** add new
+columns to a table that already exists, and never alters or drops anything.
+That's fine for a fresh/empty database, but it means adding a column to an
+existing model (e.g. a new field on `Organization`) has **no effect at all**
+on a database that already has that table — the app will start up and
+immediately 500 on any query touching the new column, exactly as `create_all`
+silently does nothing about it.
+
+**Use Alembic for any schema change to a database that already has data**
+(including the live database): `alembic revision --autogenerate -m "..."`,
+review the generated migration, then `alembic upgrade head`. See
+`backend/alembic/README.md`.

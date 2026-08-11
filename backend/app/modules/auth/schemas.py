@@ -23,12 +23,21 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     industry: Optional[str] = None
+    company_type: Optional[str] = None
+    tax_no: Optional[str] = None
+    registration_number: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
     timezone: Optional[str] = "UTC"
     phone: Optional[str] = None
+    # Jurisdiction-aware tax/registration identifiers collected on the Register
+    # Page once a country is selected — keyed by the field keys in
+    # app/core/jurisdiction.py (gstin/pan/cin, ein/state_tax_id, crn/vat_number,
+    # ust_idnr/steuernummer/hrb, abn/acn). Validated server-side against the
+    # selected country's schema before persisting.
+    tax_identifiers: Optional[dict] = None
 
 
 class RefreshRequest(BaseModel):
@@ -47,6 +56,10 @@ class TokenPasswordRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class GeneratedPasswordResponse(BaseModel):
+    password: str
 
 
 # ── Responses ───────────────────────────────────────────────────────────────

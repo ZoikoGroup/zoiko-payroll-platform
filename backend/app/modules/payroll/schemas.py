@@ -546,12 +546,16 @@ class CompanyDetails(BaseModel):
     industry:             str = ""
     email:                str = ""
     phone:                str = ""
-    jurisdictionCountry:  str = Field("India", validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionCountry:  str = Field("", validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     jurisdictionState:    str = Field("", validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
     compliancePack:       str = Field("", validation_alias="compliance_pack", serialization_alias="compliancePack")
     schedule:             str = ""
     settlementBank:       str = Field("", validation_alias="settlement_bank", serialization_alias="settlementBank")
     settlementAcc:        str = Field("", validation_alias="settlement_acc", serialization_alias="settlementAcc")
+    # Jurisdiction-aware tax/registration IDs synced from registration (see
+    # app/core/jurisdiction.py) and editable/overridable from the Compliance
+    # Details tab. Optional dict so legacy rows without it still serialize.
+    taxIdentifiers:       Optional[dict] = Field(None, validation_alias="tax_identifiers", serialization_alias="taxIdentifiers")
     configuredAt:         Optional[datetime] = Field(None, validation_alias="configured_at", serialization_alias="configuredAt")
     isConfigured:         bool = Field(False, validation_alias="is_configured", serialization_alias="isConfigured")
 
@@ -573,6 +577,7 @@ class CompanyDetailsUpdate(BaseModel):
     schedule: Optional[str] = None
     settlementBank: Optional[str] = None
     settlementAcc: Optional[str] = None
+    taxIdentifiers: Optional[dict] = None
 
 
 class ComplianceDataResponse(BaseModel):

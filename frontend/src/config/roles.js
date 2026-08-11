@@ -17,9 +17,9 @@ export const ROLE_LABELS = {
 };
 
 export const ROLE_DEFAULT_REDIRECT = {
-  [ROLES.SUPER_ADMIN]: "/dashboard",
-  [ROLES.ORG_ADMIN]: "/organization-admin/dashboard",
-  [ROLES.PAYROLL_ADMIN]: "/hr-admin/dashboard",
+  [ROLES.SUPER_ADMIN]: "/super-admin/dashboard",
+  [ROLES.ORG_ADMIN]: "/organization-admin/organization",
+  [ROLES.PAYROLL_ADMIN]: "/hr-admin/my-organization",
   [ROLES.EMPLOYEE]: "/portal",
 };
 

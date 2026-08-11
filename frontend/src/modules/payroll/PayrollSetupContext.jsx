@@ -2,14 +2,11 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { getActivePolicy, fetchComplianceData } from "../../service/payrollService";
 import { getCurrencyForCountry } from "../../utils/currency";
 
-export const PAYROLL_ONBOARDING_MESSAGE = "Complete the Payroll Policy and Compliance setup to unlock the remaining Payroll features.";
-
 // Fetches the org's active policy + compliance details ONCE per module
 // session (plus on tab focus, for cross-tab consistency) instead of every
 // page/navigation independently re-fetching the same two endpoints —
 // previously each sub-module called getCompanyProfile()/fetchComplianceData()/
-// getActivePolicy() on its own mount, and the onboarding gate in index.jsx
-// re-fetched both on every single navigation between gated pages.
+// getActivePolicy() on its own mount.
 const PayrollSetupContext = createContext(null);
 
 export function PayrollSetupProvider({ children }) {
@@ -43,9 +40,8 @@ export function PayrollSetupProvider({ children }) {
   const jurisdiction = company?.jurisdictionCountry || company?.jurisdiction_country || "";
   const currencyCode = getCurrencyForCountry(jurisdiction)?.code || "USD";
   const calculationMode = policy?.calculationMode || "standard";
-  const gateOk = Boolean(policy?.isConfigured) && Boolean(company?.isConfigured);
 
-  const value = { policy, compliance, company, calculationMode, currencyCode, gateOk, loading, refresh };
+  const value = { policy, compliance, company, calculationMode, currencyCode, loading, refresh };
   return <PayrollSetupContext.Provider value={value}>{children}</PayrollSetupContext.Provider>;
 }
 

@@ -27,6 +27,7 @@ from app.modules.auth.models import SecurityActionPurpose, User, UserRole
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
+    GeneratedPasswordResponse,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
@@ -140,6 +141,14 @@ def change_password(
     current_user=Depends(get_current_user),
 ):
     return service.change_password(db, current_user.id, data.current_password, data.new_password)
+
+
+@router.post("/generate-password", response_model=GeneratedPasswordResponse, summary="Generate a new random password for the current user")
+def generate_password(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_random_password(db, current_user.id)
 
 
 @router.post("/forgot-password", response_model=SuccessResponse, summary="Request password reset link")
