@@ -132,6 +132,22 @@ class PayrollEmployee(Base):
     uan              = Column(String(20), nullable=True)
     ifsc             = Column(String(20), nullable=True)
 
+    # Per-employee jurisdiction override for multi-country onboarding. Falls
+    # back to CompanyComplianceDetails.jurisdiction_country (via
+    # _normalize_country) when unset — same fallback pattern work_state
+    # already uses for state-level overrides. See employee_validation.py.
+    country_code     = Column(String(2), nullable=True)
+
+    # Non-India statutory/bank identifiers (SSN, NINO, TFN, SIN, Steuer-ID,
+    # IBAN, etc. — see employee_validation.py for the field set per
+    # country). India keeps its own dedicated pan/uan/ifsc columns above
+    # rather than duplicating them in here, since those already hold real
+    # production data. Deliberately a SEPARATE column from custom_fields:
+    # custom_fields is admin-defined free-form data (PayrollCustomFieldDefinition);
+    # this is system-governed, regex-validated compliance data, and keeping
+    # them apart avoids a key collision between the two.
+    compliance_fields = Column(JSON, default=dict, nullable=False, server_default="{}")
+
     # Org-defined extra fields (see PayrollCustomFieldDefinition) — a JSON
     # bag of {field_key: value} rather than real columns, since the field
     # set itself is defined at runtime by admins, not at migration time.
@@ -532,6 +548,21 @@ class JurisdictionPack(Base):
     compliance_owner     = Column(String(150), default="")
     engineering_owner    = Column(String(150), default="")
     source_references    = Column(Text, default="")
+
+    # ── Super Admin Compliance module additions ──────────────────────────
+    # Additive/nullable so existing rows (and the org-scoped Compliance UI
+    # that predates these) are unaffected. Applied to the live DB via
+    # migrations/sync_schema.py rather than a destructive migration.
+    regulatory_authority = Column(String(200), nullable=True)
+    compliance_category  = Column(String(100), nullable=True)
+    change_summary       = Column(Text, nullable=True)
+    next_review_date     = Column(Date, nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Self-reference so a new version can point back at what it replaced,
+    # without ever deleting/overwriting the prior row — version history
+    # stays intact by construction (new row per version).
+    previous_version_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())

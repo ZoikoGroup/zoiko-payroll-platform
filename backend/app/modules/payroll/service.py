@@ -42,6 +42,7 @@ from app.modules.payroll.models import (
     PayrollStatus, PayslipStatus, ActivityStatus, ComplianceDocumentStatus,
     PAYROLL_STATUS_ORDER,
 )
+from app.modules.payroll.employee_validation import get_employee_validation_strategy
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
     EmployeeCreate, EmployeeUpdate, BulkEmployeeItem, BulkEmployeeRequest,
@@ -481,12 +482,19 @@ def list_jurisdiction_packs(db: Session, country: str, state: str = None) -> Lis
     return query.order_by(JurisdictionPack.version.desc()).all()
 
 
-def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert") -> JurisdictionPack:
+def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_id: Optional[int] = None) -> JurisdictionPack:
     """Create or update a pack, matched by (pack_id, version) — matches
     the UniqueConstraint on JurisdictionPack. This intentionally does NOT
     silently bump the version on every save: per the spec's lifecycle
     model (Section 17), a new version should be a deliberate act, not an
-    accidental side effect of editing metadata."""
+    accidental side effect of editing metadata.
+
+    When the (pack_id, version) pair doesn't exist yet AND another version
+    of the same pack_id already does, the new row's previous_version_id is
+    set to the latest prior version automatically — this is what gives
+    Compliance its version chain (1.0 -> 1.1 -> 2.0) without ever mutating
+    or deleting an earlier row.
+    """
     existing = (
         db.query(JurisdictionPack)
         .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
@@ -501,17 +509,141 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert") -> Jur
         compliance_owner=data.complianceOwner,
         engineering_owner=data.engineeringOwner,
         source_references=data.sourceReferences,
+        regulatory_authority=data.regulatoryAuthority,
+        compliance_category=data.complianceCategory,
+        change_summary=data.changeSummary,
+        next_review_date=data.nextReviewDate,
     )
     if existing:
         for k, v in fields.items():
             setattr(existing, k, v)
+        existing.updated_by_id = actor_id
         row = existing
     else:
-        row = JurisdictionPack(pack_id=data.packId, version=data.version, **fields)
+        previous = (
+            db.query(JurisdictionPack)
+            .filter(JurisdictionPack.pack_id == data.packId)
+            .order_by(JurisdictionPack.created_at.desc())
+            .first()
+        )
+        row = JurisdictionPack(
+            pack_id=data.packId, version=data.version,
+            previous_version_id=previous.id if previous else None,
+            created_by_id=actor_id, updated_by_id=actor_id,
+            **fields,
+        )
         db.add(row)
     db.commit()
     db.refresh(row)
     return row
+
+
+def list_all_jurisdiction_packs(
+    db: Session, country: Optional[str] = None, state: Optional[str] = None,
+    status: Optional[str] = None, search: Optional[str] = None,
+) -> List[JurisdictionPack]:
+    """Cross-jurisdiction policy list for Super Admin Compliance — unlike
+    list_jurisdiction_packs (which requires a single country and returns
+    every version of its packs), this spans every jurisdiction and, per
+    pack_id, returns only the latest version — i.e. one row per policy,
+    which is what a review/listing screen needs. Use
+    get_jurisdiction_pack_versions() to drill into one policy's history."""
+    query = db.query(JurisdictionPack)
+    if country:
+        query = query.filter(JurisdictionPack.jurisdiction_country == country)
+    if state:
+        query = query.filter(JurisdictionPack.jurisdiction_state == state)
+    if status:
+        query = query.filter(JurisdictionPack.status == status)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                JurisdictionPack.pack_id.ilike(like),
+                JurisdictionPack.jurisdiction_country.ilike(like),
+                JurisdictionPack.compliance_category.ilike(like),
+                JurisdictionPack.regulatory_authority.ilike(like),
+            )
+        )
+    rows = query.order_by(JurisdictionPack.pack_id, JurisdictionPack.created_at.desc()).all()
+
+    latest_by_pack_id = {}
+    for row in rows:
+        if row.pack_id not in latest_by_pack_id:
+            latest_by_pack_id[row.pack_id] = row
+    return list(latest_by_pack_id.values())
+
+
+def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[JurisdictionPack]:
+    """Full version history for one policy, oldest first — nothing is ever
+    overwritten (see upsert_jurisdiction_pack), so this reconstructs the
+    complete traceable chain."""
+    return (
+        db.query(JurisdictionPack)
+        .filter(JurisdictionPack.pack_id == pack_id)
+        .order_by(JurisdictionPack.created_at.asc())
+        .all()
+    )
+
+
+def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None) -> JurisdictionPack:
+    row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not row:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_pack_applicable_organizations(db: Session, pack_row_id: int) -> List[dict]:
+    """Organizations currently assigned to this policy version, via the
+    existing CompanyComplianceDetails.active_pack_id column — reused as-is
+    rather than introducing a new assignment table."""
+    from app.modules.organizations.models import Organization
+
+    rows = (
+        db.query(Organization.id, Organization.organization_name, Organization.organization_code)
+        .join(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
+        .filter(CompanyComplianceDetails.active_pack_id == pack_row_id)
+        .all()
+    )
+    return [{"id": r.id, "organizationName": r.organization_name, "organizationCode": r.organization_code} for r in rows]
+
+
+def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids: List[int], actor_id: Optional[int] = None) -> int:
+    """Bulk-assign a policy version as the active pack for each given org,
+    get-or-creating their CompanyComplianceDetails row exactly like every
+    other Compliance write path does (get_or_create_email_settings,
+    get_company_details, etc.) rather than requiring the org to have
+    configured Compliance first."""
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+
+    updated = 0
+    for org_id in organization_ids:
+        details = (
+            db.query(CompanyComplianceDetails)
+            .filter(CompanyComplianceDetails.organization_id == org_id)
+            .first()
+        )
+        if not details:
+            details = CompanyComplianceDetails(organization_id=org_id)
+            db.add(details)
+        details.active_pack_id = pack.id
+        updated += 1
+        # Activity log is per-org by design (organization_id is required) —
+        # each affected org gets its own "policy applied" entry rather than
+        # one untethered platform-wide log row.
+        log_activity(
+            db, org_id,
+            f"Compliance policy {pack.pack_id} v{pack.version} applied by Super Admin.",
+            ActivityStatus.INFO, actor_id=actor_id,
+        )
+    db.commit()
+    return updated
 
 
 def _calculate_annual_tax(annual_income: Decimal, slabs: List[TaxSlab]) -> Decimal:
@@ -1514,9 +1646,74 @@ def _fill_missing_basic_hra(fields: dict) -> None:
             fields["hra"] = default_hra
 
 
+def _resolve_employee_country(db: Session, organization_id: int, explicit_country_code: Optional[str]) -> str:
+    """Per-employee jurisdiction override if given, else the org's default —
+    same fallback pattern _resolve_run_calc_inputs already uses for payroll
+    calculation's country resolution."""
+    if explicit_country_code:
+        return _normalize_country(explicit_country_code)
+    company = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == organization_id
+    ).first()
+    return _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+
+
+def check_duplicate_employee_identifiers(
+    db: Session, organization_id: int, email: Optional[str], country_code: str,
+    pan: Optional[str], compliance_fields: dict, exclude_employee_id: int = None,
+) -> None:
+    """Cross-employee duplicate check within the org — email always, plus
+    whichever single identifier is that jurisdiction's dedup key (PAN for
+    India's dedicated column, or the compliance_fields key named by each
+    Strategy's `duplicate_field` for the other five countries). Loads the
+    org's employees once and compares in Python, consistent with how the
+    rest of this module already favors simple in-Python comparisons over
+    JSON-path SQL operators (see e.g. _count_unpaid_leave_days)."""
+    email_norm = (email or "").strip().lower()
+    pan_norm = (pan or "").strip().upper()
+    strategy = get_employee_validation_strategy(country_code)
+    dup_id = strategy.get_duplicate_identifier(compliance_fields)
+
+    if not email_norm and not pan_norm and not dup_id:
+        return
+
+    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    if exclude_employee_id:
+        query = query.filter(PayrollEmployee.id != exclude_employee_id)
+
+    for existing in query.all():
+        if email_norm and (existing.email or "").strip().lower() == email_norm:
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=f"An employee with email '{email}' already exists in this organization.",
+            )
+        if pan_norm and (existing.pan or "").strip().upper() == pan_norm:
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=f"An employee with PAN '{pan_norm}' already exists in this organization.",
+            )
+        if dup_id:
+            field, value = dup_id
+            if (existing.compliance_fields or {}).get(field) == value:
+                raise HTTPException(
+                    http_status.HTTP_409_CONFLICT,
+                    detail=f"An employee with {field.upper()} '{value}' already exists in this organization.",
+                )
+
+
 def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> PayrollEmployee:
     employee_data = data.model_dump()
     _fill_missing_basic_hra(employee_data)
+
+    country_code = _resolve_employee_country(db, organization_id, employee_data.get("country_code"))
+    employee_data["country_code"] = country_code
+    strategy = get_employee_validation_strategy(country_code)
+    employee_data["compliance_fields"] = strategy.validate(employee_data.get("compliance_fields") or {})
+
+    check_duplicate_employee_identifiers(
+        db, organization_id, employee_data.get("email"), country_code,
+        employee_data.get("pan"), employee_data["compliance_fields"],
+    )
 
     if not employee_data.get("employee_code"):
         from app.core.code_generation import generate_employee_code
@@ -1547,7 +1744,25 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
 
 def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organization_id: int) -> PayrollEmployee:
     employee = get_employee_by_id(db, employee_id, organization_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+
+    country_code = _resolve_employee_country(
+        db, organization_id, updates.get("country_code", employee.country_code)
+    )
+    if "compliance_fields" in updates or "country_code" in updates:
+        strategy = get_employee_validation_strategy(country_code)
+        merged_compliance = {**(employee.compliance_fields or {}), **(updates.get("compliance_fields") or {})}
+        updates["compliance_fields"] = strategy.validate(merged_compliance)
+        updates["country_code"] = country_code
+
+    check_duplicate_employee_identifiers(
+        db, organization_id,
+        updates.get("email", employee.email), country_code,
+        updates.get("pan", employee.pan), updates.get("compliance_fields", employee.compliance_fields or {}),
+        exclude_employee_id=employee.id,
+    )
+
+    for field, value in updates.items():
         if value == "":
             continue
         setattr(employee, field, value)
@@ -5522,22 +5737,8 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     except Exception:
         pass
 
-    # Best-effort confirmation email — never blocks leave-request creation.
-    # Skipped for source="email": the employee already emailed us, sending
-    # them a receipt-of-receipt email back would be redundant.
-    if record.source != "email":
-        try:
-            employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == record.employee_id).first()
-            if employee and employee.email:
-                from app.services.email_service import send_leave_request_received_email
-                send_leave_request_received_email(
-                    employee.email, employee.name,
-                    str(record.start_date), str(record.end_date), record.request_code,
-                    organization_id=organization_id, db=db,
-                )
-        except Exception as exc:
-            import logging
-            logging.getLogger("zoiko").warning(f"[payroll-mail] leave-request-received email failed: {exc}")
+    # No email is sent on submission — status emails (approved / rejected)
+    # are sent by review_payroll_leave_request once an admin acts on the request.
 
     return _enrich_leave_request(db, record, organization_id)
 
@@ -5625,5 +5826,30 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
         log_activity(db, organization_id, f"Leave request #{record.id} {record.status} by admin ({record.days}d).", ActivityStatus.INFO)
     except Exception:
         pass
+
+    # Best-effort status email — never blocks the review. Sent to the employee
+    # only when their request actually transitions (approved / rejected).
+    if prev_status != record.status and record.status in ("approved", "rejected"):
+        try:
+            employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == record.employee_id).first()
+            if employee and employee.email:
+                from app.services.email_service import (
+                    send_leave_request_approved_email,
+                    send_leave_request_rejected_email,
+                )
+                sender = (
+                    send_leave_request_approved_email
+                    if record.status == "approved"
+                    else send_leave_request_rejected_email
+                )
+                sender(
+                    employee.email, employee.name,
+                    record.leave_type, str(record.start_date), str(record.end_date),
+                    record.days, record.request_code,
+                    organization_id=organization_id, db=db,
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger("zoiko").warning(f"[payroll-mail] leave-request status email failed: {exc}")
 
     return _enrich_leave_request(db, record, organization_id)

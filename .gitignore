@@ -12,3 +12,4 @@ build/
 # Local databases
 *.sqlite3
 *.db
+.env

@@ -14,8 +14,12 @@ import UsersPage from "./pages/UsersPage";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import SettingsPage from "./pages/SettingsPage";
+import CompliancePage from "./pages/CompliancePage";
+import FinancePage from "./pages/FinancePage";
+import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
+import TeamPage from "./modules/organization-admin/TeamPage";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "./config/roles";
 
 function LandingRedirect() {
@@ -59,6 +63,30 @@ export default function App() {
           element={
             <SuperAdminShell>
               <UsersPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/compliance"
+          element={
+            <SuperAdminShell>
+              <CompliancePage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/finance"
+          element={
+            <SuperAdminShell>
+              <FinancePage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/reports"
+          element={
+            <SuperAdminShell>
+              <ReportsPage />
             </SuperAdminShell>
           }
         />
@@ -114,6 +142,14 @@ export default function App() {
           element={
             <PayrollShell>
               <OrgAdminOrganizationPage />
+            </PayrollShell>
+          }
+        />
+        <Route
+          path="/organization-admin/team"
+          element={
+            <PayrollShell>
+              <TeamPage />
             </PayrollShell>
           }
         />

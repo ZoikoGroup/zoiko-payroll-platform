@@ -13,7 +13,6 @@ from sqlalchemy import text
 from app.database import Base, engine, SessionLocal
 import app.modules.auth.models
 import app.modules.organizations.models
-import app.modules.employee.models
 import app.modules.super_admin.models
 import app.modules.payroll.models
 import app.modules.payroll.policy.models
@@ -77,10 +76,6 @@ Q("INSERT INTO payroll_policy_integrations (policy_id, category, provider_key, e
 
 Q("INSERT INTO payroll_email_settings (organization_id, from_email, notify_payslip_ready, notify_run_approved, use_custom_smtp) "
   "VALUES (:o,:e,:n1,:n2,:u)", o=OID, e="noreply@tst.com", n1=1, n2=1, u=0)
-MID = Q("INSERT INTO payroll_inbound_messages (organization_id, message_uid, from_email, status) VALUES (:o,:u,:f,:s) RETURNING id",
-        o=OID, u="uid1", f="x@y.z", s="matched").scalar()
-Q("INSERT INTO payroll_inbound_attachments (message_id, file_path, file_name) VALUES (:m,:fp,:fn)",
-  m=MID, fp="/tmp/x", fn="x.txt")
 
 RID = Q("INSERT INTO payroll_runs (organization_id, period_label, period_start, period_end, pay_date, status, total_net, employee_count) "
         "VALUES (:o,:l,:s,:e,:p,:st,:n,:ec) RETURNING id",
@@ -100,21 +95,24 @@ TABLES = ["organizations", "users", "security_action_tokens",
           "payroll_leave_requests", "payroll_activity_log", "payroll_custom_field_definitions",
           "payroll_enterprise_jurisdictions", "payroll_policies", "payroll_policy_employee_categories",
           "payroll_policy_leave_rules", "payroll_policy_overtime_rules", "payroll_policy_integrations",
-          "payroll_email_settings", "payroll_inbound_messages", "payroll_inbound_attachments"]
+          "payroll_email_settings"]
 
 before = {t: db.execute(text(f'SELECT COUNT(*) FROM "{t}"')).scalar() for t in TABLES}
 print("BEFORE:", before)
 assert all(v > 0 for v in before.values()), "seed failed"
 
 # Replicate app/modules/organizations/router.py delete_organization order.
+# Note: the live endpoint also cleans up payroll_inbound_messages/attachments
+# (tables still physically present in the real DB from the now-removed IMAP
+# feature). This test's schema is built fresh from the current models via
+# create_all(), which no longer define those tables, so they're omitted here.
 _org_direct = ["payroll_email_settings", "payroll_update_form_submissions",
     "payroll_update_form_sends", "payroll_update_forms", "payroll_custom_field_definitions",
     "payroll_activity_log", "payroll_leave_requests", "payroll_leave_allocations",
     "payroll_compliance_documents", "payroll_tax_slabs", "payroll_contribution_rates",
     "payroll_company_compliance", "payroll_holidays", "payroll_enterprise_jurisdictions",
     "payslip_items", "payroll_attendance_records", "payroll_runs", "payroll_employees"]
-_org_via_parent = [("payroll_inbound_attachments", "message_id", "payroll_inbound_messages"),
-    ("payroll_policy_integrations", "policy_id", "payroll_policies"),
+_org_via_parent = [("payroll_policy_integrations", "policy_id", "payroll_policies"),
     ("payroll_policy_overtime_rules", "policy_id", "payroll_policies"),
     ("payroll_policy_leave_rules", "policy_id", "payroll_policies"),
     ("payroll_policy_employee_categories", "policy_id", "payroll_policies")]
@@ -123,7 +121,6 @@ for t, fk, p in _org_via_parent:
     db.execute(text(f'DELETE FROM "{t}" WHERE "{fk}" IN (SELECT id FROM "{p}" WHERE organization_id = :oid)'), {"oid": OID})
 for t in _org_direct:
     db.execute(text(f'DELETE FROM "{t}" WHERE organization_id = :oid'), {"oid": OID})
-db.execute(text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :oid'), {"oid": OID})
 db.execute(text('DELETE FROM "payroll_policies" WHERE organization_id = :oid'), {"oid": OID})
 db.execute(text('DELETE FROM "security_action_tokens" WHERE organization_id = :oid'), {"oid": OID})
 db.execute(text('DELETE FROM "users" WHERE organization_id = :oid'), {"oid": OID})

@@ -36,10 +36,20 @@ function getMyOrgHref(role) {
 }
 
 function buildNavGroups(role) {
+  const overviewItems = [
+    { label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true },
+    { label: "My Organization", href: getMyOrgHref(role), icon: Building2, end: true },
+  ];
+  // Only an Org Admin can invite/manage Payroll Admins — Payroll Admins
+  // themselves have no user-creation rights (see ROLE_CREATION_RULES on
+  // the backend), so they don't get this nav item at all.
+  if (role === ROLES.ORG_ADMIN) {
+    overviewItems.push({ label: "Team", href: "/organization-admin/team", icon: Users, end: true });
+  }
   return [
     {
       title: "Overview",
-      items: [{ label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true }],
+      items: overviewItems,
     },
     {
       title: "People",
@@ -75,13 +85,9 @@ function isItemActive(item, pathname) {
 }
 
 // Centralized route → page-name mapping reused by the header's dynamic title.
-// Includes "My Organization" even though it's no longer a sidebar nav item,
-// since the header must still label that route correctly when visited.
+// Single source of truth shared with the sidebar nav groups.
 function getPageLabel(role, pathname) {
-  const entries = [
-    { label: "My Organization", href: getMyOrgHref(role), end: true },
-    ...buildNavGroups(role).flatMap((group) => group.items),
-  ];
+  const entries = buildNavGroups(role).flatMap((group) => group.items);
   const match = entries.find((item) => isItemActive(item, pathname));
   return match?.label || "Dashboard";
 }
@@ -182,7 +188,7 @@ function SidebarContent({ onNavigate, role, collapsed, onToggleCollapse, closeBu
         </button>
       </div>
 
-      <nav aria-label="Organization admin navigation" className="flex-1 space-y-6 overflow-y-auto pb-6">
+      <nav aria-label="Organization admin navigation" className="scrollbar-hide flex-1 space-y-6 overflow-y-auto pb-6">
         {navGroups.map((group) => (
           <NavSection
             key={group.title}
@@ -381,9 +387,9 @@ export default function PayrollShell({ children }) {
       <aside
         role="navigation"
         aria-label="Sidebar"
-        className={`fixed inset-y-0 left-0 z-40 overflow-y-auto border-r border-white/10 bg-gradient-to-b from-[#1F0B63] to-[#160845] px-4 py-6 shadow-[0_24px_80px_rgba(8,6,37,0.42)] transition-[transform,width] duration-200 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-[#1F0B63] to-[#160845] px-4 py-6 shadow-[0_24px_80px_rgba(8,6,37,0.42)] transition-[transform,width] duration-200 lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } ${collapsed ? "w-72 lg:w-20" : "w-72"}`}
+        } ${collapsed ? "w-72 lg:w-20" : "w-72 lg:w-[272px]"}`}
       >
         <SidebarContent
           onNavigate={() => setSidebarOpen(false)}
@@ -394,7 +400,7 @@ export default function PayrollShell({ children }) {
         />
       </aside>
 
-      <div className={`transition-[padding] duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-72"}`}>
+      <div className={`transition-[padding] duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
         <Header
           onOpenMobileSidebar={() => setSidebarOpen(true)}
           onToggleCollapse={toggleCollapse}

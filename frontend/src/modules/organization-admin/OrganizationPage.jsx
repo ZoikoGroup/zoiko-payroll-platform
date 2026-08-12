@@ -31,6 +31,9 @@ const styles = `
     --success-soft:rgba(23,138,80,0.11);
     --danger:#D6304C;
     --danger-soft:rgba(214,48,76,0.10);
+    --muted:#635C72;
+    --muted-soft:rgba(28,24,40,0.07);
+    --muted-border:rgba(28,24,40,0.16);
     --radius:18px;
 
     position:relative;
@@ -43,6 +46,31 @@ const styles = `
     isolation:isolate;
   }
   .org-dash *{ box-sizing:border-box; }
+
+  /* Dark theme — reuses the same neutral palette already used across the rest
+     of the app (Compliance/Payroll dark: classes) so there's one consistent
+     dark theme, not a second one invented just for this page. Overriding the
+     tokens here is enough because every rule below reads colors from them. */
+  .dark .org-dash{
+    --bg:#1A1816;
+    --glass: rgba(34,29,26,0.72);
+    --glass-solid:#221D1A;
+    --glass-border:#38312D;
+    --ink:#F0EDE8;
+    --ink-soft:#A69B93;
+    --ink-faint:#756B64;
+    --muted:#A69B93;
+    --muted-soft:rgba(240,237,232,0.08);
+    --muted-border:rgba(240,237,232,0.14);
+  }
+  .dark .org-dash .btn-ghost:hover{ background:var(--glass-solid); }
+  .dark .org-dash .banner-text{ color:#FFB4C0; }
+  .dark .org-dash .glass{
+    box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 20px 40px -26px rgba(0,0,0,0.4);
+  }
+  .dark .org-dash .glass:hover{
+    box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 24px 44px -24px rgba(0,0,0,0.5);
+  }
 
   .org-dash .orb{ position:absolute; border-radius:50%; filter:blur(100px); z-index:0; pointer-events:none; }
   .org-dash .orb-1{ width:560px; height:560px; top:-220px; right:-160px; background:radial-gradient(circle, rgba(110,90,230,0.16), transparent 70%); }
@@ -302,7 +330,7 @@ const STATUS_STYLES = {
   on_hold: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
   suspended: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
   rejected: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
-  deactivated: { bg: "rgba(28,24,40,0.07)", color: "#635C72", border: "rgba(28,24,40,0.16)" },
+  deactivated: { bg: "var(--muted-soft)", color: "var(--muted)", border: "var(--muted-border)" },
 };
 
 function StatusPill({ status }) {

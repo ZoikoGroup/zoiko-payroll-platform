@@ -2,7 +2,7 @@
 modules/super_admin/schemas.py
 ------------------------------
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -62,7 +62,6 @@ class DashboardStats(BaseModel):
     super_admins: int
     org_admins: int
     payroll_admins: int
-    employees: int
     total_payroll_employees: int
     total_payroll_runs: int
     recent_organizations: list[dict]
@@ -116,3 +115,91 @@ class StatutoryRateResponse(BaseModel):
 class StatutoryRateListResponse(BaseModel):
     rates: list[StatutoryRateResponse]
     total: int
+
+
+# ── Compliance (Super Admin) ───────────────────────────────────────────────
+# JurisdictionPackResponse/Upsert are reused as-is from app.modules.payroll.schemas
+# (imported directly in router.py) — no parallel schema is defined here.
+
+class AssignPolicyRequest(BaseModel):
+    organizationIds: list[int]
+
+
+class ApplicableOrganization(BaseModel):
+    id: int
+    organizationName: str
+    organizationCode: Optional[str] = None
+
+
+class PolicyStatusUpdate(BaseModel):
+    status: str
+
+
+# ── Finance (Super Admin) ───────────────────────────────────────────────────
+
+class FinanceOverviewItem(BaseModel):
+    id: int
+    organizationId: int
+    organizationName: str
+    organizationCode: Optional[str] = None
+    jurisdictionCountry: Optional[str] = None
+    currency: Optional[str] = None
+    periodLabel: str
+    periodStart: Optional[date] = None
+    periodEnd: Optional[date] = None
+    payDate: Optional[date] = None
+    status: str
+    grossPay: Decimal
+    netPay: Decimal
+    totalDeductions: Decimal
+    totalTaxes: Decimal
+    employerCost: Decimal
+    employeeCount: int
+
+
+class FinanceOverviewResponse(BaseModel):
+    items: list[FinanceOverviewItem]
+    total: int
+
+
+class FinanceCountryTotal(BaseModel):
+    country: str
+    organizations: int
+    payrollRuns: int
+    grossPay: Decimal
+    netPay: Decimal
+    totalDeductions: Decimal
+    employerCost: Decimal
+
+
+class FinanceSummaryResponse(BaseModel):
+    byCountry: list[FinanceCountryTotal]
+    totalOrganizations: int
+    totalPayrollRuns: int
+    payrollsPending: int
+    payrollsCompleted: int
+
+
+# ── Reports (Super Admin) ───────────────────────────────────────────────────
+
+class ReportsListResponse(BaseModel):
+    items: list[dict]
+    total: int
+
+
+# ── Organization currency management (Finance) ─────────────────────────────
+
+class UpdateCurrencyRequest(BaseModel):
+    currency: Optional[str] = None
+
+
+# ── Dashboard charts (Super Admin) ─────────────────────────────────────────
+
+class DashboardChartsResponse(BaseModel):
+    payrollTrend: list[dict]
+    grossVsNet: dict
+    organizationsByCountry: list[dict]
+    organizationsByStatus: dict
+    payrollByJurisdiction: list[dict]
+    complianceOverview: dict
+    employeesByCountry: list[dict]
