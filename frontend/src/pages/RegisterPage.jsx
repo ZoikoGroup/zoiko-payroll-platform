@@ -8,6 +8,12 @@ import {
   getTimezonesForCountryName,
   getDefaultTimezoneForCountry,
 } from "../utils/registrationRegions";
+import {
+  getJurisdictionTaxSchema,
+  getJurisdictionTaxFields,
+  validateJurisdictionTaxIds,
+  primaryTaxValue,
+} from "../utils/jurisdictionTax";
 import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
 
@@ -42,6 +48,9 @@ export default function RegisterPage() {
     country: "",
     timezone: "",
     industry: "",
+    companyType: "",
+    taxNo: "",
+    taxIdentifiers: {},
     termsAccepted: false,
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -52,23 +61,41 @@ export default function RegisterPage() {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
+  function updateTaxIdentifier(key, value) {
+    setForm((f) => ({
+      ...f,
+      taxIdentifiers: { ...f.taxIdentifiers, [key]: value },
+    }));
+  }
+
   function handleCountryChange(value) {
     setForm((f) => ({
       ...f,
       country: value,
       state: "",
       timezone: getDefaultTimezoneForCountry(value),
+      taxIdentifiers: {},
     }));
   }
 
   const countryStates = getStatesForCountryName(form.country);
   const countryTimezones = getTimezonesForCountryName(form.country);
+  const jurisdictionSchema = getJurisdictionTaxSchema(form.country);
+  const jurisdictionTaxFields = getJurisdictionTaxFields(form.country);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLocalError(null);
+
+    const taxValidationErrors = validateJurisdictionTaxIds(form.country, form.taxIdentifiers);
+    if (taxValidationErrors.length) {
+      setLocalError(taxValidationErrors[0].message);
+      return;
+    }
+
     setSubmitting(true);
     try {
+      const hasTaxIdentifiers = jurisdictionTaxFields.length > 0;
       await apiFetch("/api/auth/register", {
         method: "POST",
         body: {
@@ -83,6 +110,11 @@ export default function RegisterPage() {
           country: form.country,
           timezone: form.timezone,
           industry: form.industry,
+          company_type: form.companyType,
+          tax_no: hasTaxIdentifiers
+            ? primaryTaxValue(form.country, form.taxIdentifiers)
+            : form.taxNo,
+          tax_identifiers: hasTaxIdentifiers ? form.taxIdentifiers : undefined,
         },
       });
       navigate("/register/success", {
@@ -257,6 +289,22 @@ export default function RegisterPage() {
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
+
+                <div>
+                  <label htmlFor="companyType" style={labelStyle}>
+                    Company Type
+                  </label>
+                  <input
+                    id="companyType"
+                    type="text"
+                    value={form.companyType}
+                    onChange={(e) => update("companyType", e.target.value)}
+                    placeholder="Private Limited"
+                    style={fieldStyle}
+                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
+                  />
+                </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "18px" }}>
@@ -316,6 +364,54 @@ export default function RegisterPage() {
                   />
                 </div>
               </div>
+
+              {jurisdictionTaxFields.length > 0 ? (
+                <div>
+                  <div style={{ marginBottom: "12px" }}>
+                    <p style={{ margin: "0 0 2px 0", fontSize: "14px", fontWeight: "600", color: "#111827" }}>
+                      Business Registration & Tax Identification
+                    </p>
+                    <p style={{ margin: 0, fontSize: "12px", color: "#6B7280" }}>
+                      {jurisdictionSchema.label} for payroll in {form.country}. Format is validated as you enter.
+                    </p>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px" }}>
+                    {jurisdictionTaxFields.map((f) => (
+                      <div key={f.key}>
+                        <label htmlFor={`reg-${f.key}`} style={labelStyle}>
+                          {f.label} {f.primary && <span style={{ color: "#DC2626" }}>*</span>}
+                        </label>
+                        <input
+                          id={`reg-${f.key}`}
+                          type="text"
+                          value={form.taxIdentifiers[f.key] || ""}
+                          onChange={(e) => updateTaxIdentifier(f.key, e.target.value)}
+                          placeholder={`e.g. ${f.example}`}
+                          style={fieldStyle}
+                          onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                          onBlur={e => e.target.style.borderColor = "#E5E7EB"}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="taxNo" style={labelStyle}>
+                    Tax Registration Number
+                  </label>
+                  <input
+                    id="taxNo"
+                    type="text"
+                    value={form.taxNo}
+                    onChange={(e) => update("taxNo", e.target.value)}
+                    placeholder="e.g. GSTIN, EIN, VAT No."
+                    style={fieldStyle}
+                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
+                  />
+                </div>
+              )}
 
               <div>
                 <label htmlFor="address" style={labelStyle}>

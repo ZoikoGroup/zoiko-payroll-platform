@@ -450,12 +450,21 @@ class CompanyComplianceDetails(Base):
     industry              = Column(String(100), default="")
     email                 = Column(String(255), default="")
     phone                 = Column(String(50), default="")
-    jurisdiction_country  = Column(String(100), default="India")
+    # Blank, not "India" — this field stores the 2-letter code the Compliance
+    # dropdown actually uses ("IN"/"US"/...), and a non-blank-but-unmatched
+    # default silently renders as an unselected dropdown (see get_company_details).
+    jurisdiction_country  = Column(String(100), default="")
     jurisdiction_state    = Column(String(100), default="")
     compliance_pack       = Column(String(100), default="")
     schedule              = Column(String(100), default="")
     settlement_bank       = Column(String(100), default="")
     settlement_acc        = Column(String(50), default="")
+    # Jurisdiction-aware tax/registration identifiers synced from the
+    # Organization.tax_identifiers captured at registration (see
+    # app/core/jurisdiction.py). Keyed by the same field keys, e.g.
+    # {"gstin": "...", "pan": "...", "cin": "..."}. Backfilled once from the
+    # org row and then editable/overridable via the Compliance Details tab.
+    tax_identifiers       = Column(JSON, nullable=True)
 
     # Which JurisdictionPack this org is currently using, if any. Nullable —
     # orgs created before this table existed, or orgs in a jurisdiction

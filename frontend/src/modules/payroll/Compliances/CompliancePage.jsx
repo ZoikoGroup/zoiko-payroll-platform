@@ -17,6 +17,7 @@ import {
   getActivePolicy,
   getEnterpriseJurisdictions,
 } from "../../../service/payrollService";
+import { getJurisdictionTaxFields } from "../../../utils/jurisdictionTax";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const BASE_TABS = ["Overview", "Company Details", "Contribution Rates", "Tax Slabs", "Documents"];
@@ -25,6 +26,7 @@ const defaultCompany = {
   name: "",
   type: "",
   taxNo: "",
+  taxIdentifiers: {},
   employerId: "",
   address: "",
   industry: "",
@@ -46,6 +48,10 @@ export default function CompliancePage() {
   const [enterpriseStatus, setEnterpriseStatus] = useState("not_configured");
   const [enterpriseJurisdictions, setEnterpriseJurisdictions] = useState([]);
   const countryMeta = getCountryMeta(companyDetails.jurisdictionCountry);
+  const taxIdsDisplay = getJurisdictionTaxFields(companyDetails.jurisdictionCountry)
+    .map((f) => (companyDetails.taxIdentifiers?.[f.key] ? `${f.label}: ${companyDetails.taxIdentifiers[f.key]}` : null))
+    .filter(Boolean)
+    .join(" · ");
 
   const refreshEnterpriseState = () => {
     getActivePolicy()
@@ -82,6 +88,21 @@ export default function CompliancePage() {
   const handleUpdate = (field, value) => {
     setCompanyDetails((prev) => {
       const next = { ...prev, [field]: value };
+      return next;
+    });
+  };
+
+  // Edit / Override mode for the jurisdiction tax/registration IDs. Merges the
+  // new value into taxIdentifiers and mirrors the primary field into the
+  // legacy tax_no so the overview/footers keep reading a single value.
+  const handleTaxIdentifierChange = (key, value) => {
+    setCompanyDetails((prev) => {
+      const taxIdentifiers = { ...(prev.taxIdentifiers || {}), [key]: value };
+      const next = { ...prev, taxIdentifiers };
+      const primaryField = getJurisdictionTaxFields(prev.jurisdictionCountry).find((f) => f.primary);
+      if (primaryField && key === primaryField.key) {
+        next.taxNo = value;
+      }
       return next;
     });
   };
@@ -159,7 +180,7 @@ export default function CompliancePage() {
               <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Company</p>
               <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{companyDetails.name}</p>
               <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">{companyDetails.type} · {companyDetails.industry}</p>
-              <p className="text-[13px] text-[#9E9690]">Tax ID: {companyDetails.taxNo}</p>
+              <p className="text-[13px] text-[#9E9690]">{taxIdsDisplay || `Tax ID: ${companyDetails.taxNo}`}</p>
               {companyDetails.email && <p className="text-[13px] text-[#9E9690]">Email: {companyDetails.email}</p>}
               {companyDetails.phone && <p className="text-[13px] text-[#9E9690]">Phone: {companyDetails.phone}</p>}
             </div>
@@ -178,6 +199,8 @@ export default function CompliancePage() {
           <ComplianceForm
             companyDetails={companyDetails}
             onUpdate={handleUpdate}
+            onTaxIdentifierChange={handleTaxIdentifierChange}
+            addToast={addToast}
           />
           <div className="flex justify-end">
             <button

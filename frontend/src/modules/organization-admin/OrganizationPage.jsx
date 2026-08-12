@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
-import { getOrganizationDetails, updateOrganizationDetails } from "../../service/orgAdminService";
-import { X, CheckCircle, AlertTriangle } from "lucide-react";
+import {
+  getOrganizationDetails,
+  updateOrganizationDetails,
+  getOrganizationDashboardStats,
+  getOrganizationActivity,
+  uploadOrganizationLogo,
+} from "../../service/orgAdminService";
+import { useOrganization } from "../../context/OrganizationContext";
+import { X, CheckCircle, AlertTriangle, RefreshCw, Upload } from "lucide-react";
+import { getJurisdictionTaxFields, getJurisdictionCode } from "../../utils/jurisdictionTax";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -50,43 +58,10 @@ const styles = `
   .org-dash .rise{ animation:org-rise .6s cubic-bezier(.2,.7,.3,1) both; }
   @media (prefers-reduced-motion: reduce){ .org-dash .rise{ animation:none; } }
 
-  .org-dash .topbar{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:24px 0; margin-bottom:36px;
-    border-bottom:1px solid var(--glass-border);
-  }
-  .org-dash .brand{ display:flex; align-items:center; gap:12px; }
-  .org-dash .brand-mark{
-    width:32px; height:32px; border-radius:9px;
-    background:linear-gradient(135deg, var(--amber), var(--violet));
-    display:flex; align-items:center; justify-content:center;
-    font-family:'Fraunces', serif; color:#fff; font-weight:700; font-size:15px;
-  }
-  .org-dash .brand-name{ font-family:'Fraunces', serif; font-weight:600; font-size:17px; color:var(--ink); }
-  .org-dash .role-chip{
-    font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase;
-    color:var(--violet-deep); background:var(--violet-soft); border:1px solid rgba(110,90,230,0.22);
-    padding:5px 10px; border-radius:100px; margin-left:8px;
-  }
-  .org-dash .user-chip{ display:flex; align-items:center; gap:11px; }
-  .org-dash .user-avatar{
-    width:34px; height:34px; border-radius:100px; background:var(--glass-solid);
-    border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center;
-    color:var(--ink-soft); font-size:13px; box-shadow:0 2px 6px rgba(28,24,40,0.06);
-  }
-  .org-dash .user-meta{ line-height:1.35; text-align:right; }
-  .org-dash .user-meta .name{ font-size:13px; font-weight:600; color:var(--ink); }
-  .org-dash .user-meta .email{ font-size:11.5px; color:var(--ink-faint); }
-
   .org-dash .hero{
     display:flex; align-items:center; justify-content:space-between; gap:24px;
     margin-bottom:22px; flex-wrap:wrap;
   }
-  .org-dash .eyebrow{
-    font-size:11.5px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase;
-    color:var(--amber-deep); margin:0 0 14px; display:flex; align-items:center; gap:8px;
-  }
-  .org-dash .eyebrow::before{ content:""; width:16px; height:1px; background:var(--amber-deep); display:inline-block; }
   .org-dash h1.title{
     font-family:'Fraunces', serif; font-weight:600; font-size:52px; line-height:1.2;
     margin:0 0 12px; letter-spacing:-0.015em;
@@ -158,7 +133,7 @@ const styles = `
     border:1px solid rgba(214,48,76,0.3); display:flex; align-items:center; justify-content:center;
     flex:none; color:var(--danger); font-weight:700; font-size:15px;
   }
-  .org-dash .banner-text{ font-size:13.5px; line-height:1.6; color:#7A1B2C; }
+  .org-dash .banner-text{ font-size:13.5px; line-height:1.6; color:#7A1B2C; flex:1; }
   .org-dash .banner-text b{ color:var(--danger); }
 
   .org-dash .stat-strip{ display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin-bottom:20px; }
@@ -223,6 +198,43 @@ const styles = `
   }
   .org-dash .foot-note b{ color:var(--ink); }
 
+  .org-dash .section-label{
+    font-size:11.5px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--ink-faint); margin:38px 0 14px;
+  }
+
+  .org-dash .dept-list{ padding:18px 24px 24px; display:flex; flex-direction:column; gap:14px; }
+  .org-dash .dept-row{ display:flex; align-items:center; gap:12px; }
+  .org-dash .dept-name{ width:140px; flex:none; font-size:13px; font-weight:600; color:var(--ink); }
+  .org-dash .dept-track{ flex:1; height:8px; border-radius:100px; background:rgba(28,24,40,0.07); overflow:hidden; }
+  .org-dash .dept-fill{ height:100%; border-radius:100px; background:linear-gradient(90deg,var(--violet),var(--violet-deep)); }
+  .org-dash .dept-count{ width:28px; flex:none; text-align:right; font-size:13px; font-weight:700; color:var(--ink); }
+
+  .org-dash .simple-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .org-dash .simple-table th{
+    text-align:left; font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--ink-faint); padding:12px 24px; border-bottom:1px solid var(--glass-border);
+  }
+  .org-dash .simple-table td{ padding:13px 24px; border-bottom:1px solid rgba(28,24,40,0.055); color:var(--ink); }
+  .org-dash .simple-table tr:last-child td{ border-bottom:none; }
+  .org-dash .emp-cell{ display:flex; align-items:center; gap:10px; }
+  .org-dash .emp-avatar{
+    width:28px; height:28px; border-radius:8px; flex:none; display:flex; align-items:center; justify-content:center;
+    font-size:11px; font-weight:700; color:#fff; background:linear-gradient(135deg,var(--violet),var(--violet-deep));
+  }
+  .org-dash .status-dot{ display:inline-flex; align-items:center; gap:6px; }
+  .org-dash .status-dot .dot{ width:7px; height:7px; border-radius:50%; flex:none; }
+  .org-dash .empty-cell{ padding:30px 24px; text-align:center; color:var(--ink-faint); font-size:13px; }
+
+  .org-dash .activity-list{ padding:6px 24px 18px; }
+  .org-dash .activity-row{
+    display:flex; align-items:flex-start; gap:12px; padding:13px 0; border-bottom:1px solid rgba(28,24,40,0.055);
+  }
+  .org-dash .activity-row:last-child{ border-bottom:none; }
+  .org-dash .activity-dot{ width:8px; height:8px; border-radius:50%; margin-top:5px; flex:none; }
+  .org-dash .activity-desc{ font-size:13.5px; color:var(--ink); line-height:1.5; }
+  .org-dash .activity-time{ font-size:11.5px; color:var(--ink-faint); margin-top:2px; }
+
   .org-dash .modal-overlay{
     position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
     background:rgba(28,24,40,0.45); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); padding:16px;
@@ -243,6 +255,13 @@ const styles = `
   }
   .org-dash .modal-close:hover{ color:var(--ink); border-color:rgba(28,24,40,0.18); }
   .org-dash .modal-body{ padding:20px 26px; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
+  .org-dash .logo-picker{ display:flex; align-items:center; gap:16px; }
+  .org-dash .logo-preview{
+    width:64px; height:64px; border-radius:14px; flex:none; overflow:hidden;
+    background:linear-gradient(155deg, var(--amber), var(--violet-deep));
+    display:flex; align-items:center; justify-content:center; color:#fff;
+  }
+  .org-dash .logo-preview img{ width:100%; height:100%; object-fit:contain; }
   .org-dash .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .org-dash .form-field label{ display:block; font-size:11.5px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; letter-spacing:0.02em; }
   .org-dash .form-field input, .org-dash .form-field textarea{
@@ -276,7 +295,9 @@ const styles = `
 
 const STATUS_STYLES = {
   active: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
+  success: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
   approved: { bg: "rgba(110,90,230,0.10)", color: "#4B3BB0", border: "rgba(110,90,230,0.22)" },
+  info: { bg: "rgba(110,90,230,0.10)", color: "#4B3BB0", border: "rgba(110,90,230,0.22)" },
   pending: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
   on_hold: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
   suspended: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
@@ -286,7 +307,8 @@ const STATUS_STYLES = {
 
 function StatusPill({ status }) {
   if (!status) return <span className="dim">—</span>;
-  const s = STATUS_STYLES[status] || STATUS_STYLES.deactivated;
+  const key = String(status).toLowerCase();
+  const s = STATUS_STYLES[key] || STATUS_STYLES.deactivated;
   return (
     <span className="status-pill" style={{ background: s.bg, color: s.color, borderColor: s.border }}>
       <span className="dot" />
@@ -314,6 +336,22 @@ const StatTile = ({ glowColor, label, value, sub, valueColor }) => (
     <p className="stat-sub">{sub}</p>
   </div>
 );
+
+const EditField = ({ label, value, onChange, textarea, mono }) => {
+  const Tag = textarea ? "textarea" : "input";
+  return (
+    <div className="form-field">
+      <label>{label}</label>
+      <Tag
+        type="text"
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        rows={textarea ? 3 : undefined}
+        className={mono ? "mono" : undefined}
+      />
+    </div>
+  );
+};
 
 function WorkforceRing({ total, active, hrAdmins }) {
   const safeTotal = total || 0;
@@ -371,36 +409,67 @@ function WorkforceRing({ total, active, hrAdmins }) {
   );
 }
 
+const EMPLOYEE_STATUS_DOT = { teal: "#178A50", amber: "#D9791E", off: "#9D96AB" };
+const ACTIVITY_DOT = { SUCCESS: "#178A50", PENDING: "#D9791E", INFO: "#6E5AE6" };
+
+function fmtCurrency(amount) {
+  if (amount == null) return "—";
+  return `$${Math.round(Number(amount)).toLocaleString("en-US")}`;
+}
+
+function timeAgo(isoString) {
+  const then = new Date(isoString).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMin = Math.round((Date.now() - then) / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 export default function OrgAdminOrganizationPage() {
+  const { refresh: refreshOrgContext } = useOrganization();
   const [org, setOrg] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [toast, setToast] = useState({ msg: null, type: "success" });
 
-  const fetchOrg = () => {
+  const fetchAll = () => {
     setLoading(true);
-    getOrganizationDetails()
-      .then(setOrg)
+    setError(null);
+    Promise.all([
+      getOrganizationDetails(),
+      getOrganizationDashboardStats().catch(() => null),
+      getOrganizationActivity(),
+    ])
+      .then(([orgData, statsData, activityData]) => {
+        setOrg(orgData);
+        setStats(statsData);
+        setActivity(activityData);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchOrg(); }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   const openEdit = () => {
     setEditForm({
       name: org.name || "",
       industry: org.industry || "",
+      companyType: org.company_type || "",
       address: org.address || "",
       city: org.city || "",
       state: org.state || "",
       country: org.country || "",
-      timezone: org.timezone || "UTC",
-      currency: org.currency || "USD",
-      domain: org.domain || "",
     });
     setShowEdit(true);
   };
@@ -411,7 +480,8 @@ export default function OrgAdminOrganizationPage() {
       await updateOrganizationDetails(editForm);
       setShowEdit(false);
       setToast({ msg: "Organization updated successfully.", type: "success" });
-      fetchOrg();
+      fetchAll();
+      refreshOrgContext();
     } catch (err) {
       setToast({ msg: err.response?.data?.detail || err.message || "Failed to update.", type: "error" });
     } finally {
@@ -419,9 +489,35 @@ export default function OrgAdminOrganizationPage() {
     }
   };
 
+  const handleLogoChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    if (!["image/jpeg", "image/jpg", "image/svg+xml"].includes(file.type) || ![".jpg", ".jpeg", ".svg"].includes(ext)) {
+      setToast({ msg: "Logo must be a JPG or SVG image.", type: "error" });
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setToast({ msg: "Logo must be smaller than 2 MB.", type: "error" });
+      return;
+    }
+    setUploadingLogo(true);
+    try {
+      const updated = await uploadOrganizationLogo(file);
+      setOrg(updated);
+      refreshOrgContext();
+      setToast({ msg: "Logo updated successfully.", type: "success" });
+    } catch (err) {
+      setToast({ msg: err.response?.data?.detail || err.message || "Failed to upload logo.", type: "error" });
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="org-dash -mx-4 sm:-mx-6 lg:-mx-8 mt-4">
+      <div className="org-dash">
         <style>{styles}</style>
         <div className="orb orb-1" />
         <div className="orb orb-2" />
@@ -437,7 +533,7 @@ export default function OrgAdminOrganizationPage() {
 
   if (error) {
     return (
-      <div className="org-dash -mx-4 sm:-mx-6 lg:-mx-8 mt-4">
+      <div className="org-dash">
         <style>{styles}</style>
         <div className="orb orb-1" />
         <div className="orb orb-2" />
@@ -445,7 +541,28 @@ export default function OrgAdminOrganizationPage() {
         <div className="page">
           <div className="banner">
             <div className="banner-icon">!</div>
-            <div className="banner-text"><b>{error}</b></div>
+            <div className="banner-text">
+              <b>Unable to load organization details. Please try again.</b>
+            </div>
+            <button className="btn btn-ghost" onClick={fetchAll}>
+              <RefreshCw className="w-3.5 h-3.5" /> Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!org) {
+    return (
+      <div className="org-dash">
+        <style>{styles}</style>
+        <div className="orb orb-1" />
+        <div className="orb orb-2" />
+        <div className="grain" />
+        <div className="page">
+          <div className="glass" style={{ padding: 60, textAlign: "center" }}>
+            <div className="dim">No organization details found.</div>
           </div>
         </div>
       </div>
@@ -455,30 +572,24 @@ export default function OrgAdminOrganizationPage() {
   const totalEmployees = org.total_employees || 0;
   const activeEmployees = org.active_employees || 0;
   const hrAdmins = org.hr_admins || 0;
-  const maxUsers = org.max_users;
-  const plan = org.subscription_plan || "FREE";
-  const currency = org.currency || "USD";
-  const seatsOver = maxUsers != null ? totalEmployees - maxUsers : 0;
   const regDate = org.created_at ? new Date(org.created_at).toLocaleDateString() : "—";
+  const deptData = stats?.department_headcount || [];
+  const employeeData = stats?.recent_employees || [];
 
-  const EditField = ({ label, value, onChange, textarea, mono }) => {
-    const Tag = textarea ? "textarea" : "input";
-    return (
-      <div className="form-field">
-        <label>{label}</label>
-        <Tag
-          type="text"
-          value={value || ""}
-          onChange={(e) => onChange(e.target.value)}
-          rows={textarea ? 3 : undefined}
-          className={mono ? "mono" : undefined}
-        />
-      </div>
-    );
-  };
+  // Jurisdiction-aware tax/registration identifiers: when the organization has
+  // structured tax_identifiers (e.g. India GSTIN/PAN/CIN), show each labelled
+  // row; otherwise fall back to the legacy single tax_no.
+  const orgTaxIds = (org.tax_identifiers || {});
+  const orgTaxFields = getJurisdictionTaxFields(getJurisdictionCode(org.country));
+  const orgTaxRows = orgTaxFields
+    .map((f) => (orgTaxIds[f.key] ? { label: f.label, value: orgTaxIds[f.key] } : null))
+    .filter(Boolean);
+  const taxRows = orgTaxRows.length
+    ? orgTaxRows
+    : (org.tax_no ? [{ label: "Tax Registration No.", value: org.tax_no }] : []);
 
   return (
-    <div className="org-dash -m-4 sm:-m-6 lg:-m-8">
+    <div className="org-dash">
       <style>{styles}</style>
       <div className="orb orb-1" />
       <div className="orb orb-2" />
@@ -489,10 +600,9 @@ export default function OrgAdminOrganizationPage() {
         <div className="hero rise" style={{ animationDelay: ".05s" }}>
           <div>
             <h1 className="title">My Organization</h1>
-            <p className="subtitle">A live record of your organization's identity, plan, and workforce.</p>
+            <p className="subtitle">A live record of your organization's identity, contacts, and workforce.</p>
           </div>
           <div className="head-actions">
-            <button className="btn btn-ghost">View audit log</button>
             <button className="btn btn-primary" onClick={openEdit}>Edit organization</button>
           </div>
         </div>
@@ -500,10 +610,14 @@ export default function OrgAdminOrganizationPage() {
         <div className="id-card glass rise" style={{ animationDelay: ".1s" }}>
           <div className="id-left">
             <div className="org-mark">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 21V7L12 3L20 7V21H4Z" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" />
-                <path d="M9 21V14H15V21" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" />
-              </svg>
+              {org.logo_data_uri ? (
+                <img src={org.logo_data_uri} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 16 }} />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M4 21V7L12 3L20 7V21H4Z" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" />
+                  <path d="M9 21V14H15V21" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" />
+                </svg>
+              )}
             </div>
             <div>
               <p className="org-name">{org.name}</p>
@@ -519,14 +633,13 @@ export default function OrgAdminOrganizationPage() {
           </div>
         </div>
 
-        <div className="stat-strip rise" style={{ animationDelay: ".2s" }}>
+        <div className="stat-strip rise" style={{ animationDelay: ".15s", gridTemplateColumns: "1fr 1fr" }}>
           <StatTile glowColor="var(--violet)" label="Total Employees" value={totalEmployees} sub="Across your organization" />
           <StatTile glowColor="var(--success)" label="Active" value={activeEmployees} sub={`${Math.round((activeEmployees / Math.max(totalEmployees, 1)) * 100)}% of workforce`} valueColor="var(--violet-deep)" />
-          <StatTile glowColor="var(--amber)" label="Plan Limit" value={maxUsers ?? "—"} sub={`${plan} plan · ${currency}`} valueColor="var(--amber-deep)" />
-          <StatTile glowColor="var(--danger)" label="Seats Over Limit" value={seatsOver > 0 ? `−${seatsOver}` : "0"} sub={seatsOver > 0 ? "Needs upgrade" : "Within limit"} valueColor="var(--danger)" />
         </div>
 
-        <div className="grid rise" style={{ animationDelay: ".25s" }}>
+        <div className="section-label">Company Details</div>
+        <div className="grid rise" style={{ animationDelay: ".2s" }}>
           <div className="glass">
             <div className="panel-head">
               <div className="panel-icon icon-violet">
@@ -540,57 +653,38 @@ export default function OrgAdminOrganizationPage() {
             <div className="rows">
               <DetailRow label="Organization Name" value={org.name} />
               <DetailRow label="Organization Code" value={org.code} mono />
+              <DetailRow label="Company Type" value={org.company_type} />
+              {taxRows.map((r) => (
+                <DetailRow key={r.label} label={r.label} value={r.value} mono />
+              ))}
               <DetailRow label="Organization Admin" value={org.admin_name} />
               <DetailRow label="Admin Email" value={org.admin_email} />
               <DetailRow label="Organization Status" value={org.status} pill />
+              <DetailRow label="Registered On" value={regDate} mono />
             </div>
           </div>
 
           <div className="glass">
             <div className="panel-head">
               <div className="panel-icon icon-amber">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="1.8" /><path d="M3 10h18" stroke="currentColor" strokeWidth="1.8" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Z" stroke="currentColor" strokeWidth="1.8" /><circle cx="12" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.8" /></svg>
               </div>
               <div>
-                <p className="panel-title">Subscription &amp; billing</p>
-                <p className="panel-sub">Plan, status and account limits</p>
+                <p className="panel-title">Location &amp; jurisdiction</p>
+                <p className="panel-sub">Registered address details</p>
               </div>
             </div>
             <div className="rows">
-              <DetailRow label="Subscription Plan" value={plan} />
-              <DetailRow label="Subscription Status" value={org.subscription_status} pill />
-              <DetailRow label="Max Users" value={maxUsers ?? "—"} mono />
-              <DetailRow label="Currency" value={currency} mono />
-              <DetailRow label="Registration Date" value={regDate} mono />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass rise" style={{ marginBottom: 16, animationDelay: ".3s" }}>
-          <div className="panel-head">
-            <div className="panel-icon icon-violet">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Z" stroke="currentColor" strokeWidth="1.8" /><circle cx="12" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.8" /></svg>
-            </div>
-            <div>
-              <p className="panel-title">Location &amp; timezone</p>
-              <p className="panel-sub">Where this organization is registered — details given while registering</p>
-            </div>
-          </div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 0, margin: 0 }}>
-            <div className="rows" style={{ borderRight: "1px solid var(--glass-border)" }}>
               <DetailRow label="Industry" value={org.industry} />
               <DetailRow label="Address" value={org.address} />
               <DetailRow label="City" value={org.city} />
-            </div>
-            <div className="rows">
               <DetailRow label="State" value={org.state} />
               <DetailRow label="Country" value={org.country} />
-              <DetailRow label="Timezone" value={org.timezone || "UTC"} mono />
             </div>
           </div>
         </div>
 
-        <div className="glass rise" style={{ animationDelay: ".35s" }}>
+        <div className="glass rise" style={{ marginBottom: 16, animationDelay: ".25s" }}>
           <div className="panel-head">
             <div className="panel-icon icon-amber">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" strokeWidth="1.8" /><circle cx="18" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.8" /><path d="M15.5 14.2C17.9 14.6 20 16.8 20 19.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
@@ -602,13 +696,118 @@ export default function OrgAdminOrganizationPage() {
           </div>
           <WorkforceRing total={totalEmployees} active={activeEmployees} hrAdmins={hrAdmins} />
           <div className="foot-note" style={{ margin: "0 24px 26px", paddingTop: 16 }}>
-            <span><b>{totalEmployees - activeEmployees}</b> seats inactive</span>
-            {seatsOver > 0 && (
-              <span style={{ color: "var(--danger)" }}><b style={{ color: "var(--danger)" }}>−{seatsOver}</b> seats remaining on {plan} plan</span>
+            <span><b>{Math.max(totalEmployees - activeEmployees, 0)}</b> seats inactive</span>
+          </div>
+        </div>
+
+        <div className="section-label">Activity &amp; Metrics</div>
+
+        <div className="stat-strip rise" style={{ animationDelay: ".3s" }}>
+          <StatTile glowColor="var(--amber)" label="Departments" value={stats ? (stats.departments ?? 0) : "—"} sub="Across your organization" />
+          <StatTile glowColor="var(--violet)" label="Designations" value={stats ? (stats.designations ?? 0) : "—"} sub="Distinct roles" />
+          <StatTile glowColor="var(--success)" label="HR Admins" value={hrAdmins} sub="Managing payroll &amp; HR" />
+          <StatTile glowColor="var(--danger)" label="Pending Leaves" value={stats ? (stats.pending_leave_requests ?? 0) : "—"} sub="Awaiting review" />
+          <StatTile glowColor="var(--amber)" label="Pending Approvals" value={stats ? (stats.pending_approvals ?? 0) : "—"} sub="Need action" />
+          <StatTile glowColor="var(--violet)" label="Monthly Payroll" value={stats ? fmtCurrency(stats.monthly_payroll) : "—"} sub="Latest run total" valueColor="var(--violet-deep)" />
+        </div>
+
+        <div className="grid rise" style={{ animationDelay: ".35s" }}>
+          <div className="glass">
+            <div className="panel-head">
+              <div className="panel-icon icon-violet">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" /><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" /><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" /><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" /></svg>
+              </div>
+              <div>
+                <p className="panel-title">Headcount by Department</p>
+                <p className="panel-sub">{deptData.length} department{deptData.length === 1 ? "" : "s"}</p>
+              </div>
+            </div>
+            {deptData.length === 0 ? (
+              <div className="empty-cell">No department data yet.</div>
+            ) : (
+              <div className="dept-list">
+                {deptData.map((d) => (
+                  <div key={d.name} className="dept-row">
+                    <span className="dept-name">{d.name}</span>
+                    <div className="dept-track"><div className="dept-fill" style={{ width: `${d.pct}%` }} /></div>
+                    <span className="dept-count">{d.count}</span>
+                  </div>
+                ))}
+              </div>
             )}
-            {seatsOver <= 0 && maxUsers != null && (
-              <span><b>{maxUsers - totalEmployees}</b> seats remaining on {plan} plan</span>
+          </div>
+
+          <div className="glass">
+            <div className="panel-head">
+              <div className="panel-icon icon-amber">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </div>
+              <div>
+                <p className="panel-title">Organization Activity</p>
+                <p className="panel-sub">Recent, real activity from your organization</p>
+              </div>
+            </div>
+            {activity.length === 0 ? (
+              <div className="empty-cell">No recent activity.</div>
+            ) : (
+              <div className="activity-list">
+                {activity.map((a) => (
+                  <div key={a.id} className="activity-row">
+                    <span className="activity-dot" style={{ background: ACTIVITY_DOT[a.status] || "#9D96AB" }} />
+                    <div>
+                      <div className="activity-desc">{a.description}</div>
+                      <div className="activity-time">{timeAgo(a.timestamp)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
+          </div>
+        </div>
+
+        <div className="glass rise" style={{ animationDelay: ".4s" }}>
+          <div className="panel-head">
+            <div className="panel-icon icon-violet">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" /><path d="M4.5 20c0-4.1 3.4-7.5 7.5-7.5s7.5 3.4 7.5 7.5" stroke="currentColor" strokeWidth="1.8" /></svg>
+            </div>
+            <div>
+              <p className="panel-title">Recently Added Employees</p>
+              <p className="panel-sub">{totalEmployees} total employees</p>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="simple-table">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Designation</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employeeData.length === 0 ? (
+                  <tr><td colSpan={4} className="empty-cell">No employees found.</td></tr>
+                ) : employeeData.map((e, idx) => (
+                  <tr key={e.name || idx}>
+                    <td>
+                      <div className="emp-cell">
+                        <span className="emp-avatar">{e.initials}</span>
+                        <span>{e.name}</span>
+                      </div>
+                    </td>
+                    <td>{e.dept || "—"}</td>
+                    <td>{e.designation || "—"}</td>
+                    <td>
+                      <span className="status-dot">
+                        <span className="dot" style={{ background: EMPLOYEE_STATUS_DOT[e.statusColor] || EMPLOYEE_STATUS_DOT.off }} />
+                        {e.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -633,21 +832,39 @@ export default function OrgAdminOrganizationPage() {
               <button className="modal-close" onClick={() => setShowEdit(false)}><X className="w-4 h-4" /></button>
             </div>
             <div className="modal-body">
+              <div className="form-field">
+                <label>Organization Logo</label>
+                <div className="logo-picker">
+                  <div className="logo-preview">
+                    {org.logo_data_uri ? (
+                      <img src={org.logo_data_uri} alt="" />
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 21V7L12 3L20 7V21H4Z" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" /></svg>
+                    )}
+                  </div>
+                  <label className="btn btn-ghost" style={{ cursor: uploadingLogo ? "not-allowed" : "pointer" }}>
+                    <Upload className="w-3.5 h-3.5" />
+                    {uploadingLogo ? "Uploading…" : "Upload logo"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/jpg,.jpg,.jpeg,.svg,image/svg+xml"
+                      onChange={handleLogoChange}
+                      disabled={uploadingLogo}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+                </div>
+                <p style={{ fontSize: 11.5, color: "var(--ink-faint)", marginTop: 8 }}>JPG or SVG only, up to 2 MB.</p>
+              </div>
               <EditField label="Organization Name" value={editForm.name} onChange={(v) => setEditForm({ ...editForm, name: v })} />
+              <EditField label="Company Type" value={editForm.companyType} onChange={(v) => setEditForm({ ...editForm, companyType: v })} />
               <EditField label="Industry" value={editForm.industry} onChange={(v) => setEditForm({ ...editForm, industry: v })} />
               <EditField label="Address" value={editForm.address} onChange={(v) => setEditForm({ ...editForm, address: v })} textarea />
               <div className="form-grid">
                 <EditField label="City" value={editForm.city} onChange={(v) => setEditForm({ ...editForm, city: v })} />
                 <EditField label="State" value={editForm.state} onChange={(v) => setEditForm({ ...editForm, state: v })} />
               </div>
-              <div className="form-grid">
-                <EditField label="Country" value={editForm.country} onChange={(v) => setEditForm({ ...editForm, country: v })} />
-                <EditField label="Timezone" value={editForm.timezone} onChange={(v) => setEditForm({ ...editForm, timezone: v })} />
-              </div>
-              <div className="form-grid">
-                <EditField label="Currency" value={editForm.currency} onChange={(v) => setEditForm({ ...editForm, currency: v })} mono />
-                <EditField label="Domain" value={editForm.domain} onChange={(v) => setEditForm({ ...editForm, domain: v })} />
-              </div>
+              <EditField label="Country" value={editForm.country} onChange={(v) => setEditForm({ ...editForm, country: v })} />
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setShowEdit(false)}>Cancel</button>

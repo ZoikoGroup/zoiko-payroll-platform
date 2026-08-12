@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   X,
@@ -15,146 +15,370 @@ import {
   Menu,
   LogOut,
   ScanSearch,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronRight,
+  Sun,
+  Moon,
+  Bell,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useOrganization } from "../context/OrganizationContext";
+import { useDarkMode } from "../context/DarkModeContext";
 import { ROLE_LABELS, ROLES } from "../config/roles";
 import AssistLauncher from "../modules/assist/AssistLauncher";
 
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
 
-const NAV_ITEMS = [
-  { label: "Dashboard", href: "/payroll", icon: LayoutDashboard },
-  { label: "Policy", href: "/payroll/policy", icon: Settings },
-  { label: "Compliances", href: "/payroll/compliances", icon: ShieldCheck },
-  { label: "Employees", href: "/payroll/employees", icon: Users },
-  { label: "Attendance", href: "/payroll/attendance", icon: CalendarCheck },
-  { label: "Leaves", href: "/payroll/leaves", icon: BookOpen },
-  { label: "Payroll Runs", href: "/payroll/payroll-runs", icon: PlayCircle },
-  { label: "Payslips", href: "/payroll/payslips", icon: FileText },
-  { label: "Reports", href: "/payroll/reports", icon: BarChart3 },
-  { label: "Assist Admin", href: "/payroll/assist-admin", icon: ScanSearch },
-];
+const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_sidebar_collapsed";
 
-// Mirrors the main ZoikoOne platform's "ORGANIZATION ADMIN" / "HR ADMIN"
-// sidebar sections — same Dashboard + My Organization items, just scoped to
-// this standalone platform's org_admin / payroll_admin roles.
-const ROLE_SECTIONS = {
-  [ROLES.ORG_ADMIN]: {
-    title: "Organization Admin",
-    items: [
-      { label: "Dashboard", href: "/organization-admin/dashboard", icon: LayoutDashboard },
-      { label: "My Organization", href: "/organization-admin/organization", icon: Building2 },
-    ],
-  },
-  [ROLES.PAYROLL_ADMIN]: {
-    title: "HR Admin",
-    items: [
-      { label: "Dashboard", href: "/hr-admin/dashboard", icon: LayoutDashboard },
-      { label: "My Organization", href: "/hr-admin/my-organization", icon: Building2 },
-    ],
-  },
-};
+// Enterprise SaaS grouping for the Organization Admin / HR Admin nav. Every
+// href below maps to a route that already exists in App.jsx / the payroll
+// module's internal page map — nothing here is a placeholder page.
+function getMyOrgHref(role) {
+  return role === ROLES.PAYROLL_ADMIN ? "/hr-admin/my-organization" : "/organization-admin/organization";
+}
 
-function isActive(href, pathname) {
-  const clean = href.split(/[?#]/)[0];
-  if (clean === "/payroll") return pathname === "/payroll";
+function buildNavGroups(role) {
+  const groups = [
+    {
+      title: "Overview",
+      items: [{ label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true }],
+    },
+    {
+      title: "People",
+      items: [
+        { label: "Employees", href: "/payroll/employees", icon: Users },
+        { label: "Attendance", href: "/payroll/attendance", icon: CalendarCheck },
+        { label: "Leaves", href: "/payroll/leaves", icon: BookOpen },
+      ],
+    },
+    {
+      title: "Payroll",
+      items: [
+        { label: "Policy", href: "/payroll/policy", icon: Settings },
+        { label: "Payroll Runs", href: "/payroll/payroll-runs", icon: PlayCircle },
+        { label: "Payslips", href: "/payroll/payslips", icon: FileText },
+      ],
+    },
+    {
+      title: "Compliance",
+      items: [{ label: "Compliance", href: "/payroll/compliances", icon: ShieldCheck }],
+    },
+    {
+      title: "Reporting",
+      items: [{ label: "Reports", href: "/payroll/reports", icon: BarChart3 }],
+    },
+  ];
+  if (OPERATOR_ROLES.has(role)) {
+    groups.push({
+      title: "Assist",
+      items: [{ label: "Assist Admin", href: "/payroll/assist-admin", icon: ScanSearch }],
+    });
+  }
+  return groups;
+}
+
+function isItemActive(item, pathname) {
+  const clean = item.href.split(/[?#]/)[0];
+  if (item.end) return pathname === clean;
   return pathname === clean || pathname.startsWith(`${clean}/`);
 }
 
-function NavSection({ title, items, pathname, onNavigate }) {
+// Centralized route → page-name mapping reused by the header's dynamic title.
+// Includes "My Organization" even though it's no longer a sidebar nav item,
+// since the header must still label that route correctly when visited.
+function getPageLabel(role, pathname) {
+  const entries = [
+    { label: "My Organization", href: getMyOrgHref(role), end: true },
+    ...buildNavGroups(role).flatMap((group) => group.items),
+  ];
+  const match = entries.find((item) => isItemActive(item, pathname));
+  return match?.label || "Dashboard";
+}
+
+function getInitials(name) {
+  return (
+    (name || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
+function NavSection({ title, items, pathname, onNavigate, collapsed }) {
   return (
     <div>
-      <p className="mb-4 text-[10px] uppercase tracking-[0.32em] text-[#8A82B7]">{title}</p>
-      <div className="space-y-2">
-        {items.map((item) => (
-          <NavLink
-            key={item.href}
-            to={item.href}
-            end={item.href === "/payroll"}
-            onClick={onNavigate}
-            className={`group flex items-center gap-3 rounded-[14px] border px-4 py-3 text-sm transition duration-200 ${
-              isActive(item.href, pathname)
-                ? "border-[#7B3AEB]/40 bg-gradient-to-r from-[#4C2CC5] via-[#7B3AEB] to-[#6033D3] text-white shadow-[0_18px_40px_rgba(70,38,156,0.18)]"
-                : "border-white/10 bg-white/5 text-[#B2ACC8] hover:border-white/20 hover:bg-white/10 hover:text-white"
-            }`}
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            <span className="flex-1 truncate">{item.label}</span>
-          </NavLink>
-        ))}
+      {!collapsed && (
+        <p className="mb-3 px-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-[#8A82B7]">{title}</p>
+      )}
+      <div className="space-y-1.5">
+        {items.map((item) => {
+          const active = isItemActive(item, pathname);
+          return (
+            <NavLink
+              key={item.href}
+              to={item.href}
+              end={item.end}
+              onClick={onNavigate}
+              title={collapsed ? item.label : undefined}
+              aria-current={active ? "page" : undefined}
+              className={`group flex items-center gap-3 rounded-[12px] border px-3.5 py-2.5 text-sm transition duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] ${
+                collapsed ? "justify-center px-0" : ""
+              } ${
+                active
+                  ? "border-[#7B3AEB]/40 bg-gradient-to-r from-[#4C2CC5] via-[#7B3AEB] to-[#6033D3] text-white shadow-[0_12px_28px_rgba(70,38,156,0.22)]"
+                  : "border-transparent text-[#B2ACC8] hover:border-white/10 hover:bg-white/8 hover:text-white"
+              }`}
+            >
+              <item.icon className="h-4 w-4 shrink-0" />
+              {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+            </NavLink>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function SidebarContent({ onNavigate, role }) {
+function SidebarContent({ onNavigate, role, collapsed, onToggleCollapse, closeButtonRef }) {
   const { pathname } = useLocation();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const roleSection = ROLE_SECTIONS[role];
+  const navGroups = buildNavGroups(role);
+  const displayName = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.email || "Account";
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-8 flex items-center justify-between gap-3">
-        <div className="flex flex-col gap-2">
-          <Link to="/payroll" onClick={onNavigate} className="text-[22px] font-extrabold tracking-tight text-white">
-            <span>Zoiko</span>
-            <span className="text-[#FC7800]">One</span>
+      <div className={`mb-5 flex items-center gap-3 ${collapsed ? "flex-col" : "justify-between"}`}>
+        {collapsed ? (
+          <Link
+            to="/payroll"
+            onClick={onNavigate}
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-extrabold text-[#FC7800]"
+          >
+            Z
           </Link>
-          {ROLE_LABELS[role] ? (
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#B2ACC8]">
-              {ROLE_LABELS[role]}
-            </p>
-          ) : null}
-        </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <Link to="/payroll" onClick={onNavigate} className="text-[22px] font-extrabold tracking-tight text-white">
+              <span>Zoiko</span>
+              <span className="text-[#FC7800]">-Pay</span>
+            </Link>
+            {ROLE_LABELS[role] ? (
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#B2ACC8]">{ROLE_LABELS[role]}</p>
+            ) : null}
+          </div>
+        )}
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onNavigate}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 lg:hidden"
+          aria-label="Close menu"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] lg:hidden"
         >
           <X className="h-4 w-4" />
         </button>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] lg:inline-flex"
+        >
+          {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+        </button>
       </div>
 
-      <div className="space-y-7 pb-8">
-        {roleSection ? (
-          <NavSection title={roleSection.title} items={roleSection.items} pathname={pathname} onNavigate={onNavigate} />
-        ) : null}
-        <NavSection
-          title="Zoiko Payroll"
-          items={OPERATOR_ROLES.has(role) ? NAV_ITEMS : NAV_ITEMS.filter((i) => i.href !== "/payroll/assist-admin")}
-          pathname={pathname}
-          onNavigate={onNavigate}
-        />
-      </div>
+      <nav aria-label="Organization admin navigation" className="flex-1 space-y-6 overflow-y-auto pb-6">
+        {navGroups.map((group) => (
+          <NavSection
+            key={group.title}
+            title={group.title}
+            items={group.items}
+            pathname={pathname}
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+        ))}
+      </nav>
 
-      <div className="mt-auto space-y-4">
+      <div className="mt-auto space-y-4 border-t border-white/10 pt-5">
+        <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`} title={collapsed ? displayName : undefined}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold text-white">
+            {getInitials(displayName)}
+          </span>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">{displayName}</p>
+              <p className="truncate text-xs text-[#B2ACC8]">{ROLE_LABELS[role] || ""}</p>
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => {
             logout();
             navigate("/login", { replace: true });
           }}
-          className="flex w-full items-center gap-3 rounded-[14px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-[#B2ACC8] transition duration-200 hover:border-[#FF6E86]/40 hover:bg-[#FF6E86]/10 hover:text-white"
+          title={collapsed ? "Sign out" : undefined}
+          className={`flex w-full items-center gap-3 rounded-[12px] border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-[#B2ACC8] transition duration-150 hover:border-[#FF6E86]/40 hover:bg-[#FF6E86]/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] ${
+            collapsed ? "justify-center px-0" : ""
+          }`}
         >
-          <LogOut className="h-4 w-4" />
-          <span>Sign out</span>
+          <LogOut className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>Sign out</span>}
         </button>
-        <div className="border-t border-white/10 pt-5">
-          <p className="text-[9px] tracking-[0.28em] text-[#7A7396]">POWERED BY</p>
-          <p className="text-[14px] font-extrabold text-white">
-            <span>Zoiko</span>
-            <span className="text-[#FC7800]">One</span>
-          </p>
-        </div>
+        {!collapsed && (
+          <div>
+            <p className="text-[9px] tracking-[0.28em] text-[#7A7396]">POWERED BY</p>
+            <p className="text-[14px] font-extrabold text-white">
+              <span>Zoiko</span>
+              <span className="text-[#FC7800]">-Pay</span>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
+function ThemeToggle() {
+  const { isDark, toggle } = useDarkMode();
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#6B6560] transition hover:bg-[#F8F7F4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B3AEB] dark:text-[#A69B93] dark:hover:bg-white/10"
+    >
+      {isDark ? <Sun size={18} /> : <Moon size={18} />}
+    </button>
+  );
+}
+
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Notifications"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#6B6560] transition hover:bg-[#F8F7F4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B3AEB]"
+      >
+        <Bell size={18} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-[#E5E0D9] bg-white py-4 px-4 text-center shadow-lg"
+          >
+            <p className="text-sm text-[#9E9690]">You're all caught up — no new notifications.</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CurrentDateBadge() {
+  const [today] = useState(() => new Date());
+  const formatted = today.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return <span className="hidden shrink-0 text-sm text-[#6B6560] sm:inline">{formatted}</span>;
+}
+
+function Header({ onOpenMobileSidebar, onToggleCollapse, collapsed, menuButtonRef }) {
+  const { role } = useAuth();
+  const { organization } = useOrganization();
+  const { pathname } = useLocation();
+  const companyName = organization?.name || organization?.organization_name || "";
+  const logo = organization?.logo_data_uri;
+  const pageLabel = getPageLabel(role, pathname);
+
+  return (
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-[#EFEBE3] bg-white/95 px-4 backdrop-blur sm:px-6">
+      <button
+        ref={menuButtonRef}
+        type="button"
+        onClick={onOpenMobileSidebar}
+        aria-label="Open menu"
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#6B6560] transition hover:bg-[#F8F7F4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B3AEB] lg:hidden"
+      >
+        <Menu size={18} />
+      </button>
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#6B6560] transition hover:bg-[#F8F7F4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B3AEB] lg:inline-flex"
+      >
+        {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+      </button>
+
+      <div className="flex min-w-0 items-center gap-2">
+        <Link
+          to={getMyOrgHref(role)}
+          title="Go to My Organization"
+          className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-[#F8F7F4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7B3AEB]"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#F3F1EC] text-[#8A82B7]">
+            {logo ? <img src={logo} alt="" className="h-full w-full object-cover" /> : <Building2 size={16} />}
+          </span>
+          {companyName && (
+            <span className="hidden truncate text-sm font-semibold text-[#1A1816] sm:inline">{companyName}</span>
+          )}
+        </Link>
+        <ChevronRight size={14} className="hidden shrink-0 text-[#C7C1B8] sm:inline" />
+        <span className="truncate text-sm font-semibold text-[#1A1816]">{pageLabel}</span>
+      </div>
+
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
+        <ThemeToggle />
+        <NotificationBell />
+        <CurrentDateBadge />
+      </div>
+    </header>
+  );
+}
+
 export default function PayrollShell({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
+  });
   const { role } = useAuth();
+  const menuButtonRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const wasOpenRef = useRef(false);
+
+  function toggleCollapse() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (sidebarOpen) {
+      closeButtonRef.current?.focus();
+      wasOpenRef.current = true;
+    } else if (wasOpenRef.current) {
+      menuButtonRef.current?.focus();
+      wasOpenRef.current = false;
+    }
+  }, [sidebarOpen]);
 
   return (
     <div className="min-h-screen bg-[#F8F7F4]">
@@ -166,21 +390,28 @@ export default function PayrollShell({ children }) {
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-72 overflow-y-auto border-r border-white/10 bg-gradient-to-b from-[#1F0B63] to-[#160845] px-4 py-6 shadow-[0_24px_80px_rgba(8,6,37,0.42)] transition-transform lg:translate-x-0 ${
+        role="navigation"
+        aria-label="Sidebar"
+        className={`fixed inset-y-0 left-0 z-40 overflow-y-auto border-r border-white/10 bg-gradient-to-b from-[#1F0B63] to-[#160845] px-4 py-6 shadow-[0_24px_80px_rgba(8,6,37,0.42)] transition-[transform,width] duration-200 lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        } ${collapsed ? "w-72 lg:w-20" : "w-72"}`}
       >
-        <SidebarContent onNavigate={() => setSidebarOpen(false)} role={role} />
+        <SidebarContent
+          onNavigate={() => setSidebarOpen(false)}
+          role={role}
+          collapsed={collapsed && !sidebarOpen}
+          onToggleCollapse={toggleCollapse}
+          closeButtonRef={closeButtonRef}
+        />
       </aside>
 
-      <div className="lg:pl-72">
-        <button
-          type="button"
-          onClick={() => setSidebarOpen(true)}
-          className="fixed top-4 left-4 z-20 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[#E5E0D9] bg-white text-[#6B6560] shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] lg:hidden"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
+      <div className={`transition-[padding] duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-72"}`}>
+        <Header
+          onOpenMobileSidebar={() => setSidebarOpen(true)}
+          onToggleCollapse={toggleCollapse}
+          collapsed={collapsed}
+          menuButtonRef={menuButtonRef}
+        />
         <main className="w-full">{children}</main>
       </div>
 

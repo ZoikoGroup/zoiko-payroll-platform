@@ -11,21 +11,31 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class OrganizationBase(BaseModel):
     organization_name: str = Field(..., min_length=1, max_length=200)
     industry: Optional[str] = None
+    company_type: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     tax_no: Optional[str] = None
     registration_number: Optional[str] = None
+    tax_identifiers: Optional[dict] = None
 
 
 class OrganizationUpdate(BaseModel):
     organization_name: Optional[str] = Field(None, min_length=1, max_length=200)
     industry: Optional[str] = None
+    company_type: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     tax_no: Optional[str] = None
     registration_number: Optional[str] = None
+    tax_identifiers: Optional[dict] = None
 
 
 class OrganizationResponse(BaseModel):
@@ -35,11 +45,16 @@ class OrganizationResponse(BaseModel):
     organization_name: str
     organization_code: str
     industry: Optional[str] = None
+    company_type: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     tax_no: Optional[str] = None
     registration_number: Optional[str] = None
+    tax_identifiers: Optional[dict] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -87,10 +102,15 @@ class OrganizationDetail(BaseModel):
     admin_name: Optional[str] = None
     admin_email: Optional[str] = None
     industry: Optional[str] = None
+    company_type: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
+    tax_no: Optional[str] = None
+    registration_number: Optional[str] = None
+    tax_identifiers: Optional[dict] = None
+    logo_data_uri: Optional[str] = None
     timezone: str = "UTC"
     domain: Optional[str] = None
     subscription_plan: str = "STANDARD"

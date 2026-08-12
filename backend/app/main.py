@@ -93,6 +93,7 @@ app.add_middleware(
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.router import user_router as auth_user_router
 from app.modules.organizations.router import router as organizations_router
+from app.modules.organizations.router import jurisdiction_router
 from app.modules.employee.router import router as employee_router
 from app.modules.employee.router import hr_router as employee_hr_router
 from app.modules.super_admin.router import router as super_admin_router
@@ -103,6 +104,7 @@ from app.modules.assist.router import assist_router
 app.include_router(auth_router, prefix="/api")
 app.include_router(auth_user_router, prefix="/api")
 app.include_router(organizations_router, prefix="/api")
+app.include_router(jurisdiction_router, prefix="/api")
 app.include_router(employee_router, prefix="/api")
 app.include_router(employee_hr_router, prefix="/api")
 app.include_router(super_admin_router, prefix="/api")

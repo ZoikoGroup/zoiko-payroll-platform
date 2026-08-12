@@ -4370,6 +4370,34 @@ def upload_compliance_document(
 
 # ── Compliance ─────────────────────────────────────────────────────────
 
+# Registration collects a full country name (matches the standalone
+# Compliance dropdown's supported set); jurisdiction_country stores the
+# 2-letter code that dropdown actually uses as its option value. Mirrors
+# enterprise/service.py's SUPPORTED_COUNTRY_CODES universe.
+_COUNTRY_NAME_TO_JURISDICTION_CODE = {
+    "india": "IN",
+    "united states": "US",
+    "united kingdom": "UK",
+    "australia": "AU",
+    "germany": "DE",
+    "canada": "CA",
+}
+
+
+def _merge_tax_identifiers(existing: dict | None, incoming: dict | None) -> dict:
+    """Merge two tax-identifier maps, keeping existing values for any key that
+    is already set — the deduplication rule for compliance sync. New keys (or
+    blank values) from registration never overwrite a value the admin already
+    entered/overrode in the Compliance tab."""
+    merged = dict(existing or {})
+    for key, value in (incoming or {}).items():
+        if not value:
+            continue
+        if key not in merged or not merged.get(key):
+            merged[key] = value
+    return merged or None
+
+
 def get_company_details(db: Session, organization_id: int) -> CompanyComplianceDetails:
     row = db.query(CompanyComplianceDetails).filter(
         CompanyComplianceDetails.organization_id == organization_id
@@ -4383,40 +4411,70 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
     # Pre-fill from data the org already gave elsewhere (registration /
     # billing signup) instead of asking them to retype it on this form.
     # Only ever fills fields still at their blank default — never
-    # overwrites anything already entered here. Deliberately does NOT
-    # touch jurisdiction_country/jurisdiction_state — those are governed by
-    # the Enterprise jurisdiction verification flow (see enterprise/service.py
-    # verify_jurisdiction), and pre-filling them from the org's registration
-    # country here would fight that sync instead of complementing it.
-    if not row.name or not row.tax_no or not row.industry or not row.address \
-            or not row.employer_id or not row.email or not row.phone:
+    # overwrites anything already entered here.
+    needs_basic_backfill = not row.name or not row.tax_no or not row.industry or not row.address \
+        or not row.employer_id or not row.email or not row.phone or not row.type
+    # Legacy rows created before the "" default (see CompanyComplianceDetails)
+    # may still carry the old literal "India" placeholder — treat that the
+    # same as blank. Deliberately NOT gated on configured_at: configured_at
+    # flips true on ANY Compliance save (e.g. saving just the Tax No field),
+    # not specifically a deliberate jurisdiction choice, so a row can reach
+    # configured_at=True while jurisdiction_country is still just the unset
+    # placeholder. Once a real code is present this condition is false
+    # forever, so this can never overwrite an actual choice — see the lock
+    # in update_company_details for what stops a REAL value being changed,
+    # and verify_jurisdiction for how Enterprise mode later owns the field.
+    needs_jurisdiction_backfill = (
+        row.jurisdiction_country in ("", "India") or not row.jurisdiction_state
+    )
+
+    if needs_basic_backfill or needs_jurisdiction_backfill:
         from app.modules.organizations.models import Organization
 
         org = db.query(Organization).filter(Organization.id == organization_id).first()
         changed = False
-        if not row.name:
-            name = org and org.organization_name
-            if name:
-                row.name = name
+        if org and needs_basic_backfill:
+            if not row.name and org.organization_name:
+                row.name = org.organization_name
                 changed = True
-        if not row.tax_no and org and org.tax_no:
-            row.tax_no = org.tax_no
-            changed = True
-        if not row.employer_id and org and org.registration_number:
-            row.employer_id = org.registration_number
-            changed = True
-        if not row.industry and org and org.industry:
-            row.industry = org.industry
-            changed = True
-        if not row.address and org and org.address:
-            row.address = org.address
-            changed = True
-        if not row.email and org and org.email:
-            row.email = org.email
-            changed = True
-        if not row.phone and org and org.phone:
-            row.phone = org.phone
-            changed = True
+            if not row.tax_no and org.tax_no:
+                row.tax_no = org.tax_no
+                changed = True
+            if not row.employer_id and org.registration_number:
+                row.employer_id = org.registration_number
+                changed = True
+            if not row.industry and org.industry:
+                row.industry = org.industry
+                changed = True
+            if not row.type and org.company_type:
+                row.type = org.company_type
+                changed = True
+            if not row.address and org.address:
+                row.address = org.address
+                changed = True
+            if not row.email and org.email:
+                row.email = org.email
+                changed = True
+            if not row.phone and org.phone:
+                row.phone = org.phone
+                changed = True
+        if org and needs_jurisdiction_backfill:
+            code = org.country and _COUNTRY_NAME_TO_JURISDICTION_CODE.get(org.country.strip().lower())
+            if code and row.jurisdiction_country != code:
+                row.jurisdiction_country = code
+                changed = True
+            if org.state and not row.jurisdiction_state:
+                row.jurisdiction_state = org.state
+                changed = True
+        # Sync the jurisdiction tax/registration IDs captured at registration.
+        # Only fills keys the compliance row doesn't already hold (see
+        # _merge_tax_identifiers) so a value the admin later overrode is never
+        # clobbered by a re-registration/resubmission — reuse, not duplicates.
+        if org and org.tax_identifiers:
+            merged = _merge_tax_identifiers(row.tax_identifiers, org.tax_identifiers)
+            if merged != (row.tax_identifiers or None):
+                row.tax_identifiers = merged
+                changed = True
         if changed:
             db.commit()
             db.refresh(row)
@@ -4427,16 +4485,21 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
 def update_company_details(db: Session, organization_id: int, data: CompanyDetailsUpdate) -> CompanyComplianceDetails:
     row = get_company_details(db, organization_id)
 
-    # Jurisdiction lock: once Compliance has been explicitly saved once
-    # (configured_at set below), the jurisdiction can no longer be changed
-    # through this endpoint — every Payroll sub-module (Employees, Payroll
-    # Runs, Payslips, Reports, statutory calculations, currency) is keyed off
-    # this single field, so a silent mid-stream switch would invalidate
-    # historical payroll data. A real jurisdiction change needs a controlled
-    # migration process, not a dropdown edit.
+    # Jurisdiction lock: once a REAL jurisdiction has been chosen, it can no
+    # longer be changed through this endpoint — every Payroll sub-module
+    # (Employees, Payroll Runs, Payslips, Reports, statutory calculations,
+    # currency) is keyed off this single field, so a silent mid-stream switch
+    # would invalidate historical payroll data. A real jurisdiction change
+    # needs a controlled migration process, not a dropdown edit. Gated on the
+    # value itself being real (not blank/legacy "India" placeholder) rather
+    # than on configured_at alone — configured_at flips true on ANY Compliance
+    # save, not specifically a deliberate jurisdiction choice, so a row can
+    # reach configured_at=True while jurisdiction_country is still unset;
+    # locking on that would strand the org unable to ever pick one.
     incoming_country = data.jurisdictionCountry
+    jurisdiction_already_chosen = row.jurisdiction_country not in (None, "", "India")
     if (
-        row.configured_at is not None
+        jurisdiction_already_chosen
         and incoming_country is not None
         and incoming_country != row.jurisdiction_country
     ):
@@ -4452,10 +4515,38 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
         "compliancePack": "compliance_pack", "schedule": "schedule",
         "settlementBank": "settlement_bank", "settlementAcc": "settlement_acc",
     }
-    for camel_field, value in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    for camel_field, value in payload.items():
         column = field_map.get(camel_field)
         if column:
             setattr(row, column, value)
+
+    # Edit / Override support for the jurisdiction tax/registration IDs.
+    # Values are validated against the org's jurisdiction schema, then stored
+    # (the admin is explicitly overriding — replace what's there). Only keys
+    # the schema defines are persisted, so unknown/blank keys never create
+    # duplicate or junk tax records. The primary identifier is mirrored back
+    # into tax_no so payroll footers/reports keep reading a single value.
+    tax_identifiers_payload = payload.get("taxIdentifiers")
+    if tax_identifiers_payload is not None:
+        from app.core.jurisdiction import (
+            get_jurisdiction_code,
+            primary_tax_value,
+            validate_tax_identifiers_or_raise,
+        )
+
+        jurisdiction_code = get_jurisdiction_code(
+            data.jurisdictionCountry or row.jurisdiction_country
+        )
+        if jurisdiction_code:
+            validated = validate_tax_identifiers_or_raise(jurisdiction_code, tax_identifiers_payload)
+        else:
+            validated = {k: v for k, v in tax_identifiers_payload.items() if v}
+        row.tax_identifiers = validated or None
+        # Mirror the primary identifier into the legacy tax_no column unless the
+        # caller explicitly overrode taxNo in the same payload.
+        if "taxNo" not in payload:
+            row.tax_no = primary_tax_value(jurisdiction_code, validated) or row.tax_no
 
     # First explicit admin save unlocks the mandatory Payroll onboarding gate
     # and locks the jurisdiction in place (see check above) — immutable once
