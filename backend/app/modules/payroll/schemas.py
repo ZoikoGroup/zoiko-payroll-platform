@@ -69,6 +69,8 @@ class EmployeeCreate(BaseModel):
     pan:              Optional[str] = Field(None, validation_alias="panNumber")
     uan:              Optional[str] = None
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
+    country_code:     Optional[str] = Field(None, validation_alias="countryCode")
+    compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -91,6 +93,8 @@ class EmployeeUpdate(BaseModel):
     pan:              Optional[str] = Field(None, validation_alias="panNumber")
     uan:              Optional[str] = None
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
+    country_code:     Optional[str] = Field(None, validation_alias="countryCode")
+    compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -120,6 +124,8 @@ class EmployeeResponse(BaseModel):
     pan:             Optional[str] = Field(None, serialization_alias="panNumber")
     uan:             Optional[str] = None
     ifsc:            Optional[str] = Field(None, serialization_alias="ifscCode")
+    countryCode:     Optional[str] = Field(None, validation_alias="country_code", serialization_alias="countryCode")
+    complianceFields: Optional[dict] = Field(None, validation_alias="compliance_fields", serialization_alias="complianceFields")
     customFields:    Optional[dict] = Field(None, validation_alias="custom_fields", serialization_alias="customFields")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -705,6 +711,15 @@ class JurisdictionPackResponse(BaseModel):
     complianceOwner:     str = Field("", validation_alias="compliance_owner", serialization_alias="complianceOwner")
     engineeringOwner:    str = Field("", validation_alias="engineering_owner", serialization_alias="engineeringOwner")
     sourceReferences:    str = Field("", validation_alias="source_references", serialization_alias="sourceReferences")
+    regulatoryAuthority: Optional[str] = Field(None, validation_alias="regulatory_authority", serialization_alias="regulatoryAuthority")
+    complianceCategory:  Optional[str] = Field(None, validation_alias="compliance_category", serialization_alias="complianceCategory")
+    changeSummary:       Optional[str] = Field(None, validation_alias="change_summary", serialization_alias="changeSummary")
+    nextReviewDate:      Optional[date] = Field(None, validation_alias="next_review_date", serialization_alias="nextReviewDate")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    updatedById:         Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -720,6 +735,10 @@ class JurisdictionPackUpsert(BaseModel):
     complianceOwner: str = ""
     engineeringOwner: str = ""
     sourceReferences: str = ""
+    regulatoryAuthority: Optional[str] = None
+    complianceCategory: Optional[str] = None
+    changeSummary: Optional[str] = None
+    nextReviewDate: Optional[date] = None
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────

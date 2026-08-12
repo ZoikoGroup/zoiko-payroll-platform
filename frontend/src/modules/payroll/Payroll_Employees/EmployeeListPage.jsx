@@ -322,7 +322,12 @@ export default function EmployeeListPage() {
         {activeTab === "add" && (
           <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <h2 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-6">Add Employee</h2>
-            <EmployeeForm onCancel={() => setActiveTab("list")} onSaved={handleEmployeeCreated} currencyInfo={currencyInfo} />
+            <EmployeeForm
+              onCancel={() => setActiveTab("list")}
+              onSaved={handleEmployeeCreated}
+              currencyInfo={currencyInfo}
+              defaultCountryCode={company?.jurisdictionCountry || company?.jurisdiction_country || "IN"}
+            />
           </div>
         )}
 

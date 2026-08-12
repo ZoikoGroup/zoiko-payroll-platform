@@ -309,24 +309,78 @@ def send_update_form_invite_email(
         from_email_override=from_email, from_display_name_override=from_display_name)
 
 
-def send_leave_request_received_email(
+_LEAVE_TYPE_LABELS = {
+    "paid": "Paid Leave",
+    "unpaid": "Unpaid Leave",
+    "sick": "Sick Leave",
+    "casual": "Casual Leave",
+    "comp_off": "Compensatory Off",
+    "compOff": "Compensatory Off",
+    "other": "Other Leave",
+}
+
+
+def _send_leave_request_status_email(
     email: str,
     employee_name: str,
+    status: str,
+    leave_type: str,
     start_date: str,
     end_date: str,
+    days: int,
     request_code: str,
     organization_id=None,
     db=None,
 ) -> bool:
     from_email, from_display_name = _resolve_payroll_send_identity(organization_id, db=db)
-    return send_approval_email(email, "leave_request_received.html", {
-        "subject": f"Leave Request Received — {request_code} | Zoiko Payroll",
+    approved = status == "approved"
+    template_name = "leave_request_approved.html" if approved else "leave_request_rejected.html"
+    action = "Approved" if approved else "Rejected"
+    return send_approval_email(email, template_name, {
+        "subject": f"Leave Request {action} — {request_code} | Zoiko Payroll",
         "employee_name": employee_name,
+        "leave_type": _LEAVE_TYPE_LABELS.get(str(leave_type).lower(), str(leave_type) or "Leave"),
         "start_date": start_date,
         "end_date": end_date,
+        "days": days,
+        "plural": int(days or 0) != 1,
         "request_code": request_code,
     }, db=db, organization_id=organization_id,
         from_email_override=from_email, from_display_name_override=from_display_name)
+
+
+def send_leave_request_approved_email(
+    email: str,
+    employee_name: str,
+    leave_type: str,
+    start_date: str,
+    end_date: str,
+    days: int,
+    request_code: str,
+    organization_id=None,
+    db=None,
+) -> bool:
+    return _send_leave_request_status_email(
+        email, employee_name, "approved", leave_type, start_date, end_date, days, request_code,
+        organization_id=organization_id, db=db,
+    )
+
+
+def send_leave_request_rejected_email(
+    email: str,
+    employee_name: str,
+    leave_type: str,
+    start_date: str,
+    end_date: str,
+    days: int,
+    request_code: str,
+    organization_id=None,
+    db=None,
+) -> bool:
+    return _send_leave_request_status_email(
+        email, employee_name, "rejected", leave_type, start_date, end_date, days, request_code,
+        organization_id=organization_id, db=db,
+    )
 
 
 # ── Auth / account emails ───────────────────────────────────────────────────

@@ -1,9 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Building2, Users, ShieldCheck, CreditCard, RefreshCcw, LayoutGrid } from "lucide-react";
+import {
+  Building2, Users, ShieldCheck, CreditCard, RefreshCcw, LayoutGrid, Info,
+} from "lucide-react";
+import {
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from "recharts";
 
 import { apiFetch } from "../api/client";
 import StatusPill from "../components/StatusPill";
+import DateRangeFilter from "../components/DateRangeFilter";
+import { resolveDateRange } from "../utils/dateRangePresets";
+import { getDashboardCharts } from "../service/superAdminService";
 
 const CARDS = [
   { key: "total_organizations", label: "Organizations", icon: Building2 },
@@ -12,58 +21,118 @@ const CARDS = [
   { key: "super_admins", label: "Super Admins", icon: ShieldCheck },
   { key: "org_admins", label: "Org Admins", icon: Users },
   { key: "payroll_admins", label: "Payroll Admins", icon: Users },
-  { key: "employees", label: "Employee Logins", icon: Users },
   { key: "total_payroll_employees", label: "Payroll Employees", icon: CreditCard },
   { key: "total_payroll_runs", label: "Payroll Runs", icon: RefreshCcw },
 ];
 
+const PIE_COLORS = ["#F97316", "#7B3AEB", "#19C58A", "#35B6F5", "#FF6E86", "#F8A60A", "#9D7BF2"];
+
 function CardSkeleton() {
   return (
-    <div className="bg-white rounded-xl shadow-sm p-5 animate-pulse">
-      <div className="h-7 w-12 rounded bg-slate-200" />
-      <div className="mt-2 h-3 w-24 rounded bg-slate-100" />
+    <div className="bg-white dark:bg-[#221D1A] rounded-xl shadow-sm p-5 animate-pulse">
+      <div className="h-7 w-12 rounded bg-slate-200 dark:bg-[#38312D]" />
+      <div className="mt-2 h-3 w-24 rounded bg-slate-100 dark:bg-[#2A2520]" />
+    </div>
+  );
+}
+
+function ChartCard({ title, note, children, height = 280 }) {
+  return (
+    <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm p-5">
+      <div className="mb-4 flex items-start justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-[#F0EDE8]">{title}</h3>
+        {note && (
+          <span title={note} className="flex items-center gap-1 text-xs text-slate-400 dark:text-[#756B64]">
+            <Info size={13} />
+          </span>
+        )}
+      </div>
+      <div style={{ height }}>{children}</div>
+    </div>
+  );
+}
+
+function EmptyChart({ message }) {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-slate-400 dark:text-[#756B64]">
+      {message}
+    </div>
+  );
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-[#38312D] bg-white dark:bg-[#2A2520] px-3 py-2 text-xs shadow-lg">
+      {label && <p className="mb-1 font-semibold text-slate-500 dark:text-[#A69B93]">{label}</p>}
+      {payload.map((p) => (
+        <p key={p.dataKey || p.name} className="flex items-center gap-1.5" style={{ color: p.color || p.fill }}>
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: p.color || p.fill }} />
+          {p.name}: {typeof p.value === "number" ? p.value.toLocaleString() : p.value}
+        </p>
+      ))}
     </div>
   );
 }
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
+  const [charts, setCharts] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRange] = useState({ preset: "thisYear", ...resolveDateRange("thisYear") });
 
   const load = useCallback(() => {
     setLoading(true);
     setError("");
-    apiFetch("/api/super-admin/dashboard/stats")
-      .then(setStats)
+    Promise.all([
+      apiFetch("/api/super-admin/dashboard/stats"),
+      getDashboardCharts({ start_date: dateRange.startDate || undefined, end_date: dateRange.endDate || undefined }),
+    ])
+      .then(([statsRes, chartsRes]) => {
+        setStats(statsRes);
+        setCharts(chartsRes);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [dateRange]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const orgStatusData = charts
+    ? [
+        { name: "Active", value: charts.organizationsByStatus?.active || 0 },
+        { name: "Inactive", value: charts.organizationsByStatus?.inactive || 0 },
+      ]
+    : [];
+  const orgCountryData = charts?.organizationsByCountry?.map((r) => ({ name: r.country, value: r.count })) || [];
+  const complianceByStatus = charts ? Object.entries(charts.complianceOverview?.byStatus || {}).map(([name, value]) => ({ name, value })) : [];
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Monitor and manage your Zoiko-Pay platform.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8]">Dashboard</h1>
+          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">Monitor and manage your Zoiko-Pay platform.</p>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          title="Refresh stats"
-          className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-        >
-          <RefreshCcw size={15} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          <button
+            onClick={load}
+            disabled={loading}
+            title="Refresh stats"
+            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+          >
+            <RefreshCcw size={15} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">
           {error}
         </p>
       )}
@@ -73,11 +142,11 @@ export default function DashboardPage() {
           ? CARDS.map(({ key }) => <CardSkeleton key={key} />)
           : stats &&
             CARDS.map(({ key, label, icon: Icon }) => (
-              <div key={key} className="bg-white rounded-xl shadow-sm p-5">
+              <div key={key} className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-3xl font-bold text-slate-900">{stats[key] ?? 0}</div>
-                    <div className="text-xs text-slate-500 mt-1">{label}</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-[#F0EDE8]">{stats[key] ?? 0}</div>
+                    <div className="text-xs text-slate-500 dark:text-[#A69B93] mt-1">{label}</div>
                   </div>
                   <Icon size={20} className="text-orange-500" />
                 </div>
@@ -85,15 +154,146 @@ export default function DashboardPage() {
             ))}
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-8">
+        <ChartCard
+          title="Payroll Trend"
+          note="Operational trend only — sums across every organization's currency. For currency-accurate totals, see Finance."
+        >
+          {!charts || charts.payrollTrend.length === 0 ? (
+            <EmptyChart message="No payroll runs in this period." />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={charts.payrollTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gGross" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#19C58A" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="#19C58A" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gNet" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#35B6F5" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="#35B6F5" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E0D9" />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={{ stroke: "#E5E0D9" }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={false} tickLine={false} width={50} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Area type="monotone" dataKey="gross" name="Gross" stroke="#19C58A" fill="url(#gGross)" strokeWidth={2} />
+                <Area type="monotone" dataKey="net" name="Net" stroke="#35B6F5" fill="url(#gNet)" strokeWidth={2} strokeDasharray="5 3" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard
+          title="Gross vs Net Pay"
+          note="Operational total for the selected period — sums across every organization's currency."
+        >
+          {!charts || (!charts.grossVsNet?.gross && !charts.grossVsNet?.net) ? (
+            <EmptyChart message="No payroll data in this period." />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[{ name: "Selected Period", gross: charts.grossVsNet.gross, net: charts.grossVsNet.net }]} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E0D9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={{ stroke: "#E5E0D9" }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={false} tickLine={false} width={50} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="gross" name="Gross" fill="#19C58A" radius={[6, 6, 0, 0]} maxBarSize={80} />
+                <Bar dataKey="net" name="Net" fill="#35B6F5" radius={[6, 6, 0, 0]} maxBarSize={80} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Payroll by Jurisdiction" note="Each bar is its own currency — figures are never combined across countries.">
+          {!charts || charts.payrollByJurisdiction.length === 0 ? (
+            <EmptyChart message="No payroll data yet." />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={charts.payrollByJurisdiction} layout="vertical" margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E0D9" />
+                <XAxis type="number" tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="country" tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={false} tickLine={false} width={70} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="grossPay" name="Gross Pay" fill="#F97316" radius={[0, 6, 6, 0]} maxBarSize={22} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Organization Distribution">
+          {orgCountryData.length === 0 ? (
+            <EmptyChart message="No organizations yet." />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={orgCountryData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                  {orgCountryData.map((entry, i) => <Cell key={entry.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Compliance Overview" height={240}>
+          {!charts ? (
+            <EmptyChart message="Loading…" />
+          ) : (
+            <div className="flex h-full flex-col justify-between">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5">
+                  <div className="text-xl font-bold text-amber-600 dark:text-amber-400">{charts.complianceOverview.expiringSoon}</div>
+                  <div className="text-xs text-amber-700/80 dark:text-amber-400/70">Expiring within 60 days</div>
+                </div>
+                <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 px-3 py-2.5">
+                  <div className="text-xl font-bold text-rose-600 dark:text-rose-400">{charts.complianceOverview.pendingReview}</div>
+                  <div className="text-xs text-rose-700/80 dark:text-rose-400/70">Pending review</div>
+                </div>
+              </div>
+              {complianceByStatus.length > 0 && (
+                <ResponsiveContainer width="100%" height={120}>
+                  <BarChart data={complianceByStatus} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#9E9690" }} axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end" height={40} />
+                    <YAxis hide />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Bar dataKey="value" name="Policies" fill="#7B3AEB" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Employee Distribution by Jurisdiction">
+          {!charts || charts.employeesByCountry.length === 0 ? (
+            <EmptyChart message="No employees yet." />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={charts.employeesByCountry} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E0D9" />
+                <XAxis dataKey="country" tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={{ stroke: "#E5E0D9" }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#9E9690" }} axisLine={false} tickLine={false} width={40} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="employees" name="Employees" fill="#35B6F5" radius={[6, 6, 0, 0]} maxBarSize={44} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
+
       <div className="flex items-center justify-between mt-8 mb-3">
-        <h2 className="text-lg font-semibold text-slate-900">Recent Organizations</h2>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-[#F0EDE8]">Recent Organizations</h2>
         <Link to="/super-admin/organizations" className="text-sm font-medium text-orange-600 hover:text-orange-700">
           View all →
         </Link>
       </div>
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Code</th>
@@ -103,13 +303,13 @@ export default function DashboardPage() {
           </thead>
           <tbody>
             {(stats?.recent_organizations || []).map((org) => (
-              <tr key={org.id} className="border-t border-slate-100">
-                <td className="px-4 py-3 font-medium text-slate-800">{org.organization_name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-slate-500">{org.organization_code}</td>
+              <tr key={org.id} className="border-t border-slate-100 dark:border-[#38312D]">
+                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">{org.organization_name}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-[#A69B93]">{org.organization_code}</td>
                 <td className="px-4 py-3">
                   <StatusPill status={org.is_active ? "active" : "inactive"} />
                 </td>
-                <td className="px-4 py-3 text-slate-500">
+                <td className="px-4 py-3 text-slate-500 dark:text-[#A69B93]">
                   {new Date(org.created_at).toLocaleDateString()}
                 </td>
               </tr>
@@ -118,8 +318,8 @@ export default function DashboardPage() {
         </table>
         {stats && (stats.recent_organizations || []).length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <LayoutGrid size={28} className="text-slate-300" />
-            <p className="text-sm text-slate-400">No organizations yet.</p>
+            <LayoutGrid size={28} className="text-slate-300 dark:text-[#38312D]" />
+            <p className="text-sm text-slate-400 dark:text-[#756B64]">No organizations yet.</p>
           </div>
         )}
       </div>

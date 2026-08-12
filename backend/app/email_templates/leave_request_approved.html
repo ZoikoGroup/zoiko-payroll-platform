@@ -8,14 +8,15 @@
         <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{company_name}}</h1>
       </td></tr>
       <tr><td style="padding: 32px 28px;">
-        <h2 style="color: #059669; margin: 0 0 16px 0; font-size: 20px;">Leave Request Received</h2>
+        <h2 style="color: #059669; margin: 0 0 16px 0; font-size: 20px;">Leave Request Approved</h2>
         <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Dear {{employee_name}},</p>
         <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">
-          We have received your leave request <strong style="color: #059669;">{{request_code}}</strong> for
-          <strong>{{start_date}}</strong> to <strong>{{end_date}}</strong>.
+          Great news! Your leave request <strong style="color: #059669;">{{request_code}}</strong> for
+          <strong>{{leave_type}}</strong> from <strong>{{start_date}}</strong> to <strong>{{end_date}}</strong>
+          ({{days}} day{{#if plural}}s{{/if}}) has been <strong style="color: #059669;">approved</strong>.
         </p>
         <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 24px 0;">
-          It is now pending review. You will be notified once a decision has been made.
+          Enjoy your time off!
         </p>
         <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
         <p style="color: #9CA3AF; font-size: 12px; margin: 0;">

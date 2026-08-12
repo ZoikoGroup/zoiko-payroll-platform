@@ -1,30 +1,52 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Plus, Pencil, Trash2, RefreshCw, Landmark } from "lucide-react";
+import { Plus, Pencil, Trash2, RefreshCw, Landmark, Building2 } from "lucide-react";
 
 import { apiFetch } from "../api/client";
 import { useToast } from "../context/ToastContext";
 import StatutoryRateModal from "../components/StatutoryRateModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import StatusPill from "../components/StatusPill";
+import DateRangeFilter from "../components/DateRangeFilter";
+import { resolveDateRange } from "../utils/dateRangePresets";
+import { getComplianceJurisdictions, getOrganizationContributionRates } from "../service/superAdminService";
 
 export default function StatutoryRatesPage() {
   const { addToast } = useToast();
   const [rates, setRates] = useState([]);
+  const [orgRates, setOrgRates] = useState([]);
+  const [jurisdictions, setJurisdictions] = useState([]);
   const [country, setCountry] = useState("");
+  const [dateRange, setDateRange] = useState({ preset: "thisYear", ...resolveDateRange("thisYear") });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    getComplianceJurisdictions().then(setJurisdictions).catch(() => {});
+  }, []);
+
   const load = useCallback(() => {
     setLoading(true);
     setError("");
-    apiFetch("/api/super-admin/statutory-rates", { params: { country } })
-      .then((data) => setRates(data.rates))
+    Promise.all([
+      apiFetch("/api/super-admin/statutory-rates", {
+        params: { country, start_date: dateRange.startDate || undefined, end_date: dateRange.endDate || undefined },
+      }),
+      getOrganizationContributionRates({
+        country: country || undefined,
+        start_date: dateRange.startDate || undefined,
+        end_date: dateRange.endDate || undefined,
+      }),
+    ])
+      .then(([platformRes, orgRes]) => {
+        setRates(platformRes.rates);
+        setOrgRates(orgRes);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [country]);
+  }, [country, dateRange]);
 
   useEffect(() => {
     load();
@@ -74,41 +96,51 @@ export default function StatutoryRatesPage() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Statutory Rates</h1>
-        <div className="flex items-center gap-2">
-          <input
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
-            placeholder="Filter by country (IN)…"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-          />
-          <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-            Refresh
-          </button>
-          <button
-            onClick={() => setModal("new")}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
-          >
-            <Plus size={16} />
-            Add Rate
-          </button>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8]">Statutory Rates</h1>
+          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">
+            Platform-wide default rates, plus every organization's actual configured contribution rates.
+          </p>
         </div>
+        <button
+          onClick={() => setModal("new")}
+          className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
+        >
+          <Plus size={16} />
+          Add Platform Default
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select
+          value={country}
+          onChange={(e) => setCountry(e.target.value)}
+          className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+        >
+          <option value="">All Jurisdictions</option>
+          {jurisdictions.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
+        </select>
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+        >
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          Refresh
+        </button>
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">
           {error}
         </p>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <h2 className="text-sm font-semibold text-slate-700 dark:text-[#D8D2CB] mb-3">Platform Default Rates</h2>
+      <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm overflow-hidden mb-8">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
             <tr>
               <th className="px-4 py-3">Country</th>
               <th className="px-4 py-3">Key</th>
@@ -122,13 +154,13 @@ export default function StatutoryRatesPage() {
           </thead>
           <tbody>
             {rates.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors">
-                <td className="px-4 py-3 text-slate-500">{r.jurisdiction_country}</td>
-                <td className="px-4 py-3 font-mono text-xs text-slate-600">{r.component_key}</td>
-                <td className="px-4 py-3 font-medium text-slate-800">{r.label}</td>
-                <td className="px-4 py-3 text-slate-600">{r.employee_share || "—"}</td>
-                <td className="px-4 py-3 text-slate-600">{r.employer_share || "—"}</td>
-                <td className="px-4 py-3 text-slate-600">{r.total || "—"}</td>
+              <tr key={r.id} className="border-t border-slate-100 dark:border-[#38312D] hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                <td className="px-4 py-3 text-slate-500 dark:text-[#A69B93]">{r.jurisdiction_country}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-[#D8D2CB]">{r.component_key}</td>
+                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">{r.label}</td>
+                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employee_share || "—"}</td>
+                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employer_share || "—"}</td>
+                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.total || "—"}</td>
                 <td className="px-4 py-3">
                   <StatusPill status={r.is_active ? "active" : "inactive"} />
                 </td>
@@ -137,14 +169,14 @@ export default function StatutoryRatesPage() {
                     <button
                       onClick={() => setModal(r)}
                       title="Edit rate"
-                      className="rounded-lg bg-slate-100 p-1.5 text-slate-600 hover:bg-slate-200"
+                      className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-slate-600 dark:text-[#A69B93] hover:bg-slate-200 dark:hover:bg-white/20"
                     >
                       <Pencil size={14} />
                     </button>
                     <button
                       onClick={() => setDeleting(r)}
                       title="Delete rate"
-                      className="rounded-lg bg-red-50 p-1.5 text-red-600 hover:bg-red-100"
+                      className="rounded-lg bg-red-50 dark:bg-red-950/40 p-1.5 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -156,10 +188,52 @@ export default function StatutoryRatesPage() {
         </table>
         {!loading && rates.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <Landmark size={28} className="text-slate-300" />
-            <p className="text-sm text-slate-400">
-              {country ? `No statutory rates found for "${country}".` : "No statutory rates found."}
+            <Landmark size={28} className="text-slate-300 dark:text-[#38312D]" />
+            <p className="text-sm text-slate-400 dark:text-[#756B64]">
+              {country ? "No platform default rates found for this jurisdiction." : "No statutory rates found."}
             </p>
+          </div>
+        )}
+      </div>
+
+      <h2 className="text-sm font-semibold text-slate-700 dark:text-[#D8D2CB] mb-3">Organization Contribution Rates (actual, currently configured)</h2>
+      <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
+          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
+            <tr>
+              <th className="px-4 py-3">Organization</th>
+              <th className="px-4 py-3">Jurisdiction</th>
+              <th className="px-4 py-3">Key</th>
+              <th className="px-4 py-3">Label</th>
+              <th className="px-4 py-3">Employee</th>
+              <th className="px-4 py-3">Employer</th>
+              <th className="px-4 py-3">Total</th>
+              <th className="px-4 py-3">Last Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orgRates.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100 dark:border-[#38312D]">
+                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">
+                  {r.organizationName} <span className="ml-1 font-mono text-xs text-slate-400 dark:text-[#756B64]">{r.organizationCode}</span>
+                </td>
+                <td className="px-4 py-3 text-slate-500 dark:text-[#A69B93]">{r.jurisdictionCountry}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-[#D8D2CB]">{r.componentKey}</td>
+                <td className="px-4 py-3 text-slate-700 dark:text-[#D8D2CB]">{r.label}</td>
+                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employeeShare || "—"}</td>
+                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employerShare || "—"}</td>
+                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.total || "—"}</td>
+                <td className="px-4 py-3 text-xs text-slate-500 dark:text-[#A69B93]">
+                  {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!loading && orgRates.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+            <Building2 size={28} className="text-slate-300 dark:text-[#38312D]" />
+            <p className="text-sm text-slate-400 dark:text-[#756B64]">No organization contribution rates match these filters.</p>
           </div>
         )}
       </div>

@@ -36,7 +36,6 @@ class UserRole(str, enum.Enum):
     SUPER_ADMIN = "super_admin"
     ORG_ADMIN = "org_admin"
     PAYROLL_ADMIN = "payroll_admin"
-    EMPLOYEE = "employee"
 
 
 class User(Base):
@@ -46,7 +45,7 @@ class User(Base):
     email = Column(String(200), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
 
-    role = Column(Enum(UserRole), nullable=False, default=UserRole.EMPLOYEE)
+    role = Column(Enum(UserRole), nullable=False, default=UserRole.PAYROLL_ADMIN)
     # NULL for super_admin; required for every org-scoped role.
     organization_id = Column(
         Integer,

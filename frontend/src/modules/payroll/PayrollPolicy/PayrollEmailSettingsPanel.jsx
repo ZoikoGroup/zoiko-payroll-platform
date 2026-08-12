@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Mail, Inbox, ShieldCheck, Loader2 } from "lucide-react";
+import { Mail } from "lucide-react";
 import { useToast } from "../ToastContext";
 import { getEmailSettings, updateEmailSettings } from "../../../service/payrollService";
 
@@ -26,14 +26,8 @@ function Toggle({ checked, onChange, disabled = false }) {
 }
 
 // Sits inside the Integrations tab, directly under the Notifications card.
-// Two independent things live here:
-//   1. Outbound "From" identity override — sent through the platform's
-//      existing shared SMTP connection, no new credentials required.
-//   2. Inbound IMAP mailbox — the real address that receives leave-request
-//      emails. Its password is write-only: never returned by the API,
-//      encrypted at rest (see backend app/core/crypto.py), and this form
-//      never pre-fills it — leaving it blank on save keeps whatever is
-//      already stored untouched.
+// Outbound "From" identity override — sent through the platform's existing
+// shared SMTP connection, no new credentials required.
 export default function PayrollEmailSettingsPanel() {
   const { addToast } = useToast();
   const [settings, setSettings] = useState(null);
@@ -41,24 +35,12 @@ export default function PayrollEmailSettingsPanel() {
   const [fromDisplayName, setFromDisplayName] = useState("");
   const [savingIdentity, setSavingIdentity] = useState(false);
 
-  const [imapHost, setImapHost] = useState("");
-  const [imapPort, setImapPort] = useState("993");
-  const [imapUsername, setImapUsername] = useState("");
-  const [imapPassword, setImapPassword] = useState("");
-  const [imapUseSsl, setImapUseSsl] = useState(true);
-  const [savingImap, setSavingImap] = useState(false);
-
   const load = useCallback(async () => {
     try {
       const data = await getEmailSettings();
       setSettings(data);
       setFromEmail(data?.fromEmail || "");
       setFromDisplayName(data?.fromDisplayName || "");
-      setImapHost(data?.imapHost || "");
-      setImapPort(data?.imapPort || "993");
-      setImapUsername(data?.imapUsername || "");
-      setImapUseSsl(data?.imapUseSsl !== false);
-      setImapPassword(""); // write-only — never pre-filled from the server
     } catch {
       addToast?.("Failed to load payroll email settings.", "error");
     }
@@ -93,34 +75,6 @@ export default function PayrollEmailSettingsPanel() {
     } catch {
       setSettings(prev);
       addToast?.("Failed to update setting.", "error");
-    }
-  };
-
-  const handleSaveImap = async () => {
-    if (!imapHost.trim() || !imapUsername.trim()) {
-      addToast?.("Mailbox host and address are required.", "error");
-      return;
-    }
-    setSavingImap(true);
-    try {
-      const payload = {
-        imapHost: imapHost.trim(),
-        imapPort: imapPort.trim() || "993",
-        imapUsername: imapUsername.trim(),
-        imapUseSsl,
-      };
-      // Only send the password if the admin actually typed a new one —
-      // an empty field here means "leave the stored password alone".
-      if (imapPassword.trim()) payload.imapPassword = imapPassword.trim();
-
-      const updated = await updateEmailSettings(payload);
-      setSettings(updated);
-      setImapPassword("");
-      addToast?.("IMAP mailbox settings saved.", "success");
-    } catch (err) {
-      addToast?.(err?.message || "Failed to save IMAP mailbox settings.", "error");
-    } finally {
-      setSavingImap(false);
     }
   };
 
@@ -197,95 +151,6 @@ export default function PayrollEmailSettingsPanel() {
               onChange={(val) => handleToggle("notifyRunApproved", val)}
             />
           </div>
-        </div>
-      </div>
-
-      {/* ── Inbound IMAP mailbox (leave-request inbox) ── */}
-      <div className="space-y-4 border-t border-[#E5E0D9] dark:border-[#38312D] pt-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Inbox size={15} className="text-[#9E9690]" />
-            <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
-              Leave-Request Receiving Mailbox (IMAP)
-            </p>
-          </div>
-          <Toggle checked={settings.imapEnabled} onChange={(val) => handleToggle("imapEnabled", val)} />
-        </div>
-        <p className="text-[11px] text-[#9E9690]">
-          The real mailbox employees email to submit leave requests. Requires a mailbox you
-          control with IMAP access enabled (e.g. an app password from your email provider).
-          The password is encrypted before storage and is never shown again once saved.
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <label className="block">
-            <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">
-              IMAP Host
-            </span>
-            <input
-              className={inputClass}
-              placeholder="imap.yourprovider.com"
-              value={imapHost}
-              onChange={(e) => setImapHost(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">
-              Port
-            </span>
-            <input
-              className={inputClass}
-              placeholder="993"
-              value={imapPort}
-              onChange={(e) => setImapPort(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">
-              Mailbox Address
-            </span>
-            <input
-              type="email"
-              className={inputClass}
-              placeholder="leave@yourcompany.com"
-              value={imapUsername}
-              onChange={(e) => setImapUsername(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className="flex items-center gap-1.5 text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">
-              Password
-              {settings.imapConfigured && (
-                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#19C58A]">
-                  <ShieldCheck size={11} /> configured
-                </span>
-              )}
-            </span>
-            <input
-              type="password"
-              className={inputClass}
-              placeholder={settings.imapConfigured ? "Leave blank to keep existing" : "Enter mailbox password"}
-              value={imapPassword}
-              onChange={(e) => setImapPassword(e.target.value)}
-              autoComplete="new-password"
-            />
-          </label>
-        </div>
-
-        <div className="flex items-center justify-between rounded-[10px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3">
-          <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">Use SSL</span>
-          <Toggle checked={imapUseSsl} onChange={setImapUseSsl} />
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            onClick={handleSaveImap}
-            disabled={savingImap}
-            className="flex items-center gap-2 rounded-[10px] bg-[#35B6F5] px-4 py-2 text-[12px] font-bold text-white shadow-[0_2px_8px_rgba(53,182,245,0.3)] disabled:opacity-50"
-          >
-            {savingImap && <Loader2 size={13} className="animate-spin" />}
-            {savingImap ? "Saving…" : "Save Mailbox Settings"}
-          </button>
         </div>
       </div>
     </div>
