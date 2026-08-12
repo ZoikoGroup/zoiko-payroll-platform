@@ -16,6 +16,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ZoikoPayrollModule from "./modules/payroll";
 import OrgAdminDashboardPage from "./modules/organization-admin/DashboardPage";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
+import AssistAdminPage from "./modules/assist/AssistAdminPage";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "./config/roles";
 
 function LandingRedirect() {
@@ -86,6 +87,14 @@ export default function App() {
           element={
             <PayrollShell>
               <OrgAdminOrganizationPage />
+            </PayrollShell>
+          }
+        />
+        <Route
+          path="/payroll/assist-admin"
+          element={
+            <PayrollShell>
+              <AssistAdminPage />
             </PayrollShell>
           }
         />

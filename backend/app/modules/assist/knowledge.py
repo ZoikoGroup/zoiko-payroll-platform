@@ -1,0 +1,339 @@
+"""
+modules/assist/knowledge.py
+---------------------------
+Governed knowledge base for Zoiko Payroll Assist.
+
+Only PUBLISHED items within their effective date window and approved scope
+are retrieval-eligible (KB-GOV-002). Retrieval is hybrid-style: lexical
+(term frequency over title/body/summary) + metadata filters (jurisdiction,
+language, tenant). Source authority tier is applied as a ranking weight.
+Tenant (organization) items are isolated; global platform items are shared.
+"""
+
+import logging
+from datetime import date, datetime
+
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.modules.assist.models import (
+    AssistKbItem,
+    AssistKbSource,
+    AssistRetrievalCandidate,
+    AssistRetrievalRun,
+    AuthorityTier,
+    KnowledgeSourceState,
+    KnowledgeState,
+)
+
+logger = logging.getLogger("zoiko_payroll.assist.knowledge")
+
+# Searchable term synonyms mapped to seed knowledge content types. Used to
+# boost lexical scoring for common payroll questions.
+_CONTENT_KEYWORDS = {
+    "approval": ["approve", "approval", "sign-off", "review", "status"],
+    "leave": ["leave", "annual", "sick", "balance", "allocation", "request"],
+    "payslip": ["payslip", "pay slip", "salary slip", "earnings"],
+    "policy": ["policy", "rule", "overtime", "allowance"],
+    "payment": ["payment", "bank", "release", "transfer", "settle"],
+    "tax": ["tax", "tds", "income tax", "slab"],
+    "filing": ["filing", "statutory", "compliance", "return"],
+    "exception": ["exception", "blocker", "readiness", "error", "validation"],
+    "security": ["permission", "role", "access", "security", "privacy"],
+}
+
+
+def _is_retrieval_eligible(item: AssistKbItem, today: date) -> bool:
+    if item.state != KnowledgeState.PUBLISHED.value:
+        return False
+    if item.effective_from and item.effective_from > today:
+        return False
+    if item.effective_to and item.effective_to < today:
+        return False
+    return True
+
+
+def _score_item(item: AssistKbItem, query_terms: list[str]) -> int:
+    """Deterministic lexical score. Title matches weigh most, then body."""
+    score = 0
+    haystack_title = item.title.lower()
+    haystack_body = (item.body or "").lower()
+    haystack_summary = (item.summary or "").lower()
+    for term in query_terms:
+        if term and term in haystack_title:
+            score += 6
+        elif term and term in haystack_summary:
+            score += 4
+        elif term and term in haystack_body:
+            score += 2
+    for keyword, synonyms in _CONTENT_KEYWORDS.items():
+        if any(s in haystack_title for s in synonyms) and any(s in query_terms for s in synonyms):
+            score += 3
+    if item.authority in (AuthorityTier.TIER_1_OPERATIONAL.value, AuthorityTier.TIER_2_APPROVED_PRIMARY.value):
+        score += 2
+    return score
+
+
+def search_kb(
+    db: Session,
+    organization_id: int,
+    query: str,
+    jurisdiction_codes: list[str] | None = None,
+    limit: int = 5,
+    record_run: bool = True,
+) -> list[AssistRetrievalCandidate]:
+    """Retrieve retrieval-eligible knowledge for a tenant-scoped query.
+
+    Global items (organization_id is NULL) are shared; tenant items are
+    isolated to their organization. Jurisdiction filter: items with an empty
+    jurisdiction list apply everywhere; otherwise at least one listed
+    jurisdiction must match the request scope.
+    """
+    today = date.today()
+    jurisdiction_codes = [j.upper() for j in (jurisdiction_codes or [])]
+
+    base_query = db.query(AssistKbItem).filter(
+        AssistKbItem.state == KnowledgeState.PUBLISHED.value,
+        or_(AssistKbItem.organization_id.is_(None), AssistKbItem.organization_id == organization_id),
+    )
+    items = base_query.all()
+
+    eligible = [i for i in items if _is_retrieval_eligible(i, today)]
+
+    query_terms = [t.lower() for t in query.replace(",", " ").split() if len(t) > 2]
+    scored = []
+    for item in eligible:
+        if jurisdiction_codes:
+            item_jurisdictions = [j.upper() for j in (item.jurisdiction_codes or [])]
+            if item_jurisdictions and not set(item_jurisdictions) & set(jurisdiction_codes):
+                continue
+        score = _score_item(item, query_terms)
+        if score > 0:
+            scored.append((score, item))
+        elif not query_terms:
+            # Empty / low-information query: return newest published items so
+            # suggestions have something to ground on.
+            scored.append((1, item))
+
+    scored.sort(key=lambda pair: (-pair[0], -pair[1].id))
+    ranked = scored[:limit]
+
+    if record_run:
+        run = AssistRetrievalRun(
+            organization_id=organization_id,
+            query_hash=hash(query),
+            scope={"jurisdiction_codes": jurisdiction_codes, "limit": limit},
+            candidate_count=len(ranked),
+        )
+        db.add(run)
+        db.flush()
+        for idx, (score, item) in enumerate(ranked):
+            db.add(
+                AssistRetrievalCandidate(
+                    retrieval_run_id=run.id,
+                    kb_item_id=item.id,
+                    score=score,
+                    rank=idx + 1,
+                    reason="keyword" if score > 1 else "recent",
+                )
+            )
+        db.commit()
+
+    return [candidate for _, candidate in ranked]
+
+
+# ── Default seed content ────────────────────────────────────────────────
+
+DEFAULT_SOURCES = [
+    {
+        "name": "Zoiko Payroll Product Knowledge",
+        "source_type": "PRODUCT_DOCUMENTATION",
+        "authority_tier": AuthorityTier.TIER_2_APPROVED_PRIMARY.value,
+    },
+    {
+        "name": "Zoiko Payroll Operations Runbook",
+        "source_type": "RUNBOOK",
+        "authority_tier": AuthorityTier.TIER_3_APPROVED_SECONDARY.value,
+    },
+]
+
+DEFAULT_KB_ITEMS = [
+    {
+        "title": "How payroll approval works",
+        "content_type": "HOW_TO",
+        "summary": "Payroll runs must be reviewed and approved by an authorized user. Assist can summarize readiness but cannot approve payroll.",
+        "body": (
+            "A payroll run moves through Draft, Review, Approved, Authorized, Paid and Closed. "
+            "Approval requires a human with the correct role using the approval screen inside Zoiko Payroll. "
+            "Zoiko Payroll Assist can summarize a run, its readiness and unresolved exceptions, but it can never approve or release payroll. "
+            "Always verify material decisions against the payroll run record itself."
+        ),
+        "keywords": ["approval", "approve", "status", "sign-off"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Can Assist approve or release payments?",
+        "content_type": "FAQ",
+        "summary": "No. Assist cannot approve payroll, release payments, submit filings or change protected data.",
+        "body": (
+            "Zoiko Payroll Assist is governed: it explains, finds, reviews, prepares and routes payroll work, "
+            "but it cannot approve payroll runs, release payments or bank files, submit statutory filings, "
+            "or change bank, tax, identity or permission data. Those actions always happen in the canonical "
+            "Zoiko Payroll workflow under existing approval controls."
+        ),
+        "keywords": ["approve", "payment", "release", "filing"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Checking payroll run readiness",
+        "content_type": "HOW_TO",
+        "summary": "Use the payroll run detail to review readiness blockers such as missing payslip items or unresolved leave requests.",
+        "body": (
+            "Before approval, review the payroll run's readiness: all expected payslip items present, "
+            "no unresolved leave requests, policy and compliance setup complete, and the run status reflects "
+            "the current stage. Assist can summarize readiness blockers from the payroll run record, but it "
+            "does not recommend approval — that decision belongs to the authorized reviewer."
+        ),
+        "keywords": ["readiness", "exception", "blocker", "validation", "review"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Understanding leave balances and requests",
+        "content_type": "HOW_TO",
+        "summary": "Leave allocations and requests live in the Attendance and Leave area; reviewers approve requests there.",
+        "body": (
+            "Employees accrue leave through allocations configured in the Leaves area. Leave requests must be "
+            "reviewed by an authorized reviewer. Assist can show leave balances and the status of leave requests "
+            "from authorized records. It cannot approve or reject leave requests on your behalf."
+        ),
+        "keywords": ["leave", "balance", "request", "allocation"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Payslip access and self-service",
+        "content_type": "HOW_TO",
+        "summary": "Employees access their own payslips through the employee self-service area; Assist provides secure links, not document bodies.",
+        "body": (
+            "Employees can view and download their own payslips from the employee self-service portal. "
+            "Zoiko Payroll Assist returns secure links and metadata rather than embedding full protected "
+            "documents in the conversation by default."
+        ),
+        "keywords": ["payslip", "self-service", "employee"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Compliance and statutory filings",
+        "content_type": "JURISDICTION_GUIDE",
+        "summary": "Statutory contributions, tax slabs and filings are configured in Compliances; Assist cannot submit filings.",
+        "body": (
+            "Statutory contribution rates, tax slabs and company compliance details are managed in the "
+            "Compliances area per jurisdiction. Assist can explain configuration and summarize filing status, "
+            "but it cannot submit statutory filings. Unsupported or stale jurisdiction guidance results in a "
+            "safe fallback rather than substitution."
+        ),
+        "keywords": ["tax", "filing", "compliance", "statutory"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Roles and permissions in Zoiko Payroll",
+        "content_type": "FIELD_DEFINITION",
+        "summary": "Roles are super admin, org admin, payroll admin and employee. Access is scoped to your own organization.",
+        "body": (
+            "Zoiko Payroll has four roles: super_admin (platform-wide), org_admin (full control of their "
+            "organization), payroll_admin (day-to-day payroll operations) and employee (self-service only). "
+            "All org-scoped access is confined to your own organization. Assist derives authority from your "
+            "authenticated session — it never trusts role or tenant claims supplied in conversation text."
+        ),
+        "keywords": ["role", "permission", "security", "access"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Comparing payroll periods",
+        "content_type": "HOW_TO",
+        "summary": "Compare gross, deductions, taxes and net between two payroll runs to understand period-over-period movement.",
+        "body": (
+            "To compare periods, select two payroll runs and review gross, deductions, taxes and net totals. "
+            "Assist returns deterministic comparisons with source references and flags partial data rather than "
+            "inventing drivers for differences."
+        ),
+        "keywords": ["compare", "period", "variance", "gross", "net"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Assist privacy and data handling",
+        "content_type": "FAQ",
+        "summary": "Conversation content is minimized and never used for training by default; Assist records are not the system of record.",
+        "body": (
+            "Zoiko Payroll Assist stores minimum necessary conversation and evidence records. It is not trained "
+            "on customer conversations by default. Evidence records, policy decisions and action receipts are "
+            "structured records separate from the rendered transcript — the conversation is not the system of "
+            "record. Authoritative payroll records always take precedence over conversation memory."
+        ),
+        "keywords": ["privacy", "security", "data", "retention"],
+        "jurisdiction_codes": [],
+    },
+    {
+        "title": "Approval lifecycle states",
+        "content_type": "STATE_DEFINITION",
+        "summary": "Prepared, reviewed, approved, processed, paid and reconciled remain distinct states; the assistant never infers completion from chat.",
+        "body": (
+            "The payroll lifecycle uses distinct states: prepared, reviewed, approved, processed, paid and "
+            "reconciled. No component may infer successful approval, payment settlement, filing acceptance or "
+            "reconciliation from conversation text. Payment states — prepared, released, submitted, accepted, "
+            "settled and reconciled — remain distinct."
+        ),
+        "keywords": ["state", "approval", "payment", "lifecycle"],
+        "jurisdiction_codes": [],
+    },
+]
+
+
+def ensure_default_kb(db: Session) -> None:
+    """Idempotently seed the governed knowledge base (global platform content)."""
+    existing = db.query(AssistKbItem).filter(AssistKbItem.organization_id.is_(None)).count()
+    if existing > 0:
+        return
+
+    source_map = {}
+    for src in DEFAULT_SOURCES:
+        row = (
+            db.query(AssistKbSource)
+            .filter(AssistKbSource.name == src["name"], AssistKbSource.organization_id.is_(None))
+            .first()
+        )
+        if row is None:
+            row = AssistKbSource(
+                name=src["name"],
+                source_type=src["source_type"],
+                authority_tier=src["authority_tier"],
+                state=KnowledgeSourceState.ACTIVE.value,
+                owner="Platform",
+            )
+            db.add(row)
+            db.flush()
+        source_map[src["name"]] = row.id
+
+    default_source_id = source_map.get(DEFAULT_SOURCES[0]["name"])
+
+    for idx, item in enumerate(DEFAULT_KB_ITEMS):
+        db.add(
+            AssistKbItem(
+                source_id=default_source_id,
+                organization_id=None,
+                content_type=item["content_type"],
+                title=item["title"],
+                body=item["body"],
+                summary=item["summary"],
+                language="en",
+                jurisdiction_codes=item["jurisdiction_codes"],
+                state=KnowledgeState.PUBLISHED.value,
+                authority=AuthorityTier.TIER_2_APPROVED_PRIMARY.value,
+                version=1,
+                effective_from=None,
+                effective_to=None,
+                published_at=datetime.now(),
+                created_by=None,
+            )
+        )
+    db.commit()
+    logger.info("Seeded %s default knowledge base items.", len(DEFAULT_KB_ITEMS))

@@ -14,9 +14,13 @@ import {
   Building2,
   Menu,
   LogOut,
+  ScanSearch,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS, ROLES } from "../config/roles";
+import AssistLauncher from "../modules/assist/AssistLauncher";
+
+const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
 
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/payroll", icon: LayoutDashboard },
@@ -28,6 +32,7 @@ const NAV_ITEMS = [
   { label: "Payroll Runs", href: "/payroll/payroll-runs", icon: PlayCircle },
   { label: "Payslips", href: "/payroll/payslips", icon: FileText },
   { label: "Reports", href: "/payroll/reports", icon: BarChart3 },
+  { label: "Assist Admin", href: "/payroll/assist-admin", icon: ScanSearch },
 ];
 
 // Mirrors the main ZoikoOne platform's "ORGANIZATION ADMIN" / "HR ADMIN"
@@ -115,7 +120,12 @@ function SidebarContent({ onNavigate, role }) {
         {roleSection ? (
           <NavSection title={roleSection.title} items={roleSection.items} pathname={pathname} onNavigate={onNavigate} />
         ) : null}
-        <NavSection title="Zoiko Payroll" items={NAV_ITEMS} pathname={pathname} onNavigate={onNavigate} />
+        <NavSection
+          title="Zoiko Payroll"
+          items={OPERATOR_ROLES.has(role) ? NAV_ITEMS : NAV_ITEMS.filter((i) => i.href !== "/payroll/assist-admin")}
+          pathname={pathname}
+          onNavigate={onNavigate}
+        />
       </div>
 
       <div className="mt-auto space-y-4">
@@ -173,6 +183,8 @@ export default function PayrollShell({ children }) {
         </button>
         <main className="w-full">{children}</main>
       </div>
+
+      <AssistLauncher />
     </div>
   );
 }

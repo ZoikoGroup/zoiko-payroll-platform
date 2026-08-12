@@ -12,6 +12,7 @@ Router mounting:
   - /api/payroll/...     → the extracted Payroll module (its own prefix /payroll)
   - /api/employee        → employee self-service (ESS)
   - /api/super-admin     → platform admin
+  - /api/assist          → Zoiko Payroll Assist (its own prefix /assist)
 """
 
 import logging
@@ -97,6 +98,7 @@ from app.modules.employee.router import hr_router as employee_hr_router
 from app.modules.super_admin.router import router as super_admin_router
 from app.modules.payroll.router import payroll_router
 from app.modules.payroll.forms.router import public_forms_router
+from app.modules.assist.router import assist_router
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(auth_user_router, prefix="/api")
@@ -106,6 +108,7 @@ app.include_router(employee_hr_router, prefix="/api")
 app.include_router(super_admin_router, prefix="/api")
 app.include_router(payroll_router, prefix="/api")
 app.include_router(public_forms_router, prefix="/api/payroll")
+app.include_router(assist_router, prefix="/api")
 
 # ── Root health ──────────────────────────────────────────────────────────────
 
