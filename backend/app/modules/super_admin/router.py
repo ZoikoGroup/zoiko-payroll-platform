@@ -7,7 +7,7 @@ password resets, and PlatformSetting configuration.
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -213,9 +213,21 @@ def update_setting(
 # country. Orgs start from these defaults on first Compliance setup; their
 # own org-scoped ContributionRate rows can diverge afterwards.
 
+@router.post(
+    "/statutory-rates/seed-defaults", response_model=SuccessResponse,
+    summary="Backfill platform default rates from the payroll engine's existing per-country defaults (safe to re-run)",
+)
+def seed_statutory_rate_defaults(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.super_admin import service as sa_service
+
+    created = sa_service.seed_global_statutory_rates_from_defaults(db)
+    return {"message": f"Added {created} default rate(s)." if created else "Already up to date — no new rates added."}
+
+
 @router.get("/statutory-rates", response_model=StatutoryRateListResponse)
 def list_statutory_rates(
     country: str = Query(None),
+    state: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     current_user=Depends(get_current_super_admin),
@@ -226,10 +238,26 @@ def list_statutory_rates(
     query = db.query(GlobalStatutoryRate)
     if country:
         query = query.filter(GlobalStatutoryRate.jurisdiction_country == country)
+        # Once scoped to a country, an absent state means "country-level
+        # only" — NOT "every state blended together" — an API client that
+        # can't reliably transmit an explicit empty string (browser fetch
+        # helpers commonly strip "" params) still gets correct isolation.
+        # Same convention list_all_jurisdiction_packs() already uses.
+        if state:
+            query = query.filter(GlobalStatutoryRate.jurisdiction_state == state)
+        else:
+            query = query.filter(GlobalStatutoryRate.jurisdiction_state.is_(None))
+    elif state:
+        query = query.filter(GlobalStatutoryRate.jurisdiction_state == state)
     if start_date:
         query = query.filter(GlobalStatutoryRate.updated_at >= start_date)
     if end_date:
-        query = query.filter(GlobalStatutoryRate.updated_at <= end_date)
+        # updated_at is a timestamp; comparing it `<=` a bare date casts
+        # that date to midnight (00:00:00), which excludes every row
+        # touched later the SAME day — e.g. a rate created at 6pm "today"
+        # would fail an end_date of "today". Use the start of the
+        # following day instead so the whole end_date is included.
+        query = query.filter(GlobalStatutoryRate.updated_at < end_date + timedelta(days=1))
     rates = query.order_by(
         GlobalStatutoryRate.jurisdiction_country,
         GlobalStatutoryRate.sort_order,
@@ -251,12 +279,13 @@ def create_statutory_rate(
         db.query(GlobalStatutoryRate)
         .filter(
             GlobalStatutoryRate.jurisdiction_country == data.jurisdiction_country,
+            GlobalStatutoryRate.jurisdiction_state == data.jurisdiction_state,
             GlobalStatutoryRate.component_key == data.component_key,
         )
         .first()
     )
     if existing:
-        raise AlreadyExistsException("Statutory rate", "jurisdiction_country + component_key")
+        raise AlreadyExistsException("Statutory rate", "jurisdiction_country + jurisdiction_state + component_key")
 
     rate = GlobalStatutoryRate(**data.model_dump())
     db.add(rate)
@@ -292,12 +321,35 @@ def delete_statutory_rate(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
-    from app.core.exceptions import NotFoundException
+    from app.core.exceptions import BadRequestException, NotFoundException
+    from app.modules.payroll.models import ContributionRate
     from app.modules.super_admin.models import GlobalStatutoryRate
 
     rate = db.query(GlobalStatutoryRate).filter(GlobalStatutoryRate.id == rate_id).first()
     if rate is None:
         raise NotFoundException("Statutory rate", "id")
+
+    # Deleting a platform default that an organization's own ContributionRate
+    # already matches (same country/component — orgs seed from this table on
+    # first Compliance setup) would silently orphan that org's rate label
+    # with no platform default left to fall back to. Reject instead of a
+    # bare delete, matching the "do not allow accidental deletion of
+    # active/required configurations" requirement.
+    in_use = (
+        db.query(ContributionRate)
+        .filter(
+            ContributionRate.jurisdiction_country == rate.jurisdiction_country,
+            ContributionRate.component_key == rate.component_key,
+        )
+        .first()
+    )
+    if in_use:
+        raise BadRequestException(
+            f"'{rate.label}' is in use by at least one organization's contribution rates "
+            f"({rate.jurisdiction_country}/{rate.component_key}) and can't be deleted. "
+            "Deactivate it instead, or remove the organizations' rates first."
+        )
+
     db.delete(rate)
     db.commit()
     return {"message": "Statutory rate deleted."}
@@ -338,6 +390,16 @@ def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin),
 
 
 @router.get(
+    "/compliance/jurisdiction-summary",
+    summary="One row per jurisdiction with real counts (tax/policy packs, statutory rates, orgs) — powers the jurisdiction card grid",
+)
+def get_jurisdiction_summary(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.get_jurisdiction_summary(db)
+
+
+@router.get(
     "/compliance/configurations",
     summary="Every organization's actual, currently-configured compliance setup (not the policy templates)",
 )
@@ -361,12 +423,15 @@ def list_compliance_policies(
     state: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    packType: Optional[str] = Query(None, description="Filter to 'tax' or 'policy' packs"),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_all_jurisdiction_packs(db, country=country, state=state, status=status, search=search)
+    return payroll_service.list_all_jurisdiction_packs(
+        db, country=country, state=state, status=status, search=search, pack_type=packType,
+    )
 
 
 @router.put(

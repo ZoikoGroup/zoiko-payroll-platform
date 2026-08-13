@@ -5,12 +5,15 @@
 // used server-side in generate_payslip_pdf_bytes (backend/app/modules/payroll/service.py)
 // so a payslip's PDF and its on-screen views never disagree on wording.
 
+// Each jurisdiction's own plain term — not a generic "Income Tax" gloss —
+// so a payslip reads the way that country's own payslips actually do.
 const INCOME_TAX_LABELS = {
-  US: "Federal Income Tax",
-  UK: "Income Tax (PAYE)",
-  AU: "Income Tax (PAYG)",
-  DE: "Income Tax (Lohnsteuer)",
-  CA: "Federal Income Tax",
+  IN: "TDS",
+  US: "Federal Withholding",
+  UK: "PAYE",
+  AU: "PAYG",
+  DE: "Lohnsteuer",
+  CA: "Federal Tax",
 };
 
 const PF_LABELS = { DE: "Pension Insurance" };
@@ -25,7 +28,7 @@ const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)" };
 export function getPayrollLabels(country) {
   const c = (country || "IN").toUpperCase();
   return {
-    incomeTax: INCOME_TAX_LABELS[c] || "TDS / Income Tax",
+    incomeTax: INCOME_TAX_LABELS[c] || "TDS",
     pf: PF_LABELS[c] || "Provident Fund (PF)",
     esi: ESI_LABELS[c] || "Employee State Insurance (ESI)",
     employerPf: EMPLOYER_PF_LABELS[c] || "Employer PF",
@@ -59,6 +62,27 @@ const STATE_RULE_NOTES = {
   DE: "Statutory contribution rates can vary by state (Bundesland).",
   UK: "Statutory rates are generally uniform nationwide, but some allowances vary by region.",
 };
+
+// The one statutory ID that best identifies an employee to their tax
+// authority, per jurisdiction — India's lives on the payslip's own `pan`
+// column; every other country's lives in the payslip's `complianceFields`
+// snapshot (see employee_validation.py for the full per-country field
+// list). Mirrors _payslip_identity_rows in service.py so the on-screen
+// payslip and the generated PDF never disagree on which field they show.
+const IDENTITY_FIELD = {
+  IN: { label: "PAN", get: (p) => p.pan },
+  US: { label: "SSN", get: (p) => p.complianceFields?.ssn },
+  UK: { label: "NINO", get: (p) => p.complianceFields?.nino },
+  AU: { label: "TFN", get: (p) => p.complianceFields?.tfn },
+  CA: { label: "SIN", get: (p) => p.complianceFields?.sin },
+  DE: { label: "Steuer-ID", get: (p) => p.complianceFields?.steuer_id },
+};
+
+export function getIdentityField(payslip) {
+  const c = (payslip?.country || "IN").toUpperCase();
+  const spec = IDENTITY_FIELD[c] || IDENTITY_FIELD.IN;
+  return { label: spec.label, value: spec.get(payslip || {}) || null };
+}
 
 export function getComplianceLabels(country) {
   const c = (country || "IN").toUpperCase();

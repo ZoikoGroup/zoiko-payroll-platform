@@ -9,6 +9,7 @@ import EmployeeTable from "./EmployeeTable";
 import EmployeeForm from "./EmployeeForm";
 import EmployeeDetailPanel from "./EmployeeDetailPanel";
 import EmployeeBulkImportModal from "./EmployeeBulkImportModal";
+import { COMPLIANCE_SPECS, complianceColumnHeader } from "./countryFieldSpecs";
 import EmployeeBulkEditPanel from "./EmployeeBulkEditPanel";
 import SendTemplateBuilder from "./SendTemplateBuilder";
 import SubmissionsReviewPanel from "./SubmissionsReviewPanel";
@@ -108,25 +109,30 @@ export default function EmployeeListPage() {
       addToast?.("No employees to export.", "error");
       return;
     }
-    const rows = employees.map((emp) => ({
-      "ID": emp.employeeCode || "",
-      "Employee Name": emp.name || "",
-      "Email": emp.email || "",
-      "Phone": emp.phone || "",
-      "Department": emp.department || "",
-      "Designation": emp.designation || "",
-      "Employment Type": emp.employmentType || "",
-      "Status": emp.status || "",
-      "Date of Joining (YYYY-MM-DD)": emp.dateOfJoining || "",
-      "CTC": emp.ctc || "",
-      "Basic": emp.basic || "",
-      "HRA": emp.hra || "",
-      "Bank Name": emp.bankName || "",
-      "Bank Account Number": emp.bankAccountNumber || "",
-      "IFSC Code": emp.ifscCode || "",
-      "PAN Number": emp.panNumber || "",
-      "UAN": emp.uan || "",
-    }));
+    const rows = employees.map((emp) => {
+      const row = {
+        "ID": emp.employeeCode || "",
+        "Employee Name": emp.name || "",
+        "Email": emp.email || "",
+        "Phone": emp.phone || "",
+        "Department": emp.department || "",
+        "Designation": emp.designation || "",
+        "Employment Type": emp.employmentType || "",
+        "Status": emp.status || "",
+        "Date of Joining (YYYY-MM-DD)": emp.dateOfJoining || "",
+        "CTC": emp.ctc || "",
+        "Bank Name": emp.bankName || "",
+        "Bank Account Number": emp.bankAccountNumber || "",
+        "Country": emp.countryCode || "IN",
+        "IFSC Code": emp.ifscCode || "",
+        "PAN Number": emp.panNumber || "",
+        "UAN": emp.uan || "",
+      };
+      for (const spec of COMPLIANCE_SPECS) {
+        row[complianceColumnHeader(spec)] = (emp.complianceFields || {})[spec.key] || "";
+      }
+      return row;
+    });
     const headers = Object.keys(rows[0]);
     const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
     ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length, 18) }));
@@ -336,6 +342,7 @@ export default function EmployeeListPage() {
             <EmployeeBulkImportModal
               onClose={() => setActiveTab("list")}
               onImported={handleEmployeesBulkImported}
+              defaultCountryCode={company?.jurisdictionCountry || company?.jurisdiction_country || "IN"}
             />
           </div>
         )}

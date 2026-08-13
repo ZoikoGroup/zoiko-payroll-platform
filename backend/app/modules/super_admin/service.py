@@ -37,7 +37,12 @@ def _date_filter(query, column, start_date: Optional[date], end_date: Optional[d
     if start_date:
         query = query.filter(column >= start_date)
     if end_date:
-        query = query.filter(column <= end_date)
+        # `column` is a timestamp; comparing it `<=` a bare date casts that
+        # date to midnight (00:00:00), excluding every row touched later
+        # the SAME day (e.g. "end_date = today" would hide a row updated
+        # at 6pm today). Use the start of the following day instead so the
+        # whole end_date is actually included.
+        query = query.filter(column < end_date + timedelta(days=1))
     return query
 
 
@@ -216,6 +221,115 @@ def list_known_jurisdictions(db: Session) -> List[dict]:
         {"code": code, "name": name, "states": sorted(states_by_country.get(code, []))}
         for code, name in sorted(ALL_CODE_TO_COUNTRY_NAME.items(), key=lambda kv: kv[1])
     ]
+
+
+def get_jurisdiction_summary(db: Session) -> List[dict]:
+    """Card-grid data for the jurisdiction-first Compliance / Statutory
+    Rates pages — one row per country, built on the exact same source of
+    truth list_known_jurisdictions() already uses (ALL_CODE_TO_COUNTRY_NAME
+    + whatever states are actually in use), so a country only needs real
+    data to "show up" as configured — no separate hardcoded list to extend
+    when a new jurisdiction is added. Every count defaults to 0 and every
+    optional value falls back to None (the frontend renders "N/A") rather
+    than ever surfacing `undefined`."""
+    from app.core.jurisdiction import get_jurisdiction_schema
+    from app.modules.super_admin.models import GlobalStatutoryRate
+
+    base = list_known_jurisdictions(db)
+
+    def _count_by_country(query_col, *filters):
+        q = db.query(query_col, sa_func.count()).filter(*filters).group_by(query_col)
+        return dict(q.all())
+
+    tax_counts = _count_by_country(
+        JurisdictionPack.jurisdiction_country,
+        JurisdictionPack.pack_type == "tax", JurisdictionPack.status == "Active",
+    )
+    policy_counts = _count_by_country(
+        JurisdictionPack.jurisdiction_country,
+        JurisdictionPack.pack_type == "policy", JurisdictionPack.status == "Active",
+    )
+    rate_counts = _count_by_country(
+        GlobalStatutoryRate.jurisdiction_country, GlobalStatutoryRate.is_active == True,  # noqa: E712
+    )
+    org_counts = dict(
+        db.query(CompanyComplianceDetails.jurisdiction_country, sa_func.count(sa_func.distinct(CompanyComplianceDetails.organization_id)))
+        .filter(CompanyComplianceDetails.jurisdiction_country.isnot(None))
+        .group_by(CompanyComplianceDetails.jurisdiction_country)
+        .all()
+    )
+    last_updated = dict(
+        db.query(JurisdictionPack.jurisdiction_country, sa_func.max(JurisdictionPack.updated_at))
+        .group_by(JurisdictionPack.jurisdiction_country)
+        .all()
+    )
+
+    summaries = []
+    for entry in base:
+        code = entry["code"]
+        schema = get_jurisdiction_schema(code)
+        tax_n, policy_n, rate_n = tax_counts.get(code, 0), policy_counts.get(code, 0), rate_counts.get(code, 0)
+        summaries.append({
+            "code": code,
+            "name": entry["name"],
+            "states": entry["states"],
+            "currency": (schema or {}).get("currency"),
+            "taxPackCount": tax_n,
+            "policyPackCount": policy_n,
+            "statutoryRateCount": rate_n,
+            "organizationCount": org_counts.get(code, 0),
+            "lastUpdated": last_updated.get(code),
+            "isConfigured": bool(tax_n or policy_n or rate_n),
+        })
+    return summaries
+
+
+def seed_global_statutory_rates_from_defaults(db: Session) -> int:
+    """Backfill GlobalStatutoryRate from payroll.service._CONTRIBUTION_RATES_BY_COUNTRY
+    — the same per-country defaults the engine has always used to seed a
+    newly-onboarded ORGANIZATION's own ContributionRate rows. GlobalStatutoryRate's
+    own docstring says organizations "start from these defaults," but nothing
+    ever actually populated this table from them — org onboarding reads
+    straight from that Python dict, bypassing this table entirely. This
+    catches Super Admin's Statutory Rates view up to what the engine
+    already supports for every jurisdiction, without changing how the
+    engine itself computes anything (GlobalStatutoryRate is explicitly not
+    read at calculation time — see its class docstring).
+
+    Idempotent: only inserts a (country, component_key) pair that doesn't
+    already exist as a country-level (state=None) row, so calling this
+    again after Super Admin has edited/added rates never overwrites them."""
+    from app.modules.payroll.service import _CONTRIBUTION_RATES_BY_COUNTRY
+    from app.modules.super_admin.models import GlobalStatutoryRate
+
+    existing = {
+        (row.jurisdiction_country, row.component_key)
+        for row in db.query(GlobalStatutoryRate.jurisdiction_country, GlobalStatutoryRate.component_key)
+        .filter(GlobalStatutoryRate.jurisdiction_state.is_(None))
+    }
+    created = 0
+    for country, components in _CONTRIBUTION_RATES_BY_COUNTRY.items():
+        for comp in components:
+            key = (country, comp["component_key"])
+            if key in existing:
+                continue
+            db.add(GlobalStatutoryRate(
+                jurisdiction_country=country,
+                jurisdiction_state=None,
+                component_key=comp["component_key"],
+                label=comp["label"],
+                employee_share=comp.get("employee_share", ""),
+                employer_share=comp.get("employer_share", ""),
+                total=comp.get("total", ""),
+                employee_rate_pct=comp.get("employee_rate_pct"),
+                employer_rate_pct=comp.get("employer_rate_pct"),
+                flat_amount=comp.get("flat_amount"),
+                sort_order=comp.get("sort_order", 0),
+                is_active=True,
+            ))
+            created += 1
+    db.commit()
+    return created
 
 
 def list_compliance_configurations(db: Session, country: Optional[str] = None, search: Optional[str] = None) -> List[dict]:

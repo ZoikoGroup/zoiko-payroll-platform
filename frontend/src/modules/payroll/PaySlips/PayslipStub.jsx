@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { formatCurrency } from "../../../utils/currency";
-import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
+import { getPayrollLabels, getIdentityField } from "../../../utils/jurisdictionLabels";
 
 const printStyles = `
 @media print {
@@ -54,6 +54,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
   const fmt = (n) => formatCurrency(n || 0, currencyCode);
   const labels = getPayrollLabels(payslip.country);
+  const identity = getIdentityField(payslip);
 
   const earningsRows = [
     { label: "Basic Pay", amount: payslip.basicPay },
@@ -98,7 +99,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     ["Pay Date", payslip.payDate],
     ["Bank Name", payslip.bankName || null],
     ["Bank Account", payslip.bankAccount],
-    ["PAN", payslip.pan],
+    [identity.label, identity.value],
     ["Payable Days", payslip.payableDays != null && payslip.totalWorkingDays != null
       ? `${payslip.payableDays} / ${payslip.totalWorkingDays}` : null],
   ].filter(([, val]) => val !== null);

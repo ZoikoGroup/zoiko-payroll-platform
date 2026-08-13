@@ -13,8 +13,6 @@ export const STANDARD_EMPLOYEE_FIELDS = [
   { key: "status", label: "Status", type: "select", options: EMPLOYEE_STATUSES },
   { key: "dateOfJoining", label: "Date of joining", type: "date" },
   { key: "ctc", label: "CTC (annual)", type: "number" },
-  { key: "basic", label: "Basic (annual)", type: "number" },
-  { key: "hra", label: "HRA (annual)", type: "number" },
   { key: "bankName", label: "Bank name", type: "text" },
   { key: "bankAccountNumber", label: "Bank account number", type: "text" },
   { key: "ifscCode", label: "IFSC code", type: "text", uppercase: true },
