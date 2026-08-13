@@ -250,6 +250,19 @@ class PayslipItem(Base):
     pan             = Column(String(20), nullable=True)
     uan             = Column(String(20), nullable=True)
     ifsc            = Column(String(20), nullable=True)
+    # The employee's own jurisdiction at generation time (PayrollEmployee.country_code,
+    # falling back to the org default) — snapshotted for the same reason the
+    # fields above are: so a payslip's country/labels/currency stay tied to
+    # the employee who was actually paid, not to whatever the org's default
+    # jurisdiction happens to be when someone later views/exports it. NULL on
+    # rows generated before this column existed; callers fall back to the
+    # org's current default for those.
+    country_code    = Column(String(2), nullable=True)
+    # Snapshot of PayrollEmployee.compliance_fields (SSN, NINO, IBAN, etc. —
+    # see employee_validation.py for the full per-country set). pan/uan/ifsc
+    # above only ever covered India; every other jurisdiction's identifiers
+    # previously never made it onto the payslip at all.
+    compliance_fields = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -538,6 +551,14 @@ class JurisdictionPack(Base):
     jurisdiction_country = Column(String(100), nullable=False)
     jurisdiction_state   = Column(String(100), nullable=True)   # null = country-level pack
 
+    # "tax" | "policy" — keeps Tax and Policy records in this same versioned
+    # table (no parallel Tax system) while letting the UI show them as two
+    # clearly separate lists instead of one mixed table. Every pre-existing
+    # row is a policy pack (policy_defaults is the only thing this table
+    # held before "tax" packs existed), so this defaults to "policy" for
+    # both new rows and the backfill of old ones.
+    pack_type            = Column(String(10), nullable=False, default="policy", server_default="policy")
+
     version              = Column(String(20), nullable=False, default="1.0")
     status               = Column(String(20), nullable=False, default="Draft")
     # Draft | In Review | QA | Approved | Active | Deprecated | Retired — per spec Section 5/17.
@@ -563,6 +584,18 @@ class JurisdictionPack(Base):
     # without ever deleting/overwriting the prior row — version history
     # stays intact by construction (new row per version).
     previous_version_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
+    # Per-field default values + override permission for the SAME fields
+    # payroll/policy/models.py's PayrollPolicy exposes (calculation_mode,
+    # employee_categories, overtime_rule) — e.g.
+    # {"calculation_mode": {"value": "standard", "allowOverride": false}, ...}.
+    # A JSON blob here (not a mirrored set of child tables) matches this
+    # module's existing convention for flexible per-field config — see
+    # PolicyLeaveRule.config and EnterpriseJurisdiction's *_config columns.
+    # NULL/absent-field means "fully overridable", so an org with no pack
+    # assigned, or a pack that never sets this, behaves exactly as before
+    # this column existed.
+    policy_defaults      = Column(JSON, nullable=True)
 
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())

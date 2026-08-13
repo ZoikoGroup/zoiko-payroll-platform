@@ -12,7 +12,7 @@ aggregate queries in the router.
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, Numeric, String, Text, text
 
 from app.database import Base
 
@@ -48,6 +48,9 @@ class GlobalStatutoryRate(Base):
 
     id               = Column(Integer, primary_key=True, index=True)
     jurisdiction_country = Column(String(10), nullable=False, server_default="IN", default="IN")
+    # null = country-level default, same "null means country-level"
+    # convention JurisdictionPack.jurisdiction_state already uses.
+    jurisdiction_state = Column(String(100), nullable=True)
 
     component_key    = Column(String(20), nullable=False)   # "pf" | "esi" | "pt" | "tds" | ...
     label            = Column(String(100), nullable=False)
@@ -65,8 +68,24 @@ class GlobalStatutoryRate(Base):
     created_at       = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # Two partial unique indexes instead of one plain UniqueConstraint,
+    # because Postgres treats every NULL as distinct — a plain 3-column
+    # constraint including the nullable jurisdiction_state would silently
+    # allow duplicate country-level (state=NULL) rows for the same
+    # component. Splitting by "state IS NULL" vs "state IS NOT NULL"
+    # keeps both "one default per country" and "one default per
+    # country+state" uniquely enforced.
     __table_args__ = (
-        UniqueConstraint("jurisdiction_country", "component_key", name="uq_global_rate_country_component"),
+        Index(
+            "uq_global_rate_country_component_no_state",
+            "jurisdiction_country", "component_key",
+            unique=True, postgresql_where=text("jurisdiction_state IS NULL"),
+        ),
+        Index(
+            "uq_global_rate_country_state_component",
+            "jurisdiction_country", "jurisdiction_state", "component_key",
+            unique=True, postgresql_where=text("jurisdiction_state IS NOT NULL"),
+        ),
     )
 
     def __repr__(self):

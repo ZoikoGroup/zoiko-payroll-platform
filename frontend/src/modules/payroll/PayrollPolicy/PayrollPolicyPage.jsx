@@ -149,6 +149,34 @@ function Field({ label, children }) {
 const inputClass =
   "w-full rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-2 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-[#FF6E86]/30";
 
+// Reads policy.policyLocks (see JurisdictionPack.policy_defaults on the
+// backend) — returns null when this field isn't locked, or
+// {value, allowOverride: false} when the org's compliance policy pack
+// requires this field stay at `value`. Mirrors the intern-paid-leave lock
+// pattern already used elsewhere in this file, just data-driven instead
+// of hardcoded to one field.
+function getLock(policyLocks, path) {
+  let node = policyLocks;
+  for (const key of path) {
+    if (!node || typeof node !== "object") return null;
+    node = node[key];
+  }
+  if (!node || typeof node !== "object" || node.allowOverride !== false) return null;
+  return node;
+}
+
+function LockNote({ lock, formatValue }) {
+  if (!lock) return null;
+  return (
+    <span
+      title={`Locked by your organization's compliance policy — must stay ${formatValue ? formatValue(lock.value) : lock.value}`}
+      className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#9E9690]"
+    >
+      <Lock size={11} /> Locked
+    </span>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────
 
 export default function PayrollPolicyPage() {
@@ -350,40 +378,49 @@ export default function PayrollPolicyPage() {
           </Field>
 
           <div>
-            <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-2">
-              Payroll Calculation Mode
-            </span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93]">
+                Payroll Calculation Mode
+              </span>
+              <LockNote lock={getLock(policy.policyLocks, ["calculation_mode"])} formatValue={(v) => CALCULATION_MODE_LABELS[v] || v} />
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {Object.entries(CALCULATION_MODE_LABELS).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  disabled={saving}
-                  onClick={() => handleCalculationModeChange(mode)}
-                  className={`rounded-[12px] border px-4 py-3 text-left transition-all ${
-                    policy.calculationMode === mode
-                      ? "border-[#FF6E86] bg-[#FF6E86]/5"
-                      : "border-[#E5E0D9] dark:border-[#38312D] hover:border-[#FF6E86]/40"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{label}</p>
-                    {mode === "enterprise" && (
-                      <StatusBadge
-                        label={ENTERPRISE_STATUS_LABELS[policy.enterpriseStatus] || "Not Configured"}
-                        tone={
-                          policy.enterpriseStatus === "active" ? "green"
-                          : policy.enterpriseStatus === "configured" ? "blue"
-                          : policy.enterpriseStatus === "in_progress" ? "amber"
-                          : "gray"
-                        }
-                      />
+              {Object.entries(CALCULATION_MODE_LABELS).map(([mode, label]) => {
+                const calcModeLock = getLock(policy.policyLocks, ["calculation_mode"]);
+                const isLockedOut = calcModeLock && mode !== calcModeLock.value;
+                return (
+                  <button
+                    key={mode}
+                    disabled={saving || isLockedOut}
+                    onClick={() => handleCalculationModeChange(mode)}
+                    title={isLockedOut ? `Locked by your organization's compliance policy to ${CALCULATION_MODE_LABELS[calcModeLock.value] || calcModeLock.value}` : undefined}
+                    className={`rounded-[12px] border px-4 py-3 text-left transition-all ${
+                      policy.calculationMode === mode
+                        ? "border-[#FF6E86] bg-[#FF6E86]/5"
+                        : "border-[#E5E0D9] dark:border-[#38312D] hover:border-[#FF6E86]/40"
+                    } ${isLockedOut ? "opacity-50 cursor-not-allowed hover:border-[#E5E0D9] dark:hover:border-[#38312D]" : ""}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{label}</p>
+                      {isLockedOut && <Lock size={12} className="text-[#9E9690]" />}
+                      {mode === "enterprise" && (
+                        <StatusBadge
+                          label={ENTERPRISE_STATUS_LABELS[policy.enterpriseStatus] || "Not Configured"}
+                          tone={
+                            policy.enterpriseStatus === "active" ? "green"
+                            : policy.enterpriseStatus === "configured" ? "blue"
+                            : policy.enterpriseStatus === "in_progress" ? "amber"
+                            : "gray"
+                          }
+                        />
+                      )}
+                    </div>
+                    {mode === "simple" && (
+                      <p className="text-[11px] text-[#9E9690] mt-1">Net = Gross − Unpaid Leave. No PF/ESI/PT/TDS.</p>
                     )}
-                  </div>
-                  {mode === "simple" && (
-                    <p className="text-[11px] text-[#9E9690] mt-1">Net = Gross − Unpaid Leave. No PF/ESI/PT/TDS.</p>
-                  )}
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
             <p className="text-[11px] text-[#9E9690] mt-2">
               Switching modes only affects future payroll runs — never already-approved or paid ones.
@@ -397,6 +434,10 @@ export default function PayrollPolicyPage() {
         <div className="space-y-3 max-w-3xl">
           {policy.employeeCategories.map((cat) => {
             const isIntern = cat.category === "intern";
+            const wdLock = getLock(policy.policyLocks, ["employee_categories", cat.category, "working_days"]);
+            const ehLock = getLock(policy.policyLocks, ["employee_categories", cat.category, "expected_hours"]);
+            const mhLock = getLock(policy.policyLocks, ["employee_categories", cat.category, "minimum_hours"]);
+            const pleLock = getLock(policy.policyLocks, ["employee_categories", cat.category, "paid_leave_eligible"]);
             return (
               <ExpandableCard
                 key={cat.category}
@@ -407,26 +448,29 @@ export default function PayrollPolicyPage() {
                 }
               >
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <Field label="Working Days">
+                  <Field label={<span className="flex items-center gap-1">Working Days <LockNote lock={wdLock} /></span>}>
                     <input
                       type="number"
-                      className={inputClass}
+                      disabled={!!wdLock}
+                      className={`${inputClass} ${wdLock ? "opacity-60 cursor-not-allowed" : ""}`}
                       value={cat.workingDays}
                       onChange={(e) => handleCategoryChange(cat.category, "workingDays", Number(e.target.value))}
                     />
                   </Field>
-                  <Field label="Expected Hours">
+                  <Field label={<span className="flex items-center gap-1">Expected Hours <LockNote lock={ehLock} /></span>}>
                     <input
                       type="number"
-                      className={inputClass}
+                      disabled={!!ehLock}
+                      className={`${inputClass} ${ehLock ? "opacity-60 cursor-not-allowed" : ""}`}
                       value={cat.expectedHours}
                       onChange={(e) => handleCategoryChange(cat.category, "expectedHours", Number(e.target.value))}
                     />
                   </Field>
-                  <Field label="Minimum Hours">
+                  <Field label={<span className="flex items-center gap-1">Minimum Hours <LockNote lock={mhLock} /></span>}>
                     <input
                       type="number"
-                      className={inputClass}
+                      disabled={!!mhLock}
+                      className={`${inputClass} ${mhLock ? "opacity-60 cursor-not-allowed" : ""}`}
                       value={cat.minimumHours}
                       onChange={(e) => handleCategoryChange(cat.category, "minimumHours", Number(e.target.value))}
                     />
@@ -442,15 +486,15 @@ export default function PayrollPolicyPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-[10px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3">
                   <div className="flex items-center gap-2">
-                    {isIntern && <Lock size={14} className="text-[#9E9690]" />}
+                    {(isIntern || pleLock) && <Lock size={14} className="text-[#9E9690]" />}
                     <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
                       Paid Leave Eligible
                     </span>
                   </div>
                   <Toggle
                     checked={isIntern ? false : cat.paidLeaveEligible}
-                    disabled={isIntern}
-                    title={isIntern ? "Interns are never eligible for paid leave" : undefined}
+                    disabled={isIntern || !!pleLock}
+                    title={isIntern ? "Interns are never eligible for paid leave" : pleLock ? "Locked by your organization's compliance policy" : undefined}
                     onChange={(val) => handleCategoryChange(cat.category, "paidLeaveEligible", val)}
                   />
                 </div>
@@ -482,34 +526,43 @@ export default function PayrollPolicyPage() {
               <CalendarClock size={16} className="text-[#9E9690]" />
               <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Overtime Rules</p>
             </div>
-            {policy.overtimeRule ? (
+            {policy.overtimeRule ? (() => {
+              const enabledLock = getLock(policy.policyLocks, ["overtime_rule", "enabled"]);
+              const approvalLock = getLock(policy.policyLocks, ["overtime_rule", "approval_required"]);
+              const minutesLock = getLock(policy.policyLocks, ["overtime_rule", "minimum_overtime_minutes"]);
+              return (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">Enable Overtime</span>
+                  <span className="flex items-center gap-1 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                    Enable Overtime <LockNote lock={enabledLock} formatValue={(v) => (v ? "on" : "off")} />
+                  </span>
                   <Toggle
                     checked={policy.overtimeRule.enabled}
+                    disabled={!!enabledLock}
+                    title={enabledLock ? "Locked by your organization's compliance policy" : undefined}
                     onChange={(val) =>
                       handleSaveGeneral({ overtimeRule: { ...policy.overtimeRule, enabled: val } })
                     }
                   />
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
-                    Approval Required
+                  <span className="flex items-center gap-1 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                    Approval Required <LockNote lock={approvalLock} formatValue={(v) => (v ? "on" : "off")} />
                   </span>
                   <Toggle
                     checked={policy.overtimeRule.approvalRequired}
-                    disabled={!policy.overtimeRule.enabled}
+                    disabled={!policy.overtimeRule.enabled || !!approvalLock}
+                    title={approvalLock ? "Locked by your organization's compliance policy" : undefined}
                     onChange={(val) =>
                       handleSaveGeneral({ overtimeRule: { ...policy.overtimeRule, approvalRequired: val } })
                     }
                   />
                 </div>
-                <Field label="Minimum Overtime (minutes)">
+                <Field label={<span className="flex items-center gap-1">Minimum Overtime (minutes) <LockNote lock={minutesLock} /></span>}>
                   <input
                     type="number"
-                    disabled={!policy.overtimeRule.enabled}
-                    className={inputClass}
+                    disabled={!policy.overtimeRule.enabled || !!minutesLock}
+                    className={`${inputClass} ${minutesLock ? "opacity-60 cursor-not-allowed" : ""}`}
                     value={policy.overtimeRule.minimumOvertimeMinutes}
                     onChange={(e) =>
                       handleSaveGeneral({
@@ -519,7 +572,8 @@ export default function PayrollPolicyPage() {
                   />
                 </Field>
               </div>
-            ) : (
+              );
+            })() : (
               <p className="text-[12px] text-[#9E9690]">No overtime rule configured yet.</p>
             )}
           </Card>

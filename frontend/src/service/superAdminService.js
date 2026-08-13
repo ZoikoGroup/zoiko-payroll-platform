@@ -9,6 +9,11 @@ import { apiFetch, API_BASE, getAccessToken } from "../api/client";
 
 export const getComplianceJurisdictions = () => apiFetch("/api/super-admin/compliance/jurisdictions");
 
+// One row per jurisdiction with real counts (active tax packs, active
+// policy packs, active statutory rates, orgs assigned) — powers the
+// jurisdiction card grid landing view.
+export const getJurisdictionSummary = () => apiFetch("/api/super-admin/compliance/jurisdiction-summary");
+
 export const getCompliancePolicies = (params) => apiFetch("/api/super-admin/compliance/policies", { params });
 
 export const upsertCompliancePolicy = (payload) =>
@@ -54,6 +59,12 @@ export const updateOrganizationCurrency = (organizationId, currency) =>
 
 export const getOrganizationContributionRates = (params) =>
   apiFetch("/api/super-admin/statutory-rates/organization-rates", { params });
+
+// Backfills GlobalStatutoryRate from the payroll engine's existing
+// per-country defaults — safe to call repeatedly, never overwrites an
+// existing rate.
+export const seedStatutoryRateDefaults = () =>
+  apiFetch("/api/super-admin/statutory-rates/seed-defaults", { method: "POST" });
 
 // ── Reports ──────────────────────────────────────────────────────────────
 

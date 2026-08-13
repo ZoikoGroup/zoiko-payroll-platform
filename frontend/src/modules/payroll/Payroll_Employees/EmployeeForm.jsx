@@ -1,62 +1,6 @@
 import React, { useState } from "react";
 import { createEmployee, updateEmployee, EMPLOYMENT_TYPES, EMPLOYEE_STATUSES, DEPARTMENTS } from "../../../service/payrollService";
-
-// Matches backend/app/modules/payroll/employee_validation.py exactly — these
-// are the six jurisdictions get_employee_validation_strategy() dispatches
-// on. Regex/required-field enforcement lives server-side (single source of
-// truth); this form only needs labels/choices to render the right inputs
-// and surface the backend's error message on failure.
-const COUNTRIES = [
-  { code: "IN", name: "India" },
-  { code: "US", name: "United States" },
-  { code: "UK", name: "United Kingdom" },
-  { code: "AU", name: "Australia" },
-  { code: "CA", name: "Canada" },
-  { code: "DE", name: "Germany" },
-];
-
-const COUNTRY_FIELD_SPECS = {
-  IN: [
-    { key: "esi_number", label: "ESI number", type: "text" },
-    { key: "tax_regime", label: "Tax regime", type: "select", choices: ["Old", "New"] },
-  ],
-  US: [
-    { key: "ssn", label: "SSN", type: "text", placeholder: "123-45-6789" },
-    { key: "flsa_status", label: "FLSA status", type: "select", choices: ["Exempt", "Non-Exempt"] },
-    { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"] },
-    { key: "aba_routing_number", label: "ABA routing number", type: "text", placeholder: "9 digits" },
-    { key: "state_tax_jurisdiction", label: "State tax jurisdiction", type: "text", placeholder: "e.g. CA" },
-  ],
-  UK: [
-    { key: "nino", label: "NINO", type: "text", placeholder: "QQ123456C" },
-    { key: "paye_tax_code", label: "PAYE tax code", type: "text", placeholder: "1257L" },
-    { key: "student_loan_plan", label: "Student loan plan", type: "select", choices: ["None", "Plan 1", "Plan 2", "Plan 4", "Postgraduate"] },
-    { key: "auto_enrolment_pension", label: "Auto-enrolment pension", type: "select", choices: ["true", "false"] },
-    { key: "sort_code", label: "Bank sort code", type: "text", placeholder: "6 digits" },
-  ],
-  AU: [
-    { key: "tfn", label: "TFN", type: "text", placeholder: "8-9 digits" },
-    { key: "help_stsl_debt", label: "HELP/STSL debt", type: "select", choices: ["true", "false"] },
-    { key: "super_fund_usi", label: "Super fund USI", type: "text" },
-    { key: "super_member_number", label: "Super member number", type: "text" },
-    { key: "bsb_code", label: "BSB code", type: "text", placeholder: "6 digits" },
-  ],
-  CA: [
-    { key: "sin", label: "SIN", type: "text", placeholder: "9 digits" },
-    { key: "td1_claim_amount", label: "TD1 claim amount", type: "text" },
-    { key: "province", label: "Province of employment", type: "select", choices: ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"] },
-    { key: "transit_number", label: "Bank transit number", type: "text", placeholder: "5 digits" },
-    { key: "financial_institution_number", label: "Financial institution number", type: "text", placeholder: "3 digits" },
-  ],
-  DE: [
-    { key: "steuer_id", label: "Steuer-ID", type: "text", placeholder: "11 digits" },
-    { key: "rv_nummer", label: "RV-Nummer", type: "text", placeholder: "12 characters" },
-    { key: "steuerklasse", label: "Steuerklasse", type: "select", choices: ["I", "II", "III", "IV", "V", "VI"] },
-    { key: "krankenkasse", label: "Krankenkasse", type: "text" },
-    { key: "iban", label: "IBAN", type: "text", placeholder: "DE + 20 digits" },
-    { key: "bic", label: "BIC", type: "text" },
-  ],
-};
+import { COUNTRIES, COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
 function emptyCompliance() {
   return {};
@@ -72,8 +16,6 @@ const EMPTY_FORM = {
   status: "Active",
   dateOfJoining: "",
   ctc: "",
-  basic: "",
-  hra: "",
   bankName: "",
   bankAccountNumber: "",
   ifscCode: "",
@@ -162,14 +104,8 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
       const payload = {
         ...form,
         ctc: Number(form.ctc),
-        // Empty string means the admin cleared the field — send explicit
-        // null so the backend actually nulls it out instead of silently
-        // keeping the old value. The backend's partial-update skips only
-        // "" (meaning "not touched"); undefined keys are dropped by
-        // JSON.stringify before they even reach it, and null is the only
-        // value that reliably signals "clear this field."
-        basic: form.basic !== "" ? Number(form.basic) : null,
-        hra: form.hra !== "" ? Number(form.hra) : null,
+        // Basic/HRA are no longer editable columns — the backend derives
+        // them from CTC (40% / 20%) whenever they're absent.
         phone: form.phone !== "" ? form.phone : null,
         bankName: form.bankName !== "" ? form.bankName : null,
         bankAccountNumber: form.bankAccountNumber !== "" ? form.bankAccountNumber : null,
@@ -251,15 +187,9 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
 
       <div className="border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
         <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Salary structure (annual)</h3>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label={`CTC (${symbol})`} error={errors.ctc}>
             <input type="number" min="0" className={`${inputClass} ${errors.ctc ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.ctc} onChange={(e) => update("ctc", e.target.value)} />
-          </Field>
-          <Field label={`Basic (${symbol})`}>
-            <input type="number" min="0" className={inputClass} value={form.basic} onChange={(e) => update("basic", e.target.value)} />
-          </Field>
-          <Field label={`HRA (${symbol})`}>
-            <input type="number" min="0" className={inputClass} value={form.hra} onChange={(e) => update("hra", e.target.value)} />
           </Field>
         </div>
       </div>

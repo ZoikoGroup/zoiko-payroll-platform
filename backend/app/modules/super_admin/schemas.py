@@ -71,6 +71,7 @@ class DashboardStats(BaseModel):
 
 class StatutoryRateCreate(BaseModel):
     jurisdiction_country: str = "IN"
+    jurisdiction_state: Optional[str] = None
     component_key: str
     label: str
     employee_share: str = ""
@@ -83,6 +84,7 @@ class StatutoryRateCreate(BaseModel):
 
 
 class StatutoryRateUpdate(BaseModel):
+    jurisdiction_state: Optional[str] = None
     label: Optional[str] = None
     employee_share: Optional[str] = None
     employer_share: Optional[str] = None
@@ -99,6 +101,7 @@ class StatutoryRateResponse(BaseModel):
 
     id: int
     jurisdiction_country: str
+    jurisdiction_state: Optional[str] = None
     component_key: str
     label: str
     employee_share: str

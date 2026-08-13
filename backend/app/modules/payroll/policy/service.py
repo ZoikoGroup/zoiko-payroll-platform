@@ -14,7 +14,7 @@ from typing import Optional
 from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import NotFoundException, BadRequestException
 from app.modules.payroll.policy.models import (
     PayrollPolicy, PolicyEmployeeCategory, PolicyLeaveRule,
     PolicyOvertimeRule, PolicyIntegration,
@@ -22,7 +22,7 @@ from app.modules.payroll.policy.models import (
 )
 from app.modules.payroll.policy.schemas import PayrollPolicyUpdate
 from app.modules.payroll.service import log_activity
-from app.modules.payroll.models import ActivityStatus
+from app.modules.payroll.models import ActivityStatus, CompanyComplianceDetails, JurisdictionPack
 
 
 # Mirrors current hardcoded production behavior exactly — this is what gets
@@ -62,6 +62,86 @@ def _policy_query(db: Session):
     )
 
 
+def _resolve_policy_lock(db: Session, organization_id: int) -> dict:
+    """The org's currently-assigned JurisdictionPack's policy_defaults, if
+    any. Returns {} — "fully overridable" — when the org has no compliance
+    pack assigned, or its pack never set policy_defaults, so every org that
+    predates this locking mechanism (or simply isn't governed by a pack)
+    behaves exactly as before.
+
+    Deliberately does NOT cross-check the pack's jurisdiction_country
+    against the org's own jurisdiction_country — no such validation exists
+    anywhere else in this codebase (assign_pack_to_organizations() doesn't
+    check it either), so "the org's applicable pack" is simply whatever
+    CompanyComplianceDetails.active_pack_id currently points to.
+    """
+    details = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == organization_id
+    ).first()
+    if not details or not details.active_pack_id:
+        return {}
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == details.active_pack_id).first()
+    return (pack.policy_defaults or {}) if pack else {}
+
+
+def _check_field_lock(locks: dict, path: tuple, value) -> None:
+    """Raises if `path` (e.g. ("calculation_mode",) or
+    ("employee_categories", "intern", "working_days")) is locked
+    (allowOverride is False in `locks`) and `value` differs from the
+    locked default. A no-op wherever `locks` doesn't mention this path at
+    all — only fields Super Admin explicitly locked are enforced."""
+    node = locks
+    for key in path:
+        if not isinstance(node, dict):
+            return
+        node = node.get(key)
+        if node is None:
+            return
+    if not isinstance(node, dict) or node.get("allowOverride", True):
+        return
+    if value != node.get("value"):
+        field_label = ".".join(str(p) for p in path)
+        raise BadRequestException(
+            f"'{field_label}' is locked by your organization's compliance policy "
+            f"and must stay set to {node.get('value')!r}."
+        )
+
+
+def _apply_policy_defaults(policy: PayrollPolicy, locks: dict) -> None:
+    """Force every locked field's value onto a freshly-seeded policy so a
+    brand-new org under a governed jurisdiction starts compliant on day
+    one, rather than only being enforced on its first edit."""
+    if not locks:
+        return
+    node = locks.get("calculation_mode")
+    if isinstance(node, dict) and node.get("value") is not None:
+        policy.calculation_mode = node["value"]
+
+
+def _apply_category_policy_defaults(category_row: "PolicyEmployeeCategory", locks: dict) -> None:
+    node = (locks.get("employee_categories") or {}).get(category_row.category)
+    if not isinstance(node, dict):
+        return
+    for field in ("working_days", "expected_hours", "minimum_hours", "paid_leave_eligible", "grace_time_minutes"):
+        field_node = node.get(field)
+        if isinstance(field_node, dict) and field_node.get("value") is not None:
+            setattr(category_row, field, field_node["value"])
+    # Interns never get paid leave, regardless of any pack default — same
+    # hard rule update_policy() enforces on every edit.
+    if category_row.category == EmployeeCategoryType.INTERN.value:
+        category_row.paid_leave_eligible = False
+
+
+def _apply_overtime_policy_defaults(overtime_row: "PolicyOvertimeRule", locks: dict) -> None:
+    node = locks.get("overtime_rule")
+    if not isinstance(node, dict):
+        return
+    for field in ("enabled", "minimum_overtime_minutes", "approval_required"):
+        field_node = node.get(field)
+        if isinstance(field_node, dict) and field_node.get("value") is not None:
+            setattr(overtime_row, field, field_node["value"])
+
+
 def _seed_default_policy(db: Session, organization_id: int) -> PayrollPolicy:
     policy = PayrollPolicy(
         organization_id=organization_id,
@@ -75,13 +155,23 @@ def _seed_default_policy(db: Session, organization_id: int) -> PayrollPolicy:
     db.add(policy)
     db.flush()  # get policy.id without committing yet
 
+    # An org already governed by a compliance pack (assigned before this,
+    # its very first, policy row is created) starts compliant immediately —
+    # not just enforced on its first edit.
+    locks = _resolve_policy_lock(db, organization_id)
+    _apply_policy_defaults(policy, locks)
+
     for category, defaults in DEFAULT_CATEGORY_DEFAULTS.items():
-        db.add(PolicyEmployeeCategory(policy_id=policy.id, category=category, **defaults))
+        category_row = PolicyEmployeeCategory(policy_id=policy.id, category=category, **defaults)
+        _apply_category_policy_defaults(category_row, locks)
+        db.add(category_row)
 
     for rule_type in LeaveRuleType:
         db.add(PolicyLeaveRule(policy_id=policy.id, rule_type=rule_type.value, config={}))
 
-    db.add(PolicyOvertimeRule(policy_id=policy.id, enabled=False, minimum_overtime_minutes=30, approval_required=True))
+    overtime_row = PolicyOvertimeRule(policy_id=policy.id, enabled=False, minimum_overtime_minutes=30, approval_required=True)
+    _apply_overtime_policy_defaults(overtime_row, locks)
+    db.add(overtime_row)
 
     for category, provider_key, enabled in DEFAULT_INTEGRATIONS:
         db.add(PolicyIntegration(policy_id=policy.id, category=category, provider_key=provider_key, enabled=enabled))
@@ -105,6 +195,10 @@ def get_active_policy(db: Session, organization_id: int) -> PayrollPolicy:
     )
     if not policy:
         policy = _seed_default_policy(db, organization_id)
+    # In-memory only (not a mapped column) — lets PayrollPolicyResponse
+    # surface which fields the org's compliance pack has locked, without
+    # a second round trip from the frontend.
+    policy.policy_locks = _resolve_policy_lock(db, organization_id)
     return policy
 
 
@@ -125,6 +219,26 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
     updates = data.model_dump(exclude_unset=True, by_alias=False)
     category_updates = updates.pop("employee_categories", None)
     overtime_update = updates.pop("overtime_rule", None)
+
+    # Read-only validation pass — reject any field the org's assigned
+    # compliance pack has explicitly locked (allowOverride=false) if the
+    # client is trying to set it to something other than the locked value.
+    # A no-op (locks == {}) for any org with no pack assigned, so this
+    # changes nothing for every policy that predates jurisdiction packs.
+    locks = _resolve_policy_lock(db, organization_id)
+    if locks:
+        for field, value in updates.items():
+            _check_field_lock(locks, (field,), value)
+        for cat_data in (category_updates or []):
+            cat_key = cat_data.get("category")
+            for field, value in cat_data.items():
+                if field in ("category", "id"):
+                    continue
+                _check_field_lock(locks, ("employee_categories", cat_key, field), value)
+        if overtime_update:
+            for field, value in overtime_update.items():
+                if field != "id" and value is not None:
+                    _check_field_lock(locks, ("overtime_rule", field), value)
 
     for field, value in updates.items():
         if hasattr(policy, field):
@@ -164,6 +278,7 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
     db.commit()
     db.refresh(policy)
     log_activity(db, organization_id, f"Payroll policy '{policy.name}' updated.", ActivityStatus.SUCCESS)
+    policy.policy_locks = locks
     return policy
 
 
