@@ -8,13 +8,13 @@ import {
 const STATUS_OPTIONS = ["Draft", "In Review", "QA", "Approved", "Active", "Deprecated", "Retired"];
 
 const STATUS_COLORS = {
-  Draft: "bg-[#9E9690]/10 text-[#9E9690]",
-  "In Review": "bg-[#35B6F5]/10 text-[#35B6F5]",
-  QA: "bg-[#F8A60A]/10 text-[#F8A60A]",
-  Approved: "bg-[#19C58A]/10 text-[#19C58A]",
-  Active: "bg-[#19C58A]/10 text-[#19C58A]",
-  Deprecated: "bg-[#FF6E86]/10 text-[#FF6E86]",
-  Retired: "bg-[#9E9690]/10 text-[#9E9690]",
+  Draft: "bg-foreground-muted/10 text-foreground-muted",
+  "In Review": "bg-info/10 text-info",
+  QA: "bg-warning/10 text-warning",
+  Approved: "bg-primary/10 text-primary",
+  Active: "bg-primary/10 text-primary",
+  Deprecated: "bg-error/10 text-error",
+  Retired: "bg-foreground-muted/10 text-foreground-muted",
 };
 
 export default function PackMetadataPanel({ country, state, addToast }) {
@@ -82,16 +82,16 @@ export default function PackMetadataPanel({ country, state, addToast }) {
   };
 
   return (
-    <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+    <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="flex items-center gap-2 mb-5">
-        <div className="p-1.5 rounded-[10px] bg-[#9D7BF2]/10">
-          <Layers size={16} className="text-[#9D7BF2]" />
+        <div className="p-1.5 rounded-[10px] bg-category-teal/10">
+          <Layers size={16} className="text-category-teal" />
         </div>
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Pack Identity & Metadata</h3>
+        <h3 className="text-[15px] font-bold text-foreground">Pack Identity & Metadata</h3>
       </div>
 
-      <div className="rounded-[12px] bg-[#F8A60A]/10 border border-[#F8A60A]/20 px-4 py-3 mb-5">
-        <p className="text-[12px] font-semibold text-[#F8A60A]">
+      <div className="rounded-[12px] bg-warning/10 border border-warning/20 px-4 py-3 mb-5">
+        <p className="text-[12px] font-semibold text-warning">
           Note: Activation changes governance metadata only. Live payroll calculations must be updated via the Tax Engine Configuration.
         </p>
       </div>
@@ -101,11 +101,11 @@ export default function PackMetadataPanel({ country, state, addToast }) {
         <TextField label="Version" placeholder="e.g. 1.0" value={meta.version} onChange={(v) => update("version", v)} />
 
         <div>
-          <label className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5 block">Pack Status</label>
+          <label className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5 block">Pack Status</label>
           <select
             value={meta.status}
             onChange={(e) => update("status", e.target.value)}
-            className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+            className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
           >
             {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -125,8 +125,8 @@ export default function PackMetadataPanel({ country, state, addToast }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between mt-6 pt-5 border-t border-[#E5E0D9] dark:border-[#38312D]">
-        <p className="text-[13px] text-[#9E9690]">
+      <div className="flex items-center justify-between mt-6 pt-5 border-t border-border">
+        <p className="text-[13px] text-foreground-muted">
           {loading
             ? "Loading pack metadata..."
             : !loaded
@@ -136,7 +136,7 @@ export default function PackMetadataPanel({ country, state, addToast }) {
         <button
           onClick={handleSave}
           disabled={saving || loading}
-          className="rounded-[12px] bg-[#19C58A] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 flex items-center gap-2"
+          className="rounded-[12px] bg-primary px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 flex items-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           {saving ? "Saving..." : "Save Pack Metadata"}
@@ -149,13 +149,13 @@ export default function PackMetadataPanel({ country, state, addToast }) {
 function TextField({ label, value, onChange, placeholder, type = "text" }) {
   return (
     <div>
-      <label className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5 block">{label}</label>
+      <label className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5 block">{label}</label>
       <input
         type={type}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+        className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
       />
     </div>
   );

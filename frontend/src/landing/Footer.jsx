@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 
 const styles = {
   root: {
-    backgroundColor: "#110d2e",
+    backgroundColor: "#082B45",
     color: "#ffffff",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     width: "100%",
@@ -27,14 +27,7 @@ const styles = {
     width: "36px",
     height: "36px",
     borderRadius: "8px",
-    background: "linear-gradient(135deg, #f97316 40%, #3b82f6 100%)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "18px",
-    color: "#ffffff",
-    fontWeight: "700",
-    fontStyle: "italic",
+    objectFit: "contain",
   },
   logoText: { fontSize: "16px", fontWeight: "700", color: "#ffffff" },
   brandDesc: {
@@ -46,7 +39,7 @@ const styles = {
   colTitle: {
     fontSize: "11.5px",
     fontWeight: "700",
-    color: "#f97316",
+    color: "#20A9E8",
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     marginBottom: "14px",
@@ -80,7 +73,7 @@ export default function Footer() {
       <div style={styles.main}>
         <div style={styles.brand}>
           <div style={styles.logoWrap}>
-            <div style={styles.logoIcon}>1</div>
+            <img src="/zoikopayroll-icon.png" alt="" style={styles.logoIcon} />
             <span style={styles.logoText}>Zoiko Payroll</span>
           </div>
           <p style={styles.brandDesc}>

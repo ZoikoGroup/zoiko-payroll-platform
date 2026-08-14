@@ -116,8 +116,8 @@ export default function StatutoryRatesPage() {
     return (
       <div>
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8]">Statutory Rates</h1>
-          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">
+          <h1 className="text-2xl font-bold text-foreground">Statutory Rates</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
             Pick a jurisdiction to manage its platform default rates and see every organization's actual configured
             contribution rates — the same jurisdictions as Compliance, isolated the same way.
           </p>
@@ -139,18 +139,18 @@ export default function StatutoryRatesPage() {
         <div>
           <button
             onClick={handleBackToGrid}
-            className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-[#A69B93] hover:text-orange-500 mb-2"
+            className="flex items-center gap-1.5 text-xs font-medium text-foreground-muted hover:text-primary mb-2"
           >
             <ArrowLeft size={13} /> All Jurisdictions
           </button>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8] flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 dark:bg-black text-[10px] font-bold text-white">
               {countryCode}
             </span>
             {selectedJurisdiction.name}
-            {selectedState && <span className="text-slate-400 dark:text-[#756B64] font-normal">/ {selectedState}</span>}
+            {selectedState && <span className="text-foreground-disabled font-normal">/ {selectedState}</span>}
           </h1>
-          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">
+          <p className="text-sm text-foreground-muted mt-0.5">
             {selectedJurisdiction.currency || "N/A"} · Rates configured here apply only to{" "}
             {selectedState || selectedJurisdiction.name}.
           </p>
@@ -160,7 +160,7 @@ export default function StatutoryRatesPage() {
             <select
               value={selectedState}
               onChange={(e) => setSelectedState(e.target.value)}
-              className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+              className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground"
             >
               <option value="">Country-level (no state)</option>
               {availableStates.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -170,14 +170,14 @@ export default function StatutoryRatesPage() {
             onClick={handleSeedDefaults}
             disabled={busy}
             title="Backfill from the payroll engine's existing per-country defaults — safe to run anytime, never overwrites an existing rate"
-            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm font-medium text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
           >
             <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
             Sync Engine Defaults
           </button>
           <button
             onClick={() => setModal("new")}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"
           >
             <Plus size={16} />
             Add Rate
@@ -185,7 +185,7 @@ export default function StatutoryRatesPage() {
           <button
             onClick={load}
             disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
           >
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             Refresh
@@ -199,10 +199,10 @@ export default function StatutoryRatesPage() {
         </p>
       )}
 
-      <h2 className="text-sm font-semibold text-slate-700 dark:text-[#D8D2CB] mb-3">Platform Default Rates</h2>
-      <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm overflow-hidden mb-8">
+      <h2 className="text-sm font-semibold text-foreground-secondary mb-3">Platform Default Rates</h2>
+      <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden mb-8">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Key</th>
               <th className="px-4 py-3">Label</th>
@@ -215,12 +215,12 @@ export default function StatutoryRatesPage() {
           </thead>
           <tbody>
             {rates.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100 dark:border-[#38312D] hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-[#D8D2CB]">{r.component_key}</td>
-                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">{r.label}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employee_share || "—"}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employer_share || "—"}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.total || "—"}</td>
+              <tr key={r.id} className="border-t border-border-light hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{r.component_key}</td>
+                <td className="px-4 py-3 font-medium text-foreground">{r.label}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.employee_share || "—"}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.employer_share || "—"}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.total || "—"}</td>
                 <td className="px-4 py-3">
                   <StatusPill status={r.is_active ? "active" : "inactive"} />
                 </td>
@@ -229,7 +229,7 @@ export default function StatutoryRatesPage() {
                     <button
                       onClick={() => setModal(r)}
                       title="Edit rate"
-                      className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-slate-600 dark:text-[#A69B93] hover:bg-slate-200 dark:hover:bg-white/20"
+                      className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-foreground-secondary hover:bg-slate-200 dark:hover:bg-white/20"
                     >
                       <Pencil size={14} />
                     </button>
@@ -248,18 +248,18 @@ export default function StatutoryRatesPage() {
         </table>
         {!loading && rates.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <Landmark size={28} className="text-slate-300 dark:text-[#38312D]" />
-            <p className="text-sm text-slate-400 dark:text-[#756B64]">
+            <Landmark size={28} className="text-border-strong" />
+            <p className="text-sm text-foreground-disabled">
               No platform default rates for {selectedJurisdiction.name}{selectedState ? ` / ${selectedState}` : ""} yet.
             </p>
           </div>
         )}
       </div>
 
-      <h2 className="text-sm font-semibold text-slate-700 dark:text-[#D8D2CB] mb-3">Organization Contribution Rates (actual, currently configured)</h2>
-      <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm overflow-hidden overflow-x-auto">
+      <h2 className="text-sm font-semibold text-foreground-secondary mb-3">Organization Contribution Rates (actual, currently configured)</h2>
+      <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden overflow-x-auto">
         <table className="w-full text-sm min-w-[900px]">
-          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Organization</th>
               <th className="px-4 py-3">Key</th>
@@ -272,16 +272,16 @@ export default function StatutoryRatesPage() {
           </thead>
           <tbody>
             {orgRates.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100 dark:border-[#38312D]">
-                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">
-                  {r.organizationName} <span className="ml-1 font-mono text-xs text-slate-400 dark:text-[#756B64]">{r.organizationCode}</span>
+              <tr key={r.id} className="border-t border-border-light">
+                <td className="px-4 py-3 font-medium text-foreground">
+                  {r.organizationName} <span className="ml-1 font-mono text-xs text-foreground-disabled">{r.organizationCode}</span>
                 </td>
-                <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-[#D8D2CB]">{r.componentKey}</td>
-                <td className="px-4 py-3 text-slate-700 dark:text-[#D8D2CB]">{r.label}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employeeShare || "—"}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.employerShare || "—"}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{r.total || "—"}</td>
-                <td className="px-4 py-3 text-xs text-slate-500 dark:text-[#A69B93]">
+                <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{r.componentKey}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.label}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.employeeShare || "—"}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.employerShare || "—"}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.total || "—"}</td>
+                <td className="px-4 py-3 text-xs text-foreground-muted">
                   {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
                 </td>
               </tr>
@@ -290,8 +290,8 @@ export default function StatutoryRatesPage() {
         </table>
         {!loading && orgRates.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <Building2 size={28} className="text-slate-300 dark:text-[#38312D]" />
-            <p className="text-sm text-slate-400 dark:text-[#756B64]">
+            <Building2 size={28} className="text-border-strong" />
+            <p className="text-sm text-foreground-disabled">
               No organization in {selectedJurisdiction.name} has configured contribution rates yet.
             </p>
           </div>

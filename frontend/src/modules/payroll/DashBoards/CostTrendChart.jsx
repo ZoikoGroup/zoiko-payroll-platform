@@ -32,8 +32,8 @@ function fmt(n, currencyCode) {
 function ChartTooltip({ active, payload, label, currencyCode }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-[14px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
-      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#9E9690]">{label}</p>
+    <div className="rounded-[14px] border border-border bg-surface-muted px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-foreground-muted">{label}</p>
       {payload.map((p) => (
         <p key={p.dataKey} className="flex items-center gap-2 text-[13px] font-semibold" style={{ color: p.color }}>
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: p.color }} />
@@ -46,15 +46,15 @@ function ChartTooltip({ active, payload, label, currencyCode }) {
 
 function PillToggle({ options, value, onChange }) {
   return (
-    <div className="flex gap-0.5 rounded-[12px] bg-[#F0EDE8] dark:bg-[#38312D] p-1">
+    <div className="flex gap-0.5 rounded-[12px] bg-surface-muted p-1">
       {options.map((opt) => (
         <button
           key={opt.id}
           onClick={() => onChange(opt.id)}
           className={`rounded-[10px] px-4 py-1.5 text-[11px] font-bold transition-all duration-200 ${
             value === opt.id
-              ? "bg-white dark:bg-[#221D1A] text-[#1A1816] dark:text-[#F0EDE8] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-              : "text-[#9E9690] hover:text-[#1A1816] dark:hover:text-[#F0EDE8]"
+              ? "bg-surface text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+              : "text-foreground-muted hover:text-foreground"
           }`}
         >
           {opt.label}
@@ -66,8 +66,8 @@ function PillToggle({ options, value, onChange }) {
 
 function EmptyState({ message }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-[#9E9690]">
-      <div className="mb-3 h-10 w-10 rounded-full bg-[#F0EDE8] dark:bg-[#38312D] flex items-center justify-center">
+    <div className="flex flex-col items-center justify-center py-20 text-foreground-muted">
+      <div className="mb-3 h-10 w-10 rounded-full bg-surface-muted flex items-center justify-center">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 3v18h18" />
           <path d="M18 17V9" />
@@ -125,8 +125,8 @@ export default function CostTrendChart({ refreshTick, currencyCode }) {
   const showGross = series === "gross" || series === "both";
   const showNet = series === "net" || series === "both";
 
-  const GROSS_COLOR = "#19C58A";
-  const NET_COLOR = "#35B6F5";
+  const GROSS_COLOR = "var(--color-primary)";
+  const NET_COLOR = "var(--color-category-teal)";
 
   // Fixed Y-axis ceiling computed from BOTH datasets, regardless of which
   // toggle is active — otherwise recharts auto-scales the axis to only the
@@ -137,9 +137,9 @@ export default function CostTrendChart({ refreshTick, currencyCode }) {
   const yAxisMax = rawMax === 0 ? 1000 : Math.ceil((rawMax * 1.1) / 50000) * 50000;
 
   return (
-    <div className="rounded-[18px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+    <div className="rounded-[18px] border border-border bg-surface p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="mb-6 flex items-center justify-between">
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+        <h3 className="text-[15px] font-bold text-foreground">
           Payroll Cost Trend
         </h3>
         <PillToggle
@@ -155,7 +155,7 @@ export default function CostTrendChart({ refreshTick, currencyCode }) {
 
       {loading ? (
         <div className="flex items-center justify-center py-24">
-          <Loader2 size={22} className="animate-spin text-[#19C58A]" />
+          <Loader2 size={22} className="animate-spin text-primary" />
         </div>
       ) : trendData.length === 0 ? (
         <EmptyState message="No payroll trend data yet. Complete a payroll run to see trends." />
@@ -172,18 +172,18 @@ export default function CostTrendChart({ refreshTick, currencyCode }) {
                 <stop offset="100%" stopColor={NET_COLOR} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E0D9" dark={{ stroke: "#38312D" }} vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
             <XAxis
               dataKey="month"
-              tick={{ fontSize: 11, fill: "#9E9690", fontWeight: 500 }}
-              axisLine={{ stroke: "#E5E0D9" }}
+              tick={{ fontSize: 11, fill: "var(--color-foreground-muted)", fontWeight: 500 }}
+              axisLine={{ stroke: "var(--color-border)" }}
               tickLine={false}
               dy={8}
             />
             <YAxis
               domain={[0, yAxisMax]}
               allowDecimals={false}
-              tick={{ fontSize: 11, fill: "#9E9690", fontWeight: 500 }}
+              tick={{ fontSize: 11, fill: "var(--color-foreground-muted)", fontWeight: 500 }}
               axisLine={false}
               tickLine={false}
               tickFormatter={(v) => `${getCurrencySymbol(currencyCode)}${(v / 1000).toFixed(0)}k`}

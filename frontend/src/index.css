@@ -2,9 +2,82 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --color-primary: #087CC1;
+  --color-primary-hover: #1596D1;
+  --color-primary-active: #0B3554;
+  --color-primary-light: #DCEFFA;
+
+  --color-brand-navy: #082B45;
+  --color-brand-navy-deep: #0B3554;
+  --color-brand-blue: #087CC1;
+  --color-brand-cyan: #20A9E8;
+
+  --color-background: #F7FAFC;
+  --color-background-secondary: #F1F6FA;
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #EEF6FB;
+
+  --color-foreground: #082B45;
+  --color-foreground-secondary: #52677A;
+  --color-foreground-muted: #718596;
+  --color-foreground-disabled: #9AAAB7;
+
+  --color-border: #D7E3EB;
+  --color-border-light: #E4EDF3;
+  --color-border-strong: #C6D6E0;
+
+  --color-success: #16845B;
+  --color-success-light: #E3F5EC;
+  --color-warning: #B7791F;
+  --color-warning-light: #FBF0DE;
+  --color-error: #D64545;
+  --color-error-light: #FBE7E7;
+  --color-info: #1677B7;
+  --color-info-light: #E3F1FA;
+  --color-category-teal: #0F9B8E;
+  --color-category-teal-light: #E1F4F2;
+
+  --color-focus-ring: #1596D1;
+}
+
+.dark {
+  --color-primary: #1596D1;
+  --color-primary-hover: #20A9E8;
+  --color-primary-active: #087CC1;
+  --color-primary-light: #123350;
+
+  --color-background: #0A1E30;
+  --color-background-secondary: #0D2740;
+  --color-surface: #0F2A42;
+  --color-surface-muted: #123350;
+
+  --color-foreground: #EAF2F8;
+  --color-foreground-secondary: #A9C2D6;
+  --color-foreground-muted: #7C97AC;
+  --color-foreground-disabled: #5D7688;
+
+  --color-border: #1E3A54;
+  --color-border-light: #17304A;
+  --color-border-strong: #2C4C68;
+
+  --color-success: #2EAF82;
+  --color-success-light: #123B2E;
+  --color-warning: #D99A3D;
+  --color-warning-light: #3A2C13;
+  --color-error: #E86A6A;
+  --color-error-light: #3B1A1A;
+  --color-info: #3B9FDE;
+  --color-info-light: #122E42;
+  --color-category-teal: #2BC4B5;
+  --color-category-teal-light: #0F332F;
+
+  --color-focus-ring: #20A9E8;
+}
+
 body {
-  background-color: #f3f4f6;
-  color: #111827;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
 }
 
 /* Cross-browser hidden-but-functional scrollbar. Scrolling (wheel, trackpad,

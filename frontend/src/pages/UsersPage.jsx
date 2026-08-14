@@ -94,7 +94,7 @@ export default function UsersPage() {
         <select
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
         >
           <option value="">All roles</option>
           {ROLES.map((r) => (
@@ -137,7 +137,7 @@ export default function UsersPage() {
               <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors">
                 <td className="px-4 py-3 font-medium text-slate-800">
                   <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-orange-600">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
                       {initialsFor(u.first_name, u.last_name, u.email)}
                     </span>
                     {u.first_name} {u.last_name}

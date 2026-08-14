@@ -116,6 +116,10 @@ def _apply_policy_defaults(policy: PayrollPolicy, locks: dict) -> None:
     node = locks.get("calculation_mode")
     if isinstance(node, dict) and node.get("value") is not None:
         policy.calculation_mode = node["value"]
+    for field in ("basic_pct", "hra_pct"):
+        node = locks.get(field)
+        if isinstance(node, dict) and node.get("value") is not None:
+            setattr(policy, field, node["value"])
 
 
 def _apply_category_policy_defaults(category_row: "PolicyEmployeeCategory", locks: dict) -> None:

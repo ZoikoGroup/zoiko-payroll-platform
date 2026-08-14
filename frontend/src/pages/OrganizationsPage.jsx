@@ -133,7 +133,7 @@ export default function OrganizationsPage() {
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const INPUT =
-    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500";
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring";
 
   return (
     <div>
@@ -157,7 +157,7 @@ export default function OrganizationsPage() {
           </button>
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"
           >
             <Plus size={16} />
             New Organization
@@ -189,7 +189,7 @@ export default function OrganizationsPage() {
               <tr key={org.id} className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors">
                 <td className="px-4 py-3 font-medium text-slate-800">
                   <div className="flex items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-orange-600">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
                       {initialsFor(org.organization_name)}
                     </span>
                     {org.organization_name}
@@ -296,7 +296,7 @@ export default function OrganizationsPage() {
               <button
                 type="submit"
                 disabled={busy}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50"
               >
                 {busy
                   ? modalMode === "edit" ? "Saving…" : "Creating…"

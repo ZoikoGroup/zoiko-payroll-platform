@@ -12,25 +12,25 @@ import {
 } from "../../../../service/payrollService";
 
 const inputClass =
-  "w-full h-10 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-[#9D7BF2]/30 disabled:opacity-60 transition-all duration-150";
+  "w-full h-10 rounded-[10px] border border-border bg-background px-3.5 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-category-teal/30 disabled:opacity-60 transition-all duration-150";
 const textareaClass =
-  "w-full rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-[#9D7BF2]/30 disabled:opacity-60 transition-all duration-150";
+  "w-full rounded-[10px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-category-teal/30 disabled:opacity-60 transition-all duration-150";
 
 // ── Shared presentational pieces ─────────────────────────────────────────
 
 function Card({ title, icon: Icon, subtitle, actions, children }) {
   return (
-    <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-[#E5E0D9] dark:border-[#38312D]">
+    <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-border">
         <div className="flex items-center gap-2.5 min-w-0">
           {Icon && (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[#9D7BF2]/10">
-              <Icon size={15} className="text-[#9D7BF2]" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-category-teal/10">
+              <Icon size={15} className="text-category-teal" />
             </div>
           )}
           <div className="min-w-0">
-            <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8] truncate">{title}</p>
-            {subtitle && <p className="text-[11px] text-[#9E9690] truncate">{subtitle}</p>}
+            <p className="text-[14px] font-bold text-foreground truncate">{title}</p>
+            {subtitle && <p className="text-[11px] text-foreground-muted truncate">{subtitle}</p>}
           </div>
         </div>
         {actions}
@@ -43,9 +43,9 @@ function Card({ title, icon: Icon, subtitle, actions, children }) {
 function Field({ label, children, hint }) {
   return (
     <label className="block">
-      <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">{label}</span>
+      <span className="block text-[12px] font-semibold text-foreground-muted mb-1.5">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-[#9E9690] mt-1">{hint}</span>}
+      {hint && <span className="block text-[11px] text-foreground-muted mt-1">{hint}</span>}
     </label>
   );
 }
@@ -63,7 +63,7 @@ function PercentInput({ value, onChange, disabled, placeholder }) {
         value={value}
         onChange={onChange}
       />
-      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-[#9E9690]">%</span>
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-foreground-muted">%</span>
     </div>
   );
 }
@@ -74,9 +74,9 @@ const STATUS_META = {
   verified: { label: "Verified", tone: "green" },
 };
 const TONE_CLASSES = {
-  amber: "bg-[#F8A60A]/10 text-[#F8A60A] border-[#F8A60A]/20",
-  blue: "bg-[#35B6F5]/10 text-[#35B6F5] border-[#35B6F5]/20",
-  green: "bg-[#19C58A]/10 text-[#19C58A] border-[#19C58A]/20",
+  amber: "bg-warning/10 text-warning border-warning/20",
+  blue: "bg-info/10 text-info border-info/20",
+  green: "bg-primary/10 text-primary border-primary/20",
 };
 
 function StatusBadge({ status }) {
@@ -229,26 +229,26 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
   const missingItems = checklist.items.filter((i) => !i.done);
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-[#F8F7F4] dark:bg-[#1A1816]">
+    <div className="fixed inset-0 z-40 flex flex-col bg-background">
       {/* ── Header (fixed) ── */}
-      <header className="shrink-0 flex items-center justify-between gap-4 border-b border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-6 py-4">
+      <header className="shrink-0 flex items-center justify-between gap-4 border-b border-border bg-surface px-6 py-4">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onClose}
             title="Back"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] text-[#6B6560] dark:text-[#A69B93] hover:border-[#9D7BF2] hover:text-[#9D7BF2] transition-all duration-200"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border bg-surface-muted text-foreground-muted hover:border-category-teal hover:text-category-teal transition-all duration-200"
           >
             <ArrowLeft size={16} />
           </button>
           <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#F0EDE8] dark:bg-[#38312D] text-[20px] leading-none"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-surface-muted text-[20px] leading-none"
             title={meta.code}
           >
             {meta.flag}
           </span>
           <div className="min-w-0">
-            <h1 className="text-[17px] font-bold text-[#1A1816] dark:text-[#F0EDE8] truncate">{meta.name}</h1>
-            <p className="text-[12px] text-[#9E9690] truncate">
+            <h1 className="text-[17px] font-bold text-foreground truncate">{meta.name}</h1>
+            <p className="text-[12px] text-foreground-muted truncate">
               {meta.code} &middot; {meta.currency} &middot; Tax Year {meta.financialYear}
             </p>
           </div>
@@ -261,7 +261,7 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
         <div className="max-w-[1440px] mx-auto p-6 lg:p-8">
           {loading ? (
             <div className="flex items-center justify-center py-32">
-              <Loader2 size={24} className="animate-spin text-[#9D7BF2]" />
+              <Loader2 size={24} className="animate-spin text-category-teal" />
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 items-start">
@@ -296,26 +296,26 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
                 <Card title="Tax Slabs" icon={Percent} subtitle="Live rates the payroll engine calculates against, plus anything extracted from uploaded documents">
                   <div className="space-y-4">
                     {taxSlabStatus.loadState === "ready" && taxSlabStatus.activeSlabCount === 0 && (
-                      <div className="rounded-[14px] border border-dashed border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-6 py-8 text-center">
-                        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#9D7BF2]/10">
-                          <Percent size={20} className="text-[#9D7BF2]" />
+                      <div className="rounded-[14px] border border-dashed border-border bg-background px-6 py-8 text-center">
+                        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-category-teal/10">
+                          <Percent size={20} className="text-category-teal" />
                         </div>
-                        <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">No Tax Slabs Configured</p>
-                        <p className="text-[12px] text-[#9E9690] mt-1 mb-4">
+                        <p className="text-[14px] font-bold text-foreground">No Tax Slabs Configured</p>
+                        <p className="text-[12px] text-foreground-muted mt-1 mb-4">
                           Upload a compliance document to auto-extract slabs, or add one manually below.
                         </p>
                         <div className="flex items-center justify-center gap-2.5">
                           <button
                             onClick={onClose}
                             title="Closes this workspace so you can open the Documents tab"
-                            className="flex items-center gap-2 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-4 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:border-[#9D7BF2] hover:text-[#9D7BF2] transition-all duration-200"
+                            className="flex items-center gap-2 rounded-[10px] border border-border bg-surface px-4 py-2 text-[13px] font-semibold text-foreground-muted hover:border-category-teal hover:text-category-teal transition-all duration-200"
                           >
                             <Upload size={14} /> Upload Compliance Document
                           </button>
                           <button
                             disabled
                             title="Coming soon"
-                            className="flex items-center gap-2 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-4 py-2 text-[13px] font-semibold text-[#9E9690] opacity-60 cursor-not-allowed"
+                            className="flex items-center gap-2 rounded-[10px] border border-border bg-surface px-4 py-2 text-[13px] font-semibold text-foreground-muted opacity-60 cursor-not-allowed"
                           >
                             <Plus size={14} /> Add Tax Slab Manually
                           </button>
@@ -328,15 +328,15 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
 
                 <Card title="Employer &amp; Employee Contributions" icon={Users} subtitle="Statutory contribution rates for this jurisdiction">
                   {rates.length === 0 ? (
-                    <p className="text-[13px] text-[#9E9690]">No contribution components for this jurisdiction.</p>
+                    <p className="text-[13px] text-foreground-muted">No contribution components for this jurisdiction.</p>
                   ) : (
                     <div className="space-y-3">
                       {rates.map((r) => (
                         <div
                           key={r.componentKey}
-                          className="grid grid-cols-1 sm:grid-cols-[1fr_140px_140px_auto] items-center gap-3 rounded-[12px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3"
+                          className="grid grid-cols-1 sm:grid-cols-[1fr_140px_140px_auto] items-center gap-3 rounded-[12px] bg-background px-4 py-3"
                         >
-                          <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8] truncate">{r.label}</span>
+                          <span className="text-[13px] font-semibold text-foreground truncate">{r.label}</span>
                           <PercentInput
                             disabled={!canEdit}
                             placeholder="Employee"
@@ -352,7 +352,7 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
                           <button
                             disabled={!canEdit || savingRateKey === r.componentKey}
                             onClick={() => handleSaveRate(r)}
-                            className="flex items-center justify-center gap-1.5 rounded-[10px] bg-[#9D7BF2]/10 px-4 py-2 text-[12px] font-bold text-[#9D7BF2] hover:bg-[#9D7BF2]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="flex items-center justify-center gap-1.5 rounded-[10px] bg-category-teal/10 px-4 py-2 text-[12px] font-bold text-category-teal hover:bg-category-teal/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {savingRateKey === r.componentKey && <Loader2 size={12} className="animate-spin" />}
                             {savingRateKey === r.componentKey ? "Saving…" : "Save"}
@@ -423,7 +423,7 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
               {/* ── Right column: context, status, summary ── */}
               <div className="space-y-6 min-w-0">
                 <Card title="Uploaded Compliance Document" icon={FileText}>
-                  <p className="text-[12px] text-[#9E9690]">
+                  <p className="text-[12px] text-foreground-muted">
                     No document is linked to this jurisdiction from this screen. Upload and manage compliance
                     documents from the Documents tab — extracted tax slabs will then appear above automatically.
                   </p>
@@ -431,8 +431,8 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
 
                 <Card title="AI Extraction Status" icon={Sparkles}>
                   <div className="flex items-center gap-2.5">
-                    <CircleDashed size={16} className="text-[#9E9690]" />
-                    <p className="text-[12px] text-[#9E9690]">No extraction run yet for this jurisdiction.</p>
+                    <CircleDashed size={16} className="text-foreground-muted" />
+                    <p className="text-[12px] text-foreground-muted">No extraction run yet for this jurisdiction.</p>
                   </div>
                 </Card>
 
@@ -446,8 +446,8 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
                       ["Required Reports", compliance.requiredReports ? compliance.requiredReports.split(",").filter((s) => s.trim()).length : 0],
                     ].map(([label, value]) => (
                       <div key={label} className="flex items-center justify-between gap-3 text-[12px]">
-                        <dt className="text-[#9E9690]">{label}</dt>
-                        <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8] text-right">{value}</dd>
+                        <dt className="text-foreground-muted">{label}</dt>
+                        <dd className="font-semibold text-foreground text-right">{value}</dd>
                       </div>
                     ))}
                   </dl>
@@ -456,14 +456,14 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
                 {showValidation && (
                   <Card title="Validation" icon={AlertTriangle}>
                     {missingItems.length === 0 ? (
-                      <div className="flex items-center gap-2 text-[13px] font-semibold text-[#19C58A]">
+                      <div className="flex items-center gap-2 text-[13px] font-semibold text-primary">
                         <CheckCircle2 size={16} /> Everything looks complete.
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        <p className="text-[12px] text-[#9E9690]">Not yet complete:</p>
+                        <p className="text-[12px] text-foreground-muted">Not yet complete:</p>
                         {missingItems.map((i) => (
-                          <div key={i.key} className="flex items-center gap-2 text-[12px] font-semibold text-[#F8A60A]">
+                          <div key={i.key} className="flex items-center gap-2 text-[12px] font-semibold text-warning">
                             <AlertTriangle size={13} /> {i.label}
                           </div>
                         ))}
@@ -477,25 +477,25 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
                     {checklist.items.map((i) => (
                       <div key={i.key} className="flex items-center gap-2.5 text-[13px]">
                         {i.done ? (
-                          <CheckCircle2 size={15} className="text-[#19C58A] shrink-0" />
+                          <CheckCircle2 size={15} className="text-primary shrink-0" />
                         ) : i.partial ? (
-                          <AlertTriangle size={15} className="text-[#F8A60A] shrink-0" />
+                          <AlertTriangle size={15} className="text-warning shrink-0" />
                         ) : (
-                          <CircleDashed size={15} className="text-[#9E9690] shrink-0" />
+                          <CircleDashed size={15} className="text-foreground-muted shrink-0" />
                         )}
-                        <span className={i.done ? "text-[#1A1816] dark:text-[#F0EDE8] font-semibold" : "text-[#9E9690]"}>
+                        <span className={i.done ? "text-foreground font-semibold" : "text-foreground-muted"}>
                           {i.label}
                         </span>
                       </div>
                     ))}
                   </div>
-                  <div className="h-2 bg-[#F0EDE8] dark:bg-[#38312D] rounded-full overflow-hidden">
+                  <div className="h-2 bg-surface-muted rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-[#19C58A] transition-all duration-300"
+                      className="h-full rounded-full bg-primary transition-all duration-300"
                       style={{ width: `${checklist.pct}%` }}
                     />
                   </div>
-                  <p className="text-[11px] font-bold text-[#9E9690] mt-2 text-right">{checklist.pct}% Complete</p>
+                  <p className="text-[11px] font-bold text-foreground-muted mt-2 text-right">{checklist.pct}% Complete</p>
                 </Card>
               </div>
             </div>
@@ -505,21 +505,21 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
 
       {/* ── Footer (fixed) ── */}
       {!loading && (
-        <footer className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-6 py-4">
-          <div className="flex items-center gap-2 text-[12px] text-[#9E9690]">
+        <footer className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface px-6 py-4">
+          <div className="flex items-center gap-2 text-[12px] text-foreground-muted">
             <Info size={13} />
             {checklist.pct}% complete
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
-              className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-colors"
+              className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-foreground-muted hover:bg-surface-muted transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={() => setShowValidation(true)}
-              className="flex items-center gap-2 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] px-4 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:border-[#9D7BF2] hover:text-[#9D7BF2] transition-all duration-200"
+              className="flex items-center gap-2 rounded-[10px] border border-border bg-surface-muted px-4 py-2 text-[13px] font-semibold text-foreground-muted hover:border-category-teal hover:text-category-teal transition-all duration-200"
             >
               <ListChecks size={14} /> Validate
             </button>
@@ -527,7 +527,7 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
               <button
                 onClick={() => handleSaveSections(false)}
                 disabled={saving}
-                className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-colors disabled:opacity-60"
+                className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-foreground-muted hover:bg-surface-muted transition-colors disabled:opacity-60"
               >
                 Save Draft
               </button>
@@ -536,7 +536,7 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
               <button
                 onClick={() => handleSaveSections(true)}
                 disabled={saving}
-                className="flex items-center gap-2 rounded-[10px] bg-[#35B6F5] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#2AA0DE] transition-colors disabled:opacity-60"
+                className="flex items-center gap-2 rounded-[10px] bg-info px-4 py-2 text-[13px] font-bold text-white hover:bg-info transition-colors disabled:opacity-60"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
                 Mark as Configured
@@ -546,7 +546,7 @@ export default function JurisdictionConfigPanel({ meta, jurisdiction, onClose, o
               <button
                 onClick={handleVerify}
                 disabled={saving}
-                className="flex items-center gap-2 rounded-[10px] bg-[#19C58A] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#15B07A] transition-colors disabled:opacity-60"
+                className="flex items-center gap-2 rounded-[10px] bg-primary px-4 py-2 text-[13px] font-bold text-white hover:bg-primary-hover transition-colors disabled:opacity-60"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
                 Verify

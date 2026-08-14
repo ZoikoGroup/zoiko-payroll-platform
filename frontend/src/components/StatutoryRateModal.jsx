@@ -55,7 +55,7 @@ function toPayload(form) {
 }
 
 const INPUT =
-  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500";
+  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring";
 
 export default function StatutoryRateModal({ rate, defaultCountry, defaultState, lockJurisdiction, onSave, onClose, busy }) {
   const [form, setForm] = useState(toForm(rate, defaultCountry, defaultState));
@@ -153,7 +153,7 @@ export default function StatutoryRateModal({ rate, defaultCountry, defaultState,
           <button
             onClick={() => onSave(toPayload(form))}
             disabled={busy || !form.component_key.trim() || !form.label.trim()}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50"
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50"
           >
             {busy ? "Saving…" : rate ? "Save Changes" : "Create"}
           </button>

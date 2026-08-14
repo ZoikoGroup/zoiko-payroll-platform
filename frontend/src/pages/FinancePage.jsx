@@ -59,21 +59,21 @@ function CurrencyManagerModal({ onClose }) {
 
   return (
     <Modal title="Manage Organization Currencies" onClose={onClose} maxWidth="max-w-2xl">
-      <p className="text-sm text-slate-500 dark:text-[#A69B93] mb-4">
+      <p className="text-sm text-foreground-muted mb-4">
         Set an explicit currency for an organization when it differs from its jurisdiction's default. Leave as
         "Auto (from jurisdiction)" to keep using the derived currency.
       </p>
       {loading ? (
-        <p className="py-8 text-center text-sm text-slate-400 dark:text-[#756B64]">Loading…</p>
+        <p className="py-8 text-center text-sm text-foreground-disabled">Loading…</p>
       ) : (
-        <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200 dark:border-[#38312D]">
+        <div className="max-h-96 overflow-y-auto rounded-lg border border-border">
           {orgs.map((org) => {
             const derived = getCurrencyForCountry(org.jurisdictionCountry);
             return (
-              <div key={org.id} className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-[#38312D] px-3.5 py-3 last:border-b-0">
+              <div key={org.id} className="flex items-center justify-between gap-3 border-b border-border-light px-3.5 py-3 last:border-b-0">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800 dark:text-[#F0EDE8]">{org.organizationName}</p>
-                  <p className="truncate text-xs text-slate-400 dark:text-[#756B64]">
+                  <p className="truncate text-sm font-medium text-foreground">{org.organizationName}</p>
+                  <p className="truncate text-xs text-foreground-disabled">
                     {org.jurisdictionCountry || "No jurisdiction set"}
                     {derived ? ` · default ${derived.code}` : ""}
                   </p>
@@ -82,7 +82,7 @@ function CurrencyManagerModal({ onClose }) {
                   value={org.currency || ""}
                   disabled={savingId === org.id}
                   onChange={(e) => handleChange(org, e.target.value)}
-                  className="w-56 shrink-0 rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] py-1.5 px-2.5 text-sm text-slate-700 dark:text-[#F0EDE8] disabled:opacity-50"
+                  className="w-56 shrink-0 rounded-lg border border-border bg-background py-1.5 px-2.5 text-sm text-foreground disabled:opacity-50"
                 >
                   <option value="">Auto (from jurisdiction)</option>
                   {currencyOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
@@ -91,7 +91,7 @@ function CurrencyManagerModal({ onClose }) {
             );
           })}
           {orgs.length === 0 && (
-            <p className="py-8 text-center text-sm text-slate-400 dark:text-[#756B64]">No organizations found.</p>
+            <p className="py-8 text-center text-sm text-foreground-disabled">No organizations found.</p>
           )}
         </div>
       )}
@@ -101,13 +101,13 @@ function CurrencyManagerModal({ onClose }) {
 
 function SummaryCard({ icon: Icon, label, value, accent }) {
   return (
-    <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm p-5">
+    <div className="bg-surface border border-border rounded-xl shadow-sm p-5">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8]">{value}</div>
-          <div className="text-xs text-slate-500 dark:text-[#A69B93] mt-1">{label}</div>
+          <div className="text-2xl font-bold text-foreground">{value}</div>
+          <div className="text-xs text-foreground-muted mt-1">{label}</div>
         </div>
-        <Icon size={20} className={accent || "text-orange-500"} />
+        <Icon size={20} className={accent || "text-primary"} />
       </div>
     </div>
   );
@@ -171,24 +171,24 @@ export default function FinancePage() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8] flex items-center gap-2">
-            <Wallet size={22} className="text-orange-500" /> Finance
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <Wallet size={22} className="text-primary" /> Finance
           </h1>
-          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">
+          <p className="text-sm text-foreground-muted mt-0.5">
             Cross-organization payroll financial overview. Does not replace an org's own Payroll module.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCurrencyManager(true)}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5"
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5"
           >
             <Coins size={15} /> Manage Currencies
           </button>
           <button
             onClick={load}
             disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
           >
             <RefreshCcw size={15} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
@@ -203,31 +203,31 @@ export default function FinancePage() {
       </div>
 
       <div className="mb-6">
-        <h2 className="text-sm font-semibold text-slate-700 dark:text-[#D8D2CB] mb-3">Totals by Jurisdiction (currency-safe — never combined)</h2>
+        <h2 className="text-sm font-semibold text-foreground-secondary mb-3">Totals by Jurisdiction (currency-safe — never combined)</h2>
         {!summary || summary.byCountry.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-[#756B64]">No payroll data for the selected filters.</p>
+          <p className="text-sm text-foreground-disabled">No payroll data for the selected filters.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {summary.byCountry.map((row) => {
               const currencyInfo = getCurrencyForCountry(row.country);
               return (
-              <div key={row.country} className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm p-4">
+              <div key={row.country} className="bg-surface border border-border rounded-xl shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-[#F0EDE8]">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     {row.country}
                     {currencyInfo && (
-                      <span className="rounded-full bg-orange-50 dark:bg-orange-950/30 px-2 py-0.5 text-[11px] font-semibold text-orange-600 dark:text-orange-400">
+                      <span className="rounded-full bg-primary-light dark:bg-primary-active/30 px-2 py-0.5 text-[11px] font-semibold text-primary-hover">
                         {currencyInfo.symbol} {currencyInfo.code}
                       </span>
                     )}
                   </span>
-                  <span className="text-xs text-slate-400 dark:text-[#756B64]">{row.organizations} org(s) · {row.payrollRuns} run(s)</span>
+                  <span className="text-xs text-foreground-disabled">{row.organizations} org(s) · {row.payrollRuns} run(s)</span>
                 </div>
                 <dl className="space-y-1.5 text-sm">
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-[#A69B93]">Gross Pay</dt><dd className="font-medium text-slate-800 dark:text-[#F0EDE8]">{money(row.grossPay, row.country)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-[#A69B93]">Net Pay</dt><dd className="font-medium text-slate-800 dark:text-[#F0EDE8]">{money(row.netPay, row.country)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-[#A69B93]">Deductions</dt><dd className="text-slate-600 dark:text-[#D8D2CB]">{money(row.totalDeductions, row.country)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-[#A69B93]">Employer Cost</dt><dd className="text-slate-600 dark:text-[#D8D2CB]">{money(row.employerCost, row.country)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-foreground-muted">Gross Pay</dt><dd className="font-medium text-foreground">{money(row.grossPay, row.country)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-foreground-muted">Net Pay</dt><dd className="font-medium text-foreground">{money(row.netPay, row.country)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-foreground-muted">Deductions</dt><dd className="text-foreground-secondary">{money(row.totalDeductions, row.country)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{money(row.employerCost, row.country)}</dd></div>
                 </dl>
               </div>
               );
@@ -237,15 +237,15 @@ export default function FinancePage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]">
+        <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Organizations</option>
           {organizations.map((o) => <option key={o.id} value={o.id}>{o.organization_name}</option>)}
         </select>
-        <select value={country} onChange={(e) => setCountry(e.target.value)} className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]">
+        <select value={country} onChange={(e) => setCountry(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Jurisdictions</option>
           {jurisdictions.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]">
+        <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Statuses</option>
           {RUN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -256,9 +256,9 @@ export default function FinancePage() {
         <p className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">{error}</p>
       )}
 
-      <div className="bg-white dark:bg-[#221D1A] rounded-xl shadow-sm dark:border dark:border-[#38312D] overflow-hidden overflow-x-auto">
+      <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
         <table className="w-full text-sm min-w-[900px]">
-          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Organization</th>
               <th className="px-4 py-3">Jurisdiction</th>
@@ -275,21 +275,21 @@ export default function FinancePage() {
             {overview.items.map((row) => {
               const resolvedCurrency = resolveCurrencyCode(row.currency, row.jurisdictionCountry);
               return (
-              <tr key={row.id} className="border-t border-slate-100 dark:border-[#38312D]">
-                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">{row.organizationName}</td>
-                <td className="px-4 py-3 text-slate-500 dark:text-[#A69B93]">{row.jurisdictionCountry || "—"}</td>
+              <tr key={row.id} className="border-t border-border-light">
+                <td className="px-4 py-3 font-medium text-foreground">{row.organizationName}</td>
+                <td className="px-4 py-3 text-foreground-muted">{row.jurisdictionCountry || "—"}</td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 dark:bg-white/10 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-[#D8D2CB]">
+                  <span className="rounded-full bg-slate-100 dark:bg-white/10 px-2 py-0.5 text-xs font-semibold text-foreground-secondary">
                     {resolvedCurrency || "—"}
                   </span>
-                  {row.currency && <span className="ml-1 text-[10px] text-orange-500" title="Explicit override">override</span>}
+                  {row.currency && <span className="ml-1 text-[10px] text-primary" title="Explicit override">override</span>}
                 </td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{row.periodLabel}</td>
-                <td className="px-4 py-3 text-slate-500 dark:text-[#A69B93]">{row.payDate}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{row.periodLabel}</td>
+                <td className="px-4 py-3 text-foreground-muted">{row.payDate}</td>
                 <td className="px-4 py-3"><StatusPill status={STATUS_PILL_MAP[row.status] || "pending"} label={row.status} /></td>
-                <td className="px-4 py-3 text-right font-medium text-slate-800 dark:text-[#F0EDE8]">{money(row.grossPay, row.jurisdictionCountry, row.currency)}</td>
-                <td className="px-4 py-3 text-right font-medium text-slate-800 dark:text-[#F0EDE8]">{money(row.netPay, row.jurisdictionCountry, row.currency)}</td>
-                <td className="px-4 py-3 text-right text-slate-500 dark:text-[#A69B93]">{money(row.employerCost, row.jurisdictionCountry, row.currency)}</td>
+                <td className="px-4 py-3 text-right font-medium text-foreground">{money(row.grossPay, row.jurisdictionCountry, row.currency)}</td>
+                <td className="px-4 py-3 text-right font-medium text-foreground">{money(row.netPay, row.jurisdictionCountry, row.currency)}</td>
+                <td className="px-4 py-3 text-right text-foreground-muted">{money(row.employerCost, row.jurisdictionCountry, row.currency)}</td>
               </tr>
               );
             })}
@@ -297,18 +297,18 @@ export default function FinancePage() {
         </table>
         {!loading && overview.items.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <Wallet size={28} className="text-slate-300 dark:text-[#38312D]" />
-            <p className="text-sm text-slate-400 dark:text-[#756B64]">No payroll runs match these filters.</p>
+            <Wallet size={28} className="text-border-strong" />
+            <p className="text-sm text-foreground-disabled">No payroll runs match these filters.</p>
           </div>
         )}
       </div>
 
       {overview.total > pageSize && (
-        <div className="flex items-center justify-between mt-3 text-sm text-slate-500 dark:text-[#A69B93]">
+        <div className="flex items-center justify-between mt-3 text-sm text-foreground-muted">
           <span>Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, overview.total)} of {overview.total}</span>
           <div className="flex gap-2">
-            <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-1.5 disabled:opacity-40">Previous</button>
-            <button disabled={(page + 1) * pageSize >= overview.total} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-1.5 disabled:opacity-40">Next</button>
+            <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Previous</button>
+            <button disabled={(page + 1) * pageSize >= overview.total} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Next</button>
           </div>
         </div>
       )}

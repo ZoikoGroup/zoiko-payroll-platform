@@ -24,21 +24,15 @@ export default function OrgPortalPage() {
   const roleLabel = user?.role ? ROLE_LABELS[user.role] || user.role : "—";
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-orange-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-light via-white to-primary-light px-4">
       <div className="w-full max-w-md">
-        <div className="mb-8 flex items-center justify-center gap-2">
-          <span
-            className="grid h-10 w-10 place-items-center rounded-lg text-lg font-bold italic text-white"
-            style={{ background: "linear-gradient(135deg, #f97316 40%, #3b82f6 100%)" }}
-          >
-            1
-          </span>
-          <span className="text-lg font-bold tracking-tight text-slate-900">Zoiko Payroll</span>
+        <div className="mb-8 flex items-center justify-center">
+          <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-9 w-auto object-contain" />
         </div>
 
         <div className="rounded-2xl border border-slate-200/80 bg-white p-8 shadow-xl shadow-slate-900/[0.04]">
           <div className="flex justify-center">
-            <div className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/25">
+            <div className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-brand-blue to-category-teal shadow-lg shadow-brand-blue/25">
               <UserCircle2 size={32} className="text-white" />
             </div>
           </div>
@@ -51,7 +45,7 @@ export default function OrgPortalPage() {
           <div className="mt-6 space-y-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Role</span>
-              <span className="inline-block rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+              <span className="inline-block rounded-full bg-primary-light px-2.5 py-0.5 text-xs font-medium text-info">
                 {roleLabel}
               </span>
             </div>
@@ -74,7 +68,7 @@ export default function OrgPortalPage() {
           {(user?.role === ROLES.ORG_ADMIN || user?.role === ROLES.PAYROLL_ADMIN) && (
             <Link
               to="/payroll"
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 px-4 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:from-indigo-600 hover:to-violet-700"
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-brand-blue to-category-teal px-4 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:from-brand-blue hover:to-category-teal"
             >
               Go to Payroll
             </Link>

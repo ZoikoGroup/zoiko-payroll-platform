@@ -241,9 +241,9 @@ export default function PayrollRunsPage() {
   const isWizard = view === "wizard";
 
   return (
-    <div className="flex h-full min-h-screen bg-[#F8F7F4] dark:bg-[#1A1816] font-sans">
-      <aside className="w-[200px] flex-shrink-0 flex flex-col border-r border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-5">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-5">
+    <div className="flex h-full min-h-screen bg-background font-sans">
+      <aside className="w-[200px] flex-shrink-0 flex flex-col border-r border-border bg-surface p-5">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-5">
           Run Progress
         </p>
         <div className="flex-1 space-y-1">
@@ -257,20 +257,20 @@ export default function PayrollRunsPage() {
                     <div
                     className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${
                       completed
-                        ? "border-[#19C58A] bg-[#19C58A] text-white"
+                        ? "border-primary bg-primary text-white"
                         : active
-                        ? "border-[#19C58A] bg-[#19C58A]/10 text-[#19C58A] ring-4 ring-[#19C58A]/20"
-                        : "border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] text-[#9E9690]"
+                        ? "border-primary bg-primary/10 text-primary ring-4 ring-primary/20"
+                        : "border-border bg-surface text-foreground-muted"
                     }`}
                   >
                     {completed ? <Check size={14} /> : <StepIcon size={14} />}
                   </div>
                   {i < WIZARD_STEPS.length - 1 && (
-                    <div className={`w-px h-5 my-0.5 ${completed || active ? "bg-[#19C58A]" : "bg-[#E5E0D9] dark:bg-[#38312D]"}`} />
+                    <div className={`w-px h-5 my-0.5 ${completed || active ? "bg-primary" : "bg-border"}`} />
                   )}
                 </div>
                 <div className="pt-1.5">
-                  <p className={`text-xs font-semibold ${completed || active ? "text-[#1A1816] dark:text-[#F0EDE8]" : "text-[#9E9690]"}`}>
+                  <p className={`text-xs font-semibold ${completed || active ? "text-foreground" : "text-foreground-muted"}`}>
                     {step.label}
                   </p>
                 </div>
@@ -279,25 +279,25 @@ export default function PayrollRunsPage() {
           })}
         </div>
         {jurisdictionCountry && (
-          <div className="mt-4 rounded-[12px] bg-[#F8F7F4] dark:bg-[#2A2520] border border-[#E5E0D9] dark:border-[#38312D] p-3">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1">Jurisdiction</p>
-            <p className="text-xs font-bold text-[#1A1816] dark:text-[#F0EDE8]">{jurisdictionCountry}</p>
-            {jurisdictionState && <p className="text-[10px] text-[#9E9690] mt-0.5">{jurisdictionState}</p>}
+          <div className="mt-4 rounded-[12px] bg-surface-muted border border-border p-3">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">Jurisdiction</p>
+            <p className="text-xs font-bold text-foreground">{jurisdictionCountry}</p>
+            {jurisdictionState && <p className="text-[10px] text-foreground-muted mt-0.5">{jurisdictionState}</p>}
           </div>
         )}
-        <div className="mt-3 rounded-[12px] bg-[#F8F7F4] dark:bg-[#2A2520] border border-[#E5E0D9] dark:border-[#38312D] p-3">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1">Policy Mode</p>
-          <p className={`text-xs font-bold ${calculationMode === "simple" ? "text-[#F8A60A]" : "text-[#19C58A]"}`}>
+        <div className="mt-3 rounded-[12px] bg-surface-muted border border-border p-3">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">Policy Mode</p>
+          <p className={`text-xs font-bold ${calculationMode === "simple" ? "text-warning" : "text-primary"}`}>
             {CALCULATION_MODE_LABELS[calculationMode] || "Standard Payroll"}
           </p>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col overflow-auto">
-        <header className="flex items-center justify-between px-8 py-5 border-b border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A]">
+        <header className="flex items-center justify-between px-8 py-5 border-b border-border bg-surface">
           <div>
-            <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">Payroll Runs</h1>
-            <p className="text-[13px] text-[#9E9690] mt-0.5">
+            <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payroll Runs</h1>
+            <p className="text-[13px] text-foreground-muted mt-0.5">
               {isWizard ? `Processing payroll for ${jurisdictionCountry}` : "View and manage existing payroll runs"}
             </p>
           </div>
@@ -306,7 +306,7 @@ export default function PayrollRunsPage() {
               <button
                 onClick={startWizard}
                 disabled={loadingEmployees}
-                className="flex items-center gap-2 bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus size={15} />
                 {loadingEmployees ? "Loading…" : "Create New Run"}
@@ -314,7 +314,7 @@ export default function PayrollRunsPage() {
             ) : (
               <button
                 onClick={() => { setView("list"); setWizardStep(0); setEmployees([]); setSelectedEmployees([]); setPreviewData(null); }}
-                className="flex items-center gap-2 border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-4 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#FF6E86] hover:text-[#FF6E86]"
+                className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-error hover:text-error"
               >
                 Cancel
               </button>
@@ -327,19 +327,19 @@ export default function PayrollRunsPage() {
             <div className="space-y-6">
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  { label: "Total Runs", value: stats.total, accent: "text-[#1A1816] dark:text-[#F0EDE8]" },
-                  { label: "Pending Review", value: stats.pending, accent: "text-[#F8A60A]" },
-                  { label: "Paid", value: stats.paid, accent: "text-[#19C58A]" },
+                  { label: "Total Runs", value: stats.total, accent: "text-foreground" },
+                  { label: "Pending Review", value: stats.pending, accent: "text-warning" },
+                  { label: "Paid", value: stats.paid, accent: "text-primary" },
                 ].map((c) => (
-                  <div key={c.label} className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">{c.label}</p>
+                  <div key={c.label} className="bg-surface border border-border rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">{c.label}</p>
                     <p className={`mt-2 text-3xl font-extrabold ${c.accent}`}>{c.value}</p>
                   </div>
                 ))}
               </div>
-              <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
                 <div className="flex items-center justify-between p-5">
-                  <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Payroll Runs</h3>
+                  <h3 className="text-[15px] font-bold text-foreground">Payroll Runs</h3>
                 </div>
                 <div className="px-5 pb-5">
                   <RunsTable runs={runs} onSelect={setSelectedRun} onDelete={handleRunChanged} isWizardMode={false} fmtCurrency={fmtCurrency} />
@@ -378,29 +378,29 @@ export default function PayrollRunsPage() {
 
       {showConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 w-full max-w-md shadow-xl">
+          <div className="bg-surface border border-border rounded-[18px] p-6 w-full max-w-md shadow-xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F8A60A]/10 text-[#F8A60A]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/10 text-warning">
                 <AlertTriangle size={20} />
               </div>
-              <h3 className="text-lg font-bold text-[#1A1816] dark:text-[#F0EDE8]">Confirm Payroll Run</h3>
+              <h3 className="text-lg font-bold text-foreground">Confirm Payroll Run</h3>
             </div>
-            <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93] mb-4">
+            <p className="text-[13px] text-foreground-muted mb-4">
               Please ensure all <strong>attendance records</strong> have been recorded for the selected period before creating the payroll run. Missing attendance data may result in incorrect calculations.
             </p>
-            <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93] mb-6">
+            <p className="text-[13px] text-foreground-muted mb-6">
               <strong>Note:</strong> Only <strong>Active Employees</strong> will be included in this payroll run.
             </p>
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => { setShowConfirmModal(false); setConfirmAttendanceChecked(false); }}
-                className="px-4 py-2 rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:border-[#FF6E86] hover:text-[#FF6E86] transition-colors"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 rounded-[12px] border border-border text-[13px] font-semibold text-foreground-muted hover:border-error hover:text-error transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmCreate}
-                className="px-4 py-2 rounded-[12px] bg-[#19C58A] text-[13px] font-bold text-white hover:bg-[#15B07A] transition-colors"
+                className="px-4 py-2 rounded-[12px] bg-primary text-[13px] font-bold text-white hover:bg-primary-hover transition-colors"
               >
                 Confirm & Create
               </button>

@@ -88,7 +88,7 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
 
   return (
     <Modal title="Invite Payroll Admin" onClose={onClose} maxWidth="max-w-xl">
-      <p className="text-sm text-slate-500 dark:text-[#A69B93] mb-4">
+      <p className="text-sm text-foreground-muted mb-4">
         They'll receive an email with a link to set their own password. Payroll Admin is the only role you can
         invite here.
       </p>
@@ -99,8 +99,8 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
           onClick={() => setSource("employee")}
           className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
             source === "employee"
-              ? "bg-white dark:bg-[#221D1A] text-slate-900 dark:text-[#F0EDE8] shadow-sm"
-              : "text-slate-500 dark:text-[#A69B93]"
+              ? "bg-surface text-foreground shadow-sm"
+              : "text-foreground-muted"
           }`}
         >
           From Existing Employee
@@ -110,8 +110,8 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
           onClick={() => setSource("manual")}
           className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
             source === "manual"
-              ? "bg-white dark:bg-[#221D1A] text-slate-900 dark:text-[#F0EDE8] shadow-sm"
-              : "text-slate-500 dark:text-[#A69B93]"
+              ? "bg-surface text-foreground shadow-sm"
+              : "text-foreground-muted"
           }`}
         >
           Enter Manually
@@ -126,14 +126,14 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
               value={employeeSearch}
               onChange={(e) => setEmployeeSearch(e.target.value)}
               placeholder="Search your organization's employees…"
-              className="w-full rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] py-2 pl-8 pr-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+              className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-sm text-foreground"
             />
           </div>
-          <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 dark:border-[#38312D]">
+          <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
             {employeesLoading ? (
-              <p className="py-6 text-center text-sm text-slate-400 dark:text-[#756B64]">Loading employees…</p>
+              <p className="py-6 text-center text-sm text-foreground-disabled">Loading employees…</p>
             ) : filteredEmployees.length === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-400 dark:text-[#756B64]">
+              <p className="py-6 text-center text-sm text-foreground-disabled">
                 No matching active employees with an email on file.
               </p>
             ) : (
@@ -145,18 +145,18 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
                     type="button"
                     disabled={alreadyInvited}
                     onClick={() => selectEmployee(emp)}
-                    className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 dark:border-[#38312D] px-3.5 py-2.5 text-left last:border-b-0 ${
+                    className={`flex w-full items-center justify-between gap-3 border-b border-border-light px-3.5 py-2.5 text-left last:border-b-0 ${
                       selectedEmployeeId === emp.id
-                        ? "bg-orange-50 dark:bg-orange-950/20"
-                        : "hover:bg-slate-50 dark:hover:bg-white/5"
+                        ? "bg-primary-light dark:bg-primary-active/20"
+                        : "hover:bg-surface-muted"
                     } ${alreadyInvited ? "opacity-40 cursor-not-allowed" : ""}`}
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium text-slate-800 dark:text-[#F0EDE8]">{emp.name}</span>
-                      <span className="block truncate text-xs text-slate-400 dark:text-[#756B64]">{emp.email}</span>
+                      <span className="block truncate text-sm font-medium text-foreground">{emp.name}</span>
+                      <span className="block truncate text-xs text-foreground-disabled">{emp.email}</span>
                     </span>
                     {alreadyInvited && (
-                      <span className="shrink-0 text-[11px] text-slate-400 dark:text-[#756B64]">Already a user</span>
+                      <span className="shrink-0 text-[11px] text-foreground-disabled">Already a user</span>
                     )}
                   </button>
                 );
@@ -169,46 +169,46 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
       {(source === "manual" || selectedEmployeeId) && (
         <form onSubmit={handleSubmit} className="space-y-3">
           {source === "employee" && selectedEmployeeId && (
-            <p className="text-xs text-slate-500 dark:text-[#A69B93]">
+            <p className="text-xs text-foreground-muted">
               Pre-filled from the employee record — you can still adjust it below before sending.
             </p>
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-[#D8D2CB] mb-1">First name</label>
+              <label className="block text-xs font-medium text-foreground-secondary mb-1">First name</label>
               <input
                 required
                 value={form.firstName}
                 onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))}
-                className="w-full rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+                className="w-full rounded-lg border border-border bg-background py-2 px-3 text-sm text-foreground"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-[#D8D2CB] mb-1">Last name</label>
+              <label className="block text-xs font-medium text-foreground-secondary mb-1">Last name</label>
               <input
                 required
                 value={form.lastName}
                 onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))}
-                className="w-full rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+                className="w-full rounded-lg border border-border bg-background py-2 px-3 text-sm text-foreground"
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-[#D8D2CB] mb-1">Email</label>
+            <label className="block text-xs font-medium text-foreground-secondary mb-1">Email</label>
             <input
               required
               type="email"
               value={form.email}
               onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-              className="w-full rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+              className="w-full rounded-lg border border-border bg-background py-2 px-3 text-sm text-foreground"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 dark:text-[#D8D2CB] mb-1">Phone (optional)</label>
+            <label className="block text-xs font-medium text-foreground-secondary mb-1">Phone (optional)</label>
             <input
               value={form.phone}
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-              className="w-full rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]"
+              className="w-full rounded-lg border border-border bg-background py-2 px-3 text-sm text-foreground"
             />
           </div>
           <div className="flex justify-end gap-3 pt-2">
@@ -216,14 +216,14 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
               type="button"
               onClick={onClose}
               disabled={busy}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 dark:text-[#D8D2CB] bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-50"
+              className="px-4 py-2 rounded-lg text-sm font-medium text-foreground-secondary bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={busy}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50"
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50"
             >
               {busy ? "Sending…" : "Send Invite"}
             </button>
@@ -285,8 +285,8 @@ export default function TeamPage() {
   if (!isOrgAdmin) {
     return (
       <div className="p-6 lg:p-8 flex flex-col items-center justify-center gap-2 py-20 text-center">
-        <Users size={28} className="text-slate-300 dark:text-[#38312D]" />
-        <p className="text-sm text-slate-400 dark:text-[#756B64]">
+        <Users size={28} className="text-border-strong" />
+        <p className="text-sm text-foreground-disabled">
           Only an Organization Admin can manage the team.
         </p>
       </div>
@@ -294,11 +294,11 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8">
+    <div className="bg-background min-h-screen p-6 lg:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8]">Team</h1>
-          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">
+          <h1 className="text-2xl font-bold text-foreground">Team</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
             Invite Payroll Admins into your organization and manage their access.
           </p>
         </div>
@@ -306,14 +306,14 @@ export default function TeamPage() {
           <button
             onClick={load}
             disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
           >
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             Refresh
           </button>
           <button
             onClick={() => setShowInvite(true)}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600"
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"
           >
             <UserPlus size={16} />
             Invite Payroll Admin
@@ -329,9 +329,9 @@ export default function TeamPage() {
         </p>
       )}
 
-      <div className="bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Email</th>
@@ -343,16 +343,16 @@ export default function TeamPage() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-t border-slate-100 dark:border-[#38312D]">
-                <td className="px-4 py-3 font-medium text-slate-800 dark:text-[#F0EDE8]">
+              <tr key={u.id} className="border-t border-border-light">
+                <td className="px-4 py-3 font-medium text-foreground">
                   {u.first_name} {u.last_name}
                 </td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{u.email}</td>
-                <td className="px-4 py-3 text-slate-600 dark:text-[#D8D2CB]">{ROLE_LABELS[u.role] || u.role}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{u.email}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{ROLE_LABELS[u.role] || u.role}</td>
                 <td className="px-4 py-3">
                   <StatusPill status={u.is_active ? "active" : "inactive"} />
                 </td>
-                <td className="px-4 py-3 text-xs text-slate-500 dark:text-[#A69B93]">
+                <td className="px-4 py-3 text-xs text-foreground-muted">
                   {new Date(u.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3">
@@ -361,7 +361,7 @@ export default function TeamPage() {
                       <button
                         onClick={() => handleResend(u)}
                         title="Resend invite email"
-                        className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-slate-600 dark:text-[#A69B93] hover:bg-slate-200 dark:hover:bg-white/20"
+                        className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-foreground-secondary hover:bg-slate-200 dark:hover:bg-white/20"
                       >
                         <Mail size={14} />
                       </button>
@@ -383,8 +383,8 @@ export default function TeamPage() {
         </table>
         {!loading && users.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <Users size={28} className="text-slate-300 dark:text-[#38312D]" />
-            <p className="text-sm text-slate-400 dark:text-[#756B64]">No team members yet.</p>
+            <Users size={28} className="text-border-strong" />
+            <p className="text-sm text-foreground-disabled">No team members yet.</p>
           </div>
         )}
       </div>

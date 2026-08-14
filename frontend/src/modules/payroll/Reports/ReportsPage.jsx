@@ -141,24 +141,24 @@ export default function ReportsPage() {
   }, []);
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8 space-y-6">
+    <div className="bg-background min-h-screen p-6 lg:p-8 space-y-6">
       <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-[12px] bg-[#19C58A] flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
+        <div className="h-10 w-10 rounded-[12px] bg-primary flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
           <BarChart3 size={20} className="text-white" />
         </div>
         <div>
-          <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">Payroll Reports</h1>
-          <p className="text-[13px] font-medium text-[#9E9690]">Generate and download payroll reports</p>
+          <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payroll Reports</h1>
+          <p className="text-[13px] font-medium text-foreground-muted">Generate and download payroll reports</p>
         </div>
       </div>
 
-      <div className="flex gap-1 bg-[#F0EDE8] dark:bg-[#38312D] rounded-[14px] p-1 w-fit flex-wrap">
+      <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-[12px] text-[13px] font-semibold transition-all duration-200 ${
-              activeTab === t.id ? "bg-white dark:bg-[#221D1A] text-[#19C58A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-[#9E9690] hover:text-[#1A1816] dark:hover:text-[#F0EDE8]"
+              activeTab === t.id ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-foreground-muted hover:text-foreground"
             }`}
           >
             <t.icon size={15} />
@@ -170,71 +170,71 @@ export default function ReportsPage() {
       {activeTab === "payroll-reports" && (
         <div className="space-y-6">
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
-              <div className="p-2.5 rounded-[12px] bg-[#19C58A]/10">
-                <FileText className="w-5 h-5 text-[#19C58A]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <div className="p-2.5 rounded-[12px] bg-primary/10">
+                <FileText className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{reports.length}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Total Reports</p>
+                <p className="text-[22px] font-bold text-foreground">{reports.length}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Total Reports</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
-              <div className="p-2.5 rounded-[12px] bg-[#35B6F5]/10">
-                <TrendingUp className="w-5 h-5 text-[#35B6F5]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <div className="p-2.5 rounded-[12px] bg-info/10">
+                <TrendingUp className="w-5 h-5 text-info" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{thisPeriodLabel}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">This Period</p>
+                <p className="text-[22px] font-bold text-foreground">{thisPeriodLabel}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">This Period</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
-              <div className="p-2.5 rounded-[12px] bg-[#F8A60A]/10">
-                <Download className="w-5 h-5 text-[#F8A60A]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <div className="p-2.5 rounded-[12px] bg-warning/10">
+                <Download className="w-5 h-5 text-warning" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{downloadCount}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Downloads</p>
+                <p className="text-[22px] font-bold text-foreground">{downloadCount}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Downloads</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+          <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
             {loading ? (
               <div className="text-center py-12 space-y-3">
                 <div className="flex justify-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-[#19C58A] animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <div className="h-2 w-2 rounded-full bg-[#19C58A] animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <div className="h-2 w-2 rounded-full bg-[#19C58A] animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <div className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
                 </div>
-                <p className="text-[13px] text-[#9E9690]">Loading reports...</p>
+                <p className="text-[13px] text-foreground-muted">Loading reports...</p>
               </div>
             ) : reports.length === 0 ? (
               <div className="text-center py-16">
-                <BarChart3 size={40} className="mx-auto mb-3 text-[#9E9690]" />
-                <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">No reports yet</p>
-                <p className="text-[13px] text-[#9E9690] mt-1">Reports will appear here once payroll runs are completed</p>
+                <BarChart3 size={40} className="mx-auto mb-3 text-foreground-muted" />
+                <p className="text-[15px] font-bold text-foreground">No reports yet</p>
+                <p className="text-[13px] text-foreground-muted mt-1">Reports will appear here once payroll runs are completed</p>
               </div>
             ) : (
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="border-b border-[#E5E0D9] dark:border-[#38312D]">
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Report Name</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Period</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Generated</th>
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Status</th>
+                  <tr className="border-b border-border">
+                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Report Name</th>
+                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Period</th>
+                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Generated</th>
+                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
                     <th className="px-5 py-3.5" />
-                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Bank Transfer File</th>
+                    <th className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Bank Transfer File</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]">
+                <tbody className="divide-y divide-border">
                   {reports.map((r, i) => (
-                    <tr key={r.id || i} className="hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] transition-colors duration-150">
-                      <td className="px-5 py-4 font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{r.name || "Payroll Report"}</td>
-                      <td className="px-5 py-4 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{r.period || "-"}</td>
-                      <td className="px-5 py-4 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{r.generatedAt || r.generated || "-"}</td>
+                    <tr key={r.id || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                      <td className="px-5 py-4 font-semibold text-foreground">{r.name || "Payroll Report"}</td>
+                      <td className="px-5 py-4 text-[13px] text-foreground-muted">{r.period || "-"}</td>
+                      <td className="px-5 py-4 text-[13px] text-foreground-muted">{r.generatedAt || r.generated || "-"}</td>
                       <td className="px-5 py-4">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#35B6F5]/10 text-[#35B6F5] px-3 py-1 text-[11px] font-bold">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-info/10 text-info px-3 py-1 text-[11px] font-bold">
                           {r.status || "available"}
                         </span>
                       </td>
@@ -242,7 +242,7 @@ export default function ReportsPage() {
                         <button
                           onClick={() => handleDownloadReport(r)}
                           disabled={downloadingId === r.id}
-                          className="flex items-center gap-1.5 rounded-[12px] bg-[#19C58A] text-white px-3.5 py-2 text-[13px] font-bold hover:bg-[#15B07A] transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Download size={12} /> {downloadingId === r.id ? "Downloading..." : "Download"}
                         </button>
@@ -253,7 +253,7 @@ export default function ReportsPage() {
                             <select
                               value={bankFileFormat[r.id] || "csv"}
                               onChange={(e) => setBankFileFormat((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                              className="rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-2.5 py-2 text-[12px] font-semibold text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#9D7BF2] focus:ring-2 focus:ring-[#9D7BF2]/20"
+                              className="rounded-[10px] border border-border bg-background px-2.5 py-2 text-[12px] font-semibold text-foreground focus:outline-none focus:border-category-teal focus:ring-2 focus:ring-category-teal/20"
                             >
                               <option value="csv">CSV</option>
                               <option value="xlsx">Excel (.xlsx)</option>
@@ -264,13 +264,13 @@ export default function ReportsPage() {
                               onClick={() => handleDownloadBankFile(r)}
                               disabled={downloadingBankFileId === r.id}
                               title="Generate and download this run's bank transfer file"
-                              className="flex items-center gap-1.5 rounded-[12px] bg-[#9D7BF2] text-white px-3.5 py-2 text-[13px] font-bold hover:bg-[#8A65E8] transition-all duration-200 shadow-[0_2px_8px_rgba(157,123,242,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex items-center gap-1.5 rounded-[12px] bg-category-teal text-white px-3.5 py-2 text-[13px] font-bold hover:bg-category-teal transition-all duration-200 shadow-[0_2px_8px_rgba(157,123,242,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Banknote size={12} /> {downloadingBankFileId === r.id ? "Generating..." : "Download"}
                             </button>
                           </div>
                         ) : (
-                          <span className="text-[12px] text-[#9E9690]">Available once approved</span>
+                          <span className="text-[12px] text-foreground-muted">Available once approved</span>
                         )}
                       </td>
                     </tr>
@@ -283,8 +283,8 @@ export default function ReportsPage() {
       )}
 
       {activeTab === "tax-reports" && (
-        <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-4">Tax Reports</h3>
+        <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <h3 className="text-[15px] font-bold text-foreground mb-4">Tax Reports</h3>
           <div className="space-y-3">
             {(jurisdictionCountry === "IN" ? [
               { id: "annual-tax", name: "Annual Tax Summary", desc: "Yearly income tax projection vs actual TDS for each employee" },
@@ -295,15 +295,15 @@ export default function ReportsPage() {
               { id: "annual-tax", name: "Annual Tax Summary", desc: "Yearly income tax projection vs actual tax withheld for each employee" },
               { id: "contributions", name: "Contribution Statement", desc: "Statutory contribution summary for the active payroll jurisdiction" },
             ]).map((report) => (
-              <div key={report.id} className="flex items-center justify-between rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <div key={report.id} className="flex items-center justify-between rounded-[12px] border border-border bg-background px-4 py-3.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
                 <div>
-                  <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{report.name}</p>
-                  <p className="text-[13px] text-[#9E9690]">{report.desc}</p>
+                  <p className="text-[13px] font-bold text-foreground">{report.name}</p>
+                  <p className="text-[13px] text-foreground-muted">{report.desc}</p>
                 </div>
                 <button
                   onClick={() => handleGenerateReport(report.id)}
                   disabled={generatingReport === report.id}
-                  className="flex items-center gap-1.5 rounded-[12px] bg-[#19C58A] text-white px-3.5 py-2 text-[13px] font-bold hover:bg-[#15B07A] transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {generatingReport === report.id ? (
                     <><Loader2 size={12} className="animate-spin" /> Generating...</>
@@ -318,32 +318,32 @@ export default function ReportsPage() {
       )}
 
       {activeTab === "compliance-reports" && (
-        <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-4">Compliance Reports</h3>
+        <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <h3 className="text-[15px] font-bold text-foreground mb-4">Compliance Reports</h3>
           <div className="grid md:grid-cols-2 gap-4">
             {[
-              { name: "Compliance Checklist", icon: FileText, color: "text-[#19C58A]", bg: "bg-[#19C58A]/10" },
-              { name: "Statutory Filings", icon: FileSpreadsheet, color: "text-[#35B6F5]", bg: "bg-[#35B6F5]/10" },
-              { name: "Audit Trail", icon: FileText, color: "text-[#F8A60A]", bg: "bg-[#F8A60A]/10" },
-              { name: "Regulatory Submissions", icon: FileSpreadsheet, color: "text-[#9D7BF2]", bg: "bg-[#9D7BF2]/10" },
+              { name: "Compliance Checklist", icon: FileText, color: "text-primary", bg: "bg-primary/10" },
+              { name: "Statutory Filings", icon: FileSpreadsheet, color: "text-info", bg: "bg-info/10" },
+              { name: "Audit Trail", icon: FileText, color: "text-warning", bg: "bg-warning/10" },
+              { name: "Regulatory Submissions", icon: FileSpreadsheet, color: "text-category-teal", bg: "bg-category-teal/10" },
             ].map((report) => (
-              <div key={report.name} className="flex items-center justify-between rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-4 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <div key={report.name} className="flex items-center justify-between rounded-[12px] border border-border bg-surface p-4 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded-[10px] ${report.bg}`}>
                     <report.icon size={16} className={report.color} />
                   </div>
-                  <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{report.name}</p>
+                  <p className="text-[13px] font-bold text-foreground">{report.name}</p>
                 </div>
                 {latestReport ? (
                   <button
                     onClick={() => handleDownloadReport(latestReport)}
                     disabled={downloadingId === latestReport.id}
-                    className="flex items-center gap-1.5 rounded-[12px] bg-[#19C58A] text-white px-3.5 py-2 text-[13px] font-bold hover:bg-[#15B07A] transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Download size={12} /> {downloadingId === latestReport.id ? "Downloading..." : "Download"}
                   </button>
                 ) : (
-                  <span className="text-[12px] font-semibold text-[#9E9690]">Not yet available</span>
+                  <span className="text-[12px] font-semibold text-foreground-muted">Not yet available</span>
                 )}
               </div>
             ))}

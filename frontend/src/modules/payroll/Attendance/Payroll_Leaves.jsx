@@ -10,16 +10,16 @@ import HolidaysTab from "./HolidaysTab";
 import LeaveBalancesTab from "./LeaveBalancesTab";
 
 const TYPE_PILL = {
-  paid:    "bg-[#35B6F5]/10 text-[#35B6F5] border-[#35B6F5]/20",
-  unpaid:  "bg-[#9E9690]/10 text-[#9E9690] border-[#E5E0D9]",
-  sick:    "bg-[#FF6E86]/10 text-[#FF6E86] border-[#FF6E86]/20",
-  compOff: "bg-[#9D7BF2]/10 text-[#9D7BF2] border-[#9D7BF2]/20",
+  paid:    "bg-info/10 text-info border-info/20",
+  unpaid:  "bg-foreground-muted/10 text-foreground-muted border-border",
+  sick:    "bg-error/10 text-error border-error/20",
+  compOff: "bg-category-teal/10 text-category-teal border-category-teal/20",
 };
 
 const TYPE_STATUS = {
-  pending:  "bg-[#F8A60A]/10 text-[#F8A60A] border-[#F8A60A]/20",
-  approved: "bg-[#19C58A]/10 text-[#19C58A] border-[#19C58A]/20",
-  rejected: "bg-[#FF6E86]/10 text-[#FF6E86] border-[#FF6E86]/20",
+  pending:  "bg-warning/10 text-warning border-warning/20",
+  approved: "bg-primary/10 text-primary border-primary/20",
+  rejected: "bg-error/10 text-error border-error/20",
 };
 
 function formatDateShort(d) {
@@ -69,30 +69,30 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
 
   return (
     <div className="space-y-4">
-      <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="bg-surface border border-border rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="flex items-center gap-3 mb-4">
           <span className="text-[20px]">{typeInfo?.icon}</span>
           <div>
-            <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{typeInfo?.label || typeKey}</h3>
-            <p className="text-[11px] text-[#9E9690]">{typeStats.totalRequests} request{typeStats.totalRequests !== 1 ? "s" : ""} · {typeStats.pendingCount} pending</p>
+            <h3 className="text-[15px] font-bold text-foreground">{typeInfo?.label || typeKey}</h3>
+            <p className="text-[11px] text-foreground-muted">{typeStats.totalRequests} request{typeStats.totalRequests !== 1 ? "s" : ""} · {typeStats.pendingCount} pending</p>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-[#F8F7F4] dark:bg-[#1A1816] rounded-[12px] p-3 border border-[#E5E0D9] dark:border-[#38312D]">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Used</p>
-            <p className="text-[18px] font-bold" style={{ color: typeInfo?.color }}>{typeStats.totalDaysUsed}<span className="text-[12px] font-semibold text-[#9E9690]">/{typeStats.totalAllowed}</span></p>
+          <div className="bg-background rounded-[12px] p-3 border border-border">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Used</p>
+            <p className="text-[18px] font-bold" style={{ color: typeInfo?.color }}>{typeStats.totalDaysUsed}<span className="text-[12px] font-semibold text-foreground-muted">/{typeStats.totalAllowed}</span></p>
           </div>
-          <div className="bg-[#F8F7F4] dark:bg-[#1A1816] rounded-[12px] p-3 border border-[#E5E0D9] dark:border-[#38312D]">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Remaining</p>
-            <p className="text-[18px] font-bold text-[#19C58A]">{typeStats.remaining}</p>
+          <div className="bg-background rounded-[12px] p-3 border border-border">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Remaining</p>
+            <p className="text-[18px] font-bold text-primary">{typeStats.remaining}</p>
           </div>
-          <div className="bg-[#F8F7F4] dark:bg-[#1A1816] rounded-[12px] p-3 border border-[#E5E0D9] dark:border-[#38312D]">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Approved</p>
-            <p className="text-[18px] font-bold text-[#19C58A]">{typeStats.approvedCount}</p>
+          <div className="bg-background rounded-[12px] p-3 border border-border">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Approved</p>
+            <p className="text-[18px] font-bold text-primary">{typeStats.approvedCount}</p>
           </div>
-          <div className="bg-[#F8F7F4] dark:bg-[#1A1816] rounded-[12px] p-3 border border-[#E5E0D9] dark:border-[#38312D]">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Pending</p>
-            <p className="text-[18px] font-bold text-[#F8A60A]">{typeStats.pendingCount}</p>
+          <div className="bg-background rounded-[12px] p-3 border border-border">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Pending</p>
+            <p className="text-[18px] font-bold text-warning">{typeStats.pendingCount}</p>
           </div>
         </div>
       </div>
@@ -101,7 +101,7 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-3.5 py-2.5 text-[13px] text-[#6B6560] dark:text-[#A69B93] font-medium focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200 cursor-pointer"
+          className="rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-foreground-muted font-medium focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200 cursor-pointer"
         >
           <option value="all">All Status</option>
           <option value="pending">Pending</option>
@@ -114,47 +114,47 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
             placeholder="Search by name or reason…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+            className="w-full rounded-[12px] border border-border bg-surface px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
           />
           {search && (
-            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9E9690] hover:text-[#6B6560] transition-colors">
+            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground-muted hover:text-foreground-muted transition-colors">
               <X size={14} />
             </button>
           )}
         </div>
       </div>
 
-      <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="overflow-x-auto">
           <table className="min-w-full table-fixed">
             <thead>
-              <tr className="bg-[#F8F7F4] dark:bg-[#2A2520] border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] w-52">Employee</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] w-28">From</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] w-28">To</th>
-                <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690] w-16">Days</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Reason</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] w-28">Status</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] w-20">Actions</th>
+              <tr className="bg-surface-muted border-b border-border">
+                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted w-52">Employee</th>
+                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted w-28">From</th>
+                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted w-28">To</th>
+                <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted w-16">Days</th>
+                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Reason</th>
+                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted w-28">Status</th>
+                <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted w-20">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#F0EDE8] dark:divide-[#38312D]/50">
+            <tbody className="divide-y divide-border">
               {typeRequests.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-16 text-center">
-                    <p className="text-[13px] text-[#9E9690] font-medium">No {typeInfo?.label || typeKey} requests found</p>
+                    <p className="text-[13px] text-foreground-muted font-medium">No {typeInfo?.label || typeKey} requests found</p>
                   </td>
                 </tr>
               ) : (
                 typeRequests.map((r, idx) => (
-                  <tr key={r.id || idx} className={`transition-colors duration-150 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] ${idx % 2 === 0 ? "bg-white dark:bg-[#221D1A]" : "bg-[#F8F7F4]/50 dark:bg-[#2A2520]/50"}`}>
-                    <td className="px-4 py-3 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{r.employeeName || "—"}</td>
-                    <td className="px-4 py-3 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{formatDateShort(r.startDate)}</td>
-                    <td className="px-4 py-3 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{formatDateShort(r.endDate)}</td>
+                  <tr key={r.id || idx} className={`transition-colors duration-150 hover:bg-background dark:hover:bg-surface-muted ${idx % 2 === 0 ? "bg-surface" : "bg-surface-muted/50"}`}>
+                    <td className="px-4 py-3 text-[13px] font-semibold text-foreground">{r.employeeName || "—"}</td>
+                    <td className="px-4 py-3 text-[13px] text-foreground-muted">{formatDateShort(r.startDate)}</td>
+                    <td className="px-4 py-3 text-[13px] text-foreground-muted">{formatDateShort(r.endDate)}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{r.days || daysBetween(r.startDate, r.endDate)}</span>
+                      <span className="text-[13px] font-bold text-foreground">{r.days || daysBetween(r.startDate, r.endDate)}</span>
                     </td>
-                    <td className="px-4 py-3 text-[13px] text-[#6B6560] dark:text-[#A69B93] max-w-[180px] truncate" title={r.reason}>{r.reason || "—"}</td>
+                    <td className="px-4 py-3 text-[13px] text-foreground-muted max-w-[180px] truncate" title={r.reason}>{r.reason || "—"}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[11px] font-bold ${TYPE_STATUS[r.status] || ""}`}>
                         {r.status ? r.status.charAt(0).toUpperCase() + r.status.slice(1) : "—"}
@@ -163,15 +163,15 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
                     <td className="px-4 py-3">
                       {r.status === "pending" ? (
                         <div className="flex items-center gap-1">
-                          <button onClick={() => onApprove?.(r.id)} className="p-1.5 rounded-[10px] bg-[#19C58A]/10 text-[#19C58A] hover:bg-[#19C58A]/20 transition-colors" title="Approve">
+                          <button onClick={() => onApprove?.(r.id)} className="p-1.5 rounded-[10px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title="Approve">
                             <Check size={14} />
                           </button>
-                          <button onClick={() => onReject?.(r.id)} className="p-1.5 rounded-[10px] bg-[#FF6E86]/10 text-[#FF6E86] hover:bg-[#FF6E86]/20 transition-colors" title="Reject">
+                          <button onClick={() => onReject?.(r.id)} className="p-1.5 rounded-[10px] bg-error/10 text-error hover:bg-error/20 transition-colors" title="Reject">
                             <Ban size={14} />
                           </button>
                         </div>
                       ) : (
-                        <span className="text-[12px] text-[#9E9690]">—</span>
+                        <span className="text-[12px] text-foreground-muted">—</span>
                       )}
                     </td>
                   </tr>
@@ -186,10 +186,10 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
 }
 
 const LEAVE_TYPES = [
-  { key: "paid",    label: "Paid Leave",    icon: "💰", color: "#35B6F5", total: 20 },
-  { key: "unpaid",  label: "Unpaid Leave",  icon: "🆓", color: "#9E9690", total: 10 },
-  { key: "sick",    label: "Sick Leave",    icon: "🏥", color: "#FF6E86", total: 12 },
-  { key: "compOff", label: "Comp-Off",      icon: "🔄", color: "#9D7BF2", total: 5  },
+  { key: "paid",    label: "Paid Leave",    icon: "💰", color: "var(--color-info)", total: 20 },
+  { key: "unpaid",  label: "Unpaid Leave",  icon: "🆓", color: "var(--color-foreground-muted)", total: 10 },
+  { key: "sick",    label: "Sick Leave",    icon: "🏥", color: "var(--color-error)", total: 12 },
+  { key: "compOff", label: "Comp-Off",      icon: "🔄", color: "var(--color-category-teal)", total: 5  },
 ];
 const LEAVE_TYPE_MAP = Object.fromEntries(LEAVE_TYPES.map((lt) => [lt.key, lt]));
 
@@ -202,10 +202,10 @@ function daysBetween(from, to) {
 
 const TABS = [
   { id: "requests",  label: "Requests" },
-  { id: "paid",      label: "Paid Leave",  color: "#35B6F5" },
-  { id: "unpaid",    label: "Unpaid Leave", color: "#9E9690" },
-  { id: "sick",      label: "Sick Leave",  color: "#FF6E86" },
-  { id: "compOff",   label: "Comp-Off",    color: "#9D7BF2" },
+  { id: "paid",      label: "Paid Leave",  color: "var(--color-info)" },
+  { id: "unpaid",    label: "Unpaid Leave", color: "var(--color-foreground-muted)" },
+  { id: "sick",      label: "Sick Leave",  color: "var(--color-error)" },
+  { id: "compOff",   label: "Comp-Off",    color: "var(--color-category-teal)" },
   { id: "holidays",  label: "Holidays" },
   { id: "balances",  label: "All Balances" },
 ];
@@ -440,22 +440,22 @@ export default function PayrollLeavesPage() {
   const pendingCount = requests.filter((r) => r.status === "pending").length;
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8 space-y-6">
+    <div className="bg-background min-h-screen p-6 lg:p-8 space-y-6">
 
       {/* ── Page Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-[12px] bg-[#19C58A] flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
+          <div className="h-10 w-10 rounded-[12px] bg-primary flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
             <BookOpen size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">Leave Management</h1>
-            <p className="text-[13px] font-medium text-[#9E9690]">Paid &amp; Unpaid leave tracking — leave days affect payroll deductions</p>
+            <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Leave Management</h1>
+            <p className="text-[13px] font-medium text-foreground-muted">Paid &amp; Unpaid leave tracking — leave days affect payroll deductions</p>
           </div>
         </div>
         <button
           onClick={openApplyModal}
-          className="flex items-center gap-2 bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px]"
+          className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px]"
         >
           <Plus size={15} /> Apply Leave
         </button>
@@ -464,28 +464,28 @@ export default function PayrollLeavesPage() {
       {/* ── Leave Type Balance Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         {balanceCards.map((card) => (
-          <div key={card.key} onClick={() => setActiveTab(card.key)} className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)] hover:-translate-y-0.5 cursor-pointer">
+          <div key={card.key} onClick={() => setActiveTab(card.key)} className="bg-surface border border-border rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.3)] hover:-translate-y-0.5 cursor-pointer">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="text-[18px]">{card.icon}</span>
-                <span className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">{card.label}</span>
+                <span className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">{card.label}</span>
               </div>
               <span className="text-[12px] font-bold" style={{ color: card.color }}>{card.pct}%</span>
             </div>
             {loading ? (
               <div className="space-y-2">
-                <div className="w-20 h-7 bg-[#E5E0D9] dark:bg-[#38312D] rounded-[10px] animate-pulse" />
-                <div className="w-full h-2 bg-[#E5E0D9] dark:bg-[#38312D] rounded-full animate-pulse" />
+                <div className="w-20 h-7 bg-border rounded-[10px] animate-pulse" />
+                <div className="w-full h-2 bg-border rounded-full animate-pulse" />
               </div>
             ) : (
               <>
-                <p className="text-[26px] font-extrabold text-[#1A1816] dark:text-[#F0EDE8] leading-none">
-                  {card.used}<span className="text-[16px] font-bold text-[#9E9690]">/{card.total}</span>
+                <p className="text-[26px] font-extrabold text-foreground leading-none">
+                  {card.used}<span className="text-[16px] font-bold text-foreground-muted">/{card.total}</span>
                 </p>
-                <p className="text-[12px] text-[#9E9690] mt-1">
+                <p className="text-[12px] text-foreground-muted mt-1">
                   {card.used} used · {card.remaining} remaining
                 </p>
-                <div className="mt-3 h-1.5 bg-[#E5E0D9] dark:bg-[#38312D] rounded-full overflow-hidden">
+                <div className="mt-3 h-1.5 bg-border rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{ width: `${Math.min(card.pct, 100)}%`, backgroundColor: card.color }}
@@ -499,21 +499,21 @@ export default function PayrollLeavesPage() {
 
       {/* ── Tab Bar ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="bg-[#F0EDE8] dark:bg-[#38312D] rounded-[14px] p-1 flex">
+        <div className="bg-surface-muted rounded-[14px] p-1 flex">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-[12px] text-[13px] font-medium transition-all duration-200 ${
                 activeTab === t.id
-                  ? "bg-white dark:bg-[#221D1A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                  : "text-[#9E9690] hover:text-[#6B6560] dark:hover:text-[#A69B93]"
+                  ? "bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                  : "text-foreground-muted hover:text-foreground-muted"
               }`}
-              style={activeTab === t.id && t.color ? { color: t.color } : activeTab === t.id ? { color: "#19C58A" } : undefined}
+              style={activeTab === t.id && t.color ? { color: t.color } : activeTab === t.id ? { color: "var(--color-primary)" } : undefined}
             >
               {t.label}
               {t.id === "requests" && pendingCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#F8A60A]/15 text-[#F8A60A] text-[10px] font-bold">{pendingCount}</span>
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-warning/15 text-warning text-[10px] font-bold">{pendingCount}</span>
               )}
             </button>
           ))}
@@ -560,19 +560,19 @@ export default function PayrollLeavesPage() {
 
       {/* ── Apply Leave Modal ── */}
       {showApplyModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#1A1816]/40 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-[#221D1A] rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.15)] w-full max-w-md p-6 mx-auto">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-background/40 backdrop-blur-sm p-4">
+          <div className="bg-surface rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.15)] w-full max-w-md p-6 mx-auto">
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-[10px] bg-[#19C58A]/10 flex items-center justify-center">
-                  <Plus size={16} className="text-[#19C58A]" />
+                <div className="w-8 h-8 rounded-[10px] bg-primary/10 flex items-center justify-center">
+                  <Plus size={16} className="text-primary" />
                 </div>
-                <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Apply Leave</h3>
+                <h3 className="text-[15px] font-bold text-foreground">Apply Leave</h3>
               </div>
               <button
                 onClick={closeApplyModal}
-                className="rounded-[10px] p-1.5 text-[#9E9690] hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#6B6560] dark:hover:text-[#A69B93] transition-colors"
+                className="rounded-[10px] p-1.5 text-foreground-muted hover:bg-background dark:hover:bg-surface-muted hover:text-foreground-muted transition-colors"
                 aria-label="Close"
               >
                 <X size={16} />
@@ -582,11 +582,11 @@ export default function PayrollLeavesPage() {
             <div className="space-y-4">
               {/* Employee */}
               <div>
-                <label className="text-[11px] font-bold text-[#9E9690] uppercase tracking-widest mb-1.5 block">Employee</label>
+                <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">Employee</label>
                 <select
                   value={applyForm.employeeId}
                   onChange={(e) => setApplyForm((f) => ({ ...f, employeeId: e.target.value }))}
-                  className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200 cursor-pointer"
+                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200 cursor-pointer"
                 >
                   <option value="">Select employee…</option>
                   {employees.map((e) => (
@@ -597,7 +597,7 @@ export default function PayrollLeavesPage() {
 
               {/* Leave Type */}
               <div>
-                <label className="text-[11px] font-bold text-[#9E9690] uppercase tracking-widest mb-1.5 block">Leave Type</label>
+                <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">Leave Type</label>
                 <div className="grid grid-cols-2 gap-2">
                   {LEAVE_TYPES.map((lt) => (
                     <button
@@ -606,8 +606,8 @@ export default function PayrollLeavesPage() {
                       onClick={() => setApplyForm((f) => ({ ...f, leaveType: lt.key }))}
                       className={`flex items-center justify-center gap-2 rounded-[12px] border-2 py-2.5 text-[13px] font-semibold transition-all duration-200 ${
                         applyForm.leaveType === lt.key
-                          ? "border-[#19C58A] bg-[#19C58A]/10 text-[#19C58A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                          : "border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] text-[#9E9690] hover:border-[#E5E0D9] hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520]"
+                          ? "border-primary bg-primary/10 text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                          : "border-border bg-surface text-foreground-muted hover:border-border hover:bg-background dark:hover:bg-surface-muted"
                       }`}
                     >
                       <span>{lt.icon}</span> {lt.label}
@@ -615,7 +615,7 @@ export default function PayrollLeavesPage() {
                   ))}
                 </div>
                 {/* Pay impact hint */}
-                <p className={`mt-1.5 text-[11px] font-semibold ${applyForm.leaveType === "unpaid" ? "text-[#FF6E86]" : "text-[#19C58A]"}`}>
+                <p className={`mt-1.5 text-[11px] font-semibold ${applyForm.leaveType === "unpaid" ? "text-error" : "text-primary"}`}>
                   {applyForm.leaveType === "unpaid" ? "No pay — will be deducted from salary" : "Full pay — no salary deduction"}
                 </p>
               </div>
@@ -623,34 +623,34 @@ export default function PayrollLeavesPage() {
               {/* Date range */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold text-[#9E9690] uppercase tracking-widest mb-1.5 block">From</label>
+                  <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">From</label>
                   <input
                     type="date"
                     value={applyForm.startDate}
                     onChange={(e) => setApplyForm((f) => ({ ...f, startDate: e.target.value }))}
-                    className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                    className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-[#9E9690] uppercase tracking-widest mb-1.5 block">To</label>
+                  <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">To</label>
                   <input
                     type="date"
                     value={applyForm.endDate}
                     onChange={(e) => setApplyForm((f) => ({ ...f, endDate: e.target.value }))}
-                    className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                    className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                   />
                 </div>
               </div>
 
               {/* Reason */}
               <div>
-                <label className="text-[11px] font-bold text-[#9E9690] uppercase tracking-widest mb-1.5 block">Reason</label>
+                <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">Reason</label>
                 <input
                   type="text"
                   placeholder="e.g. Vacation, medical appointment…"
                   value={applyForm.reason}
                   onChange={(e) => setApplyForm((f) => ({ ...f, reason: e.target.value }))}
-                  className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                 />
               </div>
 
@@ -659,7 +659,7 @@ export default function PayrollLeavesPage() {
                 <button
                   onClick={handleSubmitLeave}
                   disabled={submitting}
-                  className="flex-1 bg-[#19C58A] rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 bg-primary rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
                     <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" /> Submitting…</span>
@@ -669,7 +669,7 @@ export default function PayrollLeavesPage() {
                 </button>
                 <button
                   onClick={closeApplyModal}
-                  className="rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] px-4 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+                  className="rounded-[12px] border border-border bg-surface-muted px-4 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
                 >
                   Cancel
                 </button>

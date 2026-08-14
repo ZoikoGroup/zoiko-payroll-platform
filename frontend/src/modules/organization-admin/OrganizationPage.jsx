@@ -21,9 +21,9 @@ const styles = `
     --ink:#1C1826;
     --ink-soft:#635C72;
     --ink-faint:#9D96AB;
-    --violet:#6E5AE6;
-    --violet-deep:#4B3BB0;
-    --violet-soft: rgba(110,90,230,0.10);
+    --accent:#087CC1;
+    --accent-deep:#0B3554;
+    --accent-soft: rgba(8,124,193,0.10);
     --amber:#D9791E;
     --amber-deep:#B8600F;
     --amber-soft: rgba(217,121,30,0.12);
@@ -73,7 +73,7 @@ const styles = `
   }
 
   .org-dash .orb{ position:absolute; border-radius:50%; filter:blur(100px); z-index:0; pointer-events:none; }
-  .org-dash .orb-1{ width:560px; height:560px; top:-220px; right:-160px; background:radial-gradient(circle, rgba(110,90,230,0.16), transparent 70%); }
+  .org-dash .orb-1{ width:560px; height:560px; top:-220px; right:-160px; background:radial-gradient(circle, rgba(8,124,193,0.16), transparent 70%); }
   .org-dash .orb-2{ width:480px; height:480px; bottom:-200px; left:-160px; background:radial-gradient(circle, rgba(217,121,30,0.14), transparent 70%); }
   .org-dash .grain{
     position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0.035; mix-blend-mode:multiply;
@@ -93,7 +93,7 @@ const styles = `
   .org-dash h1.title{
     font-family:'Fraunces', serif; font-weight:600; font-size:52px; line-height:1.2;
     margin:0 0 12px; letter-spacing:-0.015em;
-    background:linear-gradient(100deg, var(--ink) 25%, var(--amber-deep) 62%, var(--violet-deep) 100%);
+    background:linear-gradient(100deg, var(--ink) 25%, var(--amber-deep) 62%, var(--accent-deep) 100%);
     -webkit-background-clip:text; background-clip:text; color:transparent;
   }
   @media (max-width:640px){ .org-dash h1.title{ font-size:38px; } }
@@ -109,10 +109,10 @@ const styles = `
   }
   .org-dash .btn:hover{ transform:translateY(-2px); }
   .org-dash .btn-primary{
-    background:linear-gradient(120deg, var(--amber), var(--violet));
-    color:#fff; box-shadow:0 10px 26px -10px rgba(110,90,230,0.5);
+    background:linear-gradient(120deg, var(--amber), var(--accent));
+    color:#fff; box-shadow:0 10px 26px -10px rgba(8,124,193,0.5);
   }
-  .org-dash .btn-primary:hover{ box-shadow:0 14px 32px -10px rgba(110,90,230,0.65); }
+  .org-dash .btn-primary:hover{ box-shadow:0 14px 32px -10px rgba(8,124,193,0.65); }
   .org-dash .btn-ghost{ background:var(--glass-solid); color:var(--ink); border-color:var(--glass-border); box-shadow:0 1px 2px rgba(28,24,40,0.04); }
   .org-dash .btn-ghost:hover{ border-color:rgba(28,24,40,0.18); background:#fff; }
   .org-dash .btn[disabled]{ opacity:0.5; cursor:not-allowed; transform:none; }
@@ -132,7 +132,7 @@ const styles = `
   .org-dash .id-left{ display:flex; align-items:center; gap:18px; }
   .org-dash .org-mark{
     width:60px; height:60px; border-radius:16px; flex:none; position:relative;
-    background:linear-gradient(155deg, var(--amber), var(--violet-deep));
+    background:linear-gradient(155deg, var(--amber), var(--accent-deep));
     display:flex; align-items:center; justify-content:center;
     box-shadow:0 0 0 1px rgba(255,255,255,0.4) inset, 0 12px 28px -10px rgba(217,121,30,0.45);
   }
@@ -141,7 +141,7 @@ const styles = `
   .org-dash .org-meta{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--ink-soft); }
   .org-dash .code-tag{
     font-family:'IBM Plex Mono', monospace; font-size:11.5px; letter-spacing:0.03em;
-    background:var(--violet-soft); color:var(--violet-deep); border:1px solid rgba(110,90,230,0.22);
+    background:var(--accent-soft); color:var(--accent-deep); border:1px solid rgba(8,124,193,0.22);
     padding:3px 9px; border-radius:6px;
   }
   .org-dash .status-pill{
@@ -185,7 +185,7 @@ const styles = `
     width:34px; height:34px; border-radius:10px; flex:none;
     display:flex; align-items:center; justify-content:center;
   }
-  .org-dash .icon-violet{ background:var(--violet-soft); color:var(--violet-deep); border:1px solid rgba(110,90,230,0.2); }
+  .org-dash .icon-violet{ background:var(--accent-soft); color:var(--accent-deep); border:1px solid rgba(8,124,193,0.2); }
   .org-dash .icon-amber{ background:var(--amber-soft); color:var(--amber-deep); border:1px solid rgba(217,121,30,0.22); }
   .org-dash .panel-title{ font-size:14.5px; font-weight:600; margin:0 0 2px; color:var(--ink); }
   .org-dash .panel-sub{ font-size:12px; color:var(--ink-faint); margin:0; }
@@ -235,7 +235,7 @@ const styles = `
   .org-dash .dept-row{ display:flex; align-items:center; gap:12px; }
   .org-dash .dept-name{ width:140px; flex:none; font-size:13px; font-weight:600; color:var(--ink); }
   .org-dash .dept-track{ flex:1; height:8px; border-radius:100px; background:rgba(28,24,40,0.07); overflow:hidden; }
-  .org-dash .dept-fill{ height:100%; border-radius:100px; background:linear-gradient(90deg,var(--violet),var(--violet-deep)); }
+  .org-dash .dept-fill{ height:100%; border-radius:100px; background:linear-gradient(90deg,var(--accent),var(--accent-deep)); }
   .org-dash .dept-count{ width:28px; flex:none; text-align:right; font-size:13px; font-weight:700; color:var(--ink); }
 
   .org-dash .simple-table{ width:100%; border-collapse:collapse; font-size:13px; }
@@ -248,7 +248,7 @@ const styles = `
   .org-dash .emp-cell{ display:flex; align-items:center; gap:10px; }
   .org-dash .emp-avatar{
     width:28px; height:28px; border-radius:8px; flex:none; display:flex; align-items:center; justify-content:center;
-    font-size:11px; font-weight:700; color:#fff; background:linear-gradient(135deg,var(--violet),var(--violet-deep));
+    font-size:11px; font-weight:700; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent-deep));
   }
   .org-dash .status-dot{ display:inline-flex; align-items:center; gap:6px; }
   .org-dash .status-dot .dot{ width:7px; height:7px; border-radius:50%; flex:none; }
@@ -286,7 +286,7 @@ const styles = `
   .org-dash .logo-picker{ display:flex; align-items:center; gap:16px; }
   .org-dash .logo-preview{
     width:64px; height:64px; border-radius:14px; flex:none; overflow:hidden;
-    background:linear-gradient(155deg, var(--amber), var(--violet-deep));
+    background:linear-gradient(155deg, var(--amber), var(--accent-deep));
     display:flex; align-items:center; justify-content:center; color:#fff;
   }
   .org-dash .logo-preview img{ width:100%; height:100%; object-fit:contain; }
@@ -298,7 +298,7 @@ const styles = `
     padding:11px 14px; outline:none; transition:border-color .18s ease, box-shadow .18s ease;
   }
   .org-dash .form-field input:focus, .org-dash .form-field textarea:focus{
-    border-color:rgba(110,90,230,0.5); box-shadow:0 0 0 3px var(--violet-soft);
+    border-color:rgba(8,124,193,0.5); box-shadow:0 0 0 3px var(--accent-soft);
   }
   .org-dash .form-field .mono{ font-family:'IBM Plex Mono', monospace; font-size:13px; }
   .org-dash .modal-foot{
@@ -324,8 +324,8 @@ const styles = `
 const STATUS_STYLES = {
   active: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
   success: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
-  approved: { bg: "rgba(110,90,230,0.10)", color: "#4B3BB0", border: "rgba(110,90,230,0.22)" },
-  info: { bg: "rgba(110,90,230,0.10)", color: "#4B3BB0", border: "rgba(110,90,230,0.22)" },
+  approved: { bg: "rgba(8,124,193,0.10)", color: "#0B3554", border: "rgba(8,124,193,0.22)" },
+  info: { bg: "rgba(8,124,193,0.10)", color: "#0B3554", border: "rgba(8,124,193,0.22)" },
   pending: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
   on_hold: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
   suspended: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
@@ -397,8 +397,8 @@ function WorkforceRing({ total, active, hrAdmins }) {
         <svg width="190" height="190" viewBox="0 0 190 190">
           <defs>
             <linearGradient id="orgActiveGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#6E5AE6" />
-              <stop offset="100%" stopColor="#4B3BB0" />
+              <stop offset="0%" stopColor="#087CC1" />
+              <stop offset="100%" stopColor="#0B3554" />
             </linearGradient>
           </defs>
           <circle cx="95" cy="95" r="78" fill="none" stroke="rgba(28,24,40,0.07)" strokeWidth="16" />
@@ -421,7 +421,7 @@ function WorkforceRing({ total, active, hrAdmins }) {
 
       <div className="legend">
         <div className="legend-row">
-          <div className="legend-left"><span className="swatch" style={{ background: "linear-gradient(120deg,#6E5AE6,#4B3BB0)" }} />Active employees</div>
+          <div className="legend-left"><span className="swatch" style={{ background: "linear-gradient(120deg,#087CC1,#0B3554)" }} />Active employees</div>
           <div className="legend-figs"><span className="count">{safeActive}</span><span className="pct">{pct(safeActive)}%</span></div>
         </div>
         <div className="legend-row">
@@ -438,7 +438,7 @@ function WorkforceRing({ total, active, hrAdmins }) {
 }
 
 const EMPLOYEE_STATUS_DOT = { teal: "#178A50", amber: "#D9791E", off: "#9D96AB" };
-const ACTIVITY_DOT = { SUCCESS: "#178A50", PENDING: "#D9791E", INFO: "#6E5AE6" };
+const ACTIVITY_DOT = { SUCCESS: "#178A50", PENDING: "#D9791E", INFO: "#087CC1" };
 
 function fmtCurrency(amount) {
   if (amount == null) return "—";
@@ -662,8 +662,8 @@ export default function OrgAdminOrganizationPage() {
         </div>
 
         <div className="stat-strip rise" style={{ animationDelay: ".15s", gridTemplateColumns: "1fr 1fr" }}>
-          <StatTile glowColor="var(--violet)" label="Total Employees" value={totalEmployees} sub="Across your organization" />
-          <StatTile glowColor="var(--success)" label="Active" value={activeEmployees} sub={`${Math.round((activeEmployees / Math.max(totalEmployees, 1)) * 100)}% of workforce`} valueColor="var(--violet-deep)" />
+          <StatTile glowColor="var(--accent)" label="Total Employees" value={totalEmployees} sub="Across your organization" />
+          <StatTile glowColor="var(--success)" label="Active" value={activeEmployees} sub={`${Math.round((activeEmployees / Math.max(totalEmployees, 1)) * 100)}% of workforce`} valueColor="var(--accent-deep)" />
         </div>
 
         <div className="section-label">Company Details</div>
@@ -732,11 +732,11 @@ export default function OrgAdminOrganizationPage() {
 
         <div className="stat-strip rise" style={{ animationDelay: ".3s" }}>
           <StatTile glowColor="var(--amber)" label="Departments" value={stats ? (stats.departments ?? 0) : "—"} sub="Across your organization" />
-          <StatTile glowColor="var(--violet)" label="Designations" value={stats ? (stats.designations ?? 0) : "—"} sub="Distinct roles" />
+          <StatTile glowColor="var(--accent)" label="Designations" value={stats ? (stats.designations ?? 0) : "—"} sub="Distinct roles" />
           <StatTile glowColor="var(--success)" label="HR Admins" value={hrAdmins} sub="Managing payroll &amp; HR" />
           <StatTile glowColor="var(--danger)" label="Pending Leaves" value={stats ? (stats.pending_leave_requests ?? 0) : "—"} sub="Awaiting review" />
           <StatTile glowColor="var(--amber)" label="Pending Approvals" value={stats ? (stats.pending_approvals ?? 0) : "—"} sub="Need action" />
-          <StatTile glowColor="var(--violet)" label="Monthly Payroll" value={stats ? fmtCurrency(stats.monthly_payroll) : "—"} sub="Latest run total" valueColor="var(--violet-deep)" />
+          <StatTile glowColor="var(--accent)" label="Monthly Payroll" value={stats ? fmtCurrency(stats.monthly_payroll) : "—"} sub="Latest run total" valueColor="var(--accent-deep)" />
         </div>
 
         <div className="grid rise" style={{ animationDelay: ".35s" }}>
