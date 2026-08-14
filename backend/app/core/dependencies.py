@@ -60,6 +60,13 @@ def _role_value(user) -> str:
     return role.value if hasattr(role, "value") else str(role)
 
 
+def role_value(user) -> str:
+    """Public alias of _role_value for modules outside core that need to
+    re-check a live user's current role (e.g. at confirmation time, when
+    role may have changed since an earlier request)."""
+    return _role_value(user)
+
+
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),

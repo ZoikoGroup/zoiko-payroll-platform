@@ -72,5 +72,16 @@ class Settings(BaseSettings):
     # Admin accounts. Never create a Super Admin through public /auth/register.
     SETUP_KEY: str = ""
 
+    # ── Zoiko Payroll Assist ───────────────────────────────────────────
+    # Deterministic engine is always available. When an OpenAI-compatible
+    # provider is configured, the model gateway uses it to generate grounded
+    # answers (with deterministic fallback on failure). Left empty by default.
+    ASSIST_MODEL_PROVIDER: str = ""                 # "openai-compatible" | "" (deterministic only)
+    ASSIST_MODEL_BASE_URL: str = ""                 # e.g. https://api.openai.com/v1
+    ASSIST_MODEL_API_KEY: str = ""
+    ASSIST_MODEL_NAME: str = "gpt-4o-mini"
+    ASSIST_MODEL_TIMEOUT_SECONDS: int = 30
+    ASSIST_POLICY_VERSION: str = "1.0.0"
+
 
 settings = Settings()
