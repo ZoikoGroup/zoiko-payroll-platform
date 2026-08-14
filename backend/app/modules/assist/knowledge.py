@@ -11,6 +11,7 @@ Tenant (organization) items are isolated; global platform items are shared.
 """
 
 import logging
+import re
 from datetime import date, datetime
 
 from sqlalchemy import or_
@@ -27,6 +28,28 @@ from app.modules.assist.models import (
 )
 
 logger = logging.getLogger("zoiko_payroll.assist.knowledge")
+
+# Common English function words. Without this filter, a message like
+# "explain the quantum telemetry of lunar regolith sampling rigs" would
+# still score a nonzero match on almost any KB article purely from "the"
+# appearing as ordinary prose — length>2 alone isn't a relevance filter.
+_STOP_WORDS = {
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "has",
+    "was", "were", "with", "this", "that", "from", "have", "will", "would",
+    "about", "what", "when", "where", "which", "who", "why", "how", "does",
+    "did", "into", "your", "our", "their", "its", "his", "her", "them",
+    "than", "then", "there", "these", "those", "been", "being", "such",
+    "get", "got", "out", "now", "any", "some", "one", "two",
+    # Generic instructional/framing verbs — they genuinely appear across
+    # unrelated KB bodies as ordinary connective language ("Assist can
+    # explain configuration...") without being real topical signal.
+    "explain", "tell", "meaning", "describe", "show", "find",
+}
+_TERM_RE = re.compile(r"[a-z0-9]+")
+
+
+def _query_terms(query: str) -> list[str]:
+    return [t for t in _TERM_RE.findall(query.lower()) if len(t) > 2 and t not in _STOP_WORDS]
 
 # Searchable term synonyms mapped to seed knowledge content types. Used to
 # boost lexical scoring for common payroll questions.
@@ -69,7 +92,11 @@ def _score_item(item: AssistKbItem, query_terms: list[str]) -> int:
     for keyword, synonyms in _CONTENT_KEYWORDS.items():
         if any(s in haystack_title for s in synonyms) and any(s in query_terms for s in synonyms):
             score += 3
-    if item.authority in (AuthorityTier.TIER_1_OPERATIONAL.value, AuthorityTier.TIER_2_APPROVED_PRIMARY.value):
+    # The authority bonus is a tie-breaker among items that already matched
+    # something — applying it unconditionally would give every query a
+    # nonzero score on every authoritative item, even one with no real
+    # relevance (e.g. "hi"), making irrelevant items look like real matches.
+    if score > 0 and item.authority in (AuthorityTier.TIER_1_OPERATIONAL.value, AuthorityTier.TIER_2_APPROVED_PRIMARY.value):
         score += 2
     return score
 
@@ -81,26 +108,38 @@ def search_kb(
     jurisdiction_codes: list[str] | None = None,
     limit: int = 5,
     record_run: bool = True,
-) -> list[AssistRetrievalCandidate]:
+) -> list[tuple[int, AssistKbItem]]:
     """Retrieve retrieval-eligible knowledge for a tenant-scoped query.
 
     Global items (organization_id is NULL) are shared; tenant items are
     isolated to their organization. Jurisdiction filter: items with an empty
     jurisdiction list apply everywhere; otherwise at least one listed
     jurisdiction must match the request scope.
+
+    Returns (score, item) pairs — the score is exposed so callers can reason
+    about match strength (e.g. flagging a POTENTIAL conflict when two
+    candidates score near-identically under different authority tiers).
     """
     today = date.today()
     jurisdiction_codes = [j.upper() for j in (jurisdiction_codes or [])]
 
-    base_query = db.query(AssistKbItem).filter(
-        AssistKbItem.state == KnowledgeState.PUBLISHED.value,
-        or_(AssistKbItem.organization_id.is_(None), AssistKbItem.organization_id == organization_id),
+    # A quarantined source's items are excluded even though the items
+    # themselves are still PUBLISHED — the incident kill switch cascades
+    # from the source without needing to touch every item it owns.
+    base_query = (
+        db.query(AssistKbItem)
+        .outerjoin(AssistKbSource, AssistKbItem.source_id == AssistKbSource.id)
+        .filter(
+            AssistKbItem.state == KnowledgeState.PUBLISHED.value,
+            or_(AssistKbItem.organization_id.is_(None), AssistKbItem.organization_id == organization_id),
+            or_(AssistKbItem.source_id.is_(None), AssistKbSource.state != KnowledgeSourceState.QUARANTINED.value),
+        )
     )
     items = base_query.all()
 
     eligible = [i for i in items if _is_retrieval_eligible(i, today)]
 
-    query_terms = [t.lower() for t in query.replace(",", " ").split() if len(t) > 2]
+    query_terms = _query_terms(query)
     scored = []
     for item in eligible:
         if jurisdiction_codes:
@@ -139,7 +178,7 @@ def search_kb(
             )
         db.commit()
 
-    return [candidate for _, candidate in ranked]
+    return ranked
 
 
 # ── Default seed content ────────────────────────────────────────────────

@@ -70,8 +70,16 @@ with an "/api" prefix at the top level, e.g.:
     GET    /assist/knowledge/items/{item_id}
     PATCH  /assist/knowledge/items/{item_id}
     POST   /assist/knowledge/items/{item_id}/publish
+    POST   /assist/knowledge/items/{item_id}/request-correction
+    POST   /assist/knowledge/items/{item_id}/reject
+    POST   /assist/knowledge/items/{item_id}/withdraw
+    POST   /assist/knowledge/items/{item_id}/quarantine
+    POST   /assist/knowledge/items/{item_id}/supersede
     GET    /assist/knowledge/sources
     POST   /assist/knowledge/sources
+    POST   /assist/knowledge/sources/{source_id}/quarantine
+    POST   /assist/knowledge/sources/{source_id}/reactivate
+    POST   /assist/admin/knowledge/expiry-run
 """
 
 import json
@@ -113,9 +121,12 @@ from app.modules.assist.schemas import (
     KbItemCreate,
     KbItemResponse,
     KbItemUpdate,
+    KbExpirySweepResponse,
     KbPublishRequest,
+    KbReasonRequest,
     KbSourceCreate,
     KbSourceResponse,
+    KbSupersedeRequest,
     MessageListResponse,
     MessageResponse,
     MessageSubmitRequest,
@@ -835,12 +846,15 @@ def confirm_action(
     preview_id: int,
     payload: ActionConfirmRequest = None,
     idempotency_key: str = Header(None, alias="Idempotency-Key"),
+    if_match: str = Header(None, alias="If-Match"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     org_id: int = Depends(get_organization_id),
 ):
     body = payload.model_dump() if payload else {}
-    return service.confirm_action(db, org_id, current_user, preview_id, body, idempotency_key=idempotency_key)
+    return service.confirm_action(
+        db, org_id, current_user, preview_id, body, idempotency_key=idempotency_key, if_match=if_match
+    )
 
 
 @assist_router.post(
@@ -890,7 +904,7 @@ def get_status(db: Session = Depends(get_db)):
 def list_kb_items(
     state: str = Query(None),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     return service.list_kb_items(db, org_id, state=state)
@@ -902,7 +916,7 @@ def list_kb_items(
 def create_kb_item(
     payload: KbItemCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     return service.create_kb_item(db, org_id, current_user, payload.model_dump(), tenant=True)
@@ -916,7 +930,7 @@ def create_kb_item(
 def get_kb_item(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     return service.get_kb_item(db, org_id, item_id)
@@ -931,7 +945,7 @@ def update_kb_item(
     item_id: int,
     payload: KbItemUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     return service.update_kb_item(db, org_id, current_user, item_id, payload.model_dump(exclude_unset=True))
@@ -946,11 +960,86 @@ def publish_kb_item(
     item_id: int,
     payload: KbPublishRequest = None,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     body = payload.model_dump() if payload else {}
     return service.publish_kb_item(db, org_id, current_user, item_id, body)
+
+
+@assist_router.post(
+    "/knowledge/items/{item_id}/request-correction",
+    response_model=KbItemResponse,
+    summary="Send a knowledge item back to its author for correction",
+)
+def request_kb_correction(
+    item_id: int,
+    payload: KbReasonRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.request_kb_correction(db, org_id, current_user, item_id, payload.reason)
+
+
+@assist_router.post(
+    "/knowledge/items/{item_id}/reject",
+    response_model=KbItemResponse,
+    summary="Reject a knowledge item",
+)
+def reject_kb_item(
+    item_id: int,
+    payload: KbReasonRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.reject_kb_item(db, org_id, current_user, item_id, payload.reason)
+
+
+@assist_router.post(
+    "/knowledge/items/{item_id}/withdraw",
+    response_model=KbItemResponse,
+    summary="Withdraw a published knowledge item",
+)
+def withdraw_kb_item(
+    item_id: int,
+    payload: KbReasonRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.withdraw_kb_item(db, org_id, current_user, item_id, payload.reason)
+
+
+@assist_router.post(
+    "/knowledge/items/{item_id}/quarantine",
+    response_model=KbItemResponse,
+    summary="Quarantine a knowledge item (incident kill switch)",
+)
+def quarantine_kb_item(
+    item_id: int,
+    payload: KbReasonRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.quarantine_kb_item(db, org_id, current_user, item_id, payload.reason)
+
+
+@assist_router.post(
+    "/knowledge/items/{item_id}/supersede",
+    response_model=KbItemResponse,
+    summary="Mark a knowledge item as superseded by a successor item",
+)
+def supersede_kb_item(
+    item_id: int,
+    payload: KbSupersedeRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.supersede_kb_item(db, org_id, current_user, item_id, payload.new_item_id, payload.reason)
 
 
 @assist_router.get(
@@ -960,7 +1049,7 @@ def publish_kb_item(
 )
 def list_kb_sources(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     return service.list_kb_sources(db)
@@ -974,10 +1063,39 @@ def list_kb_sources(
 def create_kb_source(
     payload: KbSourceCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_payroll_operator),
     org_id: int = Depends(get_organization_id),
 ):
     return service.create_kb_source(db, payload.model_dump())
+
+
+@assist_router.post(
+    "/knowledge/sources/{source_id}/quarantine",
+    response_model=KbSourceResponse,
+    summary="Quarantine a knowledge source (cascades to its items)",
+)
+def quarantine_kb_source(
+    source_id: int,
+    payload: KbReasonRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.quarantine_kb_source(db, org_id, current_user, source_id, payload.reason)
+
+
+@assist_router.post(
+    "/knowledge/sources/{source_id}/reactivate",
+    response_model=KbSourceResponse,
+    summary="Reactivate a quarantined knowledge source",
+)
+def reactivate_kb_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.reactivate_kb_source(db, org_id, current_user, source_id)
 
 
 # ── Audit / retention (admin) ───────────────────────────────────────────
@@ -1041,6 +1159,19 @@ def run_retention_cleanup(
     org_id: int = Depends(get_organization_id),
 ):
     return service.run_retention_cleanup(db, org_id, current_user)
+
+
+@assist_router.post(
+    "/admin/knowledge/expiry-run",
+    response_model=KbExpirySweepResponse,
+    summary="Run KB expiry sweep (move past-effective_to items to EXPIRED)",
+)
+def run_kb_expiry_sweep(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_payroll_operator),
+    org_id: int = Depends(get_organization_id),
+):
+    return service.run_kb_expiry_sweep(db, org_id)
 
 
 @assist_router.get(

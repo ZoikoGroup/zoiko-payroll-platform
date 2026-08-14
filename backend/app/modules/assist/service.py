@@ -17,12 +17,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
+from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException, ZoikoException
 from app.modules.assist import gateway, guardrails, intents, knowledge as knowledge_module
 from app.modules.assist.models import (
     AssistActionConfirmation,
@@ -53,12 +53,43 @@ from app.modules.assist.models import (
     KnowledgeSourceState,
     KnowledgeState,
 )
-from app.modules.assist.tools import get_action_tool, invoke_read_tool
+from app.core.dependencies import role_value
+from app.modules.assist.tools import get_action_tool, get_live_target_version, invoke_read_tool
 
 logger = logging.getLogger("zoiko_payroll.assist.service")
 
 DEFAULT_ACTION_PREVIEW_MINUTES = 10
 DEFAULT_HANDOFF_PREVIEW_MINUTES = 15
+
+# Read tools resolvable purely from an intent's tool_id (run-wide + employee
+# self-service). Kept as one set so both evidence-gathering call sites agree
+# on what's routable, and so adding a tool only means updating this list.
+KNOWN_READ_TOOL_IDS = {
+    "payroll.getRunSummary",
+    "payroll.getRunReadiness",
+    "payroll.listExceptions",
+    "payroll.getApprovalStatus",
+    "payroll.comparePeriods",
+    "payroll.getMyProfile",
+    "payroll.getMyPayslips",
+}
+
+
+# ── Datetime helpers ────────────────────────────────────────────────────
+# Postgres (DateTime(timezone=True)) returns tz-aware datetimes on read;
+# SQLite (used in tests) silently drops tzinfo on round-trip and returns
+# naive ones. Comparing a fetched value against a hardcoded naive-or-aware
+# "now" therefore breaks on one dialect or the other — normalize whatever
+# comes back from the DB to UTC-aware before comparing.
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 # ── ID helpers ──────────────────────────────────────────────────────────
@@ -188,7 +219,7 @@ def update_session(db, org_id, user, session_id, payload: dict) -> AssistSession
 def archive_session(db, org_id, user, session_id) -> AssistSession:
     session = get_session(db, org_id, user, session_id)
     session.status = AssistSessionState.ARCHIVED.value
-    session.archived_at = datetime.now()
+    session.archived_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(session)
     return session
@@ -205,7 +236,7 @@ def list_suggestions(db) -> list[AssistSuggestion]:
 
 
 def get_current_notice(db, org_id, user) -> AssistNotice | None:
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     notice = (
         db.query(AssistNotice)
         .filter(
@@ -356,35 +387,66 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
     db.add(evidence_set)
     db.flush()
 
+    if decision["intent_id"] in intents.SMALLTALK_INTENT_IDS:
+        # Small talk needs no evidence — skip the KB search entirely so a
+        # bare "hi" or "thank you" never drags in unrelated knowledge
+        # articles as sources.
+        evidence_set.confidence_state = "UNAVAILABLE"
+        return evidence_set
+
     tool_id = decision.get("tool_id")
     run_id = _resolve_run_id(context) or _resolve_run_id({"object": {"type": "PAYROLL_RUN", "id": session.context_object_id}})
 
     tool_result = None
-    if tool_id and tool_id in ("payroll.getRunSummary", "payroll.getRunReadiness", "payroll.listExceptions", "payroll.getApprovalStatus", "payroll.comparePeriods"):
-        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"))
+    if tool_id and tool_id in KNOWN_READ_TOOL_IDS:
+        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"), user=user)
     elif decision["intent_id"] in ("find.object", "explain.status") and run_id:
-        tool_result = invoke_read_tool(db, org_id, "payroll.getRunSummary", run_id=run_id, context_object=context.get("object"))
+        tool_result = invoke_read_tool(db, org_id, "payroll.getRunSummary", run_id=run_id, context_object=context.get("object"), user=user)
 
-    if tool_result and tool_result.get("found"):
+    tool_found = bool(tool_result and tool_result.get("found"))
+    if tool_found:
         run = tool_result.get("run")
         if run:
-            item = AssistEvidenceItem(
-                evidence_set_id=evidence_set.id,
-                source_type="PAYROLL_RUN",
-                source_id=str(run.get("run_id")),
-                title=f"{run.get('period')} payroll run",
-                effective_at=datetime.now().date(),
-                freshness_state="CURRENT",
-                authority="TIER_1_OPERATIONAL",
+            db.add(
+                AssistEvidenceItem(
+                    evidence_set_id=evidence_set.id,
+                    source_type="PAYROLL_RUN",
+                    source_id=str(run.get("run_id")),
+                    title=f"{run.get('period')} payroll run",
+                    effective_at=datetime.now().date(),
+                    freshness_state="CURRENT",
+                    authority="TIER_1_OPERATIONAL",
+                )
             )
-            db.add(item)
-            evidence_set.entity_count = 1
-            evidence_set.confidence_state = "HIGH"
-            evidence_set.reason_codes = ["AUTHORITATIVE_RECORDS"]
+            evidence_set.entity_count += 1
+        elif "profile" in tool_result:
+            db.add(
+                AssistEvidenceItem(
+                    evidence_set_id=evidence_set.id,
+                    source_type="EMPLOYEE_PROFILE",
+                    title="Your payroll profile",
+                    effective_at=datetime.now().date(),
+                    freshness_state="CURRENT",
+                    authority="TIER_1_OPERATIONAL",
+                )
+            )
+            evidence_set.entity_count += 1
+        elif "payslips" in tool_result:
+            db.add(
+                AssistEvidenceItem(
+                    evidence_set_id=evidence_set.id,
+                    source_type="PAYSLIP",
+                    title="Your payslips",
+                    effective_at=datetime.now().date(),
+                    freshness_state="CURRENT",
+                    authority="TIER_1_OPERATIONAL",
+                )
+            )
+            evidence_set.entity_count += 1
 
     jurisdiction_codes = context.get("jurisdiction_codes") or session.jurisdiction_codes or []
-    kb_items = knowledge_module.search_kb(db, org_id, text, jurisdiction_codes=jurisdiction_codes, limit=3)
-    for item in kb_items:
+    kb_candidates = knowledge_module.search_kb(db, org_id, text, jurisdiction_codes=jurisdiction_codes, limit=3)
+    for _score, item in kb_candidates:
         db.add(
             AssistEvidenceItem(
                 evidence_set_id=evidence_set.id,
@@ -394,12 +456,45 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
                 effective_at=item.effective_from,
                 freshness_state="CURRENT",
                 authority=item.authority,
+                # AssistEvidenceItem has no summary/body columns of its own —
+                # stash the content _build_response needs to actually pass to
+                # the answer generator here rather than re-querying AssistKbItem.
+                extra={"summary": item.summary, "body": item.body},
             )
         )
         evidence_set.entity_count += 1
-        if evidence_set.confidence_state != "HIGH":
-            evidence_set.confidence_state = "HIGH"
 
+    kb_found = bool(kb_candidates)
+
+    # Confidence reflects how much of the expected evidence actually showed
+    # up, not just "something was found, therefore HIGH" as before.
+    if tool_found and kb_found:
+        evidence_set.confidence_state = "HIGH"
+        evidence_set.reason_codes = ["AUTHORITATIVE_RECORDS", "APPROVED_KNOWLEDGE"]
+    elif tool_found or kb_found:
+        evidence_set.confidence_state = "MEDIUM"
+        evidence_set.reason_codes = ["AUTHORITATIVE_RECORDS"] if tool_found else ["APPROVED_KNOWLEDGE"]
+    else:
+        evidence_set.confidence_state = "LOW"
+        evidence_set.reason_codes = ["NO_MATERIAL_EVIDENCE"]
+
+    # Conflict heuristic: two same-search-pass KB candidates scoring within
+    # 1 point of each other but carrying different authority tiers is the
+    # ambiguous case CONFLICT exists to flag — true semantic conflict
+    # detection needs embeddings (tracked as a later, larger change).
+    if len(kb_candidates) >= 2:
+        top_score, top_item = kb_candidates[0]
+        for score, item in kb_candidates[1:]:
+            if abs(score - top_score) <= 1 and item.authority != top_item.authority:
+                evidence_set.conflict_state = "POTENTIAL"
+                evidence_set.reason_codes = list(evidence_set.reason_codes) + ["AUTHORITY_TIER_DIVERGENCE"]
+                break
+
+    # SessionLocal runs with autoflush=False, so the AssistEvidenceItem rows
+    # just added above are not visible to _build_response's own query for
+    # them (evidence/knowledge would silently be empty there) without an
+    # explicit flush here.
+    db.flush()
     return evidence_set
 
 
@@ -456,8 +551,8 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
     knowledge = [
         {
             "title": item.title,
-            "summary": item.summary or "",
-            "body": item.body,
+            "summary": (item.extra or {}).get("summary") or "",
+            "body": (item.extra or {}).get("body") or "",
             "authority": item.authority,
         }
         for item in evidence_items
@@ -466,15 +561,27 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
 
     tool_result = None
     tool_id = decision.get("tool_id")
-    if tool_id and tool_id in ("payroll.getRunSummary", "payroll.getRunReadiness", "payroll.listExceptions", "payroll.getApprovalStatus", "payroll.comparePeriods"):
+    if tool_id and tool_id in KNOWN_READ_TOOL_IDS:
         run_id = _resolve_run_id(context) or _resolve_run_id({"object": {"type": "PAYROLL_RUN", "id": session.context_object_id}})
-        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"))
+        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"), user=user)
 
     engine = "deterministic"
     execution_error = None
     latency_ms = None
     started = datetime.now()
-    if gateway.model_configured() and not decision.get("blocked"):
+    injection_markers = guardrails.detect_prompt_injection(text)
+    if injection_markers:
+        logger.warning("Prompt injection markers detected, forcing deterministic engine: %s", injection_markers)
+        _audit(
+            db, org_id, user, session.id, "assist.injection_suspected",
+            {"message_id": message.id, "markers": injection_markers},
+        )
+    if (
+        gateway.model_configured()
+        and not decision.get("blocked")
+        and not injection_markers
+        and decision["intent_id"] not in intents.SMALLTALK_INTENT_IDS
+    ):
         try:
             answer = gateway.generate_llm_answer(
                 text,
@@ -532,7 +639,11 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
             provider="openai-compatible" if engine == "llm" else "deterministic",
             latency_ms=latency_ms,
             status="failed" if execution_error else "ok",
-            error_code=type(execution_error).__name__ if execution_error else None,
+            error_code=(
+                (getattr(execution_error, "error_code", None) or type(execution_error).__name__)
+                if execution_error
+                else None
+            ),
         )
     )
 
@@ -568,6 +679,19 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
                 )
             )
 
+    if decision["intent_id"] == "prepare.note":
+        draft_block = _auto_prepare_draft(db, org_id, user, session, tool_result, knowledge, text)
+        if draft_block is not None:
+            db.add(
+                AssistResponseBlock(
+                    response_id=response.id,
+                    block_type="draft",
+                    content=None,
+                    sequence=3,
+                    data=draft_block,
+                )
+            )
+
     _audit(
         db, org_id, user, session.id, "assist.message_submitted",
         {"message_id": message.id, "response_id": response.id, "intent_id": decision["intent_id"]},
@@ -586,6 +710,38 @@ def _extract_note_text(text: str) -> str | None:
     cleaned = re.sub(r"[^A-Za-z0-9 .,:;!?-]", " ", cleaned)
     cleaned = " ".join(cleaned.split())
     return cleaned[:2000] or None
+
+
+def _auto_prepare_draft(db, org_id, user, session, tool_result, knowledge, text) -> dict | None:
+    """Compose an AssistDraft from the same evidence already gathered for the
+    'prepare.note' turn, and attach it as a 'draft' response block — no
+    separate round trip to POST /assist/drafts.
+    """
+    lines = []
+    run = (tool_result or {}).get("run") or {}
+    if run:
+        lines.append(f"{run.get('period')} payroll run — status {run.get('status')}.")
+    blockers = (tool_result or {}).get("blockers") or []
+    if blockers:
+        lines.append("Open blockers:")
+        lines.extend(f"  - {b['description']} ({b['severity']})" for b in blockers)
+    elif tool_result:
+        lines.append("No open blockers.")
+    if knowledge:
+        top = knowledge[0]
+        lines.append(f"Related policy: {top.get('title')} — {top.get('summary')}")
+    user_note = _extract_note_text(text)
+    if user_note:
+        lines.append(f"Note: {user_note}")
+
+    if not lines:
+        return None
+
+    draft = create_draft(
+        db, org_id, user,
+        {"draft_type": "note", "content": "\n".join(lines), "session_id": session.id},
+    )
+    return {"draft_id": draft.id, "draft_type": draft.draft_type, "content": draft.content}
 
 
 def _auto_action_preview(db, org_id, user, session, decision, text) -> dict | None:
@@ -836,7 +992,7 @@ def create_handoff_preview(db, org_id, user, payload: dict) -> AssistHandoffPrev
         evidence_ids=payload.get("included_evidence_ids") or [],
         excluded_data_classes=payload.get("excluded_data_classes") or [],
         state="PREVIEWED",
-        expires_at=datetime.now() + timedelta(minutes=DEFAULT_HANDOFF_PREVIEW_MINUTES),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=DEFAULT_HANDOFF_PREVIEW_MINUTES),
     )
     db.add(preview)
     db.commit()
@@ -857,7 +1013,7 @@ def confirm_handoff(db, org_id, user, preview_id) -> AssistHandoff:
     preview = get_handoff_preview(db, org_id, user, preview_id)
     if preview.state != "PREVIEWED":
         raise BadRequestException(f"Handoff preview is in state {preview.state}.")
-    if preview.expires_at and preview.expires_at < datetime.now():
+    if preview.expires_at and _as_aware(preview.expires_at) < _utcnow():
         preview.state = "EXPIRED"
         db.commit()
         raise BadRequestException("Handoff preview has expired.")
@@ -924,6 +1080,20 @@ def get_allowed_actions(db, org_id, user) -> list[dict]:
     return allowed
 
 
+def _check_action_role(tool: dict, user) -> None:
+    """Re-check the acting user's live role against what this action requires.
+
+    Called at both preview creation (early feedback) and confirmation (the
+    real gate — role can change between the two, e.g. a demotion, so the
+    check at preview time alone is not sufficient).
+    """
+    required_roles = tool.get("required_roles")
+    if required_roles and role_value(user) not in required_roles:
+        raise ForbiddenException(
+            f"This action requires one of the following roles: {', '.join(required_roles)}."
+        )
+
+
 def create_action_preview(db, org_id, user, payload: dict, idempotency_key: str = None) -> dict:
     action_id = payload["action_id"]
     tool = get_action_tool(action_id)
@@ -931,6 +1101,7 @@ def create_action_preview(db, org_id, user, payload: dict, idempotency_key: str 
         raise BadRequestException(f"Action '{action_id}' is not an allowed Assist action.")
     if tool["risk_tier"] in ("A4", "A5"):
         raise BadRequestException(f"Action '{action_id}' cannot be executed by Assist.")
+    _check_action_role(tool, user)
     if payload.get("target", {}).get("type") in ("PAYROLL_RUN", "PAYROLL_EXCEPTION") and tool["risk_tier"] == "A3":
         pass
 
@@ -955,7 +1126,7 @@ def create_action_preview(db, org_id, user, payload: dict, idempotency_key: str 
             confirmation_label=preview_result.get("confirmation_label"),
             step_up_required=1 if preview_result.get("step_up_required") else 0,
             state="READY_FOR_CONFIRMATION",
-            expires_at=datetime.now() + timedelta(minutes=preview_result.get("expires_minutes", DEFAULT_ACTION_PREVIEW_MINUTES)),
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=preview_result.get("expires_minutes", DEFAULT_ACTION_PREVIEW_MINUTES)),
         )
         db.add(preview)
         db.flush()
@@ -996,11 +1167,11 @@ def get_action_preview(db, org_id, user, preview_id) -> AssistActionPreview:
     return preview
 
 
-def confirm_action(db, org_id, user, preview_id, payload: dict, idempotency_key: str = None) -> dict:
+def confirm_action(db, org_id, user, preview_id, payload: dict, idempotency_key: str = None, if_match: str = None) -> dict:
     preview = get_action_preview(db, org_id, user, preview_id)
     if preview.state != "READY_FOR_CONFIRMATION":
         raise BadRequestException(f"Action preview is in state {preview.state}.")
-    if preview.expires_at and preview.expires_at < datetime.now():
+    if preview.expires_at and _as_aware(preview.expires_at) < _utcnow():
         preview.state = "EXPIRED"
         db.commit()
         raise BadRequestException("Action preview has expired.")
@@ -1008,6 +1179,24 @@ def confirm_action(db, org_id, user, preview_id, payload: dict, idempotency_key:
     tool = get_action_tool(preview.action_id)
     if tool is None:
         raise BadRequestException("The registered action is no longer available.")
+    # Re-check the acting user's *current* role — it may have changed since
+    # the preview was created (e.g. a demotion between preview and confirm).
+    _check_action_role(tool, user)
+
+    # If the client sent an If-Match header, reject a confirm against a
+    # target that has moved on since the preview was generated. Only
+    # AssistExceptionSnapshot targets carry a real version counter today;
+    # other target types fall back to the version recorded on the preview.
+    if if_match:
+        live_version = get_live_target_version(db, org_id, preview.target_type, preview.target_id)
+        current_version = live_version if live_version is not None else (preview.target_version or 1)
+        current_etag = f'"{preview.id}-v{current_version}"'
+        if if_match != current_etag:
+            raise ZoikoException(
+                409,
+                "RESOURCE_VERSION_CONFLICT",
+                "The target has changed since this preview was created. Fetch a new preview and try again.",
+            )
 
     def _build():
         preview.state = "CONFIRMED"
@@ -1144,13 +1333,27 @@ def update_kb_item(db, org_id, user, item_id, payload: dict) -> AssistKbItem:
     item = get_kb_item(db, org_id, item_id)
     if item.state in (KnowledgeState.PUBLISHED.value, KnowledgeState.APPROVED.value) and "state" not in payload:
         raise BadRequestException("Published knowledge cannot be edited directly; create a new version instead.")
-    for field in ("title", "body", "content_type", "summary", "language", "authority", "next_review_at"):
+    for field in ("title", "body", "content_type", "summary", "language", "authority", "next_review_at", "effective_from", "effective_to"):
         if field in payload and payload[field] is not None:
             setattr(item, field, payload[field])
     if "jurisdiction_codes" in payload:
         item.jurisdiction_codes = payload["jurisdiction_codes"] or []
-    if "state" in payload and payload["state"] in (KnowledgeState.PUBLISHED.value, KnowledgeState.APPROVED.value):
+    if "state" in payload and payload["state"] == KnowledgeState.IN_REVIEW.value:
+        # Submitting for review carries no four-eyes requirement — that
+        # only applies to the APPROVED/PUBLISHED step below.
         item.state = payload["state"]
+        item.version += 1
+    elif "state" in payload and payload["state"] in (KnowledgeState.PUBLISHED.value, KnowledgeState.APPROVED.value):
+        # Four-eyes applies to any transition into APPROVED or PUBLISHED,
+        # not just the APPROVED step — otherwise a direct DRAFT->PUBLISHED
+        # edit would bypass the same-author restriction entirely.
+        if item.created_by is not None and user.id == item.created_by:
+            raise ForbiddenException(
+                "Four-eyes review required: a knowledge item cannot be approved or published by the same user "
+                "who authored it."
+            )
+        item.state = payload["state"]
+        item.reviewed_by = user.id
         if payload["state"] == KnowledgeState.PUBLISHED.value:
             item.published_at = datetime.now()
         item.version += 1
@@ -1163,13 +1366,136 @@ def publish_kb_item(db, org_id, user, item_id, payload: dict) -> AssistKbItem:
     item = get_kb_item(db, org_id, item_id)
     if item.state != KnowledgeState.APPROVED.value:
         raise BadRequestException("Only APPROVED knowledge can be published.")
+    if item.reviewed_by is None or (item.created_by is not None and item.reviewed_by == item.created_by):
+        raise ForbiddenException(
+            "Four-eyes review required: this item has no independent reviewer on record and cannot be published."
+        )
     item.state = KnowledgeState.PUBLISHED.value
     item.published_at = datetime.now()
     item.version += 1
-    item.reviewed_by = user.id
     db.commit()
     db.refresh(item)
     return item
+
+
+# States a KB item can still move out of before publication (draft/review
+# lifecycle, per KB governance spec §12).
+_PRE_PUBLISH_STATES = {
+    KnowledgeState.DRAFT.value,
+    KnowledgeState.IN_REVIEW.value,
+    KnowledgeState.APPROVED.value,
+    KnowledgeState.CORRECTION_REQUIRED.value,
+    KnowledgeState.SCHEDULED.value,
+}
+# States that are already a terminal/historical exit — nothing further
+# should move an item out of these via the transitions below.
+_TERMINAL_KB_STATES = {
+    KnowledgeState.REJECTED.value,
+    KnowledgeState.SUPERSEDED.value,
+    KnowledgeState.EXPIRED.value,
+    KnowledgeState.WITHDRAWN.value,
+    KnowledgeState.QUARANTINED.value,
+}
+
+
+def request_kb_correction(db, org_id, user, item_id, reason: str) -> AssistKbItem:
+    """Reviewer sends a defect back to the author (spec §12: "reviewer
+    identifies defect; returns to author") — distinct from a hard REJECTED."""
+    item = get_kb_item(db, org_id, item_id)
+    if item.state not in (KnowledgeState.IN_REVIEW.value, KnowledgeState.APPROVED.value):
+        raise BadRequestException(f"Cannot request correction from state {item.state}.")
+    item.state = KnowledgeState.CORRECTION_REQUIRED.value
+    item.state_reason = reason
+    item.version += 1
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def reject_kb_item(db, org_id, user, item_id, reason: str) -> AssistKbItem:
+    """Review fails outright; reason and evidence retained (spec §12)."""
+    item = get_kb_item(db, org_id, item_id)
+    if item.state not in _PRE_PUBLISH_STATES:
+        raise BadRequestException(f"Cannot reject from state {item.state}.")
+    item.state = KnowledgeState.REJECTED.value
+    item.state_reason = reason
+    item.version += 1
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def withdraw_kb_item(db, org_id, user, item_id, reason: str) -> AssistKbItem:
+    """Owner-driven removal for business/legal/content reasons — immediate
+    current-index exclusion, reason retained (spec §14)."""
+    item = get_kb_item(db, org_id, item_id)
+    if item.state not in (KnowledgeState.PUBLISHED.value, KnowledgeState.SCHEDULED.value):
+        raise BadRequestException(f"Cannot withdraw from state {item.state}.")
+    item.state = KnowledgeState.WITHDRAWN.value
+    item.state_reason = reason
+    item.version += 1
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def quarantine_kb_item(db, org_id, user, item_id, reason: str) -> AssistKbItem:
+    """Immediate kill switch for a security/integrity/accuracy incident — no
+    user-facing disclosure beyond the safe fallback (spec §14)."""
+    item = get_kb_item(db, org_id, item_id)
+    if item.state in _TERMINAL_KB_STATES:
+        raise BadRequestException(f"Cannot quarantine from state {item.state}.")
+    item.state = KnowledgeState.QUARANTINED.value
+    item.state_reason = reason
+    item.version += 1
+    db.commit()
+    db.refresh(item)
+    _audit(db, org_id, user, None, "assist.kb_item_quarantined", {"item_id": item.id, "reason": reason})
+    return item
+
+
+def supersede_kb_item(db, org_id, user, old_item_id, new_item_id, reason: str) -> AssistKbItem:
+    """Explicit successor link — the predecessor drops out of retrieval
+    indexes but its row (and any past citations of it) remain resolvable
+    (spec §14: "preserve old version; publish corrected version")."""
+    old_item = get_kb_item(db, org_id, old_item_id)
+    new_item = get_kb_item(db, org_id, new_item_id)
+    if old_item.state != KnowledgeState.PUBLISHED.value:
+        raise BadRequestException(f"Cannot supersede from state {old_item.state}; only a PUBLISHED item can be superseded.")
+    if new_item.id == old_item.id:
+        raise BadRequestException("A knowledge item cannot supersede itself.")
+    old_item.state = KnowledgeState.SUPERSEDED.value
+    old_item.state_reason = reason
+    old_item.supersedes_item_id = new_item.id
+    old_item.version += 1
+    db.commit()
+    db.refresh(old_item)
+    return old_item
+
+
+def run_kb_expiry_sweep(db, org_id) -> dict:
+    """Move PUBLISHED/SCHEDULED items whose effective_to has passed to
+    EXPIRED (spec §12: "effective_to or expiry/review policy reached").
+    Manual-trigger admin action, mirroring run_retention_cleanup — no
+    background worker exists yet, consistent with the rest of this batch.
+    """
+    today = date.today()
+    rows = (
+        db.query(AssistKbItem)
+        .filter(
+            (AssistKbItem.organization_id.is_(None)) | (AssistKbItem.organization_id == org_id),
+            AssistKbItem.state.in_([KnowledgeState.PUBLISHED.value, KnowledgeState.SCHEDULED.value]),
+            AssistKbItem.effective_to.isnot(None),
+            AssistKbItem.effective_to < today,
+        )
+        .all()
+    )
+    for item in rows:
+        item.state = KnowledgeState.EXPIRED.value
+        item.version += 1
+    if rows:
+        db.commit()
+    return {"expired": len(rows), "item_ids": [i.id for i in rows]}
 
 
 def list_kb_sources(db):
@@ -1186,6 +1512,30 @@ def create_kb_source(db, payload: dict) -> AssistKbSource:
         owner="Platform",
     )
     db.add(source)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+def quarantine_kb_source(db, org_id, user, source_id, reason: str) -> AssistKbSource:
+    """Security/integrity incident at the source level — cascades to every
+    item drawn from that source via knowledge.py's retrieval-eligibility
+    check (spec §14 ties quarantine to sources as well as items)."""
+    source = db.query(AssistKbSource).filter(AssistKbSource.id == source_id).first()
+    if source is None:
+        raise NotFoundException("Knowledge source", source_id)
+    source.state = KnowledgeSourceState.QUARANTINED.value
+    db.commit()
+    db.refresh(source)
+    _audit(db, org_id, user, None, "assist.kb_source_quarantined", {"source_id": source.id, "reason": reason})
+    return source
+
+
+def reactivate_kb_source(db, org_id, user, source_id) -> AssistKbSource:
+    source = db.query(AssistKbSource).filter(AssistKbSource.id == source_id).first()
+    if source is None:
+        raise NotFoundException("Knowledge source", source_id)
+    source.state = KnowledgeSourceState.ACTIVE.value
     db.commit()
     db.refresh(source)
     return source
@@ -1227,7 +1577,7 @@ def list_model_executions(db, org_id, skip, limit, response_id=None):
 def get_retention_summary(db, org_id) -> dict:
     from app.modules.assist.models import AssistSession
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     rows = db.query(AssistSession).filter(AssistSession.organization_id == org_id).all()
     by_class = {}
     by_status = {}
@@ -1236,7 +1586,7 @@ def get_retention_summary(db, org_id) -> dict:
     for s in rows:
         by_class[s.retention_class or "STANDARD"] = by_class.get(s.retention_class or "STANDARD", 0) + 1
         by_status[s.status] = by_status.get(s.status, 0) + 1
-        if s.expires_at and s.expires_at < now:
+        if s.expires_at and _as_aware(s.expires_at) < now:
             expired += 1
         if oldest is None or (s.created_at and s.created_at < oldest):
             oldest = s.created_at
@@ -1259,17 +1609,24 @@ def run_retention_cleanup(db, org_id, user) -> dict:
     """
     from app.modules.assist.models import AssistSession
 
-    now = datetime.now()
-    rows = (
-        db.query(AssistSession)
-        .filter(
-            AssistSession.organization_id == org_id,
-            AssistSession.expires_at.isnot(None),
-            AssistSession.expires_at < now,
-            AssistSession.status != AssistSessionState.ARCHIVED.value,
+    now = _utcnow()
+
+    def _candidates():
+        return (
+            db.query(AssistSession)
+            .filter(
+                AssistSession.organization_id == org_id,
+                AssistSession.expires_at.isnot(None),
+                AssistSession.status != AssistSessionState.ARCHIVED.value,
+            )
+            .all()
         )
-        .all()
-    )
+
+    # Expiry compares a fetched column value against "now" in Python (not a
+    # SQL filter) because DateTime(timezone=True) round-trips tz-aware on
+    # Postgres but naive on SQLite — a single hardcoded bind parameter would
+    # silently mis-filter on one dialect or the other.
+    rows = [s for s in _candidates() if _as_aware(s.expires_at) < now]
     archived = 0
     for s in rows:
         s.status = AssistSessionState.ARCHIVED.value
@@ -1281,17 +1638,9 @@ def run_retention_cleanup(db, org_id, user) -> dict:
         )
     if archived:
         db.commit()
+    expired_remaining = sum(1 for s in _candidates() if _as_aware(s.expires_at) < now)
     return {
         "archived": archived,
         "scanned": len(rows),
-        "expired_remaining": (
-            db.query(AssistSession)
-            .filter(
-                AssistSession.organization_id == org_id,
-                AssistSession.expires_at.isnot(None),
-                AssistSession.expires_at < now,
-                AssistSession.status != AssistSessionState.ARCHIVED.value,
-            )
-            .count()
-        ),
+        "expired_remaining": expired_remaining,
     }

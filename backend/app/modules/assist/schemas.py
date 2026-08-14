@@ -509,6 +509,7 @@ class KbItemResponse(BaseModel):
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     supersedes_item_id: Optional[int] = None
+    state_reason: Optional[str] = None
     published_at: Optional[datetime] = None
     next_review_at: Optional[date] = None
     created_at: datetime
@@ -516,6 +517,20 @@ class KbItemResponse(BaseModel):
 
 class KbPublishRequest(BaseModel):
     reviewer_notes: Optional[str] = None
+
+
+class KbReasonRequest(BaseModel):
+    reason: str = Field(..., max_length=2000)
+
+
+class KbSupersedeRequest(BaseModel):
+    new_item_id: int
+    reason: str = Field(..., max_length=2000)
+
+
+class KbExpirySweepResponse(BaseModel):
+    expired: int
+    item_ids: list[int] = Field(default_factory=list)
 
 
 # ── Audit / retention (admin) ───────────────────────────────────────────

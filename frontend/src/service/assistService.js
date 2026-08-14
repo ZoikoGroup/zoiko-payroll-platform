@@ -143,7 +143,39 @@ export const cancelAssistAction = async (previewId) => {
   return api.post(`/api/assist/action-previews/${previewId}/cancel`);
 };
 
+export const stopAssistResponse = async (responseId) => {
+  return api.post(`/api/assist/responses/${responseId}/stop`);
+};
+
 // ── Drafts / handoffs ──────────────────────────────────────────────────
+export const createAssistHandoffPreview = async ({
+  destination, reason_code, summary, included_evidence_ids, excluded_data_classes, source_response_id,
+}) => {
+  return api.post("/api/assist/handoff-previews", {
+    destination,
+    reason_code,
+    summary,
+    included_evidence_ids: included_evidence_ids || [],
+    excluded_data_classes: excluded_data_classes || [],
+    source_response_id: source_response_id ?? null,
+  });
+};
+
+export const getAssistHandoffPreview = async (previewId) => {
+  return api.get(`/api/assist/handoff-previews/${previewId}`);
+};
+
+export const confirmAssistHandoff = async (previewId) => {
+  return api.post(`/api/assist/handoff-previews/${previewId}/confirm`);
+};
+
+export const cancelAssistHandoff = async (previewId) => {
+  return api.post(`/api/assist/handoff-previews/${previewId}/cancel`);
+};
+
+export const getAssistHandoff = async (handoffId) => {
+  return api.get(`/api/assist/handoffs/${handoffId}`);
+};
 export const createAssistDraft = async ({ draft_type, content, session_id }) => {
   return api.post("/api/assist/drafts", { draft_type, content, session_id });
 };

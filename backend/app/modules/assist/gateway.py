@@ -12,12 +12,30 @@ external credentials.
 
 import json
 import logging
+import time
+import urllib.error
 import urllib.request
 
 from app.config import settings
 from app.modules.assist import prompts
 
 logger = logging.getLogger("zoiko_payroll.assist.gateway")
+
+_RETRYABLE_ATTEMPTS = 1  # one retry (two attempts total) on transient failures only
+_RETRY_BACKOFF_SECONDS = 0.5
+
+
+class GatewayError(Exception):
+    """Raised on a classified model-gateway failure.
+
+    `error_code` is one of timeout/connection/http_4xx/http_5xx/invalid_json —
+    recorded on AssistModelExecution so failures are diagnosable without
+    grepping logs for a bare exception class name.
+    """
+
+    def __init__(self, message: str, error_code: str):
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def model_configured() -> bool:
@@ -33,11 +51,37 @@ def active_engine() -> str:
 
 
 def _post_json(url: str, headers: dict, payload: dict, timeout: int) -> dict:
+    """POST with one retry on transient failures (timeout/connection/5xx).
+
+    4xx responses are not retried — a bad request won't succeed by resending
+    it unchanged.
+    """
     data = json.dumps(payload).encode("utf-8")
     headers.setdefault("User-Agent", "zoiko-payroll-assist/1.0")
     request = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-        return json.loads(response.read().decode("utf-8"))
+
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+                raw = response.read().decode("utf-8")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise GatewayError("Model gateway returned a non-JSON response.", "invalid_json") from exc
+        except urllib.error.HTTPError as exc:
+            if 400 <= exc.code < 500:
+                raise GatewayError(f"Model gateway returned HTTP {exc.code}.", "http_4xx") from exc
+            if attempt >= _RETRYABLE_ATTEMPTS:
+                raise GatewayError(f"Model gateway returned HTTP {exc.code}.", "http_5xx") from exc
+        except TimeoutError as exc:
+            if attempt >= _RETRYABLE_ATTEMPTS:
+                raise GatewayError("Model gateway request timed out.", "timeout") from exc
+        except urllib.error.URLError as exc:
+            if attempt >= _RETRYABLE_ATTEMPTS:
+                raise GatewayError(f"Model gateway connection failed: {exc.reason}", "connection") from exc
+        attempt += 1
+        time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
 
 def generate_llm_answer(
@@ -132,6 +176,32 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
             lines.append(f"  - {exc['description']} ({exc['severity']}, {owner})")
         return "\n".join(lines)
 
+    if intent_id == "prepare.note":
+        run = tool_result.get("run", {})
+        blockers = tool_result.get("blockers", [])
+        readiness = tool_result.get("readiness")
+        lines = [f"I've drafted a note from the current {run.get('period')} run status — see the Drafts tab."]
+        lines.append(f"Status: {readiness or run.get('status')}.")
+        if blockers:
+            lines.append(f"{len(blockers)} open blocker(s) noted in the draft.")
+        return "\n".join(lines)
+
+    if intent_id == "review.myPayslips":
+        payslips = tool_result.get("payslips", [])
+        lines = [f"Your last {len(payslips)} payslip(s):"]
+        for p in payslips:
+            lines.append(f"  - {p.get('period')}: net {p.get('net_pay', 0):,.2f} ({p.get('status')})")
+        lines.append("Open Employee Self-Service for the full payslip detail or a downloadable copy.")
+        return "\n".join(lines)
+
+    if intent_id == "explain.myProfile":
+        profile = tool_result.get("profile", {})
+        return (
+            f"{profile.get('name')} · {profile.get('designation') or 'no designation on file'} "
+            f"· {profile.get('department') or 'no department on file'} · status {profile.get('status')}. "
+            "Open Employee Self-Service to review or update your profile."
+        )
+
     if intent_id == "review.variance":
         a, b = tool_result.get("period_a", {}), tool_result.get("period_b", {})
         deltas = tool_result.get("deltas", {})
@@ -170,6 +240,33 @@ def deterministic_answer(
     knowledge_items: list[dict],
 ) -> dict:
     """Build a fully grounded structured answer using only deterministic data."""
+    if intent_id == "chat.greeting":
+        return {
+            "answer": (
+                "Hi! I'm Zoiko Payroll Assist. I can help you check payroll run status, readiness, "
+                "exceptions, and policies. What would you like to know?"
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": [],
+            "next_steps": [],
+            "sources": [],
+            "confidence": "HIGH",
+            "safety_state": "SAFE",
+        }
+
+    if intent_id == "chat.acknowledgment":
+        return {
+            "answer": "You're welcome! Let me know if there's anything else you'd like help with.",
+            "facts": [],
+            "inferences": [],
+            "limitations": [],
+            "next_steps": [],
+            "sources": [],
+            "confidence": "HIGH",
+            "safety_state": "SAFE",
+        }
+
     if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data"):
         return {
             "answer": (
@@ -229,6 +326,8 @@ def deterministic_answer(
     next_steps = ["Open the payroll run for the full detail."]
     if intent_id in ("review.run_readiness", "review.exception"):
         next_steps = ["Open the Payroll Runs screen to review exceptions and decide."]
+    elif intent_id in ("review.myPayslips", "explain.myProfile"):
+        next_steps = ["Open Employee Self-Service for the full detail or a downloadable payslip."]
 
     return {
         "answer": answer,

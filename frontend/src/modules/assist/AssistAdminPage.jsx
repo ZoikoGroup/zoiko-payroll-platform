@@ -48,7 +48,7 @@ function JsonExpandable({ label, value }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#35B6F5]"
+        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0592D3]"
       >
         <ChevronDown size={11} className={`transition-transform ${open ? "rotate-180" : ""}`} />
         {label}
@@ -79,7 +79,7 @@ const CONTENT_TYPES = ["HOW_TO", "FAQ", "POLICY", "GUIDE", "REFERENCE"];
 const AUTHORITIES = ["TIER_1_STATUTE", "TIER_2_APPROVED_PRIMARY", "TIER_3_APPROVED_SECONDARY", "TIER_4_TENANT"];
 
 const inputCls =
-  "w-full rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-2 text-[12px] text-[#2A2520] outline-none focus:border-[#19C58A]";
+  "w-full rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-2 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]";
 
 function KbItemRow({ item, onEdit, onPublish, savingId }) {
   const [editing, setEditing] = useState(false);
@@ -116,7 +116,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
               await onEdit(item.id, form);
               setEditing(false);
             }}
-            className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#15B07A] px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#0592D3] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-[#04628C] disabled:opacity-60"
           >
             {savingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
             Save
@@ -153,7 +153,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1 rounded-[8px] border border-[#E5E0D9] px-2 py-1 text-[10px] font-bold text-[#6B6560] hover:border-[#35B6F5] hover:text-[#35B6F5]"
+              className="inline-flex items-center gap-1 rounded-[8px] border border-[#E5E0D9] px-2 py-1 text-[10px] font-bold text-[#6B6560] hover:border-[#0592D3] hover:text-[#0592D3]"
             >
               <Pencil size={10} /> Edit
             </button>
@@ -163,7 +163,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
               type="button"
               disabled={savingId === item.id}
               onClick={() => onPublish(item.id)}
-              className="inline-flex items-center gap-1 rounded-[8px] bg-[#35B6F5] px-2 py-1 text-[10px] font-bold text-white disabled:opacity-60"
+              className="inline-flex items-center gap-1 rounded-[8px] bg-[#0592D3] px-2 py-1 text-[10px] font-bold text-white transition hover:bg-[#04628C] disabled:opacity-60"
             >
               {savingId === item.id ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
               Publish
@@ -246,7 +246,7 @@ function KnowledgePanel({ allowed }) {
             <select
               value={state}
               onChange={(e) => setState(e.target.value)}
-              className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#19C58A]"
+              className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
             >
               {KB_STATES.map((s) => (
                 <option key={s} value={s}>
@@ -267,7 +267,7 @@ function KnowledgePanel({ allowed }) {
           <button
             type="button"
             onClick={() => setShowCreate((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-1.5 text-[11px] font-bold text-[#15B07A] hover:border-[#19C58A]"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-1.5 text-[11px] font-bold text-[#0592D3] hover:border-[#0592D3]"
           >
             <Plus size={12} /> New knowledge item
           </button>
@@ -325,7 +325,7 @@ function KnowledgePanel({ allowed }) {
                   type="button"
                   disabled={savingId === "create"}
                   onClick={handleCreate}
-                  className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#15B07A] px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#0592D3] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-[#04628C] disabled:opacity-60"
                 >
                   {savingId === "create" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
                   Create draft
@@ -344,7 +344,7 @@ function KnowledgePanel({ allowed }) {
 
         {items === null ? (
           <div className="flex items-center justify-center p-10">
-            <Loader2 size={18} className="animate-spin text-[#19C58A]" />
+            <Loader2 size={18} className="animate-spin text-[#0592D3]" />
           </div>
         ) : items.length === 0 ? (
           <p className="p-8 text-center text-[12px] text-[#9E9690]">No knowledge items match.</p>
@@ -465,8 +465,8 @@ export default function AssistAdminPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.2em] text-[#15B07A]">
-            <ShieldCheck size={14} /> Zoiko Assist Governance
+          <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.2em] text-[#0592D3]">
+            <ShieldCheck size={14} /> Zoiko Payroll Assist
           </p>
           <h1 className="mt-1 text-[24px] font-extrabold text-[#1A1816]">Assist Governance</h1>
         </div>
@@ -474,7 +474,7 @@ export default function AssistAdminPage() {
           type="button"
           onClick={loadAll}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E0D9] bg-white px-3 py-2 text-[12px] font-bold text-[#6B6560] transition hover:border-[#19C58A] hover:text-[#15B07A] disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E0D9] bg-white px-3 py-2 text-[12px] font-bold text-[#6B6560] transition hover:border-[#0592D3] hover:text-[#0592D3] disabled:opacity-60"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           Refresh
@@ -489,7 +489,7 @@ export default function AssistAdminPage() {
         <Card
           title="Retention policy"
           value={summary?.retention_policy ? summary.retention_policy.replaceAll("_", " ") : "—"}
-          accent="text-[#35B6F5]"
+          accent="text-[#0592D3]"
           sub="classification-based retention window"
         />
       </div>
@@ -531,7 +531,7 @@ export default function AssistAdminPage() {
               type="button"
               onClick={() => setTab(tb.id)}
               className={`flex items-center gap-1.5 rounded-t-[10px] px-4 py-2.5 text-[12px] font-bold transition ${
-                tab === tb.id ? "border-b-2 border-[#19C58A] text-[#15B07A]" : "text-[#9E9690] hover:text-[#6B6560]"
+                tab === tb.id ? "border-b-2 border-[#0592D3] text-[#0592D3]" : "text-[#9E9690] hover:text-[#6B6560]"
               }`}
             >
               <Icon size={13} /> {tb.label}
@@ -548,7 +548,7 @@ export default function AssistAdminPage() {
             <select
               value={eventType}
               onChange={(e) => setEventType(e.target.value)}
-              className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#19C58A]"
+              className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
             >
               <option value="">All</option>
               {eventTypes.map((et) => (
@@ -569,7 +569,7 @@ export default function AssistAdminPage() {
           </div>
           {events === null ? (
             <div className="flex items-center justify-center p-10">
-              <Loader2 size={18} className="animate-spin text-[#19C58A]" />
+              <Loader2 size={18} className="animate-spin text-[#0592D3]" />
             </div>
           ) : events.length === 0 ? (
             <p className="p-8 text-center text-[12px] text-[#9E9690]">No audit events match.</p>
@@ -612,7 +612,7 @@ export default function AssistAdminPage() {
         <div className="mt-4 rounded-[16px] border border-[#E5E0D9] bg-white">
           {sessions === null ? (
             <div className="flex items-center justify-center p-10">
-              <Loader2 size={18} className="animate-spin text-[#19C58A]" />
+              <Loader2 size={18} className="animate-spin text-[#0592D3]" />
             </div>
           ) : sessions.length === 0 ? (
             <p className="p-8 text-center text-[12px] text-[#9E9690]">No sessions found.</p>

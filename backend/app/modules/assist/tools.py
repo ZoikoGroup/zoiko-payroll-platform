@@ -19,13 +19,14 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import role_value
 from app.modules.assist.models import (
     AssistAuditEvent,
     AssistExceptionSnapshot,
     AssistHandoff,
     AssistHandoffPreview,
 )
-from app.modules.payroll.models import PayrollLeaveRequest, PayrollRun, PayslipItem
+from app.modules.payroll.models import PayrollEmployee, PayrollLeaveRequest, PayrollRun, PayslipItem
 
 logger = logging.getLogger("zoiko_payroll.assist.tools")
 
@@ -241,6 +242,77 @@ def tool_compare_periods(db, org_id, run_id=None, context_object=None, arguments
     }
 
 
+# ── Employee self-service read tools ────────────────────────────────────
+#
+# These never accept a target employee id from the caller — they always
+# resolve the acting user's own PayrollEmployee record via the same
+# email+org join app.modules.employee.router._my_employee uses, and return
+# a neutral "not found" (matching the wording used for a missing payroll
+# run) whether the account has no linked employee record or genuinely has
+# no data — never revealing which, per the "no existence confirmation"
+# requirement for self-service denial.
+
+def _resolve_own_employee(db, org_id, user) -> PayrollEmployee | None:
+    if not getattr(user, "email", None):
+        return None
+    return (
+        db.query(PayrollEmployee)
+        .filter(PayrollEmployee.organization_id == org_id, PayrollEmployee.email == user.email)
+        .first()
+    )
+
+
+def tool_get_my_profile(db, org_id, user=None) -> dict:
+    employee = _resolve_own_employee(db, org_id, user)
+    if employee is None:
+        return {"found": False, "reason": "No visible payroll run."}
+    return {
+        "found": True,
+        "profile": {
+            "employee_code": employee.employee_code,
+            "name": employee.name,
+            "department": employee.department,
+            "designation": employee.designation,
+            "employment_type": employee.employment_type,
+            "status": employee.status,
+            "date_of_joining": str(employee.date_of_joining) if employee.date_of_joining else None,
+        },
+    }
+
+
+def tool_get_my_payslips(db, org_id, user=None, arguments=None) -> dict:
+    arguments = arguments or {}
+    employee = _resolve_own_employee(db, org_id, user)
+    if employee is None:
+        return {"found": False, "reason": "No visible payroll run."}
+    # PayslipItem has no period_label/period_start of its own — period info
+    # lives on the related PayrollRun (payroll_run_id), so filter/order via
+    # that join rather than a column PayslipItem doesn't have.
+    query = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(PayslipItem.employee_id == employee.id)
+    )
+    period = arguments.get("period")
+    if period:
+        query = query.filter(PayrollRun.period_label == period)
+    items = query.order_by(PayrollRun.period_start.desc()).limit(6).all()
+    if not items:
+        return {"found": False, "reason": "No visible payroll run."}
+    return {
+        "found": True,
+        "payslips": [
+            {
+                "period": item.payroll_run.period_label if item.payroll_run else None,
+                "net_pay": float(item.net_pay or 0),
+                "status": item.status,
+                "paid_at": item.paid_at.isoformat() if item.paid_at else None,
+            }
+            for item in items
+        ],
+    }
+
+
 # ── A3 action tools (preview / execute) ─────────────────────────────────
 
 def preview_assign_exception(db, org_id, session_id, user, target, arguments) -> dict:
@@ -354,6 +426,11 @@ def execute_create_handoff(db, org_id, session_id, user, preview) -> dict:
 
 # ── Action tool registry ────────────────────────────────────────────────
 
+# Roles permitted to confirm each action, re-checked live at both preview
+# creation and confirmation (mirrors get_current_payroll_operator's role
+# tuple in app.core.dependencies). None means any authenticated user.
+_PAYROLL_OPERATOR_ROLES = ("org_admin", "payroll_admin", "super_admin")
+
 ACTION_TOOLS = {
     "payroll.assignException": {
         "name": "Assign exception",
@@ -362,6 +439,7 @@ ACTION_TOOLS = {
         "preview": preview_assign_exception,
         "execute": execute_assign_exception,
         "requires_confirmation": True,
+        "required_roles": _PAYROLL_OPERATOR_ROLES,
     },
     "payroll.addExceptionNote": {
         "name": "Add exception note",
@@ -370,6 +448,7 @@ ACTION_TOOLS = {
         "preview": preview_add_note,
         "execute": execute_add_note,
         "requires_confirmation": True,
+        "required_roles": _PAYROLL_OPERATOR_ROLES,
     },
     "case.createHandoff": {
         "name": "Create handoff",
@@ -378,6 +457,7 @@ ACTION_TOOLS = {
         "preview": preview_create_handoff,
         "execute": execute_create_handoff,
         "requires_confirmation": True,
+        "required_roles": None,
     },
 }
 
@@ -387,7 +467,13 @@ READ_TOOLS = {
     "payroll.listExceptions": tool_list_exceptions,
     "payroll.getApprovalStatus": tool_get_approval_status,
     "payroll.comparePeriods": tool_compare_periods,
+    "payroll.getMyProfile": tool_get_my_profile,
+    "payroll.getMyPayslips": tool_get_my_payslips,
 }
+
+# Tools an `employee`-role user may call. Everything else is run-wide/scoped
+# data (FRS §30: Employee = "Own" only, no run status/exceptions visibility).
+_EMPLOYEE_ALLOWED_TOOL_IDS = {"payroll.getMyProfile", "payroll.getMyPayslips"}
 
 
 def _record_audit(db, org_id, user, session_id, event_type, payload) -> AssistAuditEvent:
@@ -403,16 +489,28 @@ def _record_audit(db, org_id, user, session_id, event_type, payload) -> AssistAu
     return event
 
 
-def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, arguments=None) -> dict:
+def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, arguments=None, user=None) -> dict:
     import inspect
 
     handler = READ_TOOLS.get(tool_id)
     if handler is None:
         return {"found": False, "reason": f"Tool {tool_id} is not registered."}
+    if user is not None and role_value(user) == "employee" and tool_id not in _EMPLOYEE_ALLOWED_TOOL_IDS:
+        # Neutral denial — identical wording to a genuinely missing run, so
+        # an employee probing for run-wide data can't distinguish "you're
+        # not allowed" from "nothing exists" (FRS UAT-001).
+        return {"found": False, "reason": "No visible payroll run."}
     try:
-        kwargs = {"run_id": run_id, "context_object": context_object}
-        if "arguments" in inspect.signature(handler).parameters:
+        params = inspect.signature(handler).parameters
+        kwargs = {}
+        if "run_id" in params:
+            kwargs["run_id"] = run_id
+        if "context_object" in params:
+            kwargs["context_object"] = context_object
+        if "arguments" in params:
             kwargs["arguments"] = arguments
+        if "user" in params:
+            kwargs["user"] = user
         return handler(db, org_id, **kwargs)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Read tool %s failed: %s", tool_id, exc)
@@ -421,3 +519,26 @@ def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, argu
 
 def get_action_tool(action_id: str) -> dict | None:
     return ACTION_TOOLS.get(action_id)
+
+
+def get_live_target_version(db: Session, org_id: int, target_type: str, target_id: str) -> int | None:
+    """Return the target's current live version, if it tracks one.
+
+    Only AssistExceptionSnapshot carries a real optimistic-concurrency
+    counter today (object_version, bumped on every mutation). Other target
+    types (PAYROLL_RUN, HANDOFF) have no real version column yet, so this
+    returns None and the caller falls back to the version recorded on the
+    preview itself.
+    """
+    if target_type == "PAYROLL_EXCEPTION":
+        try:
+            target_pk = int(target_id)
+        except (TypeError, ValueError):
+            return None
+        exception = (
+            db.query(AssistExceptionSnapshot)
+            .filter(AssistExceptionSnapshot.id == target_pk, AssistExceptionSnapshot.organization_id == org_id)
+            .first()
+        )
+        return exception.object_version if exception else None
+    return None

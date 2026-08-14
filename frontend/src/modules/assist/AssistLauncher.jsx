@@ -9,7 +9,6 @@ import {
   ThumbsUp,
   ThumbsDown,
   Loader2,
-  ChevronDown,
   Plus,
   Trash2,
   Pencil,
@@ -18,12 +17,13 @@ import {
   Check,
   Languages,
   Save,
+  LifeBuoy,
+  Square,
 } from "lucide-react";
 import {
   acknowledgeAssistNotice,
   getAssistCapabilities,
   getAssistResponse,
-  getAssistStatus,
   getAssistSuggestions,
   getCurrentAssistNotice,
   submitAssistFeedback,
@@ -39,19 +39,25 @@ import {
   listAssistDrafts,
   updateAssistDraft,
   deleteAssistDraft,
+  stopAssistResponse,
+  createAssistHandoffPreview,
+  confirmAssistHandoff,
+  cancelAssistHandoff,
 } from "../../service/assistService";
 import { ASSIST_LOCALES, getAssistLocale, setAssistLocale, t, formatAssistDate } from "./locales";
+import zoikoPayrollLogo from "../../assets/zoiko-payroll-logo.png";
+import zoikoPayrollIcon from "../../assets/zoiko-payroll-icon.png";
 
 const SESSION_KEY = "zoiko_payroll_assist_session";
 
-const ACCENT = "bg-[#19C58A]";
-const ACCENT_HOVER = "hover:bg-[#15B07A]";
+const ACCENT = "bg-[#0592D3]";
+const ACCENT_HOVER = "hover:bg-[#04628C]";
 
 function NoticeGate({ notice, onAcknowledge, busy }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#19C58A]/10">
-        <ShieldCheck className="h-6 w-6 text-[#19C58A]" />
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#0592D3]/10">
+        <ShieldCheck className="h-6 w-6 text-[#0592D3]" />
       </div>
       <div>
         <p className="text-[15px] font-bold text-[#1A1816]">{t("assist.notice.title")}</p>
@@ -79,40 +85,11 @@ function SuggestionChips({ suggestions, onPick }) {
           key={s.intent_id + s.position}
           type="button"
           onClick={() => onPick(s.prompt)}
-          className="rounded-[12px] border border-[#E5E0D9] bg-white px-3 py-2 text-left text-[12px] font-medium text-[#6B6560] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+          className="rounded-[12px] border border-[#E5E0D9] bg-white px-3 py-2 text-left text-[12px] font-medium text-[#6B6560] transition-all duration-200 hover:border-[#0592D3] hover:text-[#0592D3]"
         >
           {s.prompt}
         </button>
       ))}
-    </div>
-  );
-}
-
-function SourceList({ sources }) {
-  const [open, setOpen] = useState(false);
-  if (!sources?.length) return null;
-  return (
-    <div className="mt-2">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#35B6F5]"
-      >
-        <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-        {t("assist.sources", { count: sources.length })}
-      </button>
-      {open ? (
-        <div className="mt-1.5 space-y-1">
-          {sources.map((s) => (
-            <div key={s.evidence_id} className="rounded-[10px] bg-[#F8F7F4] px-2.5 py-1.5">
-              <p className="text-[11px] font-semibold text-[#1A1816]">{s.title}</p>
-              <p className="text-[10px] text-[#9E9690]">
-                {s.source_type} · {s.authority || "authorized record"}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -268,6 +245,167 @@ function ActionCard({ action, onError }) {
   );
 }
 
+const HANDOFF_DESTINATIONS = ["PAYROLL_SUPPORT", "COMPLIANCE_LOCAL_PAYROLL"];
+
+function HandoffPanel({ sessionId, onClose }) {
+  const [state, setState] = useState("form"); // form | busy | preview | confirmed
+  const [destination, setDestination] = useState(HANDOFF_DESTINATIONS[0]);
+  const [reasonCode, setReasonCode] = useState("USER_REQUESTED");
+  const [summary, setSummary] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [receipt, setReceipt] = useState(null);
+  const [error, setError] = useState("");
+
+  async function handleCreatePreview(e) {
+    e.preventDefault();
+    if (!summary.trim()) return;
+    setState("busy");
+    setError("");
+    try {
+      const result = await createAssistHandoffPreview({
+        destination,
+        reason_code: reasonCode,
+        summary: summary.trim(),
+        source_response_id: null,
+      });
+      setPreview(result);
+      setState("preview");
+    } catch (err) {
+      setError(err.message || "Could not prepare the handoff.");
+      setState("form");
+    }
+  }
+
+  async function handleConfirm() {
+    setState("busy");
+    try {
+      const result = await confirmAssistHandoff(preview.preview_id);
+      setReceipt(result);
+      setState("confirmed");
+    } catch (err) {
+      setError(err.message || "Could not confirm the handoff.");
+      setState("preview");
+    }
+  }
+
+  async function handleCancel() {
+    setState("busy");
+    try {
+      await cancelAssistHandoff(preview.preview_id);
+      onClose();
+    } catch (err) {
+      setError(err.message || "Could not cancel the handoff.");
+      setState("preview");
+    }
+  }
+
+  return (
+    <div className="mx-4 mt-3 rounded-[14px] border border-[#E5E0D9] bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="flex items-center gap-1.5 text-[12px] font-bold text-[#2A2520]">
+          <LifeBuoy size={13} className="text-[#0592D3]" /> {t("assist.handoff.title")}
+        </p>
+        <button type="button" onClick={onClose} className="rounded-[8px] p-1 text-[#9E9690] hover:text-[#2A2520]">
+          <X size={14} />
+        </button>
+      </div>
+
+      {error ? <p className="mb-2 rounded-[10px] bg-[#FFEAEF] px-2.5 py-1.5 text-[11px] text-[#E4506A]">{error}</p> : null}
+
+      {state === "confirmed" ? (
+        <div className="rounded-[12px] border border-[#C9EFDF] bg-[#EEFBF5] px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-[12px] font-bold text-[#15B07A]">
+            <Check size={13} /> {t("assist.handoff.created")}
+          </p>
+          <p className="mt-1 text-[11px] text-[#6B9A83]">
+            {t("assist.handoff.caseRef", { id: receipt?.case_id || receipt?.handoff_id })}
+          </p>
+          {receipt?.sla_reference ? (
+            <p className="mt-0.5 text-[10px] text-[#6B9A83]">{receipt.sla_reference}</p>
+          ) : null}
+          <button
+            type="button"
+            onClick={onClose}
+            className={`mt-2 inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[11px] font-bold text-white transition ${ACCENT} ${ACCENT_HOVER}`}
+          >
+            {t("assist.close")}
+          </button>
+        </div>
+      ) : state === "preview" ? (
+        <div className="rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] p-2.5">
+          <p className="text-[11px] font-semibold text-[#2A2520]">{preview.destination}</p>
+          <p className="mt-1 text-[11px] text-[#6B6560]">{preview.summary}</p>
+          <div className="mt-2.5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={state === "busy"}
+              className={`inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-[11px] font-bold text-white transition disabled:opacity-60 ${ACCENT} ${ACCENT_HOVER}`}
+            >
+              {t("assist.handoff.confirm")}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={state === "busy"}
+              className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#6B6560] transition hover:border-[#FF6E86] hover:text-[#E4506A] disabled:opacity-60"
+            >
+              {t("assist.action.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleCreatePreview} className="space-y-2">
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">
+              {t("assist.handoff.destination")}
+            </label>
+            <select
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              className="mt-1 w-full rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+            >
+              {HANDOFF_DESTINATIONS.map((d) => (
+                <option key={d} value={d}>{d.replaceAll("_", " ")}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">
+              {t("assist.handoff.reason")}
+            </label>
+            <input
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value)}
+              className="mt-1 w-full rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">
+              {t("assist.handoff.summary")}
+            </label>
+            <textarea
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              rows={3}
+              placeholder={t("assist.handoff.summaryPlaceholder")}
+              className="mt-1 w-full resize-none rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={state === "busy" || !summary.trim()}
+            className={`inline-flex w-full items-center justify-center gap-1.5 rounded-[10px] px-3 py-2 text-[11px] font-bold text-white transition disabled:opacity-60 ${ACCENT} ${ACCENT_HOVER}`}
+          >
+            {state === "busy" ? <Loader2 size={12} className="animate-spin" /> : null}
+            {t("assist.handoff.preview")}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
   const [open, setOpen] = useState(false);
   const [draftType, setDraftType] = useState("note");
@@ -304,7 +442,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#9E9690] transition hover:text-[#19C58A]"
+        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#9E9690] transition hover:text-[#0592D3]"
       >
         <Save size={11} /> {t("assist.drafts.save")}
       </button>
@@ -329,7 +467,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
         value={draftContent}
         onChange={(e) => setDraftContent(e.target.value)}
         rows={3}
-        className="mt-2 w-full resize-none rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-2 text-[11px] text-[#2A2520] outline-none focus:border-[#19C58A]"
+        className="mt-2 w-full resize-none rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-2 text-[11px] text-[#2A2520] outline-none focus:border-[#0592D3]"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -357,7 +495,7 @@ function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) {
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-[16px] rounded-br-[4px] bg-[#19C58A] px-3.5 py-2.5 text-[13px] leading-relaxed text-white">
+        <div className="max-w-[85%] rounded-[16px] rounded-br-[4px] bg-[#0592D3] px-3.5 py-2.5 text-[13px] leading-relaxed text-white">
           <p className="whitespace-pre-wrap">{message.content}</p>
         </div>
       </div>
@@ -368,19 +506,23 @@ function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) {
       <div className="max-w-[90%] rounded-[16px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-[#2A2520] shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
         {message.loading ? (
           <span className="inline-flex items-center gap-2 text-[12px] text-[#9E9690]">
-            <Loader2 size={13} className="animate-spin text-[#19C58A]" />
+            <Loader2 size={13} className="animate-spin text-[#0592D3]" />
             {t("assist.sse.live")}
           </span>
         ) : (
           <p className="whitespace-pre-wrap">{message.content}</p>
         )}
         {message.actionBlock ? <ActionCard action={message.actionBlock} /> : null}
+        {message.draftBlock ? (
+          <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#0592D3]">
+            <FileText size={12} /> {t("assist.drafts.ready")}
+          </p>
+        ) : null}
         {message.safetyState === "REFUSED" || message.safetyState === "SAFE_FALLBACK" ? (
           <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#F8A60A]">
             <ShieldCheck size={12} /> {t("assist.refused", { state: message.safetyState.toLowerCase() })}
           </p>
         ) : null}
-        <SourceList sources={message.sources} />
         <FeedbackRow message={message} onFeedback={onFeedback} />
         {!message.loading ? (
           <SaveDraftButton
@@ -458,7 +600,7 @@ function DraftsPanel({ sessionId }) {
   if (drafts === null) {
     return (
       <div className="flex flex-1 items-center justify-center p-4">
-        <Loader2 size={18} className="animate-spin text-[#19C58A]" />
+        <Loader2 size={18} className="animate-spin text-[#0592D3]" />
       </div>
     );
   }
@@ -474,7 +616,7 @@ function DraftsPanel({ sessionId }) {
           drafts.map((d) => (
             <div key={d.id} className="rounded-[12px] border border-[#E5E0D9] bg-white p-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full bg-[#19C58A]/10 px-2 py-0.5 text-[9px] font-bold uppercase text-[#15B07A]">
+                <span className="rounded-full bg-[#0592D3]/10 px-2 py-0.5 text-[9px] font-bold uppercase text-[#0592D3]">
                   {d.draft_type}
                 </span>
                 <div className="flex items-center gap-0.5">
@@ -486,7 +628,7 @@ function DraftsPanel({ sessionId }) {
                       setDraftContent(d.content);
                     }}
                     title={t("assist.drafts.edit")}
-                    className="rounded-[8px] p-1 text-[#9E9690] transition hover:text-[#19C58A]"
+                    className="rounded-[8px] p-1 text-[#9E9690] transition hover:text-[#0592D3]"
                   >
                     <Pencil size={12} />
                   </button>
@@ -526,7 +668,7 @@ function DraftsPanel({ sessionId }) {
           onChange={(e) => setDraftContent(e.target.value)}
           rows={3}
           placeholder={t("assist.drafts.content")}
-          className="mt-2 w-full resize-none rounded-[10px] border border-[#E5E0D9] bg-[#F8F7F4] px-2.5 py-2 text-[11px] text-[#2A2520] placeholder-[#B5ADA4] outline-none focus:border-[#19C58A]"
+          className="mt-2 w-full resize-none rounded-[10px] border border-[#E5E0D9] bg-[#F8F7F4] px-2.5 py-2 text-[11px] text-[#2A2520] placeholder-[#B5ADA4] outline-none focus:border-[#0592D3]"
         />
         <button
           type="submit"
@@ -576,7 +718,7 @@ function HistoryPanel({ onResume }) {
   if (sessions === null) {
     return (
       <div className="flex flex-1 items-center justify-center p-4">
-        <Loader2 size={18} className="animate-spin text-[#19C58A]" />
+        <Loader2 size={18} className="animate-spin text-[#0592D3]" />
       </div>
     );
   }
@@ -643,7 +785,7 @@ function LocalePicker() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={t("assist.locale")}
-        className="rounded-[10px] p-1.5 text-white/80 transition hover:bg-white/15 hover:text-white"
+        className="rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3]"
       >
         <Languages size={15} />
       </button>
@@ -655,7 +797,7 @@ function LocalePicker() {
               type="button"
               onClick={() => pick(code)}
               className={`flex w-full items-center justify-between px-3 py-2 text-[12px] font-medium transition hover:bg-[#F8F7F4] ${
-                code === locale ? "text-[#19C58A]" : "text-[#6B6560]"
+                code === locale ? "text-[#0592D3]" : "text-[#6B6560]"
               }`}
             >
               <span>{meta.name}</span>
@@ -672,7 +814,6 @@ export default function AssistLauncher() {
   const [open, setOpen] = useState(false);
   const [booting, setBooting] = useState(false);
   const [sending, setSending] = useState(false);
-  const [status, setStatus] = useState(null);
   const [notice, setNotice] = useState(null);
   const [ackDone, setAckDone] = useState(false);
   const [ackBusy, setAckBusy] = useState(false);
@@ -683,6 +824,8 @@ export default function AssistLauncher() {
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [tab, setTab] = useState("chat");
+  const [showHandoff, setShowHandoff] = useState(false);
+  const [pendingResponseId, setPendingResponseId] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
 
@@ -700,12 +843,10 @@ export default function AssistLauncher() {
     setBooting(true);
     setError("");
     try {
-      const [stat, currentNotice, sugg] = await Promise.all([
-        getAssistStatus(),
+      const [currentNotice, sugg] = await Promise.all([
         getCurrentAssistNotice(),
         getAssistSuggestions(),
       ]);
-      setStatus(stat);
       setNotice(currentNotice);
       setSuggestions(sugg);
       getAssistCapabilities().then(setCapabilities).catch(() => {});
@@ -765,6 +906,7 @@ export default function AssistLauncher() {
 
     try {
       const submit = await submitAssistMessage(sessionId, trimmed);
+      setPendingResponseId(submit.response_id);
 
       let streamed = "";
       const [response] = await Promise.all([
@@ -782,6 +924,7 @@ export default function AssistLauncher() {
 
       const textBlock = (response.blocks || []).find((b) => b.block_type === "text");
       const actionBlock = (response.blocks || []).find((b) => b.block_type === "action");
+      const draftBlock = (response.blocks || []).find((b) => b.block_type === "draft");
       patch((m) => ({
         id: pendingId,
         role: "assistant",
@@ -792,11 +935,15 @@ export default function AssistLauncher() {
         engine: response.engine,
         sources: response.sources || [],
         actionBlock: actionBlock?.data || null,
+        draftBlock: draftBlock?.data || null,
         rating: null,
         loading: false,
       }));
     } catch (e) {
-      if (e?.name === "AbortError") return;
+      if (e?.name === "AbortError") {
+        patch((m) => ({ ...m, content: m.content || t("assist.stopped"), loading: false, stopped: true }));
+        return;
+      }
       patch((m) => ({
         id: pendingId,
         role: "assistant",
@@ -805,7 +952,15 @@ export default function AssistLauncher() {
       }));
     } finally {
       setSending(false);
+      setPendingResponseId(null);
     }
+  }
+
+  async function handleStop() {
+    if (pendingResponseId) {
+      stopAssistResponse(pendingResponseId).catch(() => {});
+    }
+    abortRef.current?.abort();
   }
 
   async function handleNewSession() {
@@ -843,6 +998,7 @@ export default function AssistLauncher() {
               const response = await getAssistResponse(m.response_id);
               const textBlock = (response.blocks || []).find((b) => b.block_type === "text");
               const actionBlock = (response.blocks || []).find((b) => b.block_type === "action");
+              const draftBlock = (response.blocks || []).find((b) => b.block_type === "draft");
               return {
                 id: `r-${m.response_id}`,
                 role: "assistant",
@@ -851,6 +1007,7 @@ export default function AssistLauncher() {
                 safetyState: response.safety_state,
                 sources: response.sources || [],
                 actionBlock: actionBlock?.data || null,
+                draftBlock: draftBlock?.data || null,
                 rating: null,
                 loading: false,
               };
@@ -886,33 +1043,37 @@ export default function AssistLauncher() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("assist.open")}
-        className={`fixed bottom-6 right-6 z-[9997] flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-[0_12px_32px_rgba(0,0,0,0.22)] transition-all duration-200 hover:-translate-y-[2px] ${ACCENT} ${ACCENT_HOVER} ${open ? "rotate-90" : ""}`}
+        className={`fixed bottom-6 right-6 z-[9997] flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl shadow-[0_12px_32px_rgba(0,0,0,0.22)] transition-all duration-200 hover:-translate-y-[2px] ${
+          open ? `rotate-90 text-white ${ACCENT} ${ACCENT_HOVER}` : ""
+        }`}
       >
-        {open ? <X size={22} /> : <Sparkles size={22} />}
+        {open ? <X size={22} /> : <img src={zoikoPayrollIcon} alt="" className="h-full w-full object-cover" />}
       </button>
 
       {open ? (
         <div className="fixed bottom-24 right-6 z-[9997] flex h-[560px] max-h-[calc(100dvh-8rem)] w-[min(550px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[22px] border border-[#E5E0D9] bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-[#F0EDE8] bg-gradient-to-r from-[#19C58A] to-[#12A878] px-4 py-3">
+          <div className="flex items-center justify-between border-b border-[#E5E0D9] bg-white px-4 py-3">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 text-white">
-                <Sparkles size={17} />
-              </div>
-              <div>
-                <p className="text-[14px] font-bold leading-tight text-white">{t("assist.title")}</p>
-                <p className="text-[10px] font-medium text-white/80">
-                  {status ? (status.engine === "llm" ? t("assist.engine.llm") : t("assist.engine.guided")) : t("assist.connecting")}
-                </p>
-              </div>
+              <img src={zoikoPayrollLogo} alt="" className="h-6 w-auto shrink-0" />
+              <div className="h-5 w-px shrink-0 bg-[#E5E0D9]" />
+              <p className="text-[13px] font-bold tracking-wide text-[#0592D3]">{t("assist.title")}</p>
             </div>
             <div className="flex items-center gap-1">
               <LocalePicker />
               <button
                 type="button"
+                onClick={() => setShowHandoff((v) => !v)}
+                title={t("assist.handoff.title")}
+                className={`rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3] ${showHandoff ? "bg-[#F8F7F4] text-[#0592D3]" : ""}`}
+              >
+                <LifeBuoy size={15} />
+              </button>
+              <button
+                type="button"
                 onClick={handleNewSession}
                 title={t("assist.newSession")}
-                className="rounded-[10px] p-1.5 text-white/80 transition hover:bg-white/15 hover:text-white"
+                className="rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3]"
               >
                 <RotateCcw size={15} />
               </button>
@@ -920,7 +1081,7 @@ export default function AssistLauncher() {
                 type="button"
                 onClick={() => setOpen(false)}
                 title={t("assist.close")}
-                className="rounded-[10px] p-1.5 text-white/80 transition hover:bg-white/15 hover:text-white"
+                className="rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3]"
               >
                 <X size={16} />
               </button>
@@ -937,7 +1098,7 @@ export default function AssistLauncher() {
                   type="button"
                   onClick={() => setTab(tabDef.id)}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-t-[10px] px-2 py-2 text-[11px] font-bold transition ${
-                    tab === tabDef.id ? "border-b-2 border-[#19C58A] text-[#15B07A]" : "text-[#9E9690] hover:text-[#6B6560]"
+                    tab === tabDef.id ? "border-b-2 border-[#0592D3] text-[#0592D3]" : "text-[#9E9690] hover:text-[#6B6560]"
                   }`}
                 >
                   <Icon size={12} /> {tabDef.label}
@@ -950,7 +1111,7 @@ export default function AssistLauncher() {
           <div className="flex min-h-0 flex-1 flex-col">
             {booting ? (
               <div className="flex flex-1 items-center justify-center">
-                <Loader2 size={22} className="animate-spin text-[#19C58A]" />
+                <Loader2 size={22} className="animate-spin text-[#0592D3]" />
               </div>
             ) : noticeGateShown && tab === "chat" ? (
               <div className="flex-1">
@@ -962,6 +1123,9 @@ export default function AssistLauncher() {
               <HistoryPanel onResume={handleResume} />
             ) : (
               <>
+                {showHandoff ? (
+                  <HandoffPanel sessionId={sessionId} onClose={() => setShowHandoff(false)} />
+                ) : null}
                 <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[#FCFBF9] p-4">
                   {error ? (
                     <p className="rounded-[12px] bg-[#FFEAEF] px-3 py-2 text-[12px] font-medium text-[#E4506A]">{error}</p>
@@ -969,7 +1133,7 @@ export default function AssistLauncher() {
                   {messages.length === 0 ? (
                     <div className="flex flex-col items-start gap-4 pt-2">
                       <div className="rounded-[16px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-[#2A2520]">
-                        <p>{t("assist.intro", { name: "Zoiko Assist" })}</p>
+                        <p>{t("assist.intro", { name: "Zoiko Payroll Assist" })}</p>
                       </div>
                       <SuggestionChips suggestions={suggestions} onPick={sendMessage} />
                       {capabilities.length ? (
@@ -977,7 +1141,7 @@ export default function AssistLauncher() {
                           {capabilities.filter((c) => c.risk_tier === "A1").slice(0, 3).map((c) => (
                             <span
                               key={c.capability_id}
-                              className="rounded-full bg-[#19C58A]/10 px-2.5 py-1 text-[10px] font-semibold text-[#15B07A]"
+                              className="rounded-full bg-[#0592D3]/10 px-2.5 py-1 text-[10px] font-semibold text-[#0592D3]"
                             >
                               {c.name}
                             </span>
@@ -999,7 +1163,7 @@ export default function AssistLauncher() {
                   {sending ? (
                     <div className="flex justify-start">
                       <div className="flex items-center gap-2 rounded-[16px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[12px] text-[#9E9690]">
-                        <Loader2 size={14} className="animate-spin text-[#19C58A]" />
+                        <Loader2 size={14} className="animate-spin text-[#0592D3]" />
                         {t("assist.thinking")}
                       </div>
                     </div>
@@ -1025,18 +1189,29 @@ export default function AssistLauncher() {
                       }}
                       rows={1}
                       placeholder={t("assist.placeholder")}
-                      className="max-h-28 flex-1 resize-none rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] px-3 py-2.5 text-[13px] text-[#2A2520] placeholder-[#B5ADA4] outline-none transition focus:border-[#19C58A]"
+                      className="max-h-28 flex-1 resize-none rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] px-3 py-2.5 text-[13px] text-[#2A2520] placeholder-[#B5ADA4] outline-none transition focus:border-[#0592D3]"
                     />
-                    <button
-                      type="submit"
-                      disabled={!input.trim() || sending}
-                      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] text-white transition disabled:opacity-40 ${ACCENT} ${ACCENT_HOVER}`}
-                    >
-                      <Send size={16} />
-                    </button>
+                    {sending ? (
+                      <button
+                        type="button"
+                        onClick={handleStop}
+                        title={t("assist.stop")}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[#E5E0D9] bg-white text-[#6B6560] transition hover:border-[#FF6E86] hover:text-[#E4506A]"
+                      >
+                        <Square size={14} />
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={!input.trim() || sending}
+                        className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] text-white transition disabled:opacity-40 ${ACCENT} ${ACCENT_HOVER}`}
+                      >
+                        <Send size={16} />
+                      </button>
+                    )}
                   </form>
                   <p className="mt-2 flex items-center gap-1 text-[10px] text-[#B5ADA4]">
-                    <ShieldCheck size={11} className="text-[#19C58A]" />
+                    <ShieldCheck size={11} className="text-[#0592D3]" />
                     {t("assist.footer")}
                   </p>
                 </div>

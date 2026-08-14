@@ -91,6 +91,7 @@ INTENT_REGISTRY = [
         "risk_tier": "A2",
         "keywords": ["draft a note", "prepare a note", "write a note", "draft email", "draft a summary", "prepare a summary"],
         "description": "Prepare a draft note or summary from authorized context.",
+        "tool_id": "payroll.getRunReadiness",
     },
     # A1 — reads / explain
     {
@@ -120,6 +121,22 @@ INTENT_REGISTRY = [
         "keywords": ["compare", "difference between", "vs", "variance", "period over period", "how does this month compare", "versus"],
         "description": "Compare two payroll periods deterministically.",
         "tool_id": "payroll.comparePeriods",
+    },
+    # Employee self-service — checked before the generic explain/find
+    # catch-alls below so "explain"/"list"/"show" don't shadow them.
+    {
+        "id": "review.myPayslips",
+        "risk_tier": "A1",
+        "keywords": ["my payslip", "my pay slip", "my salary slip", "my pay stub", "my payslips"],
+        "description": "Show the caller's own payslips (employee self-service).",
+        "tool_id": "payroll.getMyPayslips",
+    },
+    {
+        "id": "explain.myProfile",
+        "risk_tier": "A1",
+        "keywords": ["my profile", "my details", "my information", "my employee record"],
+        "description": "Show the caller's own payroll profile (employee self-service).",
+        "tool_id": "payroll.getMyProfile",
     },
     {
         "id": "explain.field",
@@ -156,11 +173,33 @@ ALLOWED_A3_TOOL_IDS = {"payroll.assignException", "payroll.addExceptionNote", "c
 # Protected-data change detection is token-based (verbs and data tokens can
 # be interleaved with other words, so substring keywords miss real attempts
 # like "change the employee's bank account to ...").
-_PROTECTED_CHANGE_VERBS = {"change", "update", "reset", "modify", "swap"}
-_PROTECTED_DATA_TOKENS = {"bank", "account", "pan", "password", "permission", "role", "salary", "tax", "identity"}
+#
+# Two independent signals are checked (see _is_protected_change): a broadened
+# verb/noun token intersection, and a list of unambiguous multi-word phrases
+# that are protected-data signals on their own. This is a heuristic, not a
+# real NLU classifier — it is deliberately biased toward over-refusing an
+# ambiguous message (the A5 refusal just redirects to the right screen) over
+# under-detecting a real attempt, per the zero-tolerance framing of this tier.
+_PROTECTED_CHANGE_VERBS = {
+    "change", "update", "reset", "modify", "swap", "edit", "correct", "fix",
+    "set", "add", "enter", "provide", "route", "redirect", "reroute",
+    "switch", "replace", "remove", "delete", "input", "give",
+}
+_PROTECTED_DATA_TOKENS = {
+    "bank", "account", "pan", "password", "permission", "role", "salary",
+    "tax", "identity", "iban", "swift", "ssn", "aadhaar", "passport",
+    "routing", "deposit", "beneficiary", "payout", "dob",
+}
+_PROTECTED_DATA_PHRASES = [
+    "bank account", "routing number", "direct deposit", "account number",
+    "social security", "national id", "tax id", "date of birth",
+    "pan card", "iban number", "swift code", "beneficiary account",
+]
 
 
 def _is_protected_change(lowered: str, tokens: set[str]) -> bool:
+    if any(phrase in lowered for phrase in _PROTECTED_DATA_PHRASES):
+        return True
     if not (_PROTECTED_CHANGE_VERBS & tokens):
         return False
     if not (_PROTECTED_DATA_TOKENS & tokens):
@@ -168,10 +207,83 @@ def _is_protected_change(lowered: str, tokens: set[str]) -> bool:
     return True
 
 
+_GREETING_WORDS = {"hi", "hello", "hey", "hiya", "yo", "hola", "howdy", "greetings", "sup"}
+_GREETING_PHRASES = [
+    "good morning", "good afternoon", "good evening", "good day",
+    "what's up", "whats up", "how are you", "how's it going", "hows it going",
+]
+
+
+def _is_greeting(lowered: str, tokens: set[str]) -> bool:
+    """A bare greeting/small-talk opener with no other content.
+
+    Deliberately short-circuits to a canned reply — no KB search, no LLM
+    call — so a plain "hi" never drags in unrelated knowledge articles as
+    fake "sources". A greeting that leads into a real question (longer
+    message) falls through to normal intent classification instead.
+    """
+    stripped = lowered.strip()
+    if not stripped:
+        return False
+    if any(phrase in stripped for phrase in _GREETING_PHRASES):
+        return len(tokens) <= 5
+    return len(tokens) <= 3 and bool(tokens & _GREETING_WORDS)
+
+
+_ACK_WORDS = {
+    "thanks", "thank", "thx", "ty", "ok", "okay", "cool", "great",
+    "perfect", "awesome", "nice", "alright", "cheers", "yep", "yup",
+}
+_ACK_PHRASES = [
+    "thank you", "thanks a lot", "thank you so much", "no problem",
+    "sounds good", "got it", "appreciate it", "much appreciated",
+    "that's all", "that is all", "all good", "nothing else",
+]
+
+# Intents that are pure small talk — no material payroll content, so no KB
+# search and no LLM call is needed (see service.py's evidence/engine gates).
+SMALLTALK_INTENT_IDS = {"chat.greeting", "chat.acknowledgment"}
+
+
+def _is_acknowledgment(lowered: str, tokens: set[str]) -> bool:
+    """A closing/thanks remark with no other content (e.g. "thank you", "ok").
+
+    Same short-circuit rationale as _is_greeting: these carry no payroll
+    question, so answering them via KB search + LLM only produces a stilted
+    "no question was asked" response instead of a natural acknowledgment.
+    """
+    stripped = lowered.strip()
+    if not stripped:
+        return False
+    if any(phrase in stripped for phrase in _ACK_PHRASES):
+        return len(tokens) <= 6
+    return len(tokens) <= 3 and bool(tokens & _ACK_WORDS)
+
+
 def classify_intent(text: str) -> dict:
     """Return the highest-priority matching intent for a user message."""
     lowered = re.sub(r"[^a-z0-9 ]", " ", text.lower())
     tokens = set(lowered.split())
+
+    if _is_greeting(lowered, tokens):
+        return {
+            "intent_id": "chat.greeting",
+            "risk_tier": "A0",
+            "blocked": False,
+            "tool_id": None,
+            "confidence": "HIGH",
+            "method": "deterministic",
+        }
+
+    if _is_acknowledgment(lowered, tokens):
+        return {
+            "intent_id": "chat.acknowledgment",
+            "risk_tier": "A0",
+            "blocked": False,
+            "tool_id": None,
+            "confidence": "HIGH",
+            "method": "deterministic",
+        }
 
     if _is_protected_change(lowered, tokens):
         intent = next((i for i in INTENT_REGISTRY if i["id"] == "action.change_protected_data"), None)

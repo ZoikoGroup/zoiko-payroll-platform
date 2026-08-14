@@ -140,6 +140,7 @@ class KnowledgeState(str, enum.Enum):
     APPROVED = "APPROVED"
     PUBLISHED = "PUBLISHED"
     SCHEDULED = "SCHEDULED"
+    CORRECTION_REQUIRED = "CORRECTION_REQUIRED"
     REJECTED = "REJECTED"
     SUPERSEDED = "SUPERSEDED"
     EXPIRED = "EXPIRED"
@@ -687,11 +688,15 @@ class AssistKbItem(Base):
     language = Column(String(10), default="en", nullable=False)
     jurisdiction_codes = Column(JSON, default=list, nullable=False, server_default="[]")
     state = Column(String(20), default=KnowledgeState.DRAFT.value, nullable=False, index=True)
+    # Reason/evidence retained for REJECTED, WITHDRAWN, QUARANTINED and
+    # CORRECTION_REQUIRED transitions (KB governance spec §12/§14 — every
+    # non-routine exit from PUBLISHED must record why).
+    state_reason = Column(Text, nullable=True)
     authority = Column(String(40), default=AuthorityTier.TIER_3_APPROVED_SECONDARY.value, nullable=False)
     version = Column(Integer, default=1, nullable=False)
     effective_from = Column(Date, nullable=True)
     effective_to = Column(Date, nullable=True)
-    supersedes_item_id = Column(Integer, nullable=True)
+    supersedes_item_id = Column(Integer, ForeignKey("assist_kb_items.id"), nullable=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     next_review_at = Column(Date, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
