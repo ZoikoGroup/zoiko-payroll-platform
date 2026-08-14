@@ -38,11 +38,11 @@ function NotFoundRedirect() {
 
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="mb-4 h-14 w-14 rounded-full bg-[#FF6E86]/10 flex items-center justify-center">
-        <span className="text-[28px] font-extrabold text-[#FF6E86]">404</span>
+      <div className="mb-4 h-14 w-14 rounded-full bg-error/10 flex items-center justify-center">
+        <span className="text-[28px] font-extrabold text-error">404</span>
       </div>
-      <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Page not found</p>
-      <p className="mt-1 text-[13px] text-[#9E9690]">Redirecting to dashboard…</p>
+      <p className="text-[15px] font-bold text-foreground">Page not found</p>
+      <p className="mt-1 text-[13px] text-foreground-muted">Redirecting to dashboard…</p>
     </div>
   );
 }
@@ -51,7 +51,7 @@ function PayrollLayout({ children }) {
   const { toasts, removeToast } = useToast();
 
   return (
-    <div className="flex h-full min-h-screen bg-[#F8F7F4] dark:bg-[#1A1816] font-sans relative transition-colors duration-200">
+    <div className="flex h-full min-h-screen bg-background font-sans relative transition-colors duration-200">
 
       <div className="flex-1 overflow-auto">{children}</div>
 
@@ -60,13 +60,13 @@ function PayrollLayout({ children }) {
           <div
             key={toast.id}
             className={`rounded-[18px] border px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)] flex items-center justify-between text-[13px] transition-all duration-200 ${
-              toast.type === "success" ? "bg-[#E3F9EF] dark:bg-[#123527] border-[#19C58A]/30 dark:border-[#19C58A]/40 text-[#15B07A] dark:text-[#19C58A]"
-              : toast.type === "error" ? "bg-[#FFEAEF] dark:bg-[#3A1520] border-[#FF6E86]/30 dark:border-[#FF6E86]/40 text-[#E4506A] dark:text-[#FF6E86]"
-              : "bg-[#E7F6FE] dark:bg-[#122C3A] border-[#35B6F5]/30 dark:border-[#35B6F5]/40 text-[#1E93CC] dark:text-[#35B6F5]"
+              toast.type === "success" ? "bg-success-light bg-success-light border-primary/30 dark:border-primary/40 text-primary-hover dark:text-primary"
+              : toast.type === "error" ? "bg-error-light border-error/30 dark:border-error/40 text-error"
+              : "bg-info-light bg-info-light border-info/30 dark:border-info/40 text-info"
             }`}
           >
             <span>{toast.message}</span>
-            <button onClick={() => removeToast(toast.id)} className="ml-3 rounded-[10px] p-1 hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] text-[#9E9690] dark:text-[#9E9690] transition-all duration-200">
+            <button onClick={() => removeToast(toast.id)} className="ml-3 rounded-[10px] p-1 hover:bg-surface-muted text-foreground-muted transition-all duration-200">
               <X size={14} />
             </button>
           </div>

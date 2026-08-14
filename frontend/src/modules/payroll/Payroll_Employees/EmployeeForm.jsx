@@ -28,18 +28,18 @@ const EMPTY_FORM = {
 function Field({ label, children, error }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">{label}</span>
+      <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">{label}</span>
       {children}
-      {error && <span className="mt-1.5 block text-[11px] font-semibold text-[#FF6E86]">{error}</span>}
+      {error && <span className="mt-1.5 block text-[11px] font-semibold text-error">{error}</span>}
     </label>
   );
 }
 
 const inputClass =
-  "w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200";
+  "w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200";
 
 const selectClass =
-  "w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200";
+  "w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200";
 
 function validate(form) {
   const errors = {};
@@ -131,13 +131,13 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
       <div>
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Personal details</h3>
+        <h3 className="text-[15px] font-bold text-foreground">Personal details</h3>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Employee name" error={errors.name}>
-            <input className={`${inputClass} ${errors.name ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.name} onChange={(e) => update("name", e.target.value)} />
+            <input className={`${inputClass} ${errors.name ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.name} onChange={(e) => update("name", e.target.value)} />
           </Field>
           <Field label="Email" error={errors.email}>
-            <input type="email" className={`${inputClass} ${errors.email ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.email} onChange={(e) => update("email", e.target.value)} />
+            <input type="email" className={`${inputClass} ${errors.email ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.email} onChange={(e) => update("email", e.target.value)} />
           </Field>
           <Field label="Phone">
             <input className={inputClass} value={form.phone} onChange={(e) => update("phone", e.target.value)} />
@@ -145,8 +145,8 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         </div>
       </div>
 
-      <div className="border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Employment</h3>
+      <div className="border-t border-border pt-6">
+        <h3 className="text-[15px] font-bold text-foreground">Employment</h3>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Department">
             <select className={selectClass} value={form.department} onChange={(e) => update("department", e.target.value)}>
@@ -156,7 +156,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
             </select>
           </Field>
           <Field label="Designation" error={errors.designation}>
-            <input className={`${inputClass} ${errors.designation ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.designation} onChange={(e) => update("designation", e.target.value)} />
+            <input className={`${inputClass} ${errors.designation ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.designation} onChange={(e) => update("designation", e.target.value)} />
           </Field>
           <Field label="Employment type">
             <select className={selectClass} value={form.employmentType} onChange={(e) => update("employmentType", e.target.value)}>
@@ -173,7 +173,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
             </select>
           </Field>
           <Field label="Date of joining" error={errors.dateOfJoining}>
-            <input type="date" className={`${inputClass} ${errors.dateOfJoining ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.dateOfJoining} onChange={(e) => update("dateOfJoining", e.target.value)} />
+            <input type="date" className={`${inputClass} ${errors.dateOfJoining ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.dateOfJoining} onChange={(e) => update("dateOfJoining", e.target.value)} />
           </Field>
           <Field label="Country / jurisdiction">
             <select className={selectClass} value={form.countryCode} onChange={(e) => handleCountryChange(e.target.value)}>
@@ -185,17 +185,17 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         </div>
       </div>
 
-      <div className="border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Salary structure (annual)</h3>
+      <div className="border-t border-border pt-6">
+        <h3 className="text-[15px] font-bold text-foreground">Salary structure (annual)</h3>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label={`CTC (${symbol})`} error={errors.ctc}>
-            <input type="number" min="0" className={`${inputClass} ${errors.ctc ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.ctc} onChange={(e) => update("ctc", e.target.value)} />
+            <input type="number" min="0" className={`${inputClass} ${errors.ctc ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.ctc} onChange={(e) => update("ctc", e.target.value)} />
           </Field>
         </div>
       </div>
 
-      <div className="border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Bank details</h3>
+      <div className="border-t border-border pt-6">
+        <h3 className="text-[15px] font-bold text-foreground">Bank details</h3>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Bank name">
             <input className={inputClass} value={form.bankName} onChange={(e) => update("bankName", e.target.value)} />
@@ -211,15 +211,15 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         </div>
       </div>
 
-      <div className="border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+      <div className="border-t border-border pt-6">
+        <h3 className="text-[15px] font-bold text-foreground">
           Statutory details &mdash; {COUNTRIES.find((c) => c.code === form.countryCode)?.name}
         </h3>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {form.countryCode === "IN" && (
             <>
               <Field label="PAN number" error={errors.panNumber}>
-                <input className={`${inputClass} ${errors.panNumber ? "border-[#FF6E86] focus:border-[#FF6E86] focus:ring-[#FF6E86]/20" : ""}`} value={form.panNumber} onChange={(e) => update("panNumber", e.target.value.toUpperCase())} />
+                <input className={`${inputClass} ${errors.panNumber ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.panNumber} onChange={(e) => update("panNumber", e.target.value.toUpperCase())} />
               </Field>
               <Field label="UAN (PF)">
                 <input className={inputClass} value={form.uan} onChange={(e) => update("uan", e.target.value)} />
@@ -255,23 +255,23 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
       </div>
 
       {submitError && (
-        <div className="rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">
+        <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
           {submitError}
         </div>
       )}
 
-      <div className="flex justify-end gap-3 border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
+      <div className="flex justify-end gap-3 border-t border-border pt-6">
         <button
           type="button"
           onClick={onCancel}
-          className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+          className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-60 disabled:hover:translate-y-0"
+          className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-60 disabled:hover:translate-y-0"
         >
           {saving ? "Saving…" : isEdit ? "Save changes" : "Add employee"}
         </button>

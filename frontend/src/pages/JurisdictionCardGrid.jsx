@@ -4,8 +4,8 @@ import Modal from "../components/Modal";
 import { getJurisdictionSummary } from "../service/superAdminService";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#1A1816] px-3 py-2 text-sm text-slate-800 dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-orange-500/40";
-const labelClass = "block text-xs font-medium text-slate-500 dark:text-[#A69B93] mb-1";
+  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-focus-ring/40";
+const labelClass = "block text-xs font-medium text-foreground-muted mb-1";
 
 // Shared by every page that browses jurisdictions (Compliance, Statutory
 // Rates) — "Country-level" is represented as "" in state selectors
@@ -16,7 +16,7 @@ export function AddJurisdictionModal({ onClose, onAdd }) {
   const [name, setName] = useState("");
   return (
     <Modal title="Add Jurisdiction" onClose={onClose} maxWidth="max-w-md">
-      <p className="text-xs text-slate-500 dark:text-[#A69B93] mb-4">
+      <p className="text-xs text-foreground-muted mb-4">
         Any country can be added — it only becomes a real jurisdiction once you create its first Tax, Policy, or
         Statutory Rate record. Nothing is saved by this step alone.
       </p>
@@ -37,14 +37,14 @@ export function AddJurisdictionModal({ onClose, onAdd }) {
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 dark:border-[#38312D] px-4 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-50 dark:hover:bg-white/5">
+        <button type="button" onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">
           Cancel
         </button>
         <button
           type="button"
           disabled={!code.trim() || !name.trim()}
           onClick={() => onAdd({ code: code.trim(), name: name.trim(), currency: null, taxPackCount: 0, policyPackCount: 0, statutoryRateCount: 0, organizationCount: 0, states: [], isConfigured: false })}
-          className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50"
         >
           Continue
         </button>
@@ -61,9 +61,9 @@ export function AddJurisdictionModal({ onClose, onAdd }) {
 
 function StatTile({ label, value }) {
   return (
-    <div className="rounded-lg bg-slate-100 dark:bg-[#1A1816] px-3 py-2 text-center">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#756B64]">{label}</p>
-      <p className="text-[15px] font-bold text-slate-800 dark:text-[#F0EDE8] mt-0.5">{value}</p>
+    <div className="rounded-lg bg-background px-3 py-2 text-center">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-foreground-disabled">{label}</p>
+      <p className="text-[15px] font-bold text-foreground mt-0.5">{value}</p>
     </div>
   );
 }
@@ -74,7 +74,7 @@ function JurisdictionCard({ jurisdiction, onSelect }) {
     <button
       type="button"
       onClick={() => onSelect(jurisdiction)}
-      className="text-left rounded-xl border border-slate-200 dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-4 hover:border-orange-400 dark:hover:border-orange-500/60 transition-colors"
+      className="text-left rounded-xl border border-border bg-surface p-4 hover:border-primary/60 transition-colors"
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2.5">
@@ -82,15 +82,15 @@ function JurisdictionCard({ jurisdiction, onSelect }) {
             {code}
           </span>
           <div>
-            <p className="text-[15px] font-bold text-slate-900 dark:text-[#F0EDE8]">{name}</p>
-            <p className="text-[11px] text-slate-400 dark:text-[#756B64]">{currency || "N/A"}</p>
+            <p className="text-[15px] font-bold text-foreground">{name}</p>
+            <p className="text-[11px] text-foreground-disabled">{currency || "N/A"}</p>
           </div>
         </div>
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
             isConfigured
               ? "bg-emerald-500/10 text-emerald-500"
-              : "bg-slate-400/10 text-slate-400 dark:text-[#756B64]"
+              : "bg-slate-400/10 text-foreground-disabled"
           }`}
         >
           {isConfigured ? <ShieldCheck size={11} /> : <ShieldOff size={11} />}
@@ -104,7 +104,7 @@ function JurisdictionCard({ jurisdiction, onSelect }) {
         <StatTile label="Rates" value={statutoryRateCount ?? 0} />
       </div>
 
-      <p className="text-[11px] text-slate-400 dark:text-[#756B64]">
+      <p className="text-[11px] text-foreground-disabled">
         {organizationCount ?? 0} organization{organizationCount === 1 ? "" : "s"} assigned
         {states && states.length > 0 ? ` · ${states.length} state${states.length === 1 ? "" : "s"} configured` : " · country-level only"}
       </p>
@@ -117,7 +117,7 @@ function AddJurisdictionCard({ onAdd }) {
     <button
       type="button"
       onClick={onAdd}
-      className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 dark:border-[#38312D] p-4 text-slate-400 dark:text-[#756B64] hover:border-orange-400 hover:text-orange-500 transition-colors min-h-[148px]"
+      className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 text-foreground-disabled hover:border-primary hover:text-primary transition-colors min-h-[148px]"
     >
       <Plus size={20} />
       <span className="text-[13px] font-semibold">Add Jurisdiction</span>
@@ -141,7 +141,7 @@ export default function JurisdictionCardGrid({ onSelect, onAddJurisdiction }) {
   }, []);
 
   if (loading) {
-    return <p className="text-sm text-slate-400 dark:text-[#756B64] py-8 text-center">Loading jurisdictions…</p>;
+    return <p className="text-sm text-foreground-disabled py-8 text-center">Loading jurisdictions…</p>;
   }
   if (error) {
     return <p className="text-sm text-red-500 py-8 text-center">{error}</p>;
@@ -149,7 +149,7 @@ export default function JurisdictionCardGrid({ onSelect, onAddJurisdiction }) {
 
   return (
     <div>
-      <h2 className="text-lg font-bold text-slate-900 dark:text-[#F0EDE8] mb-4">Jurisdictions</h2>
+      <h2 className="text-lg font-bold text-foreground mb-4">Jurisdictions</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {jurisdictions.map((j) => (
           <JurisdictionCard key={j.code} jurisdiction={j} onSelect={onSelect} />

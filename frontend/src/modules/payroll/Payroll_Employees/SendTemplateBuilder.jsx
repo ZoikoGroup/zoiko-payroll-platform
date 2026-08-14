@@ -8,7 +8,7 @@ import EmployeeTable from "./EmployeeTable";
 import { useToast } from "../ToastContext";
 
 const inputClass =
-  "w-full rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-2 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200";
+  "w-full rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200";
 
 const CUSTOM_FIELD_TYPES = [
   { value: "text", label: "Text" },
@@ -137,8 +137,8 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Send Template</h3>
-        <p className="text-[13px] text-[#9E9690] mt-1">
+        <h3 className="text-[15px] font-bold text-foreground">Send Template</h3>
+        <p className="text-[13px] text-foreground-muted mt-1">
           Build a form, email it to employees with a no-login link, and review what they submit before it changes anything.
         </p>
       </div>
@@ -146,7 +146,7 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
       {step === "build" && (
         <>
           <div>
-            <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Form name</span>
+            <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Form name</span>
             <input
               className={inputClass}
               value={formName}
@@ -156,7 +156,7 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
           </div>
 
           <div>
-            <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Standard fields</span>
+            <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Standard fields</span>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {STANDARD_EMPLOYEE_FIELDS.map((field) => {
                 const isChecked = Boolean(checkedStandard[field.key]);
@@ -166,10 +166,10 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
                     key={field.key}
                     onClick={() => toggleStandard(field.key)}
                     className={`flex items-center gap-2.5 rounded-[12px] border px-3.5 py-3 text-left text-[13px] font-semibold transition-all duration-200 ${
-                      isChecked ? "border-[#19C58A] bg-[#19C58A]/5 text-[#19C58A]" : "border-[#E5E0D9] dark:border-[#38312D] text-[#1A1816] dark:text-[#F0EDE8]"
+                      isChecked ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground"
                     }`}
                   >
-                    {isChecked ? <CheckSquare size={16} className="flex-shrink-0" /> : <Square size={16} className="text-[#9E9690] flex-shrink-0" />}
+                    {isChecked ? <CheckSquare size={16} className="flex-shrink-0" /> : <Square size={16} className="text-foreground-muted flex-shrink-0" />}
                     {field.label}
                   </button>
                 );
@@ -179,11 +179,11 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Custom fields (permanent, org-wide)</span>
+              <span className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Custom fields (permanent, org-wide)</span>
               <button
                 type="button"
                 onClick={() => setShowAddField((v) => !v)}
-                className="flex items-center gap-1 text-[12px] font-semibold text-[#19C58A] hover:text-[#15B07A] transition-colors duration-200"
+                className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:text-primary-hover transition-colors duration-200"
               >
                 <Plus size={13} /> Add field
               </button>
@@ -199,12 +199,12 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
                       key={field.fieldKey}
                       onClick={() => toggleCustom(field.fieldKey)}
                       className={`flex items-center gap-2.5 rounded-[12px] border px-3.5 py-3 text-left text-[13px] font-semibold transition-all duration-200 ${
-                        isChecked ? "border-[#9D7BF2] bg-[#9D7BF2]/5 text-[#9D7BF2]" : "border-[#E5E0D9] dark:border-[#38312D] text-[#1A1816] dark:text-[#F0EDE8]"
+                        isChecked ? "border-category-teal bg-category-teal/5 text-category-teal" : "border-border text-foreground"
                       }`}
                     >
-                      {isChecked ? <CheckSquare size={16} className="flex-shrink-0" /> : <Square size={16} className="text-[#9E9690] flex-shrink-0" />}
+                      {isChecked ? <CheckSquare size={16} className="flex-shrink-0" /> : <Square size={16} className="text-foreground-muted flex-shrink-0" />}
                       {field.label}
-                      <span className="ml-auto text-[10.5px] font-bold uppercase text-[#9E9690]">{field.fieldType}</span>
+                      <span className="ml-auto text-[10.5px] font-bold uppercase text-foreground-muted">{field.fieldType}</span>
                     </button>
                   );
                 })}
@@ -212,7 +212,7 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
             )}
 
             {showAddField && (
-              <div className="rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] p-4 space-y-3">
+              <div className="rounded-[12px] border border-border p-4 space-y-3">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <input
                     className={inputClass}
@@ -235,36 +235,36 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
                   />
                 )}
                 <div className="flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowAddField(false)} className="text-[12.5px] font-semibold text-[#9E9690] hover:text-[#6B6560] px-3 py-1.5">
+                  <button type="button" onClick={() => setShowAddField(false)} className="text-[12.5px] font-semibold text-foreground-muted hover:text-foreground-muted px-3 py-1.5">
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={handleAddCustomField}
                     disabled={addingField}
-                    className="rounded-[10px] bg-[#9D7BF2] text-white px-4 py-1.5 text-[12.5px] font-bold hover:bg-[#8A65E8] transition-all duration-200 disabled:opacity-60"
+                    className="rounded-[10px] bg-category-teal text-white px-4 py-1.5 text-[12.5px] font-bold hover:bg-category-teal transition-all duration-200 disabled:opacity-60"
                   >
                     {addingField ? "Adding…" : "Add field"}
                   </button>
                 </div>
-                <p className="text-[11px] text-[#9E9690]">This field will show up for every employee in this organization going forward, not just on this form.</p>
+                <p className="text-[11px] text-foreground-muted">This field will show up for every employee in this organization going forward, not just on this form.</p>
               </div>
             )}
           </div>
 
           {error && (
-            <div className="rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">{error}</div>
+            <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">{error}</div>
           )}
 
-          <div className="flex justify-end gap-3 border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-            <button type="button" onClick={onClose} className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]">
+          <div className="flex justify-end gap-3 border-t border-border pt-6">
+            <button type="button" onClick={onClose} className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary">
               Cancel
             </button>
             <button
               type="button"
               onClick={handleSaveForm}
               disabled={saving}
-              className="bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
+              className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
             >
               {saving ? "Saving…" : "Continue to send"}
             </button>
@@ -275,7 +275,7 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
       {step === "send" && (
         <>
           <div>
-            <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">
+            <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
               Send "{savedForm?.name}" to — {pickedIds.size} selected
             </span>
             <EmployeeTable
@@ -284,24 +284,24 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
               onSelectionChange={setPickedIds}
               currencyInfo={currencyInfo}
             />
-            <p className="mt-2 text-[11.5px] text-[#9E9690]">
+            <p className="mt-2 text-[11.5px] text-foreground-muted">
               Check the header box to select every employee. Employees without an email on file will be skipped. Each link expires in 7 days and can only be used once.
             </p>
           </div>
 
           {error && (
-            <div className="rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">{error}</div>
+            <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">{error}</div>
           )}
 
-          <div className="flex justify-end gap-3 border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-            <button type="button" onClick={() => setStep("build")} className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]">
+          <div className="flex justify-end gap-3 border-t border-border pt-6">
+            <button type="button" onClick={() => setStep("build")} className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary">
               Back
             </button>
             <button
               type="button"
               onClick={handleSend}
               disabled={sending}
-              className="flex items-center gap-1.5 bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
+              className="flex items-center gap-1.5 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
             >
               {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               {sending ? "Sending…" : `Send to ${targetIds.length} employee${targetIds.length === 1 ? "" : "s"}`}
@@ -312,11 +312,11 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
 
       {step === "done" && (
         <>
-          <div className="rounded-[12px] bg-[#19C58A]/10 px-4 py-3 text-[13px] text-[#19C58A] border border-[#19C58A]/20">
+          <div className="rounded-[12px] bg-primary/10 px-4 py-3 text-[13px] text-primary border border-primary/20">
             {sendResults.filter((r) => r.status === "sent").length} of {sendResults.length} sent successfully.
           </div>
           {sendResults.some((r) => r.status === "failed") && (
-            <div className="rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">
+            <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
               <p className="font-semibold mb-1">Could not send to:</p>
               <ul className="space-y-0.5">
                 {sendResults.filter((r) => r.status === "failed").map((r, i) => {
@@ -326,8 +326,8 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
               </ul>
             </div>
           )}
-          <div className="flex justify-end border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
-            <button type="button" onClick={onClose} className="bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
+          <div className="flex justify-end border-t border-border pt-6">
+            <button type="button" onClick={onClose} className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
               Done
             </button>
           </div>

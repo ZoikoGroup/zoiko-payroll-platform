@@ -55,7 +55,10 @@ from sqlalchemy.orm import Session
 import io
 
 from app.database import get_db
-from app.core.dependencies import get_current_user, get_current_payroll_operator, require_active_subscription
+from app.core.dependencies import (
+    get_current_user, get_current_payroll_operator, get_current_super_admin, require_active_subscription,
+)
+from app.core.exceptions import ForbiddenException
 from app.modules.payroll import service
 from app.modules.payroll.policy import policy_router
 from app.modules.payroll.enterprise import enterprise_router
@@ -742,6 +745,15 @@ def get_tax_slabs(
 @payroll_router.post(
     "/compliance/apply-extracted-rate", response_model=ApplyExtractedRateResponse,
     summary="Promote a document-extracted rate/slab row into the org's active configuration",
+    # KNOWN TRANSITIONAL GAP: this still lets an org Payroll Operator edit
+    # ContributionRate/TaxSlab values that are government-mandated, not
+    # organization-negotiable — the exact gap the Global Payroll Tax Engine
+    # refactor's canonical (Super-Admin-owned) rows are meant to close.
+    # Left org-writable for now because org rows are still the engine's
+    # live read source and no canonical→org sync exists yet (see
+    # sync_org_rates_from_canonical, Milestone 2); once that sync ships,
+    # this endpoint's UI should become view-only for Org Admin (Milestone 6)
+    # rather than being cut off here with no replacement flow.
     dependencies=[Depends(get_current_payroll_operator)],
 )
 def apply_extracted_rate(
@@ -769,7 +781,7 @@ def list_jurisdiction_packs(
 
 @payroll_router.put(
     "/compliance/jurisdiction-packs", response_model=JurisdictionPackResponse, response_model_by_alias=True,
-    summary="Create or update a jurisdiction compliance pack's identity/metadata",
+    summary="Create or update a jurisdiction compliance pack's identity/metadata (policy packs only — tax packs are Super Admin-only)",
     dependencies=[Depends(get_current_payroll_operator)],
 )
 def upsert_jurisdiction_pack(
@@ -777,7 +789,15 @@ def upsert_jurisdiction_pack(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.upsert_jurisdiction_pack(db, payload)
+    # Government-mandated tax packs must only ever be authored by Super
+    # Admin (see super_admin/router.py's /compliance/policies, which is
+    # already Super-Admin-gated and calls this same service function) —
+    # this org-facing path stays open for "policy" packs only, matching
+    # the existing convention that orgs configure operational policy but
+    # never statutory tax values.
+    if payload.packType == "tax" and (current_user.role or "").lower() != "super_admin":
+        raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
+    return service.upsert_jurisdiction_pack(db, payload, actor_id=current_user.id)
 
 
 @payroll_router.put(

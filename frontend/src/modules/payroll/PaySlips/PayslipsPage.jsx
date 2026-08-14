@@ -9,9 +9,9 @@ import { formatCurrency } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const statusConfig = {
-  Paid:     { color: "bg-[#19C58A]/10 text-[#19C58A]", icon: CheckCircle2 },
-  Pending:  { color: "bg-[#F8A60A]/10 text-[#F8A60A]", icon: Clock       },
-  Failed:   { color: "bg-[#FF6E86]/10 text-[#FF6E86]", icon: AlertCircle },
+  Paid:     { color: "bg-primary/10 text-primary", icon: CheckCircle2 },
+  Pending:  { color: "bg-warning/10 text-warning", icon: Clock       },
+  Failed:   { color: "bg-error/10 text-error", icon: AlertCircle },
 };
 
 const tabs = [
@@ -141,20 +141,20 @@ export default function PayslipsPage() {
   };
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8 space-y-5">
-      <div className="rounded-[18px] bg-[#19C58A]/5 border border-[#19C58A]/15 p-7">
+    <div className="bg-background min-h-screen p-6 lg:p-8 space-y-5">
+      <div className="rounded-[18px] bg-primary/5 border border-primary/15 p-7">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-[12px] bg-[#19C58A] flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
+          <div className="h-10 w-10 rounded-[12px] bg-primary flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
             <FileText size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">Payslips</h1>
-            <p className="text-[13px] font-medium text-[#9E9690]">{stats.total} payslips · {stats.paid} distributed</p>
+            <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payslips</h1>
+            <p className="text-[13px] font-medium text-foreground-muted">{stats.total} payslips · {stats.paid} distributed</p>
           </div>
         </div>
       </div>
 
-      <div className="flex gap-1 bg-[#F0EDE8] dark:bg-[#38312D] rounded-[14px] p-1 w-fit flex-wrap">
+      <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -165,7 +165,7 @@ export default function PayslipsPage() {
               setActiveTab(t.id);
             }}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-[12px] text-[13px] font-medium transition-all duration-200 ${
-              activeTab === t.id ? "bg-white dark:bg-[#221D1A] text-[#19C58A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-[#9E9690] hover:text-[#6B6560]"
+              activeTab === t.id ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-foreground-muted hover:text-foreground-muted"
             }`}
           >
             <t.icon size={15} />
@@ -177,103 +177,103 @@ export default function PayslipsPage() {
       {activeTab === "payslips" && (
         <>
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-              <div className="p-2.5 rounded-[12px] bg-[#19C58A]/10">
-                <FileText className="w-5 h-5 text-[#19C58A]" />
+            <div className="bg-surface border border-border rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="p-2.5 rounded-[12px] bg-primary/10">
+                <FileText className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{stats.total}</p>
-                <p className="text-[13px] text-[#9E9690]">Total Payslips</p>
+                <p className="text-[22px] font-bold text-foreground">{stats.total}</p>
+                <p className="text-[13px] text-foreground-muted">Total Payslips</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-              <div className="p-2.5 rounded-[12px] bg-[#19C58A]/10">
-                <CheckCircle2 className="w-5 h-5 text-[#19C58A]" />
+            <div className="bg-surface border border-border rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="p-2.5 rounded-[12px] bg-primary/10">
+                <CheckCircle2 className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{stats.paid}</p>
-                <p className="text-[13px] text-[#9E9690]">Distributed</p>
+                <p className="text-[22px] font-bold text-foreground">{stats.paid}</p>
+                <p className="text-[13px] text-foreground-muted">Distributed</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-              <div className="p-2.5 rounded-[12px] bg-[#F8A60A]/10">
-                <Clock className="w-5 h-5 text-[#F8A60A]" />
+            <div className="bg-surface border border-border rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="p-2.5 rounded-[12px] bg-warning/10">
+                <Clock className="w-5 h-5 text-warning" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{stats.pending}</p>
-                <p className="text-[13px] text-[#9E9690]">Pending</p>
+                <p className="text-[22px] font-bold text-foreground">{stats.pending}</p>
+                <p className="text-[13px] text-foreground-muted">Pending</p>
               </div>
             </div>
           </div>
 
           {selected.size > 0 && (
-            <div className="flex items-center gap-3 px-4 py-3 bg-[#19C58A]/5 border border-[#19C58A]/20 rounded-[18px] text-[13px]">
-              <span className="font-semibold text-[#19C58A]">{selected.size} selected</span>
-              <span className="text-[12px] text-[#9E9690]">Go to Settings &amp; Templates to delete the selected payslip(s).</span>
-              <button onClick={() => setSelected(new Set())} className="text-[12px] text-[#9E9690] hover:text-[#FF6E86] font-medium ml-auto">
+            <div className="flex items-center gap-3 px-4 py-3 bg-primary/5 border border-primary/20 rounded-[18px] text-[13px]">
+              <span className="font-semibold text-primary">{selected.size} selected</span>
+              <span className="text-[12px] text-foreground-muted">Go to Settings &amp; Templates to delete the selected payslip(s).</span>
+              <button onClick={() => setSelected(new Set())} className="text-[12px] text-foreground-muted hover:text-error font-medium ml-auto">
                 Clear Selection
               </button>
             </div>
           )}
 
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+          <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
             {loading ? (
               <div className="p-6 space-y-4">
                 {[1,2,3].map((i) => (
                   <div key={i} className="flex items-center gap-4 animate-pulse">
-                    <div className="w-4 h-4 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                    <div className="w-16 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                    <div className="w-32 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                    <div className="w-24 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                    <div className="w-20 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
+                    <div className="w-4 h-4 rounded bg-surface-muted" />
+                    <div className="w-16 h-3 rounded bg-surface-muted" />
+                    <div className="w-32 h-3 rounded bg-surface-muted" />
+                    <div className="w-24 h-3 rounded bg-surface-muted" />
+                    <div className="w-20 h-3 rounded bg-surface-muted" />
                     <div className="flex-1" />
-                    <div className="w-16 h-5 rounded-full bg-[#F0EDE8] dark:bg-[#38312D]" />
+                    <div className="w-16 h-5 rounded-full bg-surface-muted" />
                   </div>
                 ))}
               </div>
             ) : error ? (
               <div className="text-center py-12 space-y-3">
-                <p className="text-[13px] text-[#FF6E86]">{error}</p>
-                <button onClick={loadPayslips} className="text-[13px] font-bold text-[#19C58A] hover:text-[#15B07A] transition-all duration-200">
+                <p className="text-[13px] text-error">{error}</p>
+                <button onClick={loadPayslips} className="text-[13px] font-bold text-primary hover:text-primary-hover transition-all duration-200">
                   Retry
                 </button>
               </div>
             ) : (
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="border-b border-[#E5E0D9] dark:border-[#38312D]">
+                  <tr className="border-b border-border">
                     <th className="px-4 py-3.5 w-10">
-                      <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-[#E5E0D9] dark:border-[#38312D] text-[#19C58A]" />
+                      <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-border text-primary" />
                     </th>
                     {["Payslip ID","Employee","Department","Pay Period","Pay Date","Net Pay","Status",""].map((h) => (
-                      <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">{h}</th>
+                      <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#E5E0D9]/50 dark:divide-[#38312D]/50">
+                <tbody className="divide-y divide-border/50">
                   {payslips.map((p) => {
                     const sc = statusConfig[p.status] || statusConfig.Paid;
                     const Icon = sc.icon;
                     return (
-                      <tr key={p.id} className="hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] transition-colors duration-150">
+                      <tr key={p.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
                         <td className="px-4 py-4">
                           <input
                             type="checkbox"
                             checked={selected.has(p.id)}
                             onChange={() => handleSelect(p.id)}
-                            className="w-4 h-4 rounded border-[#E5E0D9] dark:border-[#38312D] text-[#19C58A]"
+                            className="w-4 h-4 rounded border-border text-primary"
                           />
                         </td>
-                        <td className="px-5 py-4 font-mono text-[12px] text-[#9E9690] font-semibold">{p.id}</td>
+                        <td className="px-5 py-4 font-mono text-[12px] text-foreground-muted font-semibold">{p.id}</td>
                         <td className="px-5 py-4">
-                          <button onClick={() => setSelectedPayslip(p)} className="font-semibold text-[#1A1816] dark:text-[#F0EDE8] hover:text-[#19C58A] text-left transition-colors duration-200">
+                          <button onClick={() => setSelectedPayslip(p)} className="font-semibold text-foreground hover:text-primary text-left transition-colors duration-200">
                             {p.employee}
                           </button>
                         </td>
-                        <td className="px-5 py-4 text-[#6B6560] dark:text-[#A69B93]">{p.department}</td>
-                        <td className="px-5 py-4 text-[#6B6560] dark:text-[#A69B93]">{p.period}</td>
-                        <td className="px-5 py-4 text-[#6B6560] dark:text-[#A69B93]">{p.payDate}</td>
-                        <td className="px-5 py-4 font-bold text-[#1A1816] dark:text-[#F0EDE8]">{formatCurrency(p.netPay || 0, currencyCode)}</td>
+                        <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
+                        <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
+                        <td className="px-5 py-4 text-foreground-muted">{p.payDate}</td>
+                        <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, currencyCode)}</td>
                         <td className="px-5 py-4">
                           <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
                             <Icon size={11} /> {p.status}
@@ -281,7 +281,7 @@ export default function PayslipsPage() {
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-1">
-                            <button onClick={() => { setSelectedPayslip(p); setActiveTab("payslip-detail"); }} className="p-1.5 rounded-[10px] text-[#9E9690] hover:text-[#1A1816] dark:hover:text-[#F0EDE8] hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-all duration-150">
+                            <button onClick={() => { setSelectedPayslip(p); setActiveTab("payslip-detail"); }} className="p-1.5 rounded-[10px] text-foreground-muted hover:text-foreground hover:bg-surface-muted transition-all duration-150">
                               <ChevronRight size={15} />
                             </button>
                           </div>
@@ -295,9 +295,9 @@ export default function PayslipsPage() {
 
             {!loading && !error && payslips.length === 0 && (
               <div className="text-center py-16">
-                <FileText size={40} className="mx-auto mb-3 text-[#9E9690]/40" />
-                <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">No payslips match your filters</p>
-                <p className="text-[13px] text-[#9E9690] mt-1">Try adjusting your search or filters</p>
+                <FileText size={40} className="mx-auto mb-3 text-foreground-muted/40" />
+                <p className="text-[15px] font-bold text-foreground">No payslips match your filters</p>
+                <p className="text-[13px] text-foreground-muted mt-1">Try adjusting your search or filters</p>
               </div>
             )}
           </div>
@@ -314,8 +314,8 @@ export default function PayslipsPage() {
             <PayslipStub payslip={selectedPayslip} onClose={() => { setSelectedPayslip(null); setActiveTab("payslips"); }} currencyCode={currencyCode} company={companyProfile} />
           ) : (
             <div className="text-center py-16">
-              <Receipt size={40} className="mx-auto mb-3 text-[#9E9690]/40" />
-              <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Select a payslip from the Payslip Detail tab to view details</p>
+              <Receipt size={40} className="mx-auto mb-3 text-foreground-muted/40" />
+              <p className="text-[15px] font-bold text-foreground">Select a payslip from the Payslip Detail tab to view details</p>
             </div>
           )}
         </>
@@ -323,14 +323,14 @@ export default function PayslipsPage() {
 
       {activeTab === "settings" && (
         <>
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-5">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-5">
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2.5 rounded-[12px] bg-[#35B6F5]/10">
-                <Filter className="w-5 h-5 text-[#35B6F5]" />
+              <div className="p-2.5 rounded-[12px] bg-info/10">
+                <Filter className="w-5 h-5 text-info" />
               </div>
               <div>
-                <h2 className="text-[16px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Filter Payslips</h2>
-                <p className="text-[13px] text-[#9E9690]">Narrow down the payslip list below by search, period, or employee.</p>
+                <h2 className="text-[16px] font-bold text-foreground">Filter Payslips</h2>
+                <p className="text-[13px] text-foreground-muted">Narrow down the payslip list below by search, period, or employee.</p>
               </div>
             </div>
             <PayslipFilters
@@ -342,29 +342,29 @@ export default function PayslipsPage() {
             />
           </div>
 
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2.5 rounded-[12px] bg-[#FF6E86]/10">
-                <Trash2 className="w-5 h-5 text-[#FF6E86]" />
+              <div className="p-2.5 rounded-[12px] bg-error/10">
+                <Trash2 className="w-5 h-5 text-error" />
               </div>
               <div>
-                <h2 className="text-[16px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Delete Payslips</h2>
-                <p className="text-[13px] text-[#9E9690]">Only payslips in Draft payroll runs can be deleted. Deleted payslips cannot be recovered.</p>
+                <h2 className="text-[16px] font-bold text-foreground">Delete Payslips</h2>
+                <p className="text-[13px] text-foreground-muted">Only payslips in Draft payroll runs can be deleted. Deleted payslips cannot be recovered.</p>
               </div>
             </div>
 
             {confirmDelete === "bulk" ? (
-              <div className="flex items-center gap-3 px-4 py-3 bg-[#FF6E86]/5 border border-[#FF6E86]/20 rounded-[14px] text-[13px] mb-4">
-                <AlertTriangle size={16} className="text-[#FF6E86] shrink-0" />
-                <span className="text-[#6B6560] dark:text-[#A69B93]">Delete <strong className="text-[#FF6E86]">{selected.size} payslips</strong>? This action cannot be undone.</span>
+              <div className="flex items-center gap-3 px-4 py-3 bg-error/5 border border-error/20 rounded-[14px] text-[13px] mb-4">
+                <AlertTriangle size={16} className="text-error shrink-0" />
+                <span className="text-foreground-muted">Delete <strong className="text-error">{selected.size} payslips</strong>? This action cannot be undone.</span>
                 <button
                   onClick={handleBulkDelete}
                   disabled={bulkDeleting}
-                  className="flex items-center gap-1.5 rounded-[10px] bg-[#FF6E86] text-white px-4 py-1.5 text-[12px] font-bold transition-all duration-200 hover:bg-[#E55A72] shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-[10px] bg-error text-white px-4 py-1.5 text-[12px] font-bold transition-all duration-200 hover:bg-error shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-50"
                 >
                   <Trash2 size={12} /> {bulkDeleting ? "Deleting..." : "Confirm Delete"}
                 </button>
-                <button onClick={() => setConfirmDelete(null)} className="text-[12px] text-[#9E9690] hover:text-[#6B6560] font-medium ml-auto">
+                <button onClick={() => setConfirmDelete(null)} className="text-[12px] text-foreground-muted hover:text-foreground-muted font-medium ml-auto">
                   Cancel
                 </button>
               </div>
@@ -372,65 +372,65 @@ export default function PayslipsPage() {
               selected.size > 0 && (
                 <button
                   onClick={() => setConfirmDelete("bulk")}
-                  className="flex items-center gap-1.5 rounded-[12px] bg-[#FF6E86] text-white px-4 py-1.5 text-[12px] font-bold transition-all duration-200 hover:bg-[#E55A72] shadow-[0_2px_8px_rgba(255,110,134,0.3)] hover:shadow-[0_4px_14px_rgba(255,110,134,0.4)] mb-4"
+                  className="flex items-center gap-1.5 rounded-[12px] bg-error text-white px-4 py-1.5 text-[12px] font-bold transition-all duration-200 hover:bg-error shadow-[0_2px_8px_rgba(255,110,134,0.3)] hover:shadow-[0_4px_14px_rgba(255,110,134,0.4)] mb-4"
                 >
                   <Trash2 size={12} /> Delete Selected ({selected.size})
                 </button>
               )
             )}
 
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+            <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
               {loading ? (
                 <div className="p-6 space-y-4">
                   {[1,2,3].map((i) => (
                     <div key={i} className="flex items-center gap-4 animate-pulse">
-                      <div className="w-4 h-4 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                      <div className="w-16 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                      <div className="w-32 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
-                      <div className="w-24 h-3 rounded bg-[#F0EDE8] dark:bg-[#38312D]" />
+                      <div className="w-4 h-4 rounded bg-surface-muted" />
+                      <div className="w-16 h-3 rounded bg-surface-muted" />
+                      <div className="w-32 h-3 rounded bg-surface-muted" />
+                      <div className="w-24 h-3 rounded bg-surface-muted" />
                       <div className="flex-1" />
-                      <div className="w-20 h-5 rounded-full bg-[#F0EDE8] dark:bg-[#38312D]" />
+                      <div className="w-20 h-5 rounded-full bg-surface-muted" />
                     </div>
                   ))}
                 </div>
               ) : payslips.length === 0 ? (
                 <div className="text-center py-16">
-                  <FileText size={40} className="mx-auto mb-3 text-[#9E9690]/40" />
-                  <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">No payslips found</p>
-                  <p className="text-[13px] text-[#9E9690] mt-1">There are no payslips to manage.</p>
+                  <FileText size={40} className="mx-auto mb-3 text-foreground-muted/40" />
+                  <p className="text-[15px] font-bold text-foreground">No payslips found</p>
+                  <p className="text-[13px] text-foreground-muted mt-1">There are no payslips to manage.</p>
                 </div>
               ) : (
                 <table className="w-full text-[13px]">
                   <thead>
-                    <tr className="border-b border-[#E5E0D9] dark:border-[#38312D]">
+                    <tr className="border-b border-border">
                       <th className="px-4 py-3.5 w-10">
-                        <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-[#E5E0D9] dark:border-[#38312D] text-[#19C58A]" />
+                        <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-border text-primary" />
                       </th>
                       {["Payslip ID","Employee","Department","Pay Period","Net Pay","Status","Action"].map((h) => (
-                        <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">{h}</th>
+                        <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{h}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#E5E0D9]/50 dark:divide-[#38312D]/50">
+                  <tbody className="divide-y divide-border/50">
                     {payslips.map((p) => {
                       const sc = statusConfig[p.status] || statusConfig.Paid;
                       const Icon = sc.icon;
                       const isDeleting = deletingId === p.id;
                       return (
-                        <tr key={p.id} className={`transition-colors duration-150 ${isDeleting ? "opacity-50" : "hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520]"}`}>
+                        <tr key={p.id} className={`transition-colors duration-150 ${isDeleting ? "opacity-50" : "hover:bg-background dark:hover:bg-surface-muted"}`}>
                           <td className="px-4 py-4">
                             <input
                               type="checkbox"
                               checked={selected.has(p.id)}
                               onChange={() => handleSelect(p.id)}
-                              className="w-4 h-4 rounded border-[#E5E0D9] dark:border-[#38312D] text-[#19C58A]"
+                              className="w-4 h-4 rounded border-border text-primary"
                             />
                           </td>
-                          <td className="px-5 py-4 font-mono text-[12px] text-[#9E9690] font-semibold">{p.id}</td>
-                          <td className="px-5 py-4 font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{p.employee}</td>
-                          <td className="px-5 py-4 text-[#6B6560] dark:text-[#A69B93]">{p.department}</td>
-                          <td className="px-5 py-4 text-[#6B6560] dark:text-[#A69B93]">{p.period}</td>
-                          <td className="px-5 py-4 font-bold text-[#1A1816] dark:text-[#F0EDE8]">{formatCurrency(p.netPay || 0, currencyCode)}</td>
+                          <td className="px-5 py-4 font-mono text-[12px] text-foreground-muted font-semibold">{p.id}</td>
+                          <td className="px-5 py-4 font-semibold text-foreground">{p.employee}</td>
+                          <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
+                          <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
+                          <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, currencyCode)}</td>
                           <td className="px-5 py-4">
                             <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
                               <Icon size={11} /> {p.status}
@@ -442,11 +442,11 @@ export default function PayslipsPage() {
                                 <button
                                   onClick={() => handleDeletePayslip(p.id)}
                                   disabled={isDeleting}
-                                  className="flex items-center gap-1 rounded-[8px] bg-[#FF6E86] text-white px-3 py-1 text-[11px] font-bold transition-all duration-200 hover:bg-[#E55A72] disabled:opacity-50"
+                                  className="flex items-center gap-1 rounded-[8px] bg-error text-white px-3 py-1 text-[11px] font-bold transition-all duration-200 hover:bg-error disabled:opacity-50"
                                 >
                                   <Trash2 size={10} /> {isDeleting ? "..." : "Yes"}
                                 </button>
-                                <button onClick={() => setConfirmDelete(null)} className="rounded-[8px] bg-[#F0EDE8] dark:bg-[#38312D] text-[#9E9690] px-3 py-1 text-[11px] font-bold hover:text-[#6B6560] transition-all duration-200">
+                                <button onClick={() => setConfirmDelete(null)} className="rounded-[8px] bg-surface-muted text-foreground-muted px-3 py-1 text-[11px] font-bold hover:text-foreground-muted transition-all duration-200">
                                   No
                                 </button>
                               </div>
@@ -457,7 +457,7 @@ export default function PayslipsPage() {
                                   onClick={() => setConfirmDelete(p.id)}
                                   disabled={isDeleting}
                                   title="Delete payslip"
-                                  className="rounded-[10px] p-1.5 text-[#9E9690] hover:text-[#FF6E86] hover:bg-[#FF6E86]/10 transition-colors disabled:opacity-50"
+                                  className="rounded-[10px] p-1.5 text-foreground-muted hover:text-error hover:bg-error/10 transition-colors disabled:opacity-50"
                                 >
                                   <Trash2 size={14} />
                                 </button>

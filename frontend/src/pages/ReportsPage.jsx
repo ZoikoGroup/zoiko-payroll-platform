@@ -148,17 +148,17 @@ export default function ReportsPage() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-[#F0EDE8] flex items-center gap-2">
-            <FileBarChart size={22} className="text-orange-500" /> Reports
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <FileBarChart size={22} className="text-primary" /> Reports
           </h1>
-          <p className="text-sm text-slate-500 dark:text-[#A69B93] mt-0.5">
+          <p className="text-sm text-foreground-muted mt-0.5">
             Cross-organization reporting across payroll, employees, and compliance.
           </p>
         </div>
         <button
           onClick={load}
           disabled={loading}
-          className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
         >
           <RefreshCcw size={15} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
@@ -171,8 +171,8 @@ export default function ReportsPage() {
             onClick={() => { setActiveCategory(c.id); setSearch(""); setStatus(""); }}
             className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition ${
               activeCategory === c.id
-                ? "bg-orange-500 text-white"
-                : "bg-white dark:bg-[#221D1A] dark:border dark:border-[#38312D] text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5"
+                ? "bg-primary text-white"
+                : "bg-surface border border-border text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5"
             }`}
           >
             <c.icon size={15} /> {c.label}
@@ -183,25 +183,25 @@ export default function ReportsPage() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <SearchInput value={search} onChange={setSearch} placeholder="Search…" className="w-56" />
         {(activeCategory === "employees" || activeCategory === "payroll") && (
-          <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]">
+          <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
             <option value="">All Organizations</option>
             {organizations.map((o) => <option key={o.id} value={o.id}>{o.organization_name}</option>)}
           </select>
         )}
-        <select value={country} onChange={(e) => setCountry(e.target.value)} className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 px-3 text-sm text-slate-700 dark:text-[#F0EDE8]">
+        <select value={country} onChange={(e) => setCountry(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Jurisdictions</option>
           {jurisdictions.map((j) => <option key={j.code} value={j.code}>{j.name}</option>)}
         </select>
         {activeCategory === "payroll" && <DateRangeFilter value={dateRange} onChange={setDateRange} />}
 
         <div className="ml-auto flex items-center gap-1.5">
-          <button onClick={handleExportCsv} title="Export CSV" className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5">
+          <button onClick={handleExportCsv} title="Export CSV" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5">
             <Download size={14} /> CSV
           </button>
-          <button onClick={handleExportExcel} title="Export Excel" className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5">
+          <button onClick={handleExportExcel} title="Export Excel" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5">
             <FileSpreadsheet size={14} /> Excel
           </button>
-          <button onClick={handleExportPdf} title="Export PDF" className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-[#38312D] px-3 py-2 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/5">
+          <button onClick={handleExportPdf} title="Export PDF" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5">
             <FileText size={14} /> PDF
           </button>
         </div>
@@ -211,18 +211,18 @@ export default function ReportsPage() {
         <p className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">{error}</p>
       )}
 
-      <div className="bg-white dark:bg-[#221D1A] rounded-xl shadow-sm dark:border dark:border-[#38312D] overflow-hidden overflow-x-auto">
+      <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
         <table className="w-full text-sm min-w-[800px]">
-          <thead className="bg-slate-50 dark:bg-[#1A1816] text-left text-xs text-slate-500 dark:text-[#A69B93]">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               {category.columns.map((c) => <th key={c.key} className="px-4 py-3">{c.label}</th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map((row, i) => (
-              <tr key={row.id ?? i} className="border-t border-slate-100 dark:border-[#38312D]">
+              <tr key={row.id ?? i} className="border-t border-border-light">
                 {category.columns.map((c) => (
-                  <td key={c.key} className="px-4 py-3 text-slate-700 dark:text-[#D8D2CB]">
+                  <td key={c.key} className="px-4 py-3 text-foreground-secondary">
                     {c.key === "status" ? (
                       <StatusPill status={String(row.status || "").toLowerCase()} label={row.status} />
                     ) : (
@@ -236,13 +236,13 @@ export default function ReportsPage() {
         </table>
         {!loading && rows.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <category.icon size={28} className="text-slate-300 dark:text-[#38312D]" />
-            <p className="text-sm text-slate-400 dark:text-[#756B64]">No {category.label.toLowerCase()} match these filters.</p>
+            <category.icon size={28} className="text-border-strong" />
+            <p className="text-sm text-foreground-disabled">No {category.label.toLowerCase()} match these filters.</p>
           </div>
         )}
       </div>
       {total > rows.length && (
-        <p className="mt-2 text-xs text-slate-400 dark:text-[#756B64]">Showing {rows.length} of {total}. Refine filters to narrow results.</p>
+        <p className="mt-2 text-xs text-foreground-disabled">Showing {rows.length} of {total}. Refine filters to narrow results.</p>
       )}
     </div>
   );

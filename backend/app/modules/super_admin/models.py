@@ -33,15 +33,26 @@ class PlatformSetting(Base):
 
 
 class GlobalStatutoryRate(Base):
-    """Global statutory contribution-rate defaults, managed by Super Admin.
+    """DEPRECATED as of the Global Payroll Tax Engine refactor — superseded
+    by the canonical (organization_id IS NULL) rows on
+    payroll_contribution_rates/payroll_tax_slabs, linked to a
+    JurisdictionPack (pack_type="tax") via jurisdiction_pack_id. That is
+    now the single, versioned, effective-dated, audited source of truth
+    Super Admin manages (see payroll/service.py's
+    list_canonical_contribution_rates/list_canonical_tax_slabs and
+    engine/tax_resolver.py).
 
-    These are the platform-wide defaults for statutory components (PF/ESI/PT,
-    Social Security, Medicare, National Insurance, …) keyed by jurisdiction
-    country. Organizations start from these defaults on first Compliance
-    setup; an org's own ContributionRate rows (payroll_contribution_rates,
-    org-scoped) can then diverge. The Payroll engine only reads the
-    org-scoped tables — this table is the Super Admin's "global rate table"
-    management surface, not the runtime calc source.
+    This table is kept (not dropped — Phase 26: never drop before
+    migration/regression validation) for backward read compatibility with
+    the existing Statutory Rates page during transition. Do not write new
+    data here; use the canonical rows instead. A follow-up should migrate
+    the Statutory Rates UI onto the canonical rows and then drop this table.
+
+    Original docstring, for context: platform-wide defaults for statutory
+    components (PF/ESI/PT, Social Security, Medicare, National Insurance,
+    …) keyed by jurisdiction country — organizations started from these on
+    first Compliance setup. The Payroll engine never read this table
+    directly; it read org-scoped ContributionRate/TaxSlab rows only.
     """
 
     __tablename__ = "platform_statutory_rates"

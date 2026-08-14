@@ -9,6 +9,7 @@ that returns these models.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -80,6 +81,8 @@ class PayrollPolicyResponse(BaseModel):
     effective_date: date = Field(..., alias="effectiveDate")
     is_default: bool = Field(..., alias="isDefault")
     calculation_mode: str = Field(..., alias="calculationMode")
+    basic_pct: Decimal = Field(Decimal("40"), alias="basicPct")
+    hra_pct: Decimal = Field(Decimal("20"), alias="hraPct")
     bank_export_format: str = Field("csv", alias="bankExportFormat")
     enterprise_status: str = Field("not_configured", alias="enterpriseStatus")
     enterprise_activated_at: Optional[datetime] = Field(None, alias="enterpriseActivatedAt")
@@ -115,6 +118,8 @@ class PayrollPolicyUpdate(BaseModel):
     status: Optional[str] = None
     effective_date: Optional[date] = Field(None, alias="effectiveDate")
     calculation_mode: Optional[str] = Field(None, alias="calculationMode")
+    basic_pct: Optional[Decimal] = Field(None, alias="basicPct")
+    hra_pct: Optional[Decimal] = Field(None, alias="hraPct")
     bank_export_format: Optional[str] = Field(None, alias="bankExportFormat")
     employee_categories: Optional[List[EmployeeCategoryBase]] = Field(None, alias="employeeCategories")
     overtime_rule: Optional[OvertimeRuleUpdate] = Field(None, alias="overtimeRule")

@@ -32,13 +32,13 @@ export default function DateRangeFilter({ value, onChange, className = "" }) {
         <select
           value={preset}
           onChange={(e) => handlePresetChange(e.target.value)}
-          className="appearance-none rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-2 pl-3 pr-8 text-sm text-slate-700 dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+          className="appearance-none rounded-lg border border-border bg-surface py-2 pl-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-focus-ring/30"
         >
           {DATE_RANGE_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
         </select>
-        <Calendar size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#9E9690]" />
+        <Calendar size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-foreground-muted" />
       </div>
       {preset === "custom" && (
         <div className="flex items-center gap-1.5">
@@ -46,20 +46,20 @@ export default function DateRangeFilter({ value, onChange, className = "" }) {
             type="date"
             value={customStart}
             onChange={(e) => setCustomStart(e.target.value)}
-            className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-2.5 py-2 text-sm text-slate-700 dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+            className="rounded-lg border border-border bg-surface px-2.5 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-focus-ring/30"
           />
-          <span className="text-sm text-slate-400 dark:text-[#9E9690]">to</span>
+          <span className="text-sm text-foreground-muted">to</span>
           <input
             type="date"
             value={customEnd}
             onChange={(e) => setCustomEnd(e.target.value)}
-            className="rounded-lg border border-slate-300 dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-2.5 py-2 text-sm text-slate-700 dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+            className="rounded-lg border border-border bg-surface px-2.5 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-focus-ring/30"
           />
           <button
             type="button"
             onClick={() => onChange({ preset: "custom", startDate: customStart, endDate: customEnd })}
             disabled={!customStart || !customEnd}
-            className="rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+            className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50"
           >
             Apply
           </button>

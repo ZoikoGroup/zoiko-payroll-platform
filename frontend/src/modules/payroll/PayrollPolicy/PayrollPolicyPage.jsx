@@ -65,10 +65,10 @@ const INTEGRATION_STATUS = {
 
 function StatusBadge({ label, tone = "amber" }) {
   const toneClasses = {
-    amber: "bg-[#F8A60A]/10 text-[#F8A60A]",
-    blue: "bg-[#35B6F5]/10 text-[#35B6F5]",
-    green: "bg-[#19C58A]/10 text-[#19C58A]",
-    gray: "bg-[#9E9690]/10 text-[#9E9690]",
+    amber: "bg-warning/10 text-warning",
+    blue: "bg-info/10 text-info",
+    green: "bg-primary/10 text-primary",
+    gray: "bg-foreground-muted/10 text-foreground-muted",
   };
   return (
     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${toneClasses[tone] || toneClasses.amber}`}>
@@ -87,7 +87,7 @@ function Toggle({ checked, onChange, disabled = false, title }) {
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ${
-        checked ? "bg-[#FF6E86]" : "bg-[#E5E0D9] dark:bg-[#38312D]"
+        checked ? "bg-error" : "bg-border"
       } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
     >
       <span
@@ -102,7 +102,7 @@ function Toggle({ checked, onChange, disabled = false, title }) {
 function Card({ children, className = "" }) {
   return (
     <div
-      className={`rounded-[16px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] ${className}`}
+      className={`rounded-[16px] border border-border bg-surface p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] ${className}`}
     >
       {children}
     </div>
@@ -119,19 +119,19 @@ function ExpandableCard({ title, subtitle, badge, defaultOpen = false, children 
         className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left"
       >
         <div>
-          <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{title}</p>
-          {subtitle && <p className="text-[12px] text-[#9E9690] mt-0.5">{subtitle}</p>}
+          <p className="text-[14px] font-bold text-foreground">{title}</p>
+          {subtitle && <p className="text-[12px] text-foreground-muted mt-0.5">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-3">
           {badge}
           <ChevronDown
             size={18}
-            className={`text-[#9E9690] transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+            className={`text-foreground-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           />
         </div>
       </button>
       {open && (
-        <div className="border-t border-[#E5E0D9] dark:border-[#38312D] px-5 py-4 space-y-4">{children}</div>
+        <div className="border-t border-border px-5 py-4 space-y-4">{children}</div>
       )}
     </Card>
   );
@@ -140,14 +140,14 @@ function ExpandableCard({ title, subtitle, badge, defaultOpen = false, children 
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">{label}</span>
+      <span className="block text-[12px] font-semibold text-foreground-muted mb-1.5">{label}</span>
       {children}
     </label>
   );
 }
 
 const inputClass =
-  "w-full rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-2 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-[#FF6E86]/30";
+  "w-full rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-error/30";
 
 // Reads policy.policyLocks (see JurisdictionPack.policy_defaults on the
 // backend) — returns null when this field isn't locked, or
@@ -170,7 +170,7 @@ function LockNote({ lock, formatValue }) {
   return (
     <span
       title={`Locked by your organization's compliance policy — must stay ${formatValue ? formatValue(lock.value) : lock.value}`}
-      className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#9E9690]"
+      className="inline-flex items-center gap-1 text-[10px] font-semibold text-foreground-muted"
     >
       <Lock size={11} /> Locked
     </span>
@@ -282,52 +282,52 @@ export default function PayrollPolicyPage() {
 
   if (loading) {
     return (
-      <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8">
-        <p className="text-[13px] text-[#9E9690]">Loading payroll policy…</p>
+      <div className="bg-background min-h-screen p-6 lg:p-8">
+        <p className="text-[13px] text-foreground-muted">Loading payroll policy…</p>
       </div>
     );
   }
 
   if (!policy) {
     return (
-      <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8">
-        <p className="text-[13px] text-[#9E9690]">Could not load payroll policy.</p>
+      <div className="bg-background min-h-screen p-6 lg:p-8">
+        <p className="text-[13px] text-foreground-muted">Could not load payroll policy.</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8 space-y-6">
+    <div className="bg-background min-h-screen p-6 lg:p-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-[12px] bg-[#FF6E86] flex items-center justify-center shadow-[0_2px_8px_rgba(255,110,134,0.3)]">
+          <div className="h-10 w-10 rounded-[12px] bg-error flex items-center justify-center shadow-[0_2px_8px_rgba(255,110,134,0.3)]">
             <Settings size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">
+            <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">
               Payroll Policy
             </h1>
-            <p className="text-[13px] font-medium text-[#9E9690]">
+            <p className="text-[13px] font-medium text-foreground-muted">
               Central configuration for how payroll is calculated and processed
             </p>
           </div>
         </div>
-        <span className="rounded-full bg-[#FF6E86]/10 border border-[#FF6E86]/20 px-3.5 py-1.5 text-[11px] font-bold text-[#FF6E86]">
+        <span className="rounded-full bg-error/10 border border-error/20 px-3.5 py-1.5 text-[11px] font-bold text-error">
           {policy.name} {policy.isDefault && "· Default"}
         </span>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-[#F0EDE8] dark:bg-[#38312D] rounded-[14px] p-1 w-fit flex-wrap">
+      <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
         {tabs.map((t, i) => (
           <button
             key={t}
             onClick={() => setActiveTab(i)}
             className={`px-4 py-2 rounded-[12px] text-[13px] font-semibold transition-all duration-200 ${
               activeTab === i
-                ? "bg-white dark:bg-[#221D1A] text-[#FF6E86] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                : "text-[#9E9690] hover:text-[#1A1816] dark:hover:text-[#F0EDE8]"
+                ? "bg-surface text-error shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                : "text-foreground-muted hover:text-foreground"
             }`}
           >
             {t}
@@ -379,7 +379,7 @@ export default function PayrollPolicyPage() {
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93]">
+              <span className="block text-[12px] font-semibold text-foreground-muted">
                 Payroll Calculation Mode
               </span>
               <LockNote lock={getLock(policy.policyLocks, ["calculation_mode"])} formatValue={(v) => CALCULATION_MODE_LABELS[v] || v} />
@@ -396,13 +396,13 @@ export default function PayrollPolicyPage() {
                     title={isLockedOut ? `Locked by your organization's compliance policy to ${CALCULATION_MODE_LABELS[calcModeLock.value] || calcModeLock.value}` : undefined}
                     className={`rounded-[12px] border px-4 py-3 text-left transition-all ${
                       policy.calculationMode === mode
-                        ? "border-[#FF6E86] bg-[#FF6E86]/5"
-                        : "border-[#E5E0D9] dark:border-[#38312D] hover:border-[#FF6E86]/40"
-                    } ${isLockedOut ? "opacity-50 cursor-not-allowed hover:border-[#E5E0D9] dark:hover:border-[#38312D]" : ""}`}
+                        ? "border-error bg-error/5"
+                        : "border-border hover:border-error/40"
+                    } ${isLockedOut ? "opacity-50 cursor-not-allowed hover:border-border" : ""}`}
                   >
                     <div className="flex items-center gap-2">
-                      <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{label}</p>
-                      {isLockedOut && <Lock size={12} className="text-[#9E9690]" />}
+                      <p className="text-[13px] font-bold text-foreground">{label}</p>
+                      {isLockedOut && <Lock size={12} className="text-foreground-muted" />}
                       {mode === "enterprise" && (
                         <StatusBadge
                           label={ENTERPRISE_STATUS_LABELS[policy.enterpriseStatus] || "Not Configured"}
@@ -416,15 +416,63 @@ export default function PayrollPolicyPage() {
                       )}
                     </div>
                     {mode === "simple" && (
-                      <p className="text-[11px] text-[#9E9690] mt-1">Net = Gross − Unpaid Leave. No PF/ESI/PT/TDS.</p>
+                      <p className="text-[11px] text-foreground-muted mt-1">Net = Gross − Unpaid Leave. No PF/ESI/PT/TDS.</p>
                     )}
                   </button>
                 );
               })}
             </div>
-            <p className="text-[11px] text-[#9E9690] mt-2">
+            <p className="text-[11px] text-foreground-muted mt-2">
               Switching modes only affects future payroll runs — never already-approved or paid ones.
             </p>
+          </div>
+
+          <div className="mt-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="block text-[12px] font-semibold text-foreground-muted">
+                Salary Structure
+              </span>
+            </div>
+            <p className="text-[11px] text-foreground-muted mb-2">
+              Percentage of monthly gross paid as Basic and HRA for employees without their own explicit
+              amounts set — Special Allowance is always whatever's left of gross.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(() => {
+                const basicLock = getLock(policy.policyLocks, ["basic_pct"]);
+                const hraLock = getLock(policy.policyLocks, ["hra_pct"]);
+                return (
+                  <>
+                    <Field label={<span className="flex items-center gap-1">Basic % of Gross <LockNote lock={basicLock} formatValue={(v) => `${v}%`} /></span>}>
+                      <input
+                        type="number" step="0.01" className={inputClass}
+                        defaultValue={policy.basicPct}
+                        disabled={!!basicLock}
+                        onBlur={(e) => {
+                          const value = e.target.value;
+                          if (value !== "" && Number(value) !== Number(policy.basicPct)) {
+                            handleSaveGeneral({ basicPct: Number(value) });
+                          }
+                        }}
+                      />
+                    </Field>
+                    <Field label={<span className="flex items-center gap-1">HRA % of Gross <LockNote lock={hraLock} formatValue={(v) => `${v}%`} /></span>}>
+                      <input
+                        type="number" step="0.01" className={inputClass}
+                        defaultValue={policy.hraPct}
+                        disabled={!!hraLock}
+                        onBlur={(e) => {
+                          const value = e.target.value;
+                          if (value !== "" && Number(value) !== Number(policy.hraPct)) {
+                            handleSaveGeneral({ hraPct: Number(value) });
+                          }
+                        }}
+                      />
+                    </Field>
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </Card>
       )}
@@ -444,7 +492,7 @@ export default function PayrollPolicyPage() {
                 title={EMPLOYEE_CATEGORY_LABELS[cat.category] || cat.category}
                 subtitle={`${cat.workingDays} working days · ${cat.expectedHours}h expected`}
                 badge={
-                  <Users size={16} className="text-[#9E9690]" />
+                  <Users size={16} className="text-foreground-muted" />
                 }
               >
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -484,10 +532,10 @@ export default function PayrollPolicyPage() {
                     />
                   </Field>
                 </div>
-                <div className="flex items-center justify-between rounded-[10px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3">
+                <div className="flex items-center justify-between rounded-[10px] bg-background px-4 py-3">
                   <div className="flex items-center gap-2">
-                    {(isIntern || pleLock) && <Lock size={14} className="text-[#9E9690]" />}
-                    <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                    {(isIntern || pleLock) && <Lock size={14} className="text-foreground-muted" />}
+                    <span className="text-[13px] font-semibold text-foreground">
                       Paid Leave Eligible
                     </span>
                   </div>
@@ -499,7 +547,7 @@ export default function PayrollPolicyPage() {
                   />
                 </div>
                 {isIntern && (
-                  <p className="text-[11px] text-[#9E9690]">
+                  <p className="text-[11px] text-foreground-muted">
                     Interns never receive paid leave — this is enforced by the backend regardless of this toggle.
                   </p>
                 )}
@@ -510,7 +558,7 @@ export default function PayrollPolicyPage() {
             <button
               onClick={handleSaveCategories}
               disabled={saving}
-              className="rounded-[12px] bg-[#FF6E86] px-5 py-2.5 text-[13px] font-bold text-white shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-50"
+              className="rounded-[12px] bg-error px-5 py-2.5 text-[13px] font-bold text-white shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save Categories"}
             </button>
@@ -523,8 +571,8 @@ export default function PayrollPolicyPage() {
         <div className="space-y-4 max-w-2xl">
           <Card>
             <div className="flex items-center gap-2 mb-3">
-              <CalendarClock size={16} className="text-[#9E9690]" />
-              <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Overtime Rules</p>
+              <CalendarClock size={16} className="text-foreground-muted" />
+              <p className="text-[14px] font-bold text-foreground">Overtime Rules</p>
             </div>
             {policy.overtimeRule ? (() => {
               const enabledLock = getLock(policy.policyLocks, ["overtime_rule", "enabled"]);
@@ -533,7 +581,7 @@ export default function PayrollPolicyPage() {
               return (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                  <span className="flex items-center gap-1 text-[13px] font-semibold text-foreground">
                     Enable Overtime <LockNote lock={enabledLock} formatValue={(v) => (v ? "on" : "off")} />
                   </span>
                   <Toggle
@@ -546,7 +594,7 @@ export default function PayrollPolicyPage() {
                   />
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                  <span className="flex items-center gap-1 text-[13px] font-semibold text-foreground">
                     Approval Required <LockNote lock={approvalLock} formatValue={(v) => (v ? "on" : "off")} />
                   </span>
                   <Toggle
@@ -574,13 +622,13 @@ export default function PayrollPolicyPage() {
               </div>
               );
             })() : (
-              <p className="text-[12px] text-[#9E9690]">No overtime rule configured yet.</p>
+              <p className="text-[12px] text-foreground-muted">No overtime rule configured yet.</p>
             )}
           </Card>
 
           <Card>
-            <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-3">Leave Rules</p>
-            <p className="text-[12px] text-[#9E9690]">
+            <p className="text-[14px] font-bold text-foreground mb-3">Leave Rules</p>
+            <p className="text-[12px] text-foreground-muted">
               Paid Leave, Unpaid Leave, Half Day, Absent, Holiday, Week Off, and Intern Leave rules are configured
               here per policy. Detailed per-rule editing UI ships alongside the Leave Rules backend endpoints
               (planned next).
@@ -598,8 +646,8 @@ export default function PayrollPolicyPage() {
             return (
               <Card key={cat}>
                 <div className="flex items-center gap-2 mb-3">
-                  <Plug size={16} className="text-[#9E9690]" />
-                  <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+                  <Plug size={16} className="text-foreground-muted" />
+                  <p className="text-[14px] font-bold text-foreground">
                     {INTEGRATION_CATEGORY_LABELS[cat]}
                   </p>
                 </div>
@@ -610,9 +658,9 @@ export default function PayrollPolicyPage() {
                       <div
                         key={i.providerKey}
                         title={lockInfo?.tooltip}
-                        className="flex items-center justify-between rounded-[10px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3"
+                        className="flex items-center justify-between rounded-[10px] bg-background px-4 py-3"
                       >
-                        <span className="flex items-center gap-2 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                        <span className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
                           {INTEGRATION_LABELS[i.providerKey] || i.providerKey}
                           {lockInfo && <StatusBadge label={lockInfo.label} tone={lockInfo.tone} />}
                         </span>
@@ -627,7 +675,7 @@ export default function PayrollPolicyPage() {
                   })}
                 </div>
                 {cat === "banking" && (
-                  <div className="mt-4 border-t border-[#E5E0D9] dark:border-[#38312D] pt-4">
+                  <div className="mt-4 border-t border-border pt-4">
                     <Field label="Bank Transfer File Format">
                       <select
                         className={inputClass}
@@ -640,7 +688,7 @@ export default function PayrollPolicyPage() {
                         <option value="pdf">PDF</option>
                       </select>
                     </Field>
-                    <p className="text-[11px] text-[#9E9690] mt-2">
+                    <p className="text-[11px] text-foreground-muted mt-2">
                       Used to generate the downloadable bank transfer file when a payroll run is approved.
                     </p>
                   </div>

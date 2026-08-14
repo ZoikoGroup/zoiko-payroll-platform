@@ -38,42 +38,42 @@ export default function EnterpriseActivationDialog({ onClose, onActivated }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-[#1A1816]/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-background/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-white dark:bg-[#221D1A] rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.15)] p-6 w-full max-w-md"
+        className="bg-surface rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.15)] p-6 w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-4">
-          <div className="h-10 w-10 rounded-[12px] bg-[#9D7BF2] flex items-center justify-center">
+          <div className="h-10 w-10 rounded-[12px] bg-category-teal flex items-center justify-center">
             <Globe2 size={20} className="text-white" />
           </div>
-          <h3 className="text-[16px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Activate Enterprise Payroll</h3>
+          <h3 className="text-[16px] font-bold text-foreground">Activate Enterprise Payroll</h3>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-10">
-            <Loader2 size={20} className="animate-spin text-[#9D7BF2]" />
+            <Loader2 size={20} className="animate-spin text-category-teal" />
           </div>
         ) : validation?.canActivate ? (
           <>
-            <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93] mb-3">Enterprise Payroll is ready.</p>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-2">Selected Jurisdictions</p>
+            <p className="text-[13px] text-foreground-muted mb-3">Enterprise Payroll is ready.</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">Selected Jurisdictions</p>
             <ul className="mb-5 space-y-1.5">
               {validation.configuredJurisdictions.map((name) => (
-                <li key={name} className="flex items-center gap-2 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
-                  <CheckCircle2 size={13} className="text-[#19C58A]" />
+                <li key={name} className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+                  <CheckCircle2 size={13} className="text-primary" />
                   {jurisdictionName(name)}
                 </li>
               ))}
             </ul>
-            <p className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8] mb-5">
+            <p className="text-[13px] font-semibold text-foreground mb-5">
               Activate Enterprise Payroll?
             </p>
           </>
         ) : (
           <div className="mb-5 space-y-2">
             {validation?.blockingReasons?.map((reason, i) => (
-              <div key={i} className="flex items-start gap-2 rounded-[10px] bg-[#FF6E86]/10 px-3.5 py-2.5 text-[12px] text-[#FF6E86]">
+              <div key={i} className="flex items-start gap-2 rounded-[10px] bg-error/10 px-3.5 py-2.5 text-[12px] text-error">
                 <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
                 {reason}
               </div>
@@ -82,7 +82,7 @@ export default function EnterpriseActivationDialog({ onClose, onActivated }) {
         )}
 
         {error && (
-          <div className="mb-4 flex items-start gap-2 rounded-[10px] bg-[#FF6E86]/10 px-3.5 py-2.5 text-[12px] text-[#FF6E86]">
+          <div className="mb-4 flex items-start gap-2 rounded-[10px] bg-error/10 px-3.5 py-2.5 text-[12px] text-error">
             <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
             {error}
           </div>
@@ -91,7 +91,7 @@ export default function EnterpriseActivationDialog({ onClose, onActivated }) {
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-colors"
+            className="rounded-[10px] px-4 py-2 text-[13px] font-semibold text-foreground-muted hover:bg-surface-muted transition-colors"
           >
             Cancel
           </button>
@@ -99,7 +99,7 @@ export default function EnterpriseActivationDialog({ onClose, onActivated }) {
             <button
               onClick={handleActivate}
               disabled={activating}
-              className="flex items-center gap-2 rounded-[10px] bg-[#9D7BF2] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#8A65E0] transition-colors disabled:opacity-60"
+              className="flex items-center gap-2 rounded-[10px] bg-category-teal px-4 py-2 text-[13px] font-bold text-white hover:bg-category-teal transition-colors disabled:opacity-60"
             >
               {activating ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
               Activate

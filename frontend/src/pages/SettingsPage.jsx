@@ -82,7 +82,7 @@ export default function SettingsPage() {
                   <input
                     value={edits[s.key] ?? ""}
                     onChange={(e) => setEdits((d) => ({ ...d, [s.key]: e.target.value }))}
-                    className="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
                   />
                 </td>
                 <td className="px-4 py-3 text-slate-500">{s.is_public ? "Yes" : "No"}</td>

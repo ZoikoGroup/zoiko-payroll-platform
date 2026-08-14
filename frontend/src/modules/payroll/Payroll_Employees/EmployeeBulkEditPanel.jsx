@@ -23,7 +23,7 @@ export const STANDARD_EMPLOYEE_FIELDS = [
 const FIELDS = STANDARD_EMPLOYEE_FIELDS;
 
 const inputClass =
-  "w-full rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-2 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200 disabled:opacity-50";
+  "w-full rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200 disabled:opacity-50";
 
 export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved, onClose, currencyInfo }) {
   const { addToast } = useToast();
@@ -106,21 +106,21 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div>
-        <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Update employees</h3>
-        <p className="text-[13px] text-[#9E9690] mt-1">
+        <h3 className="text-[15px] font-bold text-foreground">Update employees</h3>
+        <p className="text-[13px] text-foreground-muted mt-1">
           Choose which employees and which field(s) to change. Only the fields you check are updated — everything else on each record stays exactly as it is.
         </p>
       </div>
 
       <div>
-        <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Employees</span>
+        <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Employees</span>
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
             onClick={() => hasSelection && setScope("selected")}
             disabled={!hasSelection}
             className={`flex-1 flex items-center gap-2.5 rounded-[12px] border px-4 py-3 text-left text-[13px] font-semibold transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
-              scope === "selected" ? "border-[#19C58A] bg-[#19C58A]/5 text-[#19C58A]" : "border-[#E5E0D9] dark:border-[#38312D] text-[#6B6560] dark:text-[#A69B93]"
+              scope === "selected" ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground-muted"
             }`}
           >
             {scope === "selected" ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -130,7 +130,7 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
             type="button"
             onClick={() => setScope("all")}
             className={`flex-1 flex items-center gap-2.5 rounded-[12px] border px-4 py-3 text-left text-[13px] font-semibold transition-all duration-200 ${
-              scope === "all" ? "border-[#19C58A] bg-[#19C58A]/5 text-[#19C58A]" : "border-[#E5E0D9] dark:border-[#38312D] text-[#6B6560] dark:text-[#A69B93]"
+              scope === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground-muted"
             }`}
           >
             <Users size={16} />
@@ -138,12 +138,12 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
           </button>
         </div>
         {scope === "all" && (
-          <p className="mt-1.5 text-[11.5px] text-[#9E9690]">This applies to every employee currently matching your search/filters, not necessarily your whole organization.</p>
+          <p className="mt-1.5 text-[11.5px] text-foreground-muted">This applies to every employee currently matching your search/filters, not necessarily your whole organization.</p>
         )}
       </div>
 
       <div>
-        <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Fields to update</span>
+        <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Fields to update</span>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {FIELDS.map((field) => {
             const isChecked = Boolean(checked[field.key]);
@@ -151,15 +151,15 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
               <div
                 key={field.key}
                 className={`rounded-[12px] border px-3.5 py-3 transition-all duration-200 ${
-                  isChecked ? "border-[#19C58A] bg-[#19C58A]/5" : "border-[#E5E0D9] dark:border-[#38312D]"
+                  isChecked ? "border-primary bg-primary/5" : "border-border"
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => toggleField(field.key)}
-                  className="flex w-full items-center gap-2.5 text-left text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]"
+                  className="flex w-full items-center gap-2.5 text-left text-[13px] font-semibold text-foreground"
                 >
-                  {isChecked ? <CheckSquare size={16} className="text-[#19C58A] flex-shrink-0" /> : <Square size={16} className="text-[#9E9690] flex-shrink-0" />}
+                  {isChecked ? <CheckSquare size={16} className="text-primary flex-shrink-0" /> : <Square size={16} className="text-foreground-muted flex-shrink-0" />}
                   {field.label}{field.type === "number" && symbol ? ` (${symbol})` : ""}
                 </button>
                 {isChecked && (
@@ -194,34 +194,34 @@ export default function EmployeeBulkEditPanel({ employees, selectedIds, onSaved,
       </div>
 
       {error && (
-        <div className="rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">
+        <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
           {error}
         </div>
       )}
 
       {result && (
-        <div className="rounded-[12px] bg-[#19C58A]/10 px-4 py-3 text-[13px] text-[#19C58A] border border-[#19C58A]/20">
+        <div className="rounded-[12px] bg-primary/10 px-4 py-3 text-[13px] text-primary border border-primary/20">
           {result.updated} employee{result.updated === 1 ? "" : "s"} updated.
           {result.failed > 0 && (
-            <span className="block mt-1 text-[#FF6E86]">
+            <span className="block mt-1 text-error">
               {result.failed} failed: {result.failedDetail.map((f) => f.reason || `#${f.id}`).join("; ")}
             </span>
           )}
         </div>
       )}
 
-      <div className="flex justify-end gap-3 border-t border-[#E5E0D9] dark:border-[#38312D] pt-6">
+      <div className="flex justify-end gap-3 border-t border-border pt-6">
         <button
           type="button"
           onClick={onClose}
-          className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+          className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
         >
           Close
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
+          className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
         >
           {saving ? "Updating…" : `Update ${targetIds.length} employee${targetIds.length === 1 ? "" : "s"}`}
         </button>
