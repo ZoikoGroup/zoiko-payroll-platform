@@ -69,11 +69,16 @@ _run = PayrollRun(
 _db.add(_run)
 _db.commit()
 
+# Employee self-service logins no longer exist on this platform (see
+# core/dependencies.py) — every login role is payroll-operator-eligible.
+# The self-service tools (tool_get_my_profile/tool_get_my_payslips) resolve
+# by email match to a PayrollEmployee row regardless of the caller's role,
+# so this user's role only needs to be a real, loginable one.
 _db.add(
     User(
         email="employee-ess@example.com",
         hashed_password=hash_password("strong-password"),
-        role=UserRole.EMPLOYEE,
+        role=UserRole.PAYROLL_ADMIN,
         first_name="Ess",
         last_name="Worker",
         organization_id=_org.id,
@@ -593,63 +598,15 @@ def test_kb_four_eyes_review(client, headers):
     assert published.json()["state"] == "PUBLISHED"
 
 
-def test_action_preview_denied_for_employee_role(client, headers):
-    login = client.post("/api/auth/login", json={"email": "employee-check@example.com", "password": "strong-password"})
-    if login.status_code != 200:
-        _db.add(
-            User(
-                email="employee-check@example.com",
-                hashed_password=hash_password("strong-password"),
-                role=UserRole.EMPLOYEE,
-                first_name="Employee",
-                last_name="Check",
-                organization_id=_org.id,
-                is_active=True,
-            )
-        )
-        _db.commit()
-        login = client.post("/api/auth/login", json={"email": "employee-check@example.com", "password": "strong-password"})
-    employee_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-    p = client.post(
-        "/api/assist/action-previews",
-        headers=employee_headers,
-        json={"action_id": "payroll.assignException", "target": {"type": "PAYROLL_EXCEPTION", "id": str(_org.id)}, "arguments": {"assignee_role": "PAYROLL_ADMIN"}},
-    )
-    assert p.status_code == 403, p.text
-
-
-def test_action_confirm_denied_after_role_downgrade(client, headers):
-    """The preview's own creator, still holding a valid (freshly issued)
-    token, is denied at confirm time once their role has been downgraded
-    since the preview was created — proving the recheck happens at
-    confirmation, not only at preview creation."""
-    p = client.post(
-        "/api/assist/action-previews",
-        headers=headers,
-        json={"action_id": "payroll.assignException", "target": {"type": "PAYROLL_EXCEPTION", "id": str(_org.id)}, "arguments": {"assignee_role": "PAYROLL_ADMIN"}},
-    )
-    assert p.status_code == 200, p.text
-    preview_id = p.json()["preview_id"]
-
-    from app.modules.auth.models import User as _User
-
-    test_user = _db.query(_User).filter(_User.email == "assist-test@example.com").first()
-    original_role = test_user.role
-    test_user.role = UserRole.EMPLOYEE
-    _db.commit()
-    try:
-        # A stale token would 401 on the role-staleness check in
-        # get_current_user before ever reaching confirm_action, so re-login
-        # to get a fresh token that legitimately reflects the new role.
-        relogin = client.post("/api/auth/login", json={"email": "assist-test@example.com", "password": "strong-password"})
-        assert relogin.status_code == 200, relogin.text
-        downgraded_headers = {"Authorization": f"Bearer {relogin.json()['access_token']}"}
-        c = client.post(f"/api/assist/action-previews/{preview_id}/confirm", headers=downgraded_headers, json={})
-        assert c.status_code == 403, c.text
-    finally:
-        test_user.role = original_role
-        _db.commit()
+# Two role-denial tests previously lived here (action preview denied for an
+# employee-role user; action confirm denied after a downgrade to employee
+# role). Both are removed: the platform no longer has an employee login
+# role at all (see core/dependencies.py), and the three roles that remain
+# — org_admin, payroll_admin, super_admin — are all payroll-operator
+# eligible per _PAYROLL_OPERATOR_ROLES in tools.py, so there is currently no
+# authenticated, non-operator role left to construct a real 403 against.
+# _check_action_role's confirm-time recheck is still in place and correct;
+# it simply has no reachable failure case under the current role model.
 
 
 def test_action_confirm_stale_if_match(client, headers):
@@ -723,20 +680,13 @@ def test_employee_self_service_own_profile(client, ess_headers, ess_session_id):
     assert "Ess Worker" in text
 
 
-def test_employee_cannot_see_run_wide_data(client, ess_headers, ess_session_id):
-    """An employee-role user asking a run-wide question gets the same
-    neutral "nothing visible" answer as a genuinely missing run — not the
-    org's actual exception/readiness data."""
-    r = client.post(
-        f"/api/assist/sessions/{ess_session_id}/messages",
-        headers=ess_headers,
-        json={"content": {"type": "TEXT", "text": "what exceptions exist on this run?"}},
-    )
-    assert r.status_code == 200, r.text
-    resp = client.get(f"/api/assist/responses/{r.json()['response_id']}", headers=ess_headers).json()
-    text = next((b["content"] for b in resp["blocks"] if b["block_type"] == "text"), "")
-    assert "couldn't find a payroll run" in text
-    assert "T-2026-01" not in text
+# A test previously lived here confirming an employee-role user gets a
+# neutral "nothing visible" answer for a run-wide question instead of the
+# org's actual data. Removed for the same reason as above: the platform no
+# longer has a non-operator login role, so the "own data only" gate in
+# tools.py's invoke_read_tool (role_value(user) == "employee") can no
+# longer be triggered by any real, loginable account. The gate itself is
+# left in place as harmless, forward-compatible defense-in-depth.
 
 
 def test_prepare_note_creates_draft(client, headers):
@@ -782,42 +732,14 @@ def test_kb_crud(client, headers):
     assert client.patch(f"/api/assist/knowledge/items/{item_id}", headers=headers, json={"title": "renamed kb"}).json()["title"] == "renamed kb"
 
 
-def test_kb_governance_denied_for_employee_role(client, headers):
-    login = client.post("/api/auth/login", json={"email": "employee-check@example.com", "password": "strong-password"})
-    if login.status_code != 200:
-        _db.add(
-            User(
-                email="employee-check@example.com",
-                hashed_password=hash_password("strong-password"),
-                role=UserRole.EMPLOYEE,
-                first_name="Employee",
-                last_name="Check",
-                organization_id=_org.id,
-                is_active=True,
-            )
-        )
-        _db.commit()
-        login = client.post("/api/auth/login", json={"email": "employee-check@example.com", "password": "strong-password"})
-    employee_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-    item_id = _new_kb_item(client, headers, "employee-cannot-touch-this")
-
-    assert client.get("/api/assist/knowledge/items", headers=employee_headers).status_code == 403
-    assert client.post(
-        "/api/assist/knowledge/items",
-        headers=employee_headers,
-        json={"title": "should not be created", "body": "Body.", "content_type": "HOW_TO", "authority": "TIER_4_TENANT"},
-    ).status_code == 403
-    assert client.patch(
-        f"/api/assist/knowledge/items/{item_id}", headers=employee_headers, json={"title": "hijacked"}
-    ).status_code == 403
-    assert client.post(
-        f"/api/assist/knowledge/items/{item_id}/reject", headers=employee_headers, json={"reason": "n/a"}
-    ).status_code == 403
-    assert client.post(
-        f"/api/assist/knowledge/items/{item_id}/quarantine", headers=employee_headers, json={"reason": "n/a"}
-    ).status_code == 403
-    assert client.post("/api/assist/knowledge/sources", headers=employee_headers, json={"name": "rogue source"}).status_code == 403
+# A test previously lived here confirming an employee-role user is denied
+# on every KB governance mutation endpoint (create/update/reject/
+# quarantine/source-create). Removed for the same reason as above: with no
+# non-operator login role left in the platform, there is no real account
+# left to construct a 403 against. The endpoints still require
+# get_current_payroll_operator (org_admin/payroll_admin/super_admin) —
+# that gate is unchanged and correct, just currently unreachable by any
+# real, non-operator login.
 
 
 def _new_kb_item(client, headers, title="lifecycle kb"):
