@@ -44,7 +44,6 @@ def main() -> None:
     # Force all models to register their __tablename__ on Base.metadata.
     import app.modules.auth.models  # noqa: F401,F811
     import app.modules.organizations.models  # noqa: F401,F811
-    import app.modules.employee.models  # noqa: F401,F811
     import app.modules.super_admin.models  # noqa: F401,F811
     import app.modules.payroll.models  # noqa: F401,F811
     import app.modules.payroll.policy.models  # noqa: F401,F811

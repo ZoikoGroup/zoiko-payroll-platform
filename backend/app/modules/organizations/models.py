@@ -50,6 +50,13 @@ class Organization(Base):
     # or auth-header-on-<img> workaround is needed.
     logo_path = Column(String(500), nullable=True)
 
+    # Explicit ISO 4217 currency override (e.g. "USD"), managed by Super
+    # Admin under Finance. Nullable — when unset, the frontend derives the
+    # currency from jurisdiction_country (see utils/currency.js) exactly as
+    # before; this column only exists for the cases where an org's actual
+    # payroll currency doesn't match its jurisdiction's default.
+    currency = Column(String(3), nullable=True)
+
     # Tenant is onboarded by /auth/register and becomes active immediately
     # (no billing module in the standalone platform). Super Admin may suspend it.
     is_active = Column(Boolean, default=True, nullable=False)

@@ -67,14 +67,6 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = "no-reply@payroll.zoiko.example"
     SMTP_USE_TLS: str = "true"
 
-    # ── Payroll Leave-Request Mail Receiver (IMAP) ─────────────────────
-    IMAP_HOST: str = ""
-    IMAP_PORT: str = "993"
-    IMAP_USERNAME: str = ""
-    IMAP_PASSWORD: str = ""
-    IMAP_USE_SSL: bool = True
-    PAYROLL_MAIL_POLL_INTERVAL_MINUTES: int = 15
-
     # ── Super Admin setup key ─────────────────────────────────────────
     # Required to run scripts/seed_super_admin.py and to create Super
     # Admin accounts. Never create a Super Admin through public /auth/register.

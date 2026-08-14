@@ -42,6 +42,7 @@ from app.modules.payroll.models import (
     PayrollStatus, PayslipStatus, ActivityStatus, ComplianceDocumentStatus,
     PAYROLL_STATUS_ORDER,
 )
+from app.modules.payroll.employee_validation import get_employee_validation_strategy
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
     EmployeeCreate, EmployeeUpdate, BulkEmployeeItem, BulkEmployeeRequest,
@@ -481,12 +482,19 @@ def list_jurisdiction_packs(db: Session, country: str, state: str = None) -> Lis
     return query.order_by(JurisdictionPack.version.desc()).all()
 
 
-def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert") -> JurisdictionPack:
+def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_id: Optional[int] = None) -> JurisdictionPack:
     """Create or update a pack, matched by (pack_id, version) — matches
     the UniqueConstraint on JurisdictionPack. This intentionally does NOT
     silently bump the version on every save: per the spec's lifecycle
     model (Section 17), a new version should be a deliberate act, not an
-    accidental side effect of editing metadata."""
+    accidental side effect of editing metadata.
+
+    When the (pack_id, version) pair doesn't exist yet AND another version
+    of the same pack_id already does, the new row's previous_version_id is
+    set to the latest prior version automatically — this is what gives
+    Compliance its version chain (1.0 -> 1.1 -> 2.0) without ever mutating
+    or deleting an earlier row.
+    """
     existing = (
         db.query(JurisdictionPack)
         .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
@@ -495,23 +503,167 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert") -> Jur
     fields = dict(
         jurisdiction_country=data.jurisdictionCountry,
         jurisdiction_state=data.jurisdictionState,
+        pack_type=data.packType,
         status=data.status,
         effective_from=data.effectiveFrom,
         effective_to=data.effectiveTo,
         compliance_owner=data.complianceOwner,
         engineering_owner=data.engineeringOwner,
         source_references=data.sourceReferences,
+        regulatory_authority=data.regulatoryAuthority,
+        compliance_category=data.complianceCategory,
+        change_summary=data.changeSummary,
+        next_review_date=data.nextReviewDate,
+        policy_defaults=data.policyDefaults,
     )
     if existing:
         for k, v in fields.items():
             setattr(existing, k, v)
+        existing.updated_by_id = actor_id
         row = existing
     else:
-        row = JurisdictionPack(pack_id=data.packId, version=data.version, **fields)
+        previous = (
+            db.query(JurisdictionPack)
+            .filter(JurisdictionPack.pack_id == data.packId)
+            .order_by(JurisdictionPack.created_at.desc())
+            .first()
+        )
+        row = JurisdictionPack(
+            pack_id=data.packId, version=data.version,
+            previous_version_id=previous.id if previous else None,
+            created_by_id=actor_id, updated_by_id=actor_id,
+            **fields,
+        )
         db.add(row)
     db.commit()
     db.refresh(row)
     return row
+
+
+def list_all_jurisdiction_packs(
+    db: Session, country: Optional[str] = None, state: Optional[str] = None,
+    status: Optional[str] = None, search: Optional[str] = None, pack_type: Optional[str] = None,
+) -> List[JurisdictionPack]:
+    """Cross-jurisdiction policy list for Super Admin Compliance — unlike
+    list_jurisdiction_packs (which requires a single country and returns
+    every version of its packs), this spans every jurisdiction and, per
+    pack_id, returns only the latest version — i.e. one row per policy,
+    which is what a review/listing screen needs. Use
+    get_jurisdiction_pack_versions() to drill into one policy's history.
+
+    `pack_type` ("tax" | "policy") lets the Taxes and Policies tabs query
+    this same table with different filters instead of needing two tables.
+
+    Once `country` is scoped, `state` follows the same "None means
+    country-level only" convention list_jurisdiction_packs already uses —
+    NOT "every state mixed together" — otherwise a jurisdiction-detail view
+    scoped to e.g. India with no state picked would silently show
+    Telangana's and Maharashtra's packs blended into one list, breaking
+    the per-state isolation the jurisdiction-first UI depends on. Only
+    when no country is given at all (a genuine global cross-jurisdiction
+    browse) does an absent state leave every state unfiltered."""
+    query = db.query(JurisdictionPack)
+    if country:
+        query = query.filter(JurisdictionPack.jurisdiction_country == country)
+        if state:
+            query = query.filter(JurisdictionPack.jurisdiction_state == state)
+        else:
+            query = query.filter(JurisdictionPack.jurisdiction_state.is_(None))
+    elif state:
+        query = query.filter(JurisdictionPack.jurisdiction_state == state)
+    if status:
+        query = query.filter(JurisdictionPack.status == status)
+    if pack_type:
+        query = query.filter(JurisdictionPack.pack_type == pack_type)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                JurisdictionPack.pack_id.ilike(like),
+                JurisdictionPack.jurisdiction_country.ilike(like),
+                JurisdictionPack.compliance_category.ilike(like),
+                JurisdictionPack.regulatory_authority.ilike(like),
+            )
+        )
+    rows = query.order_by(JurisdictionPack.pack_id, JurisdictionPack.created_at.desc()).all()
+
+    latest_by_pack_id = {}
+    for row in rows:
+        if row.pack_id not in latest_by_pack_id:
+            latest_by_pack_id[row.pack_id] = row
+    return list(latest_by_pack_id.values())
+
+
+def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[JurisdictionPack]:
+    """Full version history for one policy, oldest first — nothing is ever
+    overwritten (see upsert_jurisdiction_pack), so this reconstructs the
+    complete traceable chain."""
+    return (
+        db.query(JurisdictionPack)
+        .filter(JurisdictionPack.pack_id == pack_id)
+        .order_by(JurisdictionPack.created_at.asc())
+        .all()
+    )
+
+
+def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None) -> JurisdictionPack:
+    row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not row:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_pack_applicable_organizations(db: Session, pack_row_id: int) -> List[dict]:
+    """Organizations currently assigned to this policy version, via the
+    existing CompanyComplianceDetails.active_pack_id column — reused as-is
+    rather than introducing a new assignment table."""
+    from app.modules.organizations.models import Organization
+
+    rows = (
+        db.query(Organization.id, Organization.organization_name, Organization.organization_code)
+        .join(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
+        .filter(CompanyComplianceDetails.active_pack_id == pack_row_id)
+        .all()
+    )
+    return [{"id": r.id, "organizationName": r.organization_name, "organizationCode": r.organization_code} for r in rows]
+
+
+def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids: List[int], actor_id: Optional[int] = None) -> int:
+    """Bulk-assign a policy version as the active pack for each given org,
+    get-or-creating their CompanyComplianceDetails row exactly like every
+    other Compliance write path does (get_or_create_email_settings,
+    get_company_details, etc.) rather than requiring the org to have
+    configured Compliance first."""
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+
+    updated = 0
+    for org_id in organization_ids:
+        details = (
+            db.query(CompanyComplianceDetails)
+            .filter(CompanyComplianceDetails.organization_id == org_id)
+            .first()
+        )
+        if not details:
+            details = CompanyComplianceDetails(organization_id=org_id)
+            db.add(details)
+        details.active_pack_id = pack.id
+        updated += 1
+        # Activity log is per-org by design (organization_id is required) —
+        # each affected org gets its own "policy applied" entry rather than
+        # one untethered platform-wide log row.
+        log_activity(
+            db, org_id,
+            f"Compliance policy {pack.pack_id} v{pack.version} applied by Super Admin.",
+            ActivityStatus.INFO, actor_id=actor_id,
+        )
+    db.commit()
+    return updated
 
 
 def _calculate_annual_tax(annual_income: Decimal, slabs: List[TaxSlab]) -> Decimal:
@@ -1248,6 +1400,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "pan": getattr(employee, "pan", None),
         "uan": getattr(employee, "uan", None),
         "ifsc": getattr(employee, "ifsc", None),
+        "country_code": country,
+        "compliance_fields": dict(getattr(employee, "compliance_fields", None) or {}),
         "basic_salary": result.basic,
         "hra": result.hra,
         "special_allowance": result.special_allowance,
@@ -1318,26 +1472,44 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
     return run
 
 
-def _resolve_run_calc_inputs(db: Session, run: PayrollRun, organization_id: int = None):
-    """Shared setup for generating a payslip within a run — jurisdiction
-    country, calculation mode, and the country's rate/slab lookups. Used by
-    both a full run generation and a single-employee regeneration so the
-    two never resolve jurisdiction/rates differently."""
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first() if organization_id else None
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
-    calculation_mode = getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
-    rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
-    slabs = get_tax_slabs(db, organization_id, country)
-    return country, calculation_mode, rate_map, slabs
+def _resolve_run_calc_inputs(db: Session, run: PayrollRun, organization_id: int = None) -> str:
+    """Calculation mode for generating payslips within a run. Used by both a
+    full run generation and a single-employee regeneration so the two never
+    resolve it differently.
+
+    Jurisdiction/rate-map/slab lookups are NOT resolved here — they used to
+    be, from the org's single CompanyComplianceDetails.jurisdiction_country,
+    which meant every employee in a run was calculated (and later
+    displayed) under the org's one default country regardless of that
+    employee's own PayrollEmployee.country_code. See
+    _resolve_employee_calc_inputs for the per-employee resolution that
+    replaced it."""
+    return getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
+
+
+def _resolve_employee_calc_inputs(db: Session, organization_id: int, employee, cache: dict = None):
+    """Per-employee jurisdiction + rate-map/slab resolution for payslip
+    generation — an employee's own country_code overrides the org default
+    (_resolve_employee_country), the same override employee create/update
+    already honor. `cache` (keyed by resolved country code) lets a batch
+    caller reuse rate_map/slabs across employees who share a country
+    instead of re-querying per employee."""
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if cache is not None and country in cache:
+        rate_map, slabs = cache[country]
+    else:
+        rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
+        slabs = get_tax_slabs(db, organization_id, country)
+        if cache is not None:
+            cache[country] = (rate_map, slabs)
+    return country, rate_map, slabs
 
 
 def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
     """Generate a payslip for every Active employee in the org (or only the
     specified employee_ids if provided). Idempotent: re-running skips
     employees who already have a payslip in this run."""
-    country, calculation_mode, rate_map, slabs = _resolve_run_calc_inputs(db, run, organization_id)
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
 
     employees_query = db.query(PayrollEmployee).filter(
         PayrollEmployee.status == EmployeeStatus.ACTIVE,
@@ -1394,9 +1566,14 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             seq = int(full_code[-5:])
         else:
             base_payslip_code = full_code
+    # Cache rate_map/slabs by resolved country so employees who share a
+    # jurisdiction (the common case) don't each re-query — only distinct
+    # countries actually present in this batch pay that cost.
+    calc_cache: dict = {}
     for emp in employees:
         if emp.id in existing_ids:
             continue
+        country, rate_map, slabs = _resolve_employee_calc_inputs(db, organization_id, emp, cache=calc_cache)
         payslip_number = f"{base_payslip_code}{seq:05d}" if base_payslip_code else None
         _generate_single_payslip(
             db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
@@ -1439,7 +1616,8 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             detail="This employee doesn't have a payslip in this run yet — add them to the run instead of recalculating.",
         )
 
-    country, calculation_mode, rate_map, slabs = _resolve_run_calc_inputs(db, run, organization_id)
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    country, rate_map, slabs = _resolve_employee_calc_inputs(db, organization_id, employee)
     values = _compute_payslip_values(db, run, employee, rate_map, slabs, country, calculation_mode)
     for field, value in values.items():
         setattr(existing_item, field, value)
@@ -1514,9 +1692,74 @@ def _fill_missing_basic_hra(fields: dict) -> None:
             fields["hra"] = default_hra
 
 
+def _resolve_employee_country(db: Session, organization_id: int, explicit_country_code: Optional[str]) -> str:
+    """Per-employee jurisdiction override if given, else the org's default —
+    same fallback pattern _resolve_employee_calc_inputs uses for payroll
+    calculation's country resolution."""
+    if explicit_country_code:
+        return _normalize_country(explicit_country_code)
+    company = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == organization_id
+    ).first()
+    return _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+
+
+def check_duplicate_employee_identifiers(
+    db: Session, organization_id: int, email: Optional[str], country_code: str,
+    pan: Optional[str], compliance_fields: dict, exclude_employee_id: int = None,
+) -> None:
+    """Cross-employee duplicate check within the org — email always, plus
+    whichever single identifier is that jurisdiction's dedup key (PAN for
+    India's dedicated column, or the compliance_fields key named by each
+    Strategy's `duplicate_field` for the other five countries). Loads the
+    org's employees once and compares in Python, consistent with how the
+    rest of this module already favors simple in-Python comparisons over
+    JSON-path SQL operators (see e.g. _count_unpaid_leave_days)."""
+    email_norm = (email or "").strip().lower()
+    pan_norm = (pan or "").strip().upper()
+    strategy = get_employee_validation_strategy(country_code)
+    dup_id = strategy.get_duplicate_identifier(compliance_fields)
+
+    if not email_norm and not pan_norm and not dup_id:
+        return
+
+    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    if exclude_employee_id:
+        query = query.filter(PayrollEmployee.id != exclude_employee_id)
+
+    for existing in query.all():
+        if email_norm and (existing.email or "").strip().lower() == email_norm:
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=f"An employee with email '{email}' already exists in this organization.",
+            )
+        if pan_norm and (existing.pan or "").strip().upper() == pan_norm:
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=f"An employee with PAN '{pan_norm}' already exists in this organization.",
+            )
+        if dup_id:
+            field, value = dup_id
+            if (existing.compliance_fields or {}).get(field) == value:
+                raise HTTPException(
+                    http_status.HTTP_409_CONFLICT,
+                    detail=f"An employee with {field.upper()} '{value}' already exists in this organization.",
+                )
+
+
 def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> PayrollEmployee:
     employee_data = data.model_dump()
     _fill_missing_basic_hra(employee_data)
+
+    country_code = _resolve_employee_country(db, organization_id, employee_data.get("country_code"))
+    employee_data["country_code"] = country_code
+    strategy = get_employee_validation_strategy(country_code)
+    employee_data["compliance_fields"] = strategy.validate(employee_data.get("compliance_fields") or {})
+
+    check_duplicate_employee_identifiers(
+        db, organization_id, employee_data.get("email"), country_code,
+        employee_data.get("pan"), employee_data["compliance_fields"],
+    )
 
     if not employee_data.get("employee_code"):
         from app.core.code_generation import generate_employee_code
@@ -1547,7 +1790,25 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
 
 def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organization_id: int) -> PayrollEmployee:
     employee = get_employee_by_id(db, employee_id, organization_id)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+
+    country_code = _resolve_employee_country(
+        db, organization_id, updates.get("country_code", employee.country_code)
+    )
+    if "compliance_fields" in updates or "country_code" in updates:
+        strategy = get_employee_validation_strategy(country_code)
+        merged_compliance = {**(employee.compliance_fields or {}), **(updates.get("compliance_fields") or {})}
+        updates["compliance_fields"] = strategy.validate(merged_compliance)
+        updates["country_code"] = country_code
+
+    check_duplicate_employee_identifiers(
+        db, organization_id,
+        updates.get("email", employee.email), country_code,
+        updates.get("pan", employee.pan), updates.get("compliance_fields", employee.compliance_fields or {}),
+        exclude_employee_id=employee.id,
+    )
+
+    for field, value in updates.items():
         if value == "":
             continue
         setattr(employee, field, value)
@@ -1573,6 +1834,7 @@ FIELD_MAP = {
     "panNumber": "pan",
     "uan": "uan",
     "ifscCode": "ifsc",
+    "countryCode": "country_code",
 }
 
 
@@ -1633,6 +1895,26 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
 
         mapped = _map_employee_row(row)
         _fill_missing_basic_hra(mapped)
+
+        # Same jurisdiction resolution/validation/duplicate-check the
+        # single-employee create_employee() runs — previously this bulk
+        # path skipped it entirely, so every bulk-imported employee landed
+        # as implicitly India-only regardless of what the sheet said.
+        country_code = _resolve_employee_country(db, organization_id, mapped.get("country_code"))
+        mapped["country_code"] = country_code
+        try:
+            strategy = get_employee_validation_strategy(country_code)
+            mapped["compliance_fields"] = strategy.validate(row.complianceFields or {})
+            check_duplicate_employee_identifiers(
+                db, organization_id, mapped.get("email"), country_code,
+                mapped.get("pan"), mapped["compliance_fields"],
+            )
+        except Exception as exc:
+            failed.append({
+                "row": {"email": row.email, "name": row.name},
+                "reason": getattr(exc, "detail", None) or str(exc),
+            })
+            continue
 
         if next_seq is not None:
             mapped["employee_code"] = f"{code_prefix}{next_seq:0{seq_width}d}"
@@ -1718,6 +2000,35 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
             continue
 
         mapped = _map_employee_row(row)
+
+        # Same jurisdiction resolution/validation/duplicate-check
+        # update_employee() runs — only when this row actually touches
+        # country/compliance data, mirroring update_employee's own
+        # exclude_unset-style "only revalidate what changed" behavior.
+        try:
+            if "country_code" in mapped or row.complianceFields is not None:
+                country_code = _resolve_employee_country(
+                    db, organization_id, mapped.get("country_code", employee.country_code)
+                )
+                strategy = get_employee_validation_strategy(country_code)
+                merged_compliance = {**(employee.compliance_fields or {}), **(row.complianceFields or {})}
+                mapped["compliance_fields"] = strategy.validate(merged_compliance)
+                mapped["country_code"] = country_code
+            check_duplicate_employee_identifiers(
+                db, organization_id,
+                mapped.get("email", employee.email),
+                mapped.get("country_code", employee.country_code),
+                mapped.get("pan", employee.pan),
+                mapped.get("compliance_fields", employee.compliance_fields or {}),
+                exclude_employee_id=employee.id,
+            )
+        except Exception as exc:
+            failed.append({
+                "row": {"id": row.id, "name": row.name},
+                "reason": getattr(exc, "detail", None) or str(exc),
+            })
+            continue
+
         try:
             with db.begin_nested():
                 for column, value in mapped.items():
@@ -2440,6 +2751,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "pan": item.pan,
         "uan": item.uan,
         "ifsc": item.ifsc,
+        "complianceFields": item.compliance_fields or {},
         "status": item.status,
         "notes": item.notes,
     }
@@ -2457,8 +2769,11 @@ def list_payslips(db: Session, organization_id: int = None, search: str = None,
         query = query.filter(PayslipItem.employee_name.ilike(f"%{search}%"))
 
     rows = query.order_by(PayrollRun.pay_date.desc()).all()
-    country = _resolve_org_country(db, organization_id)
-    return [_serialize_payslip(item, run, country=country) for item, run in rows]
+    # Each payslip's own snapshotted country_code (its employee's jurisdiction
+    # at generation time) takes priority — falls back to the org's current
+    # default only for rows generated before that column existed.
+    org_country = _resolve_org_country(db, organization_id)
+    return [_serialize_payslip(item, run, country=item.country_code or org_country) for item, run in rows]
 
 
 def get_payslip_by_id(db: Session, payslip_id: int, organization_id: int = None) -> dict:
@@ -2469,7 +2784,7 @@ def get_payslip_by_id(db: Session, payslip_id: int, organization_id: int = None)
     if not row:
         raise NotFoundException(f"Payslip {payslip_id} not found.")
     item, run = row
-    country = _resolve_org_country(db, organization_id)
+    country = item.country_code or _resolve_org_country(db, organization_id)
     return _serialize_payslip(item, run, country=country), item, run
 
 
@@ -2576,6 +2891,27 @@ def _register_rupee_font(c):
     return None
 
 
+def _payslip_identity_rows(country: str, data: dict) -> list:
+    """Country-appropriate identity/bank-routing fields for the payslip's
+    three PAN/UAN/IFSC row slots. India uses its own dedicated pan/uan/ifsc
+    columns; every other jurisdiction reads its own identifiers out of the
+    compliance_fields snapshot (see employee_validation.py for the full
+    per-country field list) — those fields previously never appeared on a
+    non-India payslip at all, which always showed blank PAN/UAN/IFSC rows
+    regardless of the employee's actual jurisdiction."""
+    if country == "IN":
+        return [("PAN / Tax ID", data.get("pan")), ("UAN", data.get("uan")), ("IFSC", data.get("ifsc"))]
+    cf = data.get("complianceFields") or {}
+    rows_by_country = {
+        "US": [("SSN", cf.get("ssn")), ("Filing Status", cf.get("w4_filing_status")), ("ABA Routing No.", cf.get("aba_routing_number"))],
+        "UK": [("NINO", cf.get("nino")), ("Tax Code", cf.get("paye_tax_code")), ("Sort Code", cf.get("sort_code"))],
+        "AU": [("TFN", cf.get("tfn")), ("Super Fund USI", cf.get("super_fund_usi")), ("BSB Code", cf.get("bsb_code"))],
+        "CA": [("SIN", cf.get("sin")), ("Province", cf.get("province")), ("Transit No.", cf.get("transit_number"))],
+        "DE": [("Steuer-ID", cf.get("steuer_id")), ("Steuerklasse", cf.get("steuerklasse")), ("IBAN", cf.get("iban"))],
+    }
+    return rows_by_country.get(country, [("Tax ID", None), ("Reference", None), ("Routing", None)])
+
+
 def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:
     """Renders a professional PDF payslip document styled after the Nova Tech
     Solutions template: navy blue header, bordered grid tables, side-by-side
@@ -2595,7 +2931,13 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     company_name = getattr(company, "name", None) or "Company Name"
     company_address = getattr(company, "address", None) or ""
 
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # data["country"] is get_payslip_by_id()'s already-resolved country —
+    # the payslip's own snapshotted jurisdiction (its employee's country at
+    # generation time), not the org's current default. Re-deriving it here
+    # from the org's CompanyComplianceDetails (as this used to do) meant a
+    # non-default-jurisdiction employee's PDF showed the wrong currency,
+    # income-tax label, and statutory terminology.
+    country = _normalize_country(data.get("country") or "IN")
     sym = _get_currency_symbol(country)
 
     def fmt(val):
@@ -2653,19 +2995,20 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
             lbl += f" ({float(unpaid_days):g} day{'s' if float(unpaid_days) != 1 else ''})"
         deduction_items.append((lbl, attendance_ded))
     # Every jurisdiction routes its income-tax withholding through the same
-    # `tds` field (India-named historically) — label it per-country so a
-    # German/Australian/etc. payslip doesn't say "TDS", a purely Indian term.
+    # `tds` field (India-named historically) — label it with each
+    # jurisdiction's own plain term (not a generic "Income Tax" gloss) so a
+    # German/UK/Australian/etc. payslip reads the way that country's own
+    # payslips actually do.
     income_tax_labels = {
-        "US": "Federal Income Tax", "UK": "Income Tax (PAYE)",
-        "AU": "Income Tax (PAYG)", "DE": "Income Tax (Lohnsteuer)",
-        "CA": "Federal Income Tax",
+        "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
+        "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
     }
     pf_esi_labels = {
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
         "CA": {"esi": "Employment Insurance (EI)"},
     }.get(country, {})
     for lbl, key in [
-        (income_tax_labels.get(country, "Income Tax (TDS)"), "tds"),
+        (income_tax_labels.get(country, "TDS"), "tds"),
         (pf_esi_labels.get("pf", "Provident Fund (PF)"), "pf"),
         (pf_esi_labels.get("esi", "Employee State Insurance (ESI)"), "esi"),
         ("Professional Tax", "professionalTax"),
@@ -2844,12 +3187,13 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
             c.setFont(F, 10)
             c.drawString(vx + 3 * mm, baseline, str(val))
 
+    id_row1, id_row2, id_row3 = _payslip_identity_rows(country, data)
     emp_rows = [
         [("Employee Name", data["employee"]), ("Employee ID", str(data["employeeId"]))],
         [("Department", data["department"] or "-"), ("Designation", data.get("designation") or "-")],
-        [("Date of Joining", fmt_date(data.get("dateOfJoining"))), ("PAN / Tax ID", data["pan"] or "-")],
-        [("UAN", data.get("uan") or "-"), ("Bank", data.get("bankName") or "-")],
-        [("Account No.", mask_account(data["bankAccount"])), ("IFSC", data.get("ifsc") or "-")],
+        [("Date of Joining", fmt_date(data.get("dateOfJoining"))), (id_row1[0], id_row1[1] or "-")],
+        [(id_row2[0], id_row2[1] or "-"), ("Bank", data.get("bankName") or "-")],
+        [("Account No.", mask_account(data["bankAccount"])), (id_row3[0], id_row3[1] or "-")],
     ]
     for row in emp_rows:
         draw_detail_row(y, row_h, row)
@@ -5303,16 +5647,15 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
     ).first() if organization_id else None
     country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
     income_tax_labels = {
-        "US": "Federal Income Tax", "UK": "Income Tax (PAYE)",
-        "AU": "Income Tax (PAYG)", "DE": "Income Tax (Lohnsteuer)",
-        "CA": "Federal Income Tax",
+        "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
+        "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
     }
     pf_esi_labels = {
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
         "CA": {"esi": "Employment Insurance (EI)"},
     }.get(country, {})
     deduction_fields = [
-        (income_tax_labels.get(country, "Income Tax (TDS)"), "tds"),
+        (income_tax_labels.get(country, "TDS"), "tds"),
         (pf_esi_labels.get("pf", "Provident Fund (PF)"), "pf"),
         (pf_esi_labels.get("esi", "Employee State Insurance (ESI)"), "esi"),
         ("Professional Tax", "professional_tax"),
@@ -5522,22 +5865,8 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     except Exception:
         pass
 
-    # Best-effort confirmation email — never blocks leave-request creation.
-    # Skipped for source="email": the employee already emailed us, sending
-    # them a receipt-of-receipt email back would be redundant.
-    if record.source != "email":
-        try:
-            employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == record.employee_id).first()
-            if employee and employee.email:
-                from app.services.email_service import send_leave_request_received_email
-                send_leave_request_received_email(
-                    employee.email, employee.name,
-                    str(record.start_date), str(record.end_date), record.request_code,
-                    organization_id=organization_id, db=db,
-                )
-        except Exception as exc:
-            import logging
-            logging.getLogger("zoiko").warning(f"[payroll-mail] leave-request-received email failed: {exc}")
+    # No email is sent on submission — status emails (approved / rejected)
+    # are sent by review_payroll_leave_request once an admin acts on the request.
 
     return _enrich_leave_request(db, record, organization_id)
 
@@ -5625,5 +5954,30 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
         log_activity(db, organization_id, f"Leave request #{record.id} {record.status} by admin ({record.days}d).", ActivityStatus.INFO)
     except Exception:
         pass
+
+    # Best-effort status email — never blocks the review. Sent to the employee
+    # only when their request actually transitions (approved / rejected).
+    if prev_status != record.status and record.status in ("approved", "rejected"):
+        try:
+            employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == record.employee_id).first()
+            if employee and employee.email:
+                from app.services.email_service import (
+                    send_leave_request_approved_email,
+                    send_leave_request_rejected_email,
+                )
+                sender = (
+                    send_leave_request_approved_email
+                    if record.status == "approved"
+                    else send_leave_request_rejected_email
+                )
+                sender(
+                    employee.email, employee.name,
+                    record.leave_type, str(record.start_date), str(record.end_date),
+                    record.days, record.request_code,
+                    organization_id=organization_id, db=db,
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger("zoiko").warning(f"[payroll-mail] leave-request status email failed: {exc}")
 
     return _enrich_leave_request(db, record, organization_id)

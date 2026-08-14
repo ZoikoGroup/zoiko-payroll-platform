@@ -6,3 +6,13 @@ body {
   background-color: #f3f4f6;
   color: #111827;
 }
+
+/* Cross-browser hidden-but-functional scrollbar. Scrolling (wheel, trackpad,
+   keyboard) keeps working — only the visual scrollbar track/thumb is hidden. */
+.scrollbar-hide {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge / IE */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Chromium Edge */
+}

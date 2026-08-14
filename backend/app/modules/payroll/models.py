@@ -132,6 +132,22 @@ class PayrollEmployee(Base):
     uan              = Column(String(20), nullable=True)
     ifsc             = Column(String(20), nullable=True)
 
+    # Per-employee jurisdiction override for multi-country onboarding. Falls
+    # back to CompanyComplianceDetails.jurisdiction_country (via
+    # _normalize_country) when unset — same fallback pattern work_state
+    # already uses for state-level overrides. See employee_validation.py.
+    country_code     = Column(String(2), nullable=True)
+
+    # Non-India statutory/bank identifiers (SSN, NINO, TFN, SIN, Steuer-ID,
+    # IBAN, etc. — see employee_validation.py for the field set per
+    # country). India keeps its own dedicated pan/uan/ifsc columns above
+    # rather than duplicating them in here, since those already hold real
+    # production data. Deliberately a SEPARATE column from custom_fields:
+    # custom_fields is admin-defined free-form data (PayrollCustomFieldDefinition);
+    # this is system-governed, regex-validated compliance data, and keeping
+    # them apart avoids a key collision between the two.
+    compliance_fields = Column(JSON, default=dict, nullable=False, server_default="{}")
+
     # Org-defined extra fields (see PayrollCustomFieldDefinition) — a JSON
     # bag of {field_key: value} rather than real columns, since the field
     # set itself is defined at runtime by admins, not at migration time.
@@ -234,6 +250,19 @@ class PayslipItem(Base):
     pan             = Column(String(20), nullable=True)
     uan             = Column(String(20), nullable=True)
     ifsc            = Column(String(20), nullable=True)
+    # The employee's own jurisdiction at generation time (PayrollEmployee.country_code,
+    # falling back to the org default) — snapshotted for the same reason the
+    # fields above are: so a payslip's country/labels/currency stay tied to
+    # the employee who was actually paid, not to whatever the org's default
+    # jurisdiction happens to be when someone later views/exports it. NULL on
+    # rows generated before this column existed; callers fall back to the
+    # org's current default for those.
+    country_code    = Column(String(2), nullable=True)
+    # Snapshot of PayrollEmployee.compliance_fields (SSN, NINO, IBAN, etc. —
+    # see employee_validation.py for the full per-country set). pan/uan/ifsc
+    # above only ever covered India; every other jurisdiction's identifiers
+    # previously never made it onto the payslip at all.
+    compliance_fields = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -522,6 +551,14 @@ class JurisdictionPack(Base):
     jurisdiction_country = Column(String(100), nullable=False)
     jurisdiction_state   = Column(String(100), nullable=True)   # null = country-level pack
 
+    # "tax" | "policy" — keeps Tax and Policy records in this same versioned
+    # table (no parallel Tax system) while letting the UI show them as two
+    # clearly separate lists instead of one mixed table. Every pre-existing
+    # row is a policy pack (policy_defaults is the only thing this table
+    # held before "tax" packs existed), so this defaults to "policy" for
+    # both new rows and the backfill of old ones.
+    pack_type            = Column(String(10), nullable=False, default="policy", server_default="policy")
+
     version              = Column(String(20), nullable=False, default="1.0")
     status               = Column(String(20), nullable=False, default="Draft")
     # Draft | In Review | QA | Approved | Active | Deprecated | Retired — per spec Section 5/17.
@@ -532,6 +569,33 @@ class JurisdictionPack(Base):
     compliance_owner     = Column(String(150), default="")
     engineering_owner    = Column(String(150), default="")
     source_references    = Column(Text, default="")
+
+    # ── Super Admin Compliance module additions ──────────────────────────
+    # Additive/nullable so existing rows (and the org-scoped Compliance UI
+    # that predates these) are unaffected. Applied to the live DB via
+    # migrations/sync_schema.py rather than a destructive migration.
+    regulatory_authority = Column(String(200), nullable=True)
+    compliance_category  = Column(String(100), nullable=True)
+    change_summary       = Column(Text, nullable=True)
+    next_review_date     = Column(Date, nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Self-reference so a new version can point back at what it replaced,
+    # without ever deleting/overwriting the prior row — version history
+    # stays intact by construction (new row per version).
+    previous_version_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
+    # Per-field default values + override permission for the SAME fields
+    # payroll/policy/models.py's PayrollPolicy exposes (calculation_mode,
+    # employee_categories, overtime_rule) — e.g.
+    # {"calculation_mode": {"value": "standard", "allowOverride": false}, ...}.
+    # A JSON blob here (not a mirrored set of child tables) matches this
+    # module's existing convention for flexible per-field config — see
+    # PolicyLeaveRule.config and EnterpriseJurisdiction's *_config columns.
+    # NULL/absent-field means "fully overridable", so an org with no pack
+    # assigned, or a pack that never sets this, behaves exactly as before
+    # this column existed.
+    policy_defaults      = Column(JSON, nullable=True)
 
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())

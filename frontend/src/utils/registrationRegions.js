@@ -1,3 +1,5 @@
+import { COUNTRIES } from "../modules/payroll/Payroll_Employees/countryFieldSpecs";
+
 export const REGISTRATION_COUNTRIES = [
   "India", "Germany", "Canada", "United States", "United Kingdom", "Australia",
 ];
@@ -300,6 +302,17 @@ const TIMEZONES_BY_COUNTRY = {
 export function getStatesForCountryName(country) {
   if (!country) return [];
   return STATES_BY_COUNTRY[country] || [];
+}
+
+// Code-keyed bridge onto the same STATES_BY_COUNTRY master, for callers
+// (e.g. the Super Admin jurisdiction picker) that work in 2-letter codes
+// like the rest of the payroll module, rather than full country names.
+// Reuses COUNTRIES (the code<->name pairs already used for employee/
+// compliance jurisdiction pickers) instead of a third country list.
+export function getStatesForCountryCode(code) {
+  if (!code) return [];
+  const match = COUNTRIES.find((c) => c.code === String(code).toUpperCase());
+  return match ? getStatesForCountryName(match.name) : [];
 }
 
 export function getTimezonesForCountryName(country) {

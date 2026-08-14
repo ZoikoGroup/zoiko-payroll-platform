@@ -260,7 +260,6 @@ def check_connection() -> bool:
 # comply / insights / time) is imported at runtime.
 import app.modules.auth.models  # noqa: F401,E402
 import app.modules.organizations.models  # noqa: F401,E402
-import app.modules.employee.models  # noqa: F401,E402
 import app.modules.super_admin.models  # noqa: F401,E402
 import app.modules.payroll.models  # noqa: F401,E402
 import app.modules.payroll.policy.models  # noqa: F401,E402

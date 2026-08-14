@@ -7,7 +7,10 @@ Role hierarchy (lowest = highest privilege):
     super_admin      → platform-level, organization_id is None
     org_admin        → full control inside their own org
     payroll_admin    → day-to-day payroll operations inside their own org
-    employee         → self-service only, inside their own org
+
+Employee self-service logins were removed from the platform — an
+organization's PayrollEmployee records remain (payroll master data used to
+run payroll), but there is no login role for them anymore.
 
 Every payroll query for a non-super-admin role MUST be scoped by
 organization_id. Super Admin never reads through the org-scoped helpers;
@@ -29,17 +32,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 ROLE_SUPER_ADMIN = "super_admin"
 ROLE_ORG_ADMIN = "org_admin"
 ROLE_PAYROLL_ADMIN = "payroll_admin"
-ROLE_EMPLOYEE = "employee"
 
-VALID_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_EMPLOYEE}
+VALID_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN}
 
 # What each role may create (org admin manages org users; super admin
 # manages org admins platform-wide).
 ROLE_CREATION_RULES = {
     ROLE_SUPER_ADMIN: [ROLE_ORG_ADMIN],
-    ROLE_ORG_ADMIN: [ROLE_PAYROLL_ADMIN, ROLE_EMPLOYEE],
+    ROLE_ORG_ADMIN: [ROLE_PAYROLL_ADMIN],
     ROLE_PAYROLL_ADMIN: [],
-    ROLE_EMPLOYEE: [],
 }
 
 # Default landing route per role (mirrored in the frontend roles.js).
@@ -47,7 +48,6 @@ ROLE_DEFAULT_REDIRECT = {
     ROLE_SUPER_ADMIN: "/super-admin/dashboard",
     ROLE_ORG_ADMIN: "/organization-admin/dashboard",
     ROLE_PAYROLL_ADMIN: "/payroll-admin/dashboard",
-    ROLE_EMPLOYEE: "/employee/ess",
 }
 
 
@@ -132,16 +132,6 @@ def get_current_payroll_operator(current_user=Depends(get_current_user)):
     if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_SUPER_ADMIN):
         raise ForbiddenException(
             f"This action requires payroll operator privileges. Your role: {role}"
-        )
-    return current_user
-
-
-def get_current_employee(current_user=Depends(get_current_user)):
-    """Employee self-service only."""
-    role = _role_value(current_user)
-    if role not in (ROLE_EMPLOYEE, ROLE_SUPER_ADMIN):
-        raise ForbiddenException(
-            f"This action requires an employee account. Your role: {role}"
         )
     return current_user
 

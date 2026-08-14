@@ -91,6 +91,12 @@ class PayrollPolicyResponse(BaseModel):
     overtime_rule: Optional[OvertimeRuleResponse] = Field(None, alias="overtimeRule")
     integrations: List[IntegrationResponse] = Field(default_factory=list)
 
+    # The org's assigned compliance pack's policy_defaults (see
+    # JurisdictionPack.policy_defaults) — {} when no pack is assigned or
+    # the pack sets no defaults, so the frontend can tell "not locked"
+    # apart from "locked to this value" per field.
+    policy_locks: dict = Field(default_factory=dict, alias="policyLocks")
+
 
 class OvertimeRuleUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)

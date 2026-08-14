@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const TOKEN_KEY = "zoiko_payroll_access";
 const REFRESH_KEY = "zoiko_payroll_refresh";

@@ -7,8 +7,11 @@ password resets, and PlatformSetting configuration.
 """
 
 import logging
+from datetime import date, timedelta
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_super_admin
@@ -17,7 +20,15 @@ from app.modules.auth.models import User
 from app.modules.auth.schemas import SuccessResponse
 from app.modules.organizations.models import Organization
 from app.modules.super_admin.schemas import (
+    ApplicableOrganization,
+    AssignPolicyRequest,
+    DashboardChartsResponse,
     DashboardStats,
+    FinanceOverviewResponse,
+    FinanceSummaryResponse,
+    PolicyStatusUpdate,
+    ReportsListResponse,
+    UpdateCurrencyRequest,
     SettingCreate,
     SettingResponse,
     SettingUpdate,
@@ -28,6 +39,7 @@ from app.modules.super_admin.schemas import (
     SuperAdminUserListResponse,
     SuperAdminUserResponse,
 )
+from app.modules.payroll.schemas import JurisdictionPackResponse, JurisdictionPackUpsert
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
 
@@ -56,7 +68,6 @@ def dashboard_stats(current_user=Depends(get_current_super_admin), db: Session =
         super_admins=db.query(User).filter(User.role == "super_admin").count(),
         org_admins=db.query(User).filter(User.role == "org_admin").count(),
         payroll_admins=db.query(User).filter(User.role == "payroll_admin").count(),
-        employees=db.query(User).filter(User.role == "employee").count(),
         total_payroll_employees=db.query(PayrollEmployee).count(),
         total_payroll_runs=db.query(PayrollRun).count(),
         recent_organizations=[
@@ -202,9 +213,23 @@ def update_setting(
 # country. Orgs start from these defaults on first Compliance setup; their
 # own org-scoped ContributionRate rows can diverge afterwards.
 
+@router.post(
+    "/statutory-rates/seed-defaults", response_model=SuccessResponse,
+    summary="Backfill platform default rates from the payroll engine's existing per-country defaults (safe to re-run)",
+)
+def seed_statutory_rate_defaults(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.super_admin import service as sa_service
+
+    created = sa_service.seed_global_statutory_rates_from_defaults(db)
+    return {"message": f"Added {created} default rate(s)." if created else "Already up to date — no new rates added."}
+
+
 @router.get("/statutory-rates", response_model=StatutoryRateListResponse)
 def list_statutory_rates(
     country: str = Query(None),
+    state: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
@@ -213,6 +238,26 @@ def list_statutory_rates(
     query = db.query(GlobalStatutoryRate)
     if country:
         query = query.filter(GlobalStatutoryRate.jurisdiction_country == country)
+        # Once scoped to a country, an absent state means "country-level
+        # only" — NOT "every state blended together" — an API client that
+        # can't reliably transmit an explicit empty string (browser fetch
+        # helpers commonly strip "" params) still gets correct isolation.
+        # Same convention list_all_jurisdiction_packs() already uses.
+        if state:
+            query = query.filter(GlobalStatutoryRate.jurisdiction_state == state)
+        else:
+            query = query.filter(GlobalStatutoryRate.jurisdiction_state.is_(None))
+    elif state:
+        query = query.filter(GlobalStatutoryRate.jurisdiction_state == state)
+    if start_date:
+        query = query.filter(GlobalStatutoryRate.updated_at >= start_date)
+    if end_date:
+        # updated_at is a timestamp; comparing it `<=` a bare date casts
+        # that date to midnight (00:00:00), which excludes every row
+        # touched later the SAME day — e.g. a rate created at 6pm "today"
+        # would fail an end_date of "today". Use the start of the
+        # following day instead so the whole end_date is included.
+        query = query.filter(GlobalStatutoryRate.updated_at < end_date + timedelta(days=1))
     rates = query.order_by(
         GlobalStatutoryRate.jurisdiction_country,
         GlobalStatutoryRate.sort_order,
@@ -234,12 +279,13 @@ def create_statutory_rate(
         db.query(GlobalStatutoryRate)
         .filter(
             GlobalStatutoryRate.jurisdiction_country == data.jurisdiction_country,
+            GlobalStatutoryRate.jurisdiction_state == data.jurisdiction_state,
             GlobalStatutoryRate.component_key == data.component_key,
         )
         .first()
     )
     if existing:
-        raise AlreadyExistsException("Statutory rate", "jurisdiction_country + component_key")
+        raise AlreadyExistsException("Statutory rate", "jurisdiction_country + jurisdiction_state + component_key")
 
     rate = GlobalStatutoryRate(**data.model_dump())
     db.add(rate)
@@ -275,12 +321,371 @@ def delete_statutory_rate(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
-    from app.core.exceptions import NotFoundException
+    from app.core.exceptions import BadRequestException, NotFoundException
+    from app.modules.payroll.models import ContributionRate
     from app.modules.super_admin.models import GlobalStatutoryRate
 
     rate = db.query(GlobalStatutoryRate).filter(GlobalStatutoryRate.id == rate_id).first()
     if rate is None:
         raise NotFoundException("Statutory rate", "id")
+
+    # Deleting a platform default that an organization's own ContributionRate
+    # already matches (same country/component — orgs seed from this table on
+    # first Compliance setup) would silently orphan that org's rate label
+    # with no platform default left to fall back to. Reject instead of a
+    # bare delete, matching the "do not allow accidental deletion of
+    # active/required configurations" requirement.
+    in_use = (
+        db.query(ContributionRate)
+        .filter(
+            ContributionRate.jurisdiction_country == rate.jurisdiction_country,
+            ContributionRate.component_key == rate.component_key,
+        )
+        .first()
+    )
+    if in_use:
+        raise BadRequestException(
+            f"'{rate.label}' is in use by at least one organization's contribution rates "
+            f"({rate.jurisdiction_country}/{rate.component_key}) and can't be deleted. "
+            "Deactivate it instead, or remove the organizations' rates first."
+        )
+
     db.delete(rate)
     db.commit()
     return {"message": "Statutory rate deleted."}
+
+
+@router.get(
+    "/statutory-rates/organization-rates",
+    summary="Every organization's actual, currently-configured contribution rates (not the platform defaults)",
+)
+def list_organization_contribution_rates(
+    country: Optional[str] = Query(None),
+    organization_id: Optional[int] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.list_contribution_rates(
+        db, country=country, organization_id=organization_id, start_date=start_date, end_date=end_date,
+    )
+
+
+# ── Compliance ───────────────────────────────────────────────────────────────
+# Reuses app.modules.payroll's JurisdictionPack model/schemas and service
+# functions directly — the org-scoped endpoint at
+# PUT /api/payroll/compliance/jurisdiction-packs already exposes
+# service.upsert_jurisdiction_pack to a payroll operator; these routes
+# expose the SAME service functions to Super Admin under a cross-org,
+# Super-Admin-only path. No parallel model or business logic exists here.
+
+@router.get("/compliance/jurisdictions", summary="Countries/states the app supports or already has configured")
+def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.list_known_jurisdictions(db)
+
+
+@router.get(
+    "/compliance/jurisdiction-summary",
+    summary="One row per jurisdiction with real counts (tax/policy packs, statutory rates, orgs) — powers the jurisdiction card grid",
+)
+def get_jurisdiction_summary(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.get_jurisdiction_summary(db)
+
+
+@router.get(
+    "/compliance/configurations",
+    summary="Every organization's actual, currently-configured compliance setup (not the policy templates)",
+)
+def list_compliance_configurations(
+    country: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.list_compliance_configurations(db, country=country, search=search)
+
+
+@router.get(
+    "/compliance/policies", response_model=List[JurisdictionPackResponse], response_model_by_alias=True,
+    summary="Cross-jurisdiction compliance policy list (latest version per policy)",
+)
+def list_compliance_policies(
+    country: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    packType: Optional[str] = Query(None, description="Filter to 'tax' or 'policy' packs"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_all_jurisdiction_packs(
+        db, country=country, state=state, status=status, search=search, pack_type=packType,
+    )
+
+
+@router.put(
+    "/compliance/policies", response_model=JurisdictionPackResponse, response_model_by_alias=True,
+    summary="Create a policy, or a new version of an existing policy (identity/metadata never overwritten across versions)",
+)
+def upsert_compliance_policy(
+    payload: JurisdictionPackUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_jurisdiction_pack(db, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/policies/{pack_id}/versions", response_model=List[JurisdictionPackResponse], response_model_by_alias=True,
+    summary="Full version history for one policy, oldest first",
+)
+def get_compliance_policy_versions(
+    pack_id: str,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_jurisdiction_pack_versions(db, pack_id)
+
+
+@router.put(
+    "/compliance/policies/{id}/status", response_model=JurisdictionPackResponse, response_model_by_alias=True,
+    summary="Activate/deactivate/retire a specific policy version",
+)
+def set_compliance_policy_status(
+    id: int,
+    payload: PolicyStatusUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_jurisdiction_pack_status(db, id, payload.status, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/policies/{id}/organizations", response_model=List[ApplicableOrganization],
+    summary="Organizations currently assigned to this policy version",
+)
+def get_compliance_policy_organizations(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_pack_applicable_organizations(db, id)
+
+
+@router.post(
+    "/compliance/policies/{id}/assign", response_model=SuccessResponse,
+    summary="Assign this policy version as the active compliance pack for the given organizations",
+)
+def assign_compliance_policy(
+    id: int,
+    payload: AssignPolicyRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    count = payroll_service.assign_pack_to_organizations(db, id, payload.organizationIds, actor_id=current_user.id)
+    return {"message": f"Policy applied to {count} organization(s)."}
+
+
+# ── Finance ────────────────────────────────────────────────────────────────
+# Cross-org view over the existing PayrollRun/PayslipItem data — does not
+# replace or duplicate an org's own Payroll module, which remains the
+# system of record for its own runs.
+
+@router.get("/finance/overview", response_model=FinanceOverviewResponse, summary="Cross-org payroll run listing")
+def finance_overview(
+    organization_id: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.finance_overview(
+        db, organization_id=organization_id, country=country, status=status,
+        start_date=start_date, end_date=end_date, skip=skip, limit=limit,
+    )
+
+
+@router.get("/finance/summary", response_model=FinanceSummaryResponse, summary="Financial totals grouped by jurisdiction (currency-safe)")
+def finance_summary(
+    organization_id: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.finance_summary(db, organization_id=organization_id, country=country, start_date=start_date, end_date=end_date)
+
+
+@router.get(
+    "/finance/organization-currencies",
+    summary="Every organization plus its jurisdiction and any explicit currency override",
+)
+def list_organization_currencies(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.list_organization_currencies(db)
+
+
+@router.put(
+    "/finance/organizations/{organization_id}/currency",
+    summary="Set (or clear) an organization's explicit currency override",
+)
+def update_organization_currency(
+    organization_id: int,
+    payload: UpdateCurrencyRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    org = sa_service.update_organization_currency(db, organization_id, payload.currency)
+    return {"id": org.id, "organizationName": org.organization_name, "currency": org.currency}
+
+
+# ── Reports ────────────────────────────────────────────────────────────────
+# "Payroll" and "Compliance" report categories reuse /finance/overview and
+# /compliance/policies directly from the frontend — no separate endpoint
+# is defined for them here to avoid two code paths returning the same data.
+
+@router.get("/reports/organizations", response_model=ReportsListResponse, summary="Cross-org report: identity + employee/run counts")
+def reports_organizations(
+    search: Optional[str] = Query(None),
+    country: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.reports_organizations(db, search=search, country=country, status=status, skip=skip, limit=limit)
+
+
+@router.get("/reports/employees", response_model=ReportsListResponse, summary="Cross-org employee report")
+def reports_employees(
+    organization_id: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.reports_employees(
+        db, organization_id=organization_id, country=country, status=status, search=search, skip=skip, limit=limit,
+    )
+
+
+_REPORT_EXPORT_COLUMNS = {
+    "organizations": [
+        ("organizationName", "Organization"), ("organizationCode", "Code"), ("country", "Country"),
+        ("jurisdictionCountry", "Jurisdiction"), ("isActive", "Active"),
+        ("employeeCount", "Employees"), ("payrollRunCount", "Payroll Runs"),
+    ],
+    "employees": [
+        ("employeeCode", "Employee Code"), ("name", "Name"), ("department", "Department"),
+        ("designation", "Designation"), ("status", "Status"), ("employmentType", "Employment Type"),
+        ("organizationName", "Organization"), ("jurisdictionCountry", "Jurisdiction"),
+    ],
+    "payroll": [
+        ("organizationName", "Organization"), ("jurisdictionCountry", "Jurisdiction"), ("periodLabel", "Period"),
+        ("payDate", "Pay Date"), ("status", "Status"), ("grossPay", "Gross Pay"), ("netPay", "Net Pay"),
+        ("totalDeductions", "Deductions"), ("employerCost", "Employer Cost"),
+    ],
+    "compliance": [
+        ("packId", "Policy"), ("jurisdictionCountry", "Country"), ("jurisdictionState", "State"),
+        ("version", "Version"), ("status", "Status"), ("complianceCategory", "Category"),
+        ("effectiveFrom", "Effective From"), ("effectiveTo", "Effective To"),
+    ],
+}
+
+
+@router.get("/reports/export", summary="Export a report category as CSV")
+def export_report(
+    type: str = Query(..., pattern="^(organizations|employees|payroll|compliance)$"),
+    organization_id: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    from app.modules.super_admin import service as sa_service
+
+    if type == "organizations":
+        rows = sa_service.reports_organizations(db, search=search, country=country, status=status, limit=10000)["items"]
+    elif type == "employees":
+        rows = sa_service.reports_employees(db, organization_id=organization_id, country=country, status=status, search=search, limit=10000)["items"]
+    elif type == "payroll":
+        rows = sa_service.finance_overview(
+            db, organization_id=organization_id, country=country, status=status,
+            start_date=start_date, end_date=end_date, limit=10000,
+        )["items"]
+    else:  # compliance
+        packs = payroll_service.list_all_jurisdiction_packs(db, country=country, status=status)
+        rows = [
+            {
+                "packId": p.pack_id, "jurisdictionCountry": p.jurisdiction_country, "jurisdictionState": p.jurisdiction_state,
+                "version": p.version, "status": p.status, "complianceCategory": p.compliance_category,
+                "effectiveFrom": p.effective_from, "effectiveTo": p.effective_to,
+            }
+            for p in packs
+        ]
+
+    csv_bytes = sa_service.rows_to_csv_bytes(_REPORT_EXPORT_COLUMNS[type], rows)
+    return StreamingResponse(
+        iter([csv_bytes]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{type}-report.csv"'},
+    )
+
+
+# ── Dashboard charts ─────────────────────────────────────────────────────────
+
+@router.get("/dashboard/charts", response_model=DashboardChartsResponse, summary="Chart data for the enhanced Super Admin dashboard")
+def dashboard_charts(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.dashboard_charts(db, start_date=start_date, end_date=end_date)

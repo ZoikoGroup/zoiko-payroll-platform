@@ -1185,7 +1185,7 @@ export const EMPLOYEE_CATEGORY_LABELS = {
   freelancer: "Freelancer",
 };
 
-// ── Payroll Mail (SMTP send identity + IMAP leave-request inbox) ────────
+// ── Payroll Mail (SMTP send identity) ───────────────────────────────────
 
 export const getEmailSettings = async () => {
   try {
@@ -1198,31 +1198,6 @@ export const getEmailSettings = async () => {
 export const updateEmailSettings = async (payload) => {
   try {
     return await api.put("/api/payroll/mail/settings", payload);
-  } catch (err) {
-    throw err;
-  }
-};
-
-export const getInboundMessages = async (params) => {
-  try {
-    const res = await api.get("/api/payroll/mail/inbox", { params });
-    return res?.messages || res || [];
-  } catch {
-    return [];
-  }
-};
-
-export const convertMessageToLeaveRequest = async (messageId, payload) => {
-  try {
-    return await api.post(`/api/payroll/mail/inbox/${messageId}/convert-to-leave-request`, payload);
-  } catch (err) {
-    throw err;
-  }
-};
-
-export const ignoreInboundMessage = async (messageId) => {
-  try {
-    return await api.post(`/api/payroll/mail/inbox/${messageId}/ignore`, {});
   } catch (err) {
     throw err;
   }
@@ -1241,14 +1216,6 @@ export const getCustomFields = async () => {
 export const createCustomField = async (payload) => {
   try {
     return await api.post("/api/payroll/employee-forms/custom-fields", payload);
-  } catch (err) {
-    throw err;
-  }
-};
-
-export const pollMailboxNow = async () => {
-  try {
-    return await api.post("/api/payroll/mail/poll-now", {});
   } catch (err) {
     throw err;
   }

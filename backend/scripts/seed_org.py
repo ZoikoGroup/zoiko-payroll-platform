@@ -1,9 +1,9 @@
 """
 scripts/seed_org.py
 -------------------
-Create an organization + org_admin + optional payroll_admin + employee
-directly in the database (no invite emails). Useful for local testing and
-for the Super Admin to spin up a demo tenant.
+Create an organization + org_admin + optional payroll_admin directly in the
+database (no invite emails). Useful for local testing and for the Super
+Admin to spin up a demo tenant.
 
 Usage:
     python -m scripts.seed_org \
@@ -32,8 +32,6 @@ def main() -> None:
     parser.add_argument("--admin-password", required=True)
     parser.add_argument("--payroll-email", default=None)
     parser.add_argument("--payroll-password", default=None)
-    parser.add_argument("--employee-email", default=None)
-    parser.add_argument("--employee-password", default=None)
     args = parser.parse_args()
 
     initialize_database()
@@ -72,8 +70,6 @@ def main() -> None:
         _add_user(args.admin_email, args.admin_password, UserRole.ORG_ADMIN, "Org")
         if args.payroll_email:
             _add_user(args.payroll_email, args.payroll_password, UserRole.PAYROLL_ADMIN, "Payroll")
-        if args.employee_email:
-            _add_user(args.employee_email, args.employee_password, UserRole.EMPLOYEE, "Employee")
 
         db.commit()
         print("Done.")

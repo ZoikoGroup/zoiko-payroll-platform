@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import { Upload, Download, X, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react";
 import * as XLSX from "xlsx";
 import { bulkCreateEmployees, EMPLOYMENT_TYPES, EMPLOYEE_STATUSES, DEPARTMENTS } from "../../../service/payrollService";
+import { COUNTRIES, COUNTRY_FIELD_SPECS, COMPLIANCE_SPECS, complianceColumnHeader, validateComplianceFields } from "./countryFieldSpecs";
 
 const COLUMN_MAP = {
   "ID": "_existingId",
@@ -14,10 +15,9 @@ const COLUMN_MAP = {
   "Status": "status",
   "Date of Joining (YYYY-MM-DD)": "dateOfJoining",
   "CTC": "ctc",
-  "Basic": "basic",
-  "HRA": "hra",
   "Bank Name": "bankName",
   "Bank Account Number": "bankAccountNumber",
+  "Country": "countryCode",
   "IFSC Code": "ifscCode",
   "PAN Number": "panNumber",
   "UAN": "uan",
@@ -39,6 +39,8 @@ const HEADER_ALIASES = {
   "pan": "panNumber",
   "ifsc": "ifscCode",
   "uan number": "uan",
+  "country code": "countryCode",
+  "jurisdiction": "countryCode",
   "emp id": "_existingId",
   "emp no": "_existingId",
   "emp #": "_existingId",
@@ -46,33 +48,98 @@ const HEADER_ALIASES = {
   "employee code": "_existingId",
 };
 
-const TEMPLATE_HEADERS = Object.keys(COLUMN_MAP).filter((h) => h !== "ID");
+// The template carries the org's own jurisdiction statutory columns only —
+// no cross-country noise. The parser still recognises every country's
+// headers (COMPLIANCE_HEADER_LOOKUP) so a hand-edited mixed sheet keeps
+// working for rows whose Country differs from the org's default.
+//
+// IFSC/PAN/UAN are India's dedicated columns, so they are dropped from the
+// template whenever the org's jurisdiction is not India.
+const IN_DEDICATED_HEADERS = ["IFSC Code", "PAN Number", "UAN"];
+const BASE_TEMPLATE_HEADERS = Object.keys(COLUMN_MAP)
+  .filter((h) => h !== "ID")
+  .filter((h) => !IN_DEDICATED_HEADERS.includes(h));
 
-const TEMPLATE_SAMPLE_ROW = {
-  "Employee Name": "Asha Rao",
-  "Email": "asha.rao@example.com",
-  "Phone": "9876543210",
-  "Department": DEPARTMENTS[0],
-  "Designation": "Software Engineer",
-  "Employment Type": EMPLOYMENT_TYPES[0],
-  "Status": "Active",
-  "Date of Joining (YYYY-MM-DD)": "2026-01-15",
-  "CTC": 1200000,
-  "Basic": 600000,
-  "HRA": 240000,
-  "Bank Name": "HDFC Bank",
-  "Bank Account Number": "123456789012",
-  "IFSC Code": "HDFC0001234",
-  "PAN Number": "ABCDE1234F",
-  "UAN": "101234567890",
+// Sample values per statutory field, so each jurisdiction's template shows
+// exactly how its own columns are meant to be filled.
+const COMPLIANCE_SAMPLE_VALUES = {
+  esi_number: "1234567890",
+  tax_regime: "New",
+  ssn: "123-45-6789",
+  flsa_status: "Exempt",
+  w4_filing_status: "Single",
+  aba_routing_number: "123456789",
+  state_tax_jurisdiction: "CA",
+  nino: "AB123456C",
+  paye_tax_code: "1257L",
+  student_loan_plan: "Plan 1",
+  auto_enrolment_pension: "true",
+  sort_code: "12-34-56",
+  tfn: "123456789",
+  help_stsl_debt: "false",
+  super_fund_usi: "123456789012",
+  super_member_number: "12345",
+  bsb_code: "123-456",
+  sin: "123-456-789",
+  td1_claim_amount: "15000",
+  province: "ON",
+  transit_number: "12345",
+  financial_institution_number: "001",
+  steuer_id: "12345678901",
+  rv_nummer: "12345678A123",
+  steuerklasse: "I",
+  krankenkasse: "AOK",
+  iban: "DE12345678901234567890",
+  bic: "AARGDEFF",
 };
 
-function downloadTemplate() {
-  const ws = XLSX.utils.json_to_sheet([TEMPLATE_SAMPLE_ROW], { header: TEMPLATE_HEADERS });
-  ws["!cols"] = TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(h.length, 18) }));
+function templateHeadersFor(countryCode) {
+  const base =
+    countryCode === "IN"
+      ? [...BASE_TEMPLATE_HEADERS, ...IN_DEDICATED_HEADERS]
+      : BASE_TEMPLATE_HEADERS;
+  const jurisdiction = (COUNTRY_FIELD_SPECS[countryCode] || []).map((spec) => ({
+    ...spec,
+    country: countryCode,
+  }));
+  return [...base, ...jurisdiction.map(complianceColumnHeader)];
+}
+
+function sampleRowFor(countryCode) {
+  const row = {
+    "Employee Name": "Asha Rao",
+    "Email": "asha.rao@example.com",
+    "Phone": "9876543210",
+    "Department": DEPARTMENTS[0],
+    "Designation": "Software Engineer",
+    "Employment Type": EMPLOYMENT_TYPES[0],
+    "Status": "Active",
+    "Date of Joining (YYYY-MM-DD)": "2026-01-15",
+    "CTC": 1200000,
+    "Bank Name": "HDFC Bank",
+    "Bank Account Number": "123456789012",
+    "Country": countryCode,
+  };
+  if (countryCode === "IN") {
+    row["IFSC Code"] = "HDFC0001234";
+    row["PAN Number"] = "ABCDE1234F";
+    row["UAN"] = "101234567890";
+  }
+  for (const spec of COUNTRY_FIELD_SPECS[countryCode] || []) {
+    const sample = COMPLIANCE_SAMPLE_VALUES[spec.key];
+    if (sample) row[complianceColumnHeader(spec)] = sample;
+  }
+  return row;
+}
+
+function downloadTemplate(defaultCountryCode) {
+  const countryCode = normalizeCountryCode(defaultCountryCode) || "IN";
+  const headers = templateHeadersFor(countryCode);
+  const ws = XLSX.utils.json_to_sheet([sampleRowFor(countryCode)], { header: headers });
+  ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length, 18) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Employees");
-  XLSX.writeFile(wb, "employee_bulk_import_template.xlsx");
+  XLSX.writeFile(wb, `employee_bulk_import_template_${countryCode}.xlsx`);
 }
 
 function normalizeHeader(header) {
@@ -93,6 +160,26 @@ const NORMALIZED_FIELD_LOOKUP = (() => {
   }
   return lookup;
 })();
+
+// normalizeHeader() strips the "(CC)" suffix, so this keys purely on the
+// field's label — safe because no two jurisdictions in countryFieldSpecs.js
+// reuse the same label.
+const COMPLIANCE_HEADER_LOOKUP = (() => {
+  const lookup = {};
+  for (const spec of COMPLIANCE_SPECS) {
+    lookup[normalizeHeader(spec.label)] = spec;
+  }
+  return lookup;
+})();
+
+function normalizeCountryCode(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const match = COUNTRIES.find(
+    (c) => c.code.toLowerCase() === raw.toLowerCase() || c.name.toLowerCase() === raw.toLowerCase()
+  );
+  return match ? match.code : raw.toUpperCase();
+}
 
 // Matches an uploaded value against an allowed list case/whitespace-
 // insensitively and snaps it to the list's canonical casing (e.g. the
@@ -119,11 +206,20 @@ function normalizeDate(value) {
   return asString;
 }
 
-function toRowObject(rawRow) {
+function toRowObject(rawRow, defaultCountryCode) {
   const row = {};
+  const complianceFields = {};
   for (const [rawHeader, rawValue] of Object.entries(rawRow)) {
-    const field = NORMALIZED_FIELD_LOOKUP[normalizeHeader(rawHeader)];
-    if (field) row[field] = rawValue ?? "";
+    const normalized = normalizeHeader(rawHeader);
+    const field = NORMALIZED_FIELD_LOOKUP[normalized];
+    if (field) {
+      row[field] = rawValue ?? "";
+      continue;
+    }
+    const complianceSpec = COMPLIANCE_HEADER_LOOKUP[normalized];
+    if (complianceSpec && String(rawValue ?? "").trim() !== "") {
+      complianceFields[complianceSpec.key] = rawValue;
+    }
   }
   for (const field of Object.values(COLUMN_MAP)) {
     if (!(field in row)) row[field] = "";
@@ -134,13 +230,19 @@ function toRowObject(rawRow) {
   row.department = row.department || DEPARTMENTS[0];
   row.employmentType = normalizeAgainstAllowedList(row.employmentType, EMPLOYMENT_TYPES) || EMPLOYMENT_TYPES[0];
   row.status = normalizeAgainstAllowedList(row.status, EMPLOYEE_STATUSES) || "Active";
-  row.panNumber = row.panNumber ? String(row.panNumber).toUpperCase().trim() : "";
-  row.ifscCode = row.ifscCode ? String(row.ifscCode).toUpperCase().trim() : "";
+  row.countryCode = normalizeCountryCode(row.countryCode) || defaultCountryCode || "IN";
   row.bankName = row.bankName ? String(row.bankName).trim() : "";
   row.bankAccountNumber = row.bankAccountNumber ? String(row.bankAccountNumber).trim() : "";
   row.ctc = row.ctc === "" ? "" : Number(row.ctc);
-  row.basic = row.basic === "" ? "" : Number(row.basic);
-  row.hra = row.hra === "" ? "" : Number(row.hra);
+
+  // PAN/IFSC/UAN are India's dedicated columns — clearing them for every
+  // other jurisdiction mirrors EmployeeForm's handleSubmit so a row that
+  // switches country away from India never carries stray Indian identifiers.
+  const isIndia = row.countryCode === "IN";
+  row.panNumber = isIndia && row.panNumber ? String(row.panNumber).toUpperCase().trim() : "";
+  row.ifscCode = isIndia && row.ifscCode ? String(row.ifscCode).toUpperCase().trim() : "";
+  row.uan = isIndia ? row.uan : "";
+  row.complianceFields = complianceFields;
   return row;
 }
 
@@ -152,7 +254,10 @@ function validateRow(row) {
   if (!String(row.designation || "").trim()) errors.push("Designation is required");
   if (!row.dateOfJoining || isNaN(new Date(row.dateOfJoining))) errors.push("Date of joining is missing or invalid");
   if (!row.ctc || Number(row.ctc) <= 0) errors.push("CTC must be a positive number");
-  if (row.panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(row.panNumber)) {
+  if (!COUNTRIES.some((c) => c.code === row.countryCode)) {
+    errors.push(`Country "${row.countryCode || "(blank)"}" is not valid — must be exactly one of: ${COUNTRIES.map((c) => c.code).join(", ")}`);
+  }
+  if (row.countryCode === "IN" && row.panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(row.panNumber)) {
     errors.push("PAN format looks incorrect (e.g. ABCDE1234F)");
   }
   if (!EMPLOYMENT_TYPES.includes(row.employmentType)) {
@@ -161,10 +266,15 @@ function validateRow(row) {
   if (!EMPLOYEE_STATUSES.includes(row.status)) {
     errors.push(`Status "${row.status || "(blank)"}" is not valid — must be exactly one of: ${EMPLOYEE_STATUSES.join(", ")}`);
   }
+  // Jurisdiction-specific compliance fields (SSN, NINO, IBAN, sort code,
+  // student loan plan, etc.) — mirrored here by countryFieldSpecs.js's
+  // validateComplianceFields() from employee_validation.py so the preview
+  // shows the exact causes before upload; the server re-validates anyway.
+  errors.push(...validateComplianceFields(row.countryCode, row.complianceFields));
   return errors;
 }
 
-export default function EmployeeBulkImportModal({ onClose, onImported }) {
+export default function EmployeeBulkImportModal({ onClose, onImported, defaultCountryCode }) {
   const fileInputRef = useRef(null);
   const [fileName, setFileName] = useState("");
   const [parsedRows, setParsedRows] = useState([]);
@@ -201,7 +311,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported }) {
         }
 
         const rows = rawRows.map((rawRow) => {
-          const row = toRowObject(rawRow);
+          const row = toRowObject(rawRow, defaultCountryCode);
           const errors = row._existingId ? [] : validateRow(row);
           return { row, errors };
         });
@@ -314,13 +424,32 @@ export default function EmployeeBulkImportModal({ onClose, onImported }) {
                   <AlertCircle size={14} className="inline mr-1 -mt-0.5" />
                   {result.failed.length} row{result.failed.length === 1 ? "" : "s"} could not be imported:
                 </p>
-                <ul className="max-h-48 space-y-1 overflow-y-auto rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">
-                  {result.failed.map((f, i) => (
-                    <li key={i}>
-                      {f.row?.email || f.row?.name || `Row ${i + 1}`}: {f.reason}
-                    </li>
-                  ))}
-                </ul>
+                <div className="max-h-56 overflow-y-auto rounded-[12px] border border-[#FF6E86]/20 bg-[#FF6E86]/10">
+                  <table className="w-full text-[13px]">
+                    <thead className="sticky top-0 bg-[#FBE3E3] dark:bg-[#3A2A28]">
+                      <tr className="text-left text-[12px] uppercase tracking-wide text-[#FF6E86]">
+                        <th className="px-4 py-2 font-bold">Row</th>
+                        <th className="px-4 py-2 font-bold">Name</th>
+                        <th className="px-4 py-2 font-bold">Email</th>
+                        <th className="px-4 py-2 font-bold">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.failed.map((f, i) => (
+                        <tr key={i} className="border-t border-[#FF6E86]/15 text-[#7A3B42] dark:text-[#F2C9C9]">
+                          <td className="px-4 py-2 font-mono text-[12px]">{i + 1}</td>
+                          <td className="px-4 py-2">{f.row?.name || "—"}</td>
+                          <td className="px-4 py-2">{f.row?.email || "—"}</td>
+                          <td className="px-4 py-2">{f.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[12px] text-[#9E9690]">
+                  Fix these rows in your sheet and click &quot;Import another file&quot; to re-upload. Rows that were already imported
+                  will come back as &quot;already exists&quot; — that&apos;s expected, just leave them in the sheet.
+                </p>
               </div>
             )}
 
@@ -366,10 +495,10 @@ export default function EmployeeBulkImportModal({ onClose, onImported }) {
                 </div>
               )}
               <div className="mt-4 pt-4 border-t border-[#E5E0D9] dark:border-[#38312D]">
-                <p className="text-[11px] text-[#9E9690] mb-2">Tip: Use "Export" on the employee list to download all existing employees. Add new rows without IDs, then re-upload — existing rows are auto-skipped.</p>
+                <p className="text-[11px] text-[#9E9690] mb-2">Tip: Use "Export" on the employee list to download all existing employees. Add new rows without IDs, then re-upload — existing rows are auto-skipped. The statutory columns in this template match your organization's jurisdiction ({defaultCountryCode || "IN"}); set the "Country" column per row to place an employee under a different jurisdiction.</p>
                 <button
                   type="button"
-                  onClick={downloadTemplate}
+                  onClick={() => downloadTemplate(defaultCountryCode)}
                   className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#19C58A] hover:text-[#15B07A] transition-colors duration-200"
                 >
                   <Download size={14} />
@@ -412,6 +541,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported }) {
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Name</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Email</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Department</th>
+                        <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Country</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">CTC</th>
                         <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Status</th>
                       </tr>
@@ -438,6 +568,7 @@ export default function EmployeeBulkImportModal({ onClose, onImported }) {
                           </td>
                           <td className="px-3 py-2.5 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{row.email}</td>
                           <td className="px-3 py-2.5 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{row.department}</td>
+                          <td className="px-3 py-2.5 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{row.countryCode}</td>
                           <td className="px-3 py-2.5 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{row.ctc || "—"}</td>
                           <td className="px-3 py-2.5">
                             <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold ${

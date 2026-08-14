@@ -16,3 +16,4 @@ build/
 # Working artifacts — not consumed by any code
 docs/extracted/
 frontend/assist_images/
+claude

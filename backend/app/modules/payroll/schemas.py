@@ -69,6 +69,8 @@ class EmployeeCreate(BaseModel):
     pan:              Optional[str] = Field(None, validation_alias="panNumber")
     uan:              Optional[str] = None
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
+    country_code:     Optional[str] = Field(None, validation_alias="countryCode")
+    compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -91,6 +93,8 @@ class EmployeeUpdate(BaseModel):
     pan:              Optional[str] = Field(None, validation_alias="panNumber")
     uan:              Optional[str] = None
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
+    country_code:     Optional[str] = Field(None, validation_alias="countryCode")
+    compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -120,6 +124,8 @@ class EmployeeResponse(BaseModel):
     pan:             Optional[str] = Field(None, serialization_alias="panNumber")
     uan:             Optional[str] = None
     ifsc:            Optional[str] = Field(None, serialization_alias="ifscCode")
+    countryCode:     Optional[str] = Field(None, validation_alias="country_code", serialization_alias="countryCode")
+    complianceFields: Optional[dict] = Field(None, validation_alias="compliance_fields", serialization_alias="complianceFields")
     customFields:    Optional[dict] = Field(None, validation_alias="custom_fields", serialization_alias="customFields")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -143,6 +149,8 @@ class BulkEmployeeItem(BaseModel):
     panNumber:         CoercedStr = None
     uan:               CoercedStr = None
     ifscCode:          CoercedStr = None
+    countryCode:       Optional[str] = None
+    complianceFields:  Optional[dict] = None
 
 
 class BulkEmployeeRequest(BaseModel):
@@ -364,6 +372,7 @@ class PayslipItemResponse(BaseModel):
     pan:                Optional[str] = None
     uan:                Optional[str] = None
     ifsc:               Optional[str] = None
+    complianceFields:   Optional[dict] = None
     status:             PayslipStatus
     notes:              Optional[str] = None
 
@@ -698,6 +707,7 @@ class JurisdictionPackResponse(BaseModel):
     packId:              str = Field(validation_alias="pack_id", serialization_alias="packId")
     jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     jurisdictionState:   Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    packType:            str = Field("policy", validation_alias="pack_type", serialization_alias="packType")
     version:             str
     status:              str
     effectiveFrom:       Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
@@ -705,6 +715,16 @@ class JurisdictionPackResponse(BaseModel):
     complianceOwner:     str = Field("", validation_alias="compliance_owner", serialization_alias="complianceOwner")
     engineeringOwner:    str = Field("", validation_alias="engineering_owner", serialization_alias="engineeringOwner")
     sourceReferences:    str = Field("", validation_alias="source_references", serialization_alias="sourceReferences")
+    regulatoryAuthority: Optional[str] = Field(None, validation_alias="regulatory_authority", serialization_alias="regulatoryAuthority")
+    complianceCategory:  Optional[str] = Field(None, validation_alias="compliance_category", serialization_alias="complianceCategory")
+    changeSummary:       Optional[str] = Field(None, validation_alias="change_summary", serialization_alias="changeSummary")
+    nextReviewDate:      Optional[date] = Field(None, validation_alias="next_review_date", serialization_alias="nextReviewDate")
+    policyDefaults:      Optional[dict] = Field(None, validation_alias="policy_defaults", serialization_alias="policyDefaults")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    updatedById:         Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -713,6 +733,7 @@ class JurisdictionPackUpsert(BaseModel):
     packId: str
     jurisdictionCountry: str
     jurisdictionState: Optional[str] = None
+    packType: str = "policy"
     version: str = "1.0"
     status: str = "Draft"
     effectiveFrom: Optional[date] = None
@@ -720,6 +741,11 @@ class JurisdictionPackUpsert(BaseModel):
     complianceOwner: str = ""
     engineeringOwner: str = ""
     sourceReferences: str = ""
+    regulatoryAuthority: Optional[str] = None
+    complianceCategory: Optional[str] = None
+    changeSummary: Optional[str] = None
+    nextReviewDate: Optional[date] = None
+    policyDefaults: Optional[dict] = None
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────
