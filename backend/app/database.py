@@ -95,9 +95,143 @@ def initialize_database() -> None:
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully.")
+        _seed_reference_content()
     except exc.SQLAlchemyError as exc_info:
         logger.error("Database initialization failed: %s", exc_info)
         raise
+
+
+def _seed_reference_content() -> None:
+    """Seed Assist reference content (governed KB, capabilities, suggestions)."""
+    try:
+        from app.modules.assist import knowledge as assist_knowledge
+        from app.modules.assist.models import (
+            AssistCapability,
+            AssistNotice,
+            AssistSuggestion,
+        )
+
+        db = SessionLocal()
+        try:
+            assist_knowledge.ensure_default_kb(db)
+
+            if db.query(AssistCapability).count() == 0:
+                db.add_all(
+                    [
+                        AssistCapability(
+                            capability_id="assist.answer",
+                            name="Ask about payroll",
+                            description="Explain payroll concepts and procedures using governed knowledge.",
+                            risk_tier="A1",
+                            requires_confirmation=0,
+                            enabled=1,
+                            order_index=1,
+                        ),
+                        AssistCapability(
+                            capability_id="payroll.getRunReadiness",
+                            name="Run readiness summary",
+                            description="Summarize payroll run readiness and blockers.",
+                            risk_tier="A1",
+                            requires_confirmation=0,
+                            enabled=1,
+                            order_index=2,
+                        ),
+                        AssistCapability(
+                            capability_id="payroll.listExceptions",
+                            name="List exceptions",
+                            description="List exceptions for a payroll run.",
+                            risk_tier="A1",
+                            requires_confirmation=0,
+                            enabled=1,
+                            order_index=3,
+                        ),
+                        AssistCapability(
+                            capability_id="payroll.assignException",
+                            name="Assign exception",
+                            description="Assign an exception to an owner for follow-up.",
+                            risk_tier="A3",
+                            requires_confirmation=1,
+                            enabled=1,
+                            order_index=4,
+                        ),
+                        AssistCapability(
+                            capability_id="payroll.addExceptionNote",
+                            name="Add exception note",
+                            description="Attach a note to an exception.",
+                            risk_tier="A3",
+                            requires_confirmation=1,
+                            enabled=1,
+                            order_index=5,
+                        ),
+                        AssistCapability(
+                            capability_id="case.createHandoff",
+                            name="Create handoff",
+                            description="Create a handoff to a support or compliance team.",
+                            risk_tier="A3",
+                            requires_confirmation=1,
+                            enabled=1,
+                            order_index=6,
+                        ),
+                    ]
+                )
+                db.commit()
+
+            if db.query(AssistSuggestion).count() == 0:
+                db.add_all(
+                    [
+                        AssistSuggestion(
+                            intent_id="run.readiness",
+                            context_type="PAYROLL_RUN",
+                            prompt="Is the payroll run ready for approval?",
+                            position=1,
+                        ),
+                        AssistSuggestion(
+                            intent_id="exception.list",
+                            context_type="PAYROLL_RUN",
+                            prompt="What exceptions exist on this run?",
+                            position=2,
+                        ),
+                        AssistSuggestion(
+                            intent_id="run.status",
+                            context_type="PAYROLL_RUN",
+                            prompt="What is the current status of this run?",
+                            position=3,
+                        ),
+                        AssistSuggestion(
+                            intent_id="kb.answer",
+                            context_type="GLOBAL",
+                            prompt="Can Assist approve payroll or release payments?",
+                            position=4,
+                        ),
+                        AssistSuggestion(
+                            intent_id="variance.compare",
+                            context_type="GLOBAL",
+                            prompt="Compare this payroll period with the previous one.",
+                            position=5,
+                        ),
+                    ]
+                )
+                db.commit()
+
+            if db.query(AssistNotice).count() == 0:
+                db.add(
+                    AssistNotice(
+                        notice_version="assist-policy-1.0.0",
+                        title="Assist policy notice",
+                        content=(
+                            "Zoiko Payroll Assist is governed: it explains, finds and prepares payroll work, "
+                            "but it can never approve payroll, release payments, submit filings or change "
+                            "protected data. All controlled actions are previewed and confirmed by you before "
+                            "execution. Verify material decisions against the authoritative payroll record."
+                        ),
+                        required=1,
+                    )
+                )
+                db.commit()
+        finally:
+            db.close()
+    except Exception as exc_info:  # noqa: BLE001
+        logger.error("Failed to seed Assist reference content: %s", exc_info)
 
 
 def get_db():
@@ -131,3 +265,4 @@ import app.modules.payroll.models  # noqa: F401,E402
 import app.modules.payroll.policy.models  # noqa: F401,E402
 import app.modules.payroll.enterprise.models  # noqa: F401,E402
 import app.modules.payroll.mail.models  # noqa: F401,E402
+import app.modules.assist.models  # noqa: F401,E402

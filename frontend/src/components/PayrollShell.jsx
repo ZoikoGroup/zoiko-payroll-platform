@@ -14,6 +14,7 @@ import {
   Building2,
   Menu,
   LogOut,
+  ScanSearch,
   ChevronsLeft,
   ChevronsRight,
   ChevronRight,
@@ -25,6 +26,9 @@ import { useAuth } from "../context/AuthContext";
 import { useOrganization } from "../context/OrganizationContext";
 import { useDarkMode } from "../context/DarkModeContext";
 import { ROLE_LABELS, ROLES } from "../config/roles";
+import AssistLauncher from "../modules/assist/AssistLauncher";
+
+const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_sidebar_collapsed";
 
@@ -36,17 +40,17 @@ function getMyOrgHref(role) {
 }
 
 function buildNavGroups(role) {
-  const overviewItems = [
-    { label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true },
-    { label: "My Organization", href: getMyOrgHref(role), icon: Building2, end: true },
-  ];
+  // "My Organization" lives in the header (see getMyOrgHref usage below),
+  // not this list — kept out of Overview intentionally by the sidebar
+  // redesign, not an oversight.
+  const overviewItems = [{ label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true }];
   // Only an Org Admin can invite/manage Payroll Admins — Payroll Admins
   // themselves have no user-creation rights (see ROLE_CREATION_RULES on
   // the backend), so they don't get this nav item at all.
   if (role === ROLES.ORG_ADMIN) {
     overviewItems.push({ label: "Team", href: "/organization-admin/team", icon: Users, end: true });
   }
-  return [
+  const groups = [
     {
       title: "Overview",
       items: overviewItems,
@@ -76,6 +80,13 @@ function buildNavGroups(role) {
       items: [{ label: "Reports", href: "/payroll/reports", icon: BarChart3 }],
     },
   ];
+  if (OPERATOR_ROLES.has(role)) {
+    groups.push({
+      title: "Assist",
+      items: [{ label: "Assist Admin", href: "/payroll/assist-admin", icon: ScanSearch }],
+    });
+  }
+  return groups;
 }
 
 function isItemActive(item, pathname) {
@@ -409,6 +420,8 @@ export default function PayrollShell({ children }) {
         />
         <main className="w-full">{children}</main>
       </div>
+
+      <AssistLauncher />
     </div>
   );
 }
