@@ -20,6 +20,12 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["ASSIST_MODEL_PROVIDER"] = ""
 os.environ["ASSIST_MODEL_BASE_URL"] = ""
 os.environ["ASSIST_MODEL_API_KEY"] = ""
+# Blank out real SMTP config from the developer's own .env — handoff
+# confirmation fires an email notification, and tests must never send a
+# real one regardless of what's configured locally.
+os.environ["SMTP_HOST"] = ""
+os.environ["SMTP_FROM_EMAIL"] = ""
+os.environ["ASSIST_SUPPORT_EMAIL"] = ""
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -220,6 +226,26 @@ def test_message_flow_safe(client, headers, session_id):
     assert resp["safety_state"] == "SAFE"
     assert any(b["block_type"] == "text" for b in resp["blocks"])
     assert resp["sources"]
+
+
+def test_message_history_links_each_message_to_its_response(client, headers, session_id):
+    # Resuming a past session (History tab) reads GET .../messages and needs
+    # each message linked to the response it produced — the assistant's
+    # reply is never a second message row, only a separate AssistResponse.
+    first = client.post(
+        f"/api/assist/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": {"type": "TEXT", "text": "What exceptions exist on this run?"}},
+    )
+    second = client.post(
+        f"/api/assist/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": {"type": "TEXT", "text": "Is the payroll run ready for approval?"}},
+    )
+    history = client.get(f"/api/assist/sessions/{session_id}/messages", headers=headers).json()["messages"]
+    by_id = {m["id"]: m for m in history}
+    assert by_id[first.json()["message_id"]]["response_id"] == first.json()["response_id"]
+    assert by_id[second.json()["message_id"]]["response_id"] == second.json()["response_id"]
 
 
 def test_evidence_confidence_high_when_tool_and_kb_both_match(client, headers, session_id):

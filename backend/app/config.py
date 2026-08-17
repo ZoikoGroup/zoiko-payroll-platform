@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     ASSIST_MODEL_NAME: str = "gpt-4o-mini"
     ASSIST_MODEL_TIMEOUT_SECONDS: int = 30
     ASSIST_POLICY_VERSION: str = "1.0.0"
+    # Inbox that receives a notification whenever a chat conversation is
+    # escalated to support (see confirm_handoff in modules/assist/service.py).
+    # Left empty to skip the support-side notification (the requester's own
+    # confirmation email still sends regardless).
+    ASSIST_SUPPORT_EMAIL: str = ""
 
 
 settings = Settings()

@@ -285,6 +285,13 @@ class AssistMessage(Base):
         Index("ix_assist_messages_session_created", "session_id", "created_at"),
     )
 
+    @property
+    def response_id(self):
+        """The assistant's reply is stored as its own AssistResponse row, not
+        a second AssistMessage — expose the link so history/resume can find
+        it without a second lookup per message."""
+        return self.response.id if self.response else None
+
 
 # ── Responses ───────────────────────────────────────────────────────────
 
