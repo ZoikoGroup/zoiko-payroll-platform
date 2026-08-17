@@ -3,7 +3,7 @@ import { CalendarCheck, Clock, Users, FileText, List, CalendarDays, Save, Dollar
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../ToastContext";
-import { getEmployeeRoster, saveAttendanceRecords, getAttendanceRecords, getAttendanceHistory, getHolidays, getPayrollLeaveRequests, getEmployees } from "../../../service/payrollService";
+import { getEmployeeRoster, saveAttendanceRecords, getAttendanceRecords, getAttendanceHistory, getHolidays, getPayrollLeaveRequests } from "../../../service/payrollService";
 import * as XLSX from "xlsx";
 
 function lsKey(orgId) {
@@ -298,7 +298,10 @@ export default function AttendancePage() {
         };
       });
       apiList = mergeLocalIntoRecords(apiList, date, orgId);
-      if (requestId === recordsRequestIdRef.current) setRecords(apiList);
+      if (requestId === recordsRequestIdRef.current) {
+        setRecords(apiList);
+        setTotalEmployeeCount(apiList.length);
+      }
     } catch {
       if (requestId === recordsRequestIdRef.current && !list.length) addToast?.("Loaded from local storage.", "info");
     } finally {
@@ -417,13 +420,6 @@ export default function AttendancePage() {
   }, []);
 
   useEffect(() => { loadHolidays(); }, [loadHolidays]);
-
-  useEffect(() => {
-    getEmployees().then((data) => {
-      const list = Array.isArray(data) ? data : data?.items || [];
-      setTotalEmployeeCount(list.length);
-    }).catch(() => {});
-  }, []);
 
   const holidayDates = useMemo(() => {
     const set = new Set();

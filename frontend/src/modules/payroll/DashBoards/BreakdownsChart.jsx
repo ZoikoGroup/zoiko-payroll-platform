@@ -12,7 +12,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { Loader2 } from "lucide-react";
-import { getDashboardBreakdowns, getDashboardSummary } from "../../../service/payrollService";
+import { getDashboardBreakdowns } from "../../../service/payrollService";
 import { getCurrencySymbol } from "../../../utils/currency";
 
 const DEPT_COLORS = [
@@ -63,26 +63,16 @@ function ChartTooltip({ active, payload, label, currencyCode }) {
 
 export default function BreakdownsChart({ filter, refreshTick, currencyCode }) {
   const [data, setData] = useState(null);
-  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [breakdowns, summaryData] = await Promise.all([
-          getDashboardBreakdowns(filter),
-          getDashboardSummary(filter),
-        ]);
-        if (!cancelled) {
-          setData(breakdowns);
-          setSummary(summaryData);
-        }
+        const breakdowns = await getDashboardBreakdowns(filter);
+        if (!cancelled) setData(breakdowns);
       } catch {
-        if (!cancelled) {
-          setData(null);
-          setSummary(null);
-        }
+        if (!cancelled) setData(null);
       } finally {
         if (!cancelled) setLoading(false);
       }

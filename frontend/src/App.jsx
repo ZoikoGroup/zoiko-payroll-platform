@@ -15,6 +15,7 @@ import StatutoryRatesPage from "./pages/StatutoryRatesPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import CompliancePage from "./pages/CompliancePage";
+import PolicyConfigPage from "./pages/PolicyConfigPage";
 import FinancePage from "./pages/FinancePage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -72,6 +73,14 @@ export default function App() {
           element={
             <SuperAdminShell>
               <CompliancePage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/compliance/policy/new"
+          element={
+            <SuperAdminShell>
+              <PolicyConfigPage />
             </SuperAdminShell>
           }
         />

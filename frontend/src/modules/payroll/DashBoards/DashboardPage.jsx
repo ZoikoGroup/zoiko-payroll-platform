@@ -43,7 +43,9 @@ export default function DashboardPage({ onNewPayrollRun }) {
   const { currencyCode, calculationMode } = usePayrollSetup();
 
   useEffect(() => {
-    const id = setInterval(() => setRefreshTick((t) => t + 1), POLL_INTERVAL_MS);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") setRefreshTick((t) => t + 1);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 

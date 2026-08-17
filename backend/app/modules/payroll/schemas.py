@@ -347,6 +347,7 @@ class PayslipItemResponse(BaseModel):
     basicPay:           Decimal
     hra:                Decimal
     specialAllowance:   Decimal
+    allowanceItems:     List[dict] = Field(default_factory=list)
     overtime:           Decimal
     additionalCompensation: Decimal = Decimal("0")
     payableDays:        Optional[Decimal] = None
@@ -712,9 +713,9 @@ class JurisdictionPackResponse(BaseModel):
     status:              str
     effectiveFrom:       Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
     effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
-    complianceOwner:     str = Field("", validation_alias="compliance_owner", serialization_alias="complianceOwner")
-    engineeringOwner:    str = Field("", validation_alias="engineering_owner", serialization_alias="engineeringOwner")
-    sourceReferences:    str = Field("", validation_alias="source_references", serialization_alias="sourceReferences")
+    complianceOwner:     Optional[str] = Field(None, validation_alias="compliance_owner", serialization_alias="complianceOwner")
+    engineeringOwner:    Optional[str] = Field(None, validation_alias="engineering_owner", serialization_alias="engineeringOwner")
+    sourceReferences:    Optional[str] = Field(None, validation_alias="source_references", serialization_alias="sourceReferences")
     regulatoryAuthority: Optional[str] = Field(None, validation_alias="regulatory_authority", serialization_alias="regulatoryAuthority")
     complianceCategory:  Optional[str] = Field(None, validation_alias="compliance_category", serialization_alias="complianceCategory")
     changeSummary:       Optional[str] = Field(None, validation_alias="change_summary", serialization_alias="changeSummary")
@@ -750,9 +751,9 @@ class JurisdictionPackUpsert(BaseModel):
     status: str = "Draft"
     effectiveFrom: Optional[date] = None
     effectiveTo: Optional[date] = None
-    complianceOwner: str = ""
-    engineeringOwner: str = ""
-    sourceReferences: str = ""
+    complianceOwner: Optional[str] = None
+    engineeringOwner: Optional[str] = None
+    sourceReferences: Optional[str] = None
     regulatoryAuthority: Optional[str] = None
     complianceCategory: Optional[str] = None
     changeSummary: Optional[str] = None
@@ -826,6 +827,19 @@ class CanonicalContributionRateResponse(BaseModel):
     employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ActiveTaxConfigurationResponse(BaseModel):
+    """Read-only view of whichever tax pack is currently Active for a
+    jurisdiction — powers the Statutory Rates page's "Platform Default
+    Rates" summary. `pack` is None when no canonical tax pack has been
+    configured for this jurisdiction yet (an expected state, not an
+    error) — `rates`/`slabs` are then simply empty."""
+    pack: Optional[JurisdictionPackResponse] = None
+    rates: List[CanonicalContributionRateResponse] = Field(default_factory=list)
+    slabs: List[CanonicalTaxSlabResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

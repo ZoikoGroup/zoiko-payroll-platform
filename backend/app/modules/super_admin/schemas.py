@@ -67,57 +67,10 @@ class DashboardStats(BaseModel):
     recent_organizations: list[dict]
 
 
-# ── Global statutory rate table (Super Admin) ──────────────────────────────
-
-class StatutoryRateCreate(BaseModel):
-    jurisdiction_country: str = "IN"
-    jurisdiction_state: Optional[str] = None
-    component_key: str
-    label: str
-    employee_share: str = ""
-    employer_share: str = ""
-    total: str = ""
-    employee_rate_pct: Optional[Decimal] = None
-    employer_rate_pct: Optional[Decimal] = None
-    flat_amount: Optional[Decimal] = None
-    sort_order: int = 0
-
-
-class StatutoryRateUpdate(BaseModel):
-    jurisdiction_state: Optional[str] = None
-    label: Optional[str] = None
-    employee_share: Optional[str] = None
-    employer_share: Optional[str] = None
-    total: Optional[str] = None
-    employee_rate_pct: Optional[Decimal] = None
-    employer_rate_pct: Optional[Decimal] = None
-    flat_amount: Optional[Decimal] = None
-    sort_order: Optional[int] = None
-    is_active: Optional[bool] = None
-
-
-class StatutoryRateResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    jurisdiction_country: str
-    jurisdiction_state: Optional[str] = None
-    component_key: str
-    label: str
-    employee_share: str
-    employer_share: str
-    total: str
-    employee_rate_pct: Optional[Decimal] = None
-    employer_rate_pct: Optional[Decimal] = None
-    flat_amount: Optional[Decimal] = None
-    sort_order: int
-    is_active: bool
-    updated_at: datetime
-
-
-class StatutoryRateListResponse(BaseModel):
-    rates: list[StatutoryRateResponse]
-    total: int
+# Statutory Rate Create/Update/Response/ListResponse schemas were removed
+# here along with GlobalStatutoryRate itself (models.py) — the Statutory
+# Rates page now reads canonical tax-pack data via
+# ActiveTaxConfigurationResponse (app.modules.payroll.schemas) instead.
 
 
 # ── Compliance (Super Admin) ───────────────────────────────────────────────

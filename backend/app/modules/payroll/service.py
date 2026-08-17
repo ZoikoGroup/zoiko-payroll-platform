@@ -30,12 +30,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from calendar import month_name
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func as sa_func, tuple_, or_, and_, case
 
 from app.modules.payroll.models import (
     PayrollEmployee, EmploymentType, EmployeeStatus,
-    PayrollRun, PayslipItem, PayrollAttendanceRecord, PayrollLeaveAllocation,
+    PayrollRun, PayslipItem, PayslipAllowanceItem, PayrollAttendanceRecord, PayrollLeaveAllocation,
     PayrollLeaveRequest,
     ContributionRate, TaxSlab, CompanyComplianceDetails, ComplianceDocument, PayrollActivityLog,
     JurisdictionPack, PayrollHoliday, TaxConfigurationAudit,
@@ -188,7 +188,13 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
 
 
 def _seed_contribution_rates(db: Session, organization_id: int, country: str = "IN") -> List[ContributionRate]:
-    defaults = _CONTRIBUTION_RATES_BY_COUNTRY.get(country, _CONTRIBUTION_RATES_BY_COUNTRY["IN"])
+    defaults = _CONTRIBUTION_RATES_BY_COUNTRY.get(country, [])
+    if not defaults:
+        import logging
+        logging.getLogger("zoiko").warning(
+            f"[payroll-seed] no default contribution rates available for country '{country}' — "
+            f"org {organization_id} will have zero rates until a canonical tax pack or manual rates are configured."
+        )
     rows = []
     for d in defaults:
         row = ContributionRate(organization_id=organization_id, jurisdiction_country=country, **d)
@@ -275,11 +281,16 @@ _TAX_SLABS_BY_COUNTRY = {
     "DE": [
         # Simplified bracket approximation of Germany's continuous income
         # tax formula (real Lohnsteuer uses a smooth curve, not flat bands).
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("11000"),    rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="Basic tax-free allowance", sort_order=1),
-        dict(min_amount=Decimal("11000"),   max_amount=Decimal("17000"),    rate_pct=Decimal("14"),  rate_label="14%",  tax_formula="14% of income above €11,000", sort_order=2),
-        dict(min_amount=Decimal("17000"),   max_amount=Decimal("66000"),    rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="€840 + 30% above €17,000", sort_order=3),
-        dict(min_amount=Decimal("66000"),   max_amount=Decimal("277000"),   rate_pct=Decimal("42"),  rate_label="42%",  tax_formula="€15,540 + 42% above €66,000", sort_order=4),
-        dict(min_amount=Decimal("277000"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="€104,160 + 45% above €277,000", sort_order=5),
+        # Boundaries are expressed in TAXABLE-income terms (i.e. already
+        # net of the Grundfreibetrag) — _calculate_annual_tax_de subtracts
+        # the "grundfreibetrag" parameter (engine/standard.py) from annual
+        # gross BEFORE applying these slabs, so there is no separate 0%
+        # bracket here (that would double-count the same tax-free zone
+        # the parameter already represents).
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("5216"),     rate_pct=Decimal("14"),  rate_label="14%",  tax_formula="14% of taxable income (after Grundfreibetrag)", sort_order=1),
+        dict(min_amount=Decimal("5216"),    max_amount=Decimal("54216"),    rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="€730 + 30% above €5,216 taxable", sort_order=2),
+        dict(min_amount=Decimal("54216"),   max_amount=Decimal("265216"),   rate_pct=Decimal("42"),  rate_label="42%",  tax_formula="€15,430 + 42% above €54,216 taxable", sort_order=3),
+        dict(min_amount=Decimal("265216"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="€104,050 + 45% above €265,216 taxable", sort_order=4),
     ],
     "CA": [
         # Federal brackets only — provincial tax excluded for simplicity.
@@ -293,7 +304,13 @@ _TAX_SLABS_BY_COUNTRY = {
 
 
 def _seed_tax_slabs(db: Session, organization_id: int, country: str = "IN") -> List[TaxSlab]:
-    defaults = _TAX_SLABS_BY_COUNTRY.get(country, _TAX_SLABS_BY_COUNTRY["IN"])
+    defaults = _TAX_SLABS_BY_COUNTRY.get(country, [])
+    if not defaults:
+        import logging
+        logging.getLogger("zoiko").warning(
+            f"[payroll-seed] no default tax slabs available for country '{country}' — "
+            f"org {organization_id} will have zero income-tax slabs until a canonical tax pack or manual slabs are configured."
+        )
     rows = []
     for d in defaults:
         row = TaxSlab(organization_id=organization_id, jurisdiction_country=country, **d)
@@ -634,6 +651,104 @@ def list_tax_configuration_audit(
 # sync_org_rates_from_canonical (engine/tax_resolver.py) — the engine's
 # read path (get_contribution_rates/get_tax_slabs below) is unchanged.
 
+def _org_uses_canonical_tax_pack(db: Session, organization_id: int) -> bool:
+    """True only if this org's CompanyComplianceDetails.active_pack_id
+    currently points at a pack_type="tax" JurisdictionPack — i.e. Super
+    Admin has explicitly run "Apply Tax & Sync Rates" (assign_pack_to_
+    organizations) for this org at least once. Gates
+    _resolve_effective_rate_inputs below so canonical, date-resolved rates
+    only ever replace an org's cached rates for orgs actually opted into
+    canonical tracking — every other org's numbers are completely
+    unaffected by that function.
+
+    Known limitation (pre-existing, not introduced here): active_pack_id
+    is a single FK shared across pack types (see its TODO comment on
+    CompanyComplianceDetails, models.py) — if Super Admin later assigns a
+    policy pack to an org previously on a tax pack, this can under-detect.
+    Accepted as-is rather than solved here."""
+    if not organization_id:
+        return False
+    hit = (
+        db.query(JurisdictionPack.id)
+        .join(CompanyComplianceDetails, CompanyComplianceDetails.active_pack_id == JurisdictionPack.id)
+        .filter(CompanyComplianceDetails.organization_id == organization_id, JurisdictionPack.pack_type == "tax")
+        .first()
+    )
+    return hit is not None
+
+
+def _pack_to_tax_snapshot(rates, slabs, pack) -> dict:
+    """Build the {tax_policy_pack_id, tax_policy_version, tax_rule_snapshot}
+    dict from an already-resolved canonical pack + its rates/slabs.
+    Extracted out of _resolve_tax_snapshot so a caller that already
+    resolved a pack via _resolve_effective_rate_inputs (to get the actual
+    calculation numbers) can reuse that same resolution for the metadata
+    instead of a second resolve_tax_configuration query — the numbers and
+    the metadata can then never disagree on which pack version applied."""
+    if not pack:
+        return {"tax_policy_pack_id": None, "tax_policy_version": None, "tax_rule_snapshot": None}
+
+    def _dec(v):
+        return str(v) if v is not None else None
+
+    snapshot = {
+        "packId": pack.pack_id,
+        "version": pack.version,
+        "contributionRates": [
+            {
+                "componentKey": r.component_key, "label": r.label,
+                "employeeRatePct": _dec(r.employee_rate_pct), "employerRatePct": _dec(r.employer_rate_pct),
+                "flatAmount": _dec(r.flat_amount),
+            }
+            for r in rates
+        ],
+        "taxSlabs": [
+            {
+                "minAmount": _dec(s.min_amount), "maxAmount": _dec(s.max_amount), "ratePct": _dec(s.rate_pct),
+                "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
+            }
+            for s in slabs
+        ],
+    }
+    return {"tax_policy_pack_id": pack.id, "tax_policy_version": pack.version, "tax_rule_snapshot": snapshot}
+
+
+def _resolve_effective_rate_inputs(
+    db: Session, organization_id: int, country: str, payroll_date,
+    org_opted_in: bool, state: Optional[str] = None, tax_regime: Optional[str] = None,
+):
+    """Rate/slab resolution for one calculation, gated on org_opted_in.
+
+    If the org has opted into canonical tax-pack tracking
+    (_org_uses_canonical_tax_pack) and a canonical pack with at least one
+    rate or slab resolves for (country, state, tax_regime, payroll_date),
+    use those canonical rows DIRECTLY (no DB write) — this is what makes
+    the calculation agree with whichever pack version was actually in
+    force on payroll_date, even if the org's own cached ContributionRate/
+    TaxSlab rows have since been re-synced to a newer pack version.
+
+    Otherwise (not opted in, or no canonical pack resolves for this exact
+    date/state/regime) falls through to get_contribution_rates/
+    get_tax_slabs exactly as before this existed — byte-for-byte unchanged
+    for that population.
+
+    Returns (rate_map, slabs, canonical_rates_or_None, pack_or_None).
+    canonical_rates is the raw list (not the dict) so a caller can build a
+    tax snapshot via _pack_to_tax_snapshot without a second query; pack is
+    None whenever canonical resolution wasn't used, signalling the caller
+    to fall back to its own existing tax-snapshot logic unchanged."""
+    if org_opted_in:
+        from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+        canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
+            db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date,
+        )
+        if pack is not None and (canonical_rates or canonical_slabs):
+            return {r.component_key: r for r in canonical_rates}, canonical_slabs, canonical_rates, pack
+    rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
+    slabs = get_tax_slabs(db, organization_id, country)
+    return rate_map, slabs, None, None
+
+
 def sync_org_rates_from_canonical(
     db: Session, organization_id: int, country: str, state: Optional[str] = None,
     tax_regime: Optional[str] = None, payroll_date=None,
@@ -815,6 +930,74 @@ def upsert_canonical_contribution_rate(
     return row
 
 
+def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Optional[int] = None) -> None:
+    """Permanently remove one canonical ContributionRate row from a tax
+    pack. Unlike hard-deleting a whole JurisdictionPack, this needs no
+    org-assignment/payslip-history guard: org-scoped ContributionRate rows
+    are point-in-time SNAPSHOT copies (via sync_org_rates_from_canonical),
+    not live references back to this row, and PayslipItem's historical
+    snapshot (tax_rule_snapshot) is a JSON copy of the values, not an FK —
+    so deleting this row can never retroactively change an org's already-
+    synced rates or an already-issued payslip's recorded figures."""
+    row = db.query(ContributionRate).filter(ContributionRate.id == rate_id, ContributionRate.organization_id.is_(None)).first()
+    if not row:
+        raise NotFoundException("Canonical ContributionRate", rate_id)
+    old_value = {
+        "componentKey": row.component_key, "label": row.label,
+        "employee_rate_pct": str(row.employee_rate_pct) if row.employee_rate_pct is not None else None,
+        "employer_rate_pct": str(row.employer_rate_pct) if row.employer_rate_pct is not None else None,
+        "flat_amount": str(row.flat_amount) if row.flat_amount is not None else None,
+    }
+    jurisdiction_pack_id = row.jurisdiction_pack_id
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == jurisdiction_pack_id).first() if jurisdiction_pack_id else None
+    db.delete(row)
+    db.commit()
+    record_tax_audit(
+        db, actor_id=actor_id, action="delete", entity_type="contribution_rate", entity_id=rate_id,
+        jurisdiction_pack_id=jurisdiction_pack_id, tax_version=pack.version if pack else None,
+        old_value=old_value, new_value=None,
+    )
+
+
+def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int] = None) -> None:
+    """Permanently remove one canonical TaxSlab row from a tax pack — same
+    no-retroactive-effect reasoning as delete_canonical_contribution_rate."""
+    row = db.query(TaxSlab).filter(TaxSlab.id == slab_id, TaxSlab.organization_id.is_(None)).first()
+    if not row:
+        raise NotFoundException("Canonical TaxSlab", slab_id)
+    old_value = {
+        "min_amount": str(row.min_amount), "max_amount": str(row.max_amount) if row.max_amount is not None else None,
+        "rate_pct": str(row.rate_pct), "rate_label": row.rate_label,
+    }
+    jurisdiction_pack_id = row.jurisdiction_pack_id
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == jurisdiction_pack_id).first() if jurisdiction_pack_id else None
+    db.delete(row)
+    db.commit()
+    record_tax_audit(
+        db, actor_id=actor_id, action="delete", entity_type="tax_slab", entity_id=slab_id,
+        jurisdiction_pack_id=jurisdiction_pack_id, tax_version=pack.version if pack else None,
+        old_value=old_value, new_value=None,
+    )
+
+
+def get_active_tax_configuration_for_display(db: Session, country: str, state: Optional[str] = None) -> dict:
+    """Read-only: the canonical rates/slabs from whichever tax pack is
+    currently Active for this jurisdiction — powers the Statutory Rates
+    page's "Platform Default Rates" summary. This is the exact same
+    resolution the live payroll engine uses (resolve_tax_configuration),
+    just surfaced for display; it never writes anything. Editing these
+    values happens on the Compliance page's Rates editor.
+
+    Returns {"pack": None, "rates": [], "slabs": []} when no canonical
+    tax pack is Active for this jurisdiction yet — an expected, valid
+    state (see resolve_tax_configuration's own docstring), not an error."""
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    country = _normalize_country(country)
+    rates, slabs, pack = resolve_tax_configuration(db, country, state=state, payroll_date=date.today())
+    return {"pack": pack, "rates": rates, "slabs": slabs}
+
+
 def list_all_jurisdiction_packs(
     db: Session, country: Optional[str] = None, state: Optional[str] = None,
     status: Optional[str] = None, search: Optional[str] = None, pack_type: Optional[str] = None,
@@ -933,6 +1116,83 @@ def get_pack_applicable_organizations(db: Session, pack_row_id: int) -> List[dic
         .all()
     )
     return [{"id": r.id, "organizationName": r.organization_name, "organizationCode": r.organization_code} for r in rows]
+
+
+def hard_delete_jurisdiction_pack(db: Session, pack_row_id: int) -> dict:
+    """Permanently delete a Tax or Policy pack — the pack row itself, its
+    canonical ContributionRate/TaxSlab rows, and its TaxConfigurationAudit
+    trail. Unlike set_jurisdiction_pack_status("Retired"), nothing about
+    this pack survives.
+
+    Blocked (BadRequestException) in either of two cases, both checked
+    BEFORE anything is touched:
+      1. Any organization is currently assigned to this pack
+         (CompanyComplianceDetails.active_pack_id) — reuses
+         get_pack_applicable_organizations, the same check the "Assign"
+         UI already uses to show who's on a pack.
+      2. Any payslip, for any organization, past or present, was ever
+         generated using this pack's rates (PayslipItem.tax_policy_pack_id)
+         — per the model's own comment on that column, a payslip's figures
+         "MUST NOT change... reproducible even if the pack row is later
+         retired," so a pack with real payroll history is retirable, never
+         deletable.
+
+    When neither block applies, two more FK relationships are cleaned up
+    (not blocked on, since neither is organization or payslip data):
+      - Any OTHER org's own ContributionRate/TaxSlab row that still
+        carries a stale jurisdiction_pack_id pointing at this pack (left
+        over from a past sync to a component_key the org's *current*
+        pack no longer has) gets that pointer nulled — the org's actual
+        rate values are untouched, only the provenance breadcrumb clears.
+        Safe specifically because block #1 above already confirmed no
+        org is CURRENTLY assigned to this pack.
+      - Any other JurisdictionPack whose previous_version_id points at
+        this one (version-chain metadata) gets that pointer nulled.
+    """
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+
+    assigned_orgs = get_pack_applicable_organizations(db, pack.id)
+    if assigned_orgs:
+        names = ", ".join(o["organizationName"] for o in assigned_orgs[:5])
+        raise BadRequestException(
+            f"{pack.pack_id} v{pack.version} is still assigned to {len(assigned_orgs)} "
+            f"organization(s) ({names}{'…' if len(assigned_orgs) > 5 else ''}) — unassign them before deleting."
+        )
+
+    has_payslip_history = (
+        db.query(PayslipItem.id).filter(PayslipItem.tax_policy_pack_id == pack.id).first() is not None
+    )
+    if has_payslip_history:
+        raise BadRequestException(
+            f"{pack.pack_id} v{pack.version} has real payroll history — at least one payslip was "
+            f"generated using its rates and must keep referencing it. Retire it instead of deleting."
+        )
+
+    db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.isnot(None),
+    ).update({"jurisdiction_pack_id": None}, synchronize_session=False)
+    db.query(TaxSlab).filter(
+        TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.isnot(None),
+    ).update({"jurisdiction_pack_id": None}, synchronize_session=False)
+    db.query(JurisdictionPack).filter(JurisdictionPack.previous_version_id == pack.id).update(
+        {"previous_version_id": None}, synchronize_session=False,
+    )
+
+    db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.jurisdiction_pack_id == pack.id).delete()
+    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).delete()
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).delete()
+
+    pack_id_label, version_label = pack.pack_id, pack.version
+    db.delete(pack)
+    db.commit()
+
+    import logging
+    logging.getLogger("zoiko").info(
+        f"[compliance] Super Admin permanently deleted jurisdiction pack {pack_id_label} v{version_label} (id={pack_row_id})."
+    )
+    return {"packId": pack_id_label, "version": version_label}
 
 
 def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids: List[int], actor_id: Optional[int] = None) -> dict:
@@ -1255,8 +1515,16 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
 
     country = _normalize_country(country)
     calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
-    rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
-    slabs = get_tax_slabs(db, organization_id, country)
+    # Same canonical-pack substitution generate_payslips_for_run uses (see
+    # _resolve_effective_rate_inputs) — a preview should show the same
+    # numbers a real run for this same period would produce. No run row
+    # exists yet during preview, so period_end (falling back to today, the
+    # resolver's own default) stands in for the eventual run.pay_date.
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    rate_map, slabs, _canonical_rates, _pack = _resolve_effective_rate_inputs(
+        db, organization_id, country, period_end or date.today(), org_opted_in,
+    )
+    allowance_components = _resolve_allowance_components(db, organization_id)
 
     employees = db.query(PayrollEmployee).filter(
         PayrollEmployee.id.in_(employee_ids),
@@ -1267,6 +1535,21 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             PayrollEmployee.date_of_joining <= (period_start or date.today()),
         ),
     ).all()
+
+    # Batch-fetch every employee's attendance rows for the period in ONE query
+    # instead of 2 queries per employee (unpaid-leave count + rewards/bonus
+    # sum) — same fix already applied to generate_payslips_for_run, extended
+    # here since preview/recalculate is hit on every wizard click.
+    attendance_by_employee: dict = {}
+    if period_start and period_end and period_end >= period_start:
+        all_records = db.query(PayrollAttendanceRecord).filter(
+            PayrollAttendanceRecord.organization_id == organization_id,
+            PayrollAttendanceRecord.employee_id.in_([e.id for e in employees]),
+            PayrollAttendanceRecord.date >= period_start,
+            PayrollAttendanceRecord.date <= period_end,
+        ).all()
+        for rec in all_records:
+            attendance_by_employee.setdefault(rec.employee_id, []).append(rec)
 
     results = []
     totals = {
@@ -1283,7 +1566,10 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
 
         # Fixed 30-Day: count unpaid leave days from attendance records
         unpaid_leave_days = (
-            _count_unpaid_leave_days(db, organization_id, emp.id, period_start, period_end)
+            _count_unpaid_leave_days(
+                db, organization_id, emp.id, period_start, period_end,
+                records=attendance_by_employee.get(emp.id, []),
+            )
             if period_start and period_end else 0
         )
 
@@ -1295,20 +1581,32 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             monthly_hra   = _round2(Decimal(str(stored_hra)) / MONTHS_PER_YEAR)
             basic   = monthly_basic
             hra     = monthly_hra
-            special = _round2(monthly_gross - basic - hra)
         else:
             basic_pct, hra_pct = _resolve_salary_split_pct(db, organization_id)
             basic     = _round2(monthly_gross * basic_pct / 100)
             hra       = _round2(monthly_gross * hra_pct / 100)
-            special   = _round2(monthly_gross - basic - hra)
+        # Named allowance components (Transport/Medical/Other/...) are carved
+        # out of gross next, in both branches above — Special Allowance is
+        # still exactly the same remainder it always was, just computed
+        # after these named slices too. Empty `allowance_components` (the
+        # common case — no org has configured any yet) makes this a no-op.
+        allowance_items, allowance_total = _compute_allowance_components(allowance_components, monthly_gross)
+        special = _round2(monthly_gross - basic - hra - allowance_total)
 
         is_active = emp.status == EmployeeStatus.ACTIVE
         overtime = Decimal("0")
         additional_compensation = (
-            _sum_attendance_extras(db, organization_id, emp.id, period_start, period_end)
+            _sum_attendance_extras(
+                db, organization_id, emp.id, period_start, period_end,
+                records=attendance_by_employee.get(emp.id, []),
+            )
             if is_active and period_start and period_end else Decimal("0")
         )
-        gross = basic + hra + special + overtime + additional_compensation
+        # allowance_total is folded back in here (rather than left inside
+        # `special`) so total gross reconstructs correctly — this is a
+        # redistribution of where the money sits within gross (Basic/HRA/
+        # named allowances/Special), not a change to gross itself.
+        gross = basic + hra + special + allowance_total + overtime + additional_compensation
 
         # Delegate to the strategy engine
         ctx = build_context_from_employee(
@@ -1333,6 +1631,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "attendanceDeduction": float(calc.attendance_deduction),
             "perDaySalary": float(calc.per_day_salary),
             "monthlyGross": float(calc.gross),
+            "allowanceItems": [{"key": i["key"], "label": i["label"], "amount": float(i["amount"])} for i in allowance_items],
             "monthlyTax": float(calc.tds),
             "monthlyPf": float(calc.employee_pf),
             "monthlyEsi": float(calc.employee_esi),
@@ -1503,7 +1802,13 @@ _DEFAULT_HOLIDAYS_BY_COUNTRY = {
 
 
 def _seed_holidays_for_country(db: Session, organization_id: int, country: str, year: int) -> List[PayrollHoliday]:
-    defaults = _DEFAULT_HOLIDAYS_BY_COUNTRY.get(country, _DEFAULT_HOLIDAYS_BY_COUNTRY["IN"])
+    defaults = _DEFAULT_HOLIDAYS_BY_COUNTRY.get(country, [])
+    if not defaults:
+        import logging
+        logging.getLogger("zoiko").warning(
+            f"[payroll-seed] no default holidays available for country '{country}' — "
+            f"org {organization_id} will have zero seeded holidays for {year} until configured manually."
+        )
     rows = []
     for d in defaults:
         row = PayrollHoliday(
@@ -1669,46 +1974,31 @@ def _sum_attendance_extras(db: Session, organization_id: int, employee_id: int,
     return _round2(total)
 
 
-def _resolve_tax_snapshot(db: Session, country: str, payroll_date) -> dict:
+def _resolve_tax_snapshot(db: Session, country: str, payroll_date, state=None, tax_regime=None) -> dict:
     """Historical payroll safety (Phase 16): freeze which canonical tax
     pack applied on this payslip's actual pay date, AND the exact rate/
     slab VALUES it held then — not just an id pointer, so this payslip's
     numbers stay reproducible even if the pack is later edited, superseded,
     or retired. No-ops cleanly (all None) when no canonical tax pack has
-    been configured for this jurisdiction yet."""
+    been configured for this jurisdiction yet.
+
+    Resolves its own pack independently — used by callers that haven't
+    already resolved one via _resolve_effective_rate_inputs. A caller that
+    HAS already resolved a pack (for the actual calculation numbers)
+    should call _pack_to_tax_snapshot directly instead, to avoid a second
+    resolve_tax_configuration query and guarantee the numbers and this
+    metadata can never name different pack versions."""
     from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
 
-    rates, slabs, pack = resolve_tax_configuration(db, country, payroll_date=payroll_date)
-    if not pack:
-        return {"tax_policy_pack_id": None, "tax_policy_version": None, "tax_rule_snapshot": None}
-
-    def _dec(v):
-        return str(v) if v is not None else None
-
-    snapshot = {
-        "packId": pack.pack_id,
-        "version": pack.version,
-        "contributionRates": [
-            {
-                "componentKey": r.component_key, "label": r.label,
-                "employeeRatePct": _dec(r.employee_rate_pct), "employerRatePct": _dec(r.employer_rate_pct),
-                "flatAmount": _dec(r.flat_amount),
-            }
-            for r in rates
-        ],
-        "taxSlabs": [
-            {
-                "minAmount": _dec(s.min_amount), "maxAmount": _dec(s.max_amount), "ratePct": _dec(s.rate_pct),
-                "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
-            }
-            for s in slabs
-        ],
-    }
-    return {"tax_policy_pack_id": pack.id, "tax_policy_version": pack.version, "tax_rule_snapshot": snapshot}
+    rates, slabs, pack = resolve_tax_configuration(
+        db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date,
+    )
+    return _pack_to_tax_snapshot(rates, slabs, pack)
 
 
 def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
-                             calculation_mode: str = "standard", attendance_records: List["PayrollAttendanceRecord"] = None) -> dict:
+                             calculation_mode: str = "standard", attendance_records: List["PayrollAttendanceRecord"] = None,
+                             allowance_components: list = None, resolved_pack=None) -> dict:
     """Compute every payslip figure for an employee within a run and return
     them as a dict, without touching the database. Shared by initial payslip
     generation (_generate_single_payslip) and recalculation
@@ -1717,7 +2007,22 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     `attendance_records`: this employee's pre-fetched attendance rows for the
     run's period, if the caller already batched them across employees (see
     generate_payslips_for_run) — avoids 2 queries per employee. None means
-    "query for this employee alone" (regenerate_employee_payslip's path)."""
+    "query for this employee alone" (regenerate_employee_payslip's path).
+
+    `resolved_pack`: (canonical_rates, slabs, pack) if the caller already
+    resolved a canonical tax pack via _resolve_effective_rate_inputs to get
+    rate_map/slabs above — reused here for the tax-snapshot metadata via
+    _pack_to_tax_snapshot instead of a second resolve_tax_configuration
+    query, so the numbers and the metadata can never disagree on which
+    pack version applied. None (the default) means the caller wasn't
+    opted into canonical tracking / no pack resolved — falls back to
+    _resolve_tax_snapshot's own independent resolution, exactly as before
+    this parameter existed.
+
+    `allowance_components`: the org's configured components (see
+    _resolve_allowance_components), pre-fetched once per run by the caller —
+    this is org-level, not per-employee, so it's threaded through the same
+    way rate_map/slabs already are rather than re-queried per employee."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
@@ -1734,12 +2039,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if stored_basic is not None and stored_hra is not None:
         basic   = _round2(Decimal(str(stored_basic)) / MONTHS_PER_YEAR)
         hra     = _round2(Decimal(str(stored_hra)) / MONTHS_PER_YEAR)
-        special = _round2(monthly_gross - basic - hra)
     else:
         basic_pct, hra_pct = _resolve_salary_split_pct(db, run.organization_id)
         basic     = _round2(monthly_gross * basic_pct / 100)
         hra       = _round2(monthly_gross * hra_pct / 100)
-        special   = _round2(monthly_gross - basic - hra)
+    # Named allowance components carved out of gross next — Special
+    # Allowance is still exactly the remainder, just computed after these
+    # named slices too. None/empty makes this a no-op (unchanged behavior).
+    allowance_items, allowance_total = _compute_allowance_components(allowance_components or [], monthly_gross)
+    special = _round2(monthly_gross - basic - hra - allowance_total)
 
     is_active = employee.status == EmployeeStatus.ACTIVE
     overtime  = Decimal("0")
@@ -1747,7 +2055,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         _sum_attendance_extras(db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records)
         if is_active else Decimal("0")
     )
-    gross = basic + hra + special + overtime + additional_compensation
+    # allowance_total folded back in here so total gross reconstructs
+    # correctly — see the identical comment in preview_payroll_run.
+    gross = basic + hra + special + allowance_total + overtime + additional_compensation
 
     # Delegate to the strategy engine
     ctx = build_context_from_employee(
@@ -1760,7 +2070,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     result = calculate_payroll(ctx, calculation_mode)
 
     employee_name = getattr(employee, "name", None) or f"Employee #{employee.id}"
-    tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
+    if resolved_pack is not None:
+        resolved_rates, resolved_slabs, pack = resolved_pack
+        tax_snapshot = _pack_to_tax_snapshot(resolved_rates, resolved_slabs, pack)
+    else:
+        tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
 
     return {
         "employee_name": employee_name,
@@ -1775,6 +2089,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "country_code": country,
         "compliance_fields": dict(getattr(employee, "compliance_fields", None) or {}),
         **tax_snapshot,
+        "allowance_items": [
+            PayslipAllowanceItem(key=i["key"], label=i["label"], amount=i["amount"]) for i in allowance_items
+        ],
         "basic_salary": result.basic,
         "hra": result.hra,
         "special_allowance": result.special_allowance,
@@ -1805,7 +2122,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
 
 def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
                               calculation_mode: str = "standard", payslip_number: str = None,
-                              attendance_records: List["PayrollAttendanceRecord"] = None) -> PayslipItem:
+                              attendance_records: List["PayrollAttendanceRecord"] = None,
+                              allowance_components: list = None, resolved_pack=None) -> PayslipItem:
     """Generate a single payslip using the strategy-based payroll engine.
 
     Fixed 30-Day Payroll Model:
@@ -1817,8 +2135,15 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     Salary components (basic, hra, special) are full monthly amounts — no
     proration.  Attendance deduction is a separate line item.  Statutory
     deductions are computed on the full gross by the resolved strategy.
+
+    `resolved_pack`: passed straight through to _compute_payslip_values —
+    see its docstring.
     """
-    values = _compute_payslip_values(db, run, employee, rate_map, slabs, country, calculation_mode, attendance_records=attendance_records)
+    values = _compute_payslip_values(
+        db, run, employee, rate_map, slabs, country, calculation_mode,
+        attendance_records=attendance_records, allowance_components=allowance_components,
+        resolved_pack=resolved_pack,
+    )
 
     item = PayslipItem(
         payroll_run_id=run.id,
@@ -1860,22 +2185,42 @@ def _resolve_run_calc_inputs(db: Session, run: PayrollRun, organization_id: int 
     return getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
 
 
-def _resolve_employee_calc_inputs(db: Session, organization_id: int, employee, cache: dict = None):
+def _resolve_employee_calc_inputs(
+    db: Session, organization_id: int, employee, cache: dict = None,
+    payroll_date=None, org_opted_in: bool = False,
+):
     """Per-employee jurisdiction + rate-map/slab resolution for payslip
     generation — an employee's own country_code overrides the org default
     (_resolve_employee_country), the same override employee create/update
-    already honor. `cache` (keyed by resolved country code) lets a batch
-    caller reuse rate_map/slabs across employees who share a country
-    instead of re-querying per employee."""
+    already honor. `cache` (keyed by resolved country/state/tax_regime)
+    lets a batch caller reuse rate_map/slabs across employees who share a
+    jurisdiction instead of re-querying/re-resolving per employee.
+
+    `payroll_date`/`org_opted_in`: passed through to
+    _resolve_effective_rate_inputs so an org that has opted into canonical
+    tax-pack tracking gets rates/slabs from whichever pack version was
+    actually in force on `payroll_date`, not just whatever is currently
+    cached in the org's own ContributionRate/TaxSlab rows. `org_opted_in`
+    defaults to False so any existing caller that hasn't been updated to
+    pass it keeps today's exact behavior.
+
+    Returns (country, rate_map, slabs, pack) — pack is the resolved
+    canonical JurisdictionPack when one was used, else None (see
+    _resolve_effective_rate_inputs)."""
     country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
-    if cache is not None and country in cache:
-        rate_map, slabs = cache[country]
+    state = getattr(employee, "work_state", None)
+    tax_regime = getattr(employee, "tax_regime", None)
+    cache_key = (country, state, tax_regime)
+    if cache is not None and cache_key in cache:
+        rate_map, slabs, canonical_rates, pack = cache[cache_key]
     else:
-        rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
-        slabs = get_tax_slabs(db, organization_id, country)
+        rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
+            db, organization_id, country, payroll_date, org_opted_in, state=state, tax_regime=tax_regime,
+        )
         if cache is not None:
-            cache[country] = (rate_map, slabs)
-    return country, rate_map, slabs
+            cache[cache_key] = (rate_map, slabs, canonical_rates, pack)
+    resolved_pack = (canonical_rates, slabs, pack) if pack is not None else None
+    return country, rate_map, slabs, resolved_pack
 
 
 def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
@@ -1883,6 +2228,13 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     specified employee_ids if provided). Idempotent: re-running skips
     employees who already have a payslip in this run."""
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    # Org-level, not per-employee — resolved once for the whole run, same as
+    # rate_map/slabs are cached per-jurisdiction below.
+    allowance_components = _resolve_allowance_components(db, organization_id)
+    # Org-level, resolved once — gates whether _resolve_employee_calc_inputs
+    # is even allowed to substitute canonical, date-resolved rates for this
+    # org's own cached rates (see _org_uses_canonical_tax_pack).
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
 
     employees_query = db.query(PayrollEmployee).filter(
         PayrollEmployee.status == EmployeeStatus.ACTIVE,
@@ -1939,18 +2291,23 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             seq = int(full_code[-5:])
         else:
             base_payslip_code = full_code
-    # Cache rate_map/slabs by resolved country so employees who share a
-    # jurisdiction (the common case) don't each re-query — only distinct
-    # countries actually present in this batch pay that cost.
+    # Cache rate_map/slabs by resolved (country, state, tax_regime) so
+    # employees who share a jurisdiction (the common case) don't each
+    # re-query/re-resolve — only distinct jurisdictions actually present in
+    # this batch pay that cost.
     calc_cache: dict = {}
     for emp in employees:
         if emp.id in existing_ids:
             continue
-        country, rate_map, slabs = _resolve_employee_calc_inputs(db, organization_id, emp, cache=calc_cache)
+        country, rate_map, slabs, resolved_pack = _resolve_employee_calc_inputs(
+            db, organization_id, emp, cache=calc_cache,
+            payroll_date=run.pay_date, org_opted_in=org_opted_in,
+        )
         payslip_number = f"{base_payslip_code}{seq:05d}" if base_payslip_code else None
         _generate_single_payslip(
             db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
             attendance_records=attendance_by_employee.get(emp.id, []),
+            allowance_components=allowance_components, resolved_pack=resolved_pack,
         )
         seq += 1
 
@@ -1990,8 +2347,15 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         )
 
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
-    country, rate_map, slabs = _resolve_employee_calc_inputs(db, organization_id, employee)
-    values = _compute_payslip_values(db, run, employee, rate_map, slabs, country, calculation_mode)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    country, rate_map, slabs, resolved_pack = _resolve_employee_calc_inputs(
+        db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in,
+    )
+    allowance_components = _resolve_allowance_components(db, organization_id)
+    values = _compute_payslip_values(
+        db, run, employee, rate_map, slabs, country, calculation_mode,
+        allowance_components=allowance_components, resolved_pack=resolved_pack,
+    )
     for field, value in values.items():
         setattr(existing_item, field, value)
     existing_item.status = PayslipStatus.PENDING
@@ -2020,7 +2384,8 @@ def _apply_employee_filter(query, organization_id):
 
 
 def get_employees(db: Session, organization_id: int,
-                   search: str = None, department: str = None, status: str = None) -> List[PayrollEmployee]:
+                   search: str = None, department: str = None, status: str = None,
+                   limit: int = None, offset: int = None) -> List[PayrollEmployee]:
     query = _apply_employee_filter(db.query(PayrollEmployee), organization_id)
     if department:
         query = query.filter(PayrollEmployee.department == department)
@@ -2032,7 +2397,15 @@ def get_employees(db: Session, organization_id: int,
             (PayrollEmployee.name.ilike(like)) |
             (PayrollEmployee.employee_code.ilike(like))
         )
-    return query.order_by(PayrollEmployee.name).all()
+    query = query.order_by(PayrollEmployee.name)
+    # limit/offset are optional — omitting them preserves the exact prior
+    # "return everything" behavior for existing callers; pass them to bound
+    # the result set for orgs with very large employee counts.
+    if offset:
+        query = query.offset(offset)
+    if limit:
+        query = query.limit(limit)
+    return query.all()
 
 
 def get_employee_by_id(db: Session, employee_id: int, organization_id: int) -> PayrollEmployee:
@@ -2068,6 +2441,45 @@ def _resolve_salary_split_pct(db: Session, organization_id: Optional[int]) -> tu
         return basic_pct, hra_pct
     except Exception:
         return _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT
+
+
+def _resolve_allowance_components(db: Session, organization_id: Optional[int]) -> list:
+    """The org's Super-Admin-defined named allowance components (Transport,
+    Medical, Other, or any custom slug — see PolicyAllowanceComponent),
+    each computed as a percentage of monthly gross or a flat monthly
+    amount. Returns [] for any org with no policy/components configured —
+    Special Allowance then stays the exact same plain remainder it always
+    was, zero behavior change until an org actually adds one."""
+    if not organization_id:
+        return []
+    try:
+        from app.modules.payroll.policy.service import get_active_policy
+        policy = get_active_policy(db, organization_id)
+        return [
+            {"key": c.key, "label": c.label, "pct": c.pct, "flat_amount": c.flat_amount}
+            for c in (policy.allowance_components or [])
+        ]
+    except Exception:
+        return []
+
+
+def _compute_allowance_components(components: list, monthly_gross: Decimal) -> tuple:
+    """Given the org's configured components and this employee's monthly
+    gross, returns (list of {key,label,amount} dicts, total amount) — the
+    total is what gets subtracted from gross before Special Allowance takes
+    the remainder."""
+    items = []
+    total = Decimal("0")
+    for c in components:
+        if c.get("pct") is not None:
+            amount = _round2(monthly_gross * Decimal(str(c["pct"])) / 100)
+        elif c.get("flat_amount") is not None:
+            amount = _round2(Decimal(str(c["flat_amount"])))
+        else:
+            continue
+        items.append({"key": c["key"], "label": c["label"], "amount": amount})
+        total += amount
+    return items, total
 
 
 def _default_basic_hra_from_ctc(ctc, db: Session = None, organization_id: Optional[int] = None) -> tuple:
@@ -2109,10 +2521,12 @@ def check_duplicate_employee_identifiers(
     """Cross-employee duplicate check within the org — email always, plus
     whichever single identifier is that jurisdiction's dedup key (PAN for
     India's dedicated column, or the compliance_fields key named by each
-    Strategy's `duplicate_field` for the other five countries). Loads the
-    org's employees once and compares in Python, consistent with how the
-    rest of this module already favors simple in-Python comparisons over
-    JSON-path SQL operators (see e.g. _count_unpaid_leave_days)."""
+    Strategy's `duplicate_field` for the other five countries).
+
+    Pushes the match into the SQL WHERE clause (via the `->>` JSON operator
+    for compliance_fields) instead of loading every employee in the org —
+    this runs on every single employee create/update, so a full-table load
+    here scaled linearly with org size on every write."""
     email_norm = (email or "").strip().lower()
     pan_norm = (pan or "").strip().upper()
     strategy = get_employee_validation_strategy(country_code)
@@ -2121,7 +2535,18 @@ def check_duplicate_employee_identifiers(
     if not email_norm and not pan_norm and not dup_id:
         return
 
-    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    conditions = []
+    if email_norm:
+        conditions.append(sa_func.lower(sa_func.trim(PayrollEmployee.email)) == email_norm)
+    if pan_norm:
+        conditions.append(sa_func.upper(sa_func.trim(PayrollEmployee.pan)) == pan_norm)
+    if dup_id:
+        field, value = dup_id
+        conditions.append(PayrollEmployee.compliance_fields.op("->>")(field) == value)
+
+    query = db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id, or_(*conditions),
+    )
     if exclude_employee_id:
         query = query.filter(PayrollEmployee.id != exclude_employee_id)
 
@@ -2634,7 +3059,8 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
     return run
 
 
-def get_payroll_runs(db: Session, organization_id: int = None, year: int = None, month: int = None) -> List[PayrollRun]:
+def get_payroll_runs(db: Session, organization_id: int = None, year: int = None, month: int = None,
+                      limit: int = None, offset: int = None) -> List[PayrollRun]:
     query = db.query(PayrollRun).order_by(PayrollRun.period_start.desc())
     query = _apply_org_filter(query, PayrollRun, organization_id)
     if year and month:
@@ -2650,6 +3076,12 @@ def get_payroll_runs(db: Session, organization_id: int = None, year: int = None,
         year_start = _date(year, 1, 1)
         year_end = _date(year + 1, 1, 1)
         query = query.filter(PayrollRun.period_start >= year_start, PayrollRun.period_start < year_end)
+    # limit/offset optional — unset preserves current "return everything"
+    # behavior; bounds the result set for orgs with long payroll history.
+    if offset:
+        query = query.offset(offset)
+    if limit:
+        query = query.limit(limit)
     return query.all()
 
 
@@ -2889,8 +3321,14 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # country_code override for manually-added payslips specifically.
     country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
 
-    rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
-    slabs = get_tax_slabs(db, organization_id, country)
+    # Same canonical-pack substitution generate_payslips_for_run uses (see
+    # _resolve_effective_rate_inputs) — a manually-added payslip should be
+    # governed by the same period-correct rates a normal run would use.
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
+        db, organization_id, country, run.pay_date, org_opted_in,
+        state=getattr(employee, "work_state", None), tax_regime=getattr(employee, "tax_regime", None),
+    )
 
     calculation_mode = getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
     gross = data.basic_salary + (data.hra or 0) + (data.special_allowance or 0) + (data.overtime or 0)
@@ -2907,7 +3345,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     calc = calculate_payroll(ctx, calculation_mode)
 
     employee_name = getattr(employee, "name", None) or ""
-    tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
+    if pack is not None:
+        tax_snapshot = _pack_to_tax_snapshot(canonical_rates, slabs, pack)
+    else:
+        tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
 
     item = PayslipItem(
         payroll_run_id=run_id,
@@ -3035,11 +3476,14 @@ def get_bank_transfer_summary(db: Session, run_id: int, organization_id: int = N
     }
 
 
-def _build_bank_export_rows(run: PayrollRun, items: List[PayslipItem], company) -> list:
+def _build_bank_export_rows(run: PayrollRun, items: List[PayslipItem], company, org_currency: str = None) -> list:
     from app.modules.payroll.bank_export import BankExportRow
 
+    # Use the org's explicit currency override if set, otherwise derive
+    # from the jurisdiction — implements the Super Admin → Org Admin
+    # inheritance model for currency.
     country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
-    currency_code = _get_currency_code(country)
+    currency_code = org_currency or _get_currency_code(country)
     company_name = getattr(company, "name", None) or ""
 
     rows = []
@@ -3078,8 +3522,13 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
         CompanyComplianceDetails.organization_id == organization_id
     ).first()
 
+    # Resolve the org's explicit currency override for bank exports.
+    from app.modules.organizations.models import Organization
+    org_row = db.query(Organization).filter(Organization.id == organization_id).first()
+    org_currency = org_row.currency if org_row else None
+
     export_format = format_override or policy.bank_export_format
-    rows = _build_bank_export_rows(run, items, company)
+    rows = _build_bank_export_rows(run, items, company, org_currency=org_currency)
     try:
         exporter = get_exporter(export_format)
     except ValueError as exc:
@@ -3129,6 +3578,9 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "basicPay": item.basic_salary or z,
         "hra": item.hra or z,
         "specialAllowance": item.special_allowance or z,
+        "allowanceItems": [
+            {"key": a.key, "label": a.label, "amount": a.amount or z} for a in (item.allowance_items or [])
+        ],
         "overtime": item.overtime or z,
         "additionalCompensation": item.additional_compensation or z,
         "payableDays": item.payable_days,        # None on old rows generated before this
@@ -3162,7 +3614,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
 
 def list_payslips(db: Session, organization_id: int = None, search: str = None,
                    period: str = None, employee_id: int = None) -> List[dict]:
-    query = db.query(PayslipItem, PayrollRun).join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+    query = (
+        db.query(PayslipItem, PayrollRun)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .options(selectinload(PayslipItem.allowance_items))
+    )
     query = _apply_org_filter(query, PayslipItem, organization_id)
     if period:
         query = query.filter(PayrollRun.period_label == period)
@@ -3180,7 +3636,11 @@ def list_payslips(db: Session, organization_id: int = None, search: str = None,
 
 
 def get_payslip_by_id(db: Session, payslip_id: int, organization_id: int = None) -> dict:
-    query = db.query(PayslipItem, PayrollRun).join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+    query = (
+        db.query(PayslipItem, PayrollRun)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .options(selectinload(PayslipItem.allowance_items))
+    )
     query = query.filter(PayslipItem.id == payslip_id)
     query = _apply_org_filter(query, PayslipItem, organization_id)
     row = query.first()
@@ -3192,7 +3652,22 @@ def get_payslip_by_id(db: Session, payslip_id: int, organization_id: int = None)
 
 
 def _get_currency_symbol(country: str) -> str:
-    """Return the currency symbol for a jurisdiction country code."""
+    """Return the currency symbol for a jurisdiction country code or ISO 4217 code."""
+    # First check if it's already an ISO currency code
+    _iso_to_sym = {
+        "INR": "\u20b9", "USD": "$", "GBP": "\u00a3",
+        "AUD": "A$", "EUR": "\u20ac", "CAD": "C$",
+        "AED": "AED", "BDT": "\u09f3", "BHD": "BHD", "BRL": "R$",
+        "CHF": "CHF", "CNY": "\u00a5", "DKK": "kr", "GHS": "\u20b5",
+        "HKD": "HK$", "JPY": "\u00a5", "KES": "KSh", "KRW": "\u20a9",
+        "KWD": "KWD", "LKR": "\u20a8", "MXN": "MX$", "MYR": "RM",
+        "NGN": "\u20a6", "NOK": "kr", "NPR": "\u20a8", "NZD": "NZ$",
+        "OMR": "OMR", "PKR": "\u20a8", "QAR": "QAR", "RWF": "RF",
+        "SAR": "SAR", "SEK": "kr", "SGD": "S$", "THB": "\u0e3f",
+        "TZS": "TSh", "UGX": "USh", "ZAR": "R",
+    }
+    if country and country.upper() in _iso_to_sym:
+        return _iso_to_sym[country.upper()]
     return {
         "IN": "\u20b9", "US": "$", "UK": "\u00a3",
         "AU": "A$", "DE": "\u20ac", "CA": "C$",
@@ -3200,11 +3675,25 @@ def _get_currency_symbol(country: str) -> str:
 
 
 def _get_currency_code(country: str) -> str:
-    """Return the ISO currency code for a jurisdiction country code."""
+    """Return the ISO currency code for a jurisdiction country code.
+    Also passes through ISO 4217 codes unchanged."""
+    _iso_codes = {
+        "INR", "USD", "GBP", "AUD", "EUR", "CAD", "AED", "BDT", "BHD",
+        "BRL", "CHF", "CNY", "DKK", "GHS", "HKD", "JPY", "KES", "KRW",
+        "KWD", "LKR", "MXN", "MYR", "NGN", "NOK", "NPR", "NZD", "OMR",
+        "PKR", "QAR", "RWF", "SAR", "SEK", "SGD", "THB", "TZS", "UGX", "ZAR",
+    }
+    if country and country.upper() in _iso_codes:
+        return country.upper()
     return {
         "IN": "INR", "US": "USD", "UK": "GBP",
         "AU": "AUD", "DE": "EUR", "CA": "CAD",
     }.get(country, "USD")
+
+
+def get_currency_for_jurisdiction(jurisdiction_code: str) -> str:
+    """Public wrapper — returns the ISO 4217 currency code for a jurisdiction."""
+    return _get_currency_code(jurisdiction_code)
 
 
 def _amount_to_words(amount):
@@ -3379,8 +3868,14 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     earnings_items = [
         ("Basic Salary", data["basicPay"]),
         ("House Rent Allowance (HRA)", data["hra"]),
-        ("Special Allowance", data["specialAllowance"]),
     ]
+    # Named allowance components (Transport/Medical/Other/...), if this org
+    # has any configured — shown as their own line items, same as Overtime/
+    # Additional Compensation below. Special Allowance stays the final
+    # catch-all, listed after these named slices.
+    for allowance in data.get("allowanceItems") or []:
+        earnings_items.append((allowance["label"], allowance["amount"]))
+    earnings_items.append(("Special Allowance", data["specialAllowance"]))
     ov = float(data.get("overtime", 0) or 0)
     if ov > 0:
         earnings_items.append(("Overtime", ov))
@@ -5226,7 +5721,43 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             db.commit()
             db.refresh(row)
 
+    # Inherit pack defaults from the Super Admin's jurisdiction pack when
+    # fields are still blank — implements the inheritance model for compliance.
+    pack_changed = _backfill_compliance_from_pack(row, db)
+    if pack_changed:
+        db.commit()
+        db.refresh(row)
+
     return row
+
+
+def _backfill_compliance_from_pack(row: "CompanyComplianceDetails", db: Session) -> bool:
+    """Pre-fill compliance fields from the Super Admin's active JurisdictionPack
+    when they haven't been set yet. Returns True if any field was changed.
+
+    This implements the Super Admin → Org Admin inheritance model for
+    compliance details: the Super Admin declares pack values, the Org Admin
+    inherits them by default, and can overwrite where permitted."""
+    if not row.active_pack_id:
+        return False
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == row.active_pack_id).first()
+    if not pack:
+        return False
+
+    changed = False
+    # Pack ID — the compliance pack identifier
+    if not row.compliance_pack and pack.pack_id:
+        row.compliance_pack = pack.pack_id
+        changed = True
+    # Jurisdiction country — inherit from pack if not set
+    if not row.jurisdiction_country and pack.jurisdiction_country:
+        row.jurisdiction_country = pack.jurisdiction_country
+        changed = True
+    # State — inherit from pack if not set
+    if not row.jurisdiction_state and pack.jurisdiction_state:
+        row.jurisdiction_state = pack.jurisdiction_state
+        changed = True
+    return changed
 
 
 def update_company_details(db: Session, organization_id: int, data: CompanyDetailsUpdate) -> CompanyComplianceDetails:
@@ -5403,7 +5934,14 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
         CompanyComplianceDetails.organization_id == organization_id
     ).first() if organization_id else None
     country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
-    sym = _get_currency_symbol(country)
+    # Use the org's explicit currency override if set, otherwise derive
+    # from the jurisdiction.
+    org_currency_code = None
+    if organization_id:
+        from app.modules.organizations.models import Organization
+        org_row = db.query(Organization).filter(Organization.id == organization_id).first()
+        org_currency_code = org_row.currency if org_row else None
+    sym = _get_currency_symbol(org_currency_code or country)
 
     def fmt(val):
         v = float(val or 0)

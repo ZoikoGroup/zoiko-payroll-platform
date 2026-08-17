@@ -64,6 +64,24 @@ _UK_PENSION_MIN_ENPLOYER = Decimal("3")
 # rate_map like every other parameter below.
 _US_MEDICARE_ADDITIONAL_THRESHOLD = Decimal("200000")
 
+# Australia
+_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = Decimal("24276")
+_AU_MLS_THRESHOLD = Decimal("97000")
+_AU_MLS_RATE = Decimal("1.0")
+_AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("260280")
+
+# Germany
+_DE_GRUNDFREIBETRAG = Decimal("11784")
+_DE_CONTRIBUTION_CEILING = Decimal("96600")
+_DE_SOLI_THRESHOLD = Decimal("18130")
+_DE_SOLI_RATE = Decimal("5.5")
+
+# Canada
+_CA_CPP_YMPE = Decimal("71300")
+_CA_CPP_BASIC_EXEMPTION = Decimal("3500")
+_CA_EI_MIE = Decimal("65700")
+_CA_BASIC_PERSONAL_AMOUNT = Decimal("15705")
+
 
 # ── Government-mandated scalar parameters (Global Payroll Tax Engine) ──────
 # The constants above remain as documented FALLBACK defaults only — the
@@ -200,6 +218,24 @@ def _calculate_annual_tax_uk(annual_gross: Decimal, slabs, rate_map: dict) -> De
     return _calculate_annual_tax(taxable, slabs)
 
 
+def _calculate_annual_tax_de(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
+    grundfreibetrag = _param_amount(rate_map, "grundfreibetrag", _DE_GRUNDFREIBETRAG)
+    taxable = max(Decimal("0"), annual_gross - grundfreibetrag)
+    tax = _calculate_annual_tax(taxable, slabs)
+
+    soli_threshold = _param_amount(rate_map, "soli_threshold", _DE_SOLI_THRESHOLD)
+    soli_rate = _param_pct(rate_map, "soli_rate", "employee", _DE_SOLI_RATE)
+    if tax > soli_threshold:
+        tax += tax * soli_rate / Decimal("100")
+    return tax
+
+
+def _calculate_annual_tax_ca(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
+    bpa = _param_amount(rate_map, "basic_personal_amount", _CA_BASIC_PERSONAL_AMOUNT)
+    taxable = max(Decimal("0"), annual_gross - bpa)
+    return _calculate_annual_tax(taxable, slabs)
+
+
 # ── Per-country compliance calculators ─────────────────────────────────────
 
 def _calc_india(ctx: PayrollContext) -> dict:
@@ -314,23 +350,41 @@ def _calc_generic(ctx: PayrollContext) -> dict:
 
 
 def _calc_australia(ctx: PayrollContext) -> dict:
-    """Australia: Superannuation Guarantee (employer-only) + Medicare Levy
-    (employee) + progressive income tax. Rates are DB-backed (ContributionRate/
-    TaxSlab, seeded with representative defaults on first use) — same
-    configuration-driven pattern as India, not hardcoded module constants.
+    """Australia: Superannuation Guarantee (employer-only, capped at the
+    Max Contribution Base) + Medicare Levy (employee, waived below a
+    low-income threshold, plus a Medicare Levy Surcharge above a separate
+    higher threshold) + progressive income tax. Rates are DB-backed
+    (ContributionRate/TaxSlab, seeded with representative defaults on
+    first use) — same configuration-driven pattern as India, not
+    hardcoded module constants.
 
-    Reused PayrollResult fields: `medicare` (Medicare Levy — name already
-    matches AU terminology) and `employer_pension` (Superannuation)."""
+    Reused PayrollResult fields: `medicare` (Medicare Levy + MLS combined
+    — name already matches AU terminology) and `employer_pension`
+    (Superannuation)."""
     rate_map = ctx.rate_map
     gross = ctx.gross
-
-    super_rate = rate_map.get("super")
-    employer_pension = _round2(gross * (super_rate.employer_rate_pct / 100)) if super_rate and super_rate.employer_rate_pct else Decimal("0")
-
-    medicare_rate = rate_map.get("medicare-levy")
-    medicare = _round2(gross * (medicare_rate.employee_rate_pct / 100)) if medicare_rate and medicare_rate.employee_rate_pct else Decimal("0")
-
     annual_gross = gross * MONTHS_PER_YEAR
+
+    super_cap = _param_amount(rate_map, "super_max_contribution_base", _AU_SUPER_MAX_CONTRIBUTION_BASE)
+    super_rate = rate_map.get("super")
+    annual_super_base = min(annual_gross, super_cap)
+    employer_pension = (
+        _round2((annual_super_base * (super_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if super_rate and super_rate.employer_rate_pct else Decimal("0")
+    )
+
+    medicare_threshold = _param_amount(rate_map, "medicare_levy_low_income_threshold", _AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD)
+    medicare_rate = rate_map.get("medicare-levy")
+    if annual_gross > medicare_threshold and medicare_rate and medicare_rate.employee_rate_pct:
+        medicare = _round2(gross * (medicare_rate.employee_rate_pct / 100))
+    else:
+        medicare = Decimal("0")
+
+    mls_threshold = _param_amount(rate_map, "mls_threshold", _AU_MLS_THRESHOLD)
+    mls_rate = _param_pct(rate_map, "mls_rate", "employee", _AU_MLS_RATE)
+    if annual_gross > mls_threshold:
+        medicare += _round2((annual_gross * mls_rate / Decimal("100")) / MONTHS_PER_YEAR)
+
     annual_tax = _calculate_annual_tax(annual_gross, ctx.slabs)
     tds = _round2(annual_tax / MONTHS_PER_YEAR)
 
@@ -344,8 +398,11 @@ def _calc_australia(ctx: PayrollContext) -> dict:
 def _calc_germany(ctx: PayrollContext) -> dict:
     """Germany: Pension insurance (Rentenversicherung) + combined Health/
     Unemployment/Long-term-care insurance (simplified into one "social
-    insurance" component) + progressive income tax (simplified bracket
-    approximation of Germany's continuous tax formula). DB-backed rates.
+    insurance" component), both capped at the annual Contribution
+    Ceiling (Beitragsbemessungsgrenze) + progressive income tax with the
+    Basic Tax-Free Allowance (Grundfreibetrag) deducted first and the
+    Solidarity Surcharge added above a tax-liability threshold. DB-backed
+    rates.
 
     Reused PayrollResult fields: `employee_pf`/`employer_pf` (Pension
     insurance) and `employee_esi`/`employer_esi` (combined social
@@ -353,17 +410,32 @@ def _calc_germany(ctx: PayrollContext) -> dict:
     this country in generate_payslip_pdf_bytes."""
     rate_map = ctx.rate_map
     gross = ctx.gross
+    annual_gross = gross * MONTHS_PER_YEAR
+
+    contribution_ceiling = _param_amount(rate_map, "contribution_ceiling", _DE_CONTRIBUTION_CEILING)
+    annual_contribution_base = min(annual_gross, contribution_ceiling)
 
     pension_rate = rate_map.get("pension")
-    employee_pf = _round2(gross * (pension_rate.employee_rate_pct / 100)) if pension_rate and pension_rate.employee_rate_pct else Decimal("0")
-    employer_pf = _round2(gross * (pension_rate.employer_rate_pct / 100)) if pension_rate and pension_rate.employer_rate_pct else Decimal("0")
+    employee_pf = (
+        _round2((annual_contribution_base * (pension_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if pension_rate and pension_rate.employee_rate_pct else Decimal("0")
+    )
+    employer_pf = (
+        _round2((annual_contribution_base * (pension_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if pension_rate and pension_rate.employer_rate_pct else Decimal("0")
+    )
 
     social_rate = rate_map.get("social-insurance")
-    employee_esi = _round2(gross * (social_rate.employee_rate_pct / 100)) if social_rate and social_rate.employee_rate_pct else Decimal("0")
-    employer_esi = _round2(gross * (social_rate.employer_rate_pct / 100)) if social_rate and social_rate.employer_rate_pct else Decimal("0")
+    employee_esi = (
+        _round2((annual_contribution_base * (social_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if social_rate and social_rate.employee_rate_pct else Decimal("0")
+    )
+    employer_esi = (
+        _round2((annual_contribution_base * (social_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if social_rate and social_rate.employer_rate_pct else Decimal("0")
+    )
 
-    annual_gross = gross * MONTHS_PER_YEAR
-    annual_tax = _calculate_annual_tax(annual_gross, ctx.slabs)
+    annual_tax = _calculate_annual_tax_de(annual_gross, ctx.slabs, rate_map)
     tds = _round2(annual_tax / MONTHS_PER_YEAR)
 
     return dict(
@@ -374,25 +446,45 @@ def _calc_germany(ctx: PayrollContext) -> dict:
 
 
 def _calc_canada(ctx: PayrollContext) -> dict:
-    """Canada: CPP (Canada Pension Plan) + EI (Employment Insurance) +
-    progressive federal income tax (provincial tax excluded for
+    """Canada: CPP (Canada Pension Plan — contributory earnings floored by
+    the Basic Exemption Amount, capped at the Year's Maximum Pensionable
+    Earnings) + EI (Employment Insurance — capped separately at its own
+    Maximum Insurable Earnings) + progressive federal income tax with the
+    Basic Personal Amount deducted first (provincial tax excluded for
     simplicity). DB-backed rates.
 
     Reused PayrollResult fields: `social_security`/`employer_social_security`
     (CPP) and `employee_esi`/`employer_esi` (EI)."""
     rate_map = ctx.rate_map
     gross = ctx.gross
-
-    cpp_rate = rate_map.get("cpp")
-    social_security = _round2(gross * (cpp_rate.employee_rate_pct / 100)) if cpp_rate and cpp_rate.employee_rate_pct else Decimal("0")
-    employer_social_security = _round2(gross * (cpp_rate.employer_rate_pct / 100)) if cpp_rate and cpp_rate.employer_rate_pct else Decimal("0")
-
-    ei_rate = rate_map.get("ei")
-    employee_esi = _round2(gross * (ei_rate.employee_rate_pct / 100)) if ei_rate and ei_rate.employee_rate_pct else Decimal("0")
-    employer_esi = _round2(gross * (ei_rate.employer_rate_pct / 100)) if ei_rate and ei_rate.employer_rate_pct else Decimal("0")
-
     annual_gross = gross * MONTHS_PER_YEAR
-    annual_tax = _calculate_annual_tax(annual_gross, ctx.slabs)
+
+    cpp_ympe = _param_amount(rate_map, "cpp_ympe", _CA_CPP_YMPE)
+    cpp_basic_exemption = _param_amount(rate_map, "cpp_basic_exemption", _CA_CPP_BASIC_EXEMPTION)
+    annual_cpp_pensionable = max(Decimal("0"), min(annual_gross, cpp_ympe) - cpp_basic_exemption)
+    cpp_rate = rate_map.get("cpp")
+    social_security = (
+        _round2((annual_cpp_pensionable * (cpp_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if cpp_rate and cpp_rate.employee_rate_pct else Decimal("0")
+    )
+    employer_social_security = (
+        _round2((annual_cpp_pensionable * (cpp_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if cpp_rate and cpp_rate.employer_rate_pct else Decimal("0")
+    )
+
+    ei_mie = _param_amount(rate_map, "ei_mie", _CA_EI_MIE)
+    annual_ei_insurable = min(annual_gross, ei_mie)
+    ei_rate = rate_map.get("ei")
+    employee_esi = (
+        _round2((annual_ei_insurable * (ei_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if ei_rate and ei_rate.employee_rate_pct else Decimal("0")
+    )
+    employer_esi = (
+        _round2((annual_ei_insurable * (ei_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
+        if ei_rate and ei_rate.employer_rate_pct else Decimal("0")
+    )
+
+    annual_tax = _calculate_annual_tax_ca(annual_gross, ctx.slabs, rate_map)
     tds = _round2(annual_tax / MONTHS_PER_YEAR)
 
     return dict(

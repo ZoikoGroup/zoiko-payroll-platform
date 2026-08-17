@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Shield, Upload } from "lucide-react";
+import { Shield, Upload, Info } from "lucide-react";
 import { getCountryMeta } from "../../../service/payrollService";
 import { getComplianceLabels } from "../../../utils/jurisdictionLabels";
 import {
@@ -105,6 +105,11 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
       </div>
 
       <CompanyLogoField addToast={addToast} />
+
+      <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 mb-5 text-[12px] text-foreground-muted flex items-center gap-2">
+        <Info size={14} className="text-info shrink-0" />
+        <span>Values below are inherited from the <strong>Super Admin's</strong> compliance configuration. You can overwrite fields where permitted — changes apply only to your organization.</span>
+      </div>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {FIELDS.map((f) => (

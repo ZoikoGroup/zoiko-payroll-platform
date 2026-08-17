@@ -115,6 +115,10 @@ class PayrollPolicy(Base):
     leave_rules          = relationship("PolicyLeaveRule", back_populates="policy", cascade="all, delete-orphan")
     overtime_rule        = relationship("PolicyOvertimeRule", back_populates="policy", uselist=False, cascade="all, delete-orphan")
     integrations         = relationship("PolicyIntegration", back_populates="policy", cascade="all, delete-orphan")
+    allowance_components = relationship(
+        "PolicyAllowanceComponent", back_populates="policy",
+        cascade="all, delete-orphan", order_by="PolicyAllowanceComponent.sort_order",
+    )
 
     __table_args__ = (
         Index("ix_payroll_policies_org_status", "organization_id", "status"),
@@ -154,6 +158,42 @@ class PolicyEmployeeCategory(Base):
 
     __table_args__ = (
         UniqueConstraint("policy_id", "category", name="uq_policy_category"),
+    )
+
+
+# ── Allowance Components (dynamic, Super-Admin-defined) ──────────────────
+# Super Admin defines the available components + defaults on the canonical
+# side (JurisdictionPack.policy_defaults["allowance_components"], a dict
+# keyed by `key`, same {value, allowOverride} lock shape already used for
+# basic_pct/hra_pct/employee_categories — see policy/service.py's
+# _apply_allowance_component_defaults). This table is the org's own
+# resolved/materialized set of components, seeded/locked from those
+# defaults, exactly the same two-tier pattern PolicyEmployeeCategory
+# already uses. `key` is admin-typed (e.g. "transport", "medical", "other",
+# or any custom slug) — arbitrary and unbounded, which is why this is a
+# real child table rather than fixed columns on PayrollPolicy.
+class PolicyAllowanceComponent(Base):
+    __tablename__ = "payroll_policy_allowance_components"
+
+    id        = Column(Integer, primary_key=True, index=True)
+    policy_id = Column(Integer, ForeignKey("payroll_policies.id"), nullable=False, index=True)
+
+    key   = Column(String(50), nullable=False)   # admin-defined slug, e.g. "transport"
+    label = Column(String(100), nullable=False)  # display name, e.g. "Transport Allowance"
+
+    # Exactly one of these two is set — percentage of monthly gross, or a
+    # flat monthly amount. Same either/or shape ContributionRate already
+    # uses for employee_rate_pct vs flat_amount.
+    pct         = Column(Numeric(6, 2), nullable=True)
+    flat_amount = Column(Numeric(12, 2), nullable=True)
+
+    allow_override = Column(Boolean, nullable=False, default=True)
+    sort_order     = Column(Integer, default=0)
+
+    policy = relationship("PayrollPolicy", back_populates="allowance_components")
+
+    __table_args__ = (
+        UniqueConstraint("policy_id", "key", name="uq_policy_allowance_component_key"),
     )
 
 

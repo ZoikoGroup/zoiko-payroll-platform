@@ -36,6 +36,7 @@ class OrganizationUpdate(BaseModel):
     tax_no: Optional[str] = None
     registration_number: Optional[str] = None
     tax_identifiers: Optional[dict] = None
+    currency: Optional[str] = None
 
 
 class OrganizationResponse(BaseModel):

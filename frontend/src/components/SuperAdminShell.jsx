@@ -135,8 +135,8 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
           />
         ) : (
           <div className="flex flex-col gap-1.5">
-            <div className="inline-flex w-fit rounded-lg bg-white px-2.5 py-1.5">
-              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-6 w-auto object-contain" />
+            <div className="inline-flex w-fit rounded-lg bg-white px-3 py-2.5">
+              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-11 w-auto object-contain" />
             </div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">Super Admin</p>
           </div>

@@ -7,7 +7,7 @@ password resets, and PlatformSetting configuration.
 """
 
 import logging
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -32,10 +32,6 @@ from app.modules.super_admin.schemas import (
     SettingCreate,
     SettingResponse,
     SettingUpdate,
-    StatutoryRateCreate,
-    StatutoryRateListResponse,
-    StatutoryRateResponse,
-    StatutoryRateUpdate,
     SuperAdminUserListResponse,
     SuperAdminUserResponse,
 )
@@ -43,7 +39,7 @@ from app.modules.payroll.schemas import (
     JurisdictionPackResponse, JurisdictionPackUpsert,
     CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
     CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
-    TaxConfigurationAuditResponse,
+    TaxConfigurationAuditResponse, ActiveTaxConfigurationResponse,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -213,152 +209,14 @@ def update_setting(
     return setting
 
 
-# ── Global statutory rate table ────────────────────────────────────────────
-# Platform-wide default statutory contribution rates keyed by jurisdiction
-# country. Orgs start from these defaults on first Compliance setup; their
-# own org-scoped ContributionRate rows can diverge afterwards.
-
-@router.post(
-    "/statutory-rates/seed-defaults", response_model=SuccessResponse,
-    summary="Backfill platform default rates from the payroll engine's existing per-country defaults (safe to re-run)",
-)
-def seed_statutory_rate_defaults(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.super_admin import service as sa_service
-
-    created = sa_service.seed_global_statutory_rates_from_defaults(db)
-    return {"message": f"Added {created} default rate(s)." if created else "Already up to date — no new rates added."}
-
-
-@router.get("/statutory-rates", response_model=StatutoryRateListResponse)
-def list_statutory_rates(
-    country: str = Query(None),
-    state: Optional[str] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    from app.modules.super_admin.models import GlobalStatutoryRate
-
-    query = db.query(GlobalStatutoryRate)
-    if country:
-        query = query.filter(GlobalStatutoryRate.jurisdiction_country == country)
-        # Once scoped to a country, an absent state means "country-level
-        # only" — NOT "every state blended together" — an API client that
-        # can't reliably transmit an explicit empty string (browser fetch
-        # helpers commonly strip "" params) still gets correct isolation.
-        # Same convention list_all_jurisdiction_packs() already uses.
-        if state:
-            query = query.filter(GlobalStatutoryRate.jurisdiction_state == state)
-        else:
-            query = query.filter(GlobalStatutoryRate.jurisdiction_state.is_(None))
-    elif state:
-        query = query.filter(GlobalStatutoryRate.jurisdiction_state == state)
-    if start_date:
-        query = query.filter(GlobalStatutoryRate.updated_at >= start_date)
-    if end_date:
-        # updated_at is a timestamp; comparing it `<=` a bare date casts
-        # that date to midnight (00:00:00), which excludes every row
-        # touched later the SAME day — e.g. a rate created at 6pm "today"
-        # would fail an end_date of "today". Use the start of the
-        # following day instead so the whole end_date is included.
-        query = query.filter(GlobalStatutoryRate.updated_at < end_date + timedelta(days=1))
-    rates = query.order_by(
-        GlobalStatutoryRate.jurisdiction_country,
-        GlobalStatutoryRate.sort_order,
-        GlobalStatutoryRate.component_key,
-    ).all()
-    return StatutoryRateListResponse(rates=rates, total=len(rates))
-
-
-@router.post("/statutory-rates", response_model=StatutoryRateResponse)
-def create_statutory_rate(
-    data: StatutoryRateCreate,
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    from app.core.exceptions import AlreadyExistsException
-    from app.modules.super_admin.models import GlobalStatutoryRate
-
-    existing = (
-        db.query(GlobalStatutoryRate)
-        .filter(
-            GlobalStatutoryRate.jurisdiction_country == data.jurisdiction_country,
-            GlobalStatutoryRate.jurisdiction_state == data.jurisdiction_state,
-            GlobalStatutoryRate.component_key == data.component_key,
-        )
-        .first()
-    )
-    if existing:
-        raise AlreadyExistsException("Statutory rate", "jurisdiction_country + jurisdiction_state + component_key")
-
-    rate = GlobalStatutoryRate(**data.model_dump())
-    db.add(rate)
-    db.commit()
-    db.refresh(rate)
-    logger.info("Super Admin %s created statutory rate %s/%s", current_user.email, data.jurisdiction_country, data.component_key)
-    return rate
-
-
-@router.put("/statutory-rates/{rate_id}", response_model=StatutoryRateResponse)
-def update_statutory_rate(
-    rate_id: int,
-    data: StatutoryRateUpdate,
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    from app.core.exceptions import NotFoundException
-    from app.modules.super_admin.models import GlobalStatutoryRate
-
-    rate = db.query(GlobalStatutoryRate).filter(GlobalStatutoryRate.id == rate_id).first()
-    if rate is None:
-        raise NotFoundException("Statutory rate", "id")
-    for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(rate, field, value)
-    db.commit()
-    db.refresh(rate)
-    return rate
-
-
-@router.delete("/statutory-rates/{rate_id}", response_model=SuccessResponse)
-def delete_statutory_rate(
-    rate_id: int,
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    from app.core.exceptions import BadRequestException, NotFoundException
-    from app.modules.payroll.models import ContributionRate
-    from app.modules.super_admin.models import GlobalStatutoryRate
-
-    rate = db.query(GlobalStatutoryRate).filter(GlobalStatutoryRate.id == rate_id).first()
-    if rate is None:
-        raise NotFoundException("Statutory rate", "id")
-
-    # Deleting a platform default that an organization's own ContributionRate
-    # already matches (same country/component — orgs seed from this table on
-    # first Compliance setup) would silently orphan that org's rate label
-    # with no platform default left to fall back to. Reject instead of a
-    # bare delete, matching the "do not allow accidental deletion of
-    # active/required configurations" requirement.
-    in_use = (
-        db.query(ContributionRate)
-        .filter(
-            ContributionRate.jurisdiction_country == rate.jurisdiction_country,
-            ContributionRate.component_key == rate.component_key,
-        )
-        .first()
-    )
-    if in_use:
-        raise BadRequestException(
-            f"'{rate.label}' is in use by at least one organization's contribution rates "
-            f"({rate.jurisdiction_country}/{rate.component_key}) and can't be deleted. "
-            "Deactivate it instead, or remove the organizations' rates first."
-        )
-
-    db.delete(rate)
-    db.commit()
-    return {"message": "Statutory rate deleted."}
-
+# The old "Global statutory rate table" endpoints (seed-defaults, list,
+# create, update, delete against GlobalStatutoryRate) were removed here —
+# that table was never read by the live payroll engine (see its former
+# model docstring). The Statutory Rates page now reads canonical tax-pack
+# data directly via GET /compliance/active-tax-configuration below;
+# editing happens on the Compliance page. list_organization_contribution_rates
+# right below is unaffected — it always read the real, live ContributionRate
+# table and still does.
 
 @router.get(
     "/statutory-rates/organization-rates",
@@ -517,6 +375,21 @@ def assign_compliance_policy(
     return {"message": f"Policy applied to {result['updated']} organization(s)."}
 
 
+@router.delete(
+    "/compliance/policies/{id}", response_model=SuccessResponse,
+    summary="Permanently delete a policy/tax pack version — only allowed with no assigned organizations and no payroll history",
+)
+def hard_delete_compliance_policy(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    result = payroll_service.hard_delete_jurisdiction_pack(db, id)
+    return {"message": f"{result['packId']} v{result['version']} permanently deleted."}
+
+
 # ── Canonical Tax Configuration (government-mandated values; Super Admin-only) ──
 # organization_id IS NULL rows on payroll_tax_slabs/payroll_contribution_rates —
 # the single source of truth these tax packs' rules resolve to. Org-scoped
@@ -552,6 +425,21 @@ def upsert_canonical_tax_slab(
     return payroll_service.upsert_canonical_tax_slab(db, payload, actor_id=current_user.id)
 
 
+@router.delete(
+    "/compliance/tax-configuration/slabs/{id}", response_model=SuccessResponse,
+    summary="Permanently delete a canonical tax slab row (Super Admin only)",
+)
+def delete_canonical_tax_slab(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_canonical_tax_slab(db, id, actor_id=current_user.id)
+    return {"message": "Tax slab deleted."}
+
+
 @router.get(
     "/compliance/tax-configuration/contribution-rates", response_model=List[CanonicalContributionRateResponse], response_model_by_alias=True,
     summary="List canonical contribution rates for a pack or country",
@@ -581,6 +469,21 @@ def upsert_canonical_contribution_rate(
     return payroll_service.upsert_canonical_contribution_rate(db, payload, actor_id=current_user.id)
 
 
+@router.delete(
+    "/compliance/tax-configuration/contribution-rates/{id}", response_model=SuccessResponse,
+    summary="Permanently delete a canonical contribution rate row (Super Admin only)",
+)
+def delete_canonical_contribution_rate(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_canonical_contribution_rate(db, id, actor_id=current_user.id)
+    return {"message": "Contribution rate deleted."}
+
+
 @router.get(
     "/compliance/tax-configuration/audit", response_model=List[TaxConfigurationAuditResponse], response_model_by_alias=True,
     summary="Audit trail for canonical tax configuration changes",
@@ -594,6 +497,21 @@ def list_tax_configuration_audit(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.list_tax_configuration_audit(db, jurisdiction_pack_id=jurisdictionPackId, entity_type=entityType)
+
+
+@router.get(
+    "/compliance/active-tax-configuration", response_model=ActiveTaxConfigurationResponse, response_model_by_alias=True,
+    summary="Read-only: the canonical rates/slabs from whichever tax pack is currently Active for this jurisdiction",
+)
+def get_active_tax_configuration(
+    country: str = Query(...),
+    state: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_active_tax_configuration_for_display(db, country, state=state)
 
 
 # ── Finance ────────────────────────────────────────────────────────────────

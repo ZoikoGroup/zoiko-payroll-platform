@@ -79,6 +79,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
   const earnings = [
     ["Basic Salary", item.basicPay],
     ["House Rent Allowance", item.hra],
+    ...(item.allowanceItems || []).map((a) => [a.label, a.amount]),
     ["Special Allowance", item.specialAllowance],
     ["Overtime", item.overtime],
     ["Additional Compensation", item.additionalCompensation],
