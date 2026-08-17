@@ -6,6 +6,7 @@ import {
   Sparkles,
   ShieldCheck,
   RotateCcw,
+  MoreVertical,
   ThumbsUp,
   ThumbsDown,
   Loader2,
@@ -45,10 +46,17 @@ import {
   cancelAssistHandoff,
 } from "../../service/assistService";
 import { ASSIST_LOCALES, getAssistLocale, setAssistLocale, t, formatAssistDate } from "./locales";
+import { useAuth } from "../../context/AuthContext";
 import zoikoPayrollLogo from "../../assets/zoiko-payroll-logo.png";
 import zoikoPayrollIcon from "../../assets/zoiko-payroll-icon.png";
 
-const SESSION_KEY = "zoiko_payroll_assist_session";
+// Scoped per user id — otherwise switching accounts in the same browser
+// leaves the previous user's session id in localStorage, and the widget
+// tries to reuse a session that belongs to a different organization.
+const SESSION_KEY_PREFIX = "zoiko_payroll_assist_session";
+function getSessionStorageKey(userId) {
+  return userId ? `${SESSION_KEY_PREFIX}_${userId}` : SESSION_KEY_PREFIX;
+}
 
 const ACCENT = "bg-[#0592D3]";
 const ACCENT_HOVER = "hover:bg-[#04628C]";
@@ -811,13 +819,15 @@ function LocalePicker() {
 }
 
 export default function AssistLauncher() {
+  const { user } = useAuth();
+  const sessionKey = getSessionStorageKey(user?.id);
   const [open, setOpen] = useState(false);
   const [booting, setBooting] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null);
   const [ackDone, setAckDone] = useState(false);
   const [ackBusy, setAckBusy] = useState(false);
-  const [sessionId, setSessionId] = useState(() => localStorage.getItem(SESSION_KEY) || null);
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem(sessionKey) || null);
   const [messages, setMessages] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [capabilities, setCapabilities] = useState([]);
@@ -825,6 +835,7 @@ export default function AssistLauncher() {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("chat");
   const [showHandoff, setShowHandoff] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [pendingResponseId, setPendingResponseId] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
@@ -853,7 +864,7 @@ export default function AssistLauncher() {
 
       const session = await createAssistSession({ title: "Payroll Assist" });
       setSessionId(session.id);
-      localStorage.setItem(SESSION_KEY, String(session.id));
+      localStorage.setItem(sessionKey, String(session.id));
     } catch (e) {
       setError(e.message || t("assist.bootError"));
     } finally {
@@ -904,10 +915,9 @@ export default function AssistLauncher() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    try {
-      const submit = await submitAssistMessage(sessionId, trimmed);
+    async function submitTo(sid) {
+      const submit = await submitAssistMessage(sid, trimmed);
       setPendingResponseId(submit.response_id);
-
       let streamed = "";
       const [response] = await Promise.all([
         getAssistResponse(submit.response_id),
@@ -921,6 +931,29 @@ export default function AssistLauncher() {
           },
         }).catch(() => {}),
       ]);
+      return { response, streamed };
+    }
+
+    try {
+      let response, streamed;
+      try {
+        ({ response, streamed } = await submitTo(sessionId));
+      } catch (e) {
+        // The stored session id can go stale — e.g. a different user logged
+        // in on this browser previously (fixed by scoping the storage key
+        // per user, but old stale entries may still be lying around), or
+        // the session was archived by retention cleanup while this tab was
+        // open. Recover once by starting a fresh session instead of
+        // leaving the widget permanently stuck on a dead session id.
+        if (e?.status === 404) {
+          const session = await createAssistSession({ title: "Payroll Assist" });
+          setSessionId(session.id);
+          localStorage.setItem(sessionKey, String(session.id));
+          ({ response, streamed } = await submitTo(session.id));
+        } else {
+          throw e;
+        }
+      }
 
       const textBlock = (response.blocks || []).find((b) => b.block_type === "text");
       const actionBlock = (response.blocks || []).find((b) => b.block_type === "action");
@@ -972,7 +1005,7 @@ export default function AssistLauncher() {
         // best effort
       }
     }
-    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(sessionKey);
     setSessionId(null);
     setMessages([]);
     setAckDone(false);
@@ -985,44 +1018,49 @@ export default function AssistLauncher() {
   async function handleResume(session) {
     setTab("chat");
     setSessionId(session.id);
-    localStorage.setItem(SESSION_KEY, String(session.id));
+    localStorage.setItem(sessionKey, String(session.id));
     setMessages([]);
     setError("");
     try {
       const msgs = await listAssistMessages(session.id);
-      const loaded = await Promise.all(
-        msgs
-          .filter((m) => m.role === "assistant" && m.response_id)
-          .map(async (m) => {
-            try {
-              const response = await getAssistResponse(m.response_id);
-              const textBlock = (response.blocks || []).find((b) => b.block_type === "text");
-              const actionBlock = (response.blocks || []).find((b) => b.block_type === "action");
-              const draftBlock = (response.blocks || []).find((b) => b.block_type === "draft");
-              return {
-                id: `r-${m.response_id}`,
-                role: "assistant",
-                content: textBlock?.content || "…",
-                responseId: m.response_id,
-                safetyState: response.safety_state,
-                sources: response.sources || [],
-                actionBlock: actionBlock?.data || null,
-                draftBlock: draftBlock?.data || null,
-                rating: null,
-                loading: false,
-              };
-            } catch {
-              return { id: `r-${m.response_id}`, role: "assistant", content: "…", loading: false };
-            }
-          })
+      // Every stored message is the user's side — the assistant's reply is a
+      // separate AssistResponse linked via response_id, not a second message
+      // row. Fetch each linked response in parallel, then interleave them
+      // back into conversational order (user, its reply, next user, ...).
+      const responseByMessageId = new Map(
+        await Promise.all(
+          msgs
+            .filter((m) => m.response_id)
+            .map(async (m) => {
+              try {
+                const response = await getAssistResponse(m.response_id);
+                const textBlock = (response.blocks || []).find((b) => b.block_type === "text");
+                const actionBlock = (response.blocks || []).find((b) => b.block_type === "action");
+                const draftBlock = (response.blocks || []).find((b) => b.block_type === "draft");
+                return [m.id, {
+                  id: `r-${m.response_id}`,
+                  role: "assistant",
+                  content: textBlock?.content || "…",
+                  responseId: m.response_id,
+                  safetyState: response.safety_state,
+                  sources: response.sources || [],
+                  actionBlock: actionBlock?.data || null,
+                  draftBlock: draftBlock?.data || null,
+                  rating: null,
+                  loading: false,
+                }];
+              } catch {
+                return [m.id, { id: `r-${m.response_id}`, role: "assistant", content: "…", loading: false }];
+              }
+            })
+        )
       );
       const flattened = [];
       for (const m of msgs) {
-        if (m.role === "user") {
-          flattened.push({ id: `h-u-${m.id}`, role: "user", content: m.content?.text || m.content || "…" });
-        }
+        flattened.push({ id: `h-u-${m.id}`, role: "user", content: m.content?.text || m.content || "…" });
+        const resp = responseByMessageId.get(m.id);
+        if (resp) flattened.push(resp);
       }
-      for (const resp of loaded) flattened.push(resp);
       setMessages(flattened);
     } catch {
       setError(t("assist.sendError"));
@@ -1069,14 +1107,49 @@ export default function AssistLauncher() {
               >
                 <LifeBuoy size={15} />
               </button>
-              <button
-                type="button"
-                onClick={handleNewSession}
-                title={t("assist.newSession")}
-                className="rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3]"
-              >
-                <RotateCcw size={15} />
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowMoreMenu((v) => !v)}
+                  title={t("assist.more")}
+                  className={`rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3] ${showMoreMenu ? "bg-[#F8F7F4] text-[#0592D3]" : ""}`}
+                >
+                  <MoreVertical size={15} />
+                </button>
+                {showMoreMenu ? (
+                  <div className="absolute right-0 top-9 z-10 w-40 overflow-hidden rounded-[12px] border border-[#E5E0D9] bg-white py-1 shadow-lg">
+                    {tabs.map((tabDef) => {
+                      const Icon = tabDef.icon;
+                      return (
+                        <button
+                          key={tabDef.id}
+                          type="button"
+                          onClick={() => {
+                            setTab(tabDef.id);
+                            setShowMoreMenu(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium transition hover:bg-[#F8F7F4] ${
+                            tab === tabDef.id ? "text-[#0592D3]" : "text-[#6B6560]"
+                          }`}
+                        >
+                          <Icon size={13} /> {tabDef.label}
+                        </button>
+                      );
+                    })}
+                    <div className="my-1 border-t border-[#F0EDE8]" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMoreMenu(false);
+                        handleNewSession();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium text-[#6B6560] transition hover:bg-[#F8F7F4]"
+                    >
+                      <RotateCcw size={13} /> {t("assist.newSession")}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
@@ -1086,25 +1159,6 @@ export default function AssistLauncher() {
                 <X size={16} />
               </button>
             </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="flex border-b border-[#F0EDE8] bg-white px-2 pt-2">
-            {tabs.map((tabDef) => {
-              const Icon = tabDef.icon;
-              return (
-                <button
-                  key={tabDef.id}
-                  type="button"
-                  onClick={() => setTab(tabDef.id)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-t-[10px] px-2 py-2 text-[11px] font-bold transition ${
-                    tab === tabDef.id ? "border-b-2 border-[#0592D3] text-[#0592D3]" : "text-[#9E9690] hover:text-[#6B6560]"
-                  }`}
-                >
-                  <Icon size={12} /> {tabDef.label}
-                </button>
-              );
-            })}
           </div>
 
           {/* Body */}
