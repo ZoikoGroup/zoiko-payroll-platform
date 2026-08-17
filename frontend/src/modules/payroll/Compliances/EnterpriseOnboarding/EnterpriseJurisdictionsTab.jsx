@@ -51,8 +51,8 @@ export default function EnterpriseJurisdictionsTab({ enterpriseStatus, onEnterpr
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Enterprise Jurisdictions</h3>
-          <p className="text-[12px] text-[#9E9690] mt-0.5">
+          <h3 className="text-[15px] font-bold text-foreground">Enterprise Jurisdictions</h3>
+          <p className="text-[12px] text-foreground-muted mt-0.5">
             Select and configure the countries your organization operates payroll in.
           </p>
         </div>
@@ -60,7 +60,7 @@ export default function EnterpriseJurisdictionsTab({ enterpriseStatus, onEnterpr
           <button
             onClick={() => setShowActivation(true)}
             disabled={!canEdit}
-            className="flex items-center gap-2 rounded-[12px] bg-[#9D7BF2] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#8A65E0] shadow-[0_2px_8px_rgba(157,123,242,0.3)] transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 rounded-[12px] bg-category-teal px-4 py-2 text-[13px] font-bold text-white hover:bg-category-teal shadow-[0_2px_8px_rgba(157,123,242,0.3)] transition-colors disabled:opacity-50"
           >
             <Rocket size={14} />
             Activate Enterprise Payroll

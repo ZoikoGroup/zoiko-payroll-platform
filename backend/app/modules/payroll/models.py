@@ -22,7 +22,7 @@ performed an action, not a payroll employee record.
 import enum
 from sqlalchemy import (
     Column, Integer, String, Date, DateTime, Boolean,
-    ForeignKey, Text, Numeric, UniqueConstraint, Index, JSON,
+    ForeignKey, Text, Numeric, UniqueConstraint, Index, JSON, text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -137,6 +137,13 @@ class PayrollEmployee(Base):
     # _normalize_country) when unset — same fallback pattern work_state
     # already uses for state-level overrides. See employee_validation.py.
     country_code     = Column(String(2), nullable=True)
+
+    # First-class (indexable/filterable) tax regime — e.g. India's
+    # "Old"/"New" regime. Kept as a real column rather than a
+    # compliance_fields JSON key because the tax resolver (engine/tax_resolver.py)
+    # needs to filter canonical TaxSlab/ContributionRate rows by regime;
+    # jurisdictions with no regime concept simply leave this NULL.
+    tax_regime       = Column(String(20), nullable=True)
 
     # Non-India statutory/bank identifiers (SSN, NINO, TFN, SIN, Steuer-ID,
     # IBAN, etc. — see employee_validation.py for the field set per
@@ -263,6 +270,17 @@ class PayslipItem(Base):
     # above only ever covered India; every other jurisdiction's identifiers
     # previously never made it onto the payslip at all.
     compliance_fields = Column(JSON, nullable=True)
+
+    # Which exact canonical tax policy version produced this payslip's
+    # numbers, frozen at generation time. If Super Admin later edits or
+    # supersedes that pack version, this payslip's figures MUST NOT change —
+    # tax_rule_snapshot is the actual rate/slab values used (not just a
+    # pointer), so the payslip is reproducible even if the pack row itself
+    # is later retired. NULL on payslips generated before this column
+    # existed or where no canonical tax pack applied.
+    tax_policy_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+    tax_policy_version  = Column(String(20), nullable=True)
+    tax_rule_snapshot   = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -415,11 +433,21 @@ class ContributionRate(Base):
     Compliance > Contribution Rates. `employee_rate_pct` / `employer_rate_pct`
     are the actual numeric rates used by payslip generation; `*_share`
     columns are the human-readable display strings the table renders.
+
+    A row with `organization_id IS NULL` is a CANONICAL, Super-Admin-owned
+    value linked to a `JurisdictionPack` (pack_type="tax") via
+    `jurisdiction_pack_id` — the single government-mandated source of truth.
+    A row with `organization_id` set is that org's own synced copy (see
+    `sync_org_rates_from_canonical` in service.py), which is what
+    `get_contribution_rates()`/the calculation engine actually reads — this
+    keeps the engine's read path unchanged while moving *authorship* of the
+    canonical values to Super Admin only. Deliberately not a separate
+    `ContributionRule` table — same shape, just a nullable owner.
     """
     __tablename__ = "payroll_contribution_rates"
 
     id               = Column(Integer, primary_key=True, index=True)
-    organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
 
     component_key        = Column(String(20), nullable=False)   # "pf" | "esi" | "pt" | "tds"
     label                = Column(String(100), nullable=False)  # → r.label
@@ -432,23 +460,52 @@ class ContributionRate(Base):
     flat_amount          = Column(Numeric(10, 2), nullable=True)  # for flat components like PT
 
     jurisdiction_country = Column(String(10), nullable=False, server_default="IN", default="IN")
+    # Null = country-level, matching the convention JurisdictionPack/
+    # GlobalStatutoryRate already use for optional state/province scoping.
+    jurisdiction_state    = Column(String(100), nullable=True)
+    tax_regime            = Column(String(20), nullable=True)
+    # Which canonical tax pack version this row was authored under/synced
+    # from. NULL on org-scoped rows created before this column existed.
+    jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     sort_order           = Column(Integer, default=0)
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Plain UniqueConstraint replaced with two partial unique indexes —
+    # Postgres treats every NULL as distinct, so a single constraint
+    # including a nullable organization_id would not prevent duplicate
+    # canonical (organization_id IS NULL) rows. Same pattern as
+    # GlobalStatutoryRate (super_admin/models.py).
     __table_args__ = (
-        UniqueConstraint("organization_id", "jurisdiction_country", "component_key", name="uq_contribution_rate_org_country_component"),
+        Index(
+            "uq_contribution_rate_org_country_component",
+            "organization_id", "jurisdiction_country", "component_key",
+            unique=True, postgresql_where=text("organization_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_contribution_rate_canonical_country_state_component",
+            "jurisdiction_country", "jurisdiction_state", "component_key", "tax_regime",
+            unique=True, postgresql_where=text("organization_id IS NULL"),
+        ),
     )
 
 
 # ── Compliance: Tax Slabs ──────────────────────────────────────────────
 
 class TaxSlab(Base):
-    """One income tax slab row shown in Compliance > Tax Slabs."""
+    """One income tax slab row shown in Compliance > Tax Slabs.
+
+    Same canonical/org-scoped split as ContributionRate above:
+    `organization_id IS NULL` = Super-Admin-owned canonical row linked to a
+    `JurisdictionPack` (pack_type="tax"); `organization_id` set = an org's
+    synced copy, which is what the engine actually reads. Deliberately not
+    a separate `TaxBracket` table.
+    """
     __tablename__ = "payroll_tax_slabs"
 
     id               = Column(Integer, primary_key=True, index=True)
-    organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
 
     min_amount           = Column(Numeric(14, 2), nullable=False)
     max_amount           = Column(Numeric(14, 2), nullable=True)   # null = "and above"
@@ -458,6 +515,20 @@ class TaxSlab(Base):
     sort_order           = Column(Integer, default=0)
 
     jurisdiction_country = Column(String(10), nullable=False, server_default="IN", default="IN")
+    jurisdiction_state    = Column(String(100), nullable=True)   # null = country-level
+    tax_regime            = Column(String(20), nullable=True)
+
+    # MARGINAL_RATE (default, existing brackets) | FLAT_RATE | FIXED_PLUS_MARGINAL
+    # | FORMULA | TABLE_LOOKUP | CONTRIBUTION. Only FORMULA rows use
+    # formula_expression instead of min/max/rate_pct — e.g. Germany's
+    # Lohnsteuer, which isn't a clean bracket table. Existing bracket rows
+    # for every country default to MARGINAL_RATE, so no calculator changes
+    # are required until a row actually opts into FORMULA.
+    rule_type             = Column(String(20), nullable=False, default="MARGINAL_RATE", server_default="MARGINAL_RATE")
+    formula_expression    = Column(Text, nullable=True)
+    # Which canonical tax pack version this row was authored under/synced from.
+    jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -537,10 +608,10 @@ class CompanyComplianceDetails(Base):
 # (Jurisdiction, JurisdictionPack, RuleSet, RuleVersion, SafeExpression,
 # Accumulator, CalculationSnapshot, RetroDelta, ActivationGate,
 # SourceReference). RuleSet/RuleVersion/SafeExpression/Accumulator are not
-# built yet — this table only carries pack identity/metadata, matching
-# what PackMetadataPanel.jsx collects today. The actual rule data
-# (contribution rates, tax slabs) still lives in ContributionRate/TaxSlab
-# below, unlinked to a pack version, until that follow-up work is scoped.
+# built as separate tables — the actual rule data (contribution rates, tax
+# slabs) lives in ContributionRate/TaxSlab, now linked to a pack version via
+# jurisdiction_pack_id (see the Global Payroll Tax Engine additions below
+# and on those two models).
 class JurisdictionPack(Base):
     """Versioned identity/metadata for a jurisdiction compliance pack."""
     __tablename__ = "payroll_jurisdiction_packs"
@@ -580,6 +651,14 @@ class JurisdictionPack(Base):
     next_review_date     = Column(Date, nullable=True)
     created_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # ── Global Payroll Tax Engine additions (pack_type="tax" packs) ──────
+    # Nullable/additive — every existing row (all "policy" packs today) is
+    # unaffected. Only tax packs meaningfully set these.
+    tax_year             = Column(String(20), nullable=True)   # e.g. "2026-27" or "2026"
+    tax_regime           = Column(String(20), nullable=True)   # e.g. India's "Old"/"New"; null where not applicable
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    currency             = Column(String(10), nullable=True)
     # Self-reference so a new version can point back at what it replaced,
     # without ever deleting/overwriting the prior row — version history
     # stays intact by construction (new row per version).
@@ -604,6 +683,39 @@ class JurisdictionPack(Base):
         UniqueConstraint("pack_id", "version", name="uq_jurisdiction_pack_id_version"),
         Index("ix_jurisdiction_packs_country_state", "jurisdiction_country", "jurisdiction_state"),
     )
+
+
+# ── Tax Configuration Audit ─────────────────────────────────────────────
+# One canonical audit trail for every mutation to a Super-Admin-owned
+# canonical tax/contribution/pack row. No audit system existed anywhere in
+# the codebase prior to this (PayrollActivityLog, above, covers unrelated
+# payroll-run activity, not tax configuration) — this is genuinely new,
+# not a duplicate of an existing table.
+class TaxConfigurationAudit(Base):
+    __tablename__ = "payroll_tax_configuration_audit"
+
+    id             = Column(Integer, primary_key=True, index=True)
+
+    actor_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action         = Column(String(30), nullable=False)   # "create" | "update" | "status_change" | "delete"
+    entity_type    = Column(String(30), nullable=False)    # "jurisdiction_pack" | "tax_slab" | "contribution_rate"
+    entity_id      = Column(Integer, nullable=False)
+
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+    tax_version           = Column(String(20), nullable=True)
+    legal_reference       = Column(String(200), nullable=True)
+
+    old_value      = Column(JSON, nullable=True)
+    new_value      = Column(JSON, nullable=True)
+    reason         = Column(Text, nullable=True)
+
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_tax_audit_entity", "entity_type", "entity_id"),
+        Index("ix_tax_audit_pack", "jurisdiction_pack_id"),
+    )
+
 
 class ComplianceDocument(Base):
     """Uploaded compliance documents for payroll (e.g. statutory filings)."""

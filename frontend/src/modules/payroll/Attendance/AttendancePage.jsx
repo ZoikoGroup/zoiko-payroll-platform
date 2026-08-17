@@ -1725,15 +1725,15 @@ export default function AttendancePage() {
   const rangeOnLeave = filteredSummary.reduce((s, e) => s + (e.leave || 0), 0);
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8 space-y-6">
+    <div className="bg-background min-h-screen p-6 lg:p-8 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-[12px] bg-[#19C58A] flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
+          <div className="h-10 w-10 rounded-[12px] bg-primary flex items-center justify-center shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
             <CalendarCheck size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">Attendance & Compensation</h1>
-            <p className="text-[13px] font-medium text-[#9E9690]">Track attendance, rewards, and bonuses for payroll</p>
+            <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Attendance & Compensation</h1>
+            <p className="text-[13px] font-medium text-foreground-muted">Track attendance, rewards, and bonuses for payroll</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1742,19 +1742,19 @@ export default function AttendancePage() {
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+              className="rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
             />
             {isFutureDate(date) && (
-              <span className="text-[10px] font-bold uppercase tracking-widest text-[#F8A60A] bg-[#F8A60A]/10 rounded-full px-3 py-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-warning bg-warning/10 rounded-full px-3 py-1">
                 Scheduled — upcoming day
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1 bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[12px] p-1">
+          <div className="flex items-center gap-1 bg-surface border border-border rounded-[12px] p-1">
             <button
               type="button"
               onClick={() => setDate(todayStr())}
-              className="px-3 py-1.5 rounded-[10px] text-[13px] font-semibold text-[#9E9690] hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#1A1816] dark:hover:text-[#F0EDE8] transition-all"
+              className="px-3 py-1.5 rounded-[10px] text-[13px] font-semibold text-foreground-muted hover:bg-background dark:hover:bg-surface-muted hover:text-foreground transition-all"
             >Today</button>
             <button
               type="button"
@@ -1762,7 +1762,7 @@ export default function AttendancePage() {
                 const d = new Date(); d.setDate(d.getDate() + 1);
                 setDate(toLocalDateStr(d));
               }}
-              className="px-3 py-1.5 rounded-[10px] text-[13px] font-semibold text-[#9E9690] hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#1A1816] dark:hover:text-[#F0EDE8] transition-all"
+              className="px-3 py-1.5 rounded-[10px] text-[13px] font-semibold text-foreground-muted hover:bg-background dark:hover:bg-surface-muted hover:text-foreground transition-all"
             >+ Tomorrow</button>
             <button
               type="button"
@@ -1770,12 +1770,12 @@ export default function AttendancePage() {
                 const d = new Date(); d.setDate(d.getDate() + 7);
                 setDate(toLocalDateStr(d));
               }}
-              className="px-3 py-1.5 rounded-[10px] text-[13px] font-semibold text-[#9E9690] hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#1A1816] dark:hover:text-[#F0EDE8] transition-all"
+              className="px-3 py-1.5 rounded-[10px] text-[13px] font-semibold text-foreground-muted hover:bg-background dark:hover:bg-surface-muted hover:text-foreground transition-all"
             >+ Next Week</button>
           </div>
           <button
             onClick={exportAttendance}
-            className="flex items-center gap-2 bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A] hover:shadow-[0_2px_8px_rgba(25,197,138,0.15)] hover:-translate-y-[1px]"
+            className="flex items-center gap-2 bg-surface border border-border rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary hover:shadow-[0_2px_8px_rgba(25,197,138,0.15)] hover:-translate-y-[1px]"
           >
             <Download size={15} />
             Export
@@ -1783,24 +1783,24 @@ export default function AttendancePage() {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50"
+            className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50"
           >
             <Save size={15} />
             {saving ? "Saving..." : "Save Records"}
           </button>
         </div>
       </div>
-      <p className="text-[11px] font-medium text-[#9E9690] -mt-3">
+      <p className="text-[11px] font-medium text-foreground-muted -mt-3">
         Tip: pick a future date above (or use the shortcuts) to pre-schedule attendance for upcoming days — it saves the same way, and won't count toward "Working Days" until that day actually arrives.
       </p>
 
-      <div className="bg-[#F0EDE8] dark:bg-[#38312D] rounded-[14px] p-1 w-fit flex flex-wrap">
+      <div className="bg-surface-muted rounded-[14px] p-1 w-fit flex flex-wrap">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-[12px] text-[13px] font-medium transition-all duration-200 ${
-              activeTab === t.id ? "bg-white dark:bg-[#221D1A] text-[#19C58A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-[#9E9690] hover:text-[#6B6560] dark:hover:text-[#A69B93]"
+              activeTab === t.id ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "text-foreground-muted hover:text-foreground-muted"
             }`}
           >
             <t.icon size={15} />
@@ -1811,54 +1811,54 @@ export default function AttendancePage() {
 
       {activeTab === "overview" && (
         <div className="space-y-6">
-          <div className="bg-[#19C58A]/5 border border-[#19C58A]/15 rounded-[14px] px-4 py-3 text-[13px] text-[#6B6560] dark:text-[#A69B93]">
+          <div className="bg-primary/5 border border-primary/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted">
             Only <strong>Active</strong> employees are shown. Inactive employees are excluded from attendance tracking.
           </div>
           <div className="grid grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
-              <div className="p-2.5 rounded-[12px] bg-[#9D7BF2]/10">
-                <Users className="w-5 h-5 text-[#9D7BF2]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
+              <div className="p-2.5 rounded-[12px] bg-category-teal/10">
+                <Users className="w-5 h-5 text-category-teal" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{totalEmployeeCount}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Total Employees</p>
+                <p className="text-[22px] font-bold text-foreground">{totalEmployeeCount}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Total Employees</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
-              <div className="p-2.5 rounded-[12px] bg-[#19C58A]/10">
-                <CalendarCheck className="w-5 h-5 text-[#19C58A]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
+              <div className="p-2.5 rounded-[12px] bg-primary/10">
+                <CalendarCheck className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{present}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Present</p>
+                <p className="text-[22px] font-bold text-foreground">{present}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Present</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
-              <div className="p-2.5 rounded-[12px] bg-[#FF6E86]/10">
-                <Clock className="w-5 h-5 text-[#FF6E86]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
+              <div className="p-2.5 rounded-[12px] bg-error/10">
+                <Clock className="w-5 h-5 text-error" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{absent}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Absent</p>
+                <p className="text-[22px] font-bold text-foreground">{absent}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Absent</p>
               </div>
             </div>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
-              <div className="p-2.5 rounded-[12px] bg-[#35B6F5]/10">
-                <CalendarDays className="w-5 h-5 text-[#35B6F5]" />
+            <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
+              <div className="p-2.5 rounded-[12px] bg-info/10">
+                <CalendarDays className="w-5 h-5 text-info" />
               </div>
               <div>
-                <p className="text-[22px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{onLeave}</p>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">On Leave</p>
+                <p className="text-[22px] font-bold text-foreground">{onLeave}</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">On Leave</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-4">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h3 className="text-[15px] font-bold text-foreground mb-4">
               Attendance for {formatDisplayDate(date)}
             </h3>
             {loading ? (
-              <div className="text-center py-8 text-[#9E9690] text-[13px]">Loading employees...</div>
+              <div className="text-center py-8 text-foreground-muted text-[13px]">Loading employees...</div>
             ) : records.length === 0 ? (
               <div className="text-center py-8">
                 <CalendarCheck size={32} className="mx-auto mb-2 opacity-40" />
@@ -1868,38 +1868,38 @@ export default function AttendancePage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-[#E5E0D9] dark:border-[#38312D]">
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Employee</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Department</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Status</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Leave Type</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Check In</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Check Out</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Break (min)</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Hours</th>
+                    <tr className="border-b border-border">
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Department</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Leave Type</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Check In</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Check Out</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Break (min)</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Hours</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]">
+                  <tbody className="divide-y divide-border">
                     {records.map((r, i) => (
-                      <tr key={r.employeeId || i} className="hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] transition-colors">
-                        <td className="px-4 py-3 font-medium text-[#1A1816] dark:text-[#F0EDE8]">
+                      <tr key={r.employeeId || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors">
+                        <td className="px-4 py-3 font-medium text-foreground">
                           <div className="flex items-center gap-2.5">
-                            <div className="h-8 w-8 rounded-full bg-[#19C58A]/10 flex items-center justify-center text-[11px] font-bold text-[#19C58A]">
+                            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-[11px] font-bold text-primary">
                               {(r.name || "?").charAt(0).toUpperCase()}
                             </div>
                             {r.name}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-[#6B6560] dark:text-[#A69B93]">{r.department || "-"}</td>
+                        <td className="px-4 py-3 text-foreground-muted">{r.department || "-"}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <select
                               value={r.status}
                               onChange={(e) => updateRecord(i, "status", e.target.value)}
                               className={`rounded-[10px] border px-2.5 py-1 text-[11px] font-bold focus:outline-none transition-all duration-200 ${
-                                r.status === "present" ? "bg-[#19C58A]/10 border-[#19C58A]/20 text-[#19C58A]"
-                                : r.status === "absent" ? "bg-[#FF6E86]/10 border-[#FF6E86]/20 text-[#FF6E86]"
-                                : "bg-[#35B6F5]/10 border-[#35B6F5]/20 text-[#35B6F5]"
+                                r.status === "present" ? "bg-primary/10 border-primary/20 text-primary"
+                                : r.status === "absent" ? "bg-error/10 border-error/20 text-error"
+                                : "bg-info/10 border-info/20 text-info"
                               }`}
                             >
                               {STATUS_OPTIONS.map((s) => (
@@ -1907,7 +1907,7 @@ export default function AttendancePage() {
                               ))}
                             </select>
                             {r.isHalfDay && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border bg-[#F8A60A]/10 border-[#F8A60A]/20 text-[#F8A60A]">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border bg-warning/10 border-warning/20 text-warning">
                                 Half-Day
                               </span>
                             )}
@@ -1919,10 +1919,10 @@ export default function AttendancePage() {
                               value={r.leaveType || "paid"}
                               onChange={(e) => updateRecord(i, "leaveType", e.target.value)}
                               className={`rounded-[10px] border px-2.5 py-1 text-[11px] font-bold focus:outline-none transition-all duration-200 ${
-                                r.leaveType === "unpaid" ? "bg-[#9E9690]/10 border-[#E5E0D9] text-[#9E9690]"
-                                : r.leaveType === "sick" ? "bg-[#FF6E86]/10 border-[#FF6E86]/20 text-[#FF6E86]"
-                                : r.leaveType === "compOff" ? "bg-[#9D7BF2]/10 border-[#9D7BF2]/20 text-[#9D7BF2]"
-                                : "bg-[#35B6F5]/10 border-[#35B6F5]/20 text-[#35B6F5]"
+                                r.leaveType === "unpaid" ? "bg-foreground-muted/10 border-border text-foreground-muted"
+                                : r.leaveType === "sick" ? "bg-error/10 border-error/20 text-error"
+                                : r.leaveType === "compOff" ? "bg-category-teal/10 border-category-teal/20 text-category-teal"
+                                : "bg-info/10 border-info/20 text-info"
                               }`}
                             >
                               <option value="paid">Paid</option>
@@ -1931,7 +1931,7 @@ export default function AttendancePage() {
                               <option value="compOff">Comp-Off</option>
                             </select>
                           ) : (
-                            <span className="text-[12px] text-[#9E9690]">—</span>
+                            <span className="text-[12px] text-foreground-muted">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
@@ -1940,12 +1940,12 @@ export default function AttendancePage() {
                               type="time"
                               value={r.checkIn}
                               onChange={(e) => updateRecord(i, "checkIn", e.target.value)}
-                              className="w-20 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-2 py-1 text-[12px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                              className="w-20 rounded-[10px] border border-border bg-background px-2 py-1 text-[12px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                             />
                             <select
                               value={r.checkInPeriod}
                               onChange={(e) => updateRecord(i, "checkInPeriod", e.target.value)}
-                              className="w-14 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-1 py-1 text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A] transition-all duration-200"
+                              className="w-14 rounded-[10px] border border-border bg-background px-1 py-1 text-[12px] font-semibold text-foreground-muted focus:outline-none focus:border-primary transition-all duration-200"
                             >
                               <option value="AM">AM</option>
                               <option value="PM">PM</option>
@@ -1958,12 +1958,12 @@ export default function AttendancePage() {
                               type="time"
                               value={r.checkOut}
                               onChange={(e) => updateRecord(i, "checkOut", e.target.value)}
-                              className="w-20 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-2 py-1 text-[12px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                              className="w-20 rounded-[10px] border border-border bg-background px-2 py-1 text-[12px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                             />
                             <select
                               value={r.checkOutPeriod}
                               onChange={(e) => updateRecord(i, "checkOutPeriod", e.target.value)}
-                              className="w-14 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-1 py-1 text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A] transition-all duration-200"
+                              className="w-14 rounded-[10px] border border-border bg-background px-1 py-1 text-[12px] font-semibold text-foreground-muted focus:outline-none focus:border-primary transition-all duration-200"
                             >
                               <option value="AM">AM</option>
                               <option value="PM">PM</option>
@@ -1977,11 +1977,11 @@ export default function AttendancePage() {
                             placeholder="0"
                             value={r.breakMinutes}
                             onChange={(e) => updateRecord(i, "breakMinutes", e.target.value)}
-                            className="w-16 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-2 py-1 text-[12px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                            className="w-16 rounded-[10px] border border-border bg-background px-2 py-1 text-[12px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <span className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+                          <span className="text-[13px] font-bold text-foreground">
                             {calculateHours(r.checkIn, r.checkOut, r.breakMinutes, r.checkInPeriod, r.checkOutPeriod) || "-"}
                           </span>
                         </td>
@@ -1997,15 +1997,15 @@ export default function AttendancePage() {
 
       {activeTab === "bulk" && (
         <div className="space-y-4">
-          <div className="bg-[#F8A60A]/5 border border-[#F8A60A]/15 rounded-[14px] px-4 py-3 text-[13px] text-[#6B6560] dark:text-[#A69B93]">
+          <div className="bg-warning/5 border border-warning/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted">
             Please make sure to add attendance details only for <strong>Active Employees</strong>. Inactive employees are excluded from the list.
           </div>
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h3 className="text-base font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-4 flex items-center gap-2">
-              <BadgePlus size={18} className="text-[#F8A60A]" />
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h3 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
+              <BadgePlus size={18} className="text-warning" />
               Bulk Attendance Generation
             </h3>
-            <p className="text-[13px] text-[#9E9690] mb-6">
+            <p className="text-[13px] text-foreground-muted mb-6">
               Create attendance records for a date range with a single clock-in / clock-out / break template.
             </p>
 
@@ -2013,22 +2013,22 @@ export default function AttendancePage() {
             <div className="flex gap-4 mb-6">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="radio" name="bulkMode" value="single" checked={bulkMode === "single"}
-                  onChange={() => setBulkMode("single")} className="accent-[#19C58A]" />
-                <span className="text-[13px] font-medium text-[#1A1816] dark:text-[#F0EDE8]">Single Employee</span>
+                  onChange={() => setBulkMode("single")} className="accent-primary" />
+                <span className="text-[13px] font-medium text-foreground">Single Employee</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="radio" name="bulkMode" value="all" checked={bulkMode === "all"}
-                  onChange={() => setBulkMode("all")} className="accent-[#19C58A]" />
-                <span className="text-[13px] font-medium text-[#1A1816] dark:text-[#F0EDE8]">All Employees</span>
+                  onChange={() => setBulkMode("all")} className="accent-primary" />
+                <span className="text-[13px] font-medium text-foreground">All Employees</span>
               </label>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               {bulkMode === "single" && (
                 <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">Employee</label>
+                  <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">Employee</label>
                   <select value={bulkEmployeeId} onChange={(e) => setBulkEmployeeId(e.target.value)}
-                    className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                    className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                   >
                     <option value="">Select employee...</option>
                     {records.map((r) => (
@@ -2038,98 +2038,98 @@ export default function AttendancePage() {
                 </div>
               )}
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">Start Date</label>
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">Start Date</label>
                 <input type="date" value={bulkStartDate} onChange={(e) => setBulkStartDate(e.target.value)}
-                  className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200" />
+                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" />
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">End Date</label>
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">End Date</label>
                 <input type="date" value={bulkEndDate} onChange={(e) => setBulkEndDate(e.target.value)}
-                  className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200" />
+                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" />
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">Clock In</label>
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">Clock In</label>
                 <div className="flex gap-1">
                   <input type="time" value={bulkClockIn} onChange={(e) => setBulkClockIn(e.target.value)}
-                    className="flex-1 rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200" />
+                    className="flex-1 rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" />
                   <select value={bulkClockInPeriod} onChange={(e) => setBulkClockInPeriod(e.target.value)}
-                    className="w-16 rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-1 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A] transition-all duration-200"
+                    className="w-16 rounded-[12px] border border-border bg-background px-1 py-2.5 text-[13px] font-semibold text-foreground-muted focus:outline-none focus:border-primary transition-all duration-200"
                   ><option value="AM">AM</option><option value="PM">PM</option></select>
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">Clock Out</label>
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">Clock Out</label>
                 <div className="flex gap-1">
                   <input type="time" value={bulkClockOut} onChange={(e) => setBulkClockOut(e.target.value)}
-                    className="flex-1 rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200" />
+                    className="flex-1 rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" />
                   <select value={bulkClockOutPeriod} onChange={(e) => setBulkClockOutPeriod(e.target.value)}
-                    className="w-16 rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-1 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A] transition-all duration-200"
+                    className="w-16 rounded-[12px] border border-border bg-background px-1 py-2.5 text-[13px] font-semibold text-foreground-muted focus:outline-none focus:border-primary transition-all duration-200"
                   ><option value="AM">AM</option><option value="PM">PM</option></select>
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">Break (minutes)</label>
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">Break (minutes)</label>
                 <input type="number" min="0" placeholder="e.g. 60" value={bulkBreak} onChange={(e) => setBulkBreak(e.target.value)}
-                  className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200" />
+                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" />
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">Total Hours / Day</label>
-                <div className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F0EDE8] dark:bg-[#2A2520] px-3.5 py-2.5 text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">Total Hours / Day</label>
+                <div className="w-full rounded-[12px] border border-border bg-surface-muted px-3.5 py-2.5 text-[13px] font-bold text-foreground">
                   {calculateHours(bulkClockIn, bulkClockOut, bulkBreak, bulkClockInPeriod, bulkClockOutPeriod) || "—"}
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-1.5">1 Day = ? Hours</label>
+                <label className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5">1 Day = ? Hours</label>
                 <input type="number" min="1" step="0.5" placeholder="8" value={standardHoursPerDay} onChange={(e) => setStandardHoursPerDay(e.target.value)}
-                  className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200" />
+                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200" />
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4 mb-4 p-3 bg-[#F8F7F4] dark:bg-[#1A1816] rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D]">
+            <div className="flex flex-wrap items-center gap-4 mb-4 p-3 bg-background rounded-[12px] border border-border">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={excludeWeekends} onChange={(e) => setExcludeWeekends(e.target.checked)} className="accent-[#19C58A] rounded" />
-                <span className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">Exclude Sat &amp; Sun</span>
+                <input type="checkbox" checked={excludeWeekends} onChange={(e) => setExcludeWeekends(e.target.checked)} className="accent-primary rounded" />
+                <span className="text-[13px] text-foreground-muted">Exclude Sat &amp; Sun</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={excludeHolidays} onChange={(e) => setExcludeHolidays(e.target.checked)} className="accent-[#19C58A] rounded" />
-                <span className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">Exclude Holidays <span className="text-[11px] text-[#9E9690]">({holidays.length} loaded)</span></span>
+                <input type="checkbox" checked={excludeHolidays} onChange={(e) => setExcludeHolidays(e.target.checked)} className="accent-primary rounded" />
+                <span className="text-[13px] text-foreground-muted">Exclude Holidays <span className="text-[11px] text-foreground-muted">({holidays.length} loaded)</span></span>
               </label>
             </div>
 
-            <div className="flex items-center gap-3 pt-2 border-t border-[#E5E0D9] dark:border-[#38312D]">
+            <div className="flex items-center gap-3 pt-2 border-t border-border">
               <button onClick={handleBulkPreview}
-                className="flex items-center gap-2 border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+                className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
               ><CalendarRange size={15} />Preview</button>
               <button onClick={handleBulkGenerate} disabled={bulkGenerating}
-                className="flex items-center gap-2 bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50"
+                className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50"
               ><BadgePlus size={15} />{bulkGenerating ? "Generating..." : "Generate & Save"}</button>
             </div>
 
             {/* Preview table */}
             {bulkPreview.length > 0 && (
               <div className="mt-6">
-                <h4 className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8] mb-2">Preview — {bulkPreview.length} working day(s) to be created</h4>
-                <div className="overflow-x-auto max-h-60 overflow-y-auto border border-[#E5E0D9] dark:border-[#38312D] rounded-[12px]">
+                <h4 className="text-[13px] font-semibold text-foreground mb-2">Preview — {bulkPreview.length} working day(s) to be created</h4>
+                <div className="overflow-x-auto max-h-60 overflow-y-auto border border-border rounded-[12px]">
                   <table className="w-full text-[13px]">
-                    <thead className="bg-[#F8F7F4] dark:bg-[#1A1816] sticky top-0">
+                    <thead className="bg-background sticky top-0">
                       <tr>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Date</th>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Day</th>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">In</th>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Out</th>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Break</th>
-                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Hours</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Date</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Day</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">In</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Out</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Break</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Hours</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]">
+                    <tbody className="divide-y divide-border">
                       {bulkPreview.map((p, i) => (
-                        <tr key={i} className="hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] transition-colors">
-                          <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{p.date}</td>
-                          <td className="px-3 py-2 text-[12px] text-[#9E9690]">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p.date+"T00:00:00").getDay()]}</td>
-                          <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{p.clockIn}</td>
-                          <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{p.clockOut}</td>
-                          <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{p.break} min</td>
-                          <td className="px-3 py-2 text-[12px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{p.hours}</td>
+                        <tr key={i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors">
+                          <td className="px-3 py-2 text-[12px] text-foreground-muted">{p.date}</td>
+                          <td className="px-3 py-2 text-[12px] text-foreground-muted">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(p.date+"T00:00:00").getDay()]}</td>
+                          <td className="px-3 py-2 text-[12px] text-foreground-muted">{p.clockIn}</td>
+                          <td className="px-3 py-2 text-[12px] text-foreground-muted">{p.clockOut}</td>
+                          <td className="px-3 py-2 text-[12px] text-foreground-muted">{p.break} min</td>
+                          <td className="px-3 py-2 text-[12px] font-bold text-foreground">{p.hours}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2143,28 +2143,28 @@ export default function AttendancePage() {
 
       {activeTab === "upload" && (
         <div className="space-y-4">
-          <div className="bg-[#35B6F5]/5 border border-[#35B6F5]/15 rounded-[14px] px-4 py-3 text-[13px] text-[#6B6560] dark:text-[#A69B93]">
+          <div className="bg-info/5 border border-info/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted">
             Please make sure to add attendance details only for <strong>Active Employees</strong>. Inactive employees present in the upload will be skipped by the system.
           </div>
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h3 className="text-base font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-2 flex items-center gap-2">
-              <Upload size={18} className="text-[#35B6F5]" />
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h3 className="text-base font-bold text-foreground mb-2 flex items-center gap-2">
+              <Upload size={18} className="text-info" />
               Upload Attendance Sheet
             </h3>
-            <p className="text-[13px] text-[#9E9690] mb-5">
+            <p className="text-[13px] text-foreground-muted mb-5">
               Upload an Excel (.xlsx) file with attendance data. Columns are auto-mapped by header name — matching records merge with existing data.
             </p>
 
             <div className="flex items-center gap-3 flex-wrap mb-5">
-              <div className="flex gap-1 bg-[#F0EDE8] dark:bg-[#38312D] rounded-[12px] p-1">
+              <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1">
                 {[{ id: "day", label: "Day" }, { id: "month", label: "Month" }, { id: "year", label: "Year" }].map((m) => (
                   <button
                     key={m.id}
                     onClick={() => { setUploadMode(m.id); handleUploadReset(); }}
                     className={`px-4 py-1.5 rounded-[10px] text-[12px] font-semibold transition-all ${
                       uploadMode === m.id
-                        ? "bg-white dark:bg-[#221D1A] text-[#19C58A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                        : "text-[#9E9690] hover:text-[#6B6560] dark:hover:text-[#A69B93]"
+                        ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                        : "text-foreground-muted hover:text-foreground-muted"
                     }`}
                   >
                     {m.label}
@@ -2176,7 +2176,7 @@ export default function AttendancePage() {
                   <select
                     value={uploadMonth}
                     onChange={(e) => { setUploadMonth(Number(e.target.value)); handleUploadReset(); }}
-                    className="rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-1.5 text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A]"
+                    className="rounded-[10px] border border-border bg-background px-3 py-1.5 text-[12px] font-semibold text-foreground-muted focus:outline-none focus:border-primary"
                   >
                     {["January","February","March","April","May","June","July","August","September","October","November","December"].map((name, i) => (
                       <option key={i} value={i}>{name}</option>
@@ -2185,7 +2185,7 @@ export default function AttendancePage() {
                   <select
                     value={uploadYear}
                     onChange={(e) => { setUploadYear(Number(e.target.value)); handleUploadReset(); }}
-                    className="rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-1.5 text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A]"
+                    className="rounded-[10px] border border-border bg-background px-3 py-1.5 text-[12px] font-semibold text-foreground-muted focus:outline-none focus:border-primary"
                   >
                     {[2024, 2025, 2026, 2027, 2028].map((y) => (
                       <option key={y} value={y}>{y}</option>
@@ -2197,14 +2197,14 @@ export default function AttendancePage() {
                 <select
                   value={uploadYear}
                   onChange={(e) => { setUploadYear(Number(e.target.value)); handleUploadReset(); }}
-                  className="rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-1.5 text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] focus:outline-none focus:border-[#19C58A]"
+                  className="rounded-[10px] border border-border bg-background px-3 py-1.5 text-[12px] font-semibold text-foreground-muted focus:outline-none focus:border-primary"
                 >
                   {[2024, 2025, 2026, 2027, 2028].map((y) => (
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
               )}
-              <span className="text-[11px] text-[#9E9690]">
+              <span className="text-[11px] text-foreground-muted">
                 {uploadMode === "day" && "Template for a single day"}
                 {uploadMode === "month" && `Template for all days in ${["January","February","March","April","May","June","July","August","September","October","November","December"][uploadMonth]} ${uploadYear}`}
                 {uploadMode === "year" && `Template for all days in ${uploadYear}`}
@@ -2215,10 +2215,10 @@ export default function AttendancePage() {
               <div className="space-y-4">
                 <div className={`flex items-center gap-3 rounded-[12px] px-4 py-3.5 text-[13px] font-semibold border ${
                   uploadResult.skippedCount > 0
-                    ? "bg-[#F8A60A]/10 text-[#F8A60A] border-[#F8A60A]/20"
-                    : "bg-[#19C58A]/10 text-[#19C58A] border-[#19C58A]/20"
+                    ? "bg-warning/10 text-warning border-warning/20"
+                    : "bg-primary/10 text-primary border-primary/20"
                 }`}>
-                  <CheckCircle size={18} className={uploadResult.skippedCount > 0 ? "text-[#F8A60A]" : "text-[#19C58A]"} />
+                  <CheckCircle size={18} className={uploadResult.skippedCount > 0 ? "text-warning" : "text-primary"} />
                   <span>
                     Imported {uploadResult.savedCount} attendance record(s).
                     {uploadResult.skippedCount > 0 && (
@@ -2227,13 +2227,13 @@ export default function AttendancePage() {
                   </span>
                 </div>
                 {uploadResult.skippedDetails?.length > 0 && (
-                  <div className="rounded-[12px] bg-[#FF6E86]/5 border border-[#FF6E86]/15 p-3">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#FF6E86] mb-2">Skipped Rows</p>
+                  <div className="rounded-[12px] bg-error/5 border border-error/15 p-3">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-error mb-2">Skipped Rows</p>
                     <div className="max-h-32 overflow-y-auto space-y-1">
                       {uploadResult.skippedDetails.map((s, i) => (
-                        <div key={i} className="flex items-center justify-between text-[12px] text-[#6B6560] dark:text-[#A69B93]">
+                        <div key={i} className="flex items-center justify-between text-[12px] text-foreground-muted">
                           <span className="font-medium">{s.rowName || s.rowId || `Row ${i + 1}`}{s.date ? ` (${s.date})` : ""}</span>
-                          <span className="text-[#FF6E86]">{s.reason}</span>
+                          <span className="text-error">{s.reason}</span>
                         </div>
                       ))}
                     </div>
@@ -2241,19 +2241,19 @@ export default function AttendancePage() {
                 )}
                 <div className="flex justify-end gap-3">
                   <button onClick={handleUploadReset}
-                    className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+                    className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
                   >Upload another file</button>
                 </div>
               </div>
             ) : (
               <>
                 <div
-                  className="border-2 border-dashed border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-8 text-center transition-all duration-200 hover:border-[#35B6F5] hover:bg-[#35B6F5]/5"
+                  className="border-2 border-dashed border-border rounded-[18px] p-8 text-center transition-all duration-200 hover:border-info hover:bg-info/5"
                   onDragOver={handleUploadDragOver}
                   onDrop={handleUploadDrop}
                 >
-                  <Upload size={36} className="mx-auto mb-3 text-[#35B6F5]" />
-                  <p className="text-[13px] text-[#9E9690] mb-4">
+                  <Upload size={36} className="mx-auto mb-3 text-info" />
+                  <p className="text-[13px] text-foreground-muted mb-4">
                     Drag &amp; drop your attendance sheet here, or browse to upload.
                   </p>
                   <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
@@ -2262,52 +2262,52 @@ export default function AttendancePage() {
                       type="file"
                       accept=".xlsx,.xls,.csv"
                       onChange={parseAttendanceFile}
-                      className="block w-full text-[13px] text-[#9E9690] file:mr-3 file:rounded-[12px] file:border-0 file:bg-[#35B6F5] file:px-4 file:py-2 file:text-[13px] file:font-bold file:text-white file:cursor-pointer file:transition-all duration-200 hover:file:bg-[#2DA0E0] sm:w-auto"
+                      className="block w-full text-[13px] text-foreground-muted file:mr-3 file:rounded-[12px] file:border-0 file:bg-info file:px-4 file:py-2 file:text-[13px] file:font-bold file:text-white file:cursor-pointer file:transition-all duration-200 hover:file:bg-info sm:w-auto"
                     />
                   </div>
                   {uploadFileName && (
-                    <div className="mt-3 inline-flex items-center gap-2 rounded-[10px] bg-[#F8F7F4] dark:bg-[#2A2520] px-3.5 py-2">
-                      <FileSpreadsheet size={14} className="text-[#35B6F5]" />
-                      <span className="text-[13px] text-[#1A1816] dark:text-[#F0EDE8]">{uploadFileName}</span>
+                    <div className="mt-3 inline-flex items-center gap-2 rounded-[10px] bg-surface-muted px-3.5 py-2">
+                      <FileSpreadsheet size={14} className="text-info" />
+                      <span className="text-[13px] text-foreground">{uploadFileName}</span>
                     </div>
                   )}
-                  <div className="mt-4 pt-4 border-t border-[#E5E0D9] dark:border-[#38312D]">
+                  <div className="mt-4 pt-4 border-t border-border">
                     <button type="button" onClick={() => downloadAttendanceTemplate()}
-                      className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#35B6F5] hover:text-[#2DA0E0] transition-colors duration-200"
+                      className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-info hover:text-info transition-colors duration-200"
                     ><Download size={14} />Download template</button>
                   </div>
                 </div>
 
                 {showClockChoice && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-white dark:bg-[#2A2520] rounded-[18px] shadow-xl w-full max-w-md mx-4 p-6">
-                      <h3 className="text-[16px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-2">Do you have Clock In &amp; Clock Out data?</h3>
-                      <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93] mb-5">
+                    <div className="bg-surface-muted rounded-[18px] shadow-xl w-full max-w-md mx-4 p-6">
+                      <h3 className="text-[16px] font-bold text-foreground mb-2">Do you have Clock In &amp; Clock Out data?</h3>
+                      <p className="text-[13px] text-foreground-muted mb-5">
                         Choose the template type based on the data you have for
                         {" "}{uploadMode === "month" ? ["January","February","March","April","May","June","July","August","September","October","November","December"][uploadMonth] : ""} {uploadYear}.
                       </p>
                       <div className="flex flex-col gap-3">
                         <button
                           onClick={() => downloadAttendanceTemplate(true)}
-                          className="w-full rounded-[12px] border-2 border-[#19C58A] bg-[#19C58A]/5 px-4 py-3 text-left transition-all hover:bg-[#19C58A]/10"
+                          className="w-full rounded-[12px] border-2 border-primary bg-primary/5 px-4 py-3 text-left transition-all hover:bg-primary/10"
                         >
-                          <span className="text-[13px] font-bold text-[#19C58A]">Yes, I have Clock In &amp; Clock Out</span>
-                          <p className="text-[12px] text-[#6B6560] dark:text-[#A69B93] mt-1">
+                          <span className="text-[13px] font-bold text-primary">Yes, I have Clock In &amp; Clock Out</span>
+                          <p className="text-[12px] text-foreground-muted mt-1">
                             Template with Check In, Check Out, Break (min), Total Hours, Status, Leave Type, Notes columns
                           </p>
                         </button>
                         <button
                           onClick={() => downloadAttendanceTemplate(false)}
-                          className="w-full rounded-[12px] border-2 border-[#35B6F5] bg-[#35B6F5]/5 px-4 py-3 text-left transition-all hover:bg-[#35B6F5]/10"
+                          className="w-full rounded-[12px] border-2 border-info bg-info/5 px-4 py-3 text-left transition-all hover:bg-info/10"
                         >
-                          <span className="text-[13px] font-bold text-[#35B6F5]">No, I only have summary data</span>
-                          <p className="text-[12px] text-[#6B6560] dark:text-[#A69B93] mt-1">
+                          <span className="text-[13px] font-bold text-info">No, I only have summary data</span>
+                          <p className="text-[12px] text-foreground-muted mt-1">
                             Template with Total Hours &amp; Fixed Break (min) columns
                           </p>
                         </button>
                         <button
                           onClick={() => setShowClockChoice(false)}
-                          className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] px-4 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] hover:border-[#9E9690] transition-all"
+                          className="w-full rounded-[12px] border border-border px-4 py-2.5 text-[13px] font-semibold text-foreground-muted hover:border-border transition-all"
                         >Cancel</button>
                       </div>
                     </div>
@@ -2315,7 +2315,7 @@ export default function AttendancePage() {
                 )}
 
                 {uploadParseError && (
-                  <div className="mt-4 rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">
+                  <div className="mt-4 rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
                     {uploadParseError}
                   </div>
                 )}
@@ -2323,59 +2323,59 @@ export default function AttendancePage() {
                 {uploadParsedRows.length > 0 && (
                   <div className="mt-5">
                     <div className="mb-3 flex items-center justify-between">
-                      <p className="text-[13px] text-[#1A1816] dark:text-[#F0EDE8]">
-                        <span className="font-bold text-[#19C58A]">{uploadParsedRows.filter((r) => r.errors.length === 0).length} ready to import</span>
+                      <p className="text-[13px] text-foreground">
+                        <span className="font-bold text-primary">{uploadParsedRows.filter((r) => r.errors.length === 0).length} ready to import</span>
                         {uploadParsedRows.filter((r) => r.errors.length > 0).length > 0 && (
-                          <span className="ml-2 text-[#FF6E86]">· {uploadParsedRows.filter((r) => r.errors.length > 0).length} with errors</span>
+                          <span className="ml-2 text-error">· {uploadParsedRows.filter((r) => r.errors.length > 0).length} with errors</span>
                         )}
                       </p>
                       <button type="button" onClick={() => { handleUploadReset(); if (uploadFileInputRef.current) uploadFileInputRef.current.click(); }}
-                        className="text-[13px] font-semibold text-[#35B6F5] hover:text-[#2DA0E0] transition-colors duration-200"
+                        className="text-[13px] font-semibold text-info hover:text-info transition-colors duration-200"
                       >Re-upload</button>
                     </div>
 
-                    <div className="max-h-80 overflow-auto rounded-[14px] border border-[#E5E0D9] dark:border-[#38312D]">
+                    <div className="max-h-80 overflow-auto rounded-[14px] border border-border">
                       <table className="min-w-full text-[13px]">
-                        <thead className="bg-[#F8F7F4] dark:bg-[#1A1816] sticky top-0">
+                        <thead className="bg-background sticky top-0">
                           <tr>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Row</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Employee</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Date</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">In</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Out</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Status</th>
-                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Errors</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Row</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Date</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">In</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Out</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
+                            <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Errors</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]">
+                        <tbody className="divide-y divide-border">
                           {uploadParsedRows.map((item, i) => (
-                            <tr key={i} className={item.errors.length > 0 ? "bg-[#FF6E86]/5" : "hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] transition-colors"}>
-                              <td className="px-3 py-2 text-[12px] text-[#9E9690]">{item.rowNum}</td>
-                              <td className="px-3 py-2 font-medium text-[#1A1816] dark:text-[#F0EDE8]">
+                            <tr key={i} className={item.errors.length > 0 ? "bg-error/5" : "hover:bg-background dark:hover:bg-surface-muted transition-colors"}>
+                              <td className="px-3 py-2 text-[12px] text-foreground-muted">{item.rowNum}</td>
+                              <td className="px-3 py-2 font-medium text-foreground">
                                 <div className="flex flex-col">
                                   <span>{item.record.name || `ID: ${item.record.employeeId || "?"}`}</span>
-                                  {item.record.employeeCode && <span className="text-[10px] text-[#9E9690] font-normal">{item.record.employeeCode}</span>}
+                                  {item.record.employeeCode && <span className="text-[10px] text-foreground-muted font-normal">{item.record.employeeCode}</span>}
                                 </div>
-                                {item.matchedExisting && <span className="ml-1.5 text-[10px] font-bold text-[#19C58A] bg-[#19C58A]/10 rounded-full px-2 py-0.5">matched</span>}
+                                {item.matchedExisting && <span className="ml-1.5 text-[10px] font-bold text-primary bg-primary/10 rounded-full px-2 py-0.5">matched</span>}
                               </td>
-                              <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{item.record.date || "-"}</td>
-                              <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{item.record.checkIn || "-"}</td>
-                              <td className="px-3 py-2 text-[12px] text-[#6B6560] dark:text-[#A69B93]">{item.record.checkOut || "-"}</td>
+                              <td className="px-3 py-2 text-[12px] text-foreground-muted">{item.record.date || "-"}</td>
+                              <td className="px-3 py-2 text-[12px] text-foreground-muted">{item.record.checkIn || "-"}</td>
+                              <td className="px-3 py-2 text-[12px] text-foreground-muted">{item.record.checkOut || "-"}</td>
                               <td className="px-3 py-2">
                                 <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                                  item.record.status === "present" ? "bg-[#19C58A]/10 text-[#19C58A]"
-                                  : item.record.status === "absent" ? "bg-[#FF6E86]/10 text-[#FF6E86]"
-                                  : "bg-[#35B6F5]/10 text-[#35B6F5]"
+                                  item.record.status === "present" ? "bg-primary/10 text-primary"
+                                  : item.record.status === "absent" ? "bg-error/10 text-error"
+                                  : "bg-info/10 text-info"
                                 }`}>{item.record.status}</span>
                                 {item.record.isHalfDay && (
-                                  <span className="ml-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[8px] font-bold bg-[#F8A60A]/10 text-[#F8A60A] border border-[#F8A60A]/20">Half</span>
+                                  <span className="ml-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[8px] font-bold bg-warning/10 text-warning border border-warning/20">Half</span>
                                 )}
                               </td>
                               <td className="px-3 py-2">
                                 {item.errors.length > 0 && (
                                   <ul className="space-y-0.5">
                                     {item.errors.map((err, j) => (
-                                      <li key={j} className="text-[11px] text-[#FF6E86]">· {err}</li>
+                                      <li key={j} className="text-[11px] text-error">· {err}</li>
                                     ))}
                                   </ul>
                                 )}
@@ -2388,26 +2388,26 @@ export default function AttendancePage() {
                   </div>
                 )}
 
-                <div className="mt-6 flex justify-end gap-3 border-t border-[#E5E0D9] dark:border-[#38312D] pt-5">
+                <div className="mt-6 flex justify-end gap-3 border-t border-border pt-5">
                   <button onClick={handleUploadReset}
-                    className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+                    className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
                   >Cancel</button>
                   <button onClick={handleUploadSave} disabled={uploadParsedRows.filter((r) => r.errors.length === 0).length === 0 || uploadSaving || checkingExistingAttendance}
-                    className="bg-[#19C58A] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#15B07A] shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:hover:translate-y-0"
+                    className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:hover:translate-y-0"
                   >{checkingExistingAttendance ? "Checking…" : uploadSaving ? "Saving..." : `Save ${uploadParsedRows.filter((r) => r.errors.length === 0).length || ""} Record(s)`}</button>
                 </div>
 
                 {pendingOverrideRows && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="bg-white dark:bg-[#2A2520] rounded-[18px] shadow-xl w-full max-w-md mx-4 p-6">
-                      <h3 className="text-[16px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-2">Attendance already exists</h3>
-                      <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93] mb-5">
+                    <div className="bg-surface-muted rounded-[18px] shadow-xl w-full max-w-md mx-4 p-6">
+                      <h3 className="text-[16px] font-bold text-foreground mb-2">Attendance already exists</h3>
+                      <p className="text-[13px] text-foreground-muted mb-5">
                         Attendance for this payroll period already exists. Do you want to override the existing attendance?
                       </p>
                       <div className="flex justify-end gap-3">
                         <button
                           onClick={() => setPendingOverrideRows(null)}
-                          className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+                          className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
                         >
                           Cancel
                         </button>
@@ -2417,7 +2417,7 @@ export default function AttendancePage() {
                             setPendingOverrideRows(null);
                             performUploadSave(rows);
                           }}
-                          className="bg-[#FF6E86] rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#E55A72] shadow-[0_2px_8px_rgba(255,110,134,0.3)]"
+                          className="bg-error rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-error shadow-[0_2px_8px_rgba(255,110,134,0.3)]"
                         >
                           Override
                         </button>
@@ -2429,9 +2429,9 @@ export default function AttendancePage() {
             )}
           </div>
 
-          <div className="rounded-[12px] bg-[#35B6F5]/10 border border-[#35B6F5]/20 p-4">
-            <p className="text-[11px] font-bold text-[#35B6F5] mb-1 uppercase tracking-widest">How it works</p>
-            <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">
+          <div className="rounded-[12px] bg-info/10 border border-info/20 p-4">
+            <p className="text-[11px] font-bold text-info mb-1 uppercase tracking-widest">How it works</p>
+            <p className="text-[13px] text-foreground-muted">
               <strong>Day mode:</strong> One row per employee — fill in Date, Check In, Check Out, Status, Leave Type, and Notes.<br />
               <strong>Month / Year mode:</strong> One row per employee, columns are day numbers (1, 2, 3…). Fill each cell with a status: <strong>present</strong>, <strong>absent</strong>, <strong>leave</strong>, or <strong>off</strong>. Weekends and holidays are pre-filled as <strong>off</strong>.<br />
               <strong>Clock data (monthly):</strong> One row per employee per day — fill in Check In, Check Out, Break, Status, Leave Type, Rewards, Bonus, and Notes. Total Hours is auto-calculated when both Check In and Check Out are filled; you can also enter it manually for rows without clock times.<br />
@@ -2445,28 +2445,28 @@ export default function AttendancePage() {
         <div className="space-y-4">
           {/* Time Range + Search Filter */}
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Attendance Records</h3>
+            <h3 className="text-[15px] font-bold text-foreground">Attendance Records</h3>
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-2 bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[12px] px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" title="Start date">
-                <CalendarDays size={14} className="text-[#9E9690]" />
+              <div className="flex items-center gap-2 bg-surface border border-border rounded-[12px] px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" title="Start date">
+                <CalendarDays size={14} className="text-foreground-muted" />
                 <input type="date" value={filterStartDate} onChange={(e) => setFilterStartDate(e.target.value)}
                   title="Start date — the range extends forward by the selected duration (1W/1M/4M...)"
-                  className="text-xs border-none outline-none bg-transparent text-[#6B6560] dark:text-[#A69B93] font-medium w-28" />
+                  className="text-xs border-none outline-none bg-transparent text-foreground-muted font-medium w-28" />
               </div>
               {timeRange > 0 && (
-                <span className="text-[11px] text-[#9E9690]">
+                <span className="text-[11px] text-foreground-muted">
                   {formatDisplayDate(getDateRange(timeRange, filterStartDate).start)} → {formatDisplayDate(getDateRange(timeRange, filterStartDate).end)}
                 </span>
               )}
-              <div className="flex gap-1 bg-[#F0EDE8] dark:bg-[#38312D] rounded-[12px] p-1">
+              <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1">
                 {TIME_RANGES.map((r) => (
                   <button
                     key={r.label}
                     onClick={() => setTimeRange(r.days)}
                     className={`px-3 py-1.5 rounded-[10px] text-[12px] font-semibold transition-all ${
                       timeRange === r.days
-                        ? "bg-white dark:bg-[#221D1A] text-[#19C58A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                        : "text-[#9E9690] hover:text-[#6B6560] dark:hover:text-[#A69B93]"
+                        ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+                        : "text-foreground-muted hover:text-foreground-muted"
                     }`}
                   >
                     {r.label}
@@ -2475,28 +2475,28 @@ export default function AttendancePage() {
               </div>
               <button onClick={handleResetAll}
                 title="Clears unsaved edits only — already-saved attendance is never deleted."
-                className="flex items-center gap-1.5 border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] px-3 py-1.5 text-[12px] font-semibold text-[#FF6E86] transition-all duration-200 hover:border-[#FF6E86]">
+                className="flex items-center gap-1.5 border border-border bg-surface-muted rounded-[12px] px-3 py-1.5 text-[12px] font-semibold text-error transition-all duration-200 hover:border-error">
                 <Trash2 size={14} />
                 Clear Unsaved
               </button>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             {/* Employee Search */}
             <div className="relative mb-4">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9E9690]" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted" />
               <input
                 type="text"
                 placeholder="Search by employee name or department..."
                 value={employeeSearch}
                 onChange={(e) => setEmployeeSearch(e.target.value)}
-                className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] pl-9 pr-3 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                className="w-full rounded-[12px] border border-border bg-background pl-9 pr-3 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
               />
             </div>
 
             {historyLoading ? (
-              <div className="text-center py-8 text-[#9E9690] text-[13px]">Loading records...</div>
+              <div className="text-center py-8 text-foreground-muted text-[13px]">Loading records...</div>
             ) : employeeAttendanceSummary.length === 0 ? (
               <div className="text-center py-8">
                 <List size={32} className="mx-auto mb-2 opacity-40" />
@@ -2505,82 +2505,82 @@ export default function AttendancePage() {
             ) : (
               <>
                 <div className="grid grid-cols-4 gap-3 mb-4">
-                  <div className="bg-[#F8F7F4] dark:bg-[#1A1816] rounded-[12px] p-3 text-center border border-[#E5E0D9] dark:border-[#38312D]">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">Employees</p>
-                    <p className="text-[18px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{filteredSummary.length}</p>
+                  <div className="bg-background rounded-[12px] p-3 text-center border border-border">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Employees</p>
+                    <p className="text-[18px] font-bold text-foreground">{filteredSummary.length}</p>
                   </div>
-                  <div className="bg-[#19C58A]/10 rounded-[12px] p-3 text-center border border-[#19C58A]/20">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#19C58A]">Total Working Days</p>
-                    <p className="text-[18px] font-bold text-[#19C58A]">{totalWorkingDays}</p>
+                  <div className="bg-primary/10 rounded-[12px] p-3 text-center border border-primary/20">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-primary">Total Working Days</p>
+                    <p className="text-[18px] font-bold text-primary">{totalWorkingDays}</p>
                   </div>
-                  <div className="bg-[#F8A60A]/10 rounded-[12px] p-3 text-center border border-[#F8A60A]/20">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#F8A60A]">Present Days</p>
-                    <p className="text-[18px] font-bold text-[#F8A60A]">{filteredSummary.reduce((s, e) => s + e.present, 0)}</p>
+                  <div className="bg-warning/10 rounded-[12px] p-3 text-center border border-warning/20">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-warning">Present Days</p>
+                    <p className="text-[18px] font-bold text-warning">{filteredSummary.reduce((s, e) => s + e.present, 0)}</p>
                   </div>
-                  <div className="bg-[#FF6E86]/10 rounded-[12px] p-3 text-center border border-[#FF6E86]/20">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#FF6E86]">Absent Days</p>
-                    <p className="text-[18px] font-bold text-[#FF6E86]">{filteredSummary.reduce((s, e) => s + e.absent, 0)}</p>
+                  <div className="bg-error/10 rounded-[12px] p-3 text-center border border-error/20">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-error">Absent Days</p>
+                    <p className="text-[18px] font-bold text-error">{filteredSummary.reduce((s, e) => s + e.absent, 0)}</p>
                   </div>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-[#E5E0D9] dark:border-[#38312D]">
-                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Employee</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Department</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Total Working Days</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Present Days</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Paid Leave</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Unpaid Leave</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Leave</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Absent</th>
-                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">Total Working Hours</th>
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee</th>
+                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Department</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Working Days</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Present Days</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Paid Leave</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Unpaid Leave</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Leave</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Absent</th>
+                        <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Working Hours</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]">
+                    <tbody className="divide-y divide-border">
                       {filteredSummary.map((emp, i) => (
-                        <tr key={emp.employeeId || i} className="hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] transition-colors">
-                          <td className="px-4 py-3 font-medium text-[#1A1816] dark:text-[#F0EDE8]">
+                        <tr key={emp.employeeId || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors">
+                          <td className="px-4 py-3 font-medium text-foreground">
                             <div className="flex items-center gap-2.5">
-                              <div className="h-8 w-8 rounded-full bg-[#19C58A]/10 flex items-center justify-center text-[11px] font-bold text-[#19C58A]">
+                              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-[11px] font-bold text-primary">
                                 {(emp.name || "?").charAt(0).toUpperCase()}
                               </div>
                               {emp.name}
                             </div>
                         </td>
-                          <td className="px-4 py-3 text-[#6B6560] dark:text-[#A69B93]">{emp.department || "-"}</td>
-                          <td className="px-4 py-3 text-center font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{emp.totalDays || 0}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{emp.department || "-"}</td>
+                          <td className="px-4 py-3 text-center font-semibold text-foreground">{emp.totalDays || 0}</td>
                           <td className="px-4 py-3 text-center">
-                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-[#19C58A]/10 text-[#19C58A] text-[11px] font-bold">
+                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-primary/10 text-primary text-[11px] font-bold">
                               {emp.present}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-[#35B6F5]/10 text-[#35B6F5] text-[11px] font-bold">
+                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-info/10 text-info text-[11px] font-bold">
                               {emp.paidLeaves || 0}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-[#F8A60A]/10 text-[#F8A60A] text-[11px] font-bold">
+                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-warning/10 text-warning text-[11px] font-bold">
                               {emp.unpaidLeaves || 0}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
                             <span
                               title="Leave days (all types combined) — click to manage in Payroll Leaves"
-                              className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-[#9D7BF2]/10 text-[#9D7BF2] text-[11px] font-bold cursor-pointer hover:bg-[#9D7BF2]/20 transition-all"
+                              className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-category-teal/10 text-category-teal text-[11px] font-bold cursor-pointer hover:bg-category-teal/20 transition-all"
                               onClick={() => navigate("/payroll/leaves")}
                             >
                               {emp.leave}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-[#FF6E86]/10 text-[#FF6E86] text-[11px] font-bold">
+                            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-error/10 text-error text-[11px] font-bold">
                               {emp.absent}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                          <td className="px-4 py-3 text-center font-semibold text-foreground">
                             {formatHours(emp.totalHours)}
                           </td>
                         </tr>
@@ -2588,7 +2588,7 @@ export default function AttendancePage() {
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[10px] text-[#9E9690] mt-2">All columns reflect saved attendance records for this period. Leave Days link to Payroll Leaves — click to manage there.</p>
+                <p className="text-[10px] text-foreground-muted mt-2">All columns reflect saved attendance records for this period. Leave Days link to Payroll Leaves — click to manage there.</p>
               </>
             )}
           </div>
@@ -2597,39 +2597,39 @@ export default function AttendancePage() {
 
       {activeTab === "summary" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h3 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-4">Attendance Summary</h3>
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h3 className="text-[15px] font-bold text-foreground mb-4">Attendance Summary</h3>
             <div className="space-y-4">
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <span className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">Total Employees</span>
-                <span className="text-[18px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{totalEmployeeCount}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-[13px] text-foreground-muted">Total Employees</span>
+                <span className="text-[18px] font-bold text-foreground">{totalEmployeeCount}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <span className="text-[13px] text-[#9D7BF2] font-medium">Active Employees</span>
-                <span className="text-[18px] font-bold text-[#9D7BF2]">{records.length}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-[13px] text-category-teal font-medium">Active Employees</span>
+                <span className="text-[18px] font-bold text-category-teal">{records.length}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <span className="text-[13px] text-[#19C58A] font-medium">Present Days</span>
-                <span className="text-[18px] font-bold text-[#19C58A]">{rangePresent}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-[13px] text-primary font-medium">Present Days</span>
+                <span className="text-[18px] font-bold text-primary">{rangePresent}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <span className="text-[13px] text-[#FF6E86] font-medium">Absent Days</span>
-                <span className="text-[18px] font-bold text-[#FF6E86]">{rangeAbsent}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-[13px] text-error font-medium">Absent Days</span>
+                <span className="text-[18px] font-bold text-error">{rangeAbsent}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <span className="text-[13px] text-[#35B6F5] font-medium">Leave Days</span>
-                <span className="text-[18px] font-bold text-[#35B6F5]">{rangeOnLeave}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-[13px] text-info font-medium">Leave Days</span>
+                <span className="text-[18px] font-bold text-info">{rangeOnLeave}</span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <span className="text-[13px] text-[#F8A60A] font-medium">Total Working Days (selected period)</span>
-                <span className="text-[18px] font-bold text-[#F8A60A]">{totalWorkingDays}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border">
+                <span className="text-[13px] text-warning font-medium">Total Working Days (selected period)</span>
+                <span className="text-[18px] font-bold text-warning">{totalWorkingDays}</span>
               </div>
             </div>
           </div>
 
-          <div className="md:col-span-2 rounded-[12px] bg-[#F8A60A]/10 border border-[#F8A60A]/20 p-4">
-            <p className="text-[11px] font-bold text-[#F8A60A] mb-1 uppercase tracking-widest">Payroll Impact</p>
-            <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">
+          <div className="md:col-span-2 rounded-[12px] bg-warning/10 border border-warning/20 p-4">
+            <p className="text-[11px] font-bold text-warning mb-1 uppercase tracking-widest">Payroll Impact</p>
+            <p className="text-[13px] text-foreground-muted">
               Attendance status and working hours are used to calculate accurate payroll.
               Absences and leaves affect gross pay. Save records before creating a payroll run to include this data.
             </p>

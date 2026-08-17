@@ -82,7 +82,7 @@ export default function ForgotPasswordPage() {
                     value={email} onChange={e => setEmail(e.target.value)}
                     placeholder="you@company.com"
                     style={inputStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -92,8 +92,8 @@ export default function ForgotPasswordPage() {
                     width: "100%", padding: "13px", borderRadius: "50px", border: "none",
                     fontSize: "15px", fontWeight: "600", color: "white",
                     cursor: submitting ? "not-allowed" : "pointer",
-                    background: submitting ? "#FFA366" : "linear-gradient(135deg, #FF8C00, #FFA500)",
-                    boxShadow: "0 4px 16px rgba(255,140,0,0.4)",
+                    background: submitting ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
+                    boxShadow: "0 4px 16px rgba(8,124,193,0.4)",
                     display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
                     marginTop: "4px", letterSpacing: "0.01em",
                   }}>
@@ -117,7 +117,7 @@ export default function ForgotPasswordPage() {
               <button type="button" onClick={() => { setSent(false); setEmail(""); }}
                 style={{
                   background: "none", border: "none", cursor: "pointer",
-                  fontSize: "13px", color: "#FF6B00", fontWeight: "600", fontFamily: "inherit",
+                  fontSize: "13px", color: "#087CC1", fontWeight: "600", fontFamily: "inherit",
                 }}>
                 Use a different email
               </button>

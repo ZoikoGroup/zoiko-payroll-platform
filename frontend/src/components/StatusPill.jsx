@@ -1,19 +1,21 @@
 // Generalized from the STATUS_STYLES map in modules/organization-admin/OrganizationPage.jsx
 // so every Super Admin table/page shares one status-pill implementation instead of
-// hand-rolling green/red spans per page.
+// hand-rolling green/red spans per page. Colors reference the centralized design
+// tokens (frontend/src/index.css) via CSS custom properties so pills stay correct
+// in both light and dark theme automatically.
 const STATUS_STYLES = {
-  active: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
-  approved: { bg: "rgba(110,90,230,0.10)", color: "#4B3BB0", border: "rgba(110,90,230,0.22)" },
-  pending: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
-  on_hold: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
-  suspended: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
-  rejected: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
-  deactivated: { bg: "rgba(28,24,40,0.07)", color: "#635C72", border: "rgba(28,24,40,0.16)" },
-  inactive: { bg: "rgba(28,24,40,0.07)", color: "#635C72", border: "rgba(28,24,40,0.16)" },
+  active: { bg: "var(--color-success-light)", color: "var(--color-success)", border: "color-mix(in srgb, var(--color-success) 35%, transparent)" },
+  approved: { bg: "var(--color-category-teal-light)", color: "var(--color-category-teal)", border: "color-mix(in srgb, var(--color-category-teal) 35%, transparent)" },
+  pending: { bg: "var(--color-warning-light)", color: "var(--color-warning)", border: "color-mix(in srgb, var(--color-warning) 35%, transparent)" },
+  on_hold: { bg: "var(--color-warning-light)", color: "var(--color-warning)", border: "color-mix(in srgb, var(--color-warning) 35%, transparent)" },
+  suspended: { bg: "var(--color-error-light)", color: "var(--color-error)", border: "color-mix(in srgb, var(--color-error) 35%, transparent)" },
+  rejected: { bg: "var(--color-error-light)", color: "var(--color-error)", border: "color-mix(in srgb, var(--color-error) 35%, transparent)" },
+  deactivated: { bg: "var(--color-surface-muted)", color: "var(--color-foreground-muted)", border: "var(--color-border)" },
+  inactive: { bg: "var(--color-surface-muted)", color: "var(--color-foreground-muted)", border: "var(--color-border)" },
 };
 
 export default function StatusPill({ status, label }) {
-  if (!status) return <span className="text-slate-400">—</span>;
+  if (!status) return <span className="text-foreground-disabled">—</span>;
   const s = STATUS_STYLES[status] || STATUS_STYLES.deactivated;
   const text = label || status.charAt(0).toUpperCase() + status.slice(1);
   return (

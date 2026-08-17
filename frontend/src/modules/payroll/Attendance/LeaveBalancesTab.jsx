@@ -2,15 +2,15 @@ import { useState, useMemo } from "react";
 import { Search, X, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 
 const COLORS = [
-  "bg-[#19C58A]", "bg-[#35B6F5]", "bg-[#9D7BF2]",
-  "bg-[#FF6E86]", "bg-[#F8A60A]", "bg-[#06B6D4]",
+  "bg-primary", "bg-info", "bg-category-teal",
+  "bg-error", "bg-warning", "bg-brand-cyan",
 ];
 
 const TYPE_COLS = [
-  { key: "paid",    label: "Paid",    color: "#35B6F5" },
-  { key: "unpaid",  label: "Unpaid",  color: "#9E9690" },
-  { key: "sick",    label: "Sick",    color: "#FF6E86" },
-  { key: "compOff", label: "Comp-Off", color: "#9D7BF2" },
+  { key: "paid",    label: "Paid",    color: "var(--color-info)" },
+  { key: "unpaid",  label: "Unpaid",  color: "var(--color-foreground-muted)" },
+  { key: "sick",    label: "Sick",    color: "var(--color-error)" },
+  { key: "compOff", label: "Comp-Off", color: "var(--color-category-teal)" },
 ];
 
 function InitialsAvatar({ name }) {
@@ -27,23 +27,23 @@ function InitialsAvatar({ name }) {
 }
 
 function SortIcon({ col, sortKey, sortOrder }) {
-  if (sortKey !== col) return <ChevronsUpDown size={12} className="text-[#9E9690] ml-1 inline" />;
+  if (sortKey !== col) return <ChevronsUpDown size={12} className="text-foreground-muted ml-1 inline" />;
   return sortOrder === "asc"
-    ? <ChevronUp size={12} className="text-[#19C58A] ml-1 inline" />
-    : <ChevronDown size={12} className="text-[#19C58A] ml-1 inline" />;
+    ? <ChevronUp size={12} className="text-primary ml-1 inline" />
+    : <ChevronDown size={12} className="text-primary ml-1 inline" />;
 }
 
 function UtilBar({ used, total }) {
   const pct = total > 0 ? Math.round((used / total) * 100) : 0;
   return (
     <div className="flex items-center gap-2 min-w-[100px]">
-      <div className="flex-1 h-1.5 bg-[#E5E0D9] dark:bg-[#38312D] rounded-full overflow-hidden">
+      <div className="flex-1 h-1.5 bg-border rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-300"
           style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: pct > 80 ? "#FF6E86" : pct > 50 ? "#F8A60A" : "#19C58A" }}
         />
       </div>
-      <span className="text-[11px] font-bold text-[#6B6560] dark:text-[#A69B93] w-[36px] text-right">{pct}%</span>
+      <span className="text-[11px] font-bold text-foreground-muted w-[36px] text-right">{pct}%</span>
     </div>
   );
 }
@@ -105,38 +105,38 @@ export default function LeaveBalancesTab({ employees = [], allocations = [] }) {
     });
   }, [rows, search, sortKey, sortOrder]);
 
-  const thCls = "px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] select-none whitespace-nowrap";
-  const thCenterCls = "px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-[#9E9690] select-none whitespace-nowrap cursor-pointer hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-all duration-150";
+  const thCls = "px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted select-none whitespace-nowrap";
+  const thCenterCls = "px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted select-none whitespace-nowrap cursor-pointer hover:bg-surface-muted transition-all duration-150";
 
   return (
     <div className="space-y-4">
       {/* Search */}
       <div className="relative max-w-sm">
-        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9E9690] pointer-events-none" />
+        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
         <input
           type="text"
           placeholder="Search by name or department…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] pl-10 pr-10 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+          className="w-full rounded-[12px] border border-border bg-surface pl-10 pr-10 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
         />
         {search && (
-          <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9E9690] hover:text-[#6B6560] transition-colors" aria-label="Clear">
+          <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground-muted hover:text-foreground-muted transition-colors" aria-label="Clear">
             <X size={14} />
           </button>
         )}
       </div>
 
       {/* Table */}
-      <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="overflow-x-auto">
           <table className="min-w-full table-fixed">
             <thead>
-              <tr className="bg-[#F8F7F4] dark:bg-[#2A2520] border-b border-[#E5E0D9] dark:border-[#38312D]">
-                <th className={`${thCls} w-52 cursor-pointer hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-all duration-150`} onClick={() => toggleSort("name")}>
+              <tr className="bg-surface-muted border-b border-border">
+                <th className={`${thCls} w-52 cursor-pointer hover:bg-surface-muted transition-all duration-150`} onClick={() => toggleSort("name")}>
                   Employee <SortIcon col="name" sortKey={sortKey} sortOrder={sortOrder} />
                 </th>
-                <th className={`${thCls} w-32 cursor-pointer hover:bg-[#F0EDE8] dark:hover:bg-[#38312D] transition-all duration-150`} onClick={() => toggleSort("department")}>
+                <th className={`${thCls} w-32 cursor-pointer hover:bg-surface-muted transition-all duration-150`} onClick={() => toggleSort("department")}>
                   Dept <SortIcon col="department" sortKey={sortKey} sortOrder={sortOrder} />
                 </th>
                 {TYPE_COLS.map((tc) => (
@@ -152,44 +152,44 @@ export default function LeaveBalancesTab({ employees = [], allocations = [] }) {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#F0EDE8] dark:divide-[#38312D]/50">
+            <tbody className="divide-y divide-border">
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-6 py-16 text-center">
-                    <p className="text-[13px] text-[#9E9690] font-medium">No employees found</p>
+                    <p className="text-[13px] text-foreground-muted font-medium">No employees found</p>
                   </td>
                 </tr>
               ) : (
                 filtered.map((r, idx) => (
-                  <tr key={r.employeeId} className={`transition-colors duration-150 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] ${idx % 2 === 0 ? "bg-white dark:bg-[#221D1A]" : "bg-[#F8F7F4]/50 dark:bg-[#2A2520]/50"}`}>
+                  <tr key={r.employeeId} className={`transition-colors duration-150 hover:bg-background dark:hover:bg-surface-muted ${idx % 2 === 0 ? "bg-surface" : "bg-surface-muted/50"}`}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <InitialsAvatar name={r.name} />
                         <div className="min-w-0">
-                          <p className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8] truncate">{r.name || "—"}</p>
-                          <p className="text-[10px] text-[#9E9690]">ID #{r.employeeId}</p>
+                          <p className="text-[13px] font-semibold text-foreground truncate">{r.name || "—"}</p>
+                          <p className="text-[10px] text-foreground-muted">ID #{r.employeeId}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       {r.department ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-[8px] bg-[#35B6F5]/10 text-[#35B6F5] text-[11px] font-semibold">{r.department}</span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-[8px] bg-info/10 text-info text-[11px] font-semibold">{r.department}</span>
                       ) : (
-                        <span className="text-[#9E9690] text-[11px]">—</span>
+                        <span className="text-foreground-muted text-[11px]">—</span>
                       )}
                     </td>
                     {TYPE_COLS.map((tc) => {
                       const data = r[tc.key];
                       return (
                         <td key={tc.key} className="px-4 py-3 text-center">
-                          <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
-                            {data.used}<span className="text-[#9E9690] font-normal">/{data.total}</span>
+                          <span className="text-[13px] font-semibold text-foreground">
+                            {data.used}<span className="text-foreground-muted font-normal">/{data.total}</span>
                           </span>
                         </td>
                       );
                     })}
                     <td className="px-4 py-3 text-center">
-                      <span className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">{r.totalUsed}</span>
+                      <span className="text-[13px] font-bold text-foreground">{r.totalUsed}</span>
                     </td>
                     <td className="px-4 py-3">
                       <UtilBar used={r.totalUsed} total={r.totalAllowed} />
@@ -200,11 +200,11 @@ export default function LeaveBalancesTab({ employees = [], allocations = [] }) {
             </tbody>
           </table>
         </div>
-        <div className="bg-[#F8F7F4] dark:bg-[#2A2520] border-t border-[#E5E0D9] dark:border-[#38312D] px-4 py-2.5 flex items-center justify-between">
-          <p className="text-[11px] text-[#9E9690]">
-            Showing <span className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{filtered.length}</span> employee{filtered.length !== 1 ? "s" : ""}
+        <div className="bg-surface-muted border-t border-border px-4 py-2.5 flex items-center justify-between">
+          <p className="text-[11px] text-foreground-muted">
+            Showing <span className="font-semibold text-foreground">{filtered.length}</span> employee{filtered.length !== 1 ? "s" : ""}
           </p>
-          <p className="text-[11px] text-[#9E9690]">Defaults: Paid 20 · Unpaid 10 · Sick 12 · Comp-Off 5</p>
+          <p className="text-[11px] text-foreground-muted">Defaults: Paid 20 · Unpaid 10 · Sick 12 · Comp-Off 5</p>
         </div>
       </div>
     </div>

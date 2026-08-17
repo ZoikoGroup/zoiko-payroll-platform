@@ -41,6 +41,27 @@ export const assignCompliancePolicy = (id, organizationIds) =>
 export const getComplianceConfigurations = (params) =>
   apiFetch("/api/super-admin/compliance/configurations", { params });
 
+// ── Canonical Tax Configuration (government-mandated values; Super Admin-only) ──
+// organization_id IS NULL rows on payroll_tax_slabs/payroll_contribution_rates —
+// the actual government-mandated values, linked to a "tax" JurisdictionPack.
+// Org-scoped rows (what payroll calculation actually reads) are populated
+// FROM these via sync_org_rates_from_canonical — not a duplicate system.
+
+export const getCanonicalTaxSlabs = (params) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/slabs", { params });
+
+export const upsertCanonicalTaxSlab = (payload) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/slabs", { method: "PUT", body: payload });
+
+export const getCanonicalContributionRates = (params) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/contribution-rates", { params });
+
+export const upsertCanonicalContributionRate = (payload) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/contribution-rates", { method: "PUT", body: payload });
+
+export const getTaxConfigurationAudit = (params) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/audit", { params });
+
 // ── Finance ──────────────────────────────────────────────────────────────
 
 export const getFinanceOverview = (params) => apiFetch("/api/super-admin/finance/overview", { params });

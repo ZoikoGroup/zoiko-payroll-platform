@@ -38,7 +38,7 @@ from app.modules.payroll.models import (
     PayrollRun, PayslipItem, PayrollAttendanceRecord, PayrollLeaveAllocation,
     PayrollLeaveRequest,
     ContributionRate, TaxSlab, CompanyComplianceDetails, ComplianceDocument, PayrollActivityLog,
-    JurisdictionPack, PayrollHoliday,
+    JurisdictionPack, PayrollHoliday, TaxConfigurationAudit,
     PayrollStatus, PayslipStatus, ActivityStatus, ComplianceDocumentStatus,
     PAYROLL_STATUS_ORDER,
 )
@@ -48,7 +48,7 @@ from app.modules.payroll.schemas import (
     EmployeeCreate, EmployeeUpdate, BulkEmployeeItem, BulkEmployeeRequest,
     BulkDeleteRequest,
     AttendanceRecordCreate, BulkAttendanceRequest,
-    JurisdictionPackUpsert,
+    JurisdictionPackUpsert, CanonicalTaxSlabUpsert, CanonicalContributionRateUpsert,
 )
 from app.core.exceptions import NotFoundException, BadRequestException
 from fastapi import HTTPException, status as http_status
@@ -200,13 +200,32 @@ def _seed_contribution_rates(db: Session, organization_id: int, country: str = "
     return rows
 
 
+def _seed_org_rates_for_country(db: Session, organization_id: int, country: str) -> bool:
+    """First-use seed for an org+country: pulls from the canonical
+    Super-Admin-owned tax pack (engine/tax_resolver.py) when one exists,
+    falling back to the hardcoded _CONTRIBUTION_RATES_BY_COUNTRY/
+    _TAX_SLABS_BY_COUNTRY dicts otherwise — so a jurisdiction with no
+    canonical pack configured yet (a brand-new country Super Admin hasn't
+    set up) still seeds exactly as it did before this existed. Returns
+    True if canonical data was used."""
+    result = sync_org_rates_from_canonical(db, organization_id, country)
+    return bool(result.get("synced"))
+
+
 def get_contribution_rates(db: Session, organization_id: int = None, country: str = "IN") -> List[ContributionRate]:
     query = db.query(ContributionRate)
     query = _apply_org_filter(query, ContributionRate, organization_id)
     query = query.filter(ContributionRate.jurisdiction_country == country)
     rows = query.order_by(ContributionRate.sort_order).all()
     if not rows and organization_id:
-        rows = _seed_contribution_rates(db, organization_id, country)
+        if not _seed_org_rates_for_country(db, organization_id, country):
+            _seed_contribution_rates(db, organization_id, country)
+        rows = (
+            db.query(ContributionRate)
+            .filter(ContributionRate.organization_id == organization_id, ContributionRate.jurisdiction_country == country)
+            .order_by(ContributionRate.sort_order)
+            .all()
+        )
     return rows
 
 
@@ -292,7 +311,14 @@ def get_tax_slabs(db: Session, organization_id: int = None, country: str = "IN")
     query = query.filter(TaxSlab.jurisdiction_country == country)
     rows = query.order_by(TaxSlab.sort_order).all()
     if not rows and organization_id:
-        rows = _seed_tax_slabs(db, organization_id, country)
+        if not _seed_org_rates_for_country(db, organization_id, country):
+            _seed_tax_slabs(db, organization_id, country)
+        rows = (
+            db.query(TaxSlab)
+            .filter(TaxSlab.organization_id == organization_id, TaxSlab.jurisdiction_country == country)
+            .order_by(TaxSlab.sort_order)
+            .all()
+        )
     return rows
 
 
@@ -483,11 +509,18 @@ def list_jurisdiction_packs(db: Session, country: str, state: str = None) -> Lis
 
 
 def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_id: Optional[int] = None) -> JurisdictionPack:
-    """Create or update a pack, matched by (pack_id, version) — matches
-    the UniqueConstraint on JurisdictionPack. This intentionally does NOT
-    silently bump the version on every save: per the spec's lifecycle
-    model (Section 17), a new version should be a deliberate act, not an
-    accidental side effect of editing metadata.
+    """Create or update a pack. When `data.id` is provided (editing an
+    existing pack in place), the lookup is by primary key — the only way
+    packId/version themselves can be safely renamed, since every dependent
+    row (canonical ContributionRate/TaxSlab, TaxConfigurationAudit,
+    PayslipItem snapshots) references jurisdiction_pack_id, the integer
+    id, never the packId string. Without `data.id`, lookup falls back to
+    (pack_id, version) — matches the UniqueConstraint, and is what "create"
+    and "new version" still use.
+
+    This intentionally does NOT silently bump the version on every save:
+    per the spec's lifecycle model (Section 17), a new version should be a
+    deliberate act, not an accidental side effect of editing metadata.
 
     When the (pack_id, version) pair doesn't exist yet AND another version
     of the same pack_id already does, the new row's previous_version_id is
@@ -495,12 +528,18 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
     Compliance its version chain (1.0 -> 1.1 -> 2.0) without ever mutating
     or deleting an earlier row.
     """
-    existing = (
-        db.query(JurisdictionPack)
-        .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
-        .first()
-    )
+    existing = None
+    if data.id:
+        existing = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.id).first()
+    if not existing:
+        existing = (
+            db.query(JurisdictionPack)
+            .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
+            .first()
+        )
     fields = dict(
+        pack_id=data.packId,
+        version=data.version,
         jurisdiction_country=data.jurisdictionCountry,
         jurisdiction_state=data.jurisdictionState,
         pack_type=data.packType,
@@ -515,28 +554,264 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         change_summary=data.changeSummary,
         next_review_date=data.nextReviewDate,
         policy_defaults=data.policyDefaults,
+        tax_year=data.taxYear,
+        tax_regime=data.taxRegime,
+        approved_by_id=data.approvedById,
+        currency=data.currency,
     )
     if existing:
+        old_value = {k: (str(v) if v is not None else None) for k, v in fields.items()}
         for k, v in fields.items():
             setattr(existing, k, v)
         existing.updated_by_id = actor_id
         row = existing
-    else:
-        previous = (
-            db.query(JurisdictionPack)
-            .filter(JurisdictionPack.pack_id == data.packId)
-            .order_by(JurisdictionPack.created_at.desc())
+        db.commit()
+        db.refresh(row)
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=row.id,
+            jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
+            old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
+        )
+        return row
+
+    previous = (
+        db.query(JurisdictionPack)
+        .filter(JurisdictionPack.pack_id == data.packId)
+        .order_by(JurisdictionPack.created_at.desc())
+        .first()
+    )
+    row = JurisdictionPack(
+        previous_version_id=previous.id if previous else None,
+        created_by_id=actor_id, updated_by_id=actor_id,
+        **fields,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=row.id,
+        jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
+        old_value=None, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
+    )
+    return row
+
+
+# ── Tax Configuration Audit ──────────────────────────────────────────────
+
+def record_tax_audit(
+    db: Session, *, actor_id: Optional[int], action: str, entity_type: str, entity_id: int,
+    jurisdiction_pack_id: Optional[int] = None, tax_version: Optional[str] = None,
+    legal_reference: Optional[str] = None, old_value: Optional[dict] = None,
+    new_value: Optional[dict] = None, reason: Optional[str] = None,
+) -> None:
+    """One canonical write path for every mutation to a Super-Admin-owned
+    canonical tax/contribution/pack row. Called explicitly at each mutation
+    site (matching this module's existing style of explicit service
+    functions) rather than via an ORM event hook, so every audit entry is
+    traceable to the exact line that produced it."""
+    db.add(TaxConfigurationAudit(
+        actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id,
+        jurisdiction_pack_id=jurisdiction_pack_id, tax_version=tax_version,
+        legal_reference=legal_reference, old_value=old_value, new_value=new_value, reason=reason,
+    ))
+    db.commit()
+
+
+def list_tax_configuration_audit(
+    db: Session, jurisdiction_pack_id: Optional[int] = None, entity_type: Optional[str] = None,
+) -> List[TaxConfigurationAudit]:
+    query = db.query(TaxConfigurationAudit)
+    if jurisdiction_pack_id:
+        query = query.filter(TaxConfigurationAudit.jurisdiction_pack_id == jurisdiction_pack_id)
+    if entity_type:
+        query = query.filter(TaxConfigurationAudit.entity_type == entity_type)
+    return query.order_by(TaxConfigurationAudit.created_at.desc()).all()
+
+
+# ── Canonical Tax Rates (Super Admin-owned; organization_id IS NULL) ────
+# These are the government-mandated values. Org-scoped ContributionRate/
+# TaxSlab rows (organization_id set) are populated FROM these via
+# sync_org_rates_from_canonical (engine/tax_resolver.py) — the engine's
+# read path (get_contribution_rates/get_tax_slabs below) is unchanged.
+
+def sync_org_rates_from_canonical(
+    db: Session, organization_id: int, country: str, state: Optional[str] = None,
+    tax_regime: Optional[str] = None, payroll_date=None,
+) -> dict:
+    """Populate an org's own ContributionRate/TaxSlab rows (the ones the
+    engine actually reads) FROM the canonical Super-Admin-owned rows for
+    this jurisdiction, via engine/tax_resolver.py. Extends the exact
+    pattern super_admin/service.py's seed_global_statutory_rates_from_defaults
+    already established — idempotent, safe to call repeatedly.
+
+    No-ops (returns synced=False) if no canonical tax pack exists yet for
+    this jurisdiction, leaving the org's existing rows/hardcoded-default
+    seed path completely untouched — this function only ever ADDS a new
+    source, it never removes the fallback.
+    """
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    country = _normalize_country(country)
+    canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
+        db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date,
+    )
+    if not pack:
+        return {"synced": False, "reason": "no canonical tax pack configured for this jurisdiction"}
+
+    for cr in canonical_rates:
+        existing = (
+            db.query(ContributionRate)
+            .filter(
+                ContributionRate.organization_id == organization_id,
+                ContributionRate.jurisdiction_country == country,
+                ContributionRate.component_key == cr.component_key,
+            )
             .first()
         )
-        row = JurisdictionPack(
-            pack_id=data.packId, version=data.version,
-            previous_version_id=previous.id if previous else None,
-            created_by_id=actor_id, updated_by_id=actor_id,
-            **fields,
+        fields = dict(
+            component_key=cr.component_key,
+            label=cr.label, employee_share=cr.employee_share, employer_share=cr.employer_share,
+            total=cr.total, employee_rate_pct=cr.employee_rate_pct, employer_rate_pct=cr.employer_rate_pct,
+            flat_amount=cr.flat_amount, sort_order=cr.sort_order,
+            jurisdiction_pack_id=pack.id,
         )
+        if existing:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+        else:
+            db.add(ContributionRate(organization_id=organization_id, jurisdiction_country=country, **fields))
+
+    if canonical_slabs:
+        # TaxSlab has no natural per-bracket unique key (brackets are
+        # replaced as a whole set when the canonical version changes) —
+        # the org's cached copy is fully regenerable from canonical data,
+        # so replace-in-place is safe here, unlike ContributionRate above.
+        db.query(TaxSlab).filter(
+            TaxSlab.organization_id == organization_id, TaxSlab.jurisdiction_country == country,
+        ).delete()
+        for ts in canonical_slabs:
+            db.add(TaxSlab(
+                organization_id=organization_id, jurisdiction_country=country,
+                min_amount=ts.min_amount, max_amount=ts.max_amount, rate_pct=ts.rate_pct,
+                rate_label=ts.rate_label, tax_formula=ts.tax_formula, sort_order=ts.sort_order,
+                rule_type=ts.rule_type, formula_expression=ts.formula_expression,
+                jurisdiction_pack_id=pack.id,
+            ))
+
+    db.commit()
+    return {
+        "synced": True, "packId": pack.pack_id, "packVersion": pack.version,
+        "contributionRates": len(canonical_rates), "taxSlabs": len(canonical_slabs),
+    }
+
+
+def list_canonical_tax_slabs(
+    db: Session, jurisdiction_pack_id: Optional[int] = None, country: Optional[str] = None,
+) -> List[TaxSlab]:
+    query = db.query(TaxSlab).filter(TaxSlab.organization_id.is_(None))
+    if jurisdiction_pack_id:
+        query = query.filter(TaxSlab.jurisdiction_pack_id == jurisdiction_pack_id)
+    if country:
+        query = query.filter(TaxSlab.jurisdiction_country == _normalize_country(country))
+    return query.order_by(TaxSlab.sort_order, TaxSlab.min_amount).all()
+
+
+def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_id: Optional[int] = None) -> TaxSlab:
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
+    if pack.pack_type != "tax":
+        raise BadRequestException("Canonical tax slabs can only be attached to a pack_type='tax' JurisdictionPack.")
+
+    fields = dict(
+        jurisdiction_country=_normalize_country(data.jurisdictionCountry),
+        jurisdiction_state=data.jurisdictionState,
+        tax_regime=data.taxRegime,
+        min_amount=data.minAmount, max_amount=data.maxAmount,
+        rate_pct=data.ratePct, rate_label=data.rateLabel, tax_formula=data.taxFormula,
+        rule_type=data.ruleType, formula_expression=data.formulaExpression,
+        sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
+    )
+    action = "update" if data.id else "create"
+    old_value = None
+    if data.id:
+        row = db.query(TaxSlab).filter(TaxSlab.id == data.id, TaxSlab.organization_id.is_(None)).first()
+        if not row:
+            raise NotFoundException("Canonical TaxSlab", data.id)
+        old_value = {"min_amount": str(row.min_amount), "max_amount": str(row.max_amount) if row.max_amount is not None else None, "rate_pct": str(row.rate_pct)}
+        for k, v in fields.items():
+            setattr(row, k, v)
+    else:
+        row = TaxSlab(organization_id=None, **fields)
         db.add(row)
     db.commit()
     db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action=action, entity_type="tax_slab", entity_id=row.id,
+        jurisdiction_pack_id=pack.id, tax_version=pack.version,
+        old_value=old_value, new_value={"min_amount": str(row.min_amount), "max_amount": str(row.max_amount) if row.max_amount is not None else None, "rate_pct": str(row.rate_pct)},
+    )
+    return row
+
+
+def list_canonical_contribution_rates(
+    db: Session, jurisdiction_pack_id: Optional[int] = None, country: Optional[str] = None,
+) -> List[ContributionRate]:
+    query = db.query(ContributionRate).filter(ContributionRate.organization_id.is_(None))
+    if jurisdiction_pack_id:
+        query = query.filter(ContributionRate.jurisdiction_pack_id == jurisdiction_pack_id)
+    if country:
+        query = query.filter(ContributionRate.jurisdiction_country == _normalize_country(country))
+    return query.order_by(ContributionRate.sort_order).all()
+
+
+def upsert_canonical_contribution_rate(
+    db: Session, data: CanonicalContributionRateUpsert, actor_id: Optional[int] = None,
+) -> ContributionRate:
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
+    if pack.pack_type != "tax":
+        raise BadRequestException("Canonical contribution rates can only be attached to a pack_type='tax' JurisdictionPack.")
+
+    # employee_rate_pct/employer_rate_pct store the plain percentage number
+    # (12.00 for 12%), matching every other ContributionRate row in the
+    # system (org-scoped rows, the _CONTRIBUTION_RATES_BY_COUNTRY seed
+    # dicts) — the engine divides by 100 itself at calculation time
+    # (engine/standard.py: `basic * (pf_rate.employee_rate_pct / 100)`).
+    # Dividing again here would silently store a value 100x too small.
+    employee_pct = data.employeeSharePct
+    employer_pct = data.employerSharePct
+    fields = dict(
+        jurisdiction_country=_normalize_country(data.jurisdictionCountry),
+        jurisdiction_state=data.jurisdictionState,
+        tax_regime=data.taxRegime,
+        component_key=data.componentKey, label=data.label,
+        employee_share=f"{data.employeeSharePct}%" if data.employeeSharePct is not None else "",
+        employer_share=f"{data.employerSharePct}%" if data.employerSharePct is not None else "",
+        total=f"{(data.employeeSharePct or 0) + (data.employerSharePct or 0)}%",
+        employee_rate_pct=employee_pct, employer_rate_pct=employer_pct, flat_amount=data.flatAmount,
+        sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
+    )
+    action = "update" if data.id else "create"
+    old_value = None
+    if data.id:
+        row = db.query(ContributionRate).filter(ContributionRate.id == data.id, ContributionRate.organization_id.is_(None)).first()
+        if not row:
+            raise NotFoundException("Canonical ContributionRate", data.id)
+        old_value = {"employee_rate_pct": str(row.employee_rate_pct) if row.employee_rate_pct is not None else None, "employer_rate_pct": str(row.employer_rate_pct) if row.employer_rate_pct is not None else None, "flat_amount": str(row.flat_amount) if row.flat_amount is not None else None}
+        for k, v in fields.items():
+            setattr(row, k, v)
+    else:
+        row = ContributionRate(organization_id=None, **fields)
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action=action, entity_type="contribution_rate", entity_id=row.id,
+        jurisdiction_pack_id=pack.id, tax_version=pack.version,
+        old_value=old_value, new_value={"employee_rate_pct": str(row.employee_rate_pct) if row.employee_rate_pct is not None else None, "employer_rate_pct": str(row.employer_rate_pct) if row.employer_rate_pct is not None else None, "flat_amount": str(row.flat_amount) if row.flat_amount is not None else None},
+    )
     return row
 
 
@@ -610,10 +885,38 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
     row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not row:
         raise NotFoundException("JurisdictionPack", pack_row_id)
+    if status == "Active" and row.pack_type == "tax":
+        # Prevent two simultaneously-Active tax versions for the same
+        # country+state+tax_year+regime (Phase 22 duplicate/overlap guard).
+        conflict = (
+            db.query(JurisdictionPack)
+            .filter(
+                JurisdictionPack.id != row.id,
+                JurisdictionPack.pack_type == "tax",
+                JurisdictionPack.status == "Active",
+                JurisdictionPack.jurisdiction_country == row.jurisdiction_country,
+                JurisdictionPack.jurisdiction_state == row.jurisdiction_state,
+                JurisdictionPack.tax_year == row.tax_year,
+                JurisdictionPack.tax_regime == row.tax_regime,
+            )
+            .first()
+        )
+        if conflict:
+            raise BadRequestException(
+                f"Pack {conflict.pack_id} v{conflict.version} is already Active for this "
+                f"country/state/tax year/regime — supersede it before activating a new version."
+            )
+    old_status = row.status
     row.status = status
     row.updated_by_id = actor_id
     db.commit()
     db.refresh(row)
+    if row.pack_type == "tax":
+        record_tax_audit(
+            db, actor_id=actor_id, action="status_change", entity_type="jurisdiction_pack", entity_id=row.id,
+            jurisdiction_pack_id=row.id, tax_version=row.version,
+            old_value={"status": old_status}, new_value={"status": status},
+        )
     return row
 
 
@@ -632,15 +935,26 @@ def get_pack_applicable_organizations(db: Session, pack_row_id: int) -> List[dic
     return [{"id": r.id, "organizationName": r.organization_name, "organizationCode": r.organization_code} for r in rows]
 
 
-def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids: List[int], actor_id: Optional[int] = None) -> int:
-    """Bulk-assign a policy version as the active pack for each given org,
-    get-or-creating their CompanyComplianceDetails row exactly like every
-    other Compliance write path does (get_or_create_email_settings,
+def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids: List[int], actor_id: Optional[int] = None) -> dict:
+    """Bulk-assign a policy/tax version as the active pack for each given
+    org, get-or-creating their CompanyComplianceDetails row exactly like
+    every other Compliance write path does (get_or_create_email_settings,
     get_company_details, etc.) rather than requiring the org to have
-    configured Compliance first."""
+    configured Compliance first.
+
+    For a TAX pack specifically, this is also the deliberate "push these
+    rates to organizations" action (e.g. a new fiscal year's version):
+    beyond the active_pack_id label, it force-syncs each org's own
+    ContributionRate/TaxSlab rows from this pack's canonical values via
+    sync_org_rates_from_canonical — overwriting whatever they had before,
+    not just filling in empty rows. Nothing changes for any org until
+    Super Admin explicitly does this; activating/deprecating a canonical
+    pack alone never touches an org's live payroll numbers.
+    """
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not pack:
         raise NotFoundException("JurisdictionPack", pack_row_id)
+    is_tax = pack.pack_type == "tax"
 
     updated = 0
     for org_id in organization_ids:
@@ -659,11 +973,28 @@ def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids
         # one untethered platform-wide log row.
         log_activity(
             db, org_id,
-            f"Compliance policy {pack.pack_id} v{pack.version} applied by Super Admin.",
+            f"Compliance {'tax' if is_tax else 'policy'} {pack.pack_id} v{pack.version} applied by Super Admin.",
             ActivityStatus.INFO, actor_id=actor_id,
         )
     db.commit()
-    return updated
+
+    rates_synced = 0
+    if is_tax:
+        for org_id in organization_ids:
+            result = sync_org_rates_from_canonical(
+                db, org_id, pack.jurisdiction_country, state=pack.jurisdiction_state,
+            )
+            if result.get("synced"):
+                rates_synced += 1
+                log_activity(
+                    db, org_id,
+                    f"Tax rates synced from {pack.pack_id} v{pack.version} ({result.get('contributionRates', 0)} "
+                    f"contribution rate(s), {result.get('taxSlabs', 0)} tax slab(s)).",
+                    ActivityStatus.INFO, actor_id=actor_id,
+                )
+        db.commit()
+
+    return {"updated": updated, "isTax": is_tax, "ratesSynced": rates_synced}
 
 
 def _calculate_annual_tax(annual_income: Decimal, slabs: List[TaxSlab]) -> Decimal:
@@ -966,9 +1297,10 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             hra     = monthly_hra
             special = _round2(monthly_gross - basic - hra)
         else:
-            basic     = _round2(monthly_gross * Decimal("0.40"))
-            hra       = _round2(monthly_gross * Decimal("0.20"))
-            special   = _round2(monthly_gross * Decimal("0.40"))
+            basic_pct, hra_pct = _resolve_salary_split_pct(db, organization_id)
+            basic     = _round2(monthly_gross * basic_pct / 100)
+            hra       = _round2(monthly_gross * hra_pct / 100)
+            special   = _round2(monthly_gross - basic - hra)
 
         is_active = emp.status == EmployeeStatus.ACTIVE
         overtime = Decimal("0")
@@ -1337,6 +1669,44 @@ def _sum_attendance_extras(db: Session, organization_id: int, employee_id: int,
     return _round2(total)
 
 
+def _resolve_tax_snapshot(db: Session, country: str, payroll_date) -> dict:
+    """Historical payroll safety (Phase 16): freeze which canonical tax
+    pack applied on this payslip's actual pay date, AND the exact rate/
+    slab VALUES it held then — not just an id pointer, so this payslip's
+    numbers stay reproducible even if the pack is later edited, superseded,
+    or retired. No-ops cleanly (all None) when no canonical tax pack has
+    been configured for this jurisdiction yet."""
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    rates, slabs, pack = resolve_tax_configuration(db, country, payroll_date=payroll_date)
+    if not pack:
+        return {"tax_policy_pack_id": None, "tax_policy_version": None, "tax_rule_snapshot": None}
+
+    def _dec(v):
+        return str(v) if v is not None else None
+
+    snapshot = {
+        "packId": pack.pack_id,
+        "version": pack.version,
+        "contributionRates": [
+            {
+                "componentKey": r.component_key, "label": r.label,
+                "employeeRatePct": _dec(r.employee_rate_pct), "employerRatePct": _dec(r.employer_rate_pct),
+                "flatAmount": _dec(r.flat_amount),
+            }
+            for r in rates
+        ],
+        "taxSlabs": [
+            {
+                "minAmount": _dec(s.min_amount), "maxAmount": _dec(s.max_amount), "ratePct": _dec(s.rate_pct),
+                "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
+            }
+            for s in slabs
+        ],
+    }
+    return {"tax_policy_pack_id": pack.id, "tax_policy_version": pack.version, "tax_rule_snapshot": snapshot}
+
+
 def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
                              calculation_mode: str = "standard", attendance_records: List["PayrollAttendanceRecord"] = None) -> dict:
     """Compute every payslip figure for an employee within a run and return
@@ -1366,9 +1736,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         hra     = _round2(Decimal(str(stored_hra)) / MONTHS_PER_YEAR)
         special = _round2(monthly_gross - basic - hra)
     else:
-        basic     = _round2(monthly_gross * Decimal("0.40"))
-        hra       = _round2(monthly_gross * Decimal("0.20"))
-        special   = _round2(monthly_gross * Decimal("0.40"))
+        basic_pct, hra_pct = _resolve_salary_split_pct(db, run.organization_id)
+        basic     = _round2(monthly_gross * basic_pct / 100)
+        hra       = _round2(monthly_gross * hra_pct / 100)
+        special   = _round2(monthly_gross - basic - hra)
 
     is_active = employee.status == EmployeeStatus.ACTIVE
     overtime  = Decimal("0")
@@ -1389,6 +1760,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     result = calculate_payroll(ctx, calculation_mode)
 
     employee_name = getattr(employee, "name", None) or f"Employee #{employee.id}"
+    tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
 
     return {
         "employee_name": employee_name,
@@ -1402,6 +1774,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "ifsc": getattr(employee, "ifsc", None),
         "country_code": country,
         "compliance_fields": dict(getattr(employee, "compliance_fields", None) or {}),
+        **tax_snapshot,
         "basic_salary": result.basic,
         "hra": result.hra,
         "special_allowance": result.special_allowance,
@@ -1672,20 +2045,45 @@ def get_employee_by_id(db: Session, employee_id: int, organization_id: int) -> P
     return employee
 
 
-def _default_basic_hra_from_ctc(ctc) -> tuple:
+_DEFAULT_BASIC_PCT = Decimal("40")
+_DEFAULT_HRA_PCT = Decimal("20")
+
+
+def _resolve_salary_split_pct(db: Session, organization_id: Optional[int]) -> tuple:
+    """Basic/HRA-as-percentage-of-CTC. This is an organizational
+    compensation-structure choice (not a tax law figure), so it lives on
+    the org's own PayrollPolicy (basic_pct/hra_pct — Super Admin can set a
+    default and lock it via policy_defaults, same mechanism as
+    calculation_mode; the org can override when allowed). Falls back to
+    the historical 40%/20% split if no policy exists yet or organization_id
+    is unavailable — additive, zero behavior change for anyone who hasn't
+    touched this."""
+    if not organization_id:
+        return _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT
+    try:
+        from app.modules.payroll.policy.service import get_active_policy
+        policy = get_active_policy(db, organization_id)
+        basic_pct = policy.basic_pct if policy.basic_pct is not None else _DEFAULT_BASIC_PCT
+        hra_pct = policy.hra_pct if policy.hra_pct is not None else _DEFAULT_HRA_PCT
+        return basic_pct, hra_pct
+    except Exception:
+        return _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT
+
+
+def _default_basic_hra_from_ctc(ctc, db: Session = None, organization_id: Optional[int] = None) -> tuple:
     """Basic/HRA split applied when an employee is created without them —
-    the same 40%/20% ratios _generate_single_payslip falls back to at
-    payslip time, computed once here so the employee's own Basic/HRA
-    columns carry a real number instead of staying blank."""
+    computed once here so the employee's own Basic/HRA columns carry a
+    real number instead of staying blank."""
     ctc_val = Decimal(str(ctc or 0))
-    return _round2(ctc_val * Decimal("0.40")), _round2(ctc_val * Decimal("0.20"))
+    basic_pct, hra_pct = _resolve_salary_split_pct(db, organization_id) if db else (_DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT)
+    return _round2(ctc_val * basic_pct / 100), _round2(ctc_val * hra_pct / 100)
 
 
-def _fill_missing_basic_hra(fields: dict) -> None:
+def _fill_missing_basic_hra(fields: dict, db: Session = None, organization_id: Optional[int] = None) -> None:
     """Mutates `fields` in place, filling only whichever of basic/hra is
     actually missing — a value the caller did provide is never overwritten."""
     if fields.get("basic") is None or fields.get("hra") is None:
-        default_basic, default_hra = _default_basic_hra_from_ctc(fields.get("ctc"))
+        default_basic, default_hra = _default_basic_hra_from_ctc(fields.get("ctc"), db, organization_id)
         if fields.get("basic") is None:
             fields["basic"] = default_basic
         if fields.get("hra") is None:
@@ -1749,10 +2147,10 @@ def check_duplicate_employee_identifiers(
 
 def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> PayrollEmployee:
     employee_data = data.model_dump()
-    _fill_missing_basic_hra(employee_data)
 
     country_code = _resolve_employee_country(db, organization_id, employee_data.get("country_code"))
     employee_data["country_code"] = country_code
+    _fill_missing_basic_hra(employee_data, db, organization_id)
     strategy = get_employee_validation_strategy(country_code)
     employee_data["compliance_fields"] = strategy.validate(employee_data.get("compliance_fields") or {})
 
@@ -1894,7 +2292,6 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
             continue
 
         mapped = _map_employee_row(row)
-        _fill_missing_basic_hra(mapped)
 
         # Same jurisdiction resolution/validation/duplicate-check the
         # single-employee create_employee() runs — previously this bulk
@@ -1902,6 +2299,7 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
         # as implicitly India-only regardless of what the sheet said.
         country_code = _resolve_employee_country(db, organization_id, mapped.get("country_code"))
         mapped["country_code"] = country_code
+        _fill_missing_basic_hra(mapped, db, organization_id)
         try:
             strategy = get_employee_validation_strategy(country_code)
             mapped["compliance_fields"] = strategy.validate(row.complianceFields or {})
@@ -2484,11 +2882,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if not employee:
         raise NotFoundException(f"Employee {data.employee_id} not found.")
 
-    # Determine jurisdiction country from org's compliance details
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first() if organization_id else None
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # Employee's own jurisdiction overrides the org default — same
+    # resolution generate_payslips_for_run/regenerate_employee_payslip
+    # already use (_resolve_employee_country). Previously this looked only
+    # at the org's compliance details, silently ignoring an employee's own
+    # country_code override for manually-added payslips specifically.
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
 
     rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
     slabs = get_tax_slabs(db, organization_id, country)
@@ -2508,6 +2907,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     calc = calculate_payroll(ctx, calculation_mode)
 
     employee_name = getattr(employee, "name", None) or ""
+    tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
 
     item = PayslipItem(
         payroll_run_id=run_id,
@@ -2522,6 +2922,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         pan=getattr(employee, "pan", None),
         uan=getattr(employee, "uan", None),
         ifsc=getattr(employee, "ifsc", None),
+        country_code=country,
+        compliance_fields=dict(getattr(employee, "compliance_fields", None) or {}),
+        **tax_snapshot,
         basic_salary=calc.basic,
         hra=calc.hra,
         special_allowance=calc.special_allowance,

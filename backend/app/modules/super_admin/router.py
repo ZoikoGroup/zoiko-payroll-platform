@@ -39,7 +39,12 @@ from app.modules.super_admin.schemas import (
     SuperAdminUserListResponse,
     SuperAdminUserResponse,
 )
-from app.modules.payroll.schemas import JurisdictionPackResponse, JurisdictionPackUpsert
+from app.modules.payroll.schemas import (
+    JurisdictionPackResponse, JurisdictionPackUpsert,
+    CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
+    CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
+    TaxConfigurationAuditResponse,
+)
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
 
@@ -503,8 +508,92 @@ def assign_compliance_policy(
 ):
     from app.modules.payroll import service as payroll_service
 
-    count = payroll_service.assign_pack_to_organizations(db, id, payload.organizationIds, actor_id=current_user.id)
-    return {"message": f"Policy applied to {count} organization(s)."}
+    result = payroll_service.assign_pack_to_organizations(db, id, payload.organizationIds, actor_id=current_user.id)
+    if result["isTax"]:
+        return {
+            "message": f"Tax applied to {result['updated']} organization(s) — "
+                       f"rates synced for {result['ratesSynced']} of them."
+        }
+    return {"message": f"Policy applied to {result['updated']} organization(s)."}
+
+
+# ── Canonical Tax Configuration (government-mandated values; Super Admin-only) ──
+# organization_id IS NULL rows on payroll_tax_slabs/payroll_contribution_rates —
+# the single source of truth these tax packs' rules resolve to. Org-scoped
+# rows (what the engine actually reads) are populated FROM these via
+# sync_org_rates_from_canonical (Milestone 2) — not duplicated tables.
+
+@router.get(
+    "/compliance/tax-configuration/slabs", response_model=List[CanonicalTaxSlabResponse], response_model_by_alias=True,
+    summary="List canonical tax slabs for a pack or country",
+)
+def list_canonical_tax_slabs(
+    jurisdictionPackId: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_canonical_tax_slabs(db, jurisdiction_pack_id=jurisdictionPackId, country=country)
+
+
+@router.put(
+    "/compliance/tax-configuration/slabs", response_model=CanonicalTaxSlabResponse, response_model_by_alias=True,
+    summary="Create or update a canonical tax slab row (Super Admin only)",
+)
+def upsert_canonical_tax_slab(
+    payload: CanonicalTaxSlabUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_canonical_tax_slab(db, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/tax-configuration/contribution-rates", response_model=List[CanonicalContributionRateResponse], response_model_by_alias=True,
+    summary="List canonical contribution rates for a pack or country",
+)
+def list_canonical_contribution_rates(
+    jurisdictionPackId: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_canonical_contribution_rates(db, jurisdiction_pack_id=jurisdictionPackId, country=country)
+
+
+@router.put(
+    "/compliance/tax-configuration/contribution-rates", response_model=CanonicalContributionRateResponse, response_model_by_alias=True,
+    summary="Create or update a canonical contribution rate row (Super Admin only)",
+)
+def upsert_canonical_contribution_rate(
+    payload: CanonicalContributionRateUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_canonical_contribution_rate(db, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/tax-configuration/audit", response_model=List[TaxConfigurationAuditResponse], response_model_by_alias=True,
+    summary="Audit trail for canonical tax configuration changes",
+)
+def list_tax_configuration_audit(
+    jurisdictionPackId: Optional[int] = Query(None),
+    entityType: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_tax_configuration_audit(db, jurisdiction_pack_id=jurisdictionPackId, entity_type=entityType)
 
 
 # ── Finance ────────────────────────────────────────────────────────────────

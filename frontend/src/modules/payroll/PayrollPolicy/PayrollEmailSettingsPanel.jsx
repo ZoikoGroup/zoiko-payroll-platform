@@ -4,7 +4,7 @@ import { useToast } from "../ToastContext";
 import { getEmailSettings, updateEmailSettings } from "../../../service/payrollService";
 
 const inputClass =
-  "w-full rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3 py-2 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:ring-2 focus:ring-[#FF6E86]/30";
+  "w-full rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-error/30";
 
 function Toggle({ checked, onChange, disabled = false }) {
   return (
@@ -13,7 +13,7 @@ function Toggle({ checked, onChange, disabled = false }) {
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ${
-        checked ? "bg-[#FF6E86]" : "bg-[#E5E0D9] dark:bg-[#38312D]"
+        checked ? "bg-error" : "bg-border"
       } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
     >
       <span
@@ -81,16 +81,16 @@ export default function PayrollEmailSettingsPanel() {
   if (!settings) return null;
 
   return (
-    <div className="mt-4 border-t border-[#E5E0D9] dark:border-[#38312D] pt-4 space-y-6">
+    <div className="mt-4 border-t border-border pt-4 space-y-6">
       {/* ── Outbound sender identity ── */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
-          <Mail size={15} className="text-[#9E9690]" />
-          <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+          <Mail size={15} className="text-foreground-muted" />
+          <p className="text-[13px] font-bold text-foreground">
             Payroll Email Sender Identity
           </p>
         </div>
-        <p className="text-[11px] text-[#9E9690]">
+        <p className="text-[11px] text-foreground-muted">
           Optional — payslip and payroll emails still send through the platform's shared mail
           server. Set these so employees see your organization as the sender instead of the
           platform default. Leave blank to keep the platform default.
@@ -98,7 +98,7 @@ export default function PayrollEmailSettingsPanel() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="block">
-            <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">
+            <span className="block text-[12px] font-semibold text-foreground-muted mb-1.5">
               From Email
             </span>
             <input
@@ -110,7 +110,7 @@ export default function PayrollEmailSettingsPanel() {
             />
           </label>
           <label className="block">
-            <span className="block text-[12px] font-semibold text-[#6B6560] dark:text-[#A69B93] mb-1.5">
+            <span className="block text-[12px] font-semibold text-foreground-muted mb-1.5">
               From Display Name
             </span>
             <input
@@ -126,15 +126,15 @@ export default function PayrollEmailSettingsPanel() {
           <button
             onClick={handleSaveIdentity}
             disabled={savingIdentity}
-            className="rounded-[10px] bg-[#FF6E86] px-4 py-2 text-[12px] font-bold text-white shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-50"
+            className="rounded-[10px] bg-error px-4 py-2 text-[12px] font-bold text-white shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-50"
           >
             {savingIdentity ? "Saving…" : "Save Sender Identity"}
           </button>
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between rounded-[10px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3">
-            <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+          <div className="flex items-center justify-between rounded-[10px] bg-background px-4 py-3">
+            <span className="text-[13px] font-semibold text-foreground">
               Notify on Payslip Ready
             </span>
             <Toggle
@@ -142,8 +142,8 @@ export default function PayrollEmailSettingsPanel() {
               onChange={(val) => handleToggle("notifyPayslipReady", val)}
             />
           </div>
-          <div className="flex items-center justify-between rounded-[10px] bg-[#F8F7F4] dark:bg-[#1A1816] px-4 py-3">
-            <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+          <div className="flex items-center justify-between rounded-[10px] bg-background px-4 py-3">
+            <span className="text-[13px] font-semibold text-foreground">
               Notify on Payroll Run Approved
             </span>
             <Toggle

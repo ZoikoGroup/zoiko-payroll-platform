@@ -133,7 +133,7 @@ export default function RegisterPage() {
   return (
     <div style={{
       minHeight: "100vh", display: "flex", flexDirection: "column",
-      background: "linear-gradient(135deg, #fff7f0 0%, #ffffff 50%, #f0f4ff 100%)",
+      background: "linear-gradient(135deg, #eef6fb 0%, #ffffff 50%, #eef6fb 100%)",
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif"
     }}>
       <LandingHeader />
@@ -183,7 +183,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("orgName", e.target.value)}
                     placeholder="Acme Inc."
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -201,7 +201,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("adminName", e.target.value)}
                     placeholder="Jane Doe"
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -219,7 +219,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("adminEmail", e.target.value)}
                     placeholder="admin@company.com"
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -239,7 +239,7 @@ export default function RegisterPage() {
                       onChange={(e) => update("password", e.target.value)}
                       placeholder="At least 8 characters"
                       style={{ ...fieldStyle, padding: "11px 44px 11px 14px" }}
-                      onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                      onFocus={e => e.target.style.borderColor = "#087CC1"}
                       onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                     />
                     <button
@@ -269,7 +269,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("phone", e.target.value)}
                     placeholder="+1 (555) 123-4567"
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -285,7 +285,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("industry", e.target.value)}
                     placeholder="Technology"
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -301,7 +301,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("companyType", e.target.value)}
                     placeholder="Private Limited"
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -318,7 +318,7 @@ export default function RegisterPage() {
                     value={form.country}
                     onChange={(e) => handleCountryChange(e.target.value)}
                     style={selectStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   >
                     <option value="">Select country</option>
@@ -337,7 +337,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("state", e.target.value)}
                     disabled={countryStates.length === 0}
                     style={{ ...selectStyle, cursor: countryStates.length === 0 ? "not-allowed" : "default" }}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   >
                     <option value="">
@@ -359,7 +359,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("city", e.target.value)}
                     placeholder="New York"
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -388,7 +388,7 @@ export default function RegisterPage() {
                           onChange={(e) => updateTaxIdentifier(f.key, e.target.value)}
                           placeholder={`e.g. ${f.example}`}
                           style={fieldStyle}
-                          onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                          onFocus={e => e.target.style.borderColor = "#087CC1"}
                           onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                         />
                       </div>
@@ -407,7 +407,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("taxNo", e.target.value)}
                     placeholder="e.g. GSTIN, EIN, VAT No."
                     style={fieldStyle}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                 </div>
@@ -425,7 +425,7 @@ export default function RegisterPage() {
                   placeholder="123 Main St, Suite 100"
                   rows={2}
                   style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }}
-                  onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                  onFocus={e => e.target.style.borderColor = "#087CC1"}
                   onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                 />
               </div>
@@ -441,7 +441,7 @@ export default function RegisterPage() {
                     onChange={(e) => update("timezone", e.target.value)}
                     disabled={countryTimezones.length === 0}
                     style={{ ...selectStyle, cursor: countryTimezones.length === 0 ? "not-allowed" : "default" }}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   >
                     {countryTimezones.length === 0 ? (
@@ -461,12 +461,12 @@ export default function RegisterPage() {
                   <div
                     style={{
                       padding: "12px", borderRadius: "12px", textAlign: "center",
-                      border: "2px solid #FF6B00", background: "#FFF7F0",
-                      boxShadow: "0 4px 12px rgba(255,107,0,0.15)",
+                      border: "2px solid #087CC1", background: "#EEF6FB",
+                      boxShadow: "0 4px 12px rgba(8,124,193,0.15)",
                       boxSizing: "border-box", height: "calc(100% - 26px)", marginTop: "26px",
                     }}
                   >
-                    <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: "700", color: "#FF6B00" }}>
+                    <p style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: "700", color: "#087CC1" }}>
                       Zoiko Payroll
                     </p>
                     <p style={{ margin: 0, fontSize: "11px", color: "#6B7280", lineHeight: "1.3" }}>
@@ -485,12 +485,12 @@ export default function RegisterPage() {
                   onChange={(e) => update("termsAccepted", e.target.checked)}
                   style={{
                     marginTop: "2px", width: "16px", height: "16px", flexShrink: 0,
-                    accentColor: "#FF6B00", cursor: "pointer"
+                    accentColor: "#087CC1", cursor: "pointer"
                   }}
                 />
                 <label htmlFor="termsAccepted" style={{ fontSize: "13px", color: "#374151", cursor: "pointer", lineHeight: "1.4" }}>
                   I accept the{" "}
-                  <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" style={{ color: "#FF6B00", fontWeight: "600", textDecoration: "none" }}>
+                  <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
                     Terms & Conditions
                   </a>
                 </label>
@@ -502,8 +502,8 @@ export default function RegisterPage() {
                 style={{
                   width: "100%", padding: "13px", borderRadius: "10px", border: "none",
                   fontSize: "15px", fontWeight: "700", color: "white", cursor: submitting ? "not-allowed" : "pointer",
-                  background: submitting ? "#FFA366" : "linear-gradient(135deg, #FF6B00, #FF8C38)",
-                  boxShadow: "0 6px 20px rgba(255,107,0,0.35)",
+                  background: submitting ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
+                  boxShadow: "0 6px 20px rgba(8,124,193,0.35)",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
                   transition: "all 0.2s", marginTop: "8px"
                 }}
@@ -515,7 +515,7 @@ export default function RegisterPage() {
 
             <p style={{ textAlign: "center", fontSize: "13px", color: "#6B7280", marginTop: "20px", marginBottom: 0 }}>
               Already have an account?{" "}
-              <Link to="/login" style={{ color: "#FF6B00", fontWeight: "600", textDecoration: "none" }}>
+              <Link to="/login" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
                 Sign in
               </Link>
             </p>

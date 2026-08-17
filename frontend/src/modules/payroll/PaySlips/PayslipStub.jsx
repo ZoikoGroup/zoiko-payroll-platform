@@ -111,11 +111,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   return createPortal(
     <>
       <style>{printStyles}</style>
-      <div className="ps-backdrop fixed inset-0 z-[9998] bg-[#1A1816]/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="ps-backdrop fixed inset-0 z-[9998] bg-background/40 backdrop-blur-sm" onClick={onClose} />
       <div className="ps-outer fixed inset-0 z-[9999] flex items-center justify-center p-4">
-        <div className="ps-inner relative bg-white dark:bg-[#221D1A] rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.15)] w-full max-w-4xl max-h-[90vh] overflow-auto">
+        <div className="ps-inner relative bg-surface rounded-[18px] shadow-[0_24px_48px_rgba(0,0,0,0.15)] w-full max-w-4xl max-h-[90vh] overflow-auto">
           {/* HEADER */}
-          <div className="bg-[#1A3A5C] px-8 py-5 text-white flex items-center justify-between rounded-t-[18px]">
+          <div className="bg-brand-navy-deep px-8 py-5 text-white flex items-center justify-between rounded-t-[18px]">
             <div>
               <p className="text-2xl font-extrabold tracking-tight">{companyName}</p>
               <p className="text-[13px] opacity-80 mt-1">{companyAddress}</p>
@@ -129,19 +129,19 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
           <div className="ps-main px-7 py-6">
             {/* PAYSLIP TITLE */}
             <div className="text-center mb-6">
-              <p className="text-lg font-extrabold text-[#1A1816] dark:text-[#F0EDE8] tracking-wide">PAYSLIP</p>
-              <p className="text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] mt-1">Salary Month : {payslip.period}</p>
+              <p className="text-lg font-extrabold text-foreground tracking-wide">PAYSLIP</p>
+              <p className="text-[13px] font-semibold text-foreground-muted mt-1">Salary Month : {payslip.period}</p>
             </div>
 
             {/* EMPLOYEE DETAILS */}
-            <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-3">Employee Details</p>
-            <div className="border border-[#D1D5DB] dark:border-[#38312D] rounded-[8px] overflow-hidden mb-6">
+            <p className="text-[14px] font-bold text-foreground mb-3">Employee Details</p>
+            <div className="border border-border rounded-[8px] overflow-hidden mb-6">
               {[leftFields, rightFields].map((side, si) => (
-                <div key={si} className={si === 0 ? "border-b border-[#D1D5DB] dark:border-[#38312D]" : ""}>
+                <div key={si} className={si === 0 ? "border-b border-border" : ""}>
                   {side.map(([label, val], i) => (
-                    <div key={label} className={`flex border-b border-[#D1D5DB] dark:border-[#38312D] last:border-b-0 ${i % 2 === 0 ? 'bg-[#F9FAFB] dark:bg-[#2A2520]' : 'bg-white dark:bg-[#221D1A]'}`}>
-                      <span className="w-1/4 px-4 py-3 text-[12px] font-bold text-[#6B6560] dark:text-[#A69B93] uppercase tracking-wider border-r border-[#D1D5DB] dark:border-[#38312D]">{label}</span>
-                      <span className="w-3/4 px-4 py-3 text-[13px] font-medium text-[#1A1816] dark:text-[#F0EDE8]">{val || "\u2014"}</span>
+                    <div key={label} className={`flex border-b border-border last:border-b-0 ${i % 2 === 0 ? 'bg-surface-muted' : 'bg-surface'}`}>
+                      <span className="w-1/4 px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider border-r border-border">{label}</span>
+                      <span className="w-3/4 px-4 py-3 text-[13px] font-medium text-foreground">{val || "\u2014"}</span>
                     </div>
                   ))}
                 </div>
@@ -165,19 +165,19 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
             <div className="ps-body grid grid-cols-2 gap-6 mb-5">
               {/* EARNINGS TABLE */}
               <div>
-                <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-3">Earnings</p>
-                <div className="border border-[#D1D5DB] dark:border-[#38312D] rounded-[8px] overflow-hidden">
-                  <div className="bg-[#1A3A5C] px-4 py-3 text-white text-[12px] font-bold uppercase tracking-wider flex justify-between">
+                <p className="text-[14px] font-bold text-foreground mb-3">Earnings</p>
+                <div className="border border-border rounded-[8px] overflow-hidden">
+                  <div className="bg-brand-navy-deep px-4 py-3 text-white text-[12px] font-bold uppercase tracking-wider flex justify-between">
                     <span>Component</span>
                     <span>Amount</span>
                   </div>
                   {earningsRows.map((r, i) => (
-                    <div key={r.label} className={`flex justify-between px-4 py-3 border-b border-[#D1D5DB] dark:border-[#38312D] last:border-b-0 text-[13px] ${i % 2 === 1 ? 'bg-[#F9FAFB] dark:bg-[#2A2520]' : 'bg-white dark:bg-[#221D1A]'}`}>
-                      <span className="text-[#6B6560] dark:text-[#A69B93]">{r.label}</span>
-                      <span className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmt(r.amount)}</span>
+                    <div key={r.label} className={`flex justify-between px-4 py-3 border-b border-border last:border-b-0 text-[13px] ${i % 2 === 1 ? 'bg-surface-muted' : 'bg-surface'}`}>
+                      <span className="text-foreground-muted">{r.label}</span>
+                      <span className="font-semibold text-foreground">{fmt(r.amount)}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between px-4 py-3 bg-[#1A3A5C] text-white text-[13px] font-bold">
+                  <div className="flex justify-between px-4 py-3 bg-brand-navy-deep text-white text-[13px] font-bold">
                     <span>Total Earnings</span>
                     <span>{fmt(totalEarnings)}</span>
                   </div>
@@ -186,19 +186,19 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
               {/* DEDUCTIONS TABLE */}
               <div>
-                <p className="text-[14px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-3">Deductions</p>
-                <div className="border border-[#D1D5DB] dark:border-[#38312D] rounded-[8px] overflow-hidden">
-                  <div className="bg-[#1A3A5C] px-4 py-3 text-white text-[12px] font-bold uppercase tracking-wider flex justify-between">
+                <p className="text-[14px] font-bold text-foreground mb-3">Deductions</p>
+                <div className="border border-border rounded-[8px] overflow-hidden">
+                  <div className="bg-brand-navy-deep px-4 py-3 text-white text-[12px] font-bold uppercase tracking-wider flex justify-between">
                     <span>Component</span>
                     <span>Amount</span>
                   </div>
                   {allDeductionRows.map((r, i) => (
-                    <div key={r.label} className={`flex justify-between px-4 py-3 border-b border-[#D1D5DB] dark:border-[#38312D] last:border-b-0 text-[13px] ${i % 2 === 1 ? 'bg-[#F9FAFB] dark:bg-[#2A2520]' : 'bg-white dark:bg-[#221D1A]'}`}>
-                      <span className="text-[#6B6560] dark:text-[#A69B93]">{r.label}</span>
-                      <span className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmt(r.amount)}</span>
+                    <div key={r.label} className={`flex justify-between px-4 py-3 border-b border-border last:border-b-0 text-[13px] ${i % 2 === 1 ? 'bg-surface-muted' : 'bg-surface'}`}>
+                      <span className="text-foreground-muted">{r.label}</span>
+                      <span className="font-semibold text-foreground">{fmt(r.amount)}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between px-4 py-3 bg-[#1A3A5C] text-white text-[13px] font-bold">
+                  <div className="flex justify-between px-4 py-3 bg-brand-navy-deep text-white text-[13px] font-bold">
                     <span>Total Deductions</span>
                     <span>{fmt(totalDeductions)}</span>
                   </div>
@@ -208,16 +208,16 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
             {/* SALARY SUMMARY */}
             <div className="flex justify-end mb-5">
-              <div className="w-[50%] border border-[#D1D5DB] dark:border-[#38312D] rounded-[8px] overflow-hidden">
-                <div className="flex justify-between px-4 py-3 border-b border-[#D1D5DB] dark:border-[#38312D] text-[13px] bg-white dark:bg-[#221D1A]">
-                  <span className="font-bold text-[#6B6560] dark:text-[#A69B93]">Gross Salary</span>
-                  <span className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmt(totalEarnings)}</span>
+              <div className="w-[50%] border border-border rounded-[8px] overflow-hidden">
+                <div className="flex justify-between px-4 py-3 border-b border-border text-[13px] bg-surface">
+                  <span className="font-bold text-foreground-muted">Gross Salary</span>
+                  <span className="font-semibold text-foreground">{fmt(totalEarnings)}</span>
                 </div>
-                <div className="flex justify-between px-4 py-3 border-b border-[#D1D5DB] dark:border-[#38312D] text-[13px] bg-[#F9FAFB] dark:bg-[#2A2520]">
-                  <span className="font-bold text-[#6B6560] dark:text-[#A69B93]">Total Deductions</span>
-                  <span className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmt(totalDeductions)}</span>
+                <div className="flex justify-between px-4 py-3 border-b border-border text-[13px] bg-surface-muted">
+                  <span className="font-bold text-foreground-muted">Total Deductions</span>
+                  <span className="font-semibold text-foreground">{fmt(totalDeductions)}</span>
                 </div>
-                <div className="flex justify-between px-4 py-3.5 bg-[#ECFDF5] dark:bg-[#19C58A]/10 text-[14px] font-bold text-[#16A34A] border-t-2 border-[#16A34A]">
+                <div className="flex justify-between px-4 py-3.5 bg-success-light dark:bg-primary/10 text-[14px] font-bold text-success border-t-2 border-success">
                   <span>NET PAY</span>
                   <span>{fmt(netPay)}</span>
                 </div>
@@ -226,25 +226,25 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
             {/* NET SALARY IN WORDS */}
             <div className="mb-5">
-              <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-2">Net Salary in Words</p>
-              <p className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">{netInWords} Only.</p>
+              <p className="text-[13px] font-bold text-foreground mb-2">Net Salary in Words</p>
+              <p className="text-[13px] text-foreground-muted">{netInWords} Only.</p>
             </div>
 
             {/* PAYMENT DETAILS */}
-            <div className="border border-[#D1D5DB] dark:border-[#38312D] rounded-[8px] overflow-hidden mb-6">
-              <div className="grid grid-cols-2 border-b border-[#D1D5DB] dark:border-[#38312D]">
-                <div className="px-4 py-3 text-[12px] font-bold text-[#6B6560] dark:text-[#A69B93] uppercase tracking-wider border-r border-[#D1D5DB] dark:border-[#38312D]">Payment Mode</div>
-                <div className="px-4 py-3 text-[12px] font-bold text-[#6B6560] dark:text-[#A69B93] uppercase tracking-wider">Salary Credit Date</div>
+            <div className="border border-border rounded-[8px] overflow-hidden mb-6">
+              <div className="grid grid-cols-2 border-b border-border">
+                <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider border-r border-border">Payment Mode</div>
+                <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider">Salary Credit Date</div>
               </div>
               <div className="grid grid-cols-2">
-                <div className="px-4 py-3 text-[13px] font-medium text-[#1A1816] dark:text-[#F0EDE8] border-r border-[#D1D5DB] dark:border-[#38312D]">Bank Transfer (NEFT)</div>
-                <div className="px-4 py-3 text-[13px] font-medium text-[#1A1816] dark:text-[#F0EDE8]">{payslip.payDate || "\u2014"}</div>
+                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">Bank Transfer (NEFT)</div>
+                <div className="px-4 py-3 text-[13px] font-medium text-foreground">{payslip.payDate || "\u2014"}</div>
               </div>
             </div>
 
             {/* FOOTER */}
-            <div className="ps-footer border-t border-[#D1D5DB] dark:border-[#38312D] pt-4 text-center">
-              <p className="text-[11px] text-[#9E9690]">This is a computer-generated payslip and does not require a signature.</p>
+            <div className="ps-footer border-t border-border pt-4 text-center">
+              <p className="text-[11px] text-foreground-muted">This is a computer-generated payslip and does not require a signature.</p>
             </div>
           </div>
         </div>

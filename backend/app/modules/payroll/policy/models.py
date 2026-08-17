@@ -22,7 +22,7 @@ explicitly switched onto a non-default policy.
 import enum
 from sqlalchemy import (
     Column, Integer, String, Date, DateTime, Boolean,
-    ForeignKey, Text, UniqueConstraint, Index, JSON,
+    ForeignKey, Text, UniqueConstraint, Index, JSON, Numeric,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -75,6 +75,16 @@ class PayrollPolicy(Base):
     is_default      = Column(Boolean, default=False, nullable=False)
 
     calculation_mode = Column(String(20), default=CalculationMode.STANDARD.value, nullable=False)
+
+    # Salary structure — what share of monthly gross becomes Basic vs HRA
+    # (Special Allowance is always the remainder: gross - basic - hra).
+    # This is an organizational compensation-structure choice, not a tax
+    # law figure, so it lives here (lockable via policy_defaults, same as
+    # calculation_mode) rather than on the canonical tax pack. Only applies
+    # to employees who don't have their own explicit Basic/HRA amounts set
+    # (see _resolve_salary_split_pct in payroll/service.py).
+    basic_pct = Column(Numeric(5, 2), default=40, nullable=False)
+    hra_pct   = Column(Numeric(5, 2), default=20, nullable=False)
 
     # Format used to generate the post-approval bank transfer file for a
     # payroll run (see app/modules/payroll/bank_export/). Independent of the

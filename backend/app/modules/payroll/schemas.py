@@ -720,6 +720,10 @@ class JurisdictionPackResponse(BaseModel):
     changeSummary:       Optional[str] = Field(None, validation_alias="change_summary", serialization_alias="changeSummary")
     nextReviewDate:      Optional[date] = Field(None, validation_alias="next_review_date", serialization_alias="nextReviewDate")
     policyDefaults:      Optional[dict] = Field(None, validation_alias="policy_defaults", serialization_alias="policyDefaults")
+    taxYear:             Optional[str] = Field(None, validation_alias="tax_year", serialization_alias="taxYear")
+    taxRegime:           Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    currency:            Optional[str] = None
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     updatedById:         Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
@@ -730,6 +734,14 @@ class JurisdictionPackResponse(BaseModel):
 
 
 class JurisdictionPackUpsert(BaseModel):
+    # When editing an existing pack in place (not creating a new one, not a
+    # new version), the caller passes the row's real database id so the
+    # lookup below is by primary key rather than by (packId, version) —
+    # the only way packId itself can be safely renamed without orphaning
+    # the row's history or its linked canonical rate/slab/audit rows
+    # (all of which reference jurisdiction_pack_id, the integer id, never
+    # the packId string).
+    id: Optional[int] = None
     packId: str
     jurisdictionCountry: str
     jurisdictionState: Optional[str] = None
@@ -746,6 +758,93 @@ class JurisdictionPackUpsert(BaseModel):
     changeSummary: Optional[str] = None
     nextReviewDate: Optional[date] = None
     policyDefaults: Optional[dict] = None
+    taxYear: Optional[str] = None
+    taxRegime: Optional[str] = None
+    approvedById: Optional[int] = None
+    currency: Optional[str] = None
+
+
+# ── Canonical Tax Rates (Super Admin-owned; organization_id IS NULL) ─────
+
+class CanonicalTaxSlabUpsert(BaseModel):
+    id: Optional[int] = None
+    jurisdictionPackId: int
+    jurisdictionCountry: str
+    jurisdictionState: Optional[str] = None
+    taxRegime: Optional[str] = None
+    minAmount: Decimal
+    maxAmount: Optional[Decimal] = None
+    ratePct: Decimal
+    rateLabel: str
+    taxFormula: str = ""
+    ruleType: str = "MARGINAL_RATE"
+    formulaExpression: Optional[str] = None
+    sortOrder: int = 0
+
+
+class CanonicalContributionRateUpsert(BaseModel):
+    id: Optional[int] = None
+    jurisdictionPackId: int
+    jurisdictionCountry: str
+    jurisdictionState: Optional[str] = None
+    taxRegime: Optional[str] = None
+    componentKey: str
+    label: str
+    employeeSharePct: Optional[Decimal] = None
+    employerSharePct: Optional[Decimal] = None
+    flatAmount: Optional[Decimal] = None
+    sortOrder: int = 0
+
+
+class CanonicalTaxSlabResponse(BaseModel):
+    id: int
+    jurisdictionPackId: Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")
+    jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
+    minAmount: Decimal = Field(validation_alias="min_amount", serialization_alias="minAmount")
+    maxAmount: Optional[Decimal] = Field(None, validation_alias="max_amount", serialization_alias="maxAmount")
+    ratePct: Decimal = Field(validation_alias="rate_pct", serialization_alias="ratePct")
+    rateLabel: str = Field(validation_alias="rate_label", serialization_alias="rateLabel")
+    taxFormula: str = Field("", validation_alias="tax_formula", serialization_alias="taxFormula")
+    ruleType: str = Field("MARGINAL_RATE", validation_alias="rule_type", serialization_alias="ruleType")
+    formulaExpression: Optional[str] = Field(None, validation_alias="formula_expression", serialization_alias="formulaExpression")
+    sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class CanonicalContributionRateResponse(BaseModel):
+    id: int
+    jurisdictionPackId: Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")
+    jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
+    componentKey: str = Field(validation_alias="component_key", serialization_alias="componentKey")
+    label: str
+    employeeRatePct: Optional[Decimal] = Field(None, validation_alias="employee_rate_pct", serialization_alias="employeeRatePct")
+    employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
+    sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class TaxConfigurationAuditResponse(BaseModel):
+    id: int
+    actorId: Optional[int] = Field(None, validation_alias="actor_id", serialization_alias="actorId")
+    action: str
+    entityType: str = Field(validation_alias="entity_type", serialization_alias="entityType")
+    entityId: int = Field(validation_alias="entity_id", serialization_alias="entityId")
+    jurisdictionPackId: Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")
+    taxVersion: Optional[str] = Field(None, validation_alias="tax_version", serialization_alias="taxVersion")
+    legalReference: Optional[str] = Field(None, validation_alias="legal_reference", serialization_alias="legalReference")
+    oldValue: Optional[dict] = Field(None, validation_alias="old_value", serialization_alias="oldValue")
+    newValue: Optional[dict] = Field(None, validation_alias="new_value", serialization_alias="newValue")
+    reason: Optional[str] = None
+    createdAt: Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────

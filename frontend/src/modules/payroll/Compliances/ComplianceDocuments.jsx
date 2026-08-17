@@ -9,10 +9,10 @@ import {
 } from "../../../service/payrollService";
 
 const statusConfig = {
-  processing:  { label: "Extracting…", color: "bg-[#F8A60A]/10 text-[#F8A60A]", icon: Loader2, spin: true },
-  parsed:      { label: "Parsed", color: "bg-[#19C58A]/10 text-[#19C58A]", icon: CheckCircle2 },
-  failed:      { label: "Extraction failed", color: "bg-[#FF6E86]/10 text-[#FF6E86]", icon: AlertTriangle },
-  unavailable: { label: "Couldn't reach the server", color: "bg-[#F8F7F4] dark:bg-[#2A2520] text-[#9E9690]", icon: AlertTriangle },
+  processing:  { label: "Extracting…", color: "bg-warning/10 text-warning", icon: Loader2, spin: true },
+  parsed:      { label: "Parsed", color: "bg-primary/10 text-primary", icon: CheckCircle2 },
+  failed:      { label: "Extraction failed", color: "bg-error/10 text-error", icon: AlertTriangle },
+  unavailable: { label: "Couldn't reach the server", color: "bg-surface-muted text-foreground-muted", icon: AlertTriangle },
 };
 
 const POLL_INTERVAL_MS = 3000;
@@ -111,14 +111,14 @@ export default function ComplianceDocumentUpload({ country, addToast, documents 
         onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-[18px] border-2 border-dashed p-10 text-center transition-all duration-200 ${
-          dragOver ? "border-[#19C58A] bg-[#19C58A]/5" : "border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] hover:border-[#19C58A]/50"
+          dragOver ? "border-primary bg-primary/5" : "border-border bg-surface hover:border-primary/50"
         }`}
       >
-        <UploadCloud size={28} className="mx-auto mb-3 text-[#9E9690]" />
-        <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+        <UploadCloud size={28} className="mx-auto mb-3 text-foreground-muted" />
+        <p className="text-[13px] font-bold text-foreground">
           Drop a compliance or tax document here, or click to upload
         </p>
-        <p className="text-[13px] text-[#9E9690] mt-1">
+        <p className="text-[13px] text-foreground-muted mt-1">
           PDF, image, or scanned notice — we'll pull out contribution rates, tax slabs, and requirements for this jurisdiction.
         </p>
         <input
@@ -132,10 +132,10 @@ export default function ComplianceDocumentUpload({ country, addToast, documents 
       </div>
 
       {documents.length === 0 ? (
-        <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-8 text-center shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <FileText size={40} className="mx-auto mb-3 text-[#9E9690]" />
-          <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">No documents uploaded yet</p>
-          <p className="text-[13px] text-[#9E9690] mt-1">Upload compliance documents for this jurisdiction to get started.</p>
+        <div className="bg-surface border border-border rounded-[18px] p-8 text-center shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <FileText size={40} className="mx-auto mb-3 text-foreground-muted" />
+          <p className="text-[15px] font-bold text-foreground">No documents uploaded yet</p>
+          <p className="text-[13px] text-foreground-muted mt-1">Upload compliance documents for this jurisdiction to get started.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -143,15 +143,15 @@ export default function ComplianceDocumentUpload({ country, addToast, documents 
             const sc = statusConfig[doc.status] || statusConfig.processing;
             const Icon = sc.icon;
             return (
-              <div key={doc.id} className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
+              <div key={doc.id} className="bg-surface border border-border rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 min-w-0">
-                    <div className="h-9 w-9 rounded-[10px] bg-[#35B6F5]/10 flex items-center justify-center shrink-0">
-                      <FileText size={16} className="text-[#35B6F5]" />
+                    <div className="h-9 w-9 rounded-[10px] bg-info/10 flex items-center justify-center shrink-0">
+                      <FileText size={16} className="text-info" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[13px] font-bold text-[#1A1816] dark:text-[#F0EDE8] truncate">{doc.fileName}</p>
-                      <p className="text-[13px] text-[#9E9690]">{doc.sizeLabel} · {new Date(doc.uploadedAt).toLocaleString()}</p>
+                      <p className="text-[13px] font-bold text-foreground truncate">{doc.fileName}</p>
+                      <p className="text-[13px] text-foreground-muted">{doc.sizeLabel} · {new Date(doc.uploadedAt).toLocaleString()}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -160,7 +160,7 @@ export default function ComplianceDocumentUpload({ country, addToast, documents 
                     </span>
                     <button
                       onClick={() => handleDelete(doc)}
-                      className="p-1.5 rounded-[10px] text-[#9E9690] hover:bg-[#FF6E86]/10 hover:text-[#FF6E86] transition-all duration-200"
+                      className="p-1.5 rounded-[10px] text-foreground-muted hover:bg-error/10 hover:text-error transition-all duration-200"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -168,7 +168,7 @@ export default function ComplianceDocumentUpload({ country, addToast, documents 
                 </div>
 
                 {doc.error && (
-                  <p className="text-[13px] text-[#FF6E86] mt-3 bg-[#FF6E86]/5 rounded-[12px] px-3.5 py-2.5">{doc.error}</p>
+                  <p className="text-[13px] text-error mt-3 bg-error/5 rounded-[12px] px-3.5 py-2.5">{doc.error}</p>
                 )}
 
                 {(doc.status === "parsed" || doc.status === "failed") && doc.extracted && (
@@ -207,109 +207,109 @@ function ExtractedPreview({ documentId, extracted, source, errorMessage, country
     }
   };
   return (
-    <div className="mt-4 pt-4 border-t border-[#E5E0D9] dark:border-[#38312D] space-y-4">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-[#9E9690]">
+    <div className="mt-4 pt-4 border-t border-border space-y-4">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted">
         {isFallback ? "Policy-based preview" : "Extracted from this document"} — reference only, nothing is auto-applied
       </p>
       {isFallback && (
-        <div className="text-[13px] bg-[#F8A60A]/5 rounded-[12px] px-3.5 py-2.5 space-y-1">
-          <p className="text-[#F8A60A] font-semibold">The document parser did not return structured values, so the current company policy defaults are being shown for reference.</p>
+        <div className="text-[13px] bg-warning/5 rounded-[12px] px-3.5 py-2.5 space-y-1">
+          <p className="text-warning font-semibold">The document parser did not return structured values, so the current company policy defaults are being shown for reference.</p>
           {errorMessage && (
-            <p className="text-[#F8A60A]/70 font-mono text-[11px]">Reason: {errorMessage}</p>
+            <p className="text-warning/70 font-mono text-[11px]">Reason: {errorMessage}</p>
           )}
         </div>
       )}
 
       {registeredEntityDetails && (
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-2">Registered Entity Details</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">Registered Entity Details</p>
           <div className="space-y-1">
             {registeredEntityDetails.name && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>Company Name</span>
                 <span className="font-mono text-right">{registeredEntityDetails.name}</span>
               </div>
             )}
             {registeredEntityDetails.registrationNumber && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>Registration Number</span>
                 <span className="font-mono">{registeredEntityDetails.registrationNumber}</span>
               </div>
             )}
             {registeredEntityDetails.vatNumber && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>VAT Number</span>
                 <span className="font-mono">{registeredEntityDetails.vatNumber}</span>
               </div>
             )}
             {registeredEntityDetails.payeReference && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>PAYE Reference</span>
                 <span className="font-mono">{registeredEntityDetails.payeReference}</span>
               </div>
             )}
             {registeredEntityDetails.utr && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>UTR</span>
                 <span className="font-mono">{registeredEntityDetails.utr}</span>
               </div>
             )}
             {registeredEntityDetails.accountsReferenceDate && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>Accounts Reference Date</span>
                 <span className="font-mono">{registeredEntityDetails.accountsReferenceDate}</span>
               </div>
             )}
             {registeredEntityDetails.pan && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>PAN</span>
                 <span className="font-mono uppercase">{registeredEntityDetails.pan}</span>
               </div>
             )}
             {registeredEntityDetails.tan && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>TAN</span>
                 <span className="font-mono uppercase">{registeredEntityDetails.tan}</span>
               </div>
             )}
             {registeredEntityDetails.gst && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>GST</span>
                 <span className="font-mono uppercase">{registeredEntityDetails.gst}</span>
               </div>
             )}
             {registeredEntityDetails.pfCode && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>PF Code</span>
                 <span className="font-mono">{registeredEntityDetails.pfCode}</span>
               </div>
             )}
             {registeredEntityDetails.esiCode && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>ESI Code</span>
                 <span className="font-mono">{registeredEntityDetails.esiCode}</span>
               </div>
             )}
             {registeredEntityDetails.ein && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>EIN</span>
                 <span className="font-mono">{registeredEntityDetails.ein}</span>
               </div>
             )}
             {registeredEntityDetails.stateId && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>State ID</span>
                 <span className="font-mono">{registeredEntityDetails.stateId}</span>
               </div>
             )}
             {registeredEntityDetails.naicsCode && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>NAICS Code</span>
                 <span className="font-mono">{registeredEntityDetails.naicsCode}</span>
               </div>
             )}
             {registeredEntityDetails.address && (
-              <div className="flex justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+              <div className="flex justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                 <span>Registered Address</span>
                 <span className="font-mono text-right max-w-[60%]">{registeredEntityDetails.address}</span>
               </div>
@@ -320,19 +320,19 @@ function ExtractedPreview({ documentId, extracted, source, errorMessage, country
 
       {contributionRates?.length > 0 && (
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-2">Contribution Rates</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">Contribution Rates</p>
           <div className="space-y-1">
             {contributionRates.map((r, i) => {
               const key = `rate-${r.id ?? i}`;
               return (
-                <div key={key} className="flex items-center justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+                <div key={key} className="flex items-center justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                   <span>{r.label}</span>
                   <div className="flex items-center gap-3">
                     <span className="font-mono">{r.employee} / {r.employer}</span>
                     <button
                       onClick={() => handleApply("contributionRate", r, key)}
                       disabled={applyingKey === key}
-                      className="flex items-center gap-1 text-[#19C58A] hover:text-[#15B07A] font-semibold disabled:opacity-50 text-[11px]"
+                      className="flex items-center gap-1 text-primary hover:text-primary-hover font-semibold disabled:opacity-50 text-[11px]"
                       title="Apply this rate to the org's active configuration"
                     >
                       {applyingKey === key ? <Loader2 size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />}
@@ -348,19 +348,19 @@ function ExtractedPreview({ documentId, extracted, source, errorMessage, country
 
       {taxSlabs?.length > 0 && (
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-2">Tax Slabs</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">Tax Slabs</p>
           <div className="space-y-1">
             {taxSlabs.map((s, i) => {
               const key = `slab-${s.id ?? i}`;
               return (
-                <div key={key} className="flex items-center justify-between text-[13px] text-[#6B6560] dark:text-[#A69B93] bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[10px] px-3.5 py-2">
+                <div key={key} className="flex items-center justify-between text-[13px] text-foreground-muted bg-surface-muted rounded-[10px] px-3.5 py-2">
                   <span>{s.min} – {s.max}</span>
                   <div className="flex items-center gap-3">
                     <span className="font-mono">{s.rate}</span>
                     <button
                       onClick={() => handleApply("taxSlab", s, key)}
                       disabled={applyingKey === key}
-                      className="flex items-center gap-1 text-[#19C58A] hover:text-[#15B07A] font-semibold disabled:opacity-50 text-[11px]"
+                      className="flex items-center gap-1 text-primary hover:text-primary-hover font-semibold disabled:opacity-50 text-[11px]"
                       title="Apply this slab to the org's active configuration"
                     >
                       {applyingKey === key ? <Loader2 size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />}
@@ -376,10 +376,10 @@ function ExtractedPreview({ documentId, extracted, source, errorMessage, country
 
       {requirements?.length > 0 && (
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-2">Requirements Noted</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">Requirements Noted</p>
           <ul className="space-y-1 list-disc list-inside">
             {requirements.map((r, i) => (
-              <li key={i} className="text-[13px] text-[#6B6560] dark:text-[#A69B93]">{r.label}{r.note ? ` — ${r.note}` : ""}</li>
+              <li key={i} className="text-[13px] text-foreground-muted">{r.label}{r.note ? ` — ${r.note}` : ""}</li>
             ))}
           </ul>
         </div>

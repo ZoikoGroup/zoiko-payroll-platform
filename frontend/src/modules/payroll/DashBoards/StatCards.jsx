@@ -34,10 +34,10 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
     return (
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="rounded-[18px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] animate-pulse">
-            <div className="h-3 w-20 rounded-md bg-[#F0EDE8] dark:bg-[#38312D]" />
-            <div className="mt-4 h-8 w-28 rounded-md bg-[#F0EDE8] dark:bg-[#38312D]" />
-            <div className="mt-2.5 h-3 w-24 rounded-md bg-[#F0EDE8] dark:bg-[#38312D]" />
+          <div key={i} className="rounded-[18px] border border-border bg-surface p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] animate-pulse">
+            <div className="h-3 w-20 rounded-md bg-surface-muted" />
+            <div className="mt-4 h-8 w-28 rounded-md bg-surface-muted" />
+            <div className="mt-2.5 h-3 w-24 rounded-md bg-surface-muted" />
           </div>
         ))}
       </div>
@@ -60,12 +60,12 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       value: fmtCurrency(data?.totalNet ?? data?.totalPayrollCost, currencyCode),
       indicator: changePct != null ? `${isUp ? "+" : ""}${changePct}% vs last month` : "No prior data",
       indicatorColor: isStable
-        ? "text-[#9E9690]"
+        ? "text-foreground-muted"
         : isUp
-          ? "text-[#19C58A]"
-          : "text-[#FF6E86]",
-      iconBg: "bg-[#19C58A]/10",
-      iconColor: "text-[#19C58A]",
+          ? "text-primary"
+          : "text-error",
+      iconBg: "bg-primary/10",
+      iconColor: "text-primary",
       trendIcon: isStable ? Minus : isUp ? TrendingUp : TrendingDown,
     },
     {
@@ -74,9 +74,9 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       label: "Active Employees",
       value: String(data?.activeCount ?? 0),
       indicator: `${data?.headcount ?? 0} total \u00b7 ${data?.onLeaveCount ?? 0} on leave`,
-      indicatorColor: "text-[#9E9690]",
-      iconBg: "bg-[#35B6F5]/10",
-      iconColor: "text-[#35B6F5]",
+      indicatorColor: "text-foreground-muted",
+      iconBg: "bg-info/10",
+      iconColor: "text-info",
       trendIcon: Minus,
     },
     {
@@ -87,9 +87,9 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       indicator: attendanceDed > 0
         ? `${fmtCurrency(attendanceDed, currencyCode)} attendance`
         : `${data?.pendingApprovals ?? 0} runs pending approval`,
-      indicatorColor: attendanceDed > 0 ? "text-[#FF6E86]" : "text-[#F8A60A]",
-      iconBg: "bg-[#FF6E86]/10",
-      iconColor: "text-[#FF6E86]",
+      indicatorColor: attendanceDed > 0 ? "text-error" : "text-warning",
+      iconBg: "bg-error/10",
+      iconColor: "text-error",
       trendIcon: Minus,
     },
     {
@@ -98,9 +98,9 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       label: isAllTime ? "Gross Pay (All Time)" : "Gross Pay (This Month)",
       value: fmtCurrency(data?.totalGross, currencyCode),
       indicator: "Before deductions",
-      indicatorColor: "text-[#9E9690]",
-      iconBg: "bg-[#9D7BF2]/10",
-      iconColor: "text-[#9D7BF2]",
+      indicatorColor: "text-foreground-muted",
+      iconBg: "bg-category-teal/10",
+      iconColor: "text-category-teal",
       trendIcon: Minus,
     },
   ];
@@ -113,17 +113,17 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
         return (
           <div
             key={card.key}
-            className="group rounded-[18px] border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#221D1A] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.2)] hover:-translate-y-0.5"
+            className="group rounded-[18px] border border-border bg-surface p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_8px_24px_rgba(0,0,0,0.2)] hover:-translate-y-0.5"
           >
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690]">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
                 {card.label}
               </p>
               <div className={`flex h-10 w-10 items-center justify-center rounded-[12px] ${card.iconBg} transition-transform duration-200 group-hover:scale-110`}>
                 <Icon size={18} className={card.iconColor} strokeWidth={2} />
               </div>
             </div>
-            <p className="mt-4 text-[26px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">
+            <p className="mt-4 text-[26px] font-extrabold tracking-tight text-foreground">
               {card.value}
             </p>
             <p className={`mt-2 flex items-center gap-1.5 text-[12px] font-semibold ${card.indicatorColor}`}>

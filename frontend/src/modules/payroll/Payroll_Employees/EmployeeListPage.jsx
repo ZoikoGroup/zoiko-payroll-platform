@@ -172,20 +172,20 @@ export default function EmployeeListPage() {
   }
 
   return (
-    <div className="bg-[#F8F7F4] dark:bg-[#1A1816] min-h-screen p-6 lg:p-8">
+    <div className="bg-background min-h-screen p-6 lg:p-8">
       <div className="mx-auto max-w-6xl">
         <div className="mb-6">
-          <h1 className="text-[28px] font-extrabold tracking-tight text-[#1A1816] dark:text-[#F0EDE8]">Payroll Employees</h1>
-          <p className="text-[13px] font-medium text-[#9E9690] mt-1">Manage employee records used in payroll processing.</p>
+          <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payroll Employees</h1>
+          <p className="text-[13px] font-medium text-foreground-muted mt-1">Manage employee records used in payroll processing.</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[16px] p-1.5 mb-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="flex flex-wrap items-center gap-1.5 bg-surface border border-border rounded-[16px] p-1.5 mb-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
               className={`flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold rounded-[12px] transition-all duration-200 ${
-                activeTab === t.id ? "bg-[#19C58A]/10 text-[#19C58A]" : "text-[#9E9690] hover:text-[#1A1816] dark:hover:text-[#F0EDE8] hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520]"
+                activeTab === t.id ? "bg-primary/10 text-primary" : "text-foreground-muted hover:text-foreground hover:bg-background dark:hover:bg-surface-muted"
               }`}
             >
               <t.icon size={15} />
@@ -193,44 +193,44 @@ export default function EmployeeListPage() {
             </button>
           ))}
 
-          <div className="hidden sm:block h-6 w-px bg-[#E5E0D9] dark:bg-[#38312D] mx-1" />
+          <div className="hidden sm:block h-6 w-px bg-border mx-1" />
 
           <button
             onClick={() => setActiveTab("bulk-import")}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#19C58A]"
+            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-primary"
           >
             <Upload size={15} />
             Import
           </button>
           <button
             onClick={() => setActiveTab("bulk-update")}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#9D7BF2]"
+            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-category-teal"
           >
             <RefreshCw size={15} />
             Update Employees
           </button>
           <button
             onClick={() => setActiveTab("send-template")}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#19C58A]"
+            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-primary"
           >
             <Send size={15} />
             Send Template
           </button>
           <button
             onClick={() => setActiveTab("review-submissions")}
-            className="relative flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#F8A60A]"
+            className="relative flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-warning"
           >
             <Inbox size={15} />
             Review Submissions
             {pendingSubmissionCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-[#F8A60A] text-white text-[10px] font-bold px-1">
+              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-warning text-white text-[10px] font-bold px-1">
                 {pendingSubmissionCount}
               </span>
             )}
           </button>
           <button
             onClick={handleExportEmployees}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-[#6B6560] dark:text-[#A69B93] transition-all duration-200 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] hover:text-[#35B6F5]"
+            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-info"
           >
             <Download size={15} />
             Export
@@ -239,22 +239,22 @@ export default function EmployeeListPage() {
 
         {activeTab === "list" && (
           <>
-            <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-5">
+            <div className="bg-surface border border-border rounded-[18px] p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="relative flex-1">
-                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9E9690]" />
+                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-foreground-muted" />
                   <input
                     type="text"
                     placeholder="Search by name, ID, or email…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="w-full rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] pl-9 pr-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] placeholder:text-[#9E9690] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200 sm:max-w-xs"
+                    className="w-full rounded-[12px] border border-border bg-background pl-9 pr-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200 sm:max-w-xs"
                   />
                 </div>
                 <select
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
-                  className="rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                  className="rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                 >
                   <option value="">All departments</option>
                   {DEPARTMENTS.map((d) => (
@@ -264,7 +264,7 @@ export default function EmployeeListPage() {
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
-                  className="rounded-[12px] border border-[#E5E0D9] dark:border-[#38312D] bg-[#F8F7F4] dark:bg-[#1A1816] px-3.5 py-2.5 text-[13px] text-[#1A1816] dark:text-[#F0EDE8] focus:outline-none focus:border-[#19C58A] focus:ring-2 focus:ring-[#19C58A]/20 transition-all duration-200"
+                  className="rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                 >
                   <option value="">All statuses</option>
                   {EMPLOYEE_STATUSES.map((s) => (
@@ -274,7 +274,7 @@ export default function EmployeeListPage() {
                 {(search || department || status) && (
                   <button
                     onClick={() => { setSearch(""); setDepartment(""); setStatus(""); }}
-                    className="text-[13px] font-semibold text-[#9E9690] hover:text-[#19C58A] transition-colors duration-200 px-2"
+                    className="text-[13px] font-semibold text-foreground-muted hover:text-primary transition-colors duration-200 px-2"
                   >
                     <X size={14} className="inline mr-1" />
                     Clear
@@ -284,19 +284,19 @@ export default function EmployeeListPage() {
             </div>
 
             {loadError && (
-              <div className="mb-4 rounded-[12px] bg-[#FF6E86]/10 px-4 py-3 text-[13px] text-[#FF6E86] border border-[#FF6E86]/20">
+              <div className="mb-4 rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
                 {loadError}
               </div>
             )}
 
             <div>
               {selectedIds.size > 0 && (
-                <div className="mb-3 flex items-center gap-3 bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[12px] px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                  <span className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{selectedIds.size} selected</span>
+                <div className="mb-3 flex items-center gap-3 bg-surface border border-border rounded-[12px] px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+                  <span className="text-[13px] font-semibold text-foreground">{selectedIds.size} selected</span>
                   <button
                     onClick={handleBulkDelete}
                     disabled={deleting}
-                    className="bg-[#FF6E86] rounded-[12px] px-4 py-2 text-[13px] font-bold text-white transition-all duration-200 hover:bg-[#E55A72] shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-60"
+                    className="bg-error rounded-[12px] px-4 py-2 text-[13px] font-bold text-white transition-all duration-200 hover:bg-error shadow-[0_2px_8px_rgba(255,110,134,0.3)] disabled:opacity-60"
                   >
                     {deleting ? "Deleting…" : "Delete selected"}
                   </button>
@@ -326,8 +326,8 @@ export default function EmployeeListPage() {
         )}
 
         {activeTab === "add" && (
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <h2 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8] mb-6">Add Employee</h2>
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <h2 className="text-[15px] font-bold text-foreground mb-6">Add Employee</h2>
             <EmployeeForm
               onCancel={() => setActiveTab("list")}
               onSaved={handleEmployeeCreated}
@@ -338,7 +338,7 @@ export default function EmployeeListPage() {
         )}
 
         {activeTab === "bulk-import" && (
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <EmployeeBulkImportModal
               onClose={() => setActiveTab("list")}
               onImported={handleEmployeesBulkImported}
@@ -348,7 +348,7 @@ export default function EmployeeListPage() {
         )}
 
         {activeTab === "bulk-update" && (
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <EmployeeBulkEditPanel
               employees={employees}
               selectedIds={selectedIds}
@@ -360,7 +360,7 @@ export default function EmployeeListPage() {
         )}
 
         {activeTab === "send-template" && (
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <SendTemplateBuilder
               employees={employees}
               selectedIds={selectedIds}
@@ -372,10 +372,10 @@ export default function EmployeeListPage() {
         )}
 
         {activeTab === "review-submissions" && (
-          <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+          <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">Review Submissions</h2>
-              <button onClick={() => setActiveTab("list")} className="text-[13px] font-semibold text-[#9E9690] hover:text-[#19C58A] transition-colors duration-200">
+              <h2 className="text-[15px] font-bold text-foreground">Review Submissions</h2>
+              <button onClick={() => setActiveTab("list")} className="text-[13px] font-semibold text-foreground-muted hover:text-primary transition-colors duration-200">
                 Back to list
               </button>
             </div>

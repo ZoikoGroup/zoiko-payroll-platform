@@ -19,14 +19,12 @@ import {
   ShieldCheck,
   Wallet,
   FileBarChart,
-  Sun,
-  Moon,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { useDarkMode } from "../context/DarkModeContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
 import { apiFetch } from "../api/client";
 import Modal from "./Modal";
+import ThemeToggle from "./ThemeToggle";
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_super_admin_sidebar_collapsed";
 
@@ -89,7 +87,7 @@ function NavSection({ title, items, pathname, onNavigate, collapsed }) {
   return (
     <div>
       {!collapsed && (
-        <p className="mb-3 px-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-[#8A82B7]">{title}</p>
+        <p className="mb-3 px-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-white/40">{title}</p>
       )}
       <div className="space-y-1.5">
         {items.map((item) => {
@@ -102,15 +100,15 @@ function NavSection({ title, items, pathname, onNavigate, collapsed }) {
               onClick={onNavigate}
               title={collapsed ? item.label : undefined}
               aria-current={active ? "page" : undefined}
-              className={`group flex items-center gap-3 rounded-[12px] border px-3.5 py-2.5 text-sm transition duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] ${
+              className={`group flex items-center gap-3 rounded-[10px] border-l-[3px] px-3.5 py-2.5 text-sm transition duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
                 collapsed ? "justify-center px-0" : ""
               } ${
                 active
-                  ? "border-[#7B3AEB]/40 bg-gradient-to-r from-[#4C2CC5] via-[#7B3AEB] to-[#6033D3] text-white shadow-[0_12px_28px_rgba(70,38,156,0.22)]"
-                  : "border-transparent text-[#B2ACC8] hover:border-white/10 hover:bg-white/8 hover:text-white"
+                  ? "border-brand-cyan bg-white/10 text-white"
+                  : "border-transparent text-white/60 hover:bg-white/5 hover:text-white"
               }`}
             >
-              <item.icon className="h-4 w-4 shrink-0" />
+              <item.icon className={`h-4 w-4 shrink-0 ${active ? "text-brand-cyan" : ""}`} />
               {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
             </NavLink>
           );
@@ -130,16 +128,17 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
     <div className="flex h-full flex-col">
       <div className={`mb-5 flex items-center gap-3 ${collapsed ? "flex-col" : "justify-between"}`}>
         {collapsed ? (
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-extrabold text-[#FC7800]">
-            Z
-          </span>
+          <img
+            src="/zoikopayroll-icon.png"
+            alt="Zoiko Payroll"
+            className="h-9 w-9 rounded-xl object-contain"
+          />
         ) : (
           <div className="flex flex-col gap-1.5">
-            <span className="text-[22px] font-extrabold tracking-tight text-white">
-              <span>Zoiko</span>
-              <span className="text-[#FC7800]">-Pay</span>
-            </span>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#B2ACC8]">Super Admin</p>
+            <div className="inline-flex w-fit rounded-lg bg-white px-2.5 py-1.5">
+              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-6 w-auto object-contain" />
+            </div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">Super Admin</p>
           </div>
         )}
         <button
@@ -147,7 +146,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
           type="button"
           onClick={onNavigate}
           aria-label="Close menu"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] lg:hidden"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:hidden"
         >
           <X className="h-4 w-4" />
         </button>
@@ -156,7 +155,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
           onClick={onToggleCollapse}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] lg:inline-flex"
+          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:border-white/20 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring lg:inline-flex"
         >
           {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
         </button>
@@ -183,7 +182,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">{displayName}</p>
-              <p className="truncate text-xs text-[#B2ACC8]">Super Admin</p>
+              <p className="truncate text-xs text-white/60">Super Admin</p>
             </div>
           )}
         </div>
@@ -194,7 +193,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
             navigate("/login", { replace: true });
           }}
           title={collapsed ? "Sign out" : undefined}
-          className={`flex w-full items-center gap-3 rounded-[12px] border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-[#B2ACC8] transition duration-150 hover:border-[#FF6E86]/40 hover:bg-[#FF6E86]/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9E7BFF] ${
+          className={`flex w-full items-center gap-3 rounded-[12px] border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-white/60 transition duration-150 hover:border-error/40 hover:bg-error/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
             collapsed ? "justify-center px-0" : ""
           }`}
         >
@@ -203,11 +202,8 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
         </button>
         {!collapsed && (
           <div>
-            <p className="text-[9px] tracking-[0.28em] text-[#7A7396]">POWERED BY</p>
-            <p className="text-[14px] font-extrabold text-white">
-              <span>Zoiko</span>
-              <span className="text-[#FC7800]">-Pay</span>
-            </p>
+            <p className="text-[9px] tracking-[0.28em] text-white/40">POWERED BY</p>
+            <p className="text-[14px] font-extrabold text-white">Zoiko Payroll</p>
           </div>
         )}
       </div>
@@ -225,9 +221,9 @@ function CopyButton({ text }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }}
-      className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
+      className="flex items-center gap-1.5 rounded-lg bg-surface-muted px-3 py-1.5 text-xs font-medium text-foreground-secondary hover:bg-border-light"
     >
-      {copied ? <Check size={13} className="text-green-600" /> : <Copy size={13} />}
+      {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
       {copied ? "Copied" : "Copy"}
     </button>
   );
@@ -236,18 +232,18 @@ function CopyButton({ text }) {
 function GeneratedPasswordModal({ password, onClose }) {
   return (
     <Modal title="New password generated" onClose={onClose} maxWidth="max-w-md">
-      <p className="text-sm text-slate-600 mb-4">
+      <p className="text-sm text-foreground-secondary mb-4">
         Save this now — it won't be shown again. Use it to sign in, then change it to something memorable.
       </p>
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3">
-        <code className="truncate text-sm font-mono text-slate-800">{password}</code>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background-secondary px-3.5 py-3">
+        <code className="truncate text-sm font-mono text-foreground">{password}</code>
         <CopyButton text={password} />
       </div>
       <div className="mt-5 flex justify-end">
         <button
           type="button"
           onClick={onClose}
-          className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover"
         >
           Done
         </button>
@@ -297,28 +293,28 @@ function ProfileMenu() {
         type="button"
         disabled={busy}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-[#38312D] py-1 pl-1 pr-2.5 text-sm hover:bg-slate-50 dark:hover:bg-white/5 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+        className="flex items-center gap-2 rounded-full border border-border py-1 pl-1 pr-2.5 text-sm hover:bg-surface-muted disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-orange-600">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary">
           {getInitials(displayName)}
         </span>
-        <span className="hidden text-slate-700 dark:text-[#F0EDE8] sm:inline">{displayName}</span>
-        <ChevronDown size={14} className="text-slate-400 dark:text-[#756B64]" />
+        <span className="hidden text-foreground sm:inline">{displayName}</span>
+        <ChevronDown size={14} className="text-foreground-muted" />
       </button>
 
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-slate-200 dark:border-[#38312D] bg-white dark:bg-[#221D1A] py-1 shadow-lg">
-            <div className="border-b border-slate-100 dark:border-[#38312D] px-3.5 py-2.5">
-              <p className="truncate text-sm font-medium text-slate-800 dark:text-[#F0EDE8]">{displayName}</p>
-              <p className="truncate text-xs text-slate-500 dark:text-[#A69B93]">{user?.email}</p>
+          <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-border bg-surface py-1 shadow-lg">
+            <div className="border-b border-border-light px-3.5 py-2.5">
+              <p className="truncate text-sm font-medium text-foreground">{displayName}</p>
+              <p className="truncate text-xs text-foreground-muted">{user?.email}</p>
             </div>
             <div className="py-1">
               <button
                 type="button"
                 onClick={handleEmailReset}
-                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-50 dark:hover:bg-white/5"
+                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-foreground-secondary hover:bg-surface-muted"
               >
                 <Mail size={15} />
                 Reset password by email
@@ -326,7 +322,7 @@ function ProfileMenu() {
               <button
                 type="button"
                 onClick={handleGeneratePassword}
-                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-slate-600 dark:text-[#A69B93] hover:bg-slate-50 dark:hover:bg-white/5"
+                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-foreground-secondary hover:bg-surface-muted"
               >
                 <KeyRound size={15} />
                 Generate random password
@@ -343,33 +339,18 @@ function ProfileMenu() {
   );
 }
 
-function ThemeToggle() {
-  const { isDark, toggle } = useDarkMode();
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/10"
-    >
-      {isDark ? <Sun size={18} /> : <Moon size={18} />}
-    </button>
-  );
-}
-
 function Header({ onOpenSidebar, onToggleCollapse, collapsed }) {
   const { pathname } = useLocation();
   const pageLabel = getPageLabel(pathname);
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 dark:border-[#38312D] bg-white dark:bg-[#221D1A] px-4 sm:px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-surface px-4 sm:px-6">
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onOpenSidebar}
           aria-label="Open menu"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/10 lg:hidden"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground-muted hover:bg-surface-muted lg:hidden"
         >
           <Menu size={18} />
         </button>
@@ -378,14 +359,14 @@ function Header({ onOpenSidebar, onToggleCollapse, collapsed }) {
           onClick={onToggleCollapse}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="hidden h-9 w-9 items-center justify-center rounded-lg text-slate-500 dark:text-[#A69B93] hover:bg-slate-100 dark:hover:bg-white/10 lg:inline-flex"
+          className="hidden h-9 w-9 items-center justify-center rounded-lg text-foreground-muted hover:bg-surface-muted lg:inline-flex"
         >
           {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
         </button>
         <div className="hidden sm:block">
-          <span className="text-sm font-semibold text-slate-800 dark:text-[#F0EDE8]">Zoiko-Pay</span>
-          <span className="mx-2 text-slate-300 dark:text-[#38312D]">·</span>
-          <span className="text-sm text-slate-500 dark:text-[#A69B93]">{pageLabel}</span>
+          <span className="text-sm font-semibold text-foreground">Zoiko Payroll</span>
+          <span className="mx-2 text-border-strong">·</span>
+          <span className="text-sm text-foreground-muted">{pageLabel}</span>
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -405,10 +386,10 @@ function ToastStack() {
           key={toast.id}
           className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm shadow-lg transition-all duration-200 ${
             toast.type === "success"
-              ? "border-green-200 bg-green-50 text-green-700"
+              ? "border-success/30 bg-success-light text-success"
               : toast.type === "error"
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-blue-200 bg-blue-50 text-blue-700"
+              ? "border-error/30 bg-error-light text-error"
+              : "border-info/30 bg-info-light text-info"
           }`}
         >
           <span>{toast.message}</span>
@@ -455,7 +436,7 @@ export default function SuperAdminShell({ children }) {
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-slate-50 dark:bg-[#1A1816]">
+      <div className="min-h-screen bg-background">
         <div
           className={`fixed inset-0 z-30 bg-slate-950/40 transition-opacity lg:hidden ${
             sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
@@ -466,7 +447,7 @@ export default function SuperAdminShell({ children }) {
         <aside
           role="navigation"
           aria-label="Sidebar"
-          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-[#1F0B63] to-[#160845] px-4 py-6 shadow-[0_24px_80px_rgba(8,6,37,0.42)] transition-[transform,width] duration-200 lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 shadow-[0_8px_28px_rgba(8,43,69,0.28)] transition-[transform,width] duration-200 lg:translate-x-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           } ${collapsed ? "w-72 lg:w-20" : "w-72 lg:w-[272px]"}`}
         >

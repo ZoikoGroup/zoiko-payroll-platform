@@ -32,15 +32,15 @@ function fmtDate(v) {
 
 function StatusBadge({ status }) {
   const map = {
-    Draft: "bg-[#35B6F5]/10 text-[#35B6F5]",
-    Review: "bg-[#F8A60A]/10 text-[#F8A60A]",
-    Approved: "bg-[#19C58A]/10 text-[#19C58A]",
-    Authorized: "bg-[#19C58A]/10 text-[#19C58A]",
-    Paid: "bg-[#19C58A]/10 text-[#19C58A]",
-    Closed: "bg-[#9E9690]/10 text-[#9E9690]",
-    Pending: "bg-[#F8A60A]/10 text-[#F8A60A]",
+    Draft: "bg-info/10 text-info",
+    Review: "bg-warning/10 text-warning",
+    Approved: "bg-primary/10 text-primary",
+    Authorized: "bg-primary/10 text-primary",
+    Paid: "bg-primary/10 text-primary",
+    Closed: "bg-foreground-muted/10 text-foreground-muted",
+    Pending: "bg-warning/10 text-warning",
   };
-  const cls = map[status] || "bg-[#9E9690]/10 text-[#9E9690]";
+  const cls = map[status] || "bg-foreground-muted/10 text-foreground-muted";
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${cls}`}>
       {status || "—"}
@@ -51,8 +51,8 @@ function StatusBadge({ status }) {
 function InfoField({ label, children }) {
   return (
     <div>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-[#9E9690] mb-1">{label}</p>
-      <div className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{children ?? "—"}</div>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-muted mb-1">{label}</p>
+      <div className="text-[13px] font-semibold text-foreground">{children ?? "—"}</div>
     </div>
   );
 }
@@ -106,45 +106,45 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-[#19C58A] mb-2">Earnings</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Earnings</p>
         {earnings.length === 0 ? (
-          <p className="text-[12px] text-[#9E9690]">No earnings line items.</p>
+          <p className="text-[12px] text-foreground-muted">No earnings line items.</p>
         ) : (
           <dl className="space-y-1.5">
             {earnings.map(([label, val]) => (
               <div key={label} className="flex items-center justify-between text-[12px]">
-                <dt className="text-[#6B6560] dark:text-[#A69B93]">{label}</dt>
-                <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmtCurrencyLocal(val, fmtCurrency)}</dd>
+                <dt className="text-foreground-muted">{label}</dt>
+                <dd className="font-semibold text-foreground">{fmtCurrencyLocal(val, fmtCurrency)}</dd>
               </div>
             ))}
           </dl>
         )}
       </div>
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-[#FF6E86] mb-2">Deductions</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-error mb-2">Deductions</p>
         {deductions.length === 0 ? (
-          <p className="text-[12px] text-[#9E9690]">No deductions.</p>
+          <p className="text-[12px] text-foreground-muted">No deductions.</p>
         ) : (
           <dl className="space-y-1.5">
             {deductions.map(([label, val]) => (
               <div key={label} className="flex items-center justify-between text-[12px]">
-                <dt className="text-[#6B6560] dark:text-[#A69B93]">{label}</dt>
-                <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmtCurrencyLocal(val, fmtCurrency)}</dd>
+                <dt className="text-foreground-muted">{label}</dt>
+                <dd className="font-semibold text-foreground">{fmtCurrencyLocal(val, fmtCurrency)}</dd>
               </div>
             ))}
           </dl>
         )}
       </div>
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-[#9D7BF2] mb-2">Employer Contributions</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-category-teal mb-2">Employer Contributions</p>
         {employerContributions.length === 0 ? (
-          <p className="text-[12px] text-[#9E9690]">No employer contributions.</p>
+          <p className="text-[12px] text-foreground-muted">No employer contributions.</p>
         ) : (
           <dl className="space-y-1.5">
             {employerContributions.map(([label, val]) => (
               <div key={label} className="flex items-center justify-between text-[12px]">
-                <dt className="text-[#6B6560] dark:text-[#A69B93]">{label}</dt>
-                <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{fmtCurrencyLocal(val, fmtCurrency)}</dd>
+                <dt className="text-foreground-muted">{label}</dt>
+                <dd className="font-semibold text-foreground">{fmtCurrencyLocal(val, fmtCurrency)}</dd>
               </div>
             ))}
           </dl>
@@ -164,37 +164,37 @@ function AttendanceLeaveBlock({ item, leave }) {
     ["Casual Leave", leave?.casualLeave],
   ];
   return (
-    <div className="mt-4 border-t border-[#E5E0D9] dark:border-[#38312D] pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="mt-4 border-t border-border pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-[#35B6F5] mb-2">Attendance</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-info mb-2">Attendance</p>
         <dl className="space-y-1.5 text-[12px]">
           <div className="flex items-center justify-between">
-            <dt className="text-[#6B6560] dark:text-[#A69B93]">Payable Days</dt>
-            <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{item.payableDays ?? "—"}</dd>
+            <dt className="text-foreground-muted">Payable Days</dt>
+            <dd className="font-semibold text-foreground">{item.payableDays ?? "—"}</dd>
           </div>
           <div className="flex items-center justify-between">
-            <dt className="text-[#6B6560] dark:text-[#A69B93]">Total Working Days</dt>
-            <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{item.totalWorkingDays ?? "—"}</dd>
+            <dt className="text-foreground-muted">Total Working Days</dt>
+            <dd className="font-semibold text-foreground">{item.totalWorkingDays ?? "—"}</dd>
           </div>
           <div className="flex items-center justify-between">
-            <dt className="text-[#6B6560] dark:text-[#A69B93]">Unpaid Leave Days</dt>
-            <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{item.unpaidLeaveDays ?? 0}</dd>
+            <dt className="text-foreground-muted">Unpaid Leave Days</dt>
+            <dd className="font-semibold text-foreground">{item.unpaidLeaveDays ?? 0}</dd>
           </div>
         </dl>
       </div>
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-[#F8A60A] mb-2">Leave Summary</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-warning mb-2">Leave Summary</p>
         {leave ? (
           <dl className="space-y-1.5 text-[12px]">
             {leaveRows.map(([label, val]) => (
               <div key={label} className="flex items-center justify-between">
-                <dt className="text-[#6B6560] dark:text-[#A69B93]">{label}</dt>
-                <dd className="font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{val ?? 0} day{val === 1 ? "" : "s"}</dd>
+                <dt className="text-foreground-muted">{label}</dt>
+                <dd className="font-semibold text-foreground">{val ?? 0} day{val === 1 ? "" : "s"}</dd>
               </div>
             ))}
           </dl>
         ) : (
-          <p className="text-[12px] text-[#9E9690]">No attendance records for this period.</p>
+          <p className="text-[12px] text-foreground-muted">No attendance records for this period.</p>
         )}
       </div>
     </div>
@@ -225,39 +225,39 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
     <>
       <tr
         onClick={() => setOpen((o) => !o)}
-        className="cursor-pointer transition-colors hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520]"
+        className="cursor-pointer transition-colors hover:bg-background dark:hover:bg-surface-muted"
       >
-        <td className="px-3 py-3 text-xs font-semibold text-[#1A1816] dark:text-[#F0EDE8] whitespace-nowrap">
+        <td className="px-3 py-3 text-xs font-semibold text-foreground whitespace-nowrap">
           <span className="inline-flex items-center gap-1.5">
-            <ChevronDown size={13} className={`text-[#9E9690] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+            <ChevronDown size={13} className={`text-foreground-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
             {item.employee}
           </span>
         </td>
-        <td className="px-3 py-3 text-xs text-[#6B6560] dark:text-[#A69B93] whitespace-nowrap">{item.employeeId}</td>
-        <td className="px-3 py-3 text-xs text-[#6B6560] dark:text-[#A69B93] whitespace-nowrap">{item.department || "—"}</td>
-        <td className="px-3 py-3 text-xs text-[#6B6560] dark:text-[#A69B93] whitespace-nowrap">{item.designation || "—"}</td>
-        <td className="px-3 py-3 text-xs text-[#6B6560] dark:text-[#A69B93] whitespace-nowrap">
+        <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{item.employeeId}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{item.department || "—"}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{item.designation || "—"}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">
           {item.payableDays != null && item.totalWorkingDays != null
             ? `${item.payableDays}/${item.totalWorkingDays} days`
             : "—"}
         </td>
-        <td className="px-3 py-3 text-xs font-semibold text-[#1A1816] dark:text-[#F0EDE8] text-right whitespace-nowrap">
+        <td className="px-3 py-3 text-xs font-semibold text-foreground text-right whitespace-nowrap">
           {fmtCurrencyLocal(item.salary, fmtCurrency)}
         </td>
-        <td className="px-3 py-3 text-xs font-semibold text-[#FF6E86] text-right whitespace-nowrap">
+        <td className="px-3 py-3 text-xs font-semibold text-error text-right whitespace-nowrap">
           {fmtCurrencyLocal(item.totalDeductions, fmtCurrency)}
         </td>
-        <td className="px-3 py-3 text-xs font-bold text-[#19C58A] text-right whitespace-nowrap">
+        <td className="px-3 py-3 text-xs font-bold text-primary text-right whitespace-nowrap">
           {fmtCurrencyLocal(item.netPay, fmtCurrency)}
         </td>
-        <td className="px-3 py-3 text-xs text-[#6B6560] dark:text-[#A69B93] whitespace-nowrap">{item.bankName || "—"}</td>
-        <td className="px-3 py-3 text-xs text-[#6B6560] dark:text-[#A69B93] whitespace-nowrap">{maskAccount(item.bankAccount)}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{item.bankName || "—"}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{maskAccount(item.bankAccount)}</td>
         <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={item.status} /></td>
         <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={item.status} /></td>
-        <td className="px-3 py-3 text-xs text-[#9E9690] max-w-[160px] truncate">{item.notes || "—"}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted max-w-[160px] truncate">{item.notes || "—"}</td>
       </tr>
       {open && (
-        <tr className="bg-[#F8F7F4] dark:bg-[#1A1816]">
+        <tr className="bg-background">
           <td colSpan={BREAKDOWN_COLUMNS.length} className="px-5 py-4">
             <div className="flex items-center justify-end mb-3">
               <button
@@ -265,7 +265,7 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
                 onClick={handleRecalculate}
                 disabled={!canRecalculate || recalculating}
                 title={canRecalculate ? "Recalculate this employee's payslip using their current data" : "Only Draft/Review runs can be recalculated"}
-                className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-[10px] border border-[#E5E0D9] dark:border-[#38312D] text-[#1A1816] dark:text-[#F0EDE8] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A] disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-[10px] border border-border text-foreground transition-all duration-200 hover:border-primary hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <RotateCcw size={13} className={recalculating ? "animate-spin" : ""} />
                 {recalculating ? "Recalculating…" : "Recalculate payslip"}
@@ -310,22 +310,22 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
   if (!run) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-[#1A1816]/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex justify-end bg-background/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-5xl flex-col bg-white dark:bg-[#221D1A] border-l border-[#E5E0D9] dark:border-[#38312D] shadow-[0_24px_48px_rgba(0,0,0,0.15)]"
+        className="flex h-full w-full max-w-5xl flex-col bg-surface border-l border-border shadow-[0_24px_48px_rgba(0,0,0,0.15)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-[#E5E0D9] dark:border-[#38312D]">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
           <div>
-            <h2 className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">
+            <h2 className="text-[15px] font-bold text-foreground">
               Payroll Run &middot; {detail?.period || run.period}
             </h2>
-            <p className="text-[12px] text-[#9E9690] mt-0.5">Run details and employee-level breakdown</p>
+            <p className="text-[12px] text-foreground-muted mt-0.5">Run details and employee-level breakdown</p>
           </div>
           <button
             onClick={onClose}
             aria-label="Close panel"
-            className="border border-[#E5E0D9] dark:border-[#38312D] bg-white dark:bg-[#2A2520] rounded-[12px] p-2 text-[#9E9690] transition-all duration-200 hover:border-[#19C58A] hover:text-[#19C58A]"
+            className="border border-border bg-surface-muted rounded-[12px] p-2 text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
           >
             <X size={15} />
           </button>
@@ -334,19 +334,19 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {loading ? (
             <div className="flex items-center justify-center py-24">
-              <Loader2 size={22} className="animate-spin text-[#19C58A]" />
+              <Loader2 size={22} className="animate-spin text-primary" />
             </div>
           ) : (
             <>
               <RunStatusTimeline run={detail || run} />
 
-              <div className="bg-[#F8F7F4] dark:bg-[#2A2520] rounded-[18px] p-5 mb-5">
-                <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-4">Run Information</h4>
+              <div className="bg-surface-muted rounded-[18px] p-5 mb-5">
+                <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-4">Run Information</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <InfoField label="Payroll Period">{detail?.period || run.period}</InfoField>
                   <InfoField label="Payroll Status"><StatusBadge status={detail?.status || run.status} /></InfoField>
                   <InfoField label="Approval Status">
-                    <span className={detail?.approvalStatus === "Approved" ? "text-[#19C58A]" : "text-[#F8A60A]"}>
+                    <span className={detail?.approvalStatus === "Approved" ? "text-primary" : "text-warning"}>
                       {detail?.approvalStatus || "Pending"}
                     </span>
                   </InfoField>
@@ -358,28 +358,28 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                 </div>
               </div>
 
-              <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#9E9690] mb-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">
                 Employee Payroll Details
               </h4>
-              <div className="rounded-[14px] border border-[#E5E0D9] dark:border-[#38312D] overflow-hidden">
+              <div className="rounded-[14px] border border-border overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-[#F8F7F4] dark:bg-[#2A2520] border-b border-[#E5E0D9] dark:border-[#38312D]">
+                      <tr className="bg-surface-muted border-b border-border">
                         {BREAKDOWN_COLUMNS.map((col) => (
                           <th
                             key={col.key}
-                            className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] whitespace-nowrap"
+                            className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap"
                           >
                             {col.label}
                           </th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]/50">
+                    <tbody className="divide-y divide-border/50">
                       {items.length === 0 ? (
                         <tr>
-                          <td colSpan={BREAKDOWN_COLUMNS.length} className="px-5 py-10 text-center text-[13px] text-[#9E9690]">
+                          <td colSpan={BREAKDOWN_COLUMNS.length} className="px-5 py-10 text-center text-[13px] text-foreground-muted">
                             No employee payslips in this run yet.
                           </td>
                         </tr>

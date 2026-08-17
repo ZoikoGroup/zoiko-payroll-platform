@@ -27,8 +27,8 @@ const MicrosoftIcon = () => (
 
 const SSOIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-    <circle cx="9" cy="9" r="8" stroke="#6366F1" strokeWidth="1.5"/>
-    <path d="M9 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0 5c2.21 0 4 .895 4 2v.5H5V12c0-1.105 1.79-2 4-2z" fill="#6366F1"/>
+    <circle cx="9" cy="9" r="8" stroke="#087CC1" strokeWidth="1.5"/>
+    <path d="M9 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0 5c2.21 0 4 .895 4 2v.5H5V12c0-1.105 1.79-2 4-2z" fill="#087CC1"/>
   </svg>
 );
 
@@ -127,7 +127,7 @@ export default function LoginPage() {
           padding: "48px 40px",
           background: "white",
           backgroundImage: `
-            radial-gradient(circle at 20% 80%, rgba(255,107,0,0.04) 0%, transparent 50%),
+            radial-gradient(circle at 20% 80%, rgba(8,124,193,0.04) 0%, transparent 50%),
             radial-gradient(circle at 80% 20%, rgba(99,102,241,0.04) 0%, transparent 50%)
           `,
         }}>
@@ -157,7 +157,7 @@ export default function LoginPage() {
                   value={email} onChange={e => setEmail(e.target.value)}
                   placeholder="you@company.com"
                   style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                  onFocus={e => e.target.style.borderColor = "#087CC1"}
                   onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                 />
               </div>
@@ -172,7 +172,7 @@ export default function LoginPage() {
                     autoComplete="current-password" value={password}
                     onChange={e => setPassword(e.target.value)} placeholder="••••••••"
                     style={{ ...inputStyle, paddingRight: "44px" }}
-                    onFocus={e => e.target.style.borderColor = "#FF6B00"}
+                    onFocus={e => e.target.style.borderColor = "#087CC1"}
                     onBlur={e => e.target.style.borderColor = "#E5E7EB"}
                   />
                   <button type="button" onClick={() => setShowPassword(v => !v)}
@@ -188,8 +188,8 @@ export default function LoginPage() {
                   width: "100%", padding: "13px", borderRadius: "50px", border: "none",
                   fontSize: "15px", fontWeight: "600", color: "white",
                   cursor: submitting ? "not-allowed" : "pointer",
-                  background: submitting ? "#FFA366" : "linear-gradient(135deg, #FF8C00, #FFA500)",
-                  boxShadow: "0 4px 16px rgba(255,140,0,0.4)",
+                  background: submitting ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
+                  boxShadow: "0 4px 16px rgba(8,124,193,0.4)",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
                   marginTop: "4px",
                   letterSpacing: "0.01em",
@@ -200,7 +200,7 @@ export default function LoginPage() {
             </form>
 
             <div style={{ textAlign: "center", marginTop: "16px" }}>
-              <Link to="/forgot-password" style={{ fontSize: "13px", color: "#FF6B00", textDecoration: "none", fontWeight: "500" }}>
+              <Link to="/forgot-password" style={{ fontSize: "13px", color: "#087CC1", textDecoration: "none", fontWeight: "500" }}>
                 Forgot password?
               </Link>
             </div>
@@ -249,7 +249,7 @@ export default function LoginPage() {
           alignItems: "center",
           justifyContent: "center",
           padding: "60px 56px",
-          background: "linear-gradient(164.56deg, #1D0A5E 0%, #240C84 60%, #150844 100%)",
+          background: "linear-gradient(164.56deg, #082B45 0%, #0B3554 60%, #061D30 100%)",
           position: "relative",
           overflow: "hidden",
         }}>
@@ -267,7 +267,7 @@ export default function LoginPage() {
           }} />
 
           <div style={{ position: "relative", zIndex: 1, maxWidth: "520px" }}>
-            <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.12em", color: "#FFA500", textTransform: "uppercase", margin: "0 0 16px 0" }}>
+            <p style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "0.12em", color: "#1596D1", textTransform: "uppercase", margin: "0 0 16px 0" }}>
               NEW TO ZOIKO PAYROLL?
             </p>
 
@@ -286,10 +286,10 @@ export default function LoginPage() {
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 padding: "14px 24px", borderRadius: "50px",
-                background: "linear-gradient(135deg, #FF8C00, #FFA500)",
+                background: "linear-gradient(135deg, #087CC1, #1596D1)",
                 color: "white", fontSize: "15px", fontWeight: "700",
                 textDecoration: "none", marginBottom: "24px",
-                boxShadow: "0 4px 16px rgba(255,140,0,0.35)",
+                boxShadow: "0 4px 16px rgba(8,124,193,0.35)",
               }}>
               Create your account →
             </Link>

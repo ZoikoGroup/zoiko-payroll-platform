@@ -2,15 +2,15 @@ import React, { useState, useMemo } from "react";
 import { Users } from "lucide-react";
 
 const DEPARTMENT_STYLES = {
-  Engineering: "bg-[#35B6F5]/10 text-[#35B6F5]",
-  Sales: "bg-[#19C58A]/10 text-[#19C58A]",
-  Marketing: "bg-[#9D7BF2]/10 text-[#9D7BF2]",
-  HR: "bg-[#FF6E86]/10 text-[#FF6E86]",
-  Finance: "bg-[#F8A60A]/10 text-[#F8A60A]",
+  Engineering: "bg-info/10 text-info",
+  Sales: "bg-primary/10 text-primary",
+  Marketing: "bg-category-teal/10 text-category-teal",
+  HR: "bg-error/10 text-error",
+  Finance: "bg-warning/10 text-warning",
 };
 
 function DepartmentBadge({ dept }) {
-  const style = DEPARTMENT_STYLES[dept] || "bg-[#9E9690]/10 text-[#9E9690]";
+  const style = DEPARTMENT_STYLES[dept] || "bg-foreground-muted/10 text-foreground-muted";
   return (
     <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold ${style}`}>
       {dept}
@@ -19,9 +19,9 @@ function DepartmentBadge({ dept }) {
 }
 
 const STATUS_STYLES = {
-  Active: "bg-[#19C58A]/10 text-[#19C58A]",
-  "On Leave": "bg-[#F8A60A]/10 text-[#F8A60A]",
-  Inactive: "bg-[#FF6E86]/10 text-[#FF6E86]",
+  Active: "bg-primary/10 text-primary",
+  "On Leave": "bg-warning/10 text-warning",
+  Inactive: "bg-error/10 text-error",
 };
 
 function StatusBadge({ status }) {
@@ -100,11 +100,11 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="flex items-center justify-center py-16">
           <div className="flex flex-col items-center gap-3">
-            <div className="animate-pulse w-8 h-8 rounded-full bg-[#E5E0D9] dark:bg-[#38312D]" />
-            <span className="text-[13px] text-[#9E9690]">Loading employees…</span>
+            <div className="animate-pulse w-8 h-8 rounded-full bg-border" />
+            <span className="text-[13px] text-foreground-muted">Loading employees…</span>
           </div>
         </div>
       </div>
@@ -113,22 +113,22 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
 
   if (!sorted.length) {
     return (
-      <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-          <Users size={32} className="text-[#9E9690]" />
-          <p className="text-[15px] font-bold text-[#1A1816] dark:text-[#F0EDE8]">No employees found</p>
-          <p className="text-[13px] text-[#9E9690]">Try adjusting your filters, or add a new employee.</p>
+          <Users size={32} className="text-foreground-muted" />
+          <p className="text-[15px] font-bold text-foreground">No employees found</p>
+          <p className="text-[13px] text-foreground-muted">Try adjusting your filters, or add a new employee.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-[#221D1A] border border-[#E5E0D9] dark:border-[#38312D] rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+    <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="overflow-x-auto">
         <table className="min-w-full">
           <thead>
-            <tr className="bg-[#F8F7F4] dark:bg-[#2A2520]">
+            <tr className="bg-surface-muted">
               <th scope="col" className="w-10 px-4 py-3.5 text-left">
                 <input
                   type="checkbox"
@@ -140,7 +140,7 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                       onSelectionChange?.(new Set(sorted.map((e) => e.id)));
                     }
                   }}
-                  className="h-4 w-4 rounded border-[#E5E0D9] dark:border-[#38312D] text-[#19C58A] focus:ring-[#19C58A]/20 bg-[#F8F7F4] dark:bg-[#1A1816]"
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 bg-background"
                 />
               </th>
               {COLUMNS.map((col) => (
@@ -148,25 +148,25 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                   key={col.key}
                   scope="col"
                   onClick={() => toggleSort(col.key)}
-                  className="cursor-pointer select-none px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-[#9E9690] transition-colors duration-150 hover:text-[#19C58A]"
+                  className="cursor-pointer select-none px-4 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted transition-colors duration-150 hover:text-primary"
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.label}
                     {sortKey === col.key && (
-                      <span className="text-[#19C58A]">{sortDir === "asc" ? "▲" : "▼"}</span>
+                      <span className="text-primary">{sortDir === "asc" ? "▲" : "▼"}</span>
                     )}
                   </span>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#E5E0D9] dark:divide-[#38312D]">
+          <tbody className="divide-y divide-border">
             {sorted.map((emp) => (
               <tr
                 key={emp.id}
                 onClick={() => onRowClick?.(emp)}
-                className={`cursor-pointer transition-all duration-150 hover:bg-[#F8F7F4] dark:hover:bg-[#2A2520] ${
-                  selectedEmployeeId === emp.id ? "bg-[#19C58A]/5 dark:bg-[#19C58A]/10" : ""
+                className={`cursor-pointer transition-all duration-150 hover:bg-background dark:hover:bg-surface-muted ${
+                  selectedEmployeeId === emp.id ? "bg-primary/5 dark:bg-primary/10" : ""
                 }`}
               >
                 <td className="w-10 whitespace-nowrap px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
@@ -179,21 +179,21 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                       else next.add(emp.id);
                       onSelectionChange?.(next);
                     }}
-                    className="h-4 w-4 rounded border-[#E5E0D9] dark:border-[#38312D] text-[#19C58A] focus:ring-[#19C58A]/20 bg-[#F8F7F4] dark:bg-[#1A1816]"
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 bg-background"
                   />
                 </td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] font-semibold text-[#9E9690]">
+                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] font-semibold text-foreground-muted">
                   <div className="flex flex-col">
                     <span>{emp.employeeCode}</span>
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3.5">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-[#35B6F5]/10 text-[#35B6F5] flex items-center justify-center text-[11px] font-bold">
+                    <div className="w-8 h-8 rounded-full bg-info/10 text-info flex items-center justify-center text-[11px] font-bold">
                       {initials(emp.name)}
                     </div>
                     <div>
-                      <div className="text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">
+                      <div className="text-[13px] font-semibold text-foreground">
                         {emp.name}
                       </div>
                     </div>
@@ -202,8 +202,8 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                 <td className="whitespace-nowrap px-4 py-3.5">
                   <DepartmentBadge dept={emp.department} />
                 </td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] text-[#6B6560] dark:text-[#A69B93]">{emp.designation}</td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] font-semibold text-[#1A1816] dark:text-[#F0EDE8]">{formatCurrency(emp.ctc, currencyInfo)}</td>
+                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] text-foreground-muted">{emp.designation}</td>
+                <td className="whitespace-nowrap px-4 py-3.5 text-[13px] font-semibold text-foreground">{formatCurrency(emp.ctc, currencyInfo)}</td>
                 <td className="whitespace-nowrap px-4 py-3.5">
                   <StatusBadge status={emp.status} />
                 </td>
