@@ -23,13 +23,10 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useOrganization } from "../context/OrganizationContext";
 import { ROLE_LABELS, ROLES } from "../config/roles";
-<<<<<<< HEAD
 import ThemeToggle from "./ThemeToggle";
-=======
 import AssistLauncher from "../modules/assist/AssistLauncher";
 
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
->>>>>>> main
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_sidebar_collapsed";
 
