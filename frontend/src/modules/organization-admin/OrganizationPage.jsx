@@ -9,6 +9,7 @@ import {
 import { useOrganization } from "../../context/OrganizationContext";
 import { X, CheckCircle, AlertTriangle, RefreshCw, Upload } from "lucide-react";
 import { getJurisdictionTaxFields, getJurisdictionCode } from "../../utils/jurisdictionTax";
+import { getCurrencyForJurisdiction, getCurrencyInfo, getCurrencySelectOptions } from "../../utils/currency";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -440,9 +441,10 @@ function WorkforceRing({ total, active, hrAdmins }) {
 const EMPLOYEE_STATUS_DOT = { teal: "#178A50", amber: "#D9791E", off: "#9D96AB" };
 const ACTIVITY_DOT = { SUCCESS: "#178A50", PENDING: "#D9791E", INFO: "#087CC1" };
 
-function fmtCurrency(amount) {
+function fmtCurrency(amount, currencyCode) {
   if (amount == null) return "—";
-  return `$${Math.round(Number(amount)).toLocaleString("en-US")}`;
+  const symbol = getCurrencyInfo(currencyCode)?.symbol || "$";
+  return `${symbol}${Math.round(Number(amount)).toLocaleString("en-US")}`;
 }
 
 function timeAgo(isoString) {
@@ -498,6 +500,7 @@ export default function OrgAdminOrganizationPage() {
       city: org.city || "",
       state: org.state || "",
       country: org.country || "",
+      currency: org.currency || "",
     });
     setShowEdit(true);
   };
@@ -616,6 +619,10 @@ export default function OrgAdminOrganizationPage() {
     ? orgTaxRows
     : (org.tax_no ? [{ label: "Tax Registration No.", value: org.tax_no }] : []);
 
+  // Currency: use the explicit org override, otherwise derive from jurisdiction
+  const resolvedCurrency = org.currency || getCurrencyForJurisdiction(getJurisdictionCode(org.country))?.code || "";
+  const currencyInfo = getCurrencyInfo(resolvedCurrency);
+
   return (
     <div className="org-dash">
       <style>{styles}</style>
@@ -708,6 +715,10 @@ export default function OrgAdminOrganizationPage() {
               <DetailRow label="City" value={org.city} />
               <DetailRow label="State" value={org.state} />
               <DetailRow label="Country" value={org.country} />
+              <DetailRow
+                label="Currency"
+                value={currencyInfo ? `${currencyInfo.symbol} ${currencyInfo.name} (${resolvedCurrency})` : resolvedCurrency || "—"}
+              />
             </div>
           </div>
         </div>
@@ -736,7 +747,7 @@ export default function OrgAdminOrganizationPage() {
           <StatTile glowColor="var(--success)" label="HR Admins" value={hrAdmins} sub="Managing payroll &amp; HR" />
           <StatTile glowColor="var(--danger)" label="Pending Leaves" value={stats ? (stats.pending_leave_requests ?? 0) : "—"} sub="Awaiting review" />
           <StatTile glowColor="var(--amber)" label="Pending Approvals" value={stats ? (stats.pending_approvals ?? 0) : "—"} sub="Need action" />
-          <StatTile glowColor="var(--accent)" label="Monthly Payroll" value={stats ? fmtCurrency(stats.monthly_payroll) : "—"} sub="Latest run total" valueColor="var(--accent-deep)" />
+          <StatTile glowColor="var(--accent)" label="Monthly Payroll" value={stats ? fmtCurrency(stats.monthly_payroll, resolvedCurrency) : "—"} sub="Latest run total" valueColor="var(--accent-deep)" />
         </div>
 
         <div className="grid rise" style={{ animationDelay: ".35s" }}>
@@ -893,6 +904,30 @@ export default function OrgAdminOrganizationPage() {
                 <EditField label="State" value={editForm.state} onChange={(v) => setEditForm({ ...editForm, state: v })} />
               </div>
               <EditField label="Country" value={editForm.country} onChange={(v) => setEditForm({ ...editForm, country: v })} />
+              <div className="form-field">
+                <label>Currency</label>
+                <select
+                  value={editForm.currency || ""}
+                  onChange={(e) => setEditForm({ ...editForm, currency: e.target.value })}
+                  className="mono"
+                  style={{
+                    width: "100%", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13,
+                    color: "var(--ink)", background: "var(--glass-solid)",
+                    border: "1px solid var(--glass-border)", borderRadius: 11,
+                    padding: "11px 14px", outline: "none",
+                  }}
+                >
+                  <option value="">Auto-detect from jurisdiction</option>
+                  {getCurrencySelectOptions().map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <p style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 4 }}>
+                  {editForm.country
+                    ? `Jurisdiction default: ${getCurrencyForJurisdiction(getJurisdictionCode(editForm.country))?.code || "N/A"}`
+                    : "Select a country first to see the jurisdiction default"}
+                </p>
+              </div>
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setShowEdit(false)}>Cancel</button>

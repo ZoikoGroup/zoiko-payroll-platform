@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.exceptions import NotFoundException, BadRequestException
 from app.modules.payroll.policy.models import (
     PayrollPolicy, PolicyEmployeeCategory, PolicyLeaveRule,
-    PolicyOvertimeRule, PolicyIntegration,
+    PolicyOvertimeRule, PolicyIntegration, PolicyAllowanceComponent,
     CalculationMode, EmployeeCategoryType, LeaveRuleType,
 )
 from app.modules.payroll.policy.schemas import PayrollPolicyUpdate
@@ -59,6 +59,7 @@ def _policy_query(db: Session):
         selectinload(PayrollPolicy.leave_rules),
         joinedload(PayrollPolicy.overtime_rule),
         selectinload(PayrollPolicy.integrations),
+        selectinload(PayrollPolicy.allowance_components),
     )
 
 
@@ -110,9 +111,17 @@ def _check_field_lock(locks: dict, path: tuple, value) -> None:
 def _apply_policy_defaults(policy: PayrollPolicy, locks: dict) -> None:
     """Force every locked field's value onto a freshly-seeded policy so a
     brand-new org under a governed jurisdiction starts compliant on day
-    one, rather than only being enforced on its first edit."""
+    one, rather than only being enforced on its first edit.
+
+    Also applies the Super Admin's default policy name and salary structure
+    values (even when not locked) so the Org Admin sees the inherited
+    values immediately — they can overwrite them freely unless locked."""
     if not locks:
         return
+    # Policy name — inherit from the Super Admin's pack defaults if set.
+    name_node = locks.get("name")
+    if isinstance(name_node, dict) and name_node.get("value"):
+        policy.name = name_node["value"]
     node = locks.get("calculation_mode")
     if isinstance(node, dict) and node.get("value") is not None:
         policy.calculation_mode = node["value"]
@@ -134,6 +143,50 @@ def _apply_category_policy_defaults(category_row: "PolicyEmployeeCategory", lock
     # hard rule update_policy() enforces on every edit.
     if category_row.category == EmployeeCategoryType.INTERN.value:
         category_row.paid_leave_eligible = False
+
+
+def _seed_allowance_components_from_defaults(db: Session, policy: PayrollPolicy, locks: dict) -> None:
+    """Unlike employee categories (a fixed 6-value enum, always seeded),
+    allowance components are entirely Super-Admin-defined — there is no
+    default set at all. An org under a jurisdiction whose compliance pack
+    defines components (policy_defaults["allowance_components"], a dict
+    keyed by admin-typed slug — see PolicyAllowanceComponent's docstring)
+    gets exactly those, seeded read-only or overridable per allowOverride.
+    An org with no pack, or a pack that defines none, gets an empty list —
+    zero behavior change from before this feature existed."""
+    components = locks.get("allowance_components")
+    if not isinstance(components, dict):
+        return
+    for key, node in components.items():
+        if not isinstance(node, dict) or not isinstance(node.get("value"), dict):
+            continue
+        value = node["value"]
+        db.add(PolicyAllowanceComponent(
+            policy_id=policy.id, key=key,
+            label=value.get("label") or key,
+            pct=value.get("pct"), flat_amount=value.get("flat_amount"),
+            allow_override=node.get("allowOverride", True),
+        ))
+
+
+def _check_allowance_component_lock(locks: dict, key: str, comp_data: dict) -> None:
+    """Allowance components lock as a whole unit (one allowOverride per
+    component), not per-field like _check_field_lock — a partially-locked
+    allowance (e.g. pct fixed but label editable) isn't a real use case, and
+    a single gate is simpler to reason about for something an org either
+    can or can't customize. No-op if this key isn't mentioned in locks at
+    all, matching _check_field_lock's same "unmentioned = unenforced"
+    convention."""
+    node = (locks.get("allowance_components") or {}).get(key)
+    if not isinstance(node, dict) or node.get("allowOverride", True):
+        return
+    locked_value = node.get("value") or {}
+    for field in ("label", "pct", "flat_amount"):
+        submitted = comp_data.get(field)
+        if submitted is not None and submitted != locked_value.get(field):
+            raise BadRequestException(
+                f"Allowance component '{key}' is locked by your organization's compliance policy and cannot be changed."
+            )
 
 
 def _apply_overtime_policy_defaults(overtime_row: "PolicyOvertimeRule", locks: dict) -> None:
@@ -180,6 +233,8 @@ def _seed_default_policy(db: Session, organization_id: int) -> PayrollPolicy:
     for category, provider_key, enabled in DEFAULT_INTEGRATIONS:
         db.add(PolicyIntegration(policy_id=policy.id, category=category, provider_key=provider_key, enabled=enabled))
 
+    _seed_allowance_components_from_defaults(db, policy, locks)
+
     db.commit()
     db.refresh(policy)
     return policy
@@ -223,6 +278,7 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
     updates = data.model_dump(exclude_unset=True, by_alias=False)
     category_updates = updates.pop("employee_categories", None)
     overtime_update = updates.pop("overtime_rule", None)
+    allowance_updates = updates.pop("allowance_components", None)
 
     # Read-only validation pass — reject any field the org's assigned
     # compliance pack has explicitly locked (allowOverride=false) if the
@@ -243,6 +299,8 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
             for field, value in overtime_update.items():
                 if field != "id" and value is not None:
                     _check_field_lock(locks, ("overtime_rule", field), value)
+        for comp_data in (allowance_updates or []):
+            _check_allowance_component_lock(locks, comp_data.get("key"), comp_data)
 
     for field, value in updates.items():
         if hasattr(policy, field):
@@ -272,6 +330,31 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
                     setattr(ot, field, value)
         else:
             db.add(PolicyOvertimeRule(policy_id=policy.id, **{k: v for k, v in overtime_update.items() if v is not None}))
+
+    if allowance_updates is not None:
+        by_key = {c.key: c for c in policy.allowance_components}
+        submitted_keys = {c["key"] for c in allowance_updates}
+        # Delete components no longer present in the submitted list — guarded
+        # against removing a locked one, since the client shouldn't have been
+        # able to drop it from its payload in the first place.
+        for key, existing in list(by_key.items()):
+            if key in submitted_keys:
+                continue
+            node = (locks.get("allowance_components") or {}).get(key)
+            if isinstance(node, dict) and not node.get("allowOverride", True):
+                raise BadRequestException(
+                    f"Allowance component '{key}' is locked by your organization's compliance policy and cannot be removed."
+                )
+            db.delete(existing)
+        for comp_data in allowance_updates:
+            comp_key = comp_data["key"]
+            existing = by_key.get(comp_key)
+            if existing:
+                for field, value in comp_data.items():
+                    if field != "key" and hasattr(existing, field):
+                        setattr(existing, field, value)
+            else:
+                db.add(PolicyAllowanceComponent(policy_id=policy.id, **comp_data))
 
     # First explicit admin save unlocks the mandatory Payroll onboarding gate
     # (see useFilteredNavigation.js / payroll/index.jsx) — immutable once set,

@@ -10,6 +10,7 @@ export const updateOrganizationDetails = (data) =>
     city: data.city,
     state: data.state,
     country: data.country,
+    currency: data.currency || undefined,
   });
 export const uploadOrganizationLogo = (file) => {
   const formData = new FormData();

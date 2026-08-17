@@ -233,7 +233,6 @@ def get_jurisdiction_summary(db: Session) -> List[dict]:
     optional value falls back to None (the frontend renders "N/A") rather
     than ever surfacing `undefined`."""
     from app.core.jurisdiction import get_jurisdiction_schema
-    from app.modules.super_admin.models import GlobalStatutoryRate
 
     base = list_known_jurisdictions(db)
 
@@ -249,8 +248,12 @@ def get_jurisdiction_summary(db: Session) -> List[dict]:
         JurisdictionPack.jurisdiction_country,
         JurisdictionPack.pack_type == "policy", JurisdictionPack.status == "Active",
     )
+    # Canonical (Super-Admin-owned) contribution-rate rows — the same data
+    # the Statutory Rates page now displays. Previously counted the
+    # now-removed GlobalStatutoryRate table, which the payroll engine never
+    # actually read; this counts real, engine-facing canonical rows instead.
     rate_counts = _count_by_country(
-        GlobalStatutoryRate.jurisdiction_country, GlobalStatutoryRate.is_active == True,  # noqa: E712
+        ContributionRate.jurisdiction_country, ContributionRate.organization_id.is_(None),
     )
     org_counts = dict(
         db.query(CompanyComplianceDetails.jurisdiction_country, sa_func.count(sa_func.distinct(CompanyComplianceDetails.organization_id)))
@@ -282,54 +285,6 @@ def get_jurisdiction_summary(db: Session) -> List[dict]:
             "isConfigured": bool(tax_n or policy_n or rate_n),
         })
     return summaries
-
-
-def seed_global_statutory_rates_from_defaults(db: Session) -> int:
-    """Backfill GlobalStatutoryRate from payroll.service._CONTRIBUTION_RATES_BY_COUNTRY
-    — the same per-country defaults the engine has always used to seed a
-    newly-onboarded ORGANIZATION's own ContributionRate rows. GlobalStatutoryRate's
-    own docstring says organizations "start from these defaults," but nothing
-    ever actually populated this table from them — org onboarding reads
-    straight from that Python dict, bypassing this table entirely. This
-    catches Super Admin's Statutory Rates view up to what the engine
-    already supports for every jurisdiction, without changing how the
-    engine itself computes anything (GlobalStatutoryRate is explicitly not
-    read at calculation time — see its class docstring).
-
-    Idempotent: only inserts a (country, component_key) pair that doesn't
-    already exist as a country-level (state=None) row, so calling this
-    again after Super Admin has edited/added rates never overwrites them."""
-    from app.modules.payroll.service import _CONTRIBUTION_RATES_BY_COUNTRY
-    from app.modules.super_admin.models import GlobalStatutoryRate
-
-    existing = {
-        (row.jurisdiction_country, row.component_key)
-        for row in db.query(GlobalStatutoryRate.jurisdiction_country, GlobalStatutoryRate.component_key)
-        .filter(GlobalStatutoryRate.jurisdiction_state.is_(None))
-    }
-    created = 0
-    for country, components in _CONTRIBUTION_RATES_BY_COUNTRY.items():
-        for comp in components:
-            key = (country, comp["component_key"])
-            if key in existing:
-                continue
-            db.add(GlobalStatutoryRate(
-                jurisdiction_country=country,
-                jurisdiction_state=None,
-                component_key=comp["component_key"],
-                label=comp["label"],
-                employee_share=comp.get("employee_share", ""),
-                employer_share=comp.get("employer_share", ""),
-                total=comp.get("total", ""),
-                employee_rate_pct=comp.get("employee_rate_pct"),
-                employer_rate_pct=comp.get("employer_rate_pct"),
-                flat_amount=comp.get("flat_amount"),
-                sort_order=comp.get("sort_order", 0),
-                is_active=True,
-            ))
-            created += 1
-    db.commit()
-    return created
 
 
 def list_compliance_configurations(db: Session, country: Optional[str] = None, search: Optional[str] = None) -> List[dict]:
@@ -383,9 +338,9 @@ def list_contribution_rates(
 ) -> List[dict]:
     """Every organization's ACTUAL, currently-configured contribution
     rates (ContributionRate — the org-scoped rows the payroll engine
-    really reads), for Super Admin visibility alongside the platform-wide
-    GlobalStatutoryRate defaults. Filterable by jurisdiction and by
-    last-updated date range."""
+    really reads), for Super Admin visibility alongside the canonical
+    (organization_id IS NULL) platform defaults. Filterable by
+    jurisdiction and by last-updated date range."""
     query = (
         db.query(ContributionRate, Organization.organization_name, Organization.organization_code)
         .join(Organization, Organization.id == ContributionRate.organization_id)

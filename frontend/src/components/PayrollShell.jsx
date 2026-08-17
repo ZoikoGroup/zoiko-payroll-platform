@@ -38,10 +38,10 @@ function getMyOrgHref(role) {
 }
 
 function buildNavGroups(role) {
-  // "My Organization" lives in the header (see getMyOrgHref usage below),
-  // not this list — kept out of Overview intentionally by the sidebar
-  // redesign, not an oversight.
-  const overviewItems = [{ label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true }];
+  const overviewItems = [
+    { label: "Dashboard", href: "/payroll", icon: LayoutDashboard, end: true },
+    { label: "My Organization", href: getMyOrgHref(role), icon: Building2 },
+  ];
   // Only an Org Admin can invite/manage Payroll Admins — Payroll Admins
   // themselves have no user-creation rights (see ROLE_CREATION_RULES on
   // the backend), so they don't get this nav item at all.
@@ -164,8 +164,8 @@ function SidebarContent({ onNavigate, role, collapsed, onToggleCollapse, closeBu
           </Link>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <Link to="/payroll" onClick={onNavigate} className="inline-flex w-fit rounded-lg bg-white px-2.5 py-1.5">
-              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-6 w-auto object-contain" />
+            <Link to="/payroll" onClick={onNavigate} className="inline-flex w-fit rounded-lg bg-white px-3 py-2.5">
+              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-11 w-auto object-contain" />
             </Link>
             {ROLE_LABELS[role] ? (
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">{ROLE_LABELS[role]}</p>

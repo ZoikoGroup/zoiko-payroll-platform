@@ -1,17 +1,13 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Plus, Pencil, Trash2, RefreshCw, Landmark, Building2, ArrowLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { RefreshCw, Landmark, Building2, ArrowLeft, ArrowRight } from "lucide-react";
 
-import { apiFetch } from "../api/client";
-import { useToast } from "../context/ToastContext";
-import StatutoryRateModal from "../components/StatutoryRateModal";
-import ConfirmDialog from "../components/ConfirmDialog";
-import StatusPill from "../components/StatusPill";
-import { getOrganizationContributionRates, seedStatutoryRateDefaults } from "../service/superAdminService";
+import { getOrganizationContributionRates, getActiveTaxConfiguration } from "../service/superAdminService";
 import { getStatesForCountryCode } from "../utils/registrationRegions";
 import JurisdictionCardGrid, { AddJurisdictionModal } from "./JurisdictionCardGrid";
 
 export default function StatutoryRatesPage() {
-  const { addToast } = useToast();
+  const navigate = useNavigate();
 
   // null = jurisdiction card grid (same shared component/data Compliance
   // uses); set = drilled into one country (+ optional state) — every fetch
@@ -21,13 +17,14 @@ export default function StatutoryRatesPage() {
   const [selectedState, setSelectedState] = useState(""); // "" = country-level
   const [showAddJurisdiction, setShowAddJurisdiction] = useState(false);
 
-  const [rates, setRates] = useState([]);
+  // { pack, rates, slabs } from the canonical tax pack currently Active
+  // for this jurisdiction — pack is null when nothing has been configured
+  // yet. This is a read-only mirror of the exact data Compliance's Rates
+  // editor writes to, not a separate dataset — see getActiveTaxConfiguration.
+  const [activeConfig, setActiveConfig] = useState({ pack: null, rates: [], slabs: [] });
   const [orgRates, setOrgRates] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [modal, setModal] = useState(null);
-  const [deleting, setDeleting] = useState(null);
-  const [busy, setBusy] = useState(false);
 
   const countryCode = selectedJurisdiction?.code || "";
   const availableStates = selectedJurisdiction ? getStatesForCountryCode(countryCode) : [];
@@ -37,16 +34,14 @@ export default function StatutoryRatesPage() {
     setLoading(true);
     setError("");
     Promise.all([
-      apiFetch("/api/super-admin/statutory-rates", {
-        // Omitting `state` here means "country-level only" on the backend
-        // (not "every state blended together") — the same isolation
-        // Compliance's Taxes/Policies tabs already enforce.
-        params: { country: countryCode, state: selectedState || undefined },
-      }),
+      // Omitting `state` here means "country-level only" on the backend
+      // (not "every state blended together") — the same isolation
+      // Compliance's Taxes/Policies tabs already enforce.
+      getActiveTaxConfiguration({ country: countryCode, state: selectedState || undefined }),
       getOrganizationContributionRates({ country: countryCode }),
     ])
-      .then(([platformRes, orgRes]) => {
-        setRates(platformRes.rates);
+      .then(([configRes, orgRes]) => {
+        setActiveConfig(configRes);
         setOrgRates(orgRes);
       })
       .catch((err) => setError(err.message))
@@ -62,54 +57,17 @@ export default function StatutoryRatesPage() {
 
   function handleBackToGrid() {
     setSelectedJurisdiction(null);
-    setRates([]);
+    setActiveConfig({ pack: null, rates: [], slabs: [] });
     setOrgRates([]);
   }
 
-  async function handleSave(payload) {
-    setBusy(true);
-    try {
-      if (modal && modal !== "new") {
-        await apiFetch(`/api/super-admin/statutory-rates/${modal.id}`, { method: "PUT", body: payload });
-        addToast?.("Statutory rate updated.");
-      } else {
-        await apiFetch("/api/super-admin/statutory-rates", { method: "POST", body: payload });
-        addToast?.("Statutory rate created.");
-      }
-      setModal(null);
-      load();
-    } catch (err) {
-      addToast?.(err.message, "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleDelete() {
-    setBusy(true);
-    try {
-      await apiFetch(`/api/super-admin/statutory-rates/${deleting.id}`, { method: "DELETE" });
-      addToast?.("Statutory rate deleted.");
-      setDeleting(null);
-      load();
-    } catch (err) {
-      addToast?.(err.message, "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleSeedDefaults() {
-    setBusy(true);
-    try {
-      const res = await seedStatutoryRateDefaults();
-      addToast?.(res.message);
-      load();
-    } catch (err) {
-      addToast?.(err.message, "error");
-    } finally {
-      setBusy(false);
-    }
+  // Editing canonical rates happens in exactly one place — Compliance's
+  // Rates editor — so this just lands the admin on the right jurisdiction/
+  // tab there instead of duplicating an editor here.
+  function goToComplianceEdit() {
+    navigate("/super-admin/compliance", {
+      state: { restoreJurisdiction: selectedJurisdiction, restoreState: selectedState, tab: "taxes" },
+    });
   }
 
   if (!selectedJurisdiction) {
@@ -118,7 +76,7 @@ export default function StatutoryRatesPage() {
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground">Statutory Rates</h1>
           <p className="text-sm text-foreground-muted mt-0.5">
-            Pick a jurisdiction to manage its platform default rates and see every organization's actual configured
+            Pick a jurisdiction to see its currently-active platform rates and every organization's actual configured
             contribution rates — the same jurisdictions as Compliance, isolated the same way.
           </p>
         </div>
@@ -132,6 +90,8 @@ export default function StatutoryRatesPage() {
       </div>
     );
   }
+
+  const { pack, rates } = activeConfig;
 
   return (
     <div>
@@ -151,8 +111,8 @@ export default function StatutoryRatesPage() {
             {selectedState && <span className="text-foreground-disabled font-normal">/ {selectedState}</span>}
           </h1>
           <p className="text-sm text-foreground-muted mt-0.5">
-            {selectedJurisdiction.currency || "N/A"} · Rates configured here apply only to{" "}
-            {selectedState || selectedJurisdiction.name}.
+            {selectedJurisdiction.currency || "N/A"} · Read-only view of{" "}
+            {selectedState || selectedJurisdiction.name}'s currently active tax configuration.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -166,22 +126,6 @@ export default function StatutoryRatesPage() {
               {availableStates.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           )}
-          <button
-            onClick={handleSeedDefaults}
-            disabled={busy}
-            title="Backfill from the payroll engine's existing per-country defaults — safe to run anytime, never overwrites an existing rate"
-            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
-            Sync Engine Defaults
-          </button>
-          <button
-            onClick={() => setModal("new")}
-            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"
-          >
-            <Plus size={16} />
-            Add Rate
-          </button>
           <button
             onClick={load}
             disabled={loading}
@@ -199,58 +143,54 @@ export default function StatutoryRatesPage() {
         </p>
       )}
 
-      <h2 className="text-sm font-semibold text-foreground-secondary mb-3">Platform Default Rates</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-foreground-secondary">
+          Platform Rates {pack ? `— ${pack.packId} v${pack.version}` : ""}
+        </h2>
+        <button
+          onClick={goToComplianceEdit}
+          className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-hover"
+        >
+          Edit in Compliance <ArrowRight size={13} />
+        </button>
+      </div>
       <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden mb-8">
         <table className="w-full text-sm">
           <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Key</th>
               <th className="px-4 py-3">Label</th>
-              <th className="px-4 py-3">Employee</th>
-              <th className="px-4 py-3">Employer</th>
-              <th className="px-4 py-3">Total</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Actions</th>
+              <th className="px-4 py-3">Employee %</th>
+              <th className="px-4 py-3">Employer %</th>
+              <th className="px-4 py-3">Flat Amount</th>
             </tr>
           </thead>
           <tbody>
             {rates.map((r) => (
               <tr key={r.id} className="border-t border-border-light hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{r.component_key}</td>
+                <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{r.componentKey}</td>
                 <td className="px-4 py-3 font-medium text-foreground">{r.label}</td>
-                <td className="px-4 py-3 text-foreground-secondary">{r.employee_share || "—"}</td>
-                <td className="px-4 py-3 text-foreground-secondary">{r.employer_share || "—"}</td>
-                <td className="px-4 py-3 text-foreground-secondary">{r.total || "—"}</td>
-                <td className="px-4 py-3">
-                  <StatusPill status={r.is_active ? "active" : "inactive"} />
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setModal(r)}
-                      title="Edit rate"
-                      className="rounded-lg bg-slate-100 dark:bg-white/10 p-1.5 text-foreground-secondary hover:bg-slate-200 dark:hover:bg-white/20"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={() => setDeleting(r)}
-                      title="Delete rate"
-                      className="rounded-lg bg-red-50 dark:bg-red-950/40 p-1.5 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.employeeRatePct != null ? `${r.employeeRatePct}%` : "—"}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.employerRatePct != null ? `${r.employerRatePct}%` : "—"}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{r.flatAmount != null ? r.flatAmount : "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!loading && rates.length === 0 && (
+        {!loading && !pack && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
             <Landmark size={28} className="text-border-strong" />
             <p className="text-sm text-foreground-disabled">
-              No platform default rates for {selectedJurisdiction.name}{selectedState ? ` / ${selectedState}` : ""} yet.
+              No active tax pack configured for {selectedJurisdiction.name}{selectedState ? ` / ${selectedState}` : ""} yet
+              — configure one in Compliance.
+            </p>
+          </div>
+        )}
+        {!loading && pack && rates.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+            <Landmark size={28} className="text-border-strong" />
+            <p className="text-sm text-foreground-disabled">
+              {pack.packId} v{pack.version} has no contribution rates configured yet.
             </p>
           </div>
         )}
@@ -297,27 +237,6 @@ export default function StatutoryRatesPage() {
           </div>
         )}
       </div>
-
-      {modal && (
-        <StatutoryRateModal
-          rate={modal === "new" ? null : modal}
-          defaultCountry={countryCode}
-          defaultState={selectedState}
-          lockJurisdiction={modal === "new"}
-          busy={busy}
-          onSave={handleSave}
-          onClose={() => setModal(null)}
-        />
-      )}
-      {deleting && (
-        <ConfirmDialog
-          title="Delete Statutory Rate"
-          message={`Delete "${deleting.label}" (${deleting.jurisdiction_country}${deleting.jurisdiction_state ? "/" + deleting.jurisdiction_state : ""}/${deleting.component_key})? This cannot be undone.`}
-          busy={busy}
-          onConfirm={handleDelete}
-          onClose={() => setDeleting(null)}
-        />
-      )}
     </div>
   );
 }
