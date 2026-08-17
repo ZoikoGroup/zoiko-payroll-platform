@@ -433,6 +433,79 @@ def send_registration_received(email: str, org_name: str, db=None):
     }, db=db)
 
 
+# ── Assist handoff (support escalation) emails ──────────────────────────────
+
+_HANDOFF_DESTINATION_LABELS = {
+    "PAYROLL_SUPPORT": "Payroll Support",
+    "COMPLIANCE_LOCAL_PAYROLL": "Compliance",
+}
+
+
+def send_handoff_confirmation_email(
+    email: str,
+    requester_name: str,
+    case_id: str,
+    summary: str,
+    destination: str,
+    sla_reference: str = "",
+    organization_id=None,
+    db=None,
+) -> bool:
+    """Sent to the user who escalated a chat conversation, confirming the
+    case was filed and giving them a reference to follow up with."""
+    from app.config import settings
+
+    destination_label = _HANDOFF_DESTINATION_LABELS.get(destination, destination.replace("_", " ").title())
+    context = {
+        "subject": f"Support request received — {case_id} | Zoiko Payroll Assist",
+        "requester_name": requester_name or "there",
+        "case_id": case_id,
+        "summary": summary,
+        "destination_label": destination_label,
+        "sla_reference": sla_reference,
+    }
+    # Only override the org's own branding-resolved Reply-To when a
+    # dedicated support inbox is actually configured — an explicit None/""
+    # here would otherwise blank out that default, not just leave it alone.
+    if settings.ASSIST_SUPPORT_EMAIL:
+        context["support_email"] = settings.ASSIST_SUPPORT_EMAIL
+    return send_approval_email(email, "assist_handoff_confirmation.html", context, db=db, organization_id=organization_id)
+
+
+def send_handoff_support_notification_email(
+    requester_name: str,
+    requester_email: str,
+    case_id: str,
+    summary: str,
+    destination: str,
+    reason_code: str,
+    organization_id=None,
+    db=None,
+) -> bool:
+    """Sent to the support-team inbox whenever a chat conversation is
+    escalated. Falls back to SMTP_FROM_EMAIL if ASSIST_SUPPORT_EMAIL isn't
+    configured, so this works as soon as SMTP is set up."""
+    from app.config import settings
+
+    support_email = settings.ASSIST_SUPPORT_EMAIL or settings.SMTP_FROM_EMAIL
+    if not support_email:
+        logger.warning(f"[email] No support-team inbox configured; skipping handoff notification for case {case_id}")
+        return False
+
+    destination_label = _HANDOFF_DESTINATION_LABELS.get(destination, destination.replace("_", " ").title())
+    reason_label = reason_code.replace("_", " ").title() if reason_code else "Not specified"
+    return send_approval_email(support_email, "assist_handoff_support_notification.html", {
+        "subject": f"[Assist] New {destination_label} case — {case_id}",
+        "requester_name": requester_name or "Unknown user",
+        "requester_email": requester_email or "",
+        "case_id": case_id,
+        "summary": summary,
+        "destination_label": destination_label,
+        "reason_label": reason_label,
+        "support_email": requester_email or None,
+    }, db=db, organization_id=organization_id, from_display_name_override="Zoiko Payroll Assist")
+
+
 def send_employee_welcome_email(
     email: str,
     employee_name: str,

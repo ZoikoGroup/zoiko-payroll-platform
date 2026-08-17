@@ -1039,7 +1039,32 @@ def confirm_handoff(db, org_id, user, preview_id) -> AssistHandoff:
     handoff.audit_id = audit.id
     db.commit()
     db.refresh(handoff)
+    _notify_handoff_created(db, org_id, user, handoff)
     return handoff
+
+
+def _notify_handoff_created(db, org_id, user, handoff: AssistHandoff) -> None:
+    """Best-effort email notification — a delivery failure must never
+    block the handoff itself, which is already committed by this point."""
+    requester_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email
+    try:
+        from app.services.email_service import send_handoff_confirmation_email
+
+        send_handoff_confirmation_email(
+            user.email, requester_name, handoff.case_id, handoff.summary, handoff.destination,
+            sla_reference=handoff.sla_reference or "", organization_id=org_id, db=db,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[assist] Handoff confirmation email failed for case {handoff.case_id}: {exc}")
+    try:
+        from app.services.email_service import send_handoff_support_notification_email
+
+        send_handoff_support_notification_email(
+            requester_name, user.email, handoff.case_id, handoff.summary, handoff.destination,
+            handoff.reason_code, organization_id=org_id, db=db,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[assist] Handoff support notification email failed for case {handoff.case_id}: {exc}")
 
 
 def cancel_handoff(db, org_id, user, preview_id) -> AssistHandoffPreview:
@@ -1214,6 +1239,11 @@ def confirm_action(db, org_id, user, preview_id, payload: dict, idempotency_key:
             preview.state = "SUCCEEDED"
         else:
             preview.state = "FAILED"
+
+        if preview.action_id == "case.createHandoff" and execution.get("outcome") == "SUCCEEDED" and execution.get("handoff_id"):
+            created_handoff = db.query(AssistHandoff).filter(AssistHandoff.id == execution["handoff_id"]).first()
+            if created_handoff is not None:
+                _notify_handoff_created(db, org_id, user, created_handoff)
 
         receipt = AssistActionReceipt(
             organization_id=org_id,

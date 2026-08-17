@@ -158,6 +158,7 @@ class MessageResponse(BaseModel):
     content: str
     classification: Optional[str] = None
     created_at: datetime
+    response_id: Optional[int] = None
 
 
 class MessageListResponse(BaseModel):
