@@ -56,8 +56,12 @@ class _RedactSensitiveQueryFilter(logging.Filter):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
+    from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
+
+    start_assist_scheduler()
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
+    stop_assist_scheduler()
 
 
 app = FastAPI(

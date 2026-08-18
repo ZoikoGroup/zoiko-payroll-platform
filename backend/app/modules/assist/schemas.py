@@ -534,6 +534,14 @@ class KbExpirySweepResponse(BaseModel):
     item_ids: list[int] = Field(default_factory=list)
 
 
+class KillSwitchRequest(BaseModel):
+    enabled: bool
+
+
+class KillSwitchResponse(BaseModel):
+    enabled: bool
+
+
 # ── Audit / retention (admin) ───────────────────────────────────────────
 
 class AuditEventResponse(BaseModel):

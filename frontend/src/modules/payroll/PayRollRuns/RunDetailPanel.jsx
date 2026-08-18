@@ -5,6 +5,7 @@ import { useToast } from "../ToastContext";
 import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
 import { formatCurrency } from "../../../utils/currency";
 import RunStatusTimeline from "./RunStatusTimeline";
+import AssistInlinePanel from "../../assist/AssistInlinePanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -357,6 +358,14 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   <InfoField label="Processed Date">{fmtDate(detail?.processedAt)}</InfoField>
                   <InfoField label="Employees">{detail?.employees ?? items.length}</InfoField>
                 </div>
+              </div>
+
+              <div className="mb-5">
+                <AssistInlinePanel
+                  contextObject={{ type: "PAYROLL_RUN", id: run.id }}
+                  title="Ask Assist about this run"
+                  subtitle={`Ask about readiness, exceptions, or status for ${detail?.period || run.period} — answered using only this run's own data.`}
+                />
               </div>
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">

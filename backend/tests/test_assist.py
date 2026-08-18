@@ -26,6 +26,9 @@ os.environ["ASSIST_MODEL_API_KEY"] = ""
 os.environ["SMTP_HOST"] = ""
 os.environ["SMTP_FROM_EMAIL"] = ""
 os.environ["ASSIST_SUPPORT_EMAIL"] = ""
+# No background sweep thread during tests — the app's lifespan starts one
+# on boot, and TestClient instantiation can trigger that lifespan.
+os.environ["ASSIST_SWEEP_ENABLED"] = "false"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -296,6 +299,47 @@ def test_kb_question_no_payroll_message(client, headers, session_id):
     assert "No matching knowledge article was found" in text
 
 
+def test_employee_count_and_active_run_count(client, headers, session_id):
+    # Self-consistent against whatever the shared fixtures already contain —
+    # asserts the assistant's reported counts match a fresh direct DB count
+    # taken at the same time, rather than a fragile hardcoded number.
+    from app.modules.payroll.models import PayrollEmployee, PayrollRun
+
+    expected_total_employees = _db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == _org.id).count()
+    expected_active_runs = (
+        _db.query(PayrollRun)
+        .filter(PayrollRun.organization_id == _org.id, PayrollRun.status.in_(["Draft", "Review", "Approved", "Authorized"]))
+        .count()
+    )
+
+    r1 = client.post(
+        f"/api/assist/sessions/{session_id}/messages",
+        headers=headers,
+        # Same typo'd phrasing a real user hit, to lock in the fix.
+        json={"content": {"type": "TEXT", "text": "how many employess are their in my oraganisation"}},
+    )
+    assert r1.status_code == 200, r1.text
+    resp1 = client.get(f"/api/assist/responses/{r1.json()['response_id']}", headers=headers).json()
+    assert resp1["intent_id"] == "explain.employeeCount"
+    assert resp1["safety_state"] == "SAFE"
+    text1 = next((b["content"] for b in resp1["blocks"] if b["block_type"] == "text"), "")
+    assert "No matching knowledge article" not in text1
+    assert str(expected_total_employees) in text1
+
+    r2 = client.post(
+        f"/api/assist/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": {"type": "TEXT", "text": "how many active payrolls are their"}},
+    )
+    assert r2.status_code == 200, r2.text
+    resp2 = client.get(f"/api/assist/responses/{r2.json()['response_id']}", headers=headers).json()
+    assert resp2["intent_id"] == "explain.activeRunCount"
+    assert resp2["safety_state"] == "SAFE"
+    text2 = next((b["content"] for b in resp2["blocks"] if b["block_type"] == "text"), "")
+    assert "No matching knowledge article" not in text2
+    assert str(expected_active_runs) in text2
+
+
 def test_missing_run_guidance_message():
     """Run-aware tool failure must guide the user to create/open a run."""
     from app.modules.assist import gateway
@@ -454,6 +498,59 @@ def test_audit_and_retention_admin(client, headers):
     ret = client.get("/api/assist/admin/retention", headers=headers)
     assert ret.status_code == 200
     assert ret.json()["total_sessions"] >= 1
+
+
+def test_kill_switch_blocks_new_sessions_and_messages(client, headers, session_id):
+    login = client.post("/api/auth/login", json={"email": "assist-super-admin@example.com", "password": "strong-password"})
+    if login.status_code != 200:
+        _db.add(
+            User(
+                email="assist-super-admin@example.com",
+                hashed_password=hash_password("strong-password"),
+                role=UserRole.SUPER_ADMIN,
+                first_name="Super",
+                last_name="Admin",
+                organization_id=None,
+                is_active=True,
+            )
+        )
+        _db.commit()
+        login = client.post("/api/auth/login", json={"email": "assist-super-admin@example.com", "password": "strong-password"})
+    assert login.status_code == 200, login.text
+    super_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    # Only a Super Admin can see/toggle the switch.
+    assert client.get("/api/assist/admin/kill-switch", headers=headers).status_code == 403
+    assert client.post("/api/assist/admin/kill-switch", headers=headers, json={"enabled": True}).status_code == 403
+
+    before = client.get("/api/assist/admin/kill-switch", headers=super_headers)
+    assert before.status_code == 200 and before.json()["enabled"] is False
+
+    try:
+        on = client.post("/api/assist/admin/kill-switch", headers=super_headers, json={"enabled": True})
+        assert on.status_code == 200 and on.json()["enabled"] is True
+
+        blocked_session = client.post("/api/assist/sessions", headers=headers, json={"title": "should be blocked"})
+        assert blocked_session.status_code == 503
+
+        blocked_message = client.post(
+            f"/api/assist/sessions/{session_id}/messages",
+            headers=headers,
+            json={"content": {"type": "TEXT", "text": "hi"}},
+        )
+        assert blocked_message.status_code == 503
+    finally:
+        # Always turn it back off, regardless of assertion outcome above,
+        # so this test can never leave every other test in the file blocked.
+        off = client.post("/api/assist/admin/kill-switch", headers=super_headers, json={"enabled": False})
+        assert off.status_code == 200 and off.json()["enabled"] is False
+
+    resumed = client.post(
+        f"/api/assist/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": {"type": "TEXT", "text": "hi"}},
+    )
+    assert resumed.status_code == 200
 
 
 def test_model_executions_logged(client, headers, session_id):
