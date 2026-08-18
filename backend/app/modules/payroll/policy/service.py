@@ -199,6 +199,116 @@ def _apply_overtime_policy_defaults(overtime_row: "PolicyOvertimeRule", locks: d
             setattr(overtime_row, field, field_node["value"])
 
 
+def _force_apply_locked_policy_defaults(policy: PayrollPolicy, locks: dict) -> None:
+    """Like _apply_policy_defaults, but for an ALREADY-EXISTING policy —
+    only touches a field when the pack has explicitly locked it
+    (allowOverride is False). An overridable field is left exactly as the
+    org set it; forcing it too would defeat the entire point of marking it
+    overridable."""
+    if not locks:
+        return
+    name_node = locks.get("name")
+    if isinstance(name_node, dict) and name_node.get("value") and not name_node.get("allowOverride", True):
+        policy.name = name_node["value"]
+    node = locks.get("calculation_mode")
+    if isinstance(node, dict) and node.get("value") is not None and not node.get("allowOverride", True):
+        policy.calculation_mode = node["value"]
+    for field in ("basic_pct", "hra_pct"):
+        node = locks.get(field)
+        if isinstance(node, dict) and node.get("value") is not None and not node.get("allowOverride", True):
+            setattr(policy, field, node["value"])
+
+
+def _force_apply_locked_category_defaults(category_row: "PolicyEmployeeCategory", locks: dict) -> None:
+    node = (locks.get("employee_categories") or {}).get(category_row.category)
+    if not isinstance(node, dict):
+        return
+    for field in ("working_days", "expected_hours", "minimum_hours", "paid_leave_eligible", "grace_time_minutes"):
+        field_node = node.get(field)
+        if isinstance(field_node, dict) and field_node.get("value") is not None and not field_node.get("allowOverride", True):
+            setattr(category_row, field, field_node["value"])
+    if category_row.category == EmployeeCategoryType.INTERN.value:
+        category_row.paid_leave_eligible = False
+
+
+def _force_apply_locked_overtime_defaults(overtime_row: "PolicyOvertimeRule", locks: dict) -> None:
+    node = locks.get("overtime_rule")
+    if not isinstance(node, dict):
+        return
+    for field in ("enabled", "minimum_overtime_minutes", "approval_required"):
+        field_node = node.get(field)
+        if isinstance(field_node, dict) and field_node.get("value") is not None and not field_node.get("allowOverride", True):
+            setattr(overtime_row, field, field_node["value"])
+
+
+def _force_apply_locked_allowance_components(db: Session, policy: PayrollPolicy, locks: dict) -> None:
+    components = locks.get("allowance_components")
+    if not isinstance(components, dict):
+        return
+    by_key = {c.key: c for c in policy.allowance_components}
+    for key, node in components.items():
+        if not isinstance(node, dict) or node.get("allowOverride", True):
+            continue  # only force components Super Admin explicitly locked
+        value = node.get("value")
+        if not isinstance(value, dict):
+            continue
+        existing = by_key.get(key)
+        if existing:
+            existing.label = value.get("label") or key
+            existing.pct = value.get("pct")
+            existing.flat_amount = value.get("flat_amount")
+            existing.allow_override = False
+        else:
+            db.add(PolicyAllowanceComponent(
+                policy_id=policy.id, key=key, label=value.get("label") or key,
+                pct=value.get("pct"), flat_amount=value.get("flat_amount"), allow_override=False,
+            ))
+
+
+def sync_org_policy_from_pack(db: Session, organization_id: int) -> dict:
+    """Force-applies every LOCKED (allowOverride=False) field from the
+    org's currently-assigned Policy pack onto its EXISTING PayrollPolicy —
+    the policy-pack equivalent of sync_org_rates_from_canonical for tax
+    packs, called from assign_pack_to_organizations().
+
+    Before this existed, assigning a Policy pack only set
+    CompanyComplianceDetails.active_pack_id and started blocking future
+    edits that conflicted with a locked field (_check_field_lock in
+    update_policy) — an org's ALREADY-existing policy values were never
+    actually updated to match, so Org Admin kept seeing its own old
+    values indefinitely unless it happened to try (and get rejected on)
+    an edit. This makes assignment itself immediately push locked values
+    through, same as tax packs already do for rates.
+
+    Overridable fields are left untouched — an org's own customization on
+    a field Super Admin marked overridable is not overwritten, since
+    that's the entire point of marking it overridable. A no-op if the org
+    has no policy yet (its first policy gets seeded compliant already via
+    _seed_default_policy) or the assigned pack has no policy_defaults.
+    """
+    locks = _resolve_policy_lock(db, organization_id)
+    if not locks:
+        return {"synced": False, "reason": "assigned pack has no policy defaults"}
+
+    policy = (
+        _policy_query(db)
+        .filter(PayrollPolicy.organization_id == organization_id, PayrollPolicy.is_default == True)  # noqa: E712
+        .first()
+    )
+    if not policy:
+        return {"synced": False, "reason": "organization has no policy yet"}
+
+    _force_apply_locked_policy_defaults(policy, locks)
+    for category_row in policy.employee_categories:
+        _force_apply_locked_category_defaults(category_row, locks)
+    if policy.overtime_rule:
+        _force_apply_locked_overtime_defaults(policy.overtime_rule, locks)
+    _force_apply_locked_allowance_components(db, policy, locks)
+
+    db.commit()
+    return {"synced": True}
+
+
 def _seed_default_policy(db: Session, organization_id: int) -> PayrollPolicy:
     policy = PayrollPolicy(
         organization_id=organization_id,

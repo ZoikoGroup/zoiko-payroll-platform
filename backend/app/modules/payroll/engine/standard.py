@@ -1,7 +1,8 @@
 """
 modules/payroll/engine/standard
 -------------------------------
-Standard Payroll strategy — Indian statutory compliance (default).
+Standard Payroll strategy — country dispatch + the universal Fixed 30-Day
+attendance model.
 
 Formula:
     Net Salary =
@@ -15,14 +16,21 @@ Formula:
 Attendance deduction is ALWAYS computed first via the Fixed 30-Day model,
 then statutory deductions are applied on the full gross (not prorated).
 
-Country-specific logic is dispatched from here for "standard" mode —
-the same engine serves IN, US, UK, AU, DE, and CA under the Standard
-policy (and, via EnterpriseStrategy re-using this dispatch table, under
-the Enterprise policy too).
+Country-specific logic is dispatched from here for "standard" mode — the
+same engine serves IN, US, UK, AU, DE, and CA under the Standard policy
+(and, via EnterpriseStrategy re-using this dispatch table, under the
+Enterprise policy too). Each country's actual formulas now live in their
+own file under engine/countries/ (india.py, us.py, uk.py, australia.py,
+germany.py, canada.py) plus engine/countries/shared.py for the
+genuinely cross-cutting helpers — this file re-exports every one of
+those under its original private name (`_calc_india`, `MONTHS_PER_YEAR`,
+`_IN_STANDARD_DEDUCTION`, etc.) purely for backward compatibility, since
+engine/enterprise.py and this module's own test suite import them
+directly from here. Nothing about those contracts changed — only the
+implementation moved to make one country's formulas readable/editable
+without touching the other five.
 """
 
-import ast
-import operator
 from decimal import Decimal
 
 from app.modules.payroll.engine.base import (
@@ -32,466 +40,74 @@ from app.modules.payroll.engine.base import (
     PayrollStrategy,
     _round2,
 )
-
-# ── Constants ──────────────────────────────────────────────────────────────
-
-MONTHS_PER_YEAR = Decimal("12")
-
-# India
-ESI_MONTHLY_WAGE_CEILING = Decimal("21000")
-_IN_STANDARD_DEDUCTION = Decimal("75000")
-_IN_REBATE_87A_LIMIT = Decimal("1200000")
-_IN_REBATE_87A_MAX = Decimal("60000")
-
-# US
-_US_STANDARD_DEDUCTION = Decimal("15000")
-_US_SOCIAL_SECURITY_WAGE_BASE = Decimal("176100")
-_US_SOCIAL_SECURITY_RATE = Decimal("6.2")
-_US_MEDICARE_RATE = Decimal("1.45")
-_US_MEDICARE_ADDITIONAL_RATE = Decimal("0.9")
-
-# UK
-_UK_PERSONAL_ALLOWANCE = Decimal("12570")
-_UK_PA_TAPER_THRESHOLD = Decimal("100000")
-_UK_NI_PRIMARY_THRESHOLD = Decimal("12570")
-_UK_NI_UPPER_THRESHOLD = Decimal("50270")
-_UK_NI_PRIMARY_RATE = Decimal("8")
-_UK_NI_UPPER_RATE = Decimal("2")
-_UK_PENSION_MIN_ENPLOYER = Decimal("3")
-
-# US Medicare Additional threshold ($200,000/yr) — previously inlined at
-# its one call site in _calc_us; named here so it can be sourced from
-# rate_map like every other parameter below.
-_US_MEDICARE_ADDITIONAL_THRESHOLD = Decimal("200000")
-
-# Australia
-_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = Decimal("24276")
-_AU_MLS_THRESHOLD = Decimal("97000")
-_AU_MLS_RATE = Decimal("1.0")
-_AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("260280")
-
-# Germany
-_DE_GRUNDFREIBETRAG = Decimal("11784")
-_DE_CONTRIBUTION_CEILING = Decimal("96600")
-_DE_SOLI_THRESHOLD = Decimal("18130")
-_DE_SOLI_RATE = Decimal("5.5")
-
-# Canada
-_CA_CPP_YMPE = Decimal("71300")
-_CA_CPP_BASIC_EXEMPTION = Decimal("3500")
-_CA_EI_MIE = Decimal("65700")
-_CA_BASIC_PERSONAL_AMOUNT = Decimal("15705")
-
-
-# ── Government-mandated scalar parameters (Global Payroll Tax Engine) ──────
-# The constants above remain as documented FALLBACK defaults only — the
-# live source is now a ContributionRate row (organization_id set, synced
-# from the Super-Admin-owned canonical row of the same component_key) if
-# one exists in rate_map, so Super Admin editing e.g. the US Social
-# Security wage base actually reaches this calculator. A jurisdiction/org
-# with no such row yet (nothing has changed there) behaves EXACTLY as
-# before this existed — this is additive, not a behavior change.
-
-def _param_amount(rate_map: dict, key: str, default: Decimal) -> Decimal:
-    row = rate_map.get(key)
-    if row is not None and row.flat_amount is not None:
-        return row.flat_amount
-    return default
-
-
-def _param_pct(rate_map: dict, key: str, side: str, default: Decimal) -> Decimal:
-    row = rate_map.get(key)
-    if row is not None:
-        value = row.employee_rate_pct if side == "employee" else row.employer_rate_pct
-        if value is not None:
-            return value
-    return default
-
-
-# ── Formula-based tax rules (rule_type="FORMULA") ──────────────────────────
-# Not every jurisdiction's income tax is a clean bracket table — Germany's
-# real Lohnsteuer is a continuous formula, not flat bands. TABLE_LOOKUP/
-# MARGINAL_RATE slabs (every jurisdiction's current data) keep using the
-# bracket loop below unchanged; a slab row that opts into rule_type=FORMULA
-# is evaluated here instead. Deliberately NOT `eval()` — a restricted AST
-# walk that only allows arithmetic on a fixed `income` variable, so a
-# formula_expression can never execute arbitrary code.
-
-_SAFE_OPERATORS = {
-    ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
-    ast.Div: operator.truediv, ast.Pow: operator.pow, ast.USub: operator.neg,
-    ast.UAdd: operator.pos,
-}
-
-
-def _eval_safe_node(node, variables: dict) -> Decimal:
-    if isinstance(node, ast.Expression):
-        return _eval_safe_node(node.body, variables)
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return Decimal(str(node.value))
-    if isinstance(node, ast.Name):
-        if node.id in variables:
-            return variables[node.id]
-        raise ValueError(f"Unknown variable in tax formula: {node.id}")
-    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPERATORS:
-        return _SAFE_OPERATORS[type(node.op)](_eval_safe_node(node.left, variables), _eval_safe_node(node.right, variables))
-    if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPERATORS:
-        return _SAFE_OPERATORS[type(node.op)](_eval_safe_node(node.operand, variables))
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("min", "max"):
-        args = [_eval_safe_node(a, variables) for a in node.args]
-        return (min if node.func.id == "min" else max)(*args)
-    raise ValueError(f"Disallowed expression in tax formula: {ast.dump(node)}")
-
-
-def evaluate_tax_formula(expression: str, income: Decimal) -> Decimal:
-    """Evaluate a stored formula_expression against a taxable `income`.
-    Only arithmetic (+ - * / **), parentheses, min()/max(), and the
-    `income` variable are permitted."""
-    tree = ast.parse(expression, mode="eval")
-    result = _eval_safe_node(tree, {"income": income})
-    return max(Decimal("0"), Decimal(result))
-
-
-# ── Tax computation helpers ────────────────────────────────────────────────
-
-def _calculate_annual_tax(annual_income: Decimal, slabs) -> Decimal:
-    """Progressive slab-based tax on annual income.
-
-    If any slab row opts into rule_type="FORMULA", that row's
-    formula_expression is evaluated directly against annual_income instead
-    of the bracket-sum loop — one formula row replaces the whole table for
-    that jurisdiction (matches how Germany's real Lohnsteuer works: one
-    continuous function, not a set of bands)."""
-    formula_row = next((s for s in slabs if getattr(s, "rule_type", None) == "FORMULA" and s.formula_expression), None)
-    if formula_row is not None:
-        return evaluate_tax_formula(formula_row.formula_expression, annual_income)
-
-    tax = Decimal("0")
-    for slab in sorted(slabs, key=lambda s: s.min_amount):
-        lower = slab.min_amount
-        upper = slab.max_amount if slab.max_amount is not None else annual_income
-        if annual_income <= lower:
-            continue
-        taxable_in_band = min(annual_income, upper) - lower
-        if taxable_in_band > 0:
-            tax += taxable_in_band * (slab.rate_pct / Decimal("100"))
-    return tax
-
-
-def _apply_section_87a_rebate(annual_tax: Decimal, taxable_income: Decimal, rate_map: dict) -> Decimal:
-    rebate_limit = _param_amount(rate_map, "rebate_87a_limit", _IN_REBATE_87A_LIMIT)
-    rebate_max = _param_amount(rate_map, "rebate_87a_max", _IN_REBATE_87A_MAX)
-    if taxable_income <= rebate_limit:
-        rebate = min(annual_tax, rebate_max)
-        return annual_tax - rebate
-    tax_on_threshold = rebate_max
-    if annual_tax > tax_on_threshold:
-        excess_income = taxable_income - rebate_limit
-        excess_tax = annual_tax - tax_on_threshold
-        if excess_tax <= excess_income:
-            return tax_on_threshold + excess_tax
-        return annual_tax
-    return annual_tax
-
-
-def _calculate_annual_tax_in(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    standard_deduction = _param_amount(rate_map, "standard_deduction", _IN_STANDARD_DEDUCTION)
-    taxable = max(Decimal("0"), annual_gross - standard_deduction)
-    tax = _calculate_annual_tax(taxable, slabs)
-    tax = _apply_section_87a_rebate(tax, taxable, rate_map)
-    return max(Decimal("0"), tax)
-
-
-def _calculate_annual_tax_us(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    standard_deduction = _param_amount(rate_map, "standard_deduction", _US_STANDARD_DEDUCTION)
-    taxable = max(Decimal("0"), annual_gross - standard_deduction)
-    return _calculate_annual_tax(taxable, slabs)
-
-
-def _calculate_annual_tax_uk(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    pa = _param_amount(rate_map, "personal_allowance", _UK_PERSONAL_ALLOWANCE)
-    taper_threshold = _param_amount(rate_map, "pa_taper_threshold", _UK_PA_TAPER_THRESHOLD)
-    if annual_gross > taper_threshold:
-        taper = (annual_gross - taper_threshold) / Decimal("2")
-        pa = max(Decimal("0"), pa - taper)
-    taxable = max(Decimal("0"), annual_gross - pa)
-    return _calculate_annual_tax(taxable, slabs)
-
-
-def _calculate_annual_tax_de(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    grundfreibetrag = _param_amount(rate_map, "grundfreibetrag", _DE_GRUNDFREIBETRAG)
-    taxable = max(Decimal("0"), annual_gross - grundfreibetrag)
-    tax = _calculate_annual_tax(taxable, slabs)
-
-    soli_threshold = _param_amount(rate_map, "soli_threshold", _DE_SOLI_THRESHOLD)
-    soli_rate = _param_pct(rate_map, "soli_rate", "employee", _DE_SOLI_RATE)
-    if tax > soli_threshold:
-        tax += tax * soli_rate / Decimal("100")
-    return tax
-
-
-def _calculate_annual_tax_ca(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    bpa = _param_amount(rate_map, "basic_personal_amount", _CA_BASIC_PERSONAL_AMOUNT)
-    taxable = max(Decimal("0"), annual_gross - bpa)
-    return _calculate_annual_tax(taxable, slabs)
-
-
-# ── Per-country compliance calculators ─────────────────────────────────────
-
-def _calc_india(ctx: PayrollContext) -> dict:
-    """India: PF, ESI, Professional Tax, TDS."""
-    rate_map = ctx.rate_map
-    gross = ctx.gross
-    basic = ctx.basic
-
-    pf_rate = rate_map.get("pf")
-    employee_pf = _round2(basic * (pf_rate.employee_rate_pct / 100)) if pf_rate and pf_rate.employee_rate_pct else Decimal("0")
-    employer_pf = _round2(basic * (pf_rate.employer_rate_pct / 100)) if pf_rate and pf_rate.employer_rate_pct else Decimal("0")
-
-    esi_rate = rate_map.get("esi")
-    esi_ceiling = _param_amount(rate_map, "esi_wage_ceiling", ESI_MONTHLY_WAGE_CEILING)
-    esi_applicable = gross <= esi_ceiling
-    employee_esi = _round2(gross * (esi_rate.employee_rate_pct / 100)) if esi_rate and esi_rate.employee_rate_pct and esi_applicable else Decimal("0")
-    employer_esi = _round2(gross * (esi_rate.employer_rate_pct / 100)) if esi_rate and esi_rate.employer_rate_pct and esi_applicable else Decimal("0")
-
-    pt_rate = rate_map.get("pt")
-    professional_tax = pt_rate.flat_amount if pt_rate and pt_rate.flat_amount else Decimal("0")
-
-    annual_gross = gross * MONTHS_PER_YEAR
-    annual_tax = _calculate_annual_tax_in(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    return dict(
-        employee_pf=employee_pf, employer_pf=employer_pf,
-        employee_esi=employee_esi, employer_esi=employer_esi,
-        professional_tax=professional_tax,
-        tds=tds, annual_tax=annual_tax,
-    )
-
-
-def _calc_us(ctx: PayrollContext) -> dict:
-    """US: Social Security + Medicare + Federal Income Tax.
-
-    Employee/employer Social Security and Medicare rates now come from
-    rate_map's "social-security"/"medicare" ContributionRate rows (the
-    same rows _CONTRIBUTION_RATES_BY_COUNTRY["US"] already seeds with the
-    correct 6.2%/1.45% values) rather than being ignored in favour of a
-    hardcoded module constant — closing the gap where editing these rates
-    via Compliance previously had zero calculation effect."""
-    rate_map = ctx.rate_map
-    annual_gross = ctx.gross * MONTHS_PER_YEAR
-
-    ss_rate_employee = _param_pct(rate_map, "social-security", "employee", _US_SOCIAL_SECURITY_RATE)
-    ss_rate_employer = _param_pct(rate_map, "social-security", "employer", _US_SOCIAL_SECURITY_RATE)
-    ss_wage_base = _param_amount(rate_map, "ss_wage_base", _US_SOCIAL_SECURITY_WAGE_BASE)
-    annual_ss_wage = min(annual_gross, ss_wage_base)
-    social_security = _round2((annual_ss_wage * ss_rate_employee / Decimal("100")) / MONTHS_PER_YEAR)
-    employer_ss = _round2((annual_ss_wage * ss_rate_employer / Decimal("100")) / MONTHS_PER_YEAR)
-
-    medicare_rate_employee = _param_pct(rate_map, "medicare", "employee", _US_MEDICARE_RATE)
-    medicare_rate_employer = _param_pct(rate_map, "medicare", "employer", _US_MEDICARE_RATE)
-    medicare_additional_rate = _param_pct(rate_map, "medicare_additional", "employee", _US_MEDICARE_ADDITIONAL_RATE)
-    medicare_additional_threshold = _param_amount(rate_map, "medicare_addl_thresh", _US_MEDICARE_ADDITIONAL_THRESHOLD)
-
-    medicare = _round2((annual_gross * medicare_rate_employee / Decimal("100")) / MONTHS_PER_YEAR)
-    if annual_gross > medicare_additional_threshold:
-        medicare += _round2(((annual_gross - medicare_additional_threshold) * medicare_additional_rate / Decimal("100")) / MONTHS_PER_YEAR)
-    employer_medicare = _round2((annual_gross * medicare_rate_employer / Decimal("100")) / MONTHS_PER_YEAR)
-
-    annual_tax = _calculate_annual_tax_us(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    return dict(
-        social_security=social_security, employer_social_security=employer_ss,
-        medicare=medicare, employer_medicare=employer_medicare,
-        tds=tds, annual_tax=annual_tax,
-    )
-
-
-def _calc_uk(ctx: PayrollContext) -> dict:
-    """UK: National Insurance + Employer Pension + PAYE.
-
-    NI rates/thresholds and the employer pension rate now come from
-    rate_map's "national-insurance"/"employer-pension" ContributionRate
-    rows (already seeded with the correct 8%/2%/13.8%/3% values) rather
-    than being ignored in favour of hardcoded module constants."""
-    rate_map = ctx.rate_map
-    annual_gross = ctx.gross * MONTHS_PER_YEAR
-
-    ni_primary_threshold = _param_amount(rate_map, "ni_primary_thresh", _UK_NI_PRIMARY_THRESHOLD)
-    ni_upper_threshold = _param_amount(rate_map, "ni_upper_threshold", _UK_NI_UPPER_THRESHOLD)
-    ni_primary_rate = _param_pct(rate_map, "national-insurance", "employee", _UK_NI_PRIMARY_RATE)
-    ni_upper_rate = _param_pct(rate_map, "ni_upper_rate", "employee", _UK_NI_UPPER_RATE)
-
-    ni_basicable = max(Decimal("0"), min(annual_gross, ni_upper_threshold) - ni_primary_threshold)
-    ni_upperable = max(Decimal("0"), annual_gross - ni_upper_threshold)
-    ni_employee_annual = (ni_basicable * ni_primary_rate / Decimal("100")) + (ni_upperable * ni_upper_rate / Decimal("100"))
-    ni_employee = _round2(ni_employee_annual / MONTHS_PER_YEAR)
-
-    pension_rate = _param_pct(rate_map, "employer-pension", "employer", _UK_PENSION_MIN_ENPLOYER)
-    employer_pension = _round2(annual_gross * pension_rate / Decimal("100") / MONTHS_PER_YEAR)
-
-    annual_tax = _calculate_annual_tax_uk(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    return dict(
-        ni_employee=ni_employee,
-        employer_pension=employer_pension,
-        tds=tds, annual_tax=annual_tax,
-    )
-
-
-def _calc_generic(ctx: PayrollContext) -> dict:
-    """Fallback: progressive tax only (no country-specific contributions)."""
-    annual_gross = ctx.gross * MONTHS_PER_YEAR
-    annual_tax = _calculate_annual_tax(annual_gross, ctx.slabs)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-    return dict(tds=tds, annual_tax=annual_tax)
-
-
-def _calc_australia(ctx: PayrollContext) -> dict:
-    """Australia: Superannuation Guarantee (employer-only, capped at the
-    Max Contribution Base) + Medicare Levy (employee, waived below a
-    low-income threshold, plus a Medicare Levy Surcharge above a separate
-    higher threshold) + progressive income tax. Rates are DB-backed
-    (ContributionRate/TaxSlab, seeded with representative defaults on
-    first use) — same configuration-driven pattern as India, not
-    hardcoded module constants.
-
-    Reused PayrollResult fields: `medicare` (Medicare Levy + MLS combined
-    — name already matches AU terminology) and `employer_pension`
-    (Superannuation)."""
-    rate_map = ctx.rate_map
-    gross = ctx.gross
-    annual_gross = gross * MONTHS_PER_YEAR
-
-    super_cap = _param_amount(rate_map, "super_max_contribution_base", _AU_SUPER_MAX_CONTRIBUTION_BASE)
-    super_rate = rate_map.get("super")
-    annual_super_base = min(annual_gross, super_cap)
-    employer_pension = (
-        _round2((annual_super_base * (super_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if super_rate and super_rate.employer_rate_pct else Decimal("0")
-    )
-
-    medicare_threshold = _param_amount(rate_map, "medicare_levy_low_income_threshold", _AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD)
-    medicare_rate = rate_map.get("medicare-levy")
-    if annual_gross > medicare_threshold and medicare_rate and medicare_rate.employee_rate_pct:
-        medicare = _round2(gross * (medicare_rate.employee_rate_pct / 100))
-    else:
-        medicare = Decimal("0")
-
-    mls_threshold = _param_amount(rate_map, "mls_threshold", _AU_MLS_THRESHOLD)
-    mls_rate = _param_pct(rate_map, "mls_rate", "employee", _AU_MLS_RATE)
-    if annual_gross > mls_threshold:
-        medicare += _round2((annual_gross * mls_rate / Decimal("100")) / MONTHS_PER_YEAR)
-
-    annual_tax = _calculate_annual_tax(annual_gross, ctx.slabs)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    return dict(
-        medicare=medicare,
-        employer_pension=employer_pension,
-        tds=tds, annual_tax=annual_tax,
-    )
-
-
-def _calc_germany(ctx: PayrollContext) -> dict:
-    """Germany: Pension insurance (Rentenversicherung) + combined Health/
-    Unemployment/Long-term-care insurance (simplified into one "social
-    insurance" component), both capped at the annual Contribution
-    Ceiling (Beitragsbemessungsgrenze) + progressive income tax with the
-    Basic Tax-Free Allowance (Grundfreibetrag) deducted first and the
-    Solidarity Surcharge added above a tax-liability threshold. DB-backed
-    rates.
-
-    Reused PayrollResult fields: `employee_pf`/`employer_pf` (Pension
-    insurance) and `employee_esi`/`employer_esi` (combined social
-    insurance) — payslip labels are swapped to German terminology for
-    this country in generate_payslip_pdf_bytes."""
-    rate_map = ctx.rate_map
-    gross = ctx.gross
-    annual_gross = gross * MONTHS_PER_YEAR
-
-    contribution_ceiling = _param_amount(rate_map, "contribution_ceiling", _DE_CONTRIBUTION_CEILING)
-    annual_contribution_base = min(annual_gross, contribution_ceiling)
-
-    pension_rate = rate_map.get("pension")
-    employee_pf = (
-        _round2((annual_contribution_base * (pension_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if pension_rate and pension_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_pf = (
-        _round2((annual_contribution_base * (pension_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if pension_rate and pension_rate.employer_rate_pct else Decimal("0")
-    )
-
-    social_rate = rate_map.get("social-insurance")
-    employee_esi = (
-        _round2((annual_contribution_base * (social_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if social_rate and social_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_esi = (
-        _round2((annual_contribution_base * (social_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if social_rate and social_rate.employer_rate_pct else Decimal("0")
-    )
-
-    annual_tax = _calculate_annual_tax_de(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    return dict(
-        employee_pf=employee_pf, employer_pf=employer_pf,
-        employee_esi=employee_esi, employer_esi=employer_esi,
-        tds=tds, annual_tax=annual_tax,
-    )
-
-
-def _calc_canada(ctx: PayrollContext) -> dict:
-    """Canada: CPP (Canada Pension Plan — contributory earnings floored by
-    the Basic Exemption Amount, capped at the Year's Maximum Pensionable
-    Earnings) + EI (Employment Insurance — capped separately at its own
-    Maximum Insurable Earnings) + progressive federal income tax with the
-    Basic Personal Amount deducted first (provincial tax excluded for
-    simplicity). DB-backed rates.
-
-    Reused PayrollResult fields: `social_security`/`employer_social_security`
-    (CPP) and `employee_esi`/`employer_esi` (EI)."""
-    rate_map = ctx.rate_map
-    gross = ctx.gross
-    annual_gross = gross * MONTHS_PER_YEAR
-
-    cpp_ympe = _param_amount(rate_map, "cpp_ympe", _CA_CPP_YMPE)
-    cpp_basic_exemption = _param_amount(rate_map, "cpp_basic_exemption", _CA_CPP_BASIC_EXEMPTION)
-    annual_cpp_pensionable = max(Decimal("0"), min(annual_gross, cpp_ympe) - cpp_basic_exemption)
-    cpp_rate = rate_map.get("cpp")
-    social_security = (
-        _round2((annual_cpp_pensionable * (cpp_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if cpp_rate and cpp_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_social_security = (
-        _round2((annual_cpp_pensionable * (cpp_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if cpp_rate and cpp_rate.employer_rate_pct else Decimal("0")
-    )
-
-    ei_mie = _param_amount(rate_map, "ei_mie", _CA_EI_MIE)
-    annual_ei_insurable = min(annual_gross, ei_mie)
-    ei_rate = rate_map.get("ei")
-    employee_esi = (
-        _round2((annual_ei_insurable * (ei_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if ei_rate and ei_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_esi = (
-        _round2((annual_ei_insurable * (ei_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if ei_rate and ei_rate.employer_rate_pct else Decimal("0")
-    )
-
-    annual_tax = _calculate_annual_tax_ca(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    return dict(
-        social_security=social_security, employer_social_security=employer_social_security,
-        employee_esi=employee_esi, employer_esi=employer_esi,
-        tds=tds, annual_tax=annual_tax,
-    )
+from app.modules.payroll.engine.countries.shared import (
+    MONTHS_PER_YEAR,
+    evaluate_tax_formula,
+    _param_amount,
+    _param_pct,
+    _calculate_annual_tax,
+)
+from app.modules.payroll.engine.countries import india as _india
+from app.modules.payroll.engine.countries import us as _us
+from app.modules.payroll.engine.countries import uk as _uk
+from app.modules.payroll.engine.countries import australia as _australia
+from app.modules.payroll.engine.countries import germany as _germany
+from app.modules.payroll.engine.countries import canada as _canada
+from app.modules.payroll.engine.countries import generic as _generic
+
+# ── Backward-compatible re-exports ──────────────────────────────────────
+# Every name below existed directly in this file before the engine/
+# countries/ split — kept importable from exactly this path, exactly
+# these names, so no external caller needs to change.
+
+ESI_MONTHLY_WAGE_CEILING = _india.ESI_MONTHLY_WAGE_CEILING
+_IN_STANDARD_DEDUCTION = _india._IN_STANDARD_DEDUCTION
+_IN_REBATE_87A_LIMIT = _india._IN_REBATE_87A_LIMIT
+_IN_REBATE_87A_MAX = _india._IN_REBATE_87A_MAX
+_apply_section_87a_rebate = _india._apply_section_87a_rebate
+_calculate_annual_tax_in = _india._calculate_annual_tax_in
+_calc_india = _india.calculate
+
+_US_STANDARD_DEDUCTION = _us._US_STANDARD_DEDUCTION
+_US_SOCIAL_SECURITY_WAGE_BASE = _us._US_SOCIAL_SECURITY_WAGE_BASE
+_US_SOCIAL_SECURITY_RATE = _us._US_SOCIAL_SECURITY_RATE
+_US_MEDICARE_RATE = _us._US_MEDICARE_RATE
+_US_MEDICARE_ADDITIONAL_RATE = _us._US_MEDICARE_ADDITIONAL_RATE
+_US_MEDICARE_ADDITIONAL_THRESHOLD = _us._US_MEDICARE_ADDITIONAL_THRESHOLD
+_calculate_annual_tax_us = _us._calculate_annual_tax_us
+_calc_us = _us.calculate
+
+_UK_PERSONAL_ALLOWANCE = _uk._UK_PERSONAL_ALLOWANCE
+_UK_PA_TAPER_THRESHOLD = _uk._UK_PA_TAPER_THRESHOLD
+_UK_NI_PRIMARY_THRESHOLD = _uk._UK_NI_PRIMARY_THRESHOLD
+_UK_NI_UPPER_THRESHOLD = _uk._UK_NI_UPPER_THRESHOLD
+_UK_NI_PRIMARY_RATE = _uk._UK_NI_PRIMARY_RATE
+_UK_NI_UPPER_RATE = _uk._UK_NI_UPPER_RATE
+_UK_PENSION_MIN_ENPLOYER = _uk._UK_PENSION_MIN_ENPLOYER
+_calculate_annual_tax_uk = _uk._calculate_annual_tax_uk
+_calc_uk = _uk.calculate
+
+_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = _australia._AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD
+_AU_MLS_THRESHOLD = _australia._AU_MLS_THRESHOLD
+_AU_MLS_RATE = _australia._AU_MLS_RATE
+_AU_SUPER_MAX_CONTRIBUTION_BASE = _australia._AU_SUPER_MAX_CONTRIBUTION_BASE
+_calc_australia = _australia.calculate
+
+_DE_GRUNDFREIBETRAG = _germany._DE_GRUNDFREIBETRAG
+_DE_CONTRIBUTION_CEILING = _germany._DE_CONTRIBUTION_CEILING
+_DE_SOLI_THRESHOLD = _germany._DE_SOLI_THRESHOLD
+_DE_SOLI_RATE = _germany._DE_SOLI_RATE
+_calculate_annual_tax_de = _germany._calculate_annual_tax_de
+_calc_germany = _germany.calculate
+
+_CA_CPP_YMPE = _canada._CA_CPP_YMPE
+_CA_CPP_BASIC_EXEMPTION = _canada._CA_CPP_BASIC_EXEMPTION
+_CA_EI_MIE = _canada._CA_EI_MIE
+_CA_BASIC_PERSONAL_AMOUNT = _canada._CA_BASIC_PERSONAL_AMOUNT
+_calculate_annual_tax_ca = _canada._calculate_annual_tax_ca
+_calc_canada = _canada.calculate
+
+_calc_generic = _generic.calculate
 
 
 _COUNTRY_CALC = {

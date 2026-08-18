@@ -64,6 +64,10 @@ from app.modules.payroll.policy import policy_router
 from app.modules.payroll.enterprise import enterprise_router
 from app.modules.payroll.mail import mail_router
 from app.modules.payroll.forms import forms_router
+# Registration-only import — no router yet (data model + resolver phase
+# only; the API surface lands in a later phase). Ensures the new
+# hierarchy tables are picked up by create_all/sync_schema.
+import app.modules.payroll.hierarchy  # noqa: F401
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,

@@ -3,6 +3,18 @@ modules/payroll/enterprise/router.py
 ----------------------------------------
 HTTP endpoints for Enterprise Policy jurisdiction onboarding.
 
+DEPRECATION NOTICE (Phase 9 cleanup inventory, see
+backend/scripts/HIERARCHY_V2_CLEANUP_INVENTORY.md): this module's
+PayrollEnterpriseJurisdiction + its own contribution-rate storage is the
+duplicate system the jurisdiction hierarchy engine
+(app/modules/payroll/hierarchy/) is meant to eventually fold into via
+OrganizationJurisdictionAssignment (multiple assignments = the "Enterprise"
+UI state). NOT removed or functionally changed here — zero organizations
+are cut over to the hierarchy engine yet, and this module is what today's
+live Enterprise-mode payroll actually runs on. Do not delete/rename
+anything in this file until the inventory doc's fold-in step is actually
+executed for every org still using it.
+
 Mounted as a sub-router of payroll_router (see app/modules/payroll/router.py
 "payroll_router.include_router(enterprise_router)"), exactly like policy_router.
 

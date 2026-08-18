@@ -1,3 +1,8 @@
+// DEPRECATION NOTICE (Phase 9 cleanup inventory, see
+// backend/scripts/HIERARCHY_V2_CLEANUP_INVENTORY.md): companion to
+// EnterpriseJurisdictionsTab.jsx — same eventual fold-in target (the
+// hierarchy engine's org-assignment UI), same "not yet, zero orgs cut
+// over" status. Fully live, not touched here.
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ArrowLeft, Loader2, CheckCircle2, ShieldCheck, FileText, Sparkles,
