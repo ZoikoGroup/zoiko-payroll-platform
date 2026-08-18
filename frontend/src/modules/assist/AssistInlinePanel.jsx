@@ -13,8 +13,8 @@ import {
 import { t } from "./locales";
 import { MessageBubble } from "./AssistLauncher";
 
-const ACCENT = "bg-[#0592D3]";
-const ACCENT_HOVER = "hover:bg-[#04628C]";
+const ACCENT = "bg-primary";
+const ACCENT_HOVER = "hover:bg-primary-hover";
 
 /**
  * Assist, embedded inline on a specific page rather than the floating
@@ -148,17 +148,17 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
   return (
     <div className="flex h-[480px] flex-col rounded-[18px] border border-border bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <Sparkles size={15} className="text-[#0592D3]" />
+        <Sparkles size={15} className="text-primary" />
         <p className="text-[13px] font-bold text-foreground">{title || "Ask Assist about this run"}</p>
       </div>
 
       {booting ? (
         <div className="flex flex-1 items-center justify-center">
-          <Loader2 size={20} className="animate-spin text-[#0592D3]" />
+          <Loader2 size={20} className="animate-spin text-primary" />
         </div>
       ) : noticeGateShown ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <ShieldCheck className="h-6 w-6 text-[#0592D3]" />
+          <ShieldCheck className="h-6 w-6 text-primary" />
           <p className="text-[13px] font-bold text-foreground">{t("assist.notice.title")}</p>
           <p className="text-[12px] leading-relaxed text-foreground-muted">{notice?.content}</p>
           <button
@@ -174,10 +174,10 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
       ) : (
         <>
           <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-            {error ? <p className="rounded-[10px] bg-[#FFEAEF] px-3 py-2 text-[12px] text-[#E4506A]">{error}</p> : null}
+            {error ? <p className="rounded-[10px] bg-error-light px-3 py-2 text-[12px] text-error">{error}</p> : null}
             {messages.length === 0 ? (
               <div className="flex flex-col gap-3">
-                <div className="max-w-[90%] rounded-[14px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[13px] text-[#2A2520]">
+                <div className="max-w-[90%] rounded-[14px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[13px] text-foreground">
                   {subtitle || "Ask about this run's readiness, exceptions, or status — I'll answer using only this run's own data."}
                 </div>
                 {suggestions.length ? (
@@ -187,7 +187,7 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
                         key={s.intent_id + s.position}
                         type="button"
                         onClick={() => sendMessage(s.prompt)}
-                        className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-[#6B6560] transition hover:border-[#0592D3] hover:text-[#0592D3]"
+                        className="rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-foreground-muted transition hover:border-primary hover:text-primary"
                       >
                         {s.prompt}
                       </button>
@@ -213,7 +213,7 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
               onChange={(e) => setInput(e.target.value)}
               placeholder={t("assist.placeholder")}
               disabled={sending}
-              className="min-w-0 flex-1 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-2 text-[13px] text-[#2A2520] outline-none focus:border-[#0592D3] disabled:opacity-60"
+              className="min-w-0 flex-1 rounded-[10px] border border-border bg-white px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary disabled:opacity-60"
             />
             <button
               type="submit"

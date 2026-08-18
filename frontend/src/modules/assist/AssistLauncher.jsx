@@ -1120,12 +1120,12 @@ export default function AssistLauncher() {
                   type="button"
                   onClick={() => setShowMoreMenu((v) => !v)}
                   title={t("assist.more")}
-                  className={`rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3] ${showMoreMenu ? "bg-[#F8F7F4] text-[#0592D3]" : ""}`}
+                  className={`rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary ${showMoreMenu ? "bg-background text-primary" : ""}`}
                 >
                   <MoreVertical size={15} />
                 </button>
                 {showMoreMenu ? (
-                  <div className="absolute right-0 top-9 z-10 w-40 overflow-hidden rounded-[12px] border border-[#E5E0D9] bg-white py-1 shadow-lg">
+                  <div className="absolute right-0 top-9 z-10 w-40 overflow-hidden rounded-[12px] border border-border bg-white py-1 shadow-lg">
                     {tabs.map((tabDef) => {
                       const Icon = tabDef.icon;
                       return (
@@ -1136,22 +1136,22 @@ export default function AssistLauncher() {
                             setTab(tabDef.id);
                             setShowMoreMenu(false);
                           }}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium transition hover:bg-[#F8F7F4] ${
-                            tab === tabDef.id ? "text-[#0592D3]" : "text-[#6B6560]"
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium transition hover:bg-background ${
+                            tab === tabDef.id ? "text-primary" : "text-foreground-muted"
                           }`}
                         >
                           <Icon size={13} /> {tabDef.label}
                         </button>
                       );
                     })}
-                    <div className="my-1 border-t border-[#F0EDE8]" />
+                    <div className="my-1 border-t border-border-light" />
                     <button
                       type="button"
                       onClick={() => {
                         setShowMoreMenu(false);
                         handleNewSession();
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium text-[#6B6560] transition hover:bg-[#F8F7F4]"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium text-foreground-muted transition hover:bg-background"
                     >
                       <RotateCcw size={13} /> {t("assist.newSession")}
                     </button>
