@@ -498,7 +498,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
   );
 }
 
-function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) {
+export function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) {
   const isUser = message.role === "user";
   if (isUser) {
     return (

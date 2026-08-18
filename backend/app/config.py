@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     # Left empty to skip the support-side notification (the requester's own
     # confirmation email still sends regardless).
     ASSIST_SUPPORT_EMAIL: str = ""
+    # Background sweep of expired KB items / retention-expired sessions,
+    # mirroring the existing manual admin endpoints (run_kb_expiry_sweep,
+    # run_retention_cleanup) on a timer instead of requiring a click.
+    ASSIST_SWEEP_ENABLED: bool = True
+    ASSIST_SWEEP_INTERVAL_HOURS: int = 24
+    # Platform-wide incident kill-switch for Assist (see modules/assist/router.py).
+    # Live-toggleable via PlatformSetting, not just this startup default.
+    ASSIST_KILL_SWITCH_ENABLED: bool = False
 
 
 settings = Settings()

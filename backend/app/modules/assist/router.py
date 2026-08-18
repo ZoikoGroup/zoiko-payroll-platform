@@ -80,6 +80,10 @@ with an "/api" prefix at the top level, e.g.:
     POST   /assist/knowledge/sources/{source_id}/quarantine
     POST   /assist/knowledge/sources/{source_id}/reactivate
     POST   /assist/admin/knowledge/expiry-run
+
+  Incident kill-switch (Super Admin)
+    GET    /assist/admin/kill-switch
+    POST   /assist/admin/kill-switch
 """
 
 import json
@@ -90,7 +94,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.core.dependencies import get_current_user, get_current_payroll_operator, get_organization_id
+from app.core.dependencies import get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id
 from app.core.exceptions import NotFoundException
 from app.modules.assist import service
 from app.modules.assist.models import (
@@ -127,6 +131,8 @@ from app.modules.assist.schemas import (
     KbSourceCreate,
     KbSourceResponse,
     KbSupersedeRequest,
+    KillSwitchRequest,
+    KillSwitchResponse,
     MessageListResponse,
     MessageResponse,
     MessageSubmitRequest,
@@ -1172,6 +1178,31 @@ def run_kb_expiry_sweep(
     org_id: int = Depends(get_organization_id),
 ):
     return service.run_kb_expiry_sweep(db, org_id)
+
+
+@assist_router.get(
+    "/admin/kill-switch",
+    response_model=KillSwitchResponse,
+    summary="Get whether Assist is platform-wide disabled",
+)
+def get_kill_switch(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_super_admin),
+):
+    return {"enabled": service.is_assist_kill_switch_enabled(db)}
+
+
+@assist_router.post(
+    "/admin/kill-switch",
+    response_model=KillSwitchResponse,
+    summary="Enable/disable Assist platform-wide (incident kill-switch)",
+)
+def set_kill_switch(
+    payload: KillSwitchRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_super_admin),
+):
+    return {"enabled": service.set_assist_kill_switch(db, payload.enabled, current_user)}
 
 
 @assist_router.get(

@@ -202,6 +202,26 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
             "Open Employee Self-Service to review or update your profile."
         )
 
+    if intent_id == "explain.employeeCount":
+        total = tool_result.get("total_employees", 0)
+        active = tool_result.get("active_employees", 0)
+        if active == total:
+            return f"Your organization has {total} employee{'s' if total != 1 else ''} on record."
+        return (
+            f"Your organization has {total} employee{'s' if total != 1 else ''} on record, "
+            f"{active} of them active (not marked Inactive)."
+        )
+
+    if intent_id == "explain.activeRunCount":
+        active = tool_result.get("active_runs", 0)
+        total = tool_result.get("total_runs", 0)
+        if active == 0:
+            return f"There are no active payroll runs right now (out of {total} total)."
+        return (
+            f"There {'is' if active == 1 else 'are'} {active} active payroll run{'s' if active != 1 else ''} "
+            f"in progress (Draft, Review, Approved, or Authorized), out of {total} total."
+        )
+
     if intent_id == "review.variance":
         a, b = tool_result.get("period_a", {}), tool_result.get("period_b", {})
         deltas = tool_result.get("deltas", {})
@@ -295,6 +315,10 @@ def deterministic_answer(
             f"{run_summary.get('period')} payroll run: status {run_summary.get('status')}, "
             f"{run_summary.get('employees')} employees, net {float(run_summary.get('net') or 0):,.2f}."
         )
+    elif tool_result and "total_employees" in tool_result:
+        facts.append(f"{tool_result['total_employees']} employee(s) on record, {tool_result['active_employees']} active.")
+    elif tool_result and "active_runs" in tool_result:
+        facts.append(f"{tool_result['active_runs']} active payroll run(s) out of {tool_result['total_runs']} total.")
 
     if knowledge_items:
         top = knowledge_items[0]

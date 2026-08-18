@@ -28,5 +28,9 @@ openpyxl
 email-validator
 certifi>=2024.2.2
 
+# Assist background sweeps (KB expiry, session retention) — see
+# app/modules/assist/scheduler.py.
+apscheduler>=3.10.4
+
 # Tests (backend/tests/) — payroll tax engine boundary/regression coverage.
 pytest>=8.0.0
