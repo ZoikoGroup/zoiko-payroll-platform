@@ -10,15 +10,15 @@ sensible defaults on first access) so they are genuinely configurable data,
 not hardcoded constants baked into the frontend.
 
 IMPORTANT — payroll tax accuracy disclaimer:
-The PF/ESI/PT/TDS calculations below implement the standard *simplified*
-formulas (flat percentages of basic/gross, progressive slab tax on an
-annualized gross with no deductions/exemptions modeled). Real statutory
-payroll (especially TDS, which depends on regime, Section 80C/80D
-declarations, HRA exemption rules, etc., and Professional Tax, which is
-state-specific) is genuinely complex. Before going live, either replace
-`_calculate_annual_tax` / `_generate_single_payslip` with a certified
-payroll engine, or have these formulas reviewed by a payroll/compliance
-specialist for your jurisdiction.
+The PF/ESI/PT/TDS calculations implement the standard *simplified* formulas
+(flat percentages of basic/gross, progressive slab tax on an annualized
+gross with no deductions/exemptions modeled) — see
+`engine/standard.py`'s per-country strategies for the actual calculation.
+Real statutory payroll (especially TDS, which depends on regime, Section
+80C/80D declarations, HRA exemption rules, etc., and Professional Tax,
+which is state-specific) is genuinely complex. Before going live, either
+have `engine/standard.py` reviewed by a payroll/compliance specialist for
+your jurisdiction, or replace it with a certified payroll engine.
 """
 
 import os
@@ -53,9 +53,13 @@ from app.modules.payroll.schemas import (
 from app.core.exceptions import NotFoundException, BadRequestException
 from fastapi import HTTPException, status as http_status
 
-
-ESI_MONTHLY_WAGE_CEILING = Decimal("21000")  # employees above this gross are ESI-exempt
-MONTHS_PER_YEAR = Decimal("12")
+# Sourced from engine/standard.py — the real calculation engine — instead of
+# redefined here, so there is exactly one place each value can drift from.
+# _get_slab_label() below (a display-only helper, not part of calculation)
+# is the only other place in this file that still needs the per-country
+# deduction constants; it imports the rest of what it needs at its own
+# definition further down for the same reason.
+from app.modules.payroll.engine.standard import MONTHS_PER_YEAR
 
 
 # ── Country code normalization ──────────────────────────────────────────
@@ -360,6 +364,42 @@ _KNOWN_COMPONENT_KEYS = {
     "national insurance": "ni_employee", "ni": "ni_employee",
     "pension": "employer_pension", "workplace pension": "employer_pension",
 }
+
+
+def _strip_trailing_paren(label: str) -> str:
+    """"Employee State Insurance (ESI)" -> "employee state insurance" — used
+    to match two ContributionRate rows for the same real-world component
+    saved under labels that differ only by a trailing abbreviation. Only
+    strips the trailing parenthetical and requires the rest of the label to
+    match exactly, unlike a substring/synonym search — "ESI Wage Ceiling
+    (monthly)" strips to "esi wage ceiling", which correctly stays distinct
+    from "employee state insurance" rather than colliding on "esi"."""
+    return re.sub(r"\s*\([^)]*\)\s*$", "", (label or "")).strip().lower()
+
+
+# Component keys the engine reads via an EXACT, hardcoded, case-sensitive
+# string (engine/standard.py / engine/countries/*.py, e.g.
+# `rate_map.get("pf")`, `rate_map.get("medicare-levy")`). A canonical row
+# saved with any other casing (Super Admin typing "PF"/"Pf"/"ESI" in
+# Statutory Rates) is invisible to those lookups — a real, confirmed bug:
+# a dedup pass once kept an uppercase-cased survivor over the correctly-
+# cased one, silently zeroing PF/ESI/PT for an organization. Normalizing
+# at the ONE place these keys are ever written (here) prevents that
+# recurring, rather than patching every read site. Named parameter keys
+# (standard_deduction, esi_wage_ceiling, ...) are already lowercase by
+# convention and simply pass through unchanged — this set intentionally
+# only covers the short, exact-match generic component keys.
+_KNOWN_ENGINE_COMPONENT_KEYS = {
+    "pf", "esi", "pt", "tds", "cpp", "ei", "super", "pension", "medicare",
+    "medicare-levy", "social-insurance", "national-insurance",
+    "employer-pension", "social-security", "futa",
+}
+
+
+def _normalize_engine_component_key(key: str) -> str:
+    if key and key.lower() in _KNOWN_ENGINE_COMPONENT_KEYS:
+        return key.lower()
+    return key
 
 
 def _component_key_for_label(label: str) -> str:
@@ -736,15 +776,42 @@ def _resolve_effective_rate_inputs(
     canonical_rates is the raw list (not the dict) so a caller can build a
     tax snapshot via _pack_to_tax_snapshot without a second query; pack is
     None whenever canonical resolution wasn't used, signalling the caller
-    to fall back to its own existing tax-snapshot logic unchanged."""
+    to fall back to its own existing tax-snapshot logic unchanged.
+
+    Checked FIRST, ahead of the v1 org_opted_in path above: the new
+    generic jurisdiction/tax hierarchy engine (hierarchy/models.py +
+    engine/tax_resolver_v2.py), gated per-organization on
+    CompanyComplianceDetails.tax_hierarchy_v2_enabled. Defaults False for
+    every organization — this branch is unreachable for any org until
+    that flag is deliberately flipped (a later, separate migration/
+    cutover phase), so it changes nothing for any org today. `pack` is
+    always None on this path (there is no legacy JurisdictionPack row to
+    report) — a caller building a tax snapshot falls through to its own
+    _resolve_tax_snapshot exactly as it already does when pack is None."""
+    v2_enabled = (
+        db.query(CompanyComplianceDetails.tax_hierarchy_v2_enabled)
+        .filter(CompanyComplianceDetails.organization_id == organization_id)
+        .scalar()
+    ) if organization_id else False
+    if v2_enabled:
+        from app.modules.payroll.engine.tax_resolver_v2 import resolve_engine_inputs_v2
+        rate_map, slabs = resolve_engine_inputs_v2(db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date)
+        if rate_map or slabs:
+            return rate_map, slabs, None, None
+
     if org_opted_in:
         from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
         canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
             db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date,
         )
         if pack is not None and (canonical_rates or canonical_slabs):
-            return {r.component_key: r for r in canonical_rates}, canonical_slabs, canonical_rates, pack
-    rate_map = {r.component_key: r for r in get_contribution_rates(db, organization_id, country)}
+            # Normalized at read time too (not just at the write paths in
+            # upsert_canonical_contribution_rate/sync_org_rates_from_canonical)
+            # as defense in depth — a canonical row saved before either fix
+            # existed can still carry a wrong-cased key on disk; this
+            # guarantees the live calculation path never misses it even so.
+            return {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}, canonical_slabs, canonical_rates, pack
+    rate_map = {_normalize_engine_component_key(r.component_key): r for r in get_contribution_rates(db, organization_id, country)}
     slabs = get_tax_slabs(db, organization_id, country)
     return rate_map, slabs, None, None
 
@@ -783,8 +850,39 @@ def sync_org_rates_from_canonical(
             )
             .first()
         )
+        if not existing and cr.label:
+            # The canonical row's component_key may not be spelled the same
+            # way as the org's existing row for the same real-world
+            # component (e.g. Super Admin typed "PF"/"ESI"/"PT" in
+            # Statutory Rates while the org's own seed used "pf"/"esi"/
+            # "pt", or the labels differ only by a trailing abbreviation —
+            # "Employee State Insurance" vs "Employee State Insurance
+            # (ESI)") — an exact-key miss would otherwise INSERT a second,
+            # visibly-duplicate row instead of updating the org's existing
+            # one. Matching on the label with any trailing "(...)" suffix
+            # stripped catches that, WITHOUT the false-positive risk a
+            # broader substring/synonym search would have here — e.g. it
+            # must never conflate the unrelated "ESI Wage Ceiling
+            # (monthly)" Tax Parameter with the "esi" contribution rate
+            # just because both mention "ESI"; stripping only a trailing
+            # parenthetical and requiring the REST of the label to match
+            # exactly avoids that (their non-parenthetical text differs).
+            wanted_key = _strip_trailing_paren(cr.label)
+            for candidate in (
+                db.query(ContributionRate)
+                .filter(ContributionRate.organization_id == organization_id, ContributionRate.jurisdiction_country == country)
+                .all()
+            ):
+                if candidate.label and _strip_trailing_paren(candidate.label) == wanted_key:
+                    existing = candidate
+                    break
         fields = dict(
-            component_key=cr.component_key,
+            # Normalized here too, not just at the canonical write path —
+            # a canonical row saved before that fix existed can still carry
+            # a wrong-cased key, and every sync is the self-healing point
+            # for exactly that (matches the label-based dedup pass below,
+            # which already exists to clean up this same class of issue).
+            component_key=_normalize_engine_component_key(cr.component_key),
             label=cr.label, employee_share=cr.employee_share, employer_share=cr.employer_share,
             total=cr.total, employee_rate_pct=cr.employee_rate_pct, employer_rate_pct=cr.employer_rate_pct,
             flat_amount=cr.flat_amount, sort_order=cr.sort_order,
@@ -795,6 +893,42 @@ def sync_org_rates_from_canonical(
                 setattr(existing, k, v)
         else:
             db.add(ContributionRate(organization_id=organization_id, jurisdiction_country=country, **fields))
+    db.flush()
+
+    # Self-healing cleanup: a sync from before the label-fallback match
+    # above (or a manual edit) may have already left two rows for the same
+    # real-world component under different component_key spellings — same
+    # label, two different values shown side by side on the org's
+    # Compliance page. Collapse any such group down to the most-recently-
+    # touched row (the one this sync just updated, or the latest manual
+    # edit) so re-running this sync actually converges instead of leaving
+    # old duplicates to drift forever.
+    rows = (
+        db.query(ContributionRate)
+        .filter(ContributionRate.organization_id == organization_id, ContributionRate.jurisdiction_country == country)
+        .all()
+    )
+    by_label: dict = {}
+    for row in rows:
+        if not row.label:
+            continue
+        key = _strip_trailing_paren(row.label)
+        if not key:
+            continue
+        by_label.setdefault(key, []).append(row)
+    def _last_touched(row):
+        ts = row.updated_at or row.created_at
+        # (has-a-timestamp, timestamp-or-placeholder, id) — every row compares
+        # on the same shape regardless of whether ts ended up None, and id
+        # (monotonically increasing, always set) breaks ties deterministically.
+        return (ts is not None, ts or row.id, row.id)
+
+    for group in by_label.values():
+        if len(group) <= 1:
+            continue
+        group.sort(key=_last_touched, reverse=True)
+        for stale in group[1:]:
+            db.delete(stale)
 
     if canonical_slabs:
         # TaxSlab has no natural per-bracket unique key (brackets are
@@ -901,7 +1035,7 @@ def upsert_canonical_contribution_rate(
         jurisdiction_country=_normalize_country(data.jurisdictionCountry),
         jurisdiction_state=data.jurisdictionState,
         tax_regime=data.taxRegime,
-        component_key=data.componentKey, label=data.label,
+        component_key=_normalize_engine_component_key(data.componentKey), label=data.label,
         employee_share=f"{data.employeeSharePct}%" if data.employeeSharePct is not None else "",
         employer_share=f"{data.employerSharePct}%" if data.employerSharePct is not None else "",
         total=f"{(data.employeeSharePct or 0) + (data.employerSharePct or 0)}%",
@@ -1118,6 +1252,51 @@ def get_pack_applicable_organizations(db: Session, pack_row_id: int) -> List[dic
     return [{"id": r.id, "organizationName": r.organization_name, "organizationCode": r.organization_code} for r in rows]
 
 
+def get_organizations_eligible_for_pack(db: Session, pack_row_id: int) -> List[dict]:
+    """Organizations whose own jurisdiction matches this pack's, for the
+    "Apply Tax & Sync Rates" / "Assign Policy" picker — so a Telangana-only
+    Professional Tax pack only ever lists Telangana organizations, not
+    every organization on the platform.
+
+    An org's jurisdiction is its own CompanyComplianceDetails
+    jurisdiction_country/jurisdiction_state when set (the same field every
+    other Compliance query in this codebase treats as authoritative);
+    falls back to deriving it from Organization.country/state (the same
+    mapping get_company_details' lazy backfill uses) for an org that
+    hasn't opened Compliance yet and so has no compliance row at all, or
+    one still at its blank/default jurisdiction.
+
+    Country-level packs (jurisdiction_state is None) match any organization
+    in that country, regardless of state; a state-level pack only matches
+    organizations in that exact state.
+    """
+    from app.modules.organizations.models import Organization
+
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+
+    rows = (
+        db.query(Organization, CompanyComplianceDetails)
+        .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
+        .all()
+    )
+
+    eligible = []
+    for org, details in rows:
+        country_code = details.jurisdiction_country if details and details.jurisdiction_country else None
+        state = details.jurisdiction_state if details and details.jurisdiction_state else None
+        if not country_code:
+            country_code = org.country and _COUNTRY_NAME_TO_JURISDICTION_CODE.get(org.country.strip().lower())
+            state = org.state or None
+        if country_code != pack.jurisdiction_country:
+            continue
+        if pack.jurisdiction_state and state != pack.jurisdiction_state:
+            continue
+        eligible.append({"id": org.id, "organizationName": org.organization_name, "organizationCode": org.organization_code})
+    return eligible
+
+
 def hard_delete_jurisdiction_pack(db: Session, pack_row_id: int) -> dict:
     """Permanently delete a Tax or Policy pack — the pack row itself, its
     canonical ContributionRate/TaxSlab rows, and its TaxConfigurationAudit
@@ -1210,6 +1389,13 @@ def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids
     not just filling in empty rows. Nothing changes for any org until
     Super Admin explicitly does this; activating/deprecating a canonical
     pack alone never touches an org's live payroll numbers.
+
+    For a POLICY pack, the equivalent push is sync_org_policy_from_pack —
+    it force-applies every field the pack has explicitly locked
+    (allowOverride=False) onto each org's EXISTING PayrollPolicy, so an
+    org that already had its own policy actually starts reflecting Super
+    Admin's locked values immediately instead of only being blocked from
+    diverging further on its next edit. Overridable fields are left alone.
     """
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not pack:
@@ -1253,230 +1439,44 @@ def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids
                     ActivityStatus.INFO, actor_id=actor_id,
                 )
         db.commit()
+    else:
+        from app.modules.payroll.policy.service import sync_org_policy_from_pack
+
+        for org_id in organization_ids:
+            result = sync_org_policy_from_pack(db, org_id)
+            if result.get("synced"):
+                rates_synced += 1
+                log_activity(
+                    db, org_id,
+                    f"Policy defaults synced from {pack.pack_id} v{pack.version} (locked fields applied).",
+                    ActivityStatus.INFO, actor_id=actor_id,
+                )
+        db.commit()
 
     return {"updated": updated, "isTax": is_tax, "ratesSynced": rates_synced}
 
 
-def _calculate_annual_tax(annual_income: Decimal, slabs: List[TaxSlab]) -> Decimal:
-    """Progressive slab-based tax on the full annual income. See module
-    docstring for the accuracy disclaimer."""
-    tax = Decimal("0")
-    for slab in sorted(slabs, key=lambda s: s.min_amount):
-        lower = slab.min_amount
-        upper = slab.max_amount if slab.max_amount is not None else annual_income
-        if annual_income <= lower:
-            continue
-        taxable_in_band = min(annual_income, upper) - lower
-        if taxable_in_band > 0:
-            tax += taxable_in_band * (slab.rate_pct / Decimal("100"))
-    return tax
-
-
-# ── FY 2025-26 constants (India, New Regime) ────────────────────────────
-
-_IN_STANDARD_DEDUCTION = Decimal("75000")   # ₹75,000 standard deduction
-_IN_REBATE_87A_LIMIT = Decimal("1200000")   # Nil tax up to ₹12L taxable income
-_IN_REBATE_87A_MAX = Decimal("60000")       # Max rebate = tax on ₹12L = ₹60,000
-_IN_SURCHARGE_THRESHOLD = Decimal("50000000")  # 50L — not applied here
-
-# ── Tax Year 2025 constants (US, Single filer) ──────────────────────────
-
-_US_STANDARD_DEDUCTION = Decimal("15000")   # $15,000 standard deduction (single)
-_US_SOCIAL_SECURITY_WAGE_BASE = Decimal("176100")  # SS tax only on first $176,100
-_US_SOCIAL_SECURITY_RATE = Decimal("6.2")
-_US_MEDICARE_RATE = Decimal("1.45")
-_US_MEDICARE_ADDITIONAL_RATE = Decimal("0.9")  # Additional Medicare on > $200k
-
-# ── Tax Year 2025-26 constants (UK) ─────────────────────────────────────
-
-_UK_PERSONAL_ALLOWANCE = Decimal("12570")
-_UK_PA_TAPER_THRESHOLD = Decimal("100000")  # PA reduces by £1 per £2 over £100k
-_UK_NI_PRIMARY_THRESHOLD = Decimal("12570")  # Annual primary threshold
-_UK_NI_UPPER_THRESHOLD = Decimal("50270")    # Annual upper earnings limit
-_UK_NI_PRIMARY_RATE = Decimal("8")           # 8% (was 12% → cut in 2024)
-_UK_NI_UPPER_RATE = Decimal("2")            # 2% (was 2% → unchanged)
-_UK_PENSION_MIN_ENPLOYER = Decimal("3")     # Minimum employer contribution
-
-
-def _apply_section_87a_rebate(annual_tax: Decimal, taxable_income: Decimal) -> Decimal:
-    """Section 87A rebate for India New Regime FY 2025-26.
-    If taxable income <= ₹12,00,000, rebate = min(annual_tax, ₹60,000),
-    and that rebate is SUBTRACTED from tax owed — not returned as-is.
-    Since the slabs are calibrated so tax-at-exactly-₹12L equals ₹60,000,
-    annual_tax is always <= ₹60,000 whenever taxable_income <= ₹12L, which
-    means the rebate always fully cancels the tax (net: ₹0). The previous
-    version of this function returned `min(annual_tax, 60000)` directly —
-    since that's always just `annual_tax` unchanged in this branch, the
-    rebate had silently never reduced anyone's tax at all.
-    Marginal relief: if crossing ₹12L causes tax to exceed ₹60,000,
-    tax is capped to ₹60,000 + (taxable_income - 12L)."""
-    if taxable_income <= _IN_REBATE_87A_LIMIT:
-        rebate = min(annual_tax, _IN_REBATE_87A_MAX)
-        return annual_tax - rebate
-    # Marginal relief: tax on ₹12L is ₹60,000. If actual tax > ₹60,000
-    # and the excess is less than the income above ₹12L, cap to ₹60,000.
-    tax_on_threshold = _IN_REBATE_87A_MAX  # ₹60,000
-    if annual_tax > tax_on_threshold:
-        excess_income = taxable_income - _IN_REBATE_87A_LIMIT
-        excess_tax = annual_tax - tax_on_threshold
-        if excess_tax <= excess_income:
-            return tax_on_threshold + excess_tax
-        return annual_tax
-    return annual_tax
-
-
-def _calculate_annual_tax_in(annual_gross: Decimal, slabs: List[TaxSlab]) -> Decimal:
-    """India-specific annual tax: standard deduction → progressive slabs → Section 87A rebate."""
-    taxable = max(Decimal("0"), annual_gross - _IN_STANDARD_DEDUCTION)
-    tax = _calculate_annual_tax(taxable, slabs)
-    tax = _apply_section_87a_rebate(tax, taxable)
-    return max(Decimal("0"), tax)
-
-
-def _calculate_annual_tax_us(annual_gross: Decimal, slabs: List[TaxSlab]) -> Decimal:
-    """US-specific annual tax: standard deduction → progressive federal slabs."""
-    taxable = max(Decimal("0"), annual_gross - _US_STANDARD_DEDUCTION)
-    return _calculate_annual_tax(taxable, slabs)
-
-
-def _calculate_annual_tax_uk(annual_gross: Decimal, slabs: List[TaxSlab]) -> Decimal:
-    """UK-specific annual tax: personal allowance taper → progressive slabs.
-    PA is reduced by £1 for every £2 of income above £100,000."""
-    pa = _UK_PERSONAL_ALLOWANCE
-    if annual_gross > _UK_PA_TAPER_THRESHOLD:
-        taper = (annual_gross - _UK_PA_TAPER_THRESHOLD) / Decimal("2")
-        pa = max(Decimal("0"), pa - taper)
-    taxable = max(Decimal("0"), annual_gross - pa)
-    return _calculate_annual_tax(taxable, slabs)
-
-
-def _calculate_employee_monthly_payroll(
-    gross: Decimal,
-    basic: Decimal,
-    rate_map: dict,
-    slabs: List[TaxSlab],
-    country: str = "IN",
-    calculation_mode: str = "standard",
-) -> dict:
-    """DEPRECATED — Use ``app.modules.payroll.engine.resolver.calculate_payroll()``
-    instead.  This function is kept only for backward compatibility with any
-    external code that may still import it directly.
-
-    Shared payroll calculation engine — used by both payslip generation
-    and the preview endpoint. Returns a dict with all breakdown fields.
-
-    When *calculation_mode* is ``"simple"``, all statutory deductions
-    (PF, ESI, PT, TDS, NI, etc.) are zeroed out — net equals gross.
-    Attendance-based deductions (unpaid leave) are already applied via
-    the proration factor in the caller."""
-    from app.modules.payroll.models import EmployeeStatus
-
-    employee_pf = Decimal("0")
-    employer_pf = Decimal("0")
-    employee_esi = Decimal("0")
-    employer_esi = Decimal("0")
-    professional_tax = Decimal("0")
-    social_security = Decimal("0")
-    medicare = Decimal("0")
-    employer_social_security = Decimal("0")
-    employer_medicare = Decimal("0")
-    ni_employee = Decimal("0")
-    employer_pension = Decimal("0")
-
-    if calculation_mode == "simple":
-        # Simple mode: no statutory deductions — net equals gross.
-        # Attendance-based deductions (unpaid leave) are already handled
-        # via proration_factor in the caller.
-        tds = Decimal("0")
-        annual_tax = Decimal("0")
-        total_deductions = Decimal("0")
-
-    elif country == "IN":
-        # ── India: PF, ESI, Professional Tax ──
-        pf_rate = rate_map.get("pf")
-        employee_pf = _round2(basic * (pf_rate.employee_rate_pct / 100)) if pf_rate and pf_rate.employee_rate_pct else Decimal("0")
-        employer_pf = _round2(basic * (pf_rate.employer_rate_pct / 100)) if pf_rate and pf_rate.employer_rate_pct else Decimal("0")
-
-        esi_rate = rate_map.get("esi")
-        esi_applicable = gross <= ESI_MONTHLY_WAGE_CEILING
-        employee_esi = _round2(gross * (esi_rate.employee_rate_pct / 100)) if esi_rate and esi_rate.employee_rate_pct and esi_applicable else Decimal("0")
-        employer_esi = _round2(gross * (esi_rate.employer_rate_pct / 100)) if esi_rate and esi_rate.employer_rate_pct and esi_applicable else Decimal("0")
-
-        pt_rate = rate_map.get("pt")
-        professional_tax = pt_rate.flat_amount if pt_rate and pt_rate.flat_amount else Decimal("0")
-
-        annual_gross = gross * MONTHS_PER_YEAR
-        annual_tax = _calculate_annual_tax_in(annual_gross, slabs)
-        tds = _round2(annual_tax / MONTHS_PER_YEAR)
-        total_deductions = employee_pf + employee_esi + professional_tax + tds
-
-    elif country == "US":
-        # ── US: Social Security + Medicare (employee + employer) + Federal income tax ──
-        annual_gross = gross * MONTHS_PER_YEAR
-
-        # Employee Social Security: 6.2% on first $176,100/year
-        annual_ss_wage = min(annual_gross, _US_SOCIAL_SECURITY_WAGE_BASE)
-        social_security = _round2((annual_ss_wage * _US_SOCIAL_SECURITY_RATE / Decimal("100")) / MONTHS_PER_YEAR)
-        employer_social_security = social_security  # Employer matches
-
-        # Employee Medicare: 1.45% on all wages (no cap)
-        medicare = _round2((annual_gross * _US_MEDICARE_RATE / Decimal("100")) / MONTHS_PER_YEAR)
-        # Additional Medicare: 0.9% on wages above $200k (employee only, annualized)
-        if annual_gross > Decimal("200000"):
-            medicare += _round2(((annual_gross - Decimal("200000")) * _US_MEDICARE_ADDITIONAL_RATE / Decimal("100")) / MONTHS_PER_YEAR)
-        employer_medicare = _round2((annual_gross * _US_MEDICARE_RATE / Decimal("100")) / MONTHS_PER_YEAR)
-
-        annual_tax = _calculate_annual_tax_us(annual_gross, slabs)
-        tds = _round2(annual_tax / MONTHS_PER_YEAR)
-        total_deductions = social_security + medicare + tds
-
-    elif country == "UK":
-        # ── UK: National Insurance (employee) + employer pension ──
-        annual_gross = gross * MONTHS_PER_YEAR
-
-        # Employee NI: 8% between primary threshold and upper threshold, 2% above
-        annual_pt = _UK_NI_PRIMARY_THRESHOLD
-        annual_ut = _UK_NI_UPPER_THRESHOLD
-        ni_basicable = max(Decimal("0"), min(annual_gross, annual_ut) - annual_pt)
-        ni_upperable = max(Decimal("0"), annual_gross - annual_ut)
-        ni_employee_annual = (ni_basicable * _UK_NI_PRIMARY_RATE / Decimal("100")) + (ni_upperable * _UK_NI_UPPER_RATE / Decimal("100"))
-        ni_employee = _round2(ni_employee_annual / MONTHS_PER_YEAR)
-
-        # Employer pension: minimum 3% of gross
-        employer_pension = _round2(annual_gross * _UK_PENSION_MIN_ENPLOYER / Decimal("100") / MONTHS_PER_YEAR)
-
-        annual_tax = _calculate_annual_tax_uk(annual_gross, slabs)
-        tds = _round2(annual_tax / MONTHS_PER_YEAR)
-        total_deductions = ni_employee + tds
-
-    else:
-        # Fallback: generic progressive tax only
-        annual_gross = gross * MONTHS_PER_YEAR
-        annual_tax = _calculate_annual_tax(annual_gross, slabs)
-        tds = _round2(annual_tax / MONTHS_PER_YEAR)
-        total_deductions = tds
-
-    net_pay = gross - total_deductions
-
-    return {
-        "basic": basic,
-        "gross": gross,
-        "employee_pf": employee_pf,
-        "employer_pf": employer_pf,
-        "employee_esi": employee_esi,
-        "employer_esi": employer_esi,
-        "professional_tax": professional_tax,
-        "social_security": social_security,
-        "medicare": medicare,
-        "employer_social_security": employer_social_security,
-        "employer_medicare": employer_medicare,
-        "ni_employee": ni_employee,
-        "employer_pension": employer_pension,
-        "tds": tds,
-        "annual_tax": annual_tax,
-        "total_deductions": total_deductions,
-        "net_pay": net_pay,
-    }
+# _IN_STANDARD_DEDUCTION/_IN_REBATE_87A_LIMIT/_US_STANDARD_DEDUCTION/
+# _UK_PERSONAL_ALLOWANCE/_UK_PA_TAPER_THRESHOLD: sourced from
+# engine/standard.py (the real calculation engine's own constants) rather
+# than redefined here — _get_slab_label() below is display-only (the
+# payroll-preview endpoint's "which bracket does this land in" label) and
+# is the only remaining user of these in this file.
+#
+# The rest of what used to live in this section — a second, independent
+# _calculate_annual_tax()/_apply_section_87a_rebate()/
+# _calculate_annual_tax_in/us/uk(), and the fully-reimplemented
+# _calculate_employee_monthly_payroll() (superseded by
+# engine.resolver.calculate_payroll(), per that function's own docstring,
+# and confirmed to have zero remaining callers anywhere in this codebase)
+# has been removed — those were a second, drifting copy of exactly what
+# engine/standard.py's per-country strategies already do, not a
+# necessary or reachable code path.
+from app.modules.payroll.engine.standard import (
+    _IN_STANDARD_DEDUCTION, _IN_REBATE_87A_LIMIT,
+    _US_STANDARD_DEDUCTION,
+    _UK_PERSONAL_ALLOWANCE, _UK_PA_TAPER_THRESHOLD,
+)
 
 
 def _resolve_calculation_mode(db: Session, organization_id: int, calculation_mode: str = None) -> str:

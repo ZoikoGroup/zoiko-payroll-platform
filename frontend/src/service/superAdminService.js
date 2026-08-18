@@ -28,6 +28,12 @@ export const setCompliancePolicyStatus = (id, status) =>
 export const getCompliancePolicyOrganizations = (id) =>
   apiFetch(`/api/super-admin/compliance/policies/${id}/organizations`);
 
+// Organizations whose own jurisdiction (country, and state for a
+// state-level pack) matches this pack's — the set the Assign picker
+// should offer, not every organization on the platform.
+export const getCompliancePolicyEligibleOrganizations = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/eligible-organizations`);
+
 export const assignCompliancePolicy = (id, organizationIds) =>
   apiFetch(`/api/super-admin/compliance/policies/${id}/assign`, {
     method: "POST",

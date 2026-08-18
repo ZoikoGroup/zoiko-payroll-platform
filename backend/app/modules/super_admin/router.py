@@ -244,6 +244,15 @@ def list_organization_contribution_rates(
 # service.upsert_jurisdiction_pack to a payroll operator; these routes
 # expose the SAME service functions to Super Admin under a cross-org,
 # Super-Admin-only path. No parallel model or business logic exists here.
+#
+# DEPRECATION NOTICE (Phase 9 cleanup inventory, see
+# backend/scripts/HIERARCHY_V2_CLEANUP_INVENTORY.md): this whole
+# JurisdictionPack/ContributionRate/TaxSlab surface is what the
+# app/modules/payroll/hierarchy/* (Tax/TaxVersion/TaxRule) engine is meant
+# to eventually replace for organizations cut over to it. NOT deprecated
+# functionally here — every real organization's live payroll still runs on
+# this exact code path (zero orgs are on the hierarchy engine yet). Keep
+# fully working until the inventory doc's per-org cutover is actually done.
 
 @router.get("/compliance/jurisdictions", summary="Countries/states the app supports or already has configured")
 def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
@@ -354,6 +363,20 @@ def get_compliance_policy_organizations(
     return payroll_service.get_pack_applicable_organizations(db, id)
 
 
+@router.get(
+    "/compliance/policies/{id}/eligible-organizations", response_model=List[ApplicableOrganization],
+    summary="Organizations whose own jurisdiction matches this pack's, for the Assign picker",
+)
+def get_compliance_policy_eligible_organizations(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_organizations_eligible_for_pack(db, id)
+
+
 @router.post(
     "/compliance/policies/{id}/assign", response_model=SuccessResponse,
     summary="Assign this policy version as the active compliance pack for the given organizations",
@@ -372,7 +395,10 @@ def assign_compliance_policy(
             "message": f"Tax applied to {result['updated']} organization(s) — "
                        f"rates synced for {result['ratesSynced']} of them."
         }
-    return {"message": f"Policy applied to {result['updated']} organization(s)."}
+    return {
+        "message": f"Policy applied to {result['updated']} organization(s) — "
+                   f"locked fields synced for {result['ratesSynced']} of them."
+    }
 
 
 @router.delete(

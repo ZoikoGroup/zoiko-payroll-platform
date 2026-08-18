@@ -9,6 +9,7 @@ import TaxSlabTable from "./TaxSlabTable";
 import ComplianceDocumentUpload from "./ComplianceDocuments";
 import EnterpriseOnboardingBanner from "./EnterpriseOnboarding/EnterpriseOnboardingBanner";
 import EnterpriseJurisdictionsTab from "./EnterpriseOnboarding/EnterpriseJurisdictionsTab";
+import HierarchyComplianceTab from "./HierarchyComplianceTab";
 import {
   fetchComplianceData,
   updateCompanyDetails,
@@ -20,7 +21,7 @@ import {
 import { getJurisdictionTaxFields } from "../../../utils/jurisdictionTax";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
-const BASE_TABS = ["Overview", "Company Details", "Contribution Rates", "Tax Slabs", "Documents"];
+const BASE_TABS = ["Overview", "Company Details", "Contribution Rates", "Tax Slabs", "Documents", "Jurisdiction Hierarchy"];
 
 const defaultCompany = {
   name: "",
@@ -157,7 +158,7 @@ export default function CompliancePage() {
 
       <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
         {tabs.map((t, i) => {
-          const disabled = (calcMode === "simple" && (t === "Contribution Rates" || t === "Tax Slabs" || t === "Documents" || t === "Enterprise Jurisdictions")) || (calcMode === "standard" && !arrivedForOnboarding && t === "Enterprise Jurisdictions");
+          const disabled = (calcMode === "simple" && (t === "Contribution Rates" || t === "Tax Slabs" || t === "Documents" || t === "Jurisdiction Hierarchy" || t === "Enterprise Jurisdictions")) || (calcMode === "standard" && !arrivedForOnboarding && t === "Enterprise Jurisdictions");
           return (
             <button
               key={t}
@@ -267,13 +268,26 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {showEnterpriseTab && activeTab === 5 && (calcMode === "enterprise" || arrivedForOnboarding) && (
+      {activeTab === 5 && calcMode !== "simple" && (
+        <HierarchyComplianceTab addToast={addToast} />
+      )}
+      {activeTab === 5 && calcMode === "simple" && (
+        <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
+          <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
+            <Lock size={24} className="text-foreground-muted" />
+          </div>
+          <h3 className="text-[17px] font-bold text-foreground mb-2">Jurisdiction Hierarchy</h3>
+          <p className="text-[13px] text-foreground-muted max-w-md mx-auto">This preview is not available in Simple Payroll mode.</p>
+        </div>
+      )}
+
+      {showEnterpriseTab && activeTab === BASE_TABS.length && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab
           enterpriseStatus={enterpriseStatus}
           onEnterpriseChanged={refreshEnterpriseState}
         />
       )}
-      {showEnterpriseTab && activeTab === 5 && !(calcMode === "enterprise" || arrivedForOnboarding) && (
+      {showEnterpriseTab && activeTab === BASE_TABS.length && !(calcMode === "enterprise" || arrivedForOnboarding) && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
           <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
             <Lock size={24} className="text-foreground-muted" />

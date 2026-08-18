@@ -1,3 +1,11 @@
+// DEPRECATION NOTICE (Phase 9 cleanup inventory, see
+// backend/scripts/HIERARCHY_V2_CLEANUP_INVENTORY.md): per the hierarchy
+// engine plan, "Enterprise" is meant to eventually become a derived UI
+// state (an org with >1 active jurisdiction assignment) rather than this
+// standalone tab/mode, once the hierarchy engine's org-assignment UI
+// exists and organizations are cut over to it. NOT removed or changed
+// here — this is exactly what today's live Enterprise-mode Compliance
+// page runs on, and zero organizations are on the hierarchy engine yet.
 import { useState, useEffect, useCallback } from "react";
 import { Rocket } from "lucide-react";
 import { useAuth } from "../../../../context/AuthContext";
