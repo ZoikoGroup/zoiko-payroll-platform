@@ -34,6 +34,9 @@ export const assignCompliancePolicy = (id, organizationIds) =>
     body: { organizationIds },
   });
 
+export const hardDeleteCompliancePolicy = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}`, { method: "DELETE" });
+
 // Every organization's ACTUAL, currently-configured compliance setup (as
 // opposed to the abstract policy templates above) — used by the Compliance
 // page's "Organization Compliance" view to promote real configs into
@@ -53,11 +56,17 @@ export const getCanonicalTaxSlabs = (params) =>
 export const upsertCanonicalTaxSlab = (payload) =>
   apiFetch("/api/super-admin/compliance/tax-configuration/slabs", { method: "PUT", body: payload });
 
+export const deleteCanonicalTaxSlab = (id) =>
+  apiFetch(`/api/super-admin/compliance/tax-configuration/slabs/${id}`, { method: "DELETE" });
+
 export const getCanonicalContributionRates = (params) =>
   apiFetch("/api/super-admin/compliance/tax-configuration/contribution-rates", { params });
 
 export const upsertCanonicalContributionRate = (payload) =>
   apiFetch("/api/super-admin/compliance/tax-configuration/contribution-rates", { method: "PUT", body: payload });
+
+export const deleteCanonicalContributionRate = (id) =>
+  apiFetch(`/api/super-admin/compliance/tax-configuration/contribution-rates/${id}`, { method: "DELETE" });
 
 export const getTaxConfigurationAudit = (params) =>
   apiFetch("/api/super-admin/compliance/tax-configuration/audit", { params });
@@ -81,11 +90,11 @@ export const updateOrganizationCurrency = (organizationId, currency) =>
 export const getOrganizationContributionRates = (params) =>
   apiFetch("/api/super-admin/statutory-rates/organization-rates", { params });
 
-// Backfills GlobalStatutoryRate from the payroll engine's existing
-// per-country defaults — safe to call repeatedly, never overwrites an
-// existing rate.
-export const seedStatutoryRateDefaults = () =>
-  apiFetch("/api/super-admin/statutory-rates/seed-defaults", { method: "POST" });
+// Read-only: the canonical rates/slabs from whichever tax pack is
+// currently Active for this jurisdiction — the same data Compliance's
+// Rates editor writes to. Editing happens on the Compliance page.
+export const getActiveTaxConfiguration = (params) =>
+  apiFetch("/api/super-admin/compliance/active-tax-configuration", { params });
 
 // ── Reports ──────────────────────────────────────────────────────────────
 

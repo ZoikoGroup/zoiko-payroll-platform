@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
-import { Shield, Lock } from "lucide-react";
+import { Shield, Lock, Info } from "lucide-react";
 import { useToast } from "../ToastContext";
 import ComplianceForm from "./ComplianceForm";
 import PackMetadataPanel from "./PackMetadataPanel";
@@ -174,7 +174,12 @@ export default function CompliancePage() {
 
       {activeTab === 0 && (
         <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="text-[15px] font-bold text-foreground mb-5">Compliance Overview</h3>
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-[15px] font-bold text-foreground">Compliance Overview</h3>
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-foreground-muted rounded-full bg-info/10 px-2.5 py-1">
+              <Info size={12} /> Inherited from Super Admin
+            </span>
+          </div>
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Company</p>

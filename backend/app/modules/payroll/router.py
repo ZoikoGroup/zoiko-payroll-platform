@@ -106,12 +106,15 @@ def list_employees(
     search: Optional[str] = Query(None),
     department: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=1000),
+    offset: Optional[int] = Query(None, ge=0),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     return service.get_employees(
         db, current_user.organization_id,
         search=search, department=department, status=status,
+        limit=limit, offset=offset,
     )
 
 
@@ -257,10 +260,12 @@ def preview_run(
 def list_runs(
     year: Optional[int] = Query(None, ge=2020, le=2099, description="Filter by pay year"),
     month: Optional[int] = Query(None, ge=1, le=12, description="Filter by pay month (1-12)"),
+    limit: Optional[int] = Query(None, ge=1, le=1000),
+    offset: Optional[int] = Query(None, ge=0),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_payroll_runs(db, current_user.organization_id, year=year, month=month)
+    return service.get_payroll_runs(db, current_user.organization_id, year=year, month=month, limit=limit, offset=offset)
 
 
 @payroll_router.get(

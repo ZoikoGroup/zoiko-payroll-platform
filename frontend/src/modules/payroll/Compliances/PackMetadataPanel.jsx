@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Layers, Loader2 } from "lucide-react";
+import { Layers, Loader2, Info } from "lucide-react";
 import {
   fetchJurisdictionPack,
   upsertJurisdictionPack,
@@ -88,6 +88,11 @@ export default function PackMetadataPanel({ country, state, addToast }) {
           <Layers size={16} className="text-category-teal" />
         </div>
         <h3 className="text-[15px] font-bold text-foreground">Pack Identity & Metadata</h3>
+      </div>
+
+      <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 mb-5 text-[12px] text-foreground-muted flex items-center gap-2">
+        <Info size={14} className="text-info shrink-0" />
+        <span>Values below are inherited from the <strong>Super Admin's</strong> jurisdiction pack configuration. You can overwrite fields where permitted.</span>
       </div>
 
       <div className="rounded-[12px] bg-warning/10 border border-warning/20 px-4 py-3 mb-5">

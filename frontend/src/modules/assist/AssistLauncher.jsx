@@ -58,18 +58,18 @@ function getSessionStorageKey(userId) {
   return userId ? `${SESSION_KEY_PREFIX}_${userId}` : SESSION_KEY_PREFIX;
 }
 
-const ACCENT = "bg-[#0592D3]";
-const ACCENT_HOVER = "hover:bg-[#04628C]";
+const ACCENT = "bg-primary";
+const ACCENT_HOVER = "hover:bg-primary-hover";
 
 function NoticeGate({ notice, onAcknowledge, busy }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#0592D3]/10">
-        <ShieldCheck className="h-6 w-6 text-[#0592D3]" />
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+        <ShieldCheck className="h-6 w-6 text-primary" />
       </div>
       <div>
-        <p className="text-[15px] font-bold text-[#1A1816]">{t("assist.notice.title")}</p>
-        <p className="mt-2 text-[13px] leading-relaxed text-[#9E9690]">{notice?.content}</p>
+        <p className="text-[15px] font-bold text-foreground">{t("assist.notice.title")}</p>
+        <p className="mt-2 text-[13px] leading-relaxed text-foreground-muted">{notice?.content}</p>
       </div>
       <button
         type="button"
@@ -93,7 +93,7 @@ function SuggestionChips({ suggestions, onPick }) {
           key={s.intent_id + s.position}
           type="button"
           onClick={() => onPick(s.prompt)}
-          className="rounded-[12px] border border-[#E5E0D9] bg-white px-3 py-2 text-left text-[12px] font-medium text-[#6B6560] transition-all duration-200 hover:border-[#0592D3] hover:text-[#0592D3]"
+          className="rounded-[12px] border border-border bg-white px-3 py-2 text-left text-[12px] font-medium text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
         >
           {s.prompt}
         </button>
@@ -109,7 +109,7 @@ function FeedbackRow({ message, onFeedback }) {
       <button
         type="button"
         onClick={() => onFeedback(message, "helpful")}
-        className={`rounded-[8px] p-1 transition ${message.rating === "helpful" ? "bg-[#19C58A]/10 text-[#19C58A]" : "text-[#C9C2B8] hover:text-[#19C58A]"}`}
+        className={`rounded-[8px] p-1 transition ${message.rating === "helpful" ? "bg-primary/10 text-primary" : "text-foreground-muted hover:text-primary"}`}
         title={t("assist.helpful")}
       >
         <ThumbsUp size={12} />
@@ -117,7 +117,7 @@ function FeedbackRow({ message, onFeedback }) {
       <button
         type="button"
         onClick={() => onFeedback(message, "not-helpful")}
-        className={`rounded-[8px] p-1 transition ${message.rating === "not-helpful" ? "bg-[#FF6E86]/10 text-[#FF6E86]" : "text-[#C9C2B8] hover:text-[#FF6E86]"}`}
+        className={`rounded-[8px] p-1 transition ${message.rating === "not-helpful" ? "bg-error/10 text-error" : "text-foreground-muted hover:text-error"}`}
         title={t("assist.notHelpful")}
       >
         <ThumbsDown size={12} />
@@ -139,8 +139,8 @@ function DiffPane({ label, value }) {
   const text = typeof value === "object" ? prettyJSON(value) : String(value);
   return (
     <div className="min-w-0 flex-1">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">{label}</p>
-      <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-[10px] bg-[#F8F7F4] px-2.5 py-2 text-[10px] leading-relaxed text-[#5C5651]">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted">{label}</p>
+      <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-[10px] bg-background px-2.5 py-2 text-[10px] leading-relaxed text-foreground-muted">
         {text}
       </pre>
     </div>
@@ -154,9 +154,9 @@ function ActionCard({ action, onError }) {
 
   if (!available) {
     return (
-      <div className="mt-2 rounded-[12px] border border-[#F0E3C8] bg-[#FFF8EB] px-3 py-2">
-        <p className="text-[11px] font-semibold text-[#B47A1E]">{t("assist.action.title")}</p>
-        <p className="mt-0.5 text-[11px] text-[#8A6A2E]">{action.reason || "Action unavailable."}</p>
+      <div className="mt-2 rounded-[12px] border border-warning/30 bg-warning-light px-3 py-2">
+        <p className="text-[11px] font-semibold text-warning">{t("assist.action.title")}</p>
+        <p className="mt-0.5 text-[11px] text-warning">{action.reason || "Action unavailable."}</p>
       </div>
     );
   }
@@ -186,11 +186,11 @@ function ActionCard({ action, onError }) {
 
   if (state === "confirmed") {
     return (
-      <div className="mt-2 rounded-[12px] border border-[#C9EFDF] bg-[#EEFBF5] px-3 py-2.5">
-        <p className="flex items-center gap-1.5 text-[12px] font-bold text-[#15B07A]">
+      <div className="mt-2 rounded-[12px] border border-success/30 bg-success-light px-3 py-2.5">
+        <p className="flex items-center gap-1.5 text-[12px] font-bold text-primary-hover">
           <Check size={13} /> {t("assist.action.confirmed")}
         </p>
-        <p className="mt-0.5 break-all text-[10px] text-[#6B9A83]">
+        <p className="mt-0.5 break-all text-[10px] text-category-teal">
           {t("assist.action.receipt", { id: receipt?.receipt_id || action.preview_id })}
         </p>
       </div>
@@ -199,8 +199,8 @@ function ActionCard({ action, onError }) {
 
   if (state === "cancelled") {
     return (
-      <div className="mt-2 rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] px-3 py-2.5">
-        <p className="flex items-center gap-1.5 text-[12px] font-semibold text-[#9E9690]">
+      <div className="mt-2 rounded-[12px] border border-border bg-background px-3 py-2.5">
+        <p className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground-muted">
           <X size={13} /> {t("assist.action.cancelled")}
         </p>
       </div>
@@ -208,23 +208,23 @@ function ActionCard({ action, onError }) {
   }
 
   return (
-    <div className="mt-2 rounded-[12px] border border-[#F0E3C8] bg-[#FFF8EB] px-3 py-2.5">
+    <div className="mt-2 rounded-[12px] border border-warning/30 bg-warning-light px-3 py-2.5">
       <div className="flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-[11px] font-bold text-[#B47A1E]">
+        <p className="flex items-center gap-1.5 text-[11px] font-bold text-warning">
           <ShieldCheck size={12} /> {t("assist.action.title")}
         </p>
-        <span className="rounded-full bg-[#B47A1E]/10 px-2 py-0.5 text-[9px] font-bold uppercase text-[#B47A1E]">
+        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[9px] font-bold uppercase text-warning">
           {t("assist.action.riskTier", { tier: action.risk_tier })}
         </span>
       </div>
-      <p className="mt-1.5 truncate text-[10px] text-[#8A6A2E]">
+      <p className="mt-1.5 truncate text-[10px] text-warning">
         {action.action_id} · {t("assist.action.target", { type: action.target?.type })}
       </p>
       {action.confirmation?.label ? (
-        <p className="mt-1 text-[11px] font-medium text-[#6B5230]">{action.confirmation.label}</p>
+        <p className="mt-1 text-[11px] font-medium text-warning">{action.confirmation.label}</p>
       ) : null}
       {action.confirmation?.step_up_required ? (
-        <p className="mt-1 text-[10px] text-[#B47A1E]">MFA / second approver required</p>
+        <p className="mt-1 text-[10px] text-warning">MFA / second approver required</p>
       ) : null}
       <div className="mt-2 flex gap-2">
         <DiffPane label={t("assist.action.before")} value={action.before} />
@@ -244,7 +244,7 @@ function ActionCard({ action, onError }) {
           type="button"
           onClick={handleCancel}
           disabled={state === "busy"}
-          className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#6B6560] transition hover:border-[#FF6E86] hover:text-[#E4506A] disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-white px-3 py-1.5 text-[11px] font-semibold text-foreground-muted transition hover:border-error hover:text-error disabled:opacity-60"
         >
           {t("assist.action.cancel")}
         </button>
@@ -308,28 +308,28 @@ function HandoffPanel({ sessionId, onClose }) {
   }
 
   return (
-    <div className="mx-4 mt-3 rounded-[14px] border border-[#E5E0D9] bg-white p-3">
+    <div className="mx-4 mt-3 rounded-[14px] border border-border bg-white p-3">
       <div className="mb-2 flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-[12px] font-bold text-[#2A2520]">
-          <LifeBuoy size={13} className="text-[#0592D3]" /> {t("assist.handoff.title")}
+        <p className="flex items-center gap-1.5 text-[12px] font-bold text-foreground">
+          <LifeBuoy size={13} className="text-primary" /> {t("assist.handoff.title")}
         </p>
-        <button type="button" onClick={onClose} className="rounded-[8px] p-1 text-[#9E9690] hover:text-[#2A2520]">
+        <button type="button" onClick={onClose} className="rounded-[8px] p-1 text-foreground-muted hover:text-foreground">
           <X size={14} />
         </button>
       </div>
 
-      {error ? <p className="mb-2 rounded-[10px] bg-[#FFEAEF] px-2.5 py-1.5 text-[11px] text-[#E4506A]">{error}</p> : null}
+      {error ? <p className="mb-2 rounded-[10px] bg-error-light px-2.5 py-1.5 text-[11px] text-error">{error}</p> : null}
 
       {state === "confirmed" ? (
-        <div className="rounded-[12px] border border-[#C9EFDF] bg-[#EEFBF5] px-3 py-2.5">
-          <p className="flex items-center gap-1.5 text-[12px] font-bold text-[#15B07A]">
+        <div className="rounded-[12px] border border-success/30 bg-success-light px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-[12px] font-bold text-primary-hover">
             <Check size={13} /> {t("assist.handoff.created")}
           </p>
-          <p className="mt-1 text-[11px] text-[#6B9A83]">
+          <p className="mt-1 text-[11px] text-category-teal">
             {t("assist.handoff.caseRef", { id: receipt?.case_id || receipt?.handoff_id })}
           </p>
           {receipt?.sla_reference ? (
-            <p className="mt-0.5 text-[10px] text-[#6B9A83]">{receipt.sla_reference}</p>
+            <p className="mt-0.5 text-[10px] text-category-teal">{receipt.sla_reference}</p>
           ) : null}
           <button
             type="button"
@@ -340,9 +340,9 @@ function HandoffPanel({ sessionId, onClose }) {
           </button>
         </div>
       ) : state === "preview" ? (
-        <div className="rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] p-2.5">
-          <p className="text-[11px] font-semibold text-[#2A2520]">{preview.destination}</p>
-          <p className="mt-1 text-[11px] text-[#6B6560]">{preview.summary}</p>
+        <div className="rounded-[12px] border border-border bg-background p-2.5">
+          <p className="text-[11px] font-semibold text-foreground">{preview.destination}</p>
+          <p className="mt-1 text-[11px] text-foreground-muted">{preview.summary}</p>
           <div className="mt-2.5 flex items-center gap-2">
             <button
               type="button"
@@ -356,7 +356,7 @@ function HandoffPanel({ sessionId, onClose }) {
               type="button"
               onClick={handleCancel}
               disabled={state === "busy"}
-              className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#6B6560] transition hover:border-[#FF6E86] hover:text-[#E4506A] disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-white px-3 py-1.5 text-[11px] font-semibold text-foreground-muted transition hover:border-error hover:text-error disabled:opacity-60"
             >
               {t("assist.action.cancel")}
             </button>
@@ -365,13 +365,13 @@ function HandoffPanel({ sessionId, onClose }) {
       ) : (
         <form onSubmit={handleCreatePreview} className="space-y-2">
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">
+            <label className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted">
               {t("assist.handoff.destination")}
             </label>
             <select
               value={destination}
               onChange={(e) => setDestination(e.target.value)}
-              className="mt-1 w-full rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+              className="mt-1 w-full rounded-[8px] border border-border bg-white px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             >
               {HANDOFF_DESTINATIONS.map((d) => (
                 <option key={d} value={d}>{d.replaceAll("_", " ")}</option>
@@ -379,17 +379,17 @@ function HandoffPanel({ sessionId, onClose }) {
             </select>
           </div>
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">
+            <label className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted">
               {t("assist.handoff.reason")}
             </label>
             <input
               value={reasonCode}
               onChange={(e) => setReasonCode(e.target.value)}
-              className="mt-1 w-full rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+              className="mt-1 w-full rounded-[8px] border border-border bg-white px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             />
           </div>
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide text-[#9E9690]">
+            <label className="text-[10px] font-bold uppercase tracking-wide text-foreground-muted">
               {t("assist.handoff.summary")}
             </label>
             <textarea
@@ -397,7 +397,7 @@ function HandoffPanel({ sessionId, onClose }) {
               onChange={(e) => setSummary(e.target.value)}
               rows={3}
               placeholder={t("assist.handoff.summaryPlaceholder")}
-              className="mt-1 w-full resize-none rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+              className="mt-1 w-full resize-none rounded-[8px] border border-border bg-white px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             />
           </div>
           <button
@@ -450,7 +450,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#9E9690] transition hover:text-[#0592D3]"
+        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-foreground-muted transition hover:text-primary"
       >
         <Save size={11} /> {t("assist.drafts.save")}
       </button>
@@ -458,13 +458,13 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
   }
 
   return (
-    <form onSubmit={handleSave} className="mt-2 rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] p-2.5">
+    <form onSubmit={handleSave} className="mt-2 rounded-[12px] border border-border bg-background p-2.5">
       <div className="flex items-center gap-2">
-        <label className="text-[10px] font-bold text-[#9E9690]">{t("assist.drafts.type")}</label>
+        <label className="text-[10px] font-bold text-foreground-muted">{t("assist.drafts.type")}</label>
         <select
           value={draftType}
           onChange={(e) => setDraftType(e.target.value)}
-          className="rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1 text-[11px] text-[#2A2520] outline-none"
+          className="rounded-[8px] border border-border bg-white px-2 py-1 text-[11px] text-foreground outline-none"
         >
           <option value="note">note</option>
           <option value="case_summary">case_summary</option>
@@ -475,7 +475,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
         value={draftContent}
         onChange={(e) => setDraftContent(e.target.value)}
         rows={3}
-        className="mt-2 w-full resize-none rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-2 text-[11px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+        className="mt-2 w-full resize-none rounded-[10px] border border-border bg-white px-2.5 py-2 text-[11px] text-foreground outline-none focus:border-primary"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -489,7 +489,7 @@ function SaveDraftButton({ responseId, content, sessionId, onSaved }) {
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded-[8px] px-2 py-1.5 text-[11px] font-semibold text-[#9E9690] hover:text-[#2A2520]"
+          className="rounded-[8px] px-2 py-1.5 text-[11px] font-semibold text-foreground-muted hover:text-foreground"
         >
           {t("assist.action.cancel")}
         </button>
@@ -503,7 +503,7 @@ export function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) 
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-[16px] rounded-br-[4px] bg-[#0592D3] px-3.5 py-2.5 text-[13px] leading-relaxed text-white">
+        <div className="max-w-[85%] rounded-[16px] rounded-br-[4px] bg-primary px-3.5 py-2.5 text-[13px] leading-relaxed text-white">
           <p className="whitespace-pre-wrap">{message.content}</p>
         </div>
       </div>
@@ -511,10 +511,10 @@ export function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) 
   }
   return (
     <div className="flex justify-start">
-      <div className="max-w-[90%] rounded-[16px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-[#2A2520] shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+      <div className="max-w-[90%] rounded-[16px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
         {message.loading ? (
-          <span className="inline-flex items-center gap-2 text-[12px] text-[#9E9690]">
-            <Loader2 size={13} className="animate-spin text-[#0592D3]" />
+          <span className="inline-flex items-center gap-2 text-[12px] text-foreground-muted">
+            <Loader2 size={13} className="animate-spin text-primary" />
             {t("assist.sse.live")}
           </span>
         ) : (
@@ -522,12 +522,12 @@ export function MessageBubble({ message, onFeedback, sessionId, onDraftSaved }) 
         )}
         {message.actionBlock ? <ActionCard action={message.actionBlock} /> : null}
         {message.draftBlock ? (
-          <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#0592D3]">
+          <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-primary">
             <FileText size={12} /> {t("assist.drafts.ready")}
           </p>
         ) : null}
         {message.safetyState === "REFUSED" || message.safetyState === "SAFE_FALLBACK" ? (
-          <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#F8A60A]">
+          <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-warning">
             <ShieldCheck size={12} /> {t("assist.refused", { state: message.safetyState.toLowerCase() })}
           </p>
         ) : null}
@@ -608,7 +608,7 @@ function DraftsPanel({ sessionId }) {
   if (drafts === null) {
     return (
       <div className="flex flex-1 items-center justify-center p-4">
-        <Loader2 size={18} className="animate-spin text-[#0592D3]" />
+        <Loader2 size={18} className="animate-spin text-primary" />
       </div>
     );
   }
@@ -617,14 +617,14 @@ function DraftsPanel({ sessionId }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-1 space-y-2 overflow-y-auto p-3">
         {drafts.length === 0 ? (
-          <p className="rounded-[12px] border border-dashed border-[#E5E0D9] px-3 py-6 text-center text-[12px] text-[#9E9690]">
+          <p className="rounded-[12px] border border-dashed border-border px-3 py-6 text-center text-[12px] text-foreground-muted">
             {t("assist.drafts.empty")}
           </p>
         ) : (
           drafts.map((d) => (
-            <div key={d.id} className="rounded-[12px] border border-[#E5E0D9] bg-white p-2.5">
+            <div key={d.id} className="rounded-[12px] border border-border bg-white p-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full bg-[#0592D3]/10 px-2 py-0.5 text-[9px] font-bold uppercase text-[#0592D3]">
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">
                   {d.draft_type}
                 </span>
                 <div className="flex items-center gap-0.5">
@@ -636,7 +636,7 @@ function DraftsPanel({ sessionId }) {
                       setDraftContent(d.content);
                     }}
                     title={t("assist.drafts.edit")}
-                    className="rounded-[8px] p-1 text-[#9E9690] transition hover:text-[#0592D3]"
+                    className="rounded-[8px] p-1 text-foreground-muted transition hover:text-primary"
                   >
                     <Pencil size={12} />
                   </button>
@@ -644,27 +644,27 @@ function DraftsPanel({ sessionId }) {
                     type="button"
                     onClick={() => handleDelete(d)}
                     title={t("assist.drafts.delete")}
-                    className="rounded-[8px] p-1 text-[#9E9690] transition hover:text-[#E4506A]"
+                    className="rounded-[8px] p-1 text-foreground-muted transition hover:text-error"
                   >
                     <Trash2 size={12} />
                   </button>
                 </div>
               </div>
-              <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap text-[11px] leading-relaxed text-[#2A2520]">
+              <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap text-[11px] leading-relaxed text-foreground">
                 {d.content}
               </p>
-              <p className="mt-1 text-[9px] text-[#C9C2B8]">{formatAssistDate(d.updated_at || d.created_at)}</p>
+              <p className="mt-1 text-[9px] text-foreground-muted">{formatAssistDate(d.updated_at || d.created_at)}</p>
             </div>
           ))
         )}
       </div>
-      <form onSubmit={handleSubmit} className="border-t border-[#F0EDE8] p-3">
+      <form onSubmit={handleSubmit} className="border-t border-border-light p-3">
         <div className="flex items-center gap-2">
-          <label className="text-[10px] font-bold text-[#9E9690]">{t("assist.drafts.type")}</label>
+          <label className="text-[10px] font-bold text-foreground-muted">{t("assist.drafts.type")}</label>
           <select
             value={draftType}
             onChange={(e) => setDraftType(e.target.value)}
-            className="rounded-[8px] border border-[#E5E0D9] bg-white px-2 py-1 text-[11px] text-[#2A2520] outline-none"
+            className="rounded-[8px] border border-border bg-white px-2 py-1 text-[11px] text-foreground outline-none"
           >
             <option value="note">note</option>
             <option value="case_summary">case_summary</option>
@@ -676,7 +676,7 @@ function DraftsPanel({ sessionId }) {
           onChange={(e) => setDraftContent(e.target.value)}
           rows={3}
           placeholder={t("assist.drafts.content")}
-          className="mt-2 w-full resize-none rounded-[10px] border border-[#E5E0D9] bg-[#F8F7F4] px-2.5 py-2 text-[11px] text-[#2A2520] placeholder-[#B5ADA4] outline-none focus:border-[#0592D3]"
+          className="mt-2 w-full resize-none rounded-[10px] border border-border bg-background px-2.5 py-2 text-[11px] text-foreground placeholder-foreground-disabled outline-none focus:border-primary"
         />
         <button
           type="submit"
@@ -726,7 +726,7 @@ function HistoryPanel({ onResume }) {
   if (sessions === null) {
     return (
       <div className="flex flex-1 items-center justify-center p-4">
-        <Loader2 size={18} className="animate-spin text-[#0592D3]" />
+        <Loader2 size={18} className="animate-spin text-primary" />
       </div>
     );
   }
@@ -735,23 +735,23 @@ function HistoryPanel({ onResume }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-1 space-y-2 overflow-y-auto p-3">
         {sessions.length === 0 ? (
-          <p className="rounded-[12px] border border-dashed border-[#E5E0D9] px-3 py-6 text-center text-[12px] text-[#9E9690]">
+          <p className="rounded-[12px] border border-dashed border-border px-3 py-6 text-center text-[12px] text-foreground-muted">
             {t("assist.history.empty")}
           </p>
         ) : (
           sessions.map((s) => (
-            <div key={s.id} className="rounded-[12px] border border-[#E5E0D9] bg-white p-2.5">
+            <div key={s.id} className="rounded-[12px] border border-border bg-white p-2.5">
               <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-[12px] font-bold text-[#1A1816]">{s.title || `Session #${s.id}`}</p>
+                <p className="truncate text-[12px] font-bold text-foreground">{s.title || `Session #${s.id}`}</p>
                 <span
                   className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${
-                    s.state === "ARCHIVED" ? "bg-[#F0EDE8] text-[#9E9690]" : "bg-[#19C58A]/10 text-[#15B07A]"
+                    s.state === "ARCHIVED" ? "bg-background-secondary text-foreground-muted" : "bg-primary/10 text-primary-hover"
                   }`}
                 >
                   {s.state === "ARCHIVED" ? t("assist.history.archived") : t("assist.history.active")}
                 </span>
               </div>
-              <p className="mt-1 text-[10px] text-[#9E9690]">{formatAssistDate(s.created_at)}</p>
+              <p className="mt-1 text-[10px] text-foreground-muted">{formatAssistDate(s.created_at)}</p>
               <div className="mt-2 flex items-center gap-2">
                 <button
                   type="button"
@@ -765,7 +765,7 @@ function HistoryPanel({ onResume }) {
                     type="button"
                     onClick={() => handleArchive(s.id)}
                     disabled={busy}
-                    className="rounded-[8px] px-2 py-1 text-[11px] font-semibold text-[#9E9690] transition hover:text-[#E4506A]"
+                    className="rounded-[8px] px-2 py-1 text-[11px] font-semibold text-foreground-muted transition hover:text-error"
                   >
                     {t("assist.history.archive")}
                   </button>
@@ -793,23 +793,23 @@ function LocalePicker() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={t("assist.locale")}
-        className="rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3]"
+        className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
       >
         <Languages size={15} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-9 z-10 w-36 overflow-hidden rounded-[12px] border border-[#E5E0D9] bg-white shadow-lg">
+        <div className="absolute right-0 top-9 z-10 w-36 overflow-hidden rounded-[12px] border border-border bg-white shadow-lg">
           {Object.entries(ASSIST_LOCALES).map(([code, meta]) => (
             <button
               key={code}
               type="button"
               onClick={() => pick(code)}
-              className={`flex w-full items-center justify-between px-3 py-2 text-[12px] font-medium transition hover:bg-[#F8F7F4] ${
-                code === locale ? "text-[#0592D3]" : "text-[#6B6560]"
+              className={`flex w-full items-center justify-between px-3 py-2 text-[12px] font-medium transition hover:bg-background ${
+                code === locale ? "text-primary" : "text-foreground-muted"
               }`}
             >
               <span>{meta.name}</span>
-              <span className="text-[10px] font-bold text-[#C9C2B8]">{meta.flag}</span>
+              <span className="text-[10px] font-bold text-foreground-muted">{meta.flag}</span>
             </button>
           ))}
         </div>
@@ -1089,13 +1089,13 @@ export default function AssistLauncher() {
       </button>
 
       {open ? (
-        <div className="fixed bottom-24 right-6 z-[9997] flex h-[560px] max-h-[calc(100dvh-8rem)] w-[min(550px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[22px] border border-[#E5E0D9] bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]">
+        <div className="fixed bottom-24 right-6 z-[9997] flex h-[560px] max-h-[calc(100dvh-8rem)] w-[min(550px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[22px] border border-border bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-[#E5E0D9] bg-white px-4 py-3">
+          <div className="flex items-center justify-between border-b border-border bg-white px-4 py-3">
             <div className="flex items-center gap-2.5">
               <img src={zoikoPayrollLogo} alt="" className="h-6 w-auto shrink-0" />
-              <div className="h-5 w-px shrink-0 bg-[#E5E0D9]" />
-              <p className="text-[13px] font-bold tracking-wide text-[#0592D3]">{t("assist.title")}</p>
+              <div className="h-5 w-px shrink-0 bg-border-light" />
+              <p className="text-[13px] font-bold tracking-wide text-primary">{t("assist.title")}</p>
             </div>
             <div className="flex items-center gap-1">
               <LocalePicker />
@@ -1103,9 +1103,17 @@ export default function AssistLauncher() {
                 type="button"
                 onClick={() => setShowHandoff((v) => !v)}
                 title={t("assist.handoff.title")}
-                className={`rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3] ${showHandoff ? "bg-[#F8F7F4] text-[#0592D3]" : ""}`}
+                className={`rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary ${showHandoff ? "bg-background text-primary" : ""}`}
               >
                 <LifeBuoy size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={handleNewSession}
+                title={t("assist.newSession")}
+                className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
+              >
+                <RotateCcw size={15} />
               </button>
               <div className="relative">
                 <button
@@ -1154,18 +1162,37 @@ export default function AssistLauncher() {
                 type="button"
                 onClick={() => setOpen(false)}
                 title={t("assist.close")}
-                className="rounded-[10px] p-1.5 text-[#6B6560] transition hover:bg-[#F8F7F4] hover:text-[#0592D3]"
+                className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
               >
                 <X size={16} />
               </button>
             </div>
           </div>
 
+          {/* Tabs */}
+          <div className="flex border-b border-border-light bg-white px-2 pt-2">
+            {tabs.map((tabDef) => {
+              const Icon = tabDef.icon;
+              return (
+                <button
+                  key={tabDef.id}
+                  type="button"
+                  onClick={() => setTab(tabDef.id)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-t-[10px] px-2 py-2 text-[11px] font-bold transition ${
+                    tab === tabDef.id ? "border-b-2 border-primary text-primary" : "text-foreground-muted hover:text-foreground-muted"
+                  }`}
+                >
+                  <Icon size={12} /> {tabDef.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Body */}
           <div className="flex min-h-0 flex-1 flex-col">
             {booting ? (
               <div className="flex flex-1 items-center justify-center">
-                <Loader2 size={22} className="animate-spin text-[#0592D3]" />
+                <Loader2 size={22} className="animate-spin text-primary" />
               </div>
             ) : noticeGateShown && tab === "chat" ? (
               <div className="flex-1">
@@ -1180,13 +1207,13 @@ export default function AssistLauncher() {
                 {showHandoff ? (
                   <HandoffPanel sessionId={sessionId} onClose={() => setShowHandoff(false)} />
                 ) : null}
-                <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[#FCFBF9] p-4">
+                <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-background-secondary p-4">
                   {error ? (
-                    <p className="rounded-[12px] bg-[#FFEAEF] px-3 py-2 text-[12px] font-medium text-[#E4506A]">{error}</p>
+                    <p className="rounded-[12px] bg-error-light px-3 py-2 text-[12px] font-medium text-error">{error}</p>
                   ) : null}
                   {messages.length === 0 ? (
                     <div className="flex flex-col items-start gap-4 pt-2">
-                      <div className="rounded-[16px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-[#2A2520]">
+                      <div className="rounded-[16px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
                         <p>{t("assist.intro", { name: "Zoiko Payroll Assist" })}</p>
                       </div>
                       <SuggestionChips suggestions={suggestions} onPick={sendMessage} />
@@ -1195,7 +1222,7 @@ export default function AssistLauncher() {
                           {capabilities.filter((c) => c.risk_tier === "A1").slice(0, 3).map((c) => (
                             <span
                               key={c.capability_id}
-                              className="rounded-full bg-[#0592D3]/10 px-2.5 py-1 text-[10px] font-semibold text-[#0592D3]"
+                              className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary"
                             >
                               {c.name}
                             </span>
@@ -1216,15 +1243,15 @@ export default function AssistLauncher() {
                   )}
                   {sending ? (
                     <div className="flex justify-start">
-                      <div className="flex items-center gap-2 rounded-[16px] rounded-bl-[4px] border border-[#E5E0D9] bg-white px-3.5 py-2.5 text-[12px] text-[#9E9690]">
-                        <Loader2 size={14} className="animate-spin text-[#0592D3]" />
+                      <div className="flex items-center gap-2 rounded-[16px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[12px] text-foreground-muted">
+                        <Loader2 size={14} className="animate-spin text-primary" />
                         {t("assist.thinking")}
                       </div>
                     </div>
                   ) : null}
                 </div>
 
-                <div className="border-t border-[#F0EDE8] p-3">
+                <div className="border-t border-border-light p-3">
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -1243,14 +1270,14 @@ export default function AssistLauncher() {
                       }}
                       rows={1}
                       placeholder={t("assist.placeholder")}
-                      className="max-h-28 flex-1 resize-none rounded-[12px] border border-[#E5E0D9] bg-[#F8F7F4] px-3 py-2.5 text-[13px] text-[#2A2520] placeholder-[#B5ADA4] outline-none transition focus:border-[#0592D3]"
+                      className="max-h-28 flex-1 resize-none rounded-[12px] border border-border bg-background px-3 py-2.5 text-[13px] text-foreground placeholder-foreground-disabled outline-none transition focus:border-primary"
                     />
                     {sending ? (
                       <button
                         type="button"
                         onClick={handleStop}
                         title={t("assist.stop")}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[#E5E0D9] bg-white text-[#6B6560] transition hover:border-[#FF6E86] hover:text-[#E4506A]"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-border bg-white text-foreground-muted transition hover:border-error hover:text-error"
                       >
                         <Square size={14} />
                       </button>
@@ -1264,8 +1291,8 @@ export default function AssistLauncher() {
                       </button>
                     )}
                   </form>
-                  <p className="mt-2 flex items-center gap-1 text-[10px] text-[#B5ADA4]">
-                    <ShieldCheck size={11} className="text-[#0592D3]" />
+                  <p className="mt-2 flex items-center gap-1 text-[10px] text-foreground-disabled">
+                    <ShieldCheck size={11} className="text-primary" />
                     {t("assist.footer")}
                   </p>
                 </div>

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   ShieldCheck, Plus, RefreshCcw, History, Users as UsersIcon, GitBranch, Building2, ClipboardList, ArrowRight,
   Receipt, FileText, Trash2, Pencil, ScrollText, LayoutGrid,
@@ -11,135 +12,28 @@ import { useToast } from "../context/ToastContext";
 import {
   getCompliancePolicies, upsertCompliancePolicy,
   getCompliancePolicyVersions, setCompliancePolicyStatus, getCompliancePolicyOrganizations,
-  assignCompliancePolicy, listAllOrganizationsBrief, getComplianceConfigurations,
-  getCanonicalTaxSlabs, upsertCanonicalTaxSlab, getCanonicalContributionRates,
-  upsertCanonicalContributionRate, getTaxConfigurationAudit,
+  assignCompliancePolicy, hardDeleteCompliancePolicy, listAllOrganizationsBrief, getComplianceConfigurations,
+  getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab, getCanonicalContributionRates,
+  upsertCanonicalContributionRate, deleteCanonicalContributionRate, getTaxConfigurationAudit,
 } from "../service/superAdminService";
-// Reused, not redefined — these are the exact labels Organization Admin's
-// own Payroll Policy screen already uses (payrollService.js centralizes
-// them for both), so Policy Defaults below stays in sync with what an org
-// admin actually sees for calculation mode / employee categories.
-import { CALCULATION_MODE_LABELS, EMPLOYEE_CATEGORY_LABELS } from "../service/payrollService";
 import { getStatesForCountryCode } from "../utils/registrationRegions";
 import JurisdictionCardGrid, { AddJurisdictionModal } from "./JurisdictionCardGrid";
+import {
+  STATUS_OPTIONS, STATUS_PILL_MAP, inputClass, labelClass, emptyForm,
+} from "./policyFormShared";
 
-const STATUS_OPTIONS = ["Draft", "In Review", "QA", "Approved", "Active", "Deprecated", "Retired"];
-const STATUS_PILL_MAP = {
-  Active: "active", Approved: "approved", Draft: "pending", "In Review": "pending",
-  QA: "pending", Deprecated: "inactive", Retired: "suspended",
-};
-
-const inputClass =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-focus-ring/40";
-const labelClass = "block text-xs font-medium text-foreground-muted mb-1";
-
-function emptyForm(country, state, packType) {
-  return {
-    packId: "", jurisdictionCountry: country || "IN", jurisdictionState: state || "", packType: packType || "policy",
-    version: "1.0", status: "Draft",
-    effectiveFrom: "", effectiveTo: "", regulatoryAuthority: "", complianceCategory: "",
-    changeSummary: "", complianceOwner: "", engineeringOwner: "", sourceReferences: "", nextReviewDate: "",
-    policyDefaults: {},
-  };
-}
-
-
-// ── Policy Defaults (org-admin policy field defaults + override locks) ──
-// Same field taxonomy as payroll/policy/models.py's PayrollPolicy — no new
-// vocabulary invented here, just default values + an allowOverride flag
-// layered on top of the same calculation_mode / employee_categories /
-// overtime_rule fields Organization Admin already edits.
-const CATEGORY_KEYS = ["full_time", "part_time", "intern", "contract", "consultant", "freelancer"];
-const CATEGORY_FIELDS = [
-  { key: "working_days", label: "Working Days", type: "number" },
-  { key: "expected_hours", label: "Expected Hours", type: "number" },
-  { key: "minimum_hours", label: "Minimum Hours", type: "number" },
-  { key: "paid_leave_eligible", label: "Paid Leave Eligible", type: "boolean" },
-];
-const OVERTIME_FIELDS = [
-  { key: "enabled", label: "Overtime Enabled", type: "boolean" },
-  { key: "minimum_overtime_minutes", label: "Minimum OT Minutes", type: "number" },
-  { key: "approval_required", label: "Approval Required", type: "boolean" },
-];
-
-function getLockNode(policyDefaults, path) {
-  let node = policyDefaults;
-  for (const key of path) {
-    if (!node || typeof node !== "object") return {};
-    node = node[key];
-  }
-  return node && typeof node === "object" ? node : {};
-}
-
-function setLockNode(setForm, path, patch) {
-  setForm((f) => {
-    const next = JSON.parse(JSON.stringify(f.policyDefaults || {}));
-    let node = next;
-    for (let i = 0; i < path.length - 1; i++) {
-      const key = path[i];
-      if (!node[key] || typeof node[key] !== "object") node[key] = {};
-      node = node[key];
-    }
-    const leafKey = path[path.length - 1];
-    const existing = node[leafKey] && typeof node[leafKey] === "object" ? node[leafKey] : {};
-    node[leafKey] = { ...existing, ...patch };
-    return { ...f, policyDefaults: next };
-  });
-}
-
-function LockableField({ label, node, type, choices, onChangeValue, onChangeAllow }) {
-  const value = node.value;
-  const allowOverride = node.allowOverride !== false;
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
-      <span className="flex-1 text-xs text-foreground-secondary">{label}</span>
-      {type === "select" ? (
-        <select
-          value={value ?? ""}
-          onChange={(e) => onChangeValue(e.target.value || null)}
-          className="rounded-md border border-border bg-background text-xs px-2 py-1 text-foreground"
-        >
-          <option value="">No default</option>
-          {choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
-      ) : type === "boolean" ? (
-        <select
-          value={value === true ? "true" : value === false ? "false" : ""}
-          onChange={(e) => onChangeValue(e.target.value === "" ? null : e.target.value === "true")}
-          className="rounded-md border border-border bg-background text-xs px-2 py-1 text-foreground"
-        >
-          <option value="">No default</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
-      ) : (
-        <input
-          type="number"
-          value={value ?? ""}
-          onChange={(e) => onChangeValue(e.target.value === "" ? null : Number(e.target.value))}
-          className="w-20 rounded-md border border-border bg-background text-xs px-2 py-1 text-foreground"
-        />
-      )}
-      <label className="flex items-center gap-1 text-[10px] text-foreground-disabled whitespace-nowrap">
-        <input
-          type="checkbox"
-          checked={allowOverride}
-          onChange={(e) => onChangeAllow(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-slate-300"
-        />
-        Allow override
-      </label>
-    </div>
-  );
-}
-
-function PolicyFormModal({ mode, initial, onClose, onSaved }) {
+// Tax packs only now — Policy configuration moved to its own full page
+// (PolicyConfigPage.jsx) since it has far more to review/scroll through
+// (calculation mode, salary structure, six employee categories, overtime
+// rule) than a modal comfortably fits. Tax stays a modal: its 2-step flow
+// (identity/metadata, then rates) is comparatively short per step.
+function TaxFormModal({ mode, initial, onClose, onSaved }) {
   const { addToast } = useToast() || {};
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
-  // Tax packs are a 2-step flow: step 1 saves identity/metadata, step 2
-  // (only for Tax) adds the actual rate/slab values on that same pack —
-  // no more separate "create the pack, then go hunt down a Rates icon."
+  // 2-step flow: step 1 saves identity/metadata, step 2 adds the actual
+  // rate/slab values on that same pack — no more separate "create the
+  // pack, then go hunt down a Rates icon."
   const [step, setStep] = useState(1);
   const [savedPack, setSavedPack] = useState(null);
   // Version/country/state can't change across versions or in-place edits —
@@ -156,7 +50,7 @@ function PolicyFormModal({ mode, initial, onClose, onSaved }) {
 
   async function handleSaveStep1() {
     if (!form.packId.trim() || !form.jurisdictionCountry.trim() || !form.version.trim()) {
-      addToast?.(`${isTax ? "Tax ID" : "Policy ID"}, country, and version are required.`, "error");
+      addToast?.("Tax ID, country, and version are required.", "error");
       return;
     }
     setSaving(true);
@@ -166,21 +60,15 @@ function PolicyFormModal({ mode, initial, onClose, onSaved }) {
         if (payload[k] === "") payload[k] = null;
       });
       const saved = await upsertCompliancePolicy(payload);
-      addToast?.(mode === "edit" ? "Tax details updated." : mode === "newVersion" ? "New version created." : isTax ? "Tax created — now add its rates." : "Policy created.", "success");
-      if (isTax) {
-        setSavedPack(saved);
-        setStep(2);
-      } else {
-        onSaved();
-      }
+      addToast?.(mode === "edit" ? "Tax details updated." : mode === "newVersion" ? "New version created." : "Tax created — now add its rates.", "success");
+      setSavedPack(saved);
+      setStep(2);
     } catch (err) {
       addToast?.(err.message || "Failed to save.", "error");
     } finally {
       setSaving(false);
     }
   }
-
-  const isTax = form.packType === "tax";
 
   return (
     <Modal
@@ -191,26 +79,20 @@ function PolicyFormModal({ mode, initial, onClose, onSaved }) {
           ? `Edit — ${form.packId}`
           : mode === "newVersion"
           ? `New Version — ${form.packId}`
-          : isTax ? "New Tax" : "New Policy"
+          : "New Tax"
       }
       onClose={onClose}
       maxWidth={step === 2 ? "max-w-3xl" : "max-w-2xl"}
     >
       {step === 1 ? (
       <>
-      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold mb-3 ${
-        isTax ? "bg-blue-500/10 text-blue-500" : "bg-category-teal/10 text-category-teal"
-      }`}>
-        {isTax ? <Receipt size={11} /> : <FileText size={11} />}
-        {isTax ? "Tax" : "Policy"}
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-500 mb-3">
+        <Receipt size={11} /> Tax
       </span>
-      {/* Identity + lifecycle — the same handful of fields matter for both
-          Tax and Policy packs (what/where/when this version applies), so
-          these stay first and un-collapsed for both. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className={labelClass}>{isTax ? "Tax ID" : "Policy ID"}</label>
-          <input value={form.packId} onChange={set("packId")} disabled={idLocked} className={`${inputClass} ${idLocked ? "opacity-60" : ""}`} placeholder={isTax ? "IN-PAYROLL-2026-V1" : "IN-POLICY-2026-V1"} />
+          <label className={labelClass}>Tax ID</label>
+          <input value={form.packId} onChange={set("packId")} disabled={idLocked} className={`${inputClass} ${idLocked ? "opacity-60" : ""}`} placeholder="IN-PAYROLL-2026-V1" />
         </div>
         <div>
           <label className={labelClass}>Version</label>
@@ -240,144 +122,49 @@ function PolicyFormModal({ mode, initial, onClose, onSaved }) {
         </div>
       </div>
 
-      {isTax ? (
-        // Tax's paper trail — legal basis, authority, review cadence — is
-        // the substance of a tax pack, so it stays directly visible.
-        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Tax Category</label>
-            <input value={form.complianceCategory || ""} onChange={set("complianceCategory")} className={inputClass} placeholder="Income Tax / Statutory Contribution…" />
-          </div>
-          <div>
-            <label className={labelClass}>Regulatory Authority</label>
-            <input value={form.regulatoryAuthority || ""} onChange={set("regulatoryAuthority")} className={inputClass} placeholder="HMRC / IRS / CBDT…" />
-          </div>
-          <div>
-            <label className={labelClass}>Next Review Date</label>
-            <input type="date" value={form.nextReviewDate || ""} onChange={set("nextReviewDate")} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Compliance Owner</label>
-            <input value={form.complianceOwner || ""} onChange={set("complianceOwner")} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Engineering Owner</label>
-            <input value={form.engineeringOwner || ""} onChange={set("engineeringOwner")} className={inputClass} />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelClass}>Change Summary</label>
-            <textarea value={form.changeSummary || ""} onChange={set("changeSummary")} rows={2} className={inputClass} placeholder="What changed in this version…" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelClass}>Source References</label>
-            <textarea value={form.sourceReferences || ""} onChange={set("sourceReferences")} rows={2} className={inputClass} placeholder="Notification / circular / gazette reference…" />
-          </div>
-        </div>
-      ) : (
-      // Policy's actual substance — default values & override locks —
-      // is the whole point of a Policy pack, so nothing else (tax-flavored
-      // paper trail like Regulatory Authority/Source References) is shown
-      // here at all — not even collapsed.
-      <div className="mt-5 rounded-lg border border-border px-3.5 py-3.5 space-y-4">
-        <p className="text-sm font-medium text-foreground">Policy Defaults</p>
-        <p className="text-xs text-foreground-muted">
-          Set a default value per field and uncheck "Allow override" to lock it — organizations assigned this
-          policy pack must keep that field at the value shown. Leave a field as "No default" to keep it fully
-          editable by the organization, exactly as today.
-        </p>
-
+      <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <p className={labelClass}>Calculation Mode</p>
-          <LockableField
-            label="Calculation Mode"
-            node={getLockNode(form.policyDefaults, ["calculation_mode"])}
-            type="select"
-            choices={Object.entries(CALCULATION_MODE_LABELS).map(([value, label]) => ({ value, label }))}
-            onChangeValue={(value) => setLockNode(setForm, ["calculation_mode"], { value })}
-            onChangeAllow={(allowOverride) => setLockNode(setForm, ["calculation_mode"], { allowOverride })}
-          />
+          <label className={labelClass}>Tax Category</label>
+          <input value={form.complianceCategory || ""} onChange={set("complianceCategory")} className={inputClass} placeholder="Income Tax / Statutory Contribution…" />
         </div>
-
         <div>
-          <p className={labelClass}>Salary Structure</p>
-          <p className="text-[11px] text-foreground-disabled mb-1.5">
-            Percentage of monthly gross allocated as Basic and HRA for employees without their own explicit
-            amounts set — Special Allowance is always whatever's left of gross.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <LockableField
-              label="Basic % of Gross"
-              node={getLockNode(form.policyDefaults, ["basic_pct"])}
-              type="number"
-              onChangeValue={(value) => setLockNode(setForm, ["basic_pct"], { value })}
-              onChangeAllow={(allowOverride) => setLockNode(setForm, ["basic_pct"], { allowOverride })}
-            />
-            <LockableField
-              label="HRA % of Gross"
-              node={getLockNode(form.policyDefaults, ["hra_pct"])}
-              type="number"
-              onChangeValue={(value) => setLockNode(setForm, ["hra_pct"], { value })}
-              onChangeAllow={(allowOverride) => setLockNode(setForm, ["hra_pct"], { allowOverride })}
-            />
-          </div>
+          <label className={labelClass}>Regulatory Authority</label>
+          <input value={form.regulatoryAuthority || ""} onChange={set("regulatoryAuthority")} className={inputClass} placeholder="HMRC / IRS / CBDT…" />
         </div>
-
         <div>
-          <p className={labelClass}>Employee Categories</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {CATEGORY_KEYS.map((category) => (
-              <div key={category} className="rounded-lg border border-border p-2.5 space-y-1.5">
-                <p className="text-xs font-semibold text-foreground">{EMPLOYEE_CATEGORY_LABELS[category]}</p>
-                {CATEGORY_FIELDS.map((field) => (
-                  <LockableField
-                    key={field.key}
-                    label={field.label}
-                    node={getLockNode(form.policyDefaults, ["employee_categories", category, field.key])}
-                    type={field.type}
-                    onChangeValue={(value) => setLockNode(setForm, ["employee_categories", category, field.key], { value })}
-                    onChangeAllow={(allowOverride) => setLockNode(setForm, ["employee_categories", category, field.key], { allowOverride })}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
+          <label className={labelClass}>Next Review Date</label>
+          <input type="date" value={form.nextReviewDate || ""} onChange={set("nextReviewDate")} className={inputClass} />
         </div>
-
         <div>
-          <p className={labelClass}>Overtime Rule</p>
-          <div className="space-y-1.5">
-            {OVERTIME_FIELDS.map((field) => (
-              <LockableField
-                key={field.key}
-                label={field.label}
-                node={getLockNode(form.policyDefaults, ["overtime_rule", field.key])}
-                type={field.type}
-                onChangeValue={(value) => setLockNode(setForm, ["overtime_rule", field.key], { value })}
-                onChangeAllow={(allowOverride) => setLockNode(setForm, ["overtime_rule", field.key], { allowOverride })}
-              />
-            ))}
-          </div>
+          <label className={labelClass}>Compliance Owner</label>
+          <input value={form.complianceOwner || ""} onChange={set("complianceOwner")} className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>Engineering Owner</label>
+          <input value={form.engineeringOwner || ""} onChange={set("engineeringOwner")} className={inputClass} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass}>Change Summary</label>
+          <textarea value={form.changeSummary || ""} onChange={set("changeSummary")} rows={2} className={inputClass} placeholder="What changed in this version…" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass}>Source References</label>
+          <textarea value={form.sourceReferences || ""} onChange={set("sourceReferences")} rows={2} className={inputClass} placeholder="Notification / circular / gazette reference…" />
         </div>
       </div>
-      )}
 
       <div className="mt-6 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">
           Cancel
         </button>
         <button type="button" onClick={handleSaveStep1} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">
-          {saving ? "Saving…" : isTax ? "Save & Next →" : "Save"}
+          {saving ? "Saving…" : "Save & Next →"}
         </button>
       </div>
       </>
       ) : (
       <>
-        <RatesEditor pack={savedPack} />
-        <div className="mt-6 flex justify-end">
-          <button type="button" onClick={onSaved} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover">
-            Done
-          </button>
-        </div>
+        <RatesEditor pack={savedPack} onSaved={() => onSaved(savedPack)} />
       </>
       )}
     </Modal>
@@ -421,7 +208,7 @@ function VersionHistoryModal({ packId, versions, onClose }) {
 // Editing here changes the source of truth; it does not directly touch any
 // organization's live payroll until that org is next synced.
 //
-// Rendered as step 2 of PolicyFormModal's Tax flow (New Tax → Next → add
+// Rendered as step 2 of TaxFormModal's flow (New Tax → Next → add
 // rates here → Done) — not its own modal, so creating a tax and entering
 // its numbers is one continuous flow instead of two disconnected actions.
 //
@@ -452,17 +239,50 @@ const TAX_PARAMETER_FIELDS = {
     { key: "ni_upper_threshold", label: "NI Upper Earnings Limit", type: "amount", fallback: "50,270" },
     { key: "ni_upper_rate", label: "NI Upper Rate", type: "pct", fallback: "2%" },
   ],
+  AU: [
+    { key: "medicare_levy_low_income_threshold", label: "Medicare Levy — Low-Income Threshold", type: "amount", fallback: "24,276" },
+    { key: "mls_threshold", label: "Medicare Levy Surcharge — Income Threshold", type: "amount", fallback: "97,000" },
+    { key: "mls_rate", label: "Medicare Levy Surcharge Rate", type: "pct", fallback: "1%" },
+    { key: "super_max_contribution_base", label: "Super Guarantee — Max Contribution Base (annual)", type: "amount", fallback: "260,280" },
+  ],
+  DE: [
+    { key: "grundfreibetrag", label: "Basic Tax-Free Allowance (Grundfreibetrag)", type: "amount", fallback: "11,784" },
+    { key: "contribution_ceiling", label: "Social Insurance Contribution Ceiling (annual)", type: "amount", fallback: "96,600" },
+    { key: "soli_threshold", label: "Solidarity Surcharge — Tax Liability Threshold", type: "amount", fallback: "18,130" },
+    { key: "soli_rate", label: "Solidarity Surcharge Rate", type: "pct", fallback: "5.5%" },
+  ],
+  CA: [
+    { key: "basic_personal_amount", label: "Basic Personal Amount (Federal)", type: "amount", fallback: "15,705" },
+    { key: "cpp_ympe", label: "CPP — Year's Maximum Pensionable Earnings (YMPE)", type: "amount", fallback: "71,300" },
+    { key: "cpp_basic_exemption", label: "CPP — Basic Exemption Amount", type: "amount", fallback: "3,500" },
+    { key: "ei_mie", label: "EI — Maximum Insurable Earnings", type: "amount", fallback: "65,700" },
+  ],
 };
 
-function RatesEditor({ pack }) {
+function RatesEditor({ pack, onSaved }) {
   const { addToast } = useToast() || {};
   const [rates, setRates] = useState([]);
   const [slabs, setSlabs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [savingKey, setSavingKey] = useState("");
-  const [newRate, setNewRate] = useState({ componentKey: "", label: "", employeeSharePct: "", employerSharePct: "", flatAmount: "" });
-  const [newSlab, setNewSlab] = useState({ minAmount: "", maxAmount: "", ratePct: "", rateLabel: "", taxFormula: "" });
+  const [saving, setSaving] = useState(false);
+  // Tax Parameters are edited as a sparse overlay keyed by field.key — only
+  // fields the admin actually touched this session get an entry, so Done
+  // only re-saves what changed instead of every field unconditionally.
+  const [paramDrafts, setParamDrafts] = useState({});
+  const nextTempId = useRef(-1);
+  // Ids of EXISTING (server-side) rows the admin removed this session —
+  // tracked separately from local `rates`/`slabs` state (which just drops
+  // the row from view) so Done knows to actually DELETE them, not merely
+  // stop re-sending them. Reset on every load() so reopening the modal
+  // never carries a stale pending-deletion list forward.
+  const deletedRateIds = useRef(new Set());
+  const deletedSlabIds = useRef(new Set());
 
+  // Everything below is pure local draft state until "Done" is clicked —
+  // clicking "+" or editing a cell never calls the API and never flips
+  // `loading` (which is what previously made the whole modal flash back to
+  // "Loading…" on every keystroke's blur — read by the user as "the entire
+  // page reloading").
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -472,6 +292,9 @@ function RatesEditor({ pack }) {
       ]);
       setRates(r);
       setSlabs(s.sort((a, b) => Number(a.minAmount) - Number(b.minAmount)));
+      setParamDrafts({});
+      deletedRateIds.current = new Set();
+      deletedSlabIds.current = new Set();
     } catch (err) {
       addToast?.(err.message || "Failed to load rates.", "error");
     } finally {
@@ -481,105 +304,100 @@ function RatesEditor({ pack }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function saveParamField(field, existing, value) {
-    setSavingKey(`param-${field.key}`);
-    try {
-      await upsertCanonicalContributionRate({
-        id: existing?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
-        jurisdictionState: pack.jurisdictionState, componentKey: field.key, label: field.label,
-        employeeSharePct: field.type === "pct" ? value : null,
-        employerSharePct: null,
-        flatAmount: field.type === "amount" ? value : null,
-      });
-      addToast?.(`${field.label} saved.`, "success");
-      load();
-    } catch (err) {
-      addToast?.(err.message || `Failed to save ${field.label}.`, "error");
-    } finally {
-      setSavingKey("");
-    }
+  function addRateRow() {
+    const id = nextTempId.current--;
+    setRates((prev) => [...prev, {
+      id, componentKey: "", label: "", employeeRatePct: "", employerRatePct: "", flatAmount: "", _isNew: true,
+    }]);
   }
 
-  async function saveRate(rate, patch) {
-    setSavingKey(`rate-${rate.id}`);
-    try {
-      await upsertCanonicalContributionRate({
-        id: rate.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
-        jurisdictionState: pack.jurisdictionState, componentKey: rate.componentKey, label: rate.label,
-        employeeSharePct: rate.employeeRatePct, employerSharePct: rate.employerRatePct, flatAmount: rate.flatAmount,
-        sortOrder: rate.sortOrder, ...patch,
-      });
-      addToast?.("Contribution rate saved.", "success");
-      load();
-    } catch (err) {
-      addToast?.(err.message || "Failed to save rate.", "error");
-    } finally {
-      setSavingKey("");
-    }
+  function updateRate(id, patch) {
+    setRates((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
-  async function addRate() {
-    if (!newRate.componentKey.trim() || !newRate.label.trim()) {
-      addToast?.("Component key and label are required.", "error");
-      return;
-    }
-    setSavingKey("new-rate");
-    try {
-      await upsertCanonicalContributionRate({
-        jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry, jurisdictionState: pack.jurisdictionState,
-        componentKey: newRate.componentKey.trim(), label: newRate.label.trim(),
-        employeeSharePct: newRate.employeeSharePct || null, employerSharePct: newRate.employerSharePct || null,
-        flatAmount: newRate.flatAmount || null,
-      });
-      setNewRate({ componentKey: "", label: "", employeeSharePct: "", employerSharePct: "", flatAmount: "" });
-      addToast?.("Contribution rate added.", "success");
-      load();
-    } catch (err) {
-      addToast?.(err.message || "Failed to add rate.", "error");
-    } finally {
-      setSavingKey("");
-    }
+  function removeRateRow(id) {
+    if (id > 0) deletedRateIds.current.add(id); // negative ids are local-only draft rows, never saved
+    setRates((prev) => prev.filter((r) => r.id !== id));
   }
 
-  async function saveSlab(slab, patch) {
-    setSavingKey(`slab-${slab.id}`);
-    try {
-      await upsertCanonicalTaxSlab({
-        id: slab.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
-        jurisdictionState: pack.jurisdictionState, minAmount: slab.minAmount, maxAmount: slab.maxAmount,
-        ratePct: slab.ratePct, rateLabel: slab.rateLabel, taxFormula: slab.taxFormula,
-        ruleType: slab.ruleType, formulaExpression: slab.formulaExpression, sortOrder: slab.sortOrder,
-        ...patch,
-      });
-      addToast?.("Tax slab saved.", "success");
-      load();
-    } catch (err) {
-      addToast?.(err.message || "Failed to save slab.", "error");
-    } finally {
-      setSavingKey("");
-    }
+  function addSlabRow() {
+    const id = nextTempId.current--;
+    setSlabs((prev) => [...prev, {
+      id, minAmount: "", maxAmount: "", ratePct: "", rateLabel: "", taxFormula: "", _isNew: true,
+    }]);
   }
 
-  async function addSlab() {
-    if (newSlab.minAmount === "" || newSlab.ratePct === "") {
-      addToast?.("Minimum amount and rate are required.", "error");
-      return;
+  function updateSlab(id, patch) {
+    setSlabs((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }
+
+  function removeSlabRow(id) {
+    if (id > 0) deletedSlabIds.current.add(id); // negative ids are local-only draft rows, never saved
+    setSlabs((prev) => prev.filter((s) => s.id !== id));
+  }
+
+  async function handleDone() {
+    for (const r of rates) {
+      if (!r.componentKey.trim() || !r.label.trim()) {
+        addToast?.("Component key and label are required for every contribution rate row.", "error");
+        return;
+      }
     }
-    setSavingKey("new-slab");
+    for (const s of slabs) {
+      if (s.minAmount === "" || s.ratePct === "") {
+        addToast?.("Minimum amount and rate are required for every tax slab row.", "error");
+        return;
+      }
+    }
+
+    setSaving(true);
     try {
-      await upsertCanonicalTaxSlab({
-        jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry, jurisdictionState: pack.jurisdictionState,
-        minAmount: newSlab.minAmount, maxAmount: newSlab.maxAmount || null, ratePct: newSlab.ratePct,
-        rateLabel: newSlab.rateLabel || `${newSlab.ratePct}%`, taxFormula: newSlab.taxFormula || "",
-        sortOrder: slabs.length + 1,
-      });
-      setNewSlab({ minAmount: "", maxAmount: "", ratePct: "", rateLabel: "", taxFormula: "" });
-      addToast?.("Tax slab added.", "success");
-      load();
+      for (const id of deletedRateIds.current) {
+        await deleteCanonicalContributionRate(id);
+      }
+      for (const id of deletedSlabIds.current) {
+        await deleteCanonicalTaxSlab(id);
+      }
+      for (const r of rates) {
+        await upsertCanonicalContributionRate({
+          id: r._isNew ? undefined : r.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
+          jurisdictionState: pack.jurisdictionState, componentKey: r.componentKey.trim(), label: r.label.trim(),
+          employeeSharePct: r.employeeRatePct || null, employerSharePct: r.employerRatePct || null,
+          flatAmount: r.flatAmount || null, sortOrder: r.sortOrder,
+        });
+      }
+      for (const field of (TAX_PARAMETER_FIELDS[pack.jurisdictionCountry] || [])) {
+        if (!(field.key in paramDrafts)) continue;
+        const value = paramDrafts[field.key];
+        const existing = rates.find((r) => r.componentKey === field.key);
+        await upsertCanonicalContributionRate({
+          id: existing?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
+          jurisdictionState: pack.jurisdictionState, componentKey: field.key, label: field.label,
+          employeeSharePct: field.type === "pct" ? (value || null) : null,
+          employerSharePct: null,
+          flatAmount: field.type === "amount" ? (value || null) : null,
+        });
+      }
+      for (let i = 0; i < slabs.length; i++) {
+        const s = slabs[i];
+        await upsertCanonicalTaxSlab({
+          id: s._isNew ? undefined : s.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
+          jurisdictionState: pack.jurisdictionState, minAmount: s.minAmount, maxAmount: s.maxAmount || null,
+          ratePct: s.ratePct, rateLabel: s.rateLabel || `${s.ratePct}%`, taxFormula: s.taxFormula || "",
+          ruleType: s.ruleType, formulaExpression: s.formulaExpression, sortOrder: s._isNew ? i + 1 : s.sortOrder,
+        });
+      }
+      addToast?.("Rates saved.", "success");
+      onSaved?.();
     } catch (err) {
-      addToast?.(err.message || "Failed to add slab.", "error");
+      addToast?.(err.message || "Failed to save — reloaded the last saved values.", "error");
+      // A partial batch failure can leave some new rows already persisted on
+      // the server (upsert always inserts when no id is given, so retrying
+      // the same batch again would create duplicates). Re-syncing from the
+      // server instead of patching local state avoids that risk entirely.
+      await load();
     } finally {
-      setSavingKey("");
+      setSaving(false);
     }
   }
 
@@ -600,44 +418,40 @@ function RatesEditor({ pack }) {
                   <tr>
                     <th className="px-3 py-2">Component</th><th className="px-3 py-2">Label</th>
                     <th className="px-3 py-2">Employee %</th><th className="px-3 py-2">Employer %</th>
-                    <th className="px-3 py-2">Flat Amount</th>
+                    <th className="px-3 py-2">Flat Amount</th><th className="px-3 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {rates.map((r) => (
                     <tr key={r.id} className="border-t border-border-light">
-                      <td className="px-3 py-1.5 font-mono text-foreground-secondary">{r.componentKey}</td>
-                      <td className="px-3 py-1.5 text-foreground-secondary">{r.label}</td>
                       <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" defaultValue={r.employeeRatePct ?? ""}
-                          onBlur={(e) => e.target.value !== String(r.employeeRatePct ?? "") && saveRate(r, { employeeSharePct: e.target.value || null })}
-                          disabled={savingKey === `rate-${r.id}`} />
+                        <input className={cellInput} placeholder="component_key" value={r.componentKey} onChange={(e) => updateRate(r.id, { componentKey: e.target.value })} />
                       </td>
                       <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" defaultValue={r.employerRatePct ?? ""}
-                          onBlur={(e) => e.target.value !== String(r.employerRatePct ?? "") && saveRate(r, { employerSharePct: e.target.value || null })}
-                          disabled={savingKey === `rate-${r.id}`} />
+                        <input className={cellInput} placeholder="Label" value={r.label} onChange={(e) => updateRate(r.id, { label: e.target.value })} />
                       </td>
                       <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" defaultValue={r.flatAmount ?? ""}
-                          onBlur={(e) => e.target.value !== String(r.flatAmount ?? "") && saveRate(r, { flatAmount: e.target.value || null })}
-                          disabled={savingKey === `rate-${r.id}`} />
+                        <input className={cellInput} type="number" step="0.01" value={r.employeeRatePct ?? ""} onChange={(e) => updateRate(r.id, { employeeRatePct: e.target.value })} />
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <input className={cellInput} type="number" step="0.01" value={r.employerRatePct ?? ""} onChange={(e) => updateRate(r.id, { employerRatePct: e.target.value })} />
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <input className={cellInput} type="number" step="0.01" value={r.flatAmount ?? ""} onChange={(e) => updateRate(r.id, { flatAmount: e.target.value })} />
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <button type="button" title="Delete this rate" onClick={() => removeRateRow(r.id)} className="rounded p-1 text-foreground-disabled hover:bg-error-light hover:text-error">
+                          <Trash2 size={12} />
+                        </button>
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t border-border-light bg-slate-50/50 dark:bg-white/5">
-                    <td className="px-3 py-1.5"><input className={cellInput} placeholder="component_key" value={newRate.componentKey} onChange={(e) => setNewRate((f) => ({ ...f, componentKey: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5"><input className={cellInput} placeholder="Label" value={newRate.label} onChange={(e) => setNewRate((f) => ({ ...f, label: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5"><input className={cellInput} type="number" step="0.01" value={newRate.employeeSharePct} onChange={(e) => setNewRate((f) => ({ ...f, employeeSharePct: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5"><input className={cellInput} type="number" step="0.01" value={newRate.employerSharePct} onChange={(e) => setNewRate((f) => ({ ...f, employerSharePct: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5 flex items-center gap-1">
-                      <input className={cellInput} type="number" step="0.01" value={newRate.flatAmount} onChange={(e) => setNewRate((f) => ({ ...f, flatAmount: e.target.value }))} />
-                      <button onClick={addRate} disabled={savingKey === "new-rate"} className="shrink-0 rounded-md bg-primary p-1.5 text-white hover:bg-primary-hover disabled:opacity-50"><Plus size={12} /></button>
-                    </td>
-                  </tr>
                 </tbody>
               </table>
             </div>
+            <button type="button" onClick={addRateRow} className="mt-2 flex items-center gap-1 rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-foreground-muted hover:border-primary hover:text-primary">
+              <Plus size={12} /> Add Rate
+            </button>
           </div>
 
           {(TAX_PARAMETER_FIELDS[pack.jurisdictionCountry] || []).length > 0 && (
@@ -651,6 +465,7 @@ function RatesEditor({ pack }) {
                 {TAX_PARAMETER_FIELDS[pack.jurisdictionCountry].map((field) => {
                   const existing = rates.find((r) => r.componentKey === field.key);
                   const currentValue = field.type === "pct" ? existing?.employeeRatePct : existing?.flatAmount;
+                  const draftValue = paramDrafts[field.key] ?? currentValue ?? "";
                   return (
                     <div key={field.key}>
                       <label className="block text-[11px] font-medium text-foreground-muted mb-1">
@@ -659,15 +474,9 @@ function RatesEditor({ pack }) {
                       <input
                         className={cellInput}
                         type="number" step="0.01"
-                        defaultValue={currentValue ?? ""}
+                        value={draftValue}
                         placeholder={`Default: ${field.fallback}`}
-                        disabled={savingKey === `param-${field.key}`}
-                        onBlur={(e) => {
-                          const v = e.target.value;
-                          if (v !== "" && Number(v) !== Number(currentValue ?? NaN)) {
-                            saveParamField(field, existing, v);
-                          }
-                        }}
+                        onChange={(e) => setParamDrafts((prev) => ({ ...prev, [field.key]: e.target.value }))}
                       />
                     </div>
                   );
@@ -683,46 +492,60 @@ function RatesEditor({ pack }) {
                 <thead className="bg-background text-left text-foreground-muted">
                   <tr>
                     <th className="px-3 py-2">Min</th><th className="px-3 py-2">Max</th>
-                    <th className="px-3 py-2">Rate %</th><th className="px-3 py-2">Label</th><th className="px-3 py-2">Formula / Note</th>
+                    <th className="px-3 py-2">Rate %</th><th className="px-3 py-2">Label</th><th className="px-3 py-2">Formula / Note</th><th className="px-3 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {slabs.map((s) => (
                     <tr key={s.id} className="border-t border-border-light">
                       <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" defaultValue={s.minAmount} onBlur={(e) => e.target.value !== String(s.minAmount) && saveSlab(s, { minAmount: e.target.value })} disabled={savingKey === `slab-${s.id}`} />
+                        <input className={cellInput} type="number" value={s.minAmount} onChange={(e) => updateSlab(s.id, { minAmount: e.target.value })} />
                       </td>
                       <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" placeholder="and above" defaultValue={s.maxAmount ?? ""} onBlur={(e) => e.target.value !== String(s.maxAmount ?? "") && saveSlab(s, { maxAmount: e.target.value || null })} disabled={savingKey === `slab-${s.id}`} />
+                        <input className={cellInput} type="number" placeholder="and above" value={s.maxAmount ?? ""} onChange={(e) => updateSlab(s.id, { maxAmount: e.target.value })} />
                       </td>
                       <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" defaultValue={s.ratePct} onBlur={(e) => e.target.value !== String(s.ratePct) && saveSlab(s, { ratePct: e.target.value })} disabled={savingKey === `slab-${s.id}`} />
+                        <input className={cellInput} type="number" step="0.01" value={s.ratePct} onChange={(e) => updateSlab(s.id, { ratePct: e.target.value })} />
                       </td>
-                      <td className="px-3 py-1.5 text-foreground-secondary">{s.rateLabel}</td>
-                      <td className="px-3 py-1.5 text-foreground-muted">
-                        {s.ruleType === "FORMULA" ? <span className="font-mono">{s.formulaExpression}</span> : s.taxFormula}
+                      <td className="px-3 py-1.5">
+                        <input className={cellInput} placeholder="e.g. 20%" value={s.rateLabel} onChange={(e) => updateSlab(s.id, { rateLabel: e.target.value })} />
+                      </td>
+                      <td className="px-3 py-1.5">
+                        {s.ruleType === "FORMULA" ? (
+                          // Formula-rule rows have no editor for formulaExpression yet
+                          // (the field that actually drives their calculation) — shown
+                          // read-only rather than exposing an editable field that would
+                          // silently do nothing.
+                          <span className="text-foreground-muted font-mono">{s.formulaExpression}</span>
+                        ) : (
+                          <input className={cellInput} placeholder="Display note" value={s.taxFormula} onChange={(e) => updateSlab(s.id, { taxFormula: e.target.value })} />
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <button type="button" title="Delete this slab" onClick={() => removeSlabRow(s.id)} className="rounded p-1 text-foreground-disabled hover:bg-error-light hover:text-error">
+                          <Trash2 size={12} />
+                        </button>
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t border-border-light bg-slate-50/50 dark:bg-white/5">
-                    <td className="px-3 py-1.5"><input className={cellInput} type="number" value={newSlab.minAmount} onChange={(e) => setNewSlab((f) => ({ ...f, minAmount: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5"><input className={cellInput} type="number" placeholder="and above" value={newSlab.maxAmount} onChange={(e) => setNewSlab((f) => ({ ...f, maxAmount: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5"><input className={cellInput} type="number" step="0.01" value={newSlab.ratePct} onChange={(e) => setNewSlab((f) => ({ ...f, ratePct: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5"><input className={cellInput} placeholder="e.g. 20%" value={newSlab.rateLabel} onChange={(e) => setNewSlab((f) => ({ ...f, rateLabel: e.target.value }))} /></td>
-                    <td className="px-3 py-1.5 flex items-center gap-1">
-                      <input className={cellInput} placeholder="Display note" value={newSlab.taxFormula} onChange={(e) => setNewSlab((f) => ({ ...f, taxFormula: e.target.value }))} />
-                      <button onClick={addSlab} disabled={savingKey === "new-slab"} className="shrink-0 rounded-md bg-primary p-1.5 text-white hover:bg-primary-hover disabled:opacity-50"><Plus size={12} /></button>
-                    </td>
-                  </tr>
                 </tbody>
               </table>
             </div>
+            <button type="button" onClick={addSlabRow} className="mt-2 flex items-center gap-1 rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-foreground-muted hover:border-primary hover:text-primary">
+              <Plus size={12} /> Add Slab
+            </button>
           </div>
 
           <p className="text-xs text-foreground-disabled">
             These are the canonical, government-mandated values. Organizations read a synced copy — changes here
             take effect the next time an organization's rates are synced from this jurisdiction.
           </p>
+
+          <div className="flex justify-end">
+            <button type="button" onClick={handleDone} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">
+              {saving ? "Saving…" : "Done"}
+            </button>
+          </div>
         </div>
       )
   );
@@ -833,16 +656,23 @@ const NAV_TABS = [
 
 export default function CompliancePage() {
   const { addToast } = useToast() || {};
+  const navigate = useNavigate();
+  const location = useLocation();
+  // Returning from the full-page Policy configuration (PolicyConfigPage.jsx)
+  // remounts this component fresh, since it's a different route — restore
+  // whichever jurisdiction/state/tab the user was on before navigating away
+  // instead of dropping them back to the Overview grid.
+  const returnState = location.state || {};
 
   // null = no jurisdiction picked yet; set = every fetch below scopes to
   // this jurisdiction (+ optional state) — switching either changes the
   // entire configuration context, and nothing from one jurisdiction/state
   // is ever visible under another.
-  const [selectedJurisdiction, setSelectedJurisdiction] = useState(null);
-  const [selectedState, setSelectedState] = useState(""); // "" = country-level
+  const [selectedJurisdiction, setSelectedJurisdiction] = useState(returnState.restoreJurisdiction || null);
+  const [selectedState, setSelectedState] = useState(returnState.restoreState || ""); // "" = country-level
   const [showAddJurisdiction, setShowAddJurisdiction] = useState(false);
 
-  const [tab, setTab] = useState("overview"); // "overview" | "taxes" | "policies" | "orgConfigs"
+  const [tab, setTab] = useState(returnState.tab || "overview"); // "overview" | "taxes" | "policies" | "orgConfigs"
   const [policies, setPolicies] = useState([]);
   const [configurations, setConfigurations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -856,6 +686,8 @@ export default function CompliancePage() {
   const [assignState, setAssignState] = useState(null); // { policy, orgs, assignedOrgIds, saving }
   const [archiving, setArchiving] = useState(null); // the policy/tax pack pending archive confirmation
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [hardDeleting, setHardDeleting] = useState(null); // the (already-Retired) pack pending PERMANENT delete confirmation
+  const [hardDeleteBusy, setHardDeleteBusy] = useState(false);
 
   const countryCode = selectedJurisdiction?.code || "";
   const availableStates = selectedJurisdiction ? getStatesForCountryCode(countryCode) : [];
@@ -893,6 +725,12 @@ export default function CompliancePage() {
     setTab("taxes");
     setSearch("");
     setStatusFilter("");
+  }
+
+  function openPolicyConfigPage(mode, initial) {
+    navigate("/super-admin/compliance/policy/new", {
+      state: { mode, initial, returnTo: { jurisdiction: selectedJurisdiction, state: selectedState } },
+    });
   }
 
   async function openHistory(policy) {
@@ -949,11 +787,12 @@ export default function CompliancePage() {
     }
   }
 
-  // "Delete" here archives (status -> Retired), never a real row deletion —
-  // JurisdictionPack has no delete endpoint at all, by design, since its
-  // version chain and organization assignments are audit history. Retired
-  // packs keep their full history and can be un-retired via the status
-  // dropdown, same as any other status change.
+  // "Delete" here archives (status -> Retired), not a real row deletion —
+  // keeps the pack's full version chain and organization-assignment
+  // history intact, and it can be un-retired via the status dropdown like
+  // any other status change. A genuinely permanent delete is a separate,
+  // stricter action (see handleHardDeleteConfirm below) only offered once
+  // a pack is already Retired.
   async function handleArchiveConfirm() {
     if (!archiving) return;
     setArchiveBusy(true);
@@ -966,6 +805,25 @@ export default function CompliancePage() {
       addToast?.(err.message || "Failed to archive.", "error");
     } finally {
       setArchiveBusy(false);
+    }
+  }
+
+  // Permanent delete — the backend blocks this outright (400) if any
+  // organization is still assigned to the pack or if any payslip anywhere
+  // was ever generated from its rates, so no eligibility pre-check is
+  // done here; the backend's rejection reason is surfaced as-is via toast.
+  async function handleHardDeleteConfirm() {
+    if (!hardDeleting) return;
+    setHardDeleteBusy(true);
+    try {
+      await hardDeleteCompliancePolicy(hardDeleting.id);
+      addToast?.(`${hardDeleting.packId} permanently deleted.`, "success");
+      setPolicies((prev) => prev.filter((p) => p.id !== hardDeleting.id));
+      setHardDeleting(null);
+    } catch (err) {
+      addToast?.(err.message || "Failed to delete.", "error");
+    } finally {
+      setHardDeleteBusy(false);
     }
   }
 
@@ -1084,10 +942,13 @@ export default function CompliancePage() {
         </div>
         {tab !== "orgConfigs" && (
           <button
-            onClick={() => setFormState({
-              mode: "create",
-              initial: emptyForm(countryCode, selectedState, tab === "taxes" ? "tax" : "policy"),
-            })}
+            onClick={() => {
+              if (tab === "taxes") {
+                setFormState({ mode: "create", initial: emptyForm(countryCode, selectedState, "tax") });
+              } else {
+                openPolicyConfigPage("create", emptyForm(countryCode, selectedState, "policy"));
+              }
+            }}
             className="flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-white hover:bg-primary-hover"
           >
             <Plus size={15} /> {tab === "taxes" ? "New Tax" : "New Policy"}
@@ -1137,14 +998,11 @@ export default function CompliancePage() {
                   <td className="px-4 py-3 text-right">
                     <button
                       title="Create a versioned policy from this organization's current setup"
-                      onClick={() => setFormState({
-                        mode: "create",
-                        initial: {
-                          ...emptyForm(c.jurisdictionCountry),
-                          jurisdictionCountry: c.jurisdictionCountry || "IN",
-                          jurisdictionState: c.jurisdictionState || "",
-                          complianceCategory: c.compliancePack || "",
-                        },
+                      onClick={() => openPolicyConfigPage("create", {
+                        ...emptyForm(c.jurisdictionCountry),
+                        jurisdictionCountry: c.jurisdictionCountry || "IN",
+                        jurisdictionState: c.jurisdictionState || "",
+                        complianceCategory: c.compliancePack || "",
                       })}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground-secondary hover:bg-surface-muted"
                     >
@@ -1241,25 +1099,37 @@ export default function CompliancePage() {
                     </button>
                     <button
                       title="Create new version"
-                      onClick={() => setFormState({
-                        mode: "newVersion",
-                        initial: {
+                      onClick={() => {
+                        const newVersionInitial = {
                           ...emptyForm(p.jurisdictionCountry, p.jurisdictionState, p.packType),
                           packId: p.packId, jurisdictionCountry: p.jurisdictionCountry, jurisdictionState: p.jurisdictionState || "",
                           complianceCategory: p.complianceCategory || "", regulatoryAuthority: p.regulatoryAuthority || "",
                           complianceOwner: p.complianceOwner || "", engineeringOwner: p.engineeringOwner || "",
                           policyDefaults: p.policyDefaults || {},
                           version: "", status: "Draft",
-                        },
-                      })}
+                        };
+                        if (tab === "taxes") {
+                          setFormState({ mode: "newVersion", initial: newVersionInitial });
+                        } else {
+                          openPolicyConfigPage("newVersion", newVersionInitial);
+                        }
+                      }}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-surface-muted hover:text-slate-600 dark:hover:text-foreground"
                     >
                       <GitBranch size={15} />
                     </button>
-                    {p.status !== "Retired" && (
+                    {p.status !== "Retired" ? (
                       <button
                         title="Delete (archives — sets status to Retired, keeps full history)"
                         onClick={() => setArchiving(p)}
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    ) : (
+                      <button
+                        title="Delete Permanently — removes this pack and its history for good; blocked if any organization or payslip still references it"
+                        onClick={() => setHardDeleting(p)}
                         className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
                       >
                         <Trash2 size={15} />
@@ -1286,11 +1156,24 @@ export default function CompliancePage() {
       )}
 
       {formState && (
-        <PolicyFormModal
+        <TaxFormModal
           mode={formState.mode}
           initial={formState.initial}
           onClose={() => setFormState(null)}
-          onSaved={() => { setFormState(null); load(); }}
+          onSaved={(saved) => {
+            setFormState(null);
+            if (!saved) return;
+            // Splice the created/updated pack directly into local state
+            // instead of re-fetching the whole tab's list from the server —
+            // a single-row change doesn't need a full-list round trip.
+            setPolicies((prev) => {
+              const idx = prev.findIndex((p) => p.id === saved.id);
+              if (idx === -1) return [saved, ...prev];
+              const next = [...prev];
+              next[idx] = saved;
+              return next;
+            });
+          }}
         />
       )}
       {historyState && (
@@ -1323,6 +1206,20 @@ export default function CompliancePage() {
           busy={archiveBusy}
           onConfirm={handleArchiveConfirm}
           onClose={() => setArchiving(null)}
+        />
+      )}
+      {hardDeleting && (
+        <ConfirmDialog
+          title={`Delete Permanently — ${hardDeleting.packId}`}
+          message={
+            `This permanently and irreversibly deletes "${hardDeleting.packId}" (v${hardDeleting.version}), its rates/slabs, ` +
+            `and its full audit trail — this cannot be undone. It will be rejected if any organization is still assigned ` +
+            `to it or if any payslip anywhere was ever generated using its rates.`
+          }
+          confirmLabel="Delete Permanently"
+          busy={hardDeleteBusy}
+          onConfirm={handleHardDeleteConfirm}
+          onClose={() => setHardDeleting(null)}
         />
       )}
     </div>

@@ -214,6 +214,65 @@ def test_canada_cpp_and_ei():
     assert result.employee_esi > 0
 
 
+# ── Australia / Germany / Canada named scalar parameters ────────────────
+# Fallback-default thresholds (no override rows): AU medicare_levy_low_
+# income_threshold=24276, mls_threshold=97000/mls_rate=1.0%,
+# super_max_contribution_base=260280; DE contribution_ceiling=96600;
+# CA cpp_ympe=71300/cpp_basic_exemption=3500/ei_mie=65700. Flat 10% slab
+# used throughout so income-tax math never obscures the contribution
+# assertions being tested.
+
+_FLAT_10_SLAB = [Slab(Decimal("0"), None, Decimal("10"))]
+
+
+def test_australia_medicare_levy_exempt_below_low_income_threshold():
+    rates = {"medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00"))}
+    result = calc("AU", 1500, rates, _FLAT_10_SLAB)  # annual 18,000 < 24,276 threshold
+    assert result.medicare == 0
+
+
+def test_australia_medicare_levy_applies_above_low_income_threshold():
+    rates = {"medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00"))}
+    result = calc("AU", 2100, rates, _FLAT_10_SLAB)  # annual 25,200 > 24,276 threshold
+    assert result.medicare == Decimal("42.00")  # 2100 * 2%
+
+
+def test_australia_medicare_levy_surcharge_above_mls_threshold():
+    rates = {"medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00"))}
+    result = calc("AU", 10000, rates, _FLAT_10_SLAB)  # annual 120,000 > 97,000 MLS threshold
+    # base levy 10000*2% = 200.00, + MLS 1% of annual/12 = 100.00
+    assert result.medicare == Decimal("300.00")
+
+
+def test_australia_super_guarantee_capped_at_max_contribution_base():
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 30000, rates, _FLAT_10_SLAB)  # annual 360,000 > 260,280 cap
+    uncapped = Decimal("30000") * Decimal("11.50") / 100
+    assert result.employer_pension < uncapped
+    assert result.employer_pension == Decimal("2494.35")  # (260280 * 11.5% ) / 12
+
+
+def test_germany_contributions_capped_at_contribution_ceiling():
+    rates = {"pension": Rate("pension", employee_rate_pct=Decimal("9.30"), employer_rate_pct=Decimal("9.30"))}
+    result = calc("DE", 10000, rates, _FLAT_10_SLAB)  # annual 120,000 > 96,600 ceiling
+    uncapped = Decimal("10000") * Decimal("9.30") / 100
+    assert result.employee_pf < uncapped
+    assert result.employee_pf == Decimal("748.65")  # (96600 * 9.3%) / 12
+
+
+def test_canada_cpp_exempts_basic_amount_and_caps_at_ympe_ei_caps_separately():
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "ei": Rate("ei", employee_rate_pct=Decimal("1.66"), employer_rate_pct=Decimal("2.32")),
+    }
+    result = calc("CA", 7000, rates, _FLAT_10_SLAB)  # annual 84,000 > both YMPE (71,300) and MIE (65,700)
+    # CPP pensionable = min(84000, 71300) - 3500 = 67800 -> (67800*5.95%)/12
+    assert result.social_security == Decimal("336.18")
+    # EI insurable = min(84000, 65700) = 65700 -> (65700*1.66%)/12 — capped
+    # independently of CPP's own (lower) cap.
+    assert result.employee_esi == Decimal("90.89")
+
+
 def test_unknown_country_falls_back_to_generic():
     slabs = [Slab(Decimal("0"), None, Decimal("10"))]
     result = calc("ZZ", 1000, {}, slabs)
@@ -226,7 +285,16 @@ def test_unknown_country_falls_back_to_generic():
 def test_formula_rule_overrides_bracket_loop():
     slabs = [Slab(rule_type="FORMULA", formula_expression="income * 0.2")]
     result = calc("DE", 10000, {}, slabs)
-    assert result.tds == pytest.approx(Decimal("2000.00"), abs=Decimal("0.01"))  # (120000*0.2)/12
+    # DE income tax now goes through _calculate_annual_tax_de, which
+    # subtracts the Grundfreibetrag (11,784) before the formula runs, then
+    # adds the Solidarity Surcharge (5.5%) since the resulting tax exceeds
+    # the Soli threshold (18,130) — both use fallback defaults here since
+    # no override rows were given (rate_map={}):
+    #   taxable = 120000 - 11784 = 108216
+    #   formula tax = 108216 * 0.2 = 21643.20
+    #   + Soli (21643.20 > 18130 threshold, so +5.5%) = 22833.576
+    #   tds = 22833.576 / 12 = 1902.80
+    assert result.tds == pytest.approx(Decimal("1902.80"), abs=Decimal("0.01"))
 
 
 def test_evaluate_tax_formula_supports_min_max_and_arithmetic():

@@ -59,6 +59,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const earningsRows = [
     { label: "Basic Pay", amount: payslip.basicPay },
     { label: "HRA", amount: payslip.hra },
+    ...(payslip.allowanceItems || []).map((a) => ({ label: a.label, amount: a.amount })),
     { label: "Special Allowance", amount: payslip.specialAllowance },
     { label: "Overtime", amount: payslip.overtime || 0 },
     { label: "Additional Compensation", amount: payslip.additionalCompensation || 0 },

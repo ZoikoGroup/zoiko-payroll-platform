@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Settings, ChevronDown, Users, Plug, CalendarClock, Lock } from "lucide-react";
+import { Settings, ChevronDown, Users, Plug, CalendarClock, Lock, Info } from "lucide-react";
 import { useToast } from "../ToastContext";
 import EnterpriseConfirmModal from "./EnterpriseConfirmModal";
 import PayrollEmailSettingsPanel from "./PayrollEmailSettingsPanel";
@@ -177,6 +177,18 @@ function LockNote({ lock, formatValue }) {
   );
 }
 
+// Shows that a field's current value was inherited from the Super Admin's
+// master configuration. The Org Admin can overwrite it — this is purely
+// informational so they know where the default came from.
+function InheritedDefaultsNote({ hasLock }) {
+  if (hasLock) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-foreground-muted" title="Inherited from Super Admin configuration — you can overwrite this value">
+      <Info size={11} /> Inherited
+    </span>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────
 
 export default function PayrollPolicyPage() {
@@ -338,8 +350,12 @@ export default function PayrollPolicyPage() {
       {/* General */}
       {activeTab === 0 && (
         <Card className="space-y-5 max-w-2xl">
+          <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 text-[12px] text-foreground-muted flex items-center gap-2">
+            <Info size={14} className="text-info shrink-0" />
+            <span>Values below are inherited from the <strong>Super Admin's</strong> master configuration. You can overwrite any unlocked field — changes apply only to your organization.</span>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Policy Name">
+            <Field label={<span className="flex items-center gap-1">Policy Name <InheritedDefaultsNote /></span>}>
               <input
                 className={inputClass}
                 defaultValue={policy.name}
@@ -434,7 +450,7 @@ export default function PayrollPolicyPage() {
               </span>
             </div>
             <p className="text-[11px] text-foreground-muted mb-2">
-              Percentage of monthly gross paid as Basic and HRA for employees without their own explicit
+              Default percentages inherited from the <strong>Super Admin's</strong> configuration. Percentage of monthly gross paid as Basic and HRA for employees without their own explicit
               amounts set — Special Allowance is always whatever's left of gross.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -443,7 +459,7 @@ export default function PayrollPolicyPage() {
                 const hraLock = getLock(policy.policyLocks, ["hra_pct"]);
                 return (
                   <>
-                    <Field label={<span className="flex items-center gap-1">Basic % of Gross <LockNote lock={basicLock} formatValue={(v) => `${v}%`} /></span>}>
+                    <Field label={<span className="flex items-center gap-1">Basic % of Gross <LockNote lock={basicLock} formatValue={(v) => `${v}%`} /><InheritedDefaultsNote hasLock={!!basicLock} /></span>}>
                       <input
                         type="number" step="0.01" className={inputClass}
                         defaultValue={policy.basicPct}
@@ -456,7 +472,7 @@ export default function PayrollPolicyPage() {
                         }}
                       />
                     </Field>
-                    <Field label={<span className="flex items-center gap-1">HRA % of Gross <LockNote lock={hraLock} formatValue={(v) => `${v}%`} /></span>}>
+                    <Field label={<span className="flex items-center gap-1">HRA % of Gross <LockNote lock={hraLock} formatValue={(v) => `${v}%`} /><InheritedDefaultsNote hasLock={!!hraLock} /></span>}>
                       <input
                         type="number" step="0.01" className={inputClass}
                         defaultValue={policy.hraPct}
@@ -473,6 +489,67 @@ export default function PayrollPolicyPage() {
                 );
               })()}
             </div>
+          </div>
+
+          <div className="mt-5">
+            <span className="block text-[12px] font-semibold text-foreground-muted mb-2">
+              Special Allowance
+            </span>
+            <p className="text-[11px] text-foreground-muted mb-2">
+              Special Allowance is always whatever's left of gross after Basic, HRA, and any named components below.
+              Components are defined by your <strong>Super Admin</strong> — you can adjust the value where override is allowed.
+            </p>
+            {policy.allowanceComponents.length === 0 ? (
+              <p className="text-[11px] text-foreground-disabled italic">No named allowance components configured.</p>
+            ) : (
+              <div className="space-y-2">
+                {policy.allowanceComponents.map((comp) => {
+                  const lock = getLock(policy.policyLocks, ["allowance_components", comp.key]);
+                  const formatComp = (v) => (v?.pct != null ? `${v.pct}% of gross` : v?.flat_amount != null ? `flat ${v.flat_amount}` : "fixed");
+                  return (
+                    <Field
+                      key={comp.key}
+                      label={<span className="flex items-center gap-1">{comp.label} <LockNote lock={lock} formatValue={formatComp} /><InheritedDefaultsNote hasLock={!!lock} /></span>}
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" step="0.01" className={inputClass}
+                          defaultValue={comp.pct ?? ""}
+                          disabled={!!lock}
+                          placeholder="% of gross"
+                          onBlur={(e) => {
+                            const value = e.target.value;
+                            const pct = value === "" ? null : Number(value);
+                            if (pct === (comp.pct != null ? Number(comp.pct) : null)) return;
+                            handleSaveGeneral({
+                              allowanceComponents: policy.allowanceComponents.map((c) =>
+                                c.key === comp.key ? { ...c, pct, flatAmount: pct != null ? null : c.flatAmount } : c
+                              ),
+                            });
+                          }}
+                        />
+                        <input
+                          type="number" step="0.01" className={inputClass}
+                          defaultValue={comp.flatAmount ?? ""}
+                          disabled={!!lock}
+                          placeholder="Flat amount"
+                          onBlur={(e) => {
+                            const value = e.target.value;
+                            const flatAmount = value === "" ? null : Number(value);
+                            if (flatAmount === (comp.flatAmount != null ? Number(comp.flatAmount) : null)) return;
+                            handleSaveGeneral({
+                              allowanceComponents: policy.allowanceComponents.map((c) =>
+                                c.key === comp.key ? { ...c, flatAmount, pct: flatAmount != null ? null : c.pct } : c
+                              ),
+                            });
+                          }}
+                        />
+                      </div>
+                    </Field>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </Card>
       )}

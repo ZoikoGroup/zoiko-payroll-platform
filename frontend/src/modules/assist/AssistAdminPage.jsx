@@ -32,10 +32,10 @@ const ALLOWED_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER
 
 function Card({ title, value, sub, accent }) {
   return (
-    <div className="rounded-[16px] border border-[#E5E0D9] bg-white p-4">
-      <p className="text-[11px] font-semibold text-[#9E9690]">{title}</p>
-      <p className={`mt-1 text-[22px] font-extrabold ${accent || "text-[#1A1816]"}`}>{value}</p>
-      {sub ? <p className="mt-1 text-[10px] text-[#B5ADA4]">{sub}</p> : null}
+    <div className="rounded-[16px] border border-border bg-white p-4">
+      <p className="text-[11px] font-semibold text-foreground-muted">{title}</p>
+      <p className={`mt-1 text-[22px] font-extrabold ${accent || "text-foreground"}`}>{value}</p>
+      {sub ? <p className="mt-1 text-[10px] text-foreground-disabled">{sub}</p> : null}
     </div>
   );
 }
@@ -48,13 +48,13 @@ function JsonExpandable({ label, value }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0592D3]"
+        className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary"
       >
         <ChevronDown size={11} className={`transition-transform ${open ? "rotate-180" : ""}`} />
         {label}
       </button>
       {open ? (
-        <pre className="mt-1 max-h-40 overflow-auto rounded-[10px] bg-[#F8F7F4] px-2.5 py-2 text-[10px] leading-relaxed text-[#5C5651]">
+        <pre className="mt-1 max-h-40 overflow-auto rounded-[10px] bg-background px-2.5 py-2 text-[10px] leading-relaxed text-foreground-muted">
           {JSON.stringify(value, null, 2)}
         </pre>
       ) : null}
@@ -65,12 +65,12 @@ function JsonExpandable({ label, value }) {
 function StatusPill({ value }) {
   const tone =
     value === "COMPLETED" || value === "ACTIVE"
-      ? "bg-[#19C58A]/10 text-[#15B07A]"
+      ? "bg-primary/10 text-primary-hover"
       : value === "REFUSED" || value === "FAILED"
-        ? "bg-[#FF6E86]/10 text-[#E4506A]"
+        ? "bg-error/10 text-error"
         : value === "ARCHIVED"
-          ? "bg-[#F0EDE8] text-[#9E9690]"
-          : "bg-[#FFF1E3] text-[#F89B36]";
+          ? "bg-background-secondary text-foreground-muted"
+          : "bg-warning-light text-warning";
   return <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${tone}`}>{value}</span>;
 }
 
@@ -79,7 +79,7 @@ const CONTENT_TYPES = ["HOW_TO", "FAQ", "POLICY", "GUIDE", "REFERENCE"];
 const AUTHORITIES = ["TIER_1_STATUTE", "TIER_2_APPROVED_PRIMARY", "TIER_3_APPROVED_SECONDARY", "TIER_4_TENANT"];
 
 const inputCls =
-  "w-full rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-2 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]";
+  "w-full rounded-[10px] border border-border bg-white px-2.5 py-2 text-[12px] text-foreground outline-none focus:border-primary";
 
 function KbItemRow({ item, onEdit, onPublish, savingId }) {
   const [editing, setEditing] = useState(false);
@@ -87,7 +87,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
 
   if (editing) {
     return (
-      <div className="border-b border-[#F8F7F4] bg-[#FCFBF9] px-4 py-3">
+      <div className="border-b border-border-light bg-background-secondary px-4 py-3">
         <input
           className={inputCls}
           value={form.title}
@@ -116,7 +116,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
               await onEdit(item.id, form);
               setEditing(false);
             }}
-            className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#0592D3] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-[#04628C] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-[10px] bg-primary px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-primary-hover disabled:opacity-60"
           >
             {savingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
             Save
@@ -124,7 +124,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
           <button
             type="button"
             onClick={() => setEditing(false)}
-            className="rounded-[10px] border border-[#E5E0D9] px-3 py-1.5 text-[11px] font-bold text-[#6B6560]"
+            className="rounded-[10px] border border-border px-3 py-1.5 text-[11px] font-bold text-foreground-muted"
           >
             Cancel
           </button>
@@ -134,16 +134,16 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
   }
 
   return (
-    <div className="border-b border-[#F8F7F4] px-4 py-3">
+    <div className="border-b border-border-light px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-[13px] font-bold text-[#2A2520]">{item.title}</p>
+            <p className="text-[13px] font-bold text-foreground">{item.title}</p>
             <StatusPill value={item.state} />
-            {item.version > 1 ? <span className="rounded-full bg-[#F0EDE8] px-2 py-0.5 text-[9px] font-bold text-[#9E9690]">v{item.version}</span> : null}
+            {item.version > 1 ? <span className="rounded-full bg-background-secondary px-2 py-0.5 text-[9px] font-bold text-foreground-muted">v{item.version}</span> : null}
           </div>
-          <p className="mt-1 text-[11px] text-[#6B6560]">{item.summary || item.body?.slice(0, 120) || "—"}</p>
-          <p className="mt-1 text-[10px] text-[#9E9690]">
+          <p className="mt-1 text-[11px] text-foreground-muted">{item.summary || item.body?.slice(0, 120) || "—"}</p>
+          <p className="mt-1 text-[10px] text-foreground-muted">
             {item.content_type} · {item.authority.replaceAll("_", " ")} · #{(item.id)}
             {item.next_review_at ? ` · review ${item.next_review_at}` : ""}
           </p>
@@ -153,7 +153,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1 rounded-[8px] border border-[#E5E0D9] px-2 py-1 text-[10px] font-bold text-[#6B6560] hover:border-[#0592D3] hover:text-[#0592D3]"
+              className="inline-flex items-center gap-1 rounded-[8px] border border-border px-2 py-1 text-[10px] font-bold text-foreground-muted hover:border-primary hover:text-primary"
             >
               <Pencil size={10} /> Edit
             </button>
@@ -163,7 +163,7 @@ function KbItemRow({ item, onEdit, onPublish, savingId }) {
               type="button"
               disabled={savingId === item.id}
               onClick={() => onPublish(item.id)}
-              className="inline-flex items-center gap-1 rounded-[8px] bg-[#0592D3] px-2 py-1 text-[10px] font-bold text-white transition hover:bg-[#04628C] disabled:opacity-60"
+              className="inline-flex items-center gap-1 rounded-[8px] bg-primary px-2 py-1 text-[10px] font-bold text-white transition hover:bg-primary-hover disabled:opacity-60"
             >
               {savingId === item.id ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
               Publish
@@ -239,14 +239,14 @@ function KnowledgePanel({ allowed }) {
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="rounded-[16px] border border-[#E5E0D9] bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0EDE8] px-4 py-3">
+      <div className="rounded-[16px] border border-border bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-light px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-[11px] font-bold text-[#9E9690]">State</label>
+            <label className="text-[11px] font-bold text-foreground-muted">State</label>
             <select
               value={state}
               onChange={(e) => setState(e.target.value)}
-              className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+              className="rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             >
               {KB_STATES.map((s) => (
                 <option key={s} value={s}>
@@ -258,7 +258,7 @@ function KnowledgePanel({ allowed }) {
               <button
                 type="button"
                 onClick={() => setState("")}
-                className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[11px] font-semibold text-[#E4506A] hover:bg-[#FFEAEF]"
+                className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[11px] font-semibold text-error hover:bg-error-light"
               >
                 <X size={11} /> Clear
               </button>
@@ -267,14 +267,14 @@ function KnowledgePanel({ allowed }) {
           <button
             type="button"
             onClick={() => setShowCreate((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E5E0D9] bg-white px-3 py-1.5 text-[11px] font-bold text-[#0592D3] hover:border-[#0592D3]"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-white px-3 py-1.5 text-[11px] font-bold text-primary hover:border-primary"
           >
             <Plus size={12} /> New knowledge item
           </button>
         </div>
 
         {showCreate ? (
-          <div className="border-b border-[#F0EDE8] bg-[#FCFBF9] px-4 py-3">
+          <div className="border-b border-border-light bg-background-secondary px-4 py-3">
             <div className="grid gap-2">
               <input
                 className={inputCls}
@@ -325,7 +325,7 @@ function KnowledgePanel({ allowed }) {
                   type="button"
                   disabled={savingId === "create"}
                   onClick={handleCreate}
-                  className="inline-flex items-center gap-1.5 rounded-[10px] bg-[#0592D3] px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-[#04628C] disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 rounded-[10px] bg-primary px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-primary-hover disabled:opacity-60"
                 >
                   {savingId === "create" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
                   Create draft
@@ -333,7 +333,7 @@ function KnowledgePanel({ allowed }) {
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}
-                  className="rounded-[10px] border border-[#E5E0D9] px-3 py-1.5 text-[11px] font-bold text-[#6B6560]"
+                  className="rounded-[10px] border border-border px-3 py-1.5 text-[11px] font-bold text-foreground-muted"
                 >
                   Cancel
                 </button>
@@ -344,10 +344,10 @@ function KnowledgePanel({ allowed }) {
 
         {items === null ? (
           <div className="flex items-center justify-center p-10">
-            <Loader2 size={18} className="animate-spin text-[#0592D3]" />
+            <Loader2 size={18} className="animate-spin text-primary" />
           </div>
         ) : items.length === 0 ? (
-          <p className="p-8 text-center text-[12px] text-[#9E9690]">No knowledge items match.</p>
+          <p className="p-8 text-center text-[12px] text-foreground-muted">No knowledge items match.</p>
         ) : (
           <div className="max-h-[560px] overflow-y-auto">
             {items.map((it) => (
@@ -358,19 +358,19 @@ function KnowledgePanel({ allowed }) {
       </div>
 
       {/* Sources */}
-      <div className="rounded-[16px] border border-[#E5E0D9] bg-white">
-        <p className="border-b border-[#F0EDE8] px-4 py-3 text-[12px] font-bold text-[#2A2520]">
+      <div className="rounded-[16px] border border-border bg-white">
+        <p className="border-b border-border-light px-4 py-3 text-[12px] font-bold text-foreground">
           Knowledge sources ({sources.length})
         </p>
         {sources.length === 0 ? (
-          <p className="p-6 text-center text-[12px] text-[#9E9690]">No sources registered.</p>
+          <p className="p-6 text-center text-[12px] text-foreground-muted">No sources registered.</p>
         ) : (
           <div className="max-h-[240px] overflow-y-auto">
             {sources.map((s) => (
-              <div key={s.id} className="flex items-start justify-between gap-3 border-b border-[#F8F7F4] px-4 py-2.5">
+              <div key={s.id} className="flex items-start justify-between gap-3 border-b border-border-light px-4 py-2.5">
                 <div className="min-w-0">
-                  <p className="text-[12px] font-bold text-[#2A2520]">{s.name}</p>
-                  <p className="text-[10px] text-[#9E9690]">
+                  <p className="text-[12px] font-bold text-foreground">{s.name}</p>
+                  <p className="text-[10px] text-foreground-muted">
                     {s.source_type || "source"} · {s.authority_tier.replaceAll("_", " ")}
                   </p>
                 </div>
@@ -450,10 +450,10 @@ export default function AssistAdminPage() {
   if (!allowed) {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">
-        <div className="max-w-md rounded-[20px] border border-[#FFE0E6] bg-[#FFF3F5] px-8 py-10 text-center">
-          <ShieldCheck className="mx-auto h-10 w-10 text-[#E4506A]" />
-          <h1 className="mt-4 text-[18px] font-bold text-[#1A1816]">Restricted area</h1>
-          <p className="mt-2 text-[13px] text-[#6B6560]">
+        <div className="max-w-md rounded-[20px] border border-error/30 bg-error-light px-8 py-10 text-center">
+          <ShieldCheck className="mx-auto h-10 w-10 text-error" />
+          <h1 className="mt-4 text-[18px] font-bold text-foreground">Restricted area</h1>
+          <p className="mt-2 text-[13px] text-foreground-muted">
             Assist audit and retention administration requires org admin or payroll admin privileges.
           </p>
         </div>
@@ -465,16 +465,16 @@ export default function AssistAdminPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.2em] text-[#0592D3]">
+          <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.2em] text-primary">
             <ShieldCheck size={14} /> Zoiko Payroll Assist
           </p>
-          <h1 className="mt-1 text-[24px] font-extrabold text-[#1A1816]">Assist Governance</h1>
+          <h1 className="mt-1 text-[24px] font-extrabold text-foreground">Assist Governance</h1>
         </div>
         <button
           type="button"
           onClick={loadAll}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E0D9] bg-white px-3 py-2 text-[12px] font-bold text-[#6B6560] transition hover:border-[#0592D3] hover:text-[#0592D3] disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[12px] border border-border bg-white px-3 py-2 text-[12px] font-bold text-foreground-muted transition hover:border-primary hover:text-primary disabled:opacity-60"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           Refresh
@@ -484,12 +484,12 @@ export default function AssistAdminPage() {
       {/* Retention summary */}
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card title="Total sessions" value={summary?.total_sessions ?? "—"} />
-        <Card title="Archived" value={summary?.status_counts?.ARCHIVED ?? "—"} accent="text-[#9E9690]" />
-        <Card title="Expired (retention)" value={summary?.expired_sessions ?? "—"} accent="text-[#F89B36]" />
+        <Card title="Archived" value={summary?.status_counts?.ARCHIVED ?? "—"} accent="text-foreground-muted" />
+        <Card title="Expired (retention)" value={summary?.expired_sessions ?? "—"} accent="text-warning" />
         <Card
           title="Retention policy"
           value={summary?.retention_policy ? summary.retention_policy.replaceAll("_", " ") : "—"}
-          accent="text-[#0592D3]"
+          accent="text-primary"
           sub="classification-based retention window"
         />
       </div>
@@ -499,18 +499,18 @@ export default function AssistAdminPage() {
           type="button"
           disabled={runningRetention}
           onClick={runRetention}
-          className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#F89B36] bg-[#FFF6EA] px-3 py-1.5 text-[11px] font-bold text-[#C77912] transition hover:bg-[#FFEDD4] disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-warning bg-warning-light px-3 py-1.5 text-[11px] font-bold text-warning transition hover:bg-warning-light disabled:opacity-60"
         >
           {runningRetention ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
           Run retention cleanup
         </button>
-        <span className="text-[11px] text-[#9E9690]">Archives sessions past their retention window (audited).</span>
+        <span className="text-[11px] text-foreground-muted">Archives sessions past their retention window (audited).</span>
       </div>
 
       {summary?.retention_class_counts ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {Object.entries(summary.retention_class_counts).map(([cls, count]) => (
-            <span key={cls} className="rounded-full bg-[#F8F7F4] px-2.5 py-1 text-[10px] font-semibold text-[#6B6560]">
+            <span key={cls} className="rounded-full bg-background px-2.5 py-1 text-[10px] font-semibold text-foreground-muted">
               {cls.replaceAll("_", " ")} · {count}
             </span>
           ))}
@@ -518,7 +518,7 @@ export default function AssistAdminPage() {
       ) : null}
 
       {/* Tabs */}
-      <div className="mt-6 flex border-b border-[#E5E0D9]">
+      <div className="mt-6 flex border-b border-border">
         {[
           { id: "audit", label: "Audit events", icon: FileSearch },
           { id: "sessions", label: "Sessions", icon: ShieldCheck },
@@ -531,7 +531,7 @@ export default function AssistAdminPage() {
               type="button"
               onClick={() => setTab(tb.id)}
               className={`flex items-center gap-1.5 rounded-t-[10px] px-4 py-2.5 text-[12px] font-bold transition ${
-                tab === tb.id ? "border-b-2 border-[#0592D3] text-[#0592D3]" : "text-[#9E9690] hover:text-[#6B6560]"
+                tab === tb.id ? "border-b-2 border-primary text-primary" : "text-foreground-muted hover:text-foreground-muted"
               }`}
             >
               <Icon size={13} /> {tb.label}
@@ -542,13 +542,13 @@ export default function AssistAdminPage() {
 
       {/* Audit events */}
       {tab === "audit" ? (
-        <div className="mt-4 rounded-[16px] border border-[#E5E0D9] bg-white">
-          <div className="flex flex-wrap items-center gap-2 border-b border-[#F0EDE8] px-4 py-3">
-            <label className="text-[11px] font-bold text-[#9E9690]">Event type</label>
+        <div className="mt-4 rounded-[16px] border border-border bg-white">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-3">
+            <label className="text-[11px] font-bold text-foreground-muted">Event type</label>
             <select
               value={eventType}
               onChange={(e) => setEventType(e.target.value)}
-              className="rounded-[10px] border border-[#E5E0D9] bg-white px-2.5 py-1.5 text-[12px] text-[#2A2520] outline-none focus:border-[#0592D3]"
+              className="rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             >
               <option value="">All</option>
               {eventTypes.map((et) => (
@@ -561,7 +561,7 @@ export default function AssistAdminPage() {
               <button
                 type="button"
                 onClick={() => setEventType("")}
-                className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[11px] font-semibold text-[#E4506A] hover:bg-[#FFEAEF]"
+                className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[11px] font-semibold text-error hover:bg-error-light"
               >
                 <X size={11} /> Clear
               </button>
@@ -569,15 +569,15 @@ export default function AssistAdminPage() {
           </div>
           {events === null ? (
             <div className="flex items-center justify-center p-10">
-              <Loader2 size={18} className="animate-spin text-[#0592D3]" />
+              <Loader2 size={18} className="animate-spin text-primary" />
             </div>
           ) : events.length === 0 ? (
-            <p className="p-8 text-center text-[12px] text-[#9E9690]">No audit events match.</p>
+            <p className="p-8 text-center text-[12px] text-foreground-muted">No audit events match.</p>
           ) : (
             <div className="max-h-[560px] overflow-y-auto">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-white">
-                  <tr className="border-b border-[#F0EDE8] text-[10px] uppercase tracking-wide text-[#9E9690]">
+                  <tr className="border-b border-border-light text-[10px] uppercase tracking-wide text-foreground-muted">
                     <th className="px-4 py-2.5 font-bold">Event</th>
                     <th className="px-3 py-2.5 font-bold">Session</th>
                     <th className="px-3 py-2.5 font-bold">User</th>
@@ -587,14 +587,14 @@ export default function AssistAdminPage() {
                 </thead>
                 <tbody>
                   {events.map((e) => (
-                    <tr key={e.id} className="border-b border-[#F8F7F4] align-top hover:bg-[#FCFBF9]">
+                    <tr key={e.id} className="border-b border-border-light align-top hover:bg-background-secondary">
                       <td className="px-4 py-3">
-                        <p className="text-[12px] font-bold text-[#2A2520]">{e.event_type}</p>
-                        <p className="text-[10px] text-[#9E9690]">#{e.id}</p>
+                        <p className="text-[12px] font-bold text-foreground">{e.event_type}</p>
+                        <p className="text-[10px] text-foreground-muted">#{e.id}</p>
                       </td>
-                      <td className="px-3 py-3 text-[11px] text-[#6B6560]">{e.session_id ?? "—"}</td>
-                      <td className="px-3 py-3 text-[11px] text-[#6B6560]">{e.user_id ?? "—"}</td>
-                      <td className="px-3 py-3 text-[11px] text-[#6B6560]">{formatAssistDate(e.recorded_at)}</td>
+                      <td className="px-3 py-3 text-[11px] text-foreground-muted">{e.session_id ?? "—"}</td>
+                      <td className="px-3 py-3 text-[11px] text-foreground-muted">{e.user_id ?? "—"}</td>
+                      <td className="px-3 py-3 text-[11px] text-foreground-muted">{formatAssistDate(e.recorded_at)}</td>
                       <td className="px-4 py-3">
                         <JsonExpandable label={`payload (${Object.keys(e.payload || {}).length})`} value={e.payload} />
                       </td>
@@ -609,18 +609,18 @@ export default function AssistAdminPage() {
 
       {/* Sessions */}
       {tab === "sessions" ? (
-        <div className="mt-4 rounded-[16px] border border-[#E5E0D9] bg-white">
+        <div className="mt-4 rounded-[16px] border border-border bg-white">
           {sessions === null ? (
             <div className="flex items-center justify-center p-10">
-              <Loader2 size={18} className="animate-spin text-[#0592D3]" />
+              <Loader2 size={18} className="animate-spin text-primary" />
             </div>
           ) : sessions.length === 0 ? (
-            <p className="p-8 text-center text-[12px] text-[#9E9690]">No sessions found.</p>
+            <p className="p-8 text-center text-[12px] text-foreground-muted">No sessions found.</p>
           ) : (
             <div className="max-h-[560px] overflow-y-auto">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-white">
-                  <tr className="border-b border-[#F0EDE8] text-[10px] uppercase tracking-wide text-[#9E9690]">
+                  <tr className="border-b border-border-light text-[10px] uppercase tracking-wide text-foreground-muted">
                     <th className="px-4 py-2.5 font-bold">Session</th>
                     <th className="px-3 py-2.5 font-bold">State</th>
                     <th className="px-3 py-2.5 font-bold">Channel</th>
@@ -630,17 +630,17 @@ export default function AssistAdminPage() {
                 </thead>
                 <tbody>
                   {sessions.map((s) => (
-                    <tr key={s.id} className="border-b border-[#F8F7F4] hover:bg-[#FCFBF9]">
+                    <tr key={s.id} className="border-b border-border-light hover:bg-background-secondary">
                       <td className="px-4 py-3">
-                        <p className="text-[12px] font-bold text-[#2A2520]">{s.title || `Session #${s.id}`}</p>
-                        <p className="text-[10px] text-[#9E9690]">org #{s.organization_id ?? "—"}</p>
+                        <p className="text-[12px] font-bold text-foreground">{s.title || `Session #${s.id}`}</p>
+                        <p className="text-[10px] text-foreground-muted">org #{s.organization_id ?? "—"}</p>
                       </td>
                       <td className="px-3 py-3">
                         <StatusPill value={s.status} />
                       </td>
-                      <td className="px-3 py-3 text-[11px] text-[#6B6560]">{s.channel || "WEB"}</td>
-                      <td className="px-3 py-3 text-[11px] text-[#6B6560]">{s.locale || "en"}</td>
-                      <td className="px-4 py-3 text-[11px] text-[#6B6560]">{formatAssistDate(s.created_at)}</td>
+                      <td className="px-3 py-3 text-[11px] text-foreground-muted">{s.channel || "WEB"}</td>
+                      <td className="px-3 py-3 text-[11px] text-foreground-muted">{s.locale || "en"}</td>
+                      <td className="px-4 py-3 text-[11px] text-foreground-muted">{formatAssistDate(s.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -286,6 +286,15 @@ def get_my_organization_detail(
         .count()
     )
 
+    # Derive currency: explicit override on the org row takes precedence,
+    # otherwise fall back to the jurisdiction's default currency.
+    org_currency = org.currency
+    if not org_currency and org.country:
+        from app.core.jurisdiction import get_jurisdiction_code
+        from app.modules.payroll.service import get_currency_for_jurisdiction
+        jurisdiction_code = get_jurisdiction_code(org.country)
+        org_currency = get_currency_for_jurisdiction(jurisdiction_code) or "USD"
+
     return OrganizationDetail(
         id=org.id,
         name=org.organization_name,
@@ -307,6 +316,7 @@ def get_my_organization_detail(
         total_employees=total_employees,
         active_employees=active_employees,
         hr_admins=hr_admins,
+        currency=org_currency or "USD",
     )
 
 

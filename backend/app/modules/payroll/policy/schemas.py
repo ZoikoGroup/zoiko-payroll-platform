@@ -35,6 +35,25 @@ class EmployeeCategoryResponse(EmployeeCategoryBase):
     id: int
 
 
+# ── Allowance Component (dynamic, Super-Admin-defined) ────────────────────
+
+class AllowanceComponentBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: Optional[int] = Field(None, exclude=True)
+    key: str = Field(..., alias="key")
+    label: str = Field(..., alias="label")
+    pct: Optional[Decimal] = Field(None, alias="pct")
+    flat_amount: Optional[Decimal] = Field(None, alias="flatAmount")
+    allow_override: bool = Field(True, alias="allowOverride")
+    sort_order: int = Field(0, alias="sortOrder")
+
+
+class AllowanceComponentResponse(AllowanceComponentBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    id: int
+
+
 # ── Leave Rule ────────────────────────────────────────────────────────────
 
 class LeaveRuleResponse(BaseModel):
@@ -93,6 +112,7 @@ class PayrollPolicyResponse(BaseModel):
     leave_rules: List[LeaveRuleResponse] = Field(default_factory=list, alias="leaveRules")
     overtime_rule: Optional[OvertimeRuleResponse] = Field(None, alias="overtimeRule")
     integrations: List[IntegrationResponse] = Field(default_factory=list)
+    allowance_components: List[AllowanceComponentResponse] = Field(default_factory=list, alias="allowanceComponents")
 
     # The org's assigned compliance pack's policy_defaults (see
     # JurisdictionPack.policy_defaults) — {} when no pack is assigned or
@@ -123,6 +143,7 @@ class PayrollPolicyUpdate(BaseModel):
     bank_export_format: Optional[str] = Field(None, alias="bankExportFormat")
     employee_categories: Optional[List[EmployeeCategoryBase]] = Field(None, alias="employeeCategories")
     overtime_rule: Optional[OvertimeRuleUpdate] = Field(None, alias="overtimeRule")
+    allowance_components: Optional[List[AllowanceComponentBase]] = Field(None, alias="allowanceComponents")
 
     @model_validator(mode="before")
     @classmethod

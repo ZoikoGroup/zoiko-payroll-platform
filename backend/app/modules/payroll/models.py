@@ -341,6 +341,7 @@ class PayslipItem(Base):
     updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
 
     payroll_run = relationship("PayrollRun", back_populates="payslip_items")
+    allowance_items = relationship("PayslipAllowanceItem", back_populates="payslip_item", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("payroll_run_id", "employee_id", name="uq_payslip_run_employee"),
@@ -349,6 +350,31 @@ class PayslipItem(Base):
 
     def __repr__(self):
         return f"<PayslipItem id={self.id} employee_id={self.employee_id} net={self.net_pay}>"
+
+
+# Per-payslip breakdown of the org's dynamic, Super-Admin-defined allowance
+# components (see policy/models.py's PolicyAllowanceComponent) — a real
+# child table rather than fixed columns on PayslipItem because the set of
+# component names is admin-defined and unbounded (a new named allowance
+# must not require a schema migration). `special_allowance` on PayslipItem
+# above stays the final residual (gross - basic - hra - sum(these items)),
+# unchanged in spirit from before this table existed — it's simply computed
+# after these named slices are carved out too.
+class PayslipAllowanceItem(Base):
+    __tablename__ = "payslip_allowance_items"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    payslip_item_id = Column(Integer, ForeignKey("payslip_items.id"), nullable=False, index=True)
+
+    key    = Column(String(50), nullable=False)    # matches PolicyAllowanceComponent.key
+    label  = Column(String(100), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False, default=0)
+
+    payslip_item = relationship("PayslipItem", back_populates="allowance_items")
+
+    __table_args__ = (
+        UniqueConstraint("payslip_item_id", "key", name="uq_payslip_allowance_item_key"),
+    )
 
 
 # ── Payroll Attendance Records ─────────────────────────────────────────
