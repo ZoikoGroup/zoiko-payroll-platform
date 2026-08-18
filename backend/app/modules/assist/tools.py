@@ -87,6 +87,33 @@ def tool_get_run_summary(db, org_id, run_id=None, context_object=None) -> dict:
     return {"found": True, "run": _run_summary(run), "object_version": 1}
 
 
+# Runs still in progress — not yet fully completed. Mirrors the six-step
+# status timeline shown on the run detail page (Draft → ... → Paid → Closed).
+_ACTIVE_RUN_STATUSES = ["Draft", "Review", "Approved", "Authorized"]
+
+
+def tool_get_employee_count(db, org_id) -> dict:
+    total = db.query(func.count(PayrollEmployee.id)).filter(
+        PayrollEmployee.organization_id == org_id,
+    ).scalar() or 0
+    active = db.query(func.count(PayrollEmployee.id)).filter(
+        PayrollEmployee.organization_id == org_id,
+        PayrollEmployee.status != "Inactive",
+    ).scalar() or 0
+    return {"found": True, "total_employees": total, "active_employees": active}
+
+
+def tool_get_active_run_count(db, org_id) -> dict:
+    active = db.query(func.count(PayrollRun.id)).filter(
+        PayrollRun.organization_id == org_id,
+        PayrollRun.status.in_(_ACTIVE_RUN_STATUSES),
+    ).scalar() or 0
+    total = db.query(func.count(PayrollRun.id)).filter(
+        PayrollRun.organization_id == org_id,
+    ).scalar() or 0
+    return {"found": True, "active_runs": active, "total_runs": total}
+
+
 def _materialize_exceptions(db, org_id, run: PayrollRun) -> list[AssistExceptionSnapshot]:
     """Derive exception snapshots deterministically from a run (idempotent)."""
     from app.modules.assist.models import AssistExceptionSnapshot as Snapshot
@@ -469,6 +496,8 @@ READ_TOOLS = {
     "payroll.comparePeriods": tool_compare_periods,
     "payroll.getMyProfile": tool_get_my_profile,
     "payroll.getMyPayslips": tool_get_my_payslips,
+    "payroll.getEmployeeCount": tool_get_employee_count,
+    "payroll.getActiveRunCount": tool_get_active_run_count,
 }
 
 # Tools an `employee`-role user may call. Everything else is run-wide/scoped

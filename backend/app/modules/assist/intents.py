@@ -138,6 +138,35 @@ INTENT_REGISTRY = [
         "description": "Show the caller's own payroll profile (employee self-service).",
         "tool_id": "payroll.getMyProfile",
     },
+    # Checked before find.object/explain.field — those carry broad, generic
+    # keywords ("runs", "explain") that would otherwise steal a match here.
+    {
+        "id": "explain.employeeCount",
+        "risk_tier": "A1",
+        # Truncated stems ("employe" not "employee/employees"), not full
+        # words — deliberately, so common typos/misspellings (e.g.
+        # "employess", "employes") still match via substring containment,
+        # the same trick "runs"/"payroll" already rely on for plurals.
+        "keywords": [
+            "how many employe", "employe count", "headcount", "head count",
+            "number of employe", "total employe", "how many active employe",
+            "how many people work", "employe are there", "employe do we have",
+            "employe in my organi", "employe in the organi",
+        ],
+        "description": "Count employees in the organization.",
+        "tool_id": "payroll.getEmployeeCount",
+    },
+    {
+        "id": "explain.activeRunCount",
+        "risk_tier": "A1",
+        "keywords": [
+            "how many active payroll", "how many payroll run", "how many active run",
+            "active payroll", "number of active run", "active run count",
+            "how many run", "payroll run are there", "run are active",
+        ],
+        "description": "Count active (in-progress) payroll runs.",
+        "tool_id": "payroll.getActiveRunCount",
+    },
     {
         "id": "explain.field",
         "risk_tier": "A1",

@@ -72,6 +72,8 @@ KNOWN_READ_TOOL_IDS = {
     "payroll.comparePeriods",
     "payroll.getMyProfile",
     "payroll.getMyPayslips",
+    "payroll.getEmployeeCount",
+    "payroll.getActiveRunCount",
 }
 
 
@@ -90,6 +92,51 @@ def _as_aware(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+# ── Platform-wide incident kill-switch ──────────────────────────────────
+# One flag for the whole platform (PlatformSetting.key is globally unique,
+# not per-org), so this is deliberately a Super Admin action, not something
+# an individual org can flip for themselves.
+
+_KILL_SWITCH_KEY = "assist_kill_switch_enabled"
+
+
+def is_assist_kill_switch_enabled(db: Session) -> bool:
+    from app.modules.super_admin.models import PlatformSetting
+
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == _KILL_SWITCH_KEY).first()
+    if row is None or row.value is None:
+        return settings.ASSIST_KILL_SWITCH_ENABLED
+    return str(row.value).strip().lower() in ("1", "true", "yes")
+
+
+def set_assist_kill_switch(db: Session, enabled: bool, user) -> bool:
+    from app.modules.super_admin.models import PlatformSetting
+
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == _KILL_SWITCH_KEY).first()
+    if row is None:
+        row = PlatformSetting(
+            key=_KILL_SWITCH_KEY,
+            description="Platform-wide incident kill-switch for Zoiko Payroll Assist.",
+        )
+        db.add(row)
+    row.value = "true" if enabled else "false"
+    db.commit()
+    # AssistAuditEvent.organization_id is NOT NULL and this action isn't
+    # scoped to any one org, so it can't go through the usual per-org _audit
+    # helper — a platform-level action gets a platform-level (plain) log line.
+    logger.info("[assist] Kill switch %s by user_id=%s", "ENABLED" if enabled else "DISABLED", user.id if user else None)
+    return enabled
+
+
+def require_assist_enabled(db: Session) -> None:
+    if is_assist_kill_switch_enabled(db):
+        raise ZoikoException(
+            503,
+            "ASSIST_DISABLED",
+            "Zoiko Payroll Assist is temporarily disabled. Please try again later or contact support.",
+        )
 
 
 # ── ID helpers ──────────────────────────────────────────────────────────
@@ -152,6 +199,7 @@ def _idempotent(db, org_id, scope, key, request_body, result_builder):
 # ── Sessions ────────────────────────────────────────────────────────────
 
 def create_session(db, user, org_id, payload: dict) -> AssistSession:
+    require_assist_enabled(db)
     context = payload.get("context") or {}
     obj = context.get("object") or {}
     session = AssistSession(
@@ -305,6 +353,7 @@ def _resolve_run_id(context) -> int | None:
 
 
 def submit_message(db, org_id, user, session, payload: dict, idempotency_key: str = None) -> dict:
+    require_assist_enabled(db)
     context = payload.get("context") or {}
     content = payload.get("content") or {}
     text = content.get("text", "").strip()
@@ -341,7 +390,6 @@ def submit_message(db, org_id, user, session, payload: dict, idempotency_key: st
             method=decision["method"],
         )
         db.add(intent_decision)
-        db.flush()
 
         policy = AssistPolicyDecision(
             session_id=session.id,
@@ -352,13 +400,15 @@ def submit_message(db, org_id, user, session, payload: dict, idempotency_key: st
             policy_version=settings.ASSIST_POLICY_VERSION,
         )
         db.add(policy)
-        db.flush()
+        # Neither row's id is read before commit — deferring their flush lets
+        # them ride along with evidence_set's own (required) flush just below
+        # instead of paying for two extra network round-trips to the DB.
 
-        evidence_set = _build_evidence_set(
+        evidence_set, tool_result = _build_evidence_set(
             db, org_id, session, decision, context, message.id, user, text
         )
         response = _build_response(
-            db, org_id, user, session, message, decision, evidence_set, text, context
+            db, org_id, user, session, message, decision, evidence_set, text, context, tool_result
         )
         db.commit()
 
@@ -392,7 +442,7 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
         # bare "hi" or "thank you" never drags in unrelated knowledge
         # articles as sources.
         evidence_set.confidence_state = "UNAVAILABLE"
-        return evidence_set
+        return evidence_set, None
 
     tool_id = decision.get("tool_id")
     run_id = _resolve_run_id(context) or _resolve_run_id({"object": {"type": "PAYROLL_RUN", "id": session.context_object_id}})
@@ -437,6 +487,30 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
                     evidence_set_id=evidence_set.id,
                     source_type="PAYSLIP",
                     title="Your payslips",
+                    effective_at=datetime.now().date(),
+                    freshness_state="CURRENT",
+                    authority="TIER_1_OPERATIONAL",
+                )
+            )
+            evidence_set.entity_count += 1
+        elif "total_employees" in tool_result:
+            db.add(
+                AssistEvidenceItem(
+                    evidence_set_id=evidence_set.id,
+                    source_type="EMPLOYEE_ROSTER",
+                    title="Organization employee roster",
+                    effective_at=datetime.now().date(),
+                    freshness_state="CURRENT",
+                    authority="TIER_1_OPERATIONAL",
+                )
+            )
+            evidence_set.entity_count += 1
+        elif "active_runs" in tool_result:
+            db.add(
+                AssistEvidenceItem(
+                    evidence_set_id=evidence_set.id,
+                    source_type="PAYROLL_RUN_LIST",
+                    title="Organization payroll runs",
                     effective_at=datetime.now().date(),
                     freshness_state="CURRENT",
                     authority="TIER_1_OPERATIONAL",
@@ -495,7 +569,7 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
     # them (evidence/knowledge would silently be empty there) without an
     # explicit flush here.
     db.flush()
-    return evidence_set
+    return evidence_set, tool_result
 
 
 def _normalize_answer_sources(answer: dict, evidence: list[dict]) -> None:
@@ -535,7 +609,7 @@ def _normalize_answer_sources(answer: dict, evidence: list[dict]) -> None:
     answer["sources"] = grounded
 
 
-def _build_response(db, org_id, user, session, message, decision, evidence_set, text, context):
+def _build_response(db, org_id, user, session, message, decision, evidence_set, text, context, tool_result):
     jurisdiction_codes = context.get("jurisdiction_codes") or session.jurisdiction_codes or []
     evidence_items = db.query(AssistEvidenceItem).filter(AssistEvidenceItem.evidence_set_id == evidence_set.id).all()
     evidence = [
@@ -558,12 +632,12 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
         for item in evidence_items
         if item.source_type == "KNOWLEDGE"
     ]
-
-    tool_result = None
-    tool_id = decision.get("tool_id")
-    if tool_id and tool_id in KNOWN_READ_TOOL_IDS:
-        run_id = _resolve_run_id(context) or _resolve_run_id({"object": {"type": "PAYROLL_RUN", "id": session.context_object_id}})
-        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"), user=user)
+    # tool_result is computed once by _build_evidence_set and passed in here —
+    # re-running invoke_read_tool a second time with identical arguments was
+    # pure duplicate DB work (and, for find.object/explain.status, this
+    # function's own copy of the call was missing the getRunSummary fallback
+    # _build_evidence_set already had, so those two intents never actually
+    # saw the run data they were credited with in the evidence set).
 
     engine = "deterministic"
     execution_error = None
