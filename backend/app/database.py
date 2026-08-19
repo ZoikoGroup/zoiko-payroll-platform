@@ -265,4 +265,5 @@ import app.modules.payroll.models  # noqa: F401,E402
 import app.modules.payroll.policy.models  # noqa: F401,E402
 import app.modules.payroll.enterprise.models  # noqa: F401,E402
 import app.modules.payroll.mail.models  # noqa: F401,E402
+import app.modules.payroll.hierarchy.models  # noqa: F401,E402
 import app.modules.assist.models  # noqa: F401,E402
