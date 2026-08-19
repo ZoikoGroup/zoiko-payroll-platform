@@ -449,9 +449,9 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
 
     tool_result = None
     if tool_id and tool_id in KNOWN_READ_TOOL_IDS:
-        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"), user=user)
+        tool_result = invoke_read_tool(db, org_id, tool_id, run_id=run_id, context_object=context.get("object"), user=user, text=text)
     elif decision["intent_id"] in ("find.object", "explain.status") and run_id:
-        tool_result = invoke_read_tool(db, org_id, "payroll.getRunSummary", run_id=run_id, context_object=context.get("object"), user=user)
+        tool_result = invoke_read_tool(db, org_id, "payroll.getRunSummary", run_id=run_id, context_object=context.get("object"), user=user, text=text)
 
     tool_found = bool(tool_result and tool_result.get("found"))
     if tool_found:
