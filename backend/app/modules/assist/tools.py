@@ -33,29 +33,77 @@ logger = logging.getLogger("zoiko_payroll.assist.tools")
 
 # ── Run resolution ──────────────────────────────────────────────────────
 
+def _find_named_employee(db: Session, org_id: int, text: str | None) -> PayrollEmployee | None:
+    """Deterministic name lookup — no NLP/NER, just a substring check against
+    the org's own employee names, longest name first so "Nandini Krishnan"
+    matches before a coincidental one-word overlap with someone else's first
+    name. Names under 3 characters are skipped as too likely to false-match."""
+    if not text:
+        return None
+    lowered = text.lower()
+    employees = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id).all()
+    for employee in sorted(employees, key=lambda e: len(e.name or ""), reverse=True):
+        name = (employee.name or "").strip()
+        if len(name) >= 3 and name.lower() in lowered:
+            return employee
+    return None
+
+
+def _most_recent_run_for_employee(db: Session, org_id: int, employee: PayrollEmployee) -> PayrollRun | None:
+    item = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(PayslipItem.employee_id == employee.id, PayslipItem.organization_id == org_id)
+        .order_by(PayrollRun.period_start.desc())
+        .first()
+    )
+    if item is None:
+        return None
+    return db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).first()
+
+
 def resolve_run(
     db: Session,
     org_id: int,
     run_id: int | None = None,
     context_object: dict | None = None,
-) -> PayrollRun | None:
-    """Resolve the target payroll run from an explicit id or the bound context."""
+    text: str | None = None,
+) -> tuple[PayrollRun | None, str | None]:
+    """Resolve the target payroll run from an explicit id, a named employee
+    mentioned in the message text, the bound context, or the latest run —
+    in that priority order. Returns (run, matched_employee_name); the name
+    is only set when resolution went through the named-employee path, so
+    callers can personalize the answer (e.g. "For Nandini Krishnan, ...")
+    instead of silently answering about whichever run happens to be latest
+    or in context, regardless of who was actually asked about.
+    """
     if run_id:
-        return db.query(PayrollRun).filter(PayrollRun.organization_id == org_id, PayrollRun.id == run_id).first()
+        run = db.query(PayrollRun).filter(PayrollRun.organization_id == org_id, PayrollRun.id == run_id).first()
+        return run, None
+
+    employee = _find_named_employee(db, org_id, text)
+    if employee is not None:
+        run = _most_recent_run_for_employee(db, org_id, employee)
+        if run is not None:
+            return run, employee.name
+
     if context_object and context_object.get("type") == "PAYROLL_RUN" and context_object.get("id"):
         try:
-            return db.query(PayrollRun).filter(
+            run = db.query(PayrollRun).filter(
                 PayrollRun.organization_id == org_id,
                 PayrollRun.id == int(context_object["id"]),
             ).first()
+            return run, None
         except (TypeError, ValueError):
-            return None
-    return (
+            return None, None
+
+    run = (
         db.query(PayrollRun)
         .filter(PayrollRun.organization_id == org_id)
         .order_by(PayrollRun.period_start.desc())
         .first()
     )
+    return run, None
 
 
 def _run_summary(run: PayrollRun) -> dict:
@@ -80,11 +128,14 @@ def _run_summary(run: PayrollRun) -> dict:
 
 # ── Read tools ──────────────────────────────────────────────────────────
 
-def tool_get_run_summary(db, org_id, run_id=None, context_object=None) -> dict:
-    run = resolve_run(db, org_id, run_id, context_object)
+def tool_get_run_summary(db, org_id, run_id=None, context_object=None, text=None) -> dict:
+    run, employee_name = resolve_run(db, org_id, run_id, context_object, text)
     if run is None:
         return {"found": False, "reason": "No visible payroll run."}
-    return {"found": True, "run": _run_summary(run), "object_version": 1}
+    result = {"found": True, "run": _run_summary(run), "object_version": 1}
+    if employee_name:
+        result["employee_name"] = employee_name
+    return result
 
 
 # Runs still in progress — not yet fully completed. Mirrors the six-step
@@ -168,14 +219,14 @@ def _materialize_exceptions(db, org_id, run: PayrollRun) -> list[AssistException
     return created
 
 
-def tool_get_run_readiness(db, org_id, run_id=None, context_object=None) -> dict:
-    run = resolve_run(db, org_id, run_id, context_object)
+def tool_get_run_readiness(db, org_id, run_id=None, context_object=None, text=None) -> dict:
+    run, employee_name = resolve_run(db, org_id, run_id, context_object, text)
     if run is None:
         return {"found": False, "reason": "No visible payroll run."}
     exceptions = _materialize_exceptions(db, org_id, run)
     open_exceptions = [e for e in exceptions if e.state != "RESOLVED"]
     readiness = "READY" if not open_exceptions and run.status == "Review" else "NOT_READY"
-    return {
+    result = {
         "found": True,
         "run": _run_summary(run),
         "readiness": readiness,
@@ -185,14 +236,17 @@ def tool_get_run_readiness(db, org_id, run_id=None, context_object=None) -> dict
         ],
         "materiality": "APPROVAL_RECOMMENDATION_NOT_RETURNED",
     }
+    if employee_name:
+        result["employee_name"] = employee_name
+    return result
 
 
-def tool_list_exceptions(db, org_id, run_id=None, context_object=None) -> dict:
-    run = resolve_run(db, org_id, run_id, context_object)
+def tool_list_exceptions(db, org_id, run_id=None, context_object=None, text=None) -> dict:
+    run, employee_name = resolve_run(db, org_id, run_id, context_object, text)
     if run is None:
         return {"found": False, "reason": "No visible payroll run."}
     exceptions = _materialize_exceptions(db, org_id, run)
-    return {
+    result = {
         "found": True,
         "run": _run_summary(run),
         "exceptions": [
@@ -208,13 +262,16 @@ def tool_list_exceptions(db, org_id, run_id=None, context_object=None) -> dict:
             for e in exceptions
         ],
     }
+    if employee_name:
+        result["employee_name"] = employee_name
+    return result
 
 
-def tool_get_approval_status(db, org_id, run_id=None, context_object=None) -> dict:
-    run = resolve_run(db, org_id, run_id, context_object)
+def tool_get_approval_status(db, org_id, run_id=None, context_object=None, text=None) -> dict:
+    run, employee_name = resolve_run(db, org_id, run_id, context_object, text)
     if run is None:
         return {"found": False, "reason": "No visible payroll run."}
-    return {
+    result = {
         "found": True,
         "run": _run_summary(run),
         "workflow": {
@@ -228,11 +285,17 @@ def tool_get_approval_status(db, org_id, run_id=None, context_object=None) -> di
         "canonical_approval_route": "/payroll/payroll-runs",
         "cannot_approve": True,
     }
+    if employee_name:
+        result["employee_name"] = employee_name
+    return result
 
 
 def tool_compare_periods(db, org_id, run_id=None, context_object=None, arguments=None) -> dict:
     arguments = arguments or {}
-    base_run = resolve_run(db, org_id, run_id, context_object)
+    # Comparing periods is inherently about two runs overall, not one named
+    # employee's run — deliberately not passing text through resolve_run
+    # here, unlike the single-run tools above.
+    base_run, _ = resolve_run(db, org_id, run_id, context_object)
     target_id = arguments.get("target_run_id") or arguments.get("run_id")
     if base_run is None:
         return {"found": False, "reason": "No visible payroll run to compare."}
@@ -518,7 +581,7 @@ def _record_audit(db, org_id, user, session_id, event_type, payload) -> AssistAu
     return event
 
 
-def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, arguments=None, user=None) -> dict:
+def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, arguments=None, user=None, text=None) -> dict:
     import inspect
 
     handler = READ_TOOLS.get(tool_id)
@@ -540,6 +603,8 @@ def invoke_read_tool(db, org_id, tool_id, run_id=None, context_object=None, argu
             kwargs["arguments"] = arguments
         if "user" in params:
             kwargs["user"] = user
+        if "text" in params:
+            kwargs["text"] = text
         return handler(db, org_id, **kwargs)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Read tool %s failed: %s", tool_id, exc)

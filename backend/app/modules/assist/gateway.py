@@ -157,20 +157,26 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
             )
         return f"I couldn't find a payroll run to answer this. {reason}"
 
+    # Set only when resolve_run matched a specific named employee mentioned
+    # in the message rather than falling back to the latest/bound run — so
+    # e.g. "Nandini Krishnan payroll status" answers about *her* run instead
+    # of silently substituting whichever run happens to be latest.
+    employee_prefix = f"For {tool_result['employee_name']}: " if tool_result.get("employee_name") else ""
+
     if intent_id == "review.run_readiness":
         blockers = tool_result.get("blockers", [])
         run = tool_result.get("run", {})
         if blockers:
-            lines = [f"The {run.get('period')} run is not ready for approval. Blockers:"]
+            lines = [f"{employee_prefix}The {run.get('period')} run is not ready for approval. Blockers:"]
             lines += [f"  - {b['description']} ({b['severity']})" for b in blockers]
             return "\n".join(lines)
-        return f"The {run.get('period')} run has no open blockers and is in {run.get('status')} state. I can open the approval screen for the authorized decision."
+        return f"{employee_prefix}The {run.get('period')} run has no open blockers and is in {run.get('status')} state. I can open the approval screen for the authorized decision."
 
     if intent_id == "review.exception":
         exceptions = tool_result.get("exceptions", [])
         if not exceptions:
-            return f"No exceptions are recorded for the {tool_result.get('run', {}).get('period')} run."
-        lines = [f"{len(exceptions)} exception(s) recorded for {tool_result.get('run', {}).get('period')}:"]
+            return f"{employee_prefix}No exceptions are recorded for the {tool_result.get('run', {}).get('period')} run."
+        lines = [f"{employee_prefix}{len(exceptions)} exception(s) recorded for {tool_result.get('run', {}).get('period')}:"]
         for exc in exceptions:
             owner = f"assigned to {exc['assignee_role']}" if exc.get("assignee_role") else "unassigned"
             lines.append(f"  - {exc['description']} ({exc['severity']}, {owner})")
@@ -237,7 +243,7 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
     # explain.status / find.object / kb.answer defaults
     if run_summary:
         return (
-            f"The {run_summary.get('period')} payroll run is currently **{run_summary.get('status')}** "
+            f"{employee_prefix}The {run_summary.get('period')} payroll run is currently **{run_summary.get('status')}** "
             f"({run_summary.get('employees')} employees, net {run_summary.get('net'):,.2f}). "
             "You can open it from Payroll Runs."
         )
@@ -311,8 +317,9 @@ def deterministic_answer(
         run_summary = tool_result.get("run")
 
     if tool_result and tool_result.get("found") and run_summary:
+        employee_note = f"For {tool_result['employee_name']} — " if tool_result.get("employee_name") else ""
         facts.append(
-            f"{run_summary.get('period')} payroll run: status {run_summary.get('status')}, "
+            f"{employee_note}{run_summary.get('period')} payroll run: status {run_summary.get('status')}, "
             f"{run_summary.get('employees')} employees, net {float(run_summary.get('net') or 0):,.2f}."
         )
     elif tool_result and "total_employees" in tool_result:
