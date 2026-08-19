@@ -16,6 +16,7 @@ import OrganizationsPage from "./pages/OrganizationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import CompliancePage from "./pages/CompliancePage";
 import PolicyConfigPage from "./pages/PolicyConfigPage";
+import JurisdictionExplorerPage from "./pages/JurisdictionExplorerPage";
 import FinancePage from "./pages/FinancePage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -105,6 +106,14 @@ export default function App() {
           element={
             <SuperAdminShell>
               <StatutoryRatesPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/tax-hierarchy"
+          element={
+            <SuperAdminShell>
+              <JurisdictionExplorerPage />
             </SuperAdminShell>
           }
         />

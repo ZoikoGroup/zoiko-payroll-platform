@@ -282,6 +282,15 @@ class PayslipItem(Base):
     tax_policy_version  = Column(String(20), nullable=True)
     tax_rule_snapshot   = Column(JSON, nullable=True)
 
+    # Populated only for payslips generated after an organization is cut
+    # over to the new hierarchy engine (hierarchy/models.py) — mutually
+    # exclusive with tax_policy_pack_id in practice (a payslip is
+    # produced by exactly one resolver), never both. tax_policy_pack_id/
+    # tax_policy_version/tax_rule_snapshot above are NOT modified or
+    # repurposed by the new engine; they keep meaning exactly what they
+    # always have for every payslip generated before cutover.
+    tax_version_id = Column(Integer, ForeignKey("payroll_hierarchy_tax_versions.id"), nullable=True)
+
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
     hra               = Column(Numeric(12, 2), default=0)
@@ -601,6 +610,16 @@ class CompanyComplianceDetails(Base):
     # change to rate_map lookups) or RESTRICT (and prevent pack deletion
     # while any org references it).  Also missing: a relationship() helper
     # so SQLAlchemy can eager-load the pack without a manual join.
+    #
+    # Known bug, NOT fixed by the hierarchy engine migration: this one FK is
+    # shared by both tax packs and policy packs, so assigning one silently
+    # drops live-tracking of the other. The hierarchy migration deliberately
+    # did not repoint or rename this column — tax-pack assignment now
+    # resolves dynamically via OrganizationJurisdictionAssignment instead,
+    # but active_pack_id itself is untouched and still ambiguous for any
+    # org not yet cut over. Phase 9 cleanup inventory (see
+    # backend/scripts/HIERARCHY_V2_CLEANUP_INVENTORY.md) tracks renaming
+    # this to active_policy_pack_id once safe to do so.
     active_pack_id        = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
     # Set the first time an admin explicitly saves Compliance details via
@@ -609,6 +628,15 @@ class CompanyComplianceDetails(Base):
     # lock signal: once non-null, jurisdiction_country can no longer be
     # changed through this endpoint (see update_company_details).
     configured_at         = Column(DateTime(timezone=True), nullable=True)
+
+    # Per-org rollout gate for the new generic jurisdiction/tax hierarchy
+    # engine (hierarchy/models.py + engine/tax_resolver_v2.py). False for
+    # every existing and new organization by default — creating the new
+    # tables/resolver is a pure no-op until this is deliberately flipped
+    # for a specific org, one at a time, after that org's v2-resolved
+    # numbers have been validated against its last real payroll run.
+    # Mirrors PayrollPolicy.calculation_mode's per-org gating convention.
+    tax_hierarchy_v2_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
 
     created_at            = Column(DateTime(timezone=True), server_default=func.now())
     updated_at            = Column(DateTime(timezone=True), onupdate=func.now())

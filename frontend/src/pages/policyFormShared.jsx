@@ -1,6 +1,8 @@
 // Shared between CompliancePage.jsx's Tax modal and PolicyConfigPage.jsx's
 // full-page Policy configuration — extracted so both consume the exact same
 // field taxonomy/lock-node helpers instead of two copies drifting apart.
+import { Lock, Unlock } from "lucide-react";
+
 export const STATUS_OPTIONS = ["Draft", "In Review", "QA", "Approved", "Active", "Deprecated", "Retired"];
 export const STATUS_PILL_MAP = {
   Active: "active", Approved: "approved", Draft: "pending", "In Review": "pending",
@@ -8,8 +10,20 @@ export const STATUS_PILL_MAP = {
 };
 
 export const inputClass =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-focus-ring/40";
-export const labelClass = "block text-xs font-medium text-foreground-muted mb-1";
+  "w-full rounded-lg border border-border-strong bg-background px-3 py-2.5 text-sm text-foreground shadow-sm " +
+  "transition-colors placeholder:text-foreground-disabled hover:border-primary/50 focus:border-primary " +
+  "focus:outline-none focus:ring-2 focus:ring-focus-ring/30 disabled:cursor-not-allowed disabled:border-border-light " +
+  "disabled:bg-surface-muted disabled:text-foreground-disabled disabled:shadow-none";
+export const labelClass = "mb-1.5 block text-xs font-medium text-foreground-muted";
+
+// Same visual language as inputClass, sized down for compact card-level
+// controls (LockableField's value input, AllowanceComponentRow's cells) —
+// full-size inputClass reads oversized once several of these sit inside a
+// small bordered row.
+export const compactInputClass =
+  "w-full rounded-md border border-border-strong bg-background px-2.5 py-1.5 text-xs text-foreground shadow-sm " +
+  "transition-colors placeholder:text-foreground-disabled hover:border-primary/50 focus:border-primary " +
+  "focus:outline-none focus:ring-2 focus:ring-focus-ring/30";
 
 export function emptyForm(country, state, packType) {
   return {
@@ -79,18 +93,41 @@ export function setLockNode(setForm, path, patch) {
   });
 }
 
+// A default value (this pack's own suggestion) plus an independent
+// "Allow override" flag (whether an assigned organization may replace that
+// value). The two are unrelated to each other's editability — Super Admin
+// can always edit the value here regardless of the lock state, since the
+// lock only governs what an ORGANIZATION can later do with it — so the
+// value control is never disabled by allowOverride, only visually paired
+// with a lock/unlock indicator for the flag next to it.
 export function LockableField({ label, node, type, choices, onChangeValue, onChangeAllow }) {
   const value = node.value;
   const allowOverride = node.allowOverride !== false;
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
-      <span className="flex-1 text-xs text-foreground-secondary">{label}</span>
-      {type === "select" ? (
-        <select
-          value={value ?? ""}
-          onChange={(e) => onChangeValue(e.target.value || null)}
-          className="rounded-md border border-border bg-background text-xs px-2 py-1 text-foreground"
+    <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-foreground-secondary">{label}</span>
+        <label
+          className="flex cursor-pointer select-none items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap"
+          style={
+            allowOverride
+              ? { background: "var(--color-success-light)", color: "var(--color-success)" }
+              : { background: "var(--color-surface-muted)", color: "var(--color-foreground-muted)" }
+          }
+          title={allowOverride ? "Organizations may override this value" : "Locked — organizations must keep this value"}
         >
+          <input
+            type="checkbox"
+            checked={allowOverride}
+            onChange={(e) => onChangeAllow(e.target.checked)}
+            className="sr-only"
+          />
+          {allowOverride ? <Unlock size={10} /> : <Lock size={10} />}
+          {allowOverride ? "Overridable" : "Locked"}
+        </label>
+      </div>
+      {type === "select" ? (
+        <select value={value ?? ""} onChange={(e) => onChangeValue(e.target.value || null)} className={compactInputClass}>
           <option value="">No default</option>
           {choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
@@ -98,7 +135,7 @@ export function LockableField({ label, node, type, choices, onChangeValue, onCha
         <select
           value={value === true ? "true" : value === false ? "false" : ""}
           onChange={(e) => onChangeValue(e.target.value === "" ? null : e.target.value === "true")}
-          className="rounded-md border border-border bg-background text-xs px-2 py-1 text-foreground"
+          className={compactInputClass}
         >
           <option value="">No default</option>
           <option value="true">Yes</option>
@@ -107,20 +144,13 @@ export function LockableField({ label, node, type, choices, onChangeValue, onCha
       ) : (
         <input
           type="number"
+          min={0}
           value={value ?? ""}
           onChange={(e) => onChangeValue(e.target.value === "" ? null : Number(e.target.value))}
-          className="w-20 rounded-md border border-border bg-background text-xs px-2 py-1 text-foreground"
+          placeholder="No default"
+          className={compactInputClass}
         />
       )}
-      <label className="flex items-center gap-1 text-[10px] text-foreground-disabled whitespace-nowrap">
-        <input
-          type="checkbox"
-          checked={allowOverride}
-          onChange={(e) => onChangeAllow(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-slate-300"
-        />
-        Allow override
-      </label>
     </div>
   );
 }

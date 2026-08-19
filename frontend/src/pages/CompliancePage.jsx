@@ -12,11 +12,14 @@ import { useToast } from "../context/ToastContext";
 import {
   getCompliancePolicies, upsertCompliancePolicy,
   getCompliancePolicyVersions, setCompliancePolicyStatus, getCompliancePolicyOrganizations,
-  assignCompliancePolicy, hardDeleteCompliancePolicy, listAllOrganizationsBrief, getComplianceConfigurations,
-  getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab, getCanonicalContributionRates,
-  upsertCanonicalContributionRate, deleteCanonicalContributionRate, getTaxConfigurationAudit,
+  getCompliancePolicyEligibleOrganizations,
+  assignCompliancePolicy, hardDeleteCompliancePolicy, getComplianceConfigurations,
+  getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab,
+  getCanonicalContributionRates, upsertCanonicalContributionRate,
+  getTaxConfigurationAudit,
 } from "../service/superAdminService";
 import { getStatesForCountryCode } from "../utils/registrationRegions";
+import { getCountryNameFromCode } from "../utils/currency";
 import JurisdictionCardGrid, { AddJurisdictionModal } from "./JurisdictionCardGrid";
 import {
   STATUS_OPTIONS, STATUS_PILL_MAP, inputClass, labelClass, emptyForm,
@@ -201,17 +204,6 @@ function VersionHistoryModal({ packId, versions, onClose }) {
   );
 }
 
-// Government-mandated rate/slab values for one Tax pack version — the
-// canonical (Super Admin-owned) rows engine/tax_resolver.py resolves and
-// sync_org_rates_from_canonical() pushes down into every org's own
-// ContributionRate/TaxSlab rows (what payroll calculation actually reads).
-// Editing here changes the source of truth; it does not directly touch any
-// organization's live payroll until that org is next synced.
-//
-// Rendered as step 2 of TaxFormModal's flow (New Tax → Next → add
-// rates here → Done) — not its own modal, so creating a tax and entering
-// its numbers is one continuous flow instead of two disconnected actions.
-//
 // Named, per-country government-mandated scalar parameters — the exact
 // component_keys engine/standard.py's _param_amount/_param_pct read via
 // rate_map (with the value shown in `fallback` as the built-in default
@@ -219,6 +211,12 @@ function VersionHistoryModal({ packId, versions, onClose }) {
 // generic "Add Rate" free-text component-key entry, since typing the key
 // wrong here silently breaks the calculation for that value (this is
 // exactly the "EPF" vs "pf" bug this session already hit once).
+//
+// Country/federal/national-level ONLY — these are national statutory
+// thresholds (standard deduction, wage ceilings, rebate limits), not
+// state/province-specific, so they're only ever shown for a pack with no
+// jurisdictionState. A state/province pack (e.g. Telangana's Professional
+// Tax) only ever configures its own Tax Slab brackets, never these.
 const TAX_PARAMETER_FIELDS = {
   IN: [
     { key: "standard_deduction", label: "Standard Deduction", type: "amount", fallback: "75,000" },
@@ -259,24 +257,48 @@ const TAX_PARAMETER_FIELDS = {
   ],
 };
 
+// Government-mandated TAX SLAB (progressive bracket) values, plus — for a
+// country/federal/national-level pack only — its named Tax Parameters,
+// for one Tax pack version. The canonical (Super Admin-owned) rows
+// engine/tax_resolver.py resolves and sync_org_rates_from_canonical()
+// pushes down into every org's own TaxSlab/ContributionRate rows (what
+// payroll calculation actually reads). Editing here changes the source
+// of truth; it does not directly touch any organization's live payroll
+// until that org is next synced.
+//
+// Rendered as step 2 of TaxFormModal's flow (New Tax → Next → add
+// slabs here → Done) — not its own modal, so creating a tax and entering
+// its brackets is one continuous flow instead of two disconnected actions.
+//
+// The generic, free-text Contribution Rates table (component key, %s,
+// flat amount for things like PF/ESI) is configured separately, under
+// Statutory Rates, keyed by this pack's Tax ID (packId) — not here.
 function RatesEditor({ pack, onSaved }) {
   const { addToast } = useToast() || {};
-  const [rates, setRates] = useState([]);
   const [slabs, setSlabs] = useState([]);
+  const [rates, setRates] = useState([]); // only fetched/used for a country-level pack's Tax Parameters
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const nextTempId = useRef(-1);
+  // Ids of EXISTING (server-side) rows the admin removed this session —
+  // tracked separately from local `slabs` state (which just drops the row
+  // from view) so Done knows to actually DELETE them, not merely stop
+  // re-sending them. Reset on every load() so reopening the modal never
+  // carries a stale pending-deletion list forward.
+  const deletedSlabIds = useRef(new Set());
   // Tax Parameters are edited as a sparse overlay keyed by field.key — only
   // fields the admin actually touched this session get an entry, so Done
   // only re-saves what changed instead of every field unconditionally.
   const [paramDrafts, setParamDrafts] = useState({});
-  const nextTempId = useRef(-1);
-  // Ids of EXISTING (server-side) rows the admin removed this session —
-  // tracked separately from local `rates`/`slabs` state (which just drops
-  // the row from view) so Done knows to actually DELETE them, not merely
-  // stop re-sending them. Reset on every load() so reopening the modal
-  // never carries a stale pending-deletion list forward.
-  const deletedRateIds = useRef(new Set());
-  const deletedSlabIds = useRef(new Set());
+
+  const isCountryLevel = !pack.jurisdictionState;
+  const paramFields = isCountryLevel ? (TAX_PARAMETER_FIELDS[pack.jurisdictionCountry] || []) : [];
+
+  // Dynamic, jurisdiction-aware label — "Telangana Tax" for a state-level
+  // pack, the country's display name for a country-level one. Never a
+  // generic hardcoded "State Tax", since that reads identically for every
+  // state and gives no indication which jurisdiction's brackets these are.
+  const jurisdictionLabel = pack.jurisdictionState || getCountryNameFromCode(pack.jurisdictionCountry) || pack.jurisdictionCountry;
 
   // Everything below is pure local draft state until "Done" is clicked —
   // clicking "+" or editing a cell never calls the API and never flips
@@ -286,39 +308,21 @@ function RatesEditor({ pack, onSaved }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [r, s] = await Promise.all([
-        getCanonicalContributionRates({ jurisdictionPackId: pack.id }),
-        getCanonicalTaxSlabs({ jurisdictionPackId: pack.id }),
-      ]);
-      setRates(r);
+      const fetches = [getCanonicalTaxSlabs({ jurisdictionPackId: pack.id })];
+      if (isCountryLevel) fetches.push(getCanonicalContributionRates({ jurisdictionPackId: pack.id }));
+      const [s, r] = await Promise.all(fetches);
       setSlabs(s.sort((a, b) => Number(a.minAmount) - Number(b.minAmount)));
+      setRates(r || []);
       setParamDrafts({});
-      deletedRateIds.current = new Set();
       deletedSlabIds.current = new Set();
     } catch (err) {
-      addToast?.(err.message || "Failed to load rates.", "error");
+      addToast?.(err.message || "Failed to load tax slabs.", "error");
     } finally {
       setLoading(false);
     }
-  }, [pack.id]);
+  }, [pack.id, isCountryLevel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
-
-  function addRateRow() {
-    const id = nextTempId.current--;
-    setRates((prev) => [...prev, {
-      id, componentKey: "", label: "", employeeRatePct: "", employerRatePct: "", flatAmount: "", _isNew: true,
-    }]);
-  }
-
-  function updateRate(id, patch) {
-    setRates((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  }
-
-  function removeRateRow(id) {
-    if (id > 0) deletedRateIds.current.add(id); // negative ids are local-only draft rows, never saved
-    setRates((prev) => prev.filter((r) => r.id !== id));
-  }
 
   function addSlabRow() {
     const id = nextTempId.current--;
@@ -337,12 +341,6 @@ function RatesEditor({ pack, onSaved }) {
   }
 
   async function handleDone() {
-    for (const r of rates) {
-      if (!r.componentKey.trim() || !r.label.trim()) {
-        addToast?.("Component key and label are required for every contribution rate row.", "error");
-        return;
-      }
-    }
     for (const s of slabs) {
       if (s.minAmount === "" || s.ratePct === "") {
         addToast?.("Minimum amount and rate are required for every tax slab row.", "error");
@@ -352,21 +350,19 @@ function RatesEditor({ pack, onSaved }) {
 
     setSaving(true);
     try {
-      for (const id of deletedRateIds.current) {
-        await deleteCanonicalContributionRate(id);
-      }
       for (const id of deletedSlabIds.current) {
         await deleteCanonicalTaxSlab(id);
       }
-      for (const r of rates) {
-        await upsertCanonicalContributionRate({
-          id: r._isNew ? undefined : r.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
-          jurisdictionState: pack.jurisdictionState, componentKey: r.componentKey.trim(), label: r.label.trim(),
-          employeeSharePct: r.employeeRatePct || null, employerSharePct: r.employerRatePct || null,
-          flatAmount: r.flatAmount || null, sortOrder: r.sortOrder,
+      for (let i = 0; i < slabs.length; i++) {
+        const s = slabs[i];
+        await upsertCanonicalTaxSlab({
+          id: s._isNew ? undefined : s.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
+          jurisdictionState: pack.jurisdictionState, minAmount: s.minAmount, maxAmount: s.maxAmount || null,
+          ratePct: s.ratePct, rateLabel: s.rateLabel || `${s.ratePct}%`, taxFormula: s.taxFormula || "",
+          ruleType: s.ruleType, formulaExpression: s.formulaExpression, sortOrder: s._isNew ? i + 1 : s.sortOrder,
         });
       }
-      for (const field of (TAX_PARAMETER_FIELDS[pack.jurisdictionCountry] || [])) {
+      for (const field of paramFields) {
         if (!(field.key in paramDrafts)) continue;
         const value = paramDrafts[field.key];
         const existing = rates.find((r) => r.componentKey === field.key);
@@ -378,16 +374,7 @@ function RatesEditor({ pack, onSaved }) {
           flatAmount: field.type === "amount" ? (value || null) : null,
         });
       }
-      for (let i = 0; i < slabs.length; i++) {
-        const s = slabs[i];
-        await upsertCanonicalTaxSlab({
-          id: s._isNew ? undefined : s.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
-          jurisdictionState: pack.jurisdictionState, minAmount: s.minAmount, maxAmount: s.maxAmount || null,
-          ratePct: s.ratePct, rateLabel: s.rateLabel || `${s.ratePct}%`, taxFormula: s.taxFormula || "",
-          ruleType: s.ruleType, formulaExpression: s.formulaExpression, sortOrder: s._isNew ? i + 1 : s.sortOrder,
-        });
-      }
-      addToast?.("Rates saved.", "success");
+      addToast?.("Tax slabs saved.", "success");
       onSaved?.();
     } catch (err) {
       addToast?.(err.message || "Failed to save — reloaded the last saved values.", "error");
@@ -409,84 +396,11 @@ function RatesEditor({ pack, onSaved }) {
       ) : (
         <div className="space-y-6">
           <div>
-            <p className="text-xs font-semibold text-foreground-muted mb-2">
-              Contribution Rates — component key, employee %, employer %, or a flat amount
+            <p className="text-xs font-semibold text-foreground-muted mb-2">{jurisdictionLabel} Tax — Progressive Brackets</p>
+            <p className="text-[11px] text-foreground-disabled mb-2">
+              Generic Contribution Rates (PF, ESI, and similar percentage/flat-amount components) are configured
+              separately under Statutory Rates, keyed by this pack's Tax ID (<code className="font-mono">{pack.packId}</code>).
             </p>
-            <div className="rounded-lg border border-border overflow-x-auto">
-              <table className="w-full text-xs min-w-[560px]">
-                <thead className="bg-background text-left text-foreground-muted">
-                  <tr>
-                    <th className="px-3 py-2">Component</th><th className="px-3 py-2">Label</th>
-                    <th className="px-3 py-2">Employee %</th><th className="px-3 py-2">Employer %</th>
-                    <th className="px-3 py-2">Flat Amount</th><th className="px-3 py-2 w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rates.map((r) => (
-                    <tr key={r.id} className="border-t border-border-light">
-                      <td className="px-3 py-1.5">
-                        <input className={cellInput} placeholder="component_key" value={r.componentKey} onChange={(e) => updateRate(r.id, { componentKey: e.target.value })} />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input className={cellInput} placeholder="Label" value={r.label} onChange={(e) => updateRate(r.id, { label: e.target.value })} />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" value={r.employeeRatePct ?? ""} onChange={(e) => updateRate(r.id, { employeeRatePct: e.target.value })} />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" value={r.employerRatePct ?? ""} onChange={(e) => updateRate(r.id, { employerRatePct: e.target.value })} />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input className={cellInput} type="number" step="0.01" value={r.flatAmount ?? ""} onChange={(e) => updateRate(r.id, { flatAmount: e.target.value })} />
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <button type="button" title="Delete this rate" onClick={() => removeRateRow(r.id)} className="rounded p-1 text-foreground-disabled hover:bg-error-light hover:text-error">
-                          <Trash2 size={12} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <button type="button" onClick={addRateRow} className="mt-2 flex items-center gap-1 rounded-md border border-dashed border-border px-2.5 py-1 text-xs font-medium text-foreground-muted hover:border-primary hover:text-primary">
-              <Plus size={12} /> Add Rate
-            </button>
-          </div>
-
-          {(TAX_PARAMETER_FIELDS[pack.jurisdictionCountry] || []).length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-foreground-muted mb-1">Tax Parameters</p>
-              <p className="text-[11px] text-foreground-disabled mb-2">
-                Government-mandated thresholds this jurisdiction's calculator reads directly. Leave blank to use
-                the built-in default shown as a placeholder.
-              </p>
-              <div className="rounded-lg border border-border p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {TAX_PARAMETER_FIELDS[pack.jurisdictionCountry].map((field) => {
-                  const existing = rates.find((r) => r.componentKey === field.key);
-                  const currentValue = field.type === "pct" ? existing?.employeeRatePct : existing?.flatAmount;
-                  const draftValue = paramDrafts[field.key] ?? currentValue ?? "";
-                  return (
-                    <div key={field.key}>
-                      <label className="block text-[11px] font-medium text-foreground-muted mb-1">
-                        {field.label} {field.type === "pct" ? "(%)" : ""}
-                      </label>
-                      <input
-                        className={cellInput}
-                        type="number" step="0.01"
-                        value={draftValue}
-                        placeholder={`Default: ${field.fallback}`}
-                        onChange={(e) => setParamDrafts((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div>
-            <p className="text-xs font-semibold text-foreground-muted mb-2">Tax Slabs — progressive brackets</p>
             <div className="rounded-lg border border-border overflow-x-auto">
               <table className="w-full text-xs min-w-[560px]">
                 <thead className="bg-background text-left text-foreground-muted">
@@ -535,6 +449,37 @@ function RatesEditor({ pack, onSaved }) {
               <Plus size={12} /> Add Slab
             </button>
           </div>
+
+          {paramFields.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-foreground-muted mb-1">Tax Parameters</p>
+              <p className="text-[11px] text-foreground-disabled mb-2">
+                Government-mandated thresholds this jurisdiction's calculator reads directly. Leave blank to use
+                the built-in default shown as a placeholder.
+              </p>
+              <div className="rounded-lg border border-border p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {paramFields.map((field) => {
+                  const existing = rates.find((r) => r.componentKey === field.key);
+                  const currentValue = field.type === "pct" ? existing?.employeeRatePct : existing?.flatAmount;
+                  const draftValue = paramDrafts[field.key] ?? currentValue ?? "";
+                  return (
+                    <div key={field.key}>
+                      <label className="block text-[11px] font-medium text-foreground-muted mb-1">
+                        {field.label} {field.type === "pct" ? "(%)" : ""}
+                      </label>
+                      <input
+                        className={cellInput}
+                        type="number" step="0.01"
+                        value={draftValue}
+                        placeholder={`Default: ${field.fallback}`}
+                        onChange={(e) => setParamDrafts((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <p className="text-xs text-foreground-disabled">
             These are the canonical, government-mandated values. Organizations read a synced copy — changes here
@@ -617,10 +562,18 @@ function AssignOrgsModal({ policy, orgs, assignedOrgIds, setAssignedOrgIds, onCl
           {policy.jurisdictionState ? ` / ${policy.jurisdictionState}` : ""}. Their next payslip uses the new numbers.
         </p>
       )}
+      <p className="mb-3 text-[11px] text-foreground-disabled">
+        Showing only organizations in {policy.jurisdictionState ? `${policy.jurisdictionState}, ` : ""}
+        {policy.jurisdictionCountry} — this pack's own jurisdiction.
+      </p>
       <SearchInput value={search} onChange={setSearch} placeholder="Search organizations…" className="mb-3" />
       <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
         {filtered.length === 0 ? (
-          <p className="p-4 text-center text-sm text-foreground-disabled">No organizations found.</p>
+          <p className="p-4 text-center text-sm text-foreground-disabled">
+            {orgs.length === 0
+              ? `No organizations found in ${policy.jurisdictionState ? `${policy.jurisdictionState}, ` : ""}${policy.jurisdictionCountry}.`
+              : "No organizations found."}
+          </p>
         ) : (
           filtered.map((o) => (
             <label key={o.id} className="flex items-center gap-3 border-b border-border-light px-3.5 py-2.5 last:border-b-0 hover:bg-surface-muted cursor-pointer">
@@ -748,12 +701,12 @@ export default function CompliancePage() {
     setAssignState({ policy, orgs: [], assignedOrgIds: [], saving: false });
     try {
       const [orgList, applied] = await Promise.all([
-        listAllOrganizationsBrief(),
+        getCompliancePolicyEligibleOrganizations(policy.id),
         getCompliancePolicyOrganizations(policy.id),
       ]);
       setAssignState({
         policy,
-        orgs: orgList.organizations || [],
+        orgs: orgList || [],
         assignedOrgIds: applied.map((o) => o.id),
         saving: false,
       });
@@ -1061,27 +1014,29 @@ export default function CompliancePage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-1">
-                    {tab === "taxes" && (
-                      <button
-                        title="Edit — metadata and rates"
-                        onClick={() => setFormState({
-                          mode: "edit",
-                          initial: {
-                            ...emptyForm(p.jurisdictionCountry, p.jurisdictionState, p.packType),
-                            id: p.id, packId: p.packId, version: p.version,
-                            jurisdictionCountry: p.jurisdictionCountry, jurisdictionState: p.jurisdictionState || "",
-                            status: p.status, effectiveFrom: p.effectiveFrom || "", effectiveTo: p.effectiveTo || "",
-                            complianceCategory: p.complianceCategory || "", regulatoryAuthority: p.regulatoryAuthority || "",
-                            complianceOwner: p.complianceOwner || "", engineeringOwner: p.engineeringOwner || "",
-                            changeSummary: p.changeSummary || "", sourceReferences: p.sourceReferences || "",
-                            nextReviewDate: p.nextReviewDate || "", policyDefaults: p.policyDefaults || {},
-                          },
-                        })}
-                        className="rounded-lg p-1.5 text-slate-400 hover:bg-surface-muted hover:text-slate-600 dark:hover:text-foreground"
-                      >
-                        <Pencil size={15} />
-                      </button>
-                    )}
+                    <button
+                      title="Edit — metadata and rates"
+                      onClick={() => {
+                        const editInitial = {
+                          ...emptyForm(p.jurisdictionCountry, p.jurisdictionState, p.packType),
+                          id: p.id, packId: p.packId, version: p.version,
+                          jurisdictionCountry: p.jurisdictionCountry, jurisdictionState: p.jurisdictionState || "",
+                          status: p.status, effectiveFrom: p.effectiveFrom || "", effectiveTo: p.effectiveTo || "",
+                          complianceCategory: p.complianceCategory || "", regulatoryAuthority: p.regulatoryAuthority || "",
+                          complianceOwner: p.complianceOwner || "", engineeringOwner: p.engineeringOwner || "",
+                          changeSummary: p.changeSummary || "", sourceReferences: p.sourceReferences || "",
+                          nextReviewDate: p.nextReviewDate || "", policyDefaults: p.policyDefaults || {},
+                        };
+                        if (tab === "taxes") {
+                          setFormState({ mode: "edit", initial: editInitial });
+                        } else {
+                          openPolicyConfigPage("edit", editInitial);
+                        }
+                      }}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-surface-muted hover:text-slate-600 dark:hover:text-foreground"
+                    >
+                      <Pencil size={15} />
+                    </button>
                     {tab === "taxes" && (
                       <button title="Audit history" onClick={() => setAuditPack(p)} className="rounded-lg p-1.5 text-slate-400 hover:bg-surface-muted hover:text-slate-600 dark:hover:text-foreground">
                         <ScrollText size={15} />
