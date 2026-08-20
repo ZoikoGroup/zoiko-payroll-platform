@@ -11,12 +11,15 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import OrgPortalPage from "./pages/OrgPortalPage";
 import DashboardPage from "./pages/DashboardPage";
 import UsersPage from "./pages/UsersPage";
-import StatutoryRatesPage from "./pages/StatutoryRatesPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import SettingsPage from "./pages/SettingsPage";
-import CompliancePage from "./pages/CompliancePage";
 import PolicyConfigPage from "./pages/PolicyConfigPage";
-import JurisdictionExplorerPage from "./pages/JurisdictionExplorerPage";
+import CompliancePage from "./pages/CompliancePage";
+import {
+  INCompliancePage, USACompliancePage, UKCompliancePage,
+  AUCompliancePage, CACompliancePage, DECompliancePage,
+} from "./pages/JurisdictionCompliance";
+import StatutoryRatesPage from "./pages/StatutoryRatesPage";
 import FinancePage from "./pages/FinancePage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -70,6 +73,14 @@ export default function App() {
           }
         />
         <Route
+          path="/super-admin/compliance/policy/new"
+          element={
+            <SuperAdminShell>
+              <PolicyConfigPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
           path="/super-admin/compliance"
           element={
             <SuperAdminShell>
@@ -77,11 +88,27 @@ export default function App() {
             </SuperAdminShell>
           }
         />
+        {/* Jurisdiction Compliance — one dedicated page per country,
+            reusing the shared JurisdictionLayout. The optional
+            :jurisdiction segment pre-selects a state (e.g.
+            /super-admin/compliance/india/Telangana). */}
+        <Route path="/super-admin/compliance/india" element={<SuperAdminShell><INCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/india/:jurisdiction" element={<SuperAdminShell><INCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/united-states" element={<SuperAdminShell><USACompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/united-states/:jurisdiction" element={<SuperAdminShell><USACompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/united-kingdom" element={<SuperAdminShell><UKCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/united-kingdom/:jurisdiction" element={<SuperAdminShell><UKCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/australia" element={<SuperAdminShell><AUCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/australia/:jurisdiction" element={<SuperAdminShell><AUCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/canada" element={<SuperAdminShell><CACompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/canada/:jurisdiction" element={<SuperAdminShell><CACompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/germany" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/germany/:jurisdiction" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
         <Route
-          path="/super-admin/compliance/policy/new"
+          path="/super-admin/statutory-rates"
           element={
             <SuperAdminShell>
-              <PolicyConfigPage />
+              <StatutoryRatesPage />
             </SuperAdminShell>
           }
         />
@@ -98,22 +125,6 @@ export default function App() {
           element={
             <SuperAdminShell>
               <ReportsPage />
-            </SuperAdminShell>
-          }
-        />
-        <Route
-          path="/super-admin/statutory-rates"
-          element={
-            <SuperAdminShell>
-              <StatutoryRatesPage />
-            </SuperAdminShell>
-          }
-        />
-        <Route
-          path="/super-admin/tax-hierarchy"
-          element={
-            <SuperAdminShell>
-              <JurisdictionExplorerPage />
             </SuperAdminShell>
           }
         />

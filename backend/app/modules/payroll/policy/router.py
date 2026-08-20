@@ -17,7 +17,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.core.dependencies import get_current_user, get_current_payroll_operator, require_active_subscription
+from app.core.dependencies import (
+    get_current_user, get_current_payroll_operator, get_organization_id, require_active_subscription,
+)
 from app.modules.payroll.policy import service
 from app.modules.payroll.policy.schemas import (
     PayrollPolicyResponse, PayrollPolicyUpdate, IntegrationResponse, SuccessResponse,
@@ -36,11 +38,16 @@ policy_router = APIRouter(
 )
 def get_active_policy(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    organization_id: int = Depends(get_organization_id),
 ):
     # organization_id ALWAYS comes from the authenticated token, never from
     # a query param or request body — see earlier audit finding on cross-tenant risk.
-    return service.get_active_policy(db, current_user.organization_id)
+    # get_organization_id (not a raw current_user.organization_id read) is what
+    # actually enforces that: it raises a clean 403 for a Super Admin token
+    # (which has no organization_id) instead of this get-or-create endpoint
+    # crashing with a raw NOT NULL constraint violation trying to auto-seed
+    # a policy row for organization_id=None.
+    return service.get_active_policy(db, organization_id)
 
 
 @policy_router.put(

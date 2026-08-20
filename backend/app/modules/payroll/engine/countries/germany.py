@@ -9,24 +9,30 @@ engine/standard.py's _calc_germany.
 from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
-from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, _param_amount, _param_pct
+from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
 
 _DE_GRUNDFREIBETRAG = Decimal("11784")
 _DE_CONTRIBUTION_CEILING = Decimal("96600")
 _DE_SOLI_THRESHOLD = Decimal("18130")
 _DE_SOLI_RATE = Decimal("5.5")
+# Kirchensteuer (church tax) — a % surcharge on the base income tax
+# (before Soli), only for employees who opt in (church_tax_liable).
+# Real rate varies by federal state (8% in Bavaria/Baden-Württemberg,
+# 9% elsewhere); 9% is used as the representative default.
+_DE_CHURCH_TAX_RATE = Decimal("9")
 
 
 def _calculate_annual_tax_de(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    grundfreibetrag = _param_amount(rate_map, "grundfreibetrag", _DE_GRUNDFREIBETRAG)
+    grundfreibetrag = resolve_jurisdiction_parameter(rate_map, "grundfreibetrag", _DE_GRUNDFREIBETRAG, country="DE")
     taxable = max(Decimal("0"), annual_gross - grundfreibetrag)
-    tax = _calculate_annual_tax(taxable, slabs)
+    base_tax = _calculate_annual_tax(taxable, slabs)
 
-    soli_threshold = _param_amount(rate_map, "soli_threshold", _DE_SOLI_THRESHOLD)
-    soli_rate = _param_pct(rate_map, "soli_rate", "employee", _DE_SOLI_RATE)
+    soli_threshold = resolve_jurisdiction_parameter(rate_map, "soli_threshold", _DE_SOLI_THRESHOLD, country="DE")
+    soli_rate = resolve_jurisdiction_parameter(rate_map, "soli_rate", _DE_SOLI_RATE, side="employee", country="DE")
+    tax = base_tax
     if tax > soli_threshold:
         tax += tax * soli_rate / Decimal("100")
-    return tax
+    return tax, base_tax
 
 
 def calculate(ctx: PayrollContext) -> dict:
@@ -46,7 +52,7 @@ def calculate(ctx: PayrollContext) -> dict:
     gross = ctx.gross
     annual_gross = gross * MONTHS_PER_YEAR
 
-    contribution_ceiling = _param_amount(rate_map, "contribution_ceiling", _DE_CONTRIBUTION_CEILING)
+    contribution_ceiling = resolve_jurisdiction_parameter(rate_map, "contribution_ceiling", _DE_CONTRIBUTION_CEILING, country="DE")
     annual_contribution_base = min(annual_gross, contribution_ceiling)
 
     pension_rate = rate_map.get("pension")
@@ -69,11 +75,17 @@ def calculate(ctx: PayrollContext) -> dict:
         if social_rate and social_rate.employer_rate_pct else Decimal("0")
     )
 
-    annual_tax = _calculate_annual_tax_de(annual_gross, ctx.slabs, rate_map)
+    annual_tax, base_tax = _calculate_annual_tax_de(annual_gross, ctx.slabs, rate_map)
     tds = _round2(annual_tax / MONTHS_PER_YEAR)
+
+    church_tax = Decimal("0")
+    if ctx.church_tax_liable:
+        church_tax_rate = resolve_jurisdiction_parameter(rate_map, "church_tax_rate", _DE_CHURCH_TAX_RATE, side="employee", country="DE")
+        church_tax = _round2((base_tax * church_tax_rate / Decimal("100")) / MONTHS_PER_YEAR)
 
     return dict(
         employee_pf=employee_pf, employer_pf=employer_pf,
         employee_esi=employee_esi, employer_esi=employer_esi,
+        church_tax=church_tax,
         tds=tds, annual_tax=annual_tax,
     )

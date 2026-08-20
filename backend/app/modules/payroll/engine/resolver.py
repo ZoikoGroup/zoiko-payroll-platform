@@ -77,9 +77,17 @@ def build_context_from_employee(
     rate_map: dict | None = None,
     slabs: list | None = None,
     payroll_days: int = PAYROLL_DAYS,
+    work_state: str | None = None,
+    state_rate_map: dict | None = None,
+    state_slabs: list | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
-    and pre-computed salary components."""
+    and pre-computed salary components. Tax-profile fields (tax_code,
+    ni_category, study_loan_plan/balance, church_tax_liable) are read
+    directly off `employee` here rather than added as more explicit
+    params to every caller — they're genuinely employee-sourced, exactly
+    like the identity/bank fields _compute_payslip_values already reads
+    straight off `employee` elsewhere."""
     return PayrollContext(
         gross=gross,
         basic=basic,
@@ -92,4 +100,13 @@ def build_context_from_employee(
         country=country,
         rate_map=rate_map or {},
         slabs=slabs or [],
+        work_state=work_state,
+        state_rate_map=state_rate_map or {},
+        state_slabs=state_slabs or [],
+        tax_code=getattr(employee, "tax_code", None),
+        ni_category=getattr(employee, "ni_category", None),
+        study_loan_plan=getattr(employee, "study_loan_plan", None),
+        study_loan_balance=getattr(employee, "study_loan_balance", None),
+        church_tax_liable=bool(getattr(employee, "church_tax_liable", False)),
+        tax_regime=getattr(employee, "tax_regime", None),
     )

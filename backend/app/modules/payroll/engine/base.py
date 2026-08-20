@@ -47,7 +47,30 @@ class PayrollContext:
     # Country / compliance
     country: str = "IN"
     rate_map: dict = field(default_factory=dict)   # component_key → ContributionRate
-    slabs: list = field(default_factory=list)       # list[TaxSlab]
+    slabs: list = field(default_factory=list)       # list[TaxSlab], country/national-level
+
+    # Region (state/province/devolved-nation) — the employee's own
+    # PayrollEmployee.work_state, threaded through so a country
+    # calculator can resolve region-specific rules (India's
+    # state-specific Professional Tax, US state income tax, Scotland's
+    # own UK tax bands) without needing DB access itself. Empty/None
+    # means "no region resolved" — every existing calculation is
+    # unaffected until a calculator explicitly reads these.
+    work_state: str = None
+    state_rate_map: dict = field(default_factory=dict)   # component_key → ContributionRate, state-scoped
+    state_slabs: list = field(default_factory=list)        # list[TaxSlab], state-scoped
+
+    # Employee tax-profile fields — all opt-in (None/False means "not
+    # set," never inferred), threaded from PayrollEmployee so a country
+    # calculator can read them without DB access. No existing employee
+    # has any of these set, so no existing calculation changes just
+    # because these fields now exist.
+    tax_code: str = None            # UK HMRC tax code, e.g. "1257L"
+    ni_category: str = None         # UK NI category letter, e.g. "A"
+    study_loan_plan: str = None     # e.g. "UK_PLAN2", "UK_POSTGRAD", "AU_HELP" — shared UK/AU mechanism
+    study_loan_balance: Decimal = None
+    church_tax_liable: bool = False  # Germany Kirchensteuer opt-in
+    tax_regime: str = None          # India's "Old"/"New" — None means "not set," same as every employee today
 
 
 @dataclass
@@ -75,9 +98,22 @@ class PayrollResult:
     professional_tax: Decimal = Decimal("0")
     tds: Decimal = Decimal("0")
     annual_tax: Decimal = Decimal("0")
+    # India: monthly breakdown of what's already folded into `tds` above
+    # (tds = base tax + surcharge + cess) — informational, never summed
+    # again into total_employee_deductions. Zero for every country/employee
+    # until india.py explicitly computes them.
+    surcharge: Decimal = Decimal("0")
+    cess: Decimal = Decimal("0")
     social_security: Decimal = Decimal("0")
     medicare: Decimal = Decimal("0")
     ni_employee: Decimal = Decimal("0")
+    # UK/Australia: shared study-loan repayment line (Student/Postgraduate
+    # Loan / HELP-HECS). Germany: church tax. Canada: CPP2. Zero unless a
+    # country calculator explicitly sets it — no existing country's
+    # output changes just because these fields now exist.
+    study_loan_deduction: Decimal = Decimal("0")
+    church_tax: Decimal = Decimal("0")
+    cpp2: Decimal = Decimal("0")
 
     # Employer-side contributions
     employer_pf: Decimal = Decimal("0")
@@ -85,6 +121,8 @@ class PayrollResult:
     employer_social_security: Decimal = Decimal("0")
     employer_medicare: Decimal = Decimal("0")
     employer_pension: Decimal = Decimal("0")
+    employer_ni: Decimal = Decimal("0")
+    employer_futa: Decimal = Decimal("0")
 
     # Totals
     total_deductions: Decimal = Decimal("0")
