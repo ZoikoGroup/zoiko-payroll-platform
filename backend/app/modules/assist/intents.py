@@ -23,7 +23,7 @@ INTENT_REGISTRY = [
         "id": "action.approve_payroll",
         "risk_tier": "A5",
         "blocked": True,
-        "keywords": ["approve payroll", "approve the run", "approve the payroll run", "approve this run", "mark approved", "mark as approved", "mark the run as approved", "mark the payroll as approved", "approve run", "finalize approval", "authorize payroll", "approve the run now"],
+        "keywords": ["approve payroll", "approve the run", "approve the payroll run", "approve this run", "approve this payroll run", "approve the payroll", "approve my payroll", "approve payroll run", "mark approved", "mark as approved", "mark the run as approved", "mark the payroll as approved", "approve run", "finalize approval", "authorize payroll", "approve the run now"],
         "description": "Approve a payroll run. Prohibited — Assist cannot approve payroll.",
         "refusal": (
             "I can summarize the payroll run and its unresolved exceptions, but I cannot approve payroll. "
@@ -34,7 +34,7 @@ INTENT_REGISTRY = [
         "id": "action.release_payment",
         "risk_tier": "A5",
         "blocked": True,
-        "keywords": ["release payment", "release the payment", "release the payroll", "release bank", "pay everyone", "send payment", "pay employees", "submit payment", "release payroll"],
+        "keywords": ["release payment", "release the payment", "release the payroll", "release bank", "pay everyone", "send payment", "pay employees", "submit payment", "release payroll", "release this payment", "release this payroll payment", "release the payroll payment", "release my payment", "pay out everyone"],
         "description": "Release or submit payments. Prohibited — Assist cannot release payments.",
         "refusal": (
             "I cannot release payments or bank files. I can show the current payment state and open the "
@@ -45,7 +45,7 @@ INTENT_REGISTRY = [
         "id": "action.submit_filing",
         "risk_tier": "A5",
         "blocked": True,
-        "keywords": ["submit filing", "submit the filing", "file return", "file the return", "submit tax filing", "submit the tax filing", "submit tax", "file taxes", "submit statutory"],
+        "keywords": ["submit filing", "submit the filing", "file return", "file the return", "submit tax filing", "submit the tax filing", "submit tax", "file taxes", "submit statutory", "submit this filing", "submit my filing", "submit the statutory filing", "file this return"],
         "description": "Submit statutory filings. Prohibited — Assist cannot submit filings.",
         "refusal": (
             "I cannot submit a statutory filing. I can show the filing status, checklist and the approved "
@@ -62,6 +62,48 @@ INTENT_REGISTRY = [
             "I cannot change bank, tax, identity or permission data. Please use the employee or user "
             "management screens to make protected changes."
         ),
+    },
+    {
+        "id": "action.delete_record",
+        "risk_tier": "A5",
+        "blocked": True,
+        "keywords": [
+            "delete this employee", "delete this record", "delete this run", "delete the run",
+            "delete the payroll record", "delete this payroll record", "delete this payroll run",
+            "delete employee record", "delete payroll record", "remove this employee",
+            "delete this employee's record", "delete this employee's payroll record",
+            "permanently delete", "erase this employee", "erase this record",
+        ],
+        "description": "Delete a payroll record, run or employee. Prohibited — Assist cannot delete records.",
+        "refusal": (
+            "I cannot delete payroll records, runs or employee data. Please use the employee or "
+            "administration screens, with the appropriate role, to make deletions."
+        ),
+    },
+    # A0 — fixed boundary/disclaimer responses. No evidence gathering or LLM
+    # call needed (see SMALLTALK_INTENT_IDS) — these are canned, spec-mandated
+    # copy, not something worth risking a KB semantic-search miss on.
+    {
+        "id": "explain.identity",
+        "risk_tier": "A0",
+        "keywords": [
+            "are you my employer", "are you my accountant", "are you my bank",
+            "are you my lawyer", "are you a lawyer", "are you a tax authority",
+            "are you an approver", "is this legal advice", "are you human",
+            "are you a real person", "are you a bot",
+        ],
+        "description": "Disclaim employer/accountant/bank/lawyer/tax-authority/approver identity.",
+        "tool_id": None,
+    },
+    {
+        "id": "boundary.no_code_execution",
+        "risk_tier": "A0",
+        "keywords": [
+            "run this sql", "execute this sql", "run this query", "execute this query",
+            "run this code", "execute this code", "run this script", "execute this script",
+        ],
+        "description": "Decline arbitrary code/SQL/script execution requests.",
+        "tool_id": None,
     },
     # A3 — reversible low-materiality mutations. Preview + confirm required.
     {
@@ -271,7 +313,40 @@ _ACK_PHRASES = [
 
 # Intents that are pure small talk — no material payroll content, so no KB
 # search and no LLM call is needed (see service.py's evidence/engine gates).
-SMALLTALK_INTENT_IDS = {"chat.greeting", "chat.acknowledgment"}
+# explain.identity and boundary.no_code_execution are fixed, spec-mandated
+# boundary statements for the same reason: canned copy that must never be
+# displaced by an unrelated KB match or an LLM paraphrase.
+SMALLTALK_INTENT_IDS = {"chat.greeting", "chat.acknowledgment", "explain.identity", "boundary.no_code_execution"}
+
+
+_MEANING_QUESTION_RE = re.compile(r"\bwhat (does|is|are)\b.{0,60}\bmean(ing)?\b")
+
+_DIFFERENCE_BETWEEN_RE = re.compile(r"\bdifference between\b")
+# review.variance's own "difference between" keyword is meant for comparing
+# two payroll RUNS/periods — without a temporal/run signal word, "difference
+# between gross and net pay" or "...prepared and paid" is a term definition,
+# not a period comparison, and got misrouted to the comparison tool (which
+# has no runs to compare) instead of answered.
+_PERIOD_CONTEXT_TOKENS = {"period", "periods", "month", "months", "run", "runs", "quarter", "quarters", "year", "years"}
+
+
+def _is_term_definition_question(lowered: str, tokens: set[str]) -> bool:
+    if not _DIFFERENCE_BETWEEN_RE.search(lowered):
+        return False
+    return not (tokens & _PERIOD_CONTEXT_TOKENS)
+
+
+def _is_meaning_question(lowered: str) -> bool:
+    """"What does/is X mean?" — a definition request, not a status lookup.
+
+    Checked before the general keyword loop so a phrase like "...payroll
+    status mean?" doesn't get intercepted by explain.status's bare "status"
+    keyword before ever reaching explain.field's own "what does" keyword —
+    the two intents both match on substrings of the same question, and
+    registry order alone can't distinguish "what does X mean" (a concept
+    question) from "what is the status" (an actual status lookup).
+    """
+    return bool(_MEANING_QUESTION_RE.search(lowered))
 
 
 def _is_acknowledgment(lowered: str, tokens: set[str]) -> bool:
@@ -326,6 +401,17 @@ def classify_intent(text: str) -> dict:
                 "confidence": "HIGH",
                 "method": "deterministic",
             }
+
+    if _is_meaning_question(lowered) or _is_term_definition_question(lowered, tokens):
+        intent = next(i for i in INTENT_REGISTRY if i["id"] == "explain.field")
+        return {
+            "intent_id": intent["id"],
+            "risk_tier": intent["risk_tier"],
+            "blocked": False,
+            "tool_id": intent["tool_id"],
+            "confidence": "HIGH",
+            "method": "deterministic",
+        }
 
     for intent in INTENT_REGISTRY:
         if not intent.get("keywords"):

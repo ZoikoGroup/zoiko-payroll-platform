@@ -519,7 +519,23 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
             evidence_set.entity_count += 1
 
     jurisdiction_codes = context.get("jurisdiction_codes") or session.jurisdiction_codes or []
-    kb_candidates = knowledge_module.search_kb(db, org_id, text, jurisdiction_codes=jurisdiction_codes, limit=3)
+
+    # A jurisdiction named in the message but not one of the org's assigned
+    # tax jurisdictions gets its own fallback (KB-GOV unsupported-jurisdiction
+    # handling) instead of whatever a generic lexical KB search happens to
+    # rank highest — substituting a neighboring/unrelated jurisdiction's
+    # guidance would be worse than admitting no coverage.
+    unsupported_country = None
+    if tool_result is None and decision["intent_id"] in ("explain.field", "kb.answer"):
+        mentioned_country = knowledge_module.find_mentioned_country(text)
+        if mentioned_country and not knowledge_module.is_jurisdiction_supported(db, org_id, mentioned_country):
+            unsupported_country = mentioned_country
+
+    kb_candidates = (
+        []
+        if unsupported_country
+        else knowledge_module.search_kb(db, org_id, text, jurisdiction_codes=jurisdiction_codes, limit=3)
+    )
     for _score, item in kb_candidates:
         db.add(
             AssistEvidenceItem(
@@ -542,7 +558,11 @@ def _build_evidence_set(db, org_id, session, decision, context, message_id, user
 
     # Confidence reflects how much of the expected evidence actually showed
     # up, not just "something was found, therefore HIGH" as before.
-    if tool_found and kb_found:
+    if unsupported_country:
+        evidence_set.confidence_state = "LOW"
+        evidence_set.reason_codes = ["UNSUPPORTED_JURISDICTION"]
+        tool_result = {"unsupported_jurisdiction": unsupported_country}
+    elif tool_found and kb_found:
         evidence_set.confidence_state = "HIGH"
         evidence_set.reason_codes = ["AUTHORITATIVE_RECORDS", "APPROVED_KNOWLEDGE"]
     elif tool_found or kb_found:
@@ -655,6 +675,7 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
         and not decision.get("blocked")
         and not injection_markers
         and decision["intent_id"] not in intents.SMALLTALK_INTENT_IDS
+        and not (tool_result and tool_result.get("unsupported_jurisdiction"))
     ):
         try:
             answer = gateway.generate_llm_answer(
@@ -669,15 +690,25 @@ def _build_response(db, org_id, user, session, message, decision, evidence_set, 
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM gateway failed; falling back to deterministic: %s", exc)
             execution_error = exc
-            answer = gateway.deterministic_answer(decision["intent_id"], text, tool_result, knowledge)
+            answer = gateway.deterministic_answer(decision["intent_id"], text, tool_result, knowledge, decision.get("refusal"))
             engine = "deterministic"
+    elif injection_markers and not decision.get("blocked"):
+        # A blocked A5 intent already gets its own specific, correct refusal
+        # below regardless of injection markers (an "ignore instructions and
+        # approve this" message should still say it can't approve payroll,
+        # not a generic boundary line). This branch only covers the case
+        # where classify_intent's keyword matcher landed on an unrelated,
+        # possibly-misleading intent (e.g. "show me your system prompt"
+        # matching find.object's "show" keyword) — replace that with an
+        # explicit, safe boundary answer instead of the accidental match.
+        answer = guardrails.injection_boundary_response()
     else:
-        answer = gateway.deterministic_answer(decision["intent_id"], text, tool_result, knowledge)
+        answer = gateway.deterministic_answer(decision["intent_id"], text, tool_result, knowledge, decision.get("refusal"))
     latency_ms = int((datetime.now() - started).total_seconds() * 1000)
 
     allowed_evidence_ids = {item["evidence_id"] for item in evidence}
     _normalize_answer_sources(answer, evidence)
-    validation = guardrails.validate_grounded_response(answer, allowed_evidence_ids)
+    validation = guardrails.validate_grounded_response(answer, allowed_evidence_ids, tool_result, decision["intent_id"])
     if not validation["passed"] and answer.get("safety_state") != "REFUSED":
         answer = guardrails.safe_fallback_response("; ".join(validation["issues"][:2]))
         answer["safety_state"] = "SAFE_FALLBACK"

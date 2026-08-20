@@ -145,9 +145,6 @@ def generate_llm_answer(
 
 def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dict | None) -> str:
     """Compose a clear, governed answer from a deterministic tool result."""
-    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data"):
-        return "That action is outside what Assist is allowed to do."
-
     if not tool_result or not tool_result.get("found"):
         reason = (tool_result or {}).get("reason") or "No payroll record is visible in your authorized scope."
         if reason == "No visible payroll run.":
@@ -264,6 +261,7 @@ def deterministic_answer(
     user_text: str,
     tool_result: dict | None,
     knowledge_items: list[dict],
+    refusal: str | None = None,
 ) -> dict:
     """Build a fully grounded structured answer using only deterministic data."""
     if intent_id == "chat.greeting":
@@ -293,9 +291,9 @@ def deterministic_answer(
             "safety_state": "SAFE",
         }
 
-    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data"):
+    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data", "action.delete_record"):
         return {
-            "answer": (
+            "answer": refusal or (
                 "I can summarize the payroll run and its unresolved exceptions, but I cannot approve payroll, "
                 "release payments, submit filings, or change protected data. Use the relevant screen inside "
                 "Zoiko Payroll to make the authorized decision."
@@ -307,6 +305,55 @@ def deterministic_answer(
             "sources": [],
             "confidence": "HIGH",
             "safety_state": "REFUSED",
+        }
+
+    if intent_id == "explain.identity":
+        return {
+            "answer": (
+                "I'm Zoiko Payroll Assist, an AI assistant — not your employer, accountant, bank, lawyer or a "
+                "tax authority, and I don't have approval authority. I can explain payroll concepts and your "
+                "own records, but for legal, tax or employment decisions, please consult the appropriate "
+                "professional or your organization's authorized approver."
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": [],
+            "next_steps": [],
+            "sources": [],
+            "confidence": "HIGH",
+            "safety_state": "SAFE",
+        }
+
+    if intent_id == "boundary.no_code_execution":
+        return {
+            "answer": (
+                "I can't execute code, SQL or scripts — I only use Zoiko Payroll's own registered capabilities "
+                "to explain, find, review, prepare and route payroll work. Tell me what payroll data you're "
+                "trying to find and I can look it up directly."
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": ["out_of_scope"],
+            "next_steps": [],
+            "sources": [],
+            "confidence": "HIGH",
+            "safety_state": "SAFE",
+        }
+
+    if tool_result and tool_result.get("unsupported_jurisdiction"):
+        country = tool_result["unsupported_jurisdiction"]
+        return {
+            "answer": (
+                f"Approved guidance is not currently available for {country} for this period. "
+                "I don't substitute another jurisdiction's rule for one that isn't covered."
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": ["unsupported_jurisdiction"],
+            "next_steps": [f"Route this to your local payroll or compliance specialist for {country}-specific guidance."],
+            "sources": [],
+            "confidence": "LOW",
+            "safety_state": "SAFE",
         }
 
     sources: list[dict] = []
