@@ -104,11 +104,30 @@ def _format_tool_result(tool_result: dict) -> str:
         return str(tool_result)
 
 
+# These three intents are reversible, low-materiality actions (A3) — the
+# platform attaches a real preview-and-confirm control to the response
+# automatically (service.py's _auto_action_preview), independent of what the
+# LLM writes. Without this note the model has no way to know that, and
+# reasons from first principles that it "can't do that", producing a flat
+# refusal that sits right next to a working action-preview block.
+_A3_ACTION_INTENTS = {"action.assign_exception", "action.add_note", "action.create_case"}
+
+
 def build_task_prompt(intent_id: str, user_text: str, jurisdiction_codes: list[str]) -> str:
     jurs = ", ".join(jurisdiction_codes) if jurisdiction_codes else "not specified (do not infer)"
+    action_note = ""
+    if intent_id in _A3_ACTION_INTENTS:
+        action_note = (
+            "This is a reversible, low-materiality action (A3). The platform automatically attaches a "
+            "preview-and-confirm control to your response with the exact target, current value and "
+            "proposed change — you do not perform the action yourself, and must not claim you cannot "
+            "do it. Write your answer to describe what the preview will do and invite the user to "
+            "review and confirm it, not as a refusal.\n"
+        )
     return (
         f"Intent: {intent_id}\n"
         f"Jurisdiction scope (from trusted context): {jurs}\n"
+        f"{action_note}"
         "Task: answer the user's request following the doctrine. Return ONLY a JSON object conforming to "
         "answer_v1 with fields: answer (string), facts (string[]), inferences (string[]), "
         "limitations (string[]), next_steps (string[]), sources (array of {evidence_id,title,source_type} "
