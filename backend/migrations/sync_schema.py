@@ -28,6 +28,21 @@ from sqlalchemy import inspect, text  # type: ignore[import]
 import app.database  # noqa: F401  (registers every model on Base.metadata)
 from app.database import Base, engine  # noqa: E402
 
+# `import app.database` alone does NOT transitively import every module's
+# models — only whatever database.py itself happens to import. Modules
+# added after this script was written (mirroring the same explicit list
+# migrations/create_all/create_all.py already needs for the same reason)
+# must be imported here too, or their tables are invisible to
+# Base.metadata and this script silently reports "up to date" while
+# actually never having looked at them at all.
+import app.modules.auth.models  # noqa: F401,E402
+import app.modules.organizations.models  # noqa: F401,E402
+import app.modules.super_admin.models  # noqa: F401,E402
+import app.modules.payroll.models  # noqa: F401,E402
+import app.modules.payroll.policy.models  # noqa: F401,E402
+import app.modules.payroll.enterprise.models  # noqa: F401,E402
+import app.modules.payroll.mail.models  # noqa: F401,E402
+
 # JSON is stored as JSONB on PostgreSQL (JSON is fine on SQLite).
 _JSON_TYPE = "JSONB" if engine.dialect.name == "postgresql" else "JSON"
 

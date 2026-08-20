@@ -118,6 +118,9 @@ class PayrollEmployee(Base):
     # in India, which is state-specific). When set, this should take
     # precedence over the org-level default in PT calculation.
     work_state       = Column(String(100), nullable=True)
+    # Third hierarchy level below work_state (e.g. a city/local body with
+    # its own local tax) — null for every employee today; opt-in only.
+    work_locality    = Column(String(100), nullable=True)
 
     date_of_joining  = Column(Date, nullable=True)
     ctc              = Column(Numeric(12, 2), default=0)
@@ -144,6 +147,26 @@ class PayrollEmployee(Base):
     # needs to filter canonical TaxSlab/ContributionRate rows by regime;
     # jurisdictions with no regime concept simply leave this NULL.
     tax_regime       = Column(String(20), nullable=True)
+
+    # UK-specific: HMRC tax code (e.g. "1257L") and NI category letter
+    # (e.g. "A"). NULL for every non-UK employee, and for UK employees
+    # until explicitly set — the engine falls back to standard
+    # assumptions (basic personal allowance, category A) when unset.
+    tax_code         = Column(String(20), nullable=True)
+    ni_category      = Column(String(5), nullable=True)
+
+    # Government study-loan repayment, deducted via payroll above an
+    # income threshold — the SAME mechanism under different names in the
+    # UK (Student/Postgraduate Loan, e.g. "UK_PLAN1".."UK_PLAN5",
+    # "UK_POSTGRAD") and Australia (HELP/HECS, e.g. "AU_HELP"). One
+    # generic pair reused by both rather than two parallel field sets.
+    study_loan_plan    = Column(String(20), nullable=True)
+    study_loan_balance = Column(Numeric(12, 2), nullable=True)
+
+    # Germany: whether this employee is liable for Kirchensteuer (church
+    # tax) — an opt-in surcharge on income tax. Defaults False so no
+    # existing employee's calculation changes.
+    church_tax_liable = Column(Boolean, default=False, nullable=False, server_default="false")
 
     # Non-India statutory/bank identifiers (SSN, NINO, TFN, SIN, Steuer-ID,
     # IBAN, etc. — see employee_validation.py for the field set per
@@ -265,6 +288,12 @@ class PayslipItem(Base):
     # rows generated before this column existed; callers fall back to the
     # org's current default for those.
     country_code    = Column(String(2), nullable=True)
+    # Snapshot of PayrollEmployee.work_state/work_locality at generation
+    # time — same reproducibility reasoning as country_code above, just
+    # one level (two levels) finer. NULL on payslips generated before
+    # these columns existed or where the employee had no region set.
+    work_state      = Column(String(100), nullable=True)
+    work_locality   = Column(String(100), nullable=True)
     # Snapshot of PayrollEmployee.compliance_fields (SSN, NINO, IBAN, etc. —
     # see employee_validation.py for the full per-country set). pan/uan/ifsc
     # above only ever covered India; every other jurisdiction's identifiers
@@ -281,15 +310,6 @@ class PayslipItem(Base):
     tax_policy_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
     tax_policy_version  = Column(String(20), nullable=True)
     tax_rule_snapshot   = Column(JSON, nullable=True)
-
-    # Populated only for payslips generated after an organization is cut
-    # over to the new hierarchy engine (hierarchy/models.py) — mutually
-    # exclusive with tax_policy_pack_id in practice (a payslip is
-    # produced by exactly one resolver), never both. tax_policy_pack_id/
-    # tax_policy_version/tax_rule_snapshot above are NOT modified or
-    # repurposed by the new engine; they keep meaning exactly what they
-    # always have for every payslip generated before cutover.
-    tax_version_id = Column(Integer, ForeignKey("payroll_hierarchy_tax_versions.id"), nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -325,12 +345,27 @@ class PayslipItem(Base):
     pf                = Column(Numeric(12, 2), default=0)
     esi               = Column(Numeric(12, 2), default=0)
     professional_tax  = Column(Numeric(12, 2), default=0)
-    tds               = Column(Numeric(12, 2), default=0)   # income tax withheld
+    tds               = Column(Numeric(12, 2), default=0)   # income tax withheld — INCLUDES surcharge/cess below, not additional to them
+    # India: monthly breakdown of what's already folded into `tds` above —
+    # informational only, never summed again into total_deductions.
+    surcharge         = Column(Numeric(12, 2), default=0, server_default="0")
+    cess              = Column(Numeric(12, 2), default=0, server_default="0")
     # US-specific
     social_security   = Column(Numeric(12, 2), default=0)
     medicare          = Column(Numeric(12, 2), default=0)
     # UK-specific
     ni_employee       = Column(Numeric(12, 2), default=0)
+    # UK/Australia: government study-loan repayment (Student/Postgraduate
+    # Loan in the UK, HELP/HECS in Australia) — one shared line, same
+    # reasoning as PayrollEmployee.study_loan_plan/study_loan_balance.
+    study_loan_deduction = Column(Numeric(12, 2), default=0, server_default="0")
+    # Germany: Kirchensteuer (church tax), only nonzero when the employee
+    # is flagged church_tax_liable.
+    church_tax        = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: CPP2, the second-tier contribution above the YMPE — its own
+    # line rather than folded into social_security, matching how every
+    # other country already breaks out multiple named statutory lines.
+    cpp2              = Column(Numeric(12, 2), default=0, server_default="0")
     total_deductions  = Column(Numeric(12, 2), default=0)   # all employee deductions, INCLUDING tds — see engine/*.py
 
     # Employer-side contributions (informational, not deducted from employee).
@@ -339,6 +374,12 @@ class PayslipItem(Base):
     employer_social_security = Column(Numeric(12, 2), default=0)
     employer_medicare  = Column(Numeric(12, 2), default=0)
     employer_pension   = Column(Numeric(12, 2), default=0)
+    # UK: employer National Insurance — genuinely absent until now (only
+    # employee NI was ever modeled).
+    employer_ni        = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: FUTA — seeded as a display row since day one but never actually
+    # calculated or surfaced anywhere until now.
+    employer_futa      = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -498,6 +539,11 @@ class ContributionRate(Base):
     # Null = country-level, matching the convention JurisdictionPack/
     # GlobalStatutoryRate already use for optional state/province scoping.
     jurisdiction_state    = Column(String(100), nullable=True)
+    # Third hierarchy level below state (e.g. a city/local body) — null
+    # for every row today; a genuine locality-scoped rate is opt-in, never
+    # required. Mirrors jurisdiction_state's own null-means-broader-scope
+    # convention one level down.
+    jurisdiction_locality = Column(String(100), nullable=True)
     tax_regime            = Column(String(20), nullable=True)
     # Which canonical tax pack version this row was authored under/synced
     # from. NULL on org-scoped rows created before this column existed.
@@ -513,15 +559,32 @@ class ContributionRate(Base):
     # canonical (organization_id IS NULL) rows. Same pattern as
     # GlobalStatutoryRate (super_admin/models.py).
     __table_args__ = (
+        # sqlite_where mirrors postgresql_where so the SQLite dev/test
+        # fallback (database.py's resolve_database_url) enforces the same
+        # partial-uniqueness semantics as production Postgres — without it,
+        # SQLite silently drops the WHERE clause and applies each index
+        # unconditionally, which would wrongly forbid two different orgs
+        # from sharing a canonical (org_id-less) country/component/regime
+        # combination — the normal case.
         Index(
+            # tax_regime included so an org can hold BOTH regimes' rows
+            # for the same component_key side by side (e.g. two
+            # rebate_87a_limit rows, tagged "Old" and "New") — added for
+            # the Tax Parameters feature; a regime-agnostic row
+            # (tax_regime NULL) is still unique per component_key on its
+            # own, same as before.
             "uq_contribution_rate_org_country_component",
-            "organization_id", "jurisdiction_country", "component_key",
-            unique=True, postgresql_where=text("organization_id IS NOT NULL"),
+            "organization_id", "jurisdiction_country", "component_key", "tax_regime",
+            unique=True,
+            postgresql_where=text("organization_id IS NOT NULL"),
+            sqlite_where=text("organization_id IS NOT NULL"),
         ),
         Index(
             "uq_contribution_rate_canonical_country_state_component",
             "jurisdiction_country", "jurisdiction_state", "component_key", "tax_regime",
-            unique=True, postgresql_where=text("organization_id IS NULL"),
+            unique=True,
+            postgresql_where=text("organization_id IS NULL"),
+            sqlite_where=text("organization_id IS NULL"),
         ),
     )
 
@@ -551,16 +614,27 @@ class TaxSlab(Base):
 
     jurisdiction_country = Column(String(10), nullable=False, server_default="IN", default="IN")
     jurisdiction_state    = Column(String(100), nullable=True)   # null = country-level
+    jurisdiction_locality = Column(String(100), nullable=True)   # null = state-level (or country-level if state is also null)
     tax_regime            = Column(String(20), nullable=True)
 
     # MARGINAL_RATE (default, existing brackets) | FLAT_RATE | FIXED_PLUS_MARGINAL
-    # | FORMULA | TABLE_LOOKUP | CONTRIBUTION. Only FORMULA rows use
+    # | FORMULA | TABLE_LOOKUP | CONTRIBUTION | PT_FLAT. Only FORMULA rows use
     # formula_expression instead of min/max/rate_pct — e.g. Germany's
     # Lohnsteuer, which isn't a clean bracket table. Existing bracket rows
     # for every country default to MARGINAL_RATE, so no calculator changes
-    # are required until a row actually opts into FORMULA.
+    # are required until a row actually opts into FORMULA. PT_FLAT rows
+    # (India's state-level Professional Tax, bracketed by gross salary, not
+    # a percentage) use flat_amount instead of rate_pct — rate_pct stays
+    # 0.00 (still NOT NULL) on those rows, simply unread by the engine.
     rule_type             = Column(String(20), nullable=False, default="MARGINAL_RATE", server_default="MARGINAL_RATE")
     formula_expression    = Column(Text, nullable=True)
+    # PT_FLAT only: the fixed monthly deduction for this gross-income
+    # bracket, and an optional override for whichever month absorbs the
+    # annual-cap rounding (e.g. many states adjust February so 11×monthly +
+    # this equals the statutory annual ceiling). Null for every other
+    # rule_type — additive, no existing row's behavior changes.
+    flat_amount           = Column(Numeric(10, 2), nullable=True)
+    adjustment_amount     = Column(Numeric(10, 2), nullable=True)
     # Which canonical tax pack version this row was authored under/synced from.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
@@ -611,15 +685,8 @@ class CompanyComplianceDetails(Base):
     # while any org references it).  Also missing: a relationship() helper
     # so SQLAlchemy can eager-load the pack without a manual join.
     #
-    # Known bug, NOT fixed by the hierarchy engine migration: this one FK is
-    # shared by both tax packs and policy packs, so assigning one silently
-    # drops live-tracking of the other. The hierarchy migration deliberately
-    # did not repoint or rename this column — tax-pack assignment now
-    # resolves dynamically via OrganizationJurisdictionAssignment instead,
-    # but active_pack_id itself is untouched and still ambiguous for any
-    # org not yet cut over. Phase 9 cleanup inventory (see
-    # backend/scripts/HIERARCHY_V2_CLEANUP_INVENTORY.md) tracks renaming
-    # this to active_policy_pack_id once safe to do so.
+    # Known bug: this one FK is shared by both tax packs and policy packs,
+    # so assigning one silently drops live-tracking of the other.
     active_pack_id        = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
     # Set the first time an admin explicitly saves Compliance details via
@@ -628,15 +695,6 @@ class CompanyComplianceDetails(Base):
     # lock signal: once non-null, jurisdiction_country can no longer be
     # changed through this endpoint (see update_company_details).
     configured_at         = Column(DateTime(timezone=True), nullable=True)
-
-    # Per-org rollout gate for the new generic jurisdiction/tax hierarchy
-    # engine (hierarchy/models.py + engine/tax_resolver_v2.py). False for
-    # every existing and new organization by default — creating the new
-    # tables/resolver is a pure no-op until this is deliberately flipped
-    # for a specific org, one at a time, after that org's v2-resolved
-    # numbers have been validated against its last real payroll run.
-    # Mirrors PayrollPolicy.calculation_mode's per-org gating convention.
-    tax_hierarchy_v2_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
 
     created_at            = Column(DateTime(timezone=True), server_default=func.now())
     updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
@@ -675,6 +733,7 @@ class JurisdictionPack(Base):
     pack_id              = Column(String(100), nullable=False)  # e.g. "IN-PAYROLL-2026-V1"
     jurisdiction_country = Column(String(100), nullable=False)
     jurisdiction_state   = Column(String(100), nullable=True)   # null = country-level pack
+    jurisdiction_locality = Column(String(100), nullable=True)  # null = state-level (or country-level) pack
 
     # "tax" | "policy" — keeps Tax and Policy records in this same versioned
     # table (no parallel Tax system) while letting the UI show them as two
@@ -711,6 +770,14 @@ class JurisdictionPack(Base):
     # unaffected. Only tax packs meaningfully set these.
     tax_year             = Column(String(20), nullable=True)   # e.g. "2026-27" or "2026"
     tax_regime           = Column(String(20), nullable=True)   # e.g. India's "Old"/"New"; null where not applicable
+    # Which regime's rows/parameters an employee with no explicit
+    # PayrollEmployee.tax_regime should be treated as — a DIFFERENT concept
+    # from tax_regime above (which tags which single regime this whole
+    # pack IS for, used by the canonical pack lookup in engine/tax_resolver.py).
+    # A pack can hold BOTH regimes' rows side by side (each row tagged via
+    # its own ContributionRate/TaxSlab.tax_regime); this column is just the
+    # UI/engine's fallback pick among them. Null = no default set.
+    default_tax_regime  = Column(String(20), nullable=True)
     approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
     currency             = Column(String(10), nullable=True)
     # Self-reference so a new version can point back at what it replaced,

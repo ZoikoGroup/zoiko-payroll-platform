@@ -1,6 +1,8 @@
-// Shared between CompliancePage.jsx's Tax modal and PolicyConfigPage.jsx's
-// full-page Policy configuration — extracted so both consume the exact same
-// field taxonomy/lock-node helpers instead of two copies drifting apart.
+// Field taxonomy/lock-node helpers for PolicyConfigPage.jsx's full-page
+// Policy configuration. Originally extracted so it and the old
+// pages/CompliancePage.jsx's Tax modal (since retired) could share one
+// copy instead of drifting apart — kept as its own module since
+// PolicyConfigPage.jsx alone still depends on it.
 import { Lock, Unlock } from "lucide-react";
 
 export const STATUS_OPTIONS = ["Draft", "In Review", "QA", "Approved", "Active", "Deprecated", "Retired"];

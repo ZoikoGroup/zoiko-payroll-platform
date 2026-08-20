@@ -56,7 +56,8 @@ import io
 
 from app.database import get_db
 from app.core.dependencies import (
-    get_current_user, get_current_payroll_operator, get_current_super_admin, require_active_subscription,
+    get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
+    require_active_subscription,
 )
 from app.core.exceptions import ForbiddenException
 from app.modules.payroll import service
@@ -64,10 +65,6 @@ from app.modules.payroll.policy import policy_router
 from app.modules.payroll.enterprise import enterprise_router
 from app.modules.payroll.mail import mail_router
 from app.modules.payroll.forms import forms_router
-# Registration-only import — no router yet (data model + resolver phase
-# only; the API surface lands in a later phase). Ensures the new
-# hierarchy tables are picked up by create_all/sync_schema.
-import app.modules.payroll.hierarchy  # noqa: F401
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,
@@ -722,9 +719,9 @@ def attendance_summary(
 )
 def get_filings(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    organization_id: int = Depends(get_organization_id),
 ):
-    return service.get_compliance_data(db, current_user.organization_id)
+    return service.get_compliance_data(db, organization_id)
 
 
 @payroll_router.get(

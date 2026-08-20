@@ -150,6 +150,9 @@ class StandardStrategy(PayrollStrategy):
             + deductions.get("social_security", Decimal("0"))
             + deductions.get("medicare", Decimal("0"))
             + deductions.get("ni_employee", Decimal("0"))
+            + deductions.get("study_loan_deduction", Decimal("0"))
+            + deductions.get("church_tax", Decimal("0"))
+            + deductions.get("cpp2", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -174,11 +177,18 @@ class StandardStrategy(PayrollStrategy):
             social_security=deductions.get("social_security", Decimal("0")),
             medicare=deductions.get("medicare", Decimal("0")),
             ni_employee=deductions.get("ni_employee", Decimal("0")),
+            study_loan_deduction=deductions.get("study_loan_deduction", Decimal("0")),
+            church_tax=deductions.get("church_tax", Decimal("0")),
+            cpp2=deductions.get("cpp2", Decimal("0")),
             employer_social_security=deductions.get("employer_social_security", Decimal("0")),
             employer_medicare=deductions.get("employer_medicare", Decimal("0")),
             employer_pension=deductions.get("employer_pension", Decimal("0")),
+            employer_ni=deductions.get("employer_ni", Decimal("0")),
+            employer_futa=deductions.get("employer_futa", Decimal("0")),
             tds=deductions.get("tds", Decimal("0")),
             annual_tax=deductions.get("annual_tax", Decimal("0")),
+            surcharge=deductions.get("surcharge", Decimal("0")),
+            cess=deductions.get("cess", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
         )

@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, FileText, Plus, X, Lock, Loader2 } from "lucide-react";
 import { useToast } from "../context/ToastContext";
 import StatusPill from "../components/StatusPill";
-import { upsertCompliancePolicy } from "../service/superAdminService";
+import { upsertCompliancePolicy, getCompliancePolicyVersions } from "../service/superAdminService";
+import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import { CALCULATION_MODE_LABELS, EMPLOYEE_CATEGORY_LABELS } from "../service/payrollService";
 import {
   STATUS_OPTIONS, STATUS_PILL_MAP, inputClass, compactInputClass, emptyForm, slugify,
@@ -23,6 +24,13 @@ function FieldLabel({ children, required, locked }) {
       {locked && <Lock size={11} className="ml-auto text-foreground-disabled" />}
     </label>
   );
+}
+
+// Best-effort next-version suggestion (e.g. "1.0" -> "1.1") — a starting
+// point for the admin to confirm/adjust, not a guaranteed-unique value.
+function _bumpVersion(v) {
+  const num = parseFloat(v);
+  return isNaN(num) ? `${v}-new` : (num + 0.1).toFixed(1);
 }
 
 function FieldError({ message }) {
@@ -158,35 +166,90 @@ function AddAllowanceComponent({ onAdd }) {
 }
 
 // Full-page Policy configuration — was previously a small modal
-// (PolicyFormModal's `!isTax` branch in CompliancePage.jsx). Policy configs
-// have more to review/scroll through (calculation mode, salary structure,
-// six employee categories, overtime rule) than a modal comfortably fits,
-// so this got its own route instead. Tax packs keep their 2-step modal
-// wizard in CompliancePage.jsx — unaffected by this change.
+// (PolicyFormModal's `!isTax` branch in the old pages/CompliancePage.jsx,
+// since retired — its tax-pack CRUD is gone, but policy packs are a
+// separate system and this page's own route/logic is unaffected). Policy
+// configs have more to review/scroll through (calculation mode, salary
+// structure, six employee categories, overtime rule) than a modal
+// comfortably fits, so this got its own route instead.
+//
+// Loadable standalone via URL query params (not router state, which broke
+// on a direct load/refresh/bookmark since it only exists in memory from
+// whatever page navigated here): `?mode=new` (blank form, optionally
+// `&country=IN&state=Maharashtra` to prefill jurisdiction), or
+// `?mode=edit&packId=X&version=Y` / `?mode=newVersion&packId=X&version=Y`
+// to load a specific existing version via the same
+// getCompliancePolicyVersions(packId) call the version-history view
+// already uses — no new endpoint needed.
 export default function PolicyConfigPage() {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
-  const location = useLocation();
-  const { mode, initial, returnTo } = location.state || {};
+  const [searchParams] = useSearchParams();
+  const mode = searchParams.get("mode") || "new";
+  const packIdParam = searchParams.get("packId");
+  const versionParam = searchParams.get("version");
 
-  const [form, setForm] = useState(initial || emptyForm());
+  const [form, setForm] = useState(null);
+  const [loading, setLoading] = useState(!!packIdParam);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState({});
 
-  if (!initial) {
-    // Direct navigation/refresh with no state (e.g. a bookmarked URL) —
-    // there's nothing to configure, so send them back to pick a jurisdiction
-    // and start again rather than rendering a blank/broken form.
-    navigate("/super-admin/compliance", { replace: true });
-    return null;
+  useEffect(() => {
+    if (!packIdParam) {
+      setForm(emptyForm(searchParams.get("country"), searchParams.get("state"), "policy"));
+      return;
+    }
+    setLoading(true);
+    getCompliancePolicyVersions(packIdParam)
+      .then((versions) => {
+        const match = versionParam ? versions.find((v) => v.version === versionParam) : versions[0];
+        if (!match) {
+          addToast?.(`Version ${versionParam || ""} of "${packIdParam}" not found.`, "error");
+          navigate("/super-admin/compliance", { replace: true });
+          return;
+        }
+        if (mode === "newVersion") {
+          // A new version must be a genuinely new row — carrying over the
+          // fetched version's `id` would make upsertCompliancePolicy
+          // overwrite that OLD version in place instead of creating a new
+          // one (the backend keys off `id` when present). Strip it, and
+          // suggest (not lock) a bumped version number — unlike the old
+          // flow (a human picked "new version" from a version list and
+          // this page trusted a pre-computed number), loading straight
+          // from a URL means nobody has verified the suggestion, so the
+          // Version field stays editable here specifically.
+          const { id: _fetchedId, ...rest } = match;
+          setForm({ ...rest, version: _bumpVersion(match.version), policyDefaults: match.policyDefaults || {} });
+        } else {
+          setForm({ ...match, policyDefaults: match.policyDefaults || {} });
+        }
+      })
+      .catch((err) => {
+        addToast?.(err.message || "Failed to load policy.", "error");
+        navigate("/super-admin/compliance", { replace: true });
+      })
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [packIdParam, versionParam]);
+
+  if (loading || !form) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 size={20} className="animate-spin text-foreground-disabled" />
+      </div>
+    );
   }
 
-  // Version/country/state identify a specific pack version and can't change
-  // across versions OR in-place edits — only a genuinely new pack picks new
-  // ones. Policy ID itself stays editable in "edit" (the backend looks the
-  // row up by its real database id, not by packId/version, so renaming
-  // never orphans anything), same rule Tax's own edit mode already uses.
+  // Country/state identify a specific pack version and can't change across
+  // versions OR in-place edits — only a genuinely new pack picks new ones.
+  // Policy ID itself stays editable in "edit" (the backend looks the row
+  // up by its real database id, not by packId/version, so renaming never
+  // orphans anything), same rule Tax's own edit mode already uses.
   const locked = mode === "newVersion" || mode === "edit";
+  // Version specifically stays editable for "newVersion" (see the
+  // _bumpVersion suggestion above) — only truly locked when editing an
+  // existing version in place, where the version number must not change.
+  const versionLocked = mode === "edit";
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   const markTouched = (field) => () => setTouched((t) => ({ ...t, [field]: true }));
 
@@ -202,9 +265,14 @@ export default function PolicyConfigPage() {
   const dateOrderInvalid = form.effectiveFrom && form.effectiveTo && form.effectiveTo < form.effectiveFrom;
 
   function goBack() {
-    navigate("/super-admin/compliance", {
-      state: { tab: "policies", restoreJurisdiction: returnTo?.jurisdiction, restoreState: returnTo?.state },
-    });
+    // Return to the specific country's Jurisdiction Compliance page, not
+    // the bare landing page — this route only ever gets here via a link
+    // that already carries `country` (JurisdictionLayout's New/Edit/New
+    // Version buttons all include it). Falls back to the landing page
+    // only if someone lands on this URL directly with no country param.
+    const country = searchParams.get("country");
+    const slug = country && COUNTRY_CODE_TO_ROUTE[country];
+    navigate(slug ? `/super-admin/compliance/${slug}` : "/super-admin/compliance");
   }
 
   async function handleSave() {
@@ -284,12 +352,12 @@ export default function PolicyConfigPage() {
               <FieldError message={touched.packId ? errors.packId : ""} />
             </div>
             <div>
-              <FieldLabel required locked={locked}>Version</FieldLabel>
+              <FieldLabel required locked={versionLocked}>Version</FieldLabel>
               <input
                 value={form.version}
                 onChange={set("version")}
                 onBlur={markTouched("version")}
-                disabled={locked}
+                disabled={versionLocked}
                 className={`${inputClass} ${touched.version && errors.version ? "border-error focus:ring-error/30" : ""}`}
                 placeholder="1.0 / 1.1 / 2.0"
               />

@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   Building2,
   Users,
-  Landmark,
   Settings,
   LogOut,
   ChevronDown,
@@ -16,10 +15,10 @@ import {
   KeyRound,
   Copy,
   Check,
-  ShieldCheck,
   Wallet,
   FileBarChart,
-  FolderTree,
+  ShieldCheck,
+  Landmark,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
@@ -48,7 +47,6 @@ const NAV_GROUPS = [
     items: [
       { label: "Compliance", href: "/super-admin/compliance", icon: ShieldCheck },
       { label: "Statutory Rates", href: "/super-admin/statutory-rates", icon: Landmark },
-      { label: "Jurisdiction Explorer", href: "/super-admin/tax-hierarchy", icon: FolderTree },
       { label: "Finance", href: "/super-admin/finance", icon: Wallet },
     ],
   },

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func, or_
 
 from app.modules.payroll.models import (
-    PayrollRun, PayrollEmployee, CompanyComplianceDetails, JurisdictionPack, ContributionRate, PayrollStatus,
+    PayrollRun, PayrollEmployee, CompanyComplianceDetails, JurisdictionPack, ContributionRate, TaxSlab, PayrollStatus,
 )
 from app.modules.organizations.models import Organization
 from app.core.exceptions import NotFoundException
@@ -217,8 +217,27 @@ def list_known_jurisdictions(db: Session) -> List[dict]:
         if country and state:
             states_by_country.setdefault(country, set()).add(state)
 
+    # States whose ONLY configured tax data is Professional Tax — either
+    # mechanism: the older flat ContributionRate(component_key="pt") rows
+    # (Maharashtra/Karnataka) or the newer bracketed TaxSlab(rule_type=
+    # "PT_FLAT") rows (Telangana) — flagged, not removed from `states`
+    # itself, so Compliance (which reads `states` directly and must still
+    # let PT be configured there) is completely unaffected. Statutory
+    # Rates is the only consumer that filters using this — PT management
+    # belongs to Compliance alone, per explicit product decision, and
+    # that's true regardless of which of the two PT mechanisms a given
+    # state happens to use.
+    non_pt_states_by_country: dict = {}
+    for country, state in db.query(ContributionRate.jurisdiction_country, ContributionRate.jurisdiction_state).filter(ContributionRate.jurisdiction_state.isnot(None), ContributionRate.component_key != "pt").distinct():
+        non_pt_states_by_country.setdefault(country, set()).add(state)
+    for country, state in db.query(TaxSlab.jurisdiction_country, TaxSlab.jurisdiction_state).filter(TaxSlab.jurisdiction_state.isnot(None), TaxSlab.rule_type != "PT_FLAT").distinct():
+        non_pt_states_by_country.setdefault(country, set()).add(state)
+
     return [
-        {"code": code, "name": name, "states": sorted(states_by_country.get(code, []))}
+        {
+            "code": code, "name": name, "states": sorted(states_by_country.get(code, [])),
+            "ptOnlyStates": sorted(states_by_country.get(code, set()) - non_pt_states_by_country.get(code, set())),
+        }
         for code, name in sorted(ALL_CODE_TO_COUNTRY_NAME.items(), key=lambda kv: kv[1])
     ]
 

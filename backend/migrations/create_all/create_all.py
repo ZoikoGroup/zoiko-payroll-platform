@@ -49,7 +49,6 @@ def main() -> None:
     import app.modules.payroll.policy.models  # noqa: F401,F811
     import app.modules.payroll.enterprise.models  # noqa: F401,F811
     import app.modules.payroll.mail.models  # noqa: F401,F811
-    import app.modules.payroll.hierarchy.models  # noqa: F401,F811
 
     if args.drop:
         print("Dropping all existing tables...")

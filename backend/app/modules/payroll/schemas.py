@@ -341,6 +341,8 @@ class PayslipItemResponse(BaseModel):
     designation:        Optional[str] = None
     dateOfJoining:      Optional[date] = None
     country:            Optional[str] = None
+    workState:          Optional[str] = None
+    workLocality:       Optional[str] = None
     period:             str
     payDate:            date
     salary:             Decimal
@@ -355,6 +357,8 @@ class PayslipItemResponse(BaseModel):
     unpaidLeaveDays:    Optional[int] = None
     attendanceDeduction: Optional[Decimal] = None
     tds:                Decimal
+    surcharge:          Decimal = Decimal("0")
+    cess:               Decimal = Decimal("0")
     pf:                 Decimal
     esi:                Decimal
     professionalTax:    Decimal
@@ -708,6 +712,7 @@ class JurisdictionPackResponse(BaseModel):
     packId:              str = Field(validation_alias="pack_id", serialization_alias="packId")
     jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     jurisdictionState:   Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    jurisdictionLocality: Optional[str] = Field(None, validation_alias="jurisdiction_locality", serialization_alias="jurisdictionLocality")
     packType:            str = Field("policy", validation_alias="pack_type", serialization_alias="packType")
     version:             str
     status:              str
@@ -723,6 +728,7 @@ class JurisdictionPackResponse(BaseModel):
     policyDefaults:      Optional[dict] = Field(None, validation_alias="policy_defaults", serialization_alias="policyDefaults")
     taxYear:             Optional[str] = Field(None, validation_alias="tax_year", serialization_alias="taxYear")
     taxRegime:           Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
+    defaultTaxRegime:    Optional[str] = Field(None, validation_alias="default_tax_regime", serialization_alias="defaultTaxRegime")
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     currency:            Optional[str] = None
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
@@ -746,6 +752,7 @@ class JurisdictionPackUpsert(BaseModel):
     packId: str
     jurisdictionCountry: str
     jurisdictionState: Optional[str] = None
+    jurisdictionLocality: Optional[str] = None
     packType: str = "policy"
     version: str = "1.0"
     status: str = "Draft"
@@ -761,6 +768,7 @@ class JurisdictionPackUpsert(BaseModel):
     policyDefaults: Optional[dict] = None
     taxYear: Optional[str] = None
     taxRegime: Optional[str] = None
+    defaultTaxRegime: Optional[str] = None
     approvedById: Optional[int] = None
     currency: Optional[str] = None
 
@@ -772,6 +780,7 @@ class CanonicalTaxSlabUpsert(BaseModel):
     jurisdictionPackId: int
     jurisdictionCountry: str
     jurisdictionState: Optional[str] = None
+    jurisdictionLocality: Optional[str] = None
     taxRegime: Optional[str] = None
     minAmount: Decimal
     maxAmount: Optional[Decimal] = None
@@ -780,6 +789,11 @@ class CanonicalTaxSlabUpsert(BaseModel):
     taxFormula: str = ""
     ruleType: str = "MARGINAL_RATE"
     formulaExpression: Optional[str] = None
+    # PT_FLAT only (India state-level Professional Tax, bracketed by gross
+    # salary): a fixed monthly amount instead of a percentage, plus an
+    # optional override for whichever month absorbs annual-cap rounding.
+    flatAmount: Optional[Decimal] = None
+    adjustmentAmount: Optional[Decimal] = None
     sortOrder: int = 0
 
 
@@ -788,6 +802,7 @@ class CanonicalContributionRateUpsert(BaseModel):
     jurisdictionPackId: int
     jurisdictionCountry: str
     jurisdictionState: Optional[str] = None
+    jurisdictionLocality: Optional[str] = None
     taxRegime: Optional[str] = None
     componentKey: str
     label: str
@@ -802,6 +817,7 @@ class CanonicalTaxSlabResponse(BaseModel):
     jurisdictionPackId: Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")
     jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    jurisdictionLocality: Optional[str] = Field(None, validation_alias="jurisdiction_locality", serialization_alias="jurisdictionLocality")
     taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
     minAmount: Decimal = Field(validation_alias="min_amount", serialization_alias="minAmount")
     maxAmount: Optional[Decimal] = Field(None, validation_alias="max_amount", serialization_alias="maxAmount")
@@ -810,6 +826,8 @@ class CanonicalTaxSlabResponse(BaseModel):
     taxFormula: str = Field("", validation_alias="tax_formula", serialization_alias="taxFormula")
     ruleType: str = Field("MARGINAL_RATE", validation_alias="rule_type", serialization_alias="ruleType")
     formulaExpression: Optional[str] = Field(None, validation_alias="formula_expression", serialization_alias="formulaExpression")
+    flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
+    adjustmentAmount: Optional[Decimal] = Field(None, validation_alias="adjustment_amount", serialization_alias="adjustmentAmount")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -820,6 +838,7 @@ class CanonicalContributionRateResponse(BaseModel):
     jurisdictionPackId: Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")
     jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    jurisdictionLocality: Optional[str] = Field(None, validation_alias="jurisdiction_locality", serialization_alias="jurisdictionLocality")
     taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
     componentKey: str = Field(validation_alias="component_key", serialization_alias="componentKey")
     label: str

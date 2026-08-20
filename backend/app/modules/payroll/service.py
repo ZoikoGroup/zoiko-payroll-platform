@@ -25,7 +25,7 @@ import os
 import os as _os
 import re
 import copy
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from calendar import month_name
@@ -126,6 +126,22 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="tds", label="TDS / Income Tax",
              employee_share="As per income slab", employer_share="—", total="As per slab",
              sort_order=4),
+        # Previously never seeded anywhere — every one of these ran on its
+        # hardcoded engine/countries/india.py fallback constant for every
+        # org, always. Now real, editable ContributionRate rows (amount
+        # parameters use flat_amount, consumed via resolve_jurisdiction_parameter).
+        dict(component_key="esi_wage_ceiling", label="ESI Wage Ceiling (Monthly)",
+             employee_share="—", employer_share="—", total="₹21,000",
+             flat_amount=Decimal("21000.00"), sort_order=5),
+        dict(component_key="standard_deduction", label="Standard Deduction",
+             employee_share="—", employer_share="—", total="₹75,000",
+             flat_amount=Decimal("75000.00"), sort_order=6),
+        dict(component_key="rebate_87a_limit", label="Section 87A Rebate — Income Limit",
+             employee_share="—", employer_share="—", total="₹12,00,000",
+             flat_amount=Decimal("1200000.00"), sort_order=7),
+        dict(component_key="rebate_87a_max", label="Section 87A Rebate — Max Amount",
+             employee_share="—", employer_share="—", total="₹60,000",
+             flat_amount=Decimal("60000.00"), sort_order=8),
     ],
     "US": [
         dict(component_key="social-security", label="Social Security",
@@ -140,6 +156,19 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="federal-income-tax", label="Federal Income Tax",
              employee_share="As per W-4", employer_share="—", total="As per W-4",
              sort_order=4),
+        # Previously never seeded — see the India block's comment above,
+        # same story. FUTA itself was seeded (row above) but never
+        # actually read by the engine until this pass; its wage base
+        # never existed as a configurable row at all.
+        dict(component_key="ss_wage_base", label="Social Security Wage Base",
+             employee_share="—", employer_share="—", total="$176,100",
+             flat_amount=Decimal("176100.00"), sort_order=5),
+        dict(component_key="medicare_addl_thresh", label="Additional Medicare Threshold",
+             employee_share="—", employer_share="—", total="$200,000",
+             flat_amount=Decimal("200000.00"), sort_order=6),
+        dict(component_key="futa_wage_base", label="FUTA Wage Base",
+             employee_share="—", employer_share="—", total="$7,000",
+             flat_amount=Decimal("7000.00"), sort_order=7),
     ],
     "UK": [
         dict(component_key="national-insurance", label="National Insurance",
@@ -148,6 +177,28 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="employer-pension", label="Workplace Pension (Employer)",
              employee_share="—", employer_share="3% minimum", total="3%",
              employer_rate_pct=Decimal("3.00"), sort_order=2),
+        # Previously never seeded — see the India block's comment above.
+        # The "national-insurance" row's employer_rate_pct (13.8%, above)
+        # was ALSO seeded from day one but never read by the engine until
+        # this pass added employer NI — it was purely a display value.
+        dict(component_key="personal_allowance", label="Personal Allowance",
+             employee_share="—", employer_share="—", total="£12,570",
+             flat_amount=Decimal("12570.00"), sort_order=3),
+        dict(component_key="pa_taper_threshold", label="Personal Allowance Taper Threshold",
+             employee_share="—", employer_share="—", total="£100,000",
+             flat_amount=Decimal("100000.00"), sort_order=4),
+        dict(component_key="ni_primary_thresh", label="NI Primary Threshold",
+             employee_share="—", employer_share="—", total="£12,570",
+             flat_amount=Decimal("12570.00"), sort_order=5),
+        dict(component_key="ni_upper_threshold", label="NI Upper Earnings Limit",
+             employee_share="—", employer_share="—", total="£50,270",
+             flat_amount=Decimal("50270.00"), sort_order=6),
+        dict(component_key="ni_secondary_thresh", label="NI Secondary Threshold (Employer)",
+             employee_share="—", employer_share="—", total="£9,100",
+             flat_amount=Decimal("9100.00"), sort_order=7),
+        dict(component_key="ni_upper_rate", label="NI Upper Rate (Employee)",
+             employee_share="2%", employer_share="—", total="2%",
+             employee_rate_pct=Decimal("2.00"), sort_order=8),
     ],
     # Representative defaults — Enterprise Policy jurisdictions. Unlike US/UK
     # above (display-only; the engine's US/UK calculators use hardcoded
@@ -165,6 +216,24 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="income-tax", label="Income Tax (PAYG)",
              employee_share="As per income slab", employer_share="—", total="As per slab",
              sort_order=3),
+        dict(component_key="super_max_contribution_base", label="Superannuation Max Contribution Base",
+             employee_share="—", employer_share="—", total="A$260,280",
+             flat_amount=Decimal("260280.00"), sort_order=4),
+        dict(component_key="medicare_levy_low_income_threshold", label="Medicare Levy Low-Income Threshold",
+             employee_share="—", employer_share="—", total="A$24,276",
+             flat_amount=Decimal("24276.00"), sort_order=5),
+        dict(component_key="mls_threshold", label="Medicare Levy Surcharge Threshold",
+             employee_share="—", employer_share="—", total="A$97,000",
+             flat_amount=Decimal("97000.00"), sort_order=6),
+        dict(component_key="mls_rate", label="Medicare Levy Surcharge Rate",
+             employee_share="1.0%", employer_share="—", total="1.0%",
+             employee_rate_pct=Decimal("1.00"), sort_order=7),
+        dict(component_key="help_threshold", label="HELP/HECS Repayment Threshold",
+             employee_share="—", employer_share="—", total="A$54,435",
+             flat_amount=Decimal("54435.00"), sort_order=8),
+        dict(component_key="help_rate", label="HELP/HECS Repayment Rate",
+             employee_share="4.5%", employer_share="—", total="4.5%",
+             employee_rate_pct=Decimal("4.50"), sort_order=9),
     ],
     "DE": [
         dict(component_key="pension", label="Pension Insurance (Rentenversicherung)",
@@ -176,6 +245,21 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="income-tax", label="Income Tax (Lohnsteuer)",
              employee_share="As per income slab", employer_share="—", total="As per slab",
              sort_order=3),
+        dict(component_key="grundfreibetrag", label="Basic Tax-Free Allowance (Grundfreibetrag)",
+             employee_share="—", employer_share="—", total="€11,784",
+             flat_amount=Decimal("11784.00"), sort_order=4),
+        dict(component_key="soli_threshold", label="Solidarity Surcharge Threshold",
+             employee_share="—", employer_share="—", total="€18,130",
+             flat_amount=Decimal("18130.00"), sort_order=5),
+        dict(component_key="soli_rate", label="Solidarity Surcharge Rate",
+             employee_share="5.5%", employer_share="—", total="5.5%",
+             employee_rate_pct=Decimal("5.50"), sort_order=6),
+        dict(component_key="contribution_ceiling", label="Social Insurance Contribution Ceiling",
+             employee_share="—", employer_share="—", total="€96,600",
+             flat_amount=Decimal("96600.00"), sort_order=7),
+        dict(component_key="church_tax_rate", label="Church Tax Rate (Kirchensteuer)",
+             employee_share="9%", employer_share="—", total="9%",
+             employee_rate_pct=Decimal("9.00"), sort_order=8),
     ],
     "CA": [
         dict(component_key="cpp", label="Canada Pension Plan (CPP)",
@@ -187,6 +271,24 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="income-tax", label="Federal Income Tax",
              employee_share="As per income slab", employer_share="—", total="As per slab",
              sort_order=3),
+        dict(component_key="basic_personal_amount", label="Basic Personal Amount",
+             employee_share="—", employer_share="—", total="C$15,705",
+             flat_amount=Decimal("15705.00"), sort_order=4),
+        dict(component_key="cpp_ympe", label="CPP Year's Maximum Pensionable Earnings (YMPE)",
+             employee_share="—", employer_share="—", total="C$71,300",
+             flat_amount=Decimal("71300.00"), sort_order=5),
+        dict(component_key="cpp_basic_exemption", label="CPP Basic Exemption Amount",
+             employee_share="—", employer_share="—", total="C$3,500",
+             flat_amount=Decimal("3500.00"), sort_order=6),
+        dict(component_key="ei_mie", label="EI Maximum Insurable Earnings",
+             employee_share="—", employer_share="—", total="C$65,700",
+             flat_amount=Decimal("65700.00"), sort_order=7),
+        dict(component_key="cpp2_yampe", label="CPP2 Year's Additional Maximum Pensionable Earnings (YAMPE)",
+             employee_share="—", employer_share="—", total="C$81,200",
+             flat_amount=Decimal("81200.00"), sort_order=8),
+        dict(component_key="cpp2_rate", label="CPP2 Rate",
+             employee_share="4%", employer_share="—", total="4%",
+             employee_rate_pct=Decimal("4.00"), sort_order=9),
     ],
 }
 
@@ -222,11 +324,21 @@ def _seed_org_rates_for_country(db: Session, organization_id: int, country: str)
     return bool(result.get("synced"))
 
 
-def get_contribution_rates(db: Session, organization_id: int = None, country: str = "IN") -> List[ContributionRate]:
+def get_contribution_rates(db: Session, organization_id: int = None, country: str = "IN", tax_regime: str = None) -> List[ContributionRate]:
     query = db.query(ContributionRate)
     query = _apply_org_filter(query, ContributionRate, organization_id)
     query = query.filter(ContributionRate.jurisdiction_country == country)
-    rows = query.order_by(ContributionRate.sort_order).all()
+    if tax_regime:
+        # Regime-agnostic rows (tax_regime IS NULL — PF/ESI/PT and every
+        # existing row today) always apply; a row tagged for this specific
+        # regime ALSO applies and is ordered last, so a caller building a
+        # {component_key: row} dict from this list naturally lets the
+        # regime-specific row win when both exist for the same key. Rows
+        # tagged for the OTHER regime are excluded entirely.
+        query = query.filter(or_(ContributionRate.tax_regime.is_(None), ContributionRate.tax_regime == tax_regime))
+        rows = query.order_by(ContributionRate.tax_regime.isnot(None), ContributionRate.sort_order).all()
+    else:
+        rows = query.order_by(ContributionRate.sort_order).all()
     if not rows and organization_id:
         if not _seed_org_rates_for_country(db, organization_id, country):
             _seed_contribution_rates(db, organization_id, country)
@@ -326,10 +438,13 @@ def _seed_tax_slabs(db: Session, organization_id: int, country: str = "IN") -> L
     return rows
 
 
-def get_tax_slabs(db: Session, organization_id: int = None, country: str = "IN") -> List[TaxSlab]:
+def get_tax_slabs(db: Session, organization_id: int = None, country: str = "IN", tax_regime: str = None) -> List[TaxSlab]:
     query = db.query(TaxSlab)
     query = _apply_org_filter(query, TaxSlab, organization_id)
     query = query.filter(TaxSlab.jurisdiction_country == country)
+    if tax_regime:
+        # Same regime-agnostic-plus-specific pattern as get_contribution_rates.
+        query = query.filter(or_(TaxSlab.tax_regime.is_(None), TaxSlab.tax_regime == tax_regime))
     rows = query.order_by(TaxSlab.sort_order).all()
     if not rows and organization_id:
         if not _seed_org_rates_for_country(db, organization_id, country):
@@ -599,6 +714,7 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         version=data.version,
         jurisdiction_country=data.jurisdictionCountry,
         jurisdiction_state=data.jurisdictionState,
+        jurisdiction_locality=data.jurisdictionLocality,
         pack_type=data.packType,
         status=data.status,
         effective_from=data.effectiveFrom,
@@ -613,6 +729,7 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         policy_defaults=data.policyDefaults,
         tax_year=data.taxYear,
         tax_regime=data.taxRegime,
+        default_tax_regime=data.defaultTaxRegime,
         approved_by_id=data.approvedById,
         currency=data.currency,
     )
@@ -776,29 +893,7 @@ def _resolve_effective_rate_inputs(
     canonical_rates is the raw list (not the dict) so a caller can build a
     tax snapshot via _pack_to_tax_snapshot without a second query; pack is
     None whenever canonical resolution wasn't used, signalling the caller
-    to fall back to its own existing tax-snapshot logic unchanged.
-
-    Checked FIRST, ahead of the v1 org_opted_in path above: the new
-    generic jurisdiction/tax hierarchy engine (hierarchy/models.py +
-    engine/tax_resolver_v2.py), gated per-organization on
-    CompanyComplianceDetails.tax_hierarchy_v2_enabled. Defaults False for
-    every organization — this branch is unreachable for any org until
-    that flag is deliberately flipped (a later, separate migration/
-    cutover phase), so it changes nothing for any org today. `pack` is
-    always None on this path (there is no legacy JurisdictionPack row to
-    report) — a caller building a tax snapshot falls through to its own
-    _resolve_tax_snapshot exactly as it already does when pack is None."""
-    v2_enabled = (
-        db.query(CompanyComplianceDetails.tax_hierarchy_v2_enabled)
-        .filter(CompanyComplianceDetails.organization_id == organization_id)
-        .scalar()
-    ) if organization_id else False
-    if v2_enabled:
-        from app.modules.payroll.engine.tax_resolver_v2 import resolve_engine_inputs_v2
-        rate_map, slabs = resolve_engine_inputs_v2(db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date)
-        if rate_map or slabs:
-            return rate_map, slabs, None, None
-
+    to fall back to its own existing tax-snapshot logic unchanged."""
     if org_opted_in:
         from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
         canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
@@ -811,9 +906,56 @@ def _resolve_effective_rate_inputs(
             # existed can still carry a wrong-cased key on disk; this
             # guarantees the live calculation path never misses it even so.
             return {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}, canonical_slabs, canonical_rates, pack
-    rate_map = {_normalize_engine_component_key(r.component_key): r for r in get_contribution_rates(db, organization_id, country)}
-    slabs = get_tax_slabs(db, organization_id, country)
+    rate_map = {_normalize_engine_component_key(r.component_key): r for r in get_contribution_rates(db, organization_id, country, tax_regime=tax_regime)}
+    slabs = get_tax_slabs(db, organization_id, country, tax_regime=tax_regime)
     return rate_map, slabs, None, None
+
+
+def get_state_scoped_config(db: Session, country: str, state: Optional[str]) -> Tuple[dict, list]:
+    """Region-specific rates/slabs for a country+state combination — a
+    DELIBERATELY SEPARATE, simpler lookup from _resolve_effective_rate_inputs
+    above: it queries canonical (organization_id IS NULL) ContributionRate/
+    TaxSlab rows directly by (jurisdiction_country, jurisdiction_state),
+    bypassing the JurisdictionPack winner-take-all resolution entirely.
+
+    Why separate rather than folded into the existing canonical/org/
+    fallback tiering: that system already has a known limitation (a
+    state-specific pack's rows entirely REPLACE the country-level pack's
+    rows if one resolves, rather than layering) — fixing that is a larger,
+    separate change. This function instead answers a narrower question —
+    "is there a region-specific rate/slab for a component that only
+    exists at the region level" (India's state-specific Professional Tax,
+    US state income tax, UK's Scotland tax bands) — additively, without
+    touching or risking that existing tiering logic at all.
+
+    Returns ({}, []) if state is falsy or nothing is configured for it —
+    every existing calculation is completely unaffected until a country
+    calculator explicitly reads ctx.state_rate_map/ctx.state_slabs AND a
+    real region-scoped row has been seeded for that specific state."""
+    if not state:
+        return {}, []
+    rate_rows = (
+        db.query(ContributionRate)
+        .filter(
+            ContributionRate.organization_id.is_(None),
+            ContributionRate.jurisdiction_country == country,
+            ContributionRate.jurisdiction_state == state,
+        )
+        .order_by(ContributionRate.sort_order)
+        .all()
+    )
+    slab_rows = (
+        db.query(TaxSlab)
+        .filter(
+            TaxSlab.organization_id.is_(None),
+            TaxSlab.jurisdiction_country == country,
+            TaxSlab.jurisdiction_state == state,
+        )
+        .order_by(TaxSlab.sort_order, TaxSlab.min_amount)
+        .all()
+    )
+    state_rate_map = {_normalize_engine_component_key(r.component_key): r for r in rate_rows}
+    return state_rate_map, slab_rows
 
 
 def sync_org_rates_from_canonical(
@@ -975,10 +1117,12 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
     fields = dict(
         jurisdiction_country=_normalize_country(data.jurisdictionCountry),
         jurisdiction_state=data.jurisdictionState,
+        jurisdiction_locality=data.jurisdictionLocality,
         tax_regime=data.taxRegime,
         min_amount=data.minAmount, max_amount=data.maxAmount,
         rate_pct=data.ratePct, rate_label=data.rateLabel, tax_formula=data.taxFormula,
         rule_type=data.ruleType, formula_expression=data.formulaExpression,
+        flat_amount=data.flatAmount, adjustment_amount=data.adjustmentAmount,
         sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
     )
     action = "update" if data.id else "create"
@@ -1034,6 +1178,7 @@ def upsert_canonical_contribution_rate(
     fields = dict(
         jurisdiction_country=_normalize_country(data.jurisdictionCountry),
         jurisdiction_state=data.jurisdictionState,
+        jurisdiction_locality=data.jurisdictionLocality,
         tax_regime=data.taxRegime,
         component_key=_normalize_engine_component_key(data.componentKey), label=data.label,
         employee_share=f"{data.employeeSharePct}%" if data.employeeSharePct is not None else "",
@@ -1998,7 +2143,8 @@ def _resolve_tax_snapshot(db: Session, country: str, payroll_date, state=None, t
 
 def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
                              calculation_mode: str = "standard", attendance_records: List["PayrollAttendanceRecord"] = None,
-                             allowance_components: list = None, resolved_pack=None) -> dict:
+                             allowance_components: list = None, resolved_pack=None,
+                             state_rate_map: dict = None, state_slabs: list = None) -> dict:
     """Compute every payslip figure for an employee within a run and return
     them as a dict, without touching the database. Shared by initial payslip
     generation (_generate_single_payslip) and recalculation
@@ -2060,12 +2206,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     gross = basic + hra + special + allowance_total + overtime + additional_compensation
 
     # Delegate to the strategy engine
+    work_state = getattr(employee, "work_state", None)
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,
         additional_compensation=additional_compensation,
         unpaid_leave_days=unpaid_leave_days,
         country=country, rate_map=rate_map, slabs=slabs,
+        work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
     )
     result = calculate_payroll(ctx, calculation_mode)
 
@@ -2087,6 +2235,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "uan": getattr(employee, "uan", None),
         "ifsc": getattr(employee, "ifsc", None),
         "country_code": country,
+        "work_state": work_state,
+        "work_locality": getattr(employee, "work_locality", None),
         "compliance_fields": dict(getattr(employee, "compliance_fields", None) or {}),
         **tax_snapshot,
         "allowance_items": [
@@ -2106,13 +2256,20 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "social_security": result.social_security,
         "medicare": result.medicare,
         "ni_employee": result.ni_employee,
+        "study_loan_deduction": result.study_loan_deduction,
+        "church_tax": result.church_tax,
+        "cpp2": result.cpp2,
         "tds": result.tds,
+        "surcharge": result.surcharge,
+        "cess": result.cess,
         "total_deductions": result.total_deductions,
         "employer_pf": result.employer_pf,
         "employer_esi": result.employer_esi,
         "employer_social_security": result.employer_social_security,
         "employer_medicare": result.employer_medicare,
         "employer_pension": result.employer_pension,
+        "employer_ni": result.employer_ni,
+        "employer_futa": result.employer_futa,
         "net_pay": result.net_pay,
         "unpaid_leave_days": result.unpaid_leave_days,
         "attendance_deduction": result.attendance_deduction,
@@ -2123,7 +2280,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
 def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
                               calculation_mode: str = "standard", payslip_number: str = None,
                               attendance_records: List["PayrollAttendanceRecord"] = None,
-                              allowance_components: list = None, resolved_pack=None) -> PayslipItem:
+                              allowance_components: list = None, resolved_pack=None,
+                              state_rate_map: dict = None, state_slabs: list = None) -> PayslipItem:
     """Generate a single payslip using the strategy-based payroll engine.
 
     Fixed 30-Day Payroll Model:
@@ -2142,7 +2300,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     values = _compute_payslip_values(
         db, run, employee, rate_map, slabs, country, calculation_mode,
         attendance_records=attendance_records, allowance_components=allowance_components,
-        resolved_pack=resolved_pack,
+        resolved_pack=resolved_pack, state_rate_map=state_rate_map, state_slabs=state_slabs,
     )
 
     item = PayslipItem(
@@ -2163,7 +2321,11 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
     run.total_gross = sum((i.gross_pay for i in items), Decimal("0"))
     run.total_deductions = sum((i.total_deductions for i in items), Decimal("0"))
     run.total_taxes = sum((i.tds for i in items), Decimal("0"))
-    run.total_employer_contribution = sum((i.employer_pf + i.employer_esi + i.employer_social_security + i.employer_medicare + i.employer_pension for i in items), Decimal("0"))
+    run.total_employer_contribution = sum(
+        (i.employer_pf + i.employer_esi + i.employer_social_security + i.employer_medicare + i.employer_pension
+         + i.employer_ni + i.employer_futa for i in items),
+        Decimal("0"),
+    )
     run.total_net = sum((i.net_pay for i in items), Decimal("0"))
     db.commit()
     db.refresh(run)
@@ -2204,23 +2366,27 @@ def _resolve_employee_calc_inputs(
     defaults to False so any existing caller that hasn't been updated to
     pass it keeps today's exact behavior.
 
-    Returns (country, rate_map, slabs, pack) — pack is the resolved
-    canonical JurisdictionPack when one was used, else None (see
-    _resolve_effective_rate_inputs)."""
+    Returns (country, rate_map, slabs, pack, state, state_rate_map,
+    state_slabs) — pack is the resolved canonical JurisdictionPack when
+    one was used, else None (see _resolve_effective_rate_inputs);
+    state_rate_map/state_slabs are the separate, additive region-scoped
+    lookup (see get_state_scoped_config) — {}/[] when the employee has no
+    work_state or nothing is configured for it."""
     country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
     state = getattr(employee, "work_state", None)
     tax_regime = getattr(employee, "tax_regime", None)
     cache_key = (country, state, tax_regime)
     if cache is not None and cache_key in cache:
-        rate_map, slabs, canonical_rates, pack = cache[cache_key]
+        rate_map, slabs, canonical_rates, pack, state_rate_map, state_slabs = cache[cache_key]
     else:
         rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
             db, organization_id, country, payroll_date, org_opted_in, state=state, tax_regime=tax_regime,
         )
+        state_rate_map, state_slabs = get_state_scoped_config(db, country, state)
         if cache is not None:
-            cache[cache_key] = (rate_map, slabs, canonical_rates, pack)
+            cache[cache_key] = (rate_map, slabs, canonical_rates, pack, state_rate_map, state_slabs)
     resolved_pack = (canonical_rates, slabs, pack) if pack is not None else None
-    return country, rate_map, slabs, resolved_pack
+    return country, rate_map, slabs, resolved_pack, state, state_rate_map, state_slabs
 
 
 def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
@@ -2299,7 +2465,7 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     for emp in employees:
         if emp.id in existing_ids:
             continue
-        country, rate_map, slabs, resolved_pack = _resolve_employee_calc_inputs(
+        country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs = _resolve_employee_calc_inputs(
             db, organization_id, emp, cache=calc_cache,
             payroll_date=run.pay_date, org_opted_in=org_opted_in,
         )
@@ -2308,6 +2474,7 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
             attendance_records=attendance_by_employee.get(emp.id, []),
             allowance_components=allowance_components, resolved_pack=resolved_pack,
+            state_rate_map=state_rate_map, state_slabs=state_slabs,
         )
         seq += 1
 
@@ -2348,13 +2515,14 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
 
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
-    country, rate_map, slabs, resolved_pack = _resolve_employee_calc_inputs(
+    country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs = _resolve_employee_calc_inputs(
         db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in,
     )
     allowance_components = _resolve_allowance_components(db, organization_id)
     values = _compute_payslip_values(
         db, run, employee, rate_map, slabs, country, calculation_mode,
         allowance_components=allowance_components, resolved_pack=resolved_pack,
+        state_rate_map=state_rate_map, state_slabs=state_slabs,
     )
     for field, value in values.items():
         setattr(existing_item, field, value)
@@ -3572,6 +3740,8 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "designation": item.designation,
         "dateOfJoining": item.date_of_joining,
         "country": country,
+        "workState": item.work_state,
+        "workLocality": item.work_locality,
         "period": run.period_label,
         "payDate": run.pay_date,
         "salary": item.gross_pay or z,
@@ -3588,6 +3758,8 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "unpaidLeaveDays": item.unpaid_leave_days,
         "attendanceDeduction": item.attendance_deduction or z,
         "tds": item.tds or z,
+        "surcharge": item.surcharge or z,
+        "cess": item.cess or z,
         "pf": item.pf or z,
         "esi": item.esi or z,
         "professionalTax": item.professional_tax or z,
