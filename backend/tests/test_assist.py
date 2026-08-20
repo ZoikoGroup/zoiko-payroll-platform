@@ -121,6 +121,47 @@ _db.add(
 )
 _db.commit()
 
+# A second, later run with no relation to _ess_employee, plus a named
+# employee whose only payslip is on the *earlier* _run — proves named-employee
+# resolution picks the run that employee actually appears in, not whichever
+# run happens to be latest overall.
+_later_run = PayrollRun(
+    organization_id=_org.id,
+    run_code="T-2026-02",
+    period_label="Feb 1-28, 2026",
+    period_start=date(2026, 2, 1),
+    period_end=date(2026, 2, 28),
+    pay_date=date(2026, 3, 5),
+    status="Approved",
+    employee_count=0,
+)
+_db.add(_later_run)
+_db.commit()
+
+_named_employee = PayrollEmployee(
+    organization_id=_org.id,
+    employee_code="EMP-NK",
+    name="Nandini Krishnan",
+    status="Active",
+    designation="Analyst",
+    department="Finance",
+)
+_db.add(_named_employee)
+_db.commit()
+
+_db.add(
+    PayslipItem(
+        payslip_number="PS-NK-0001",
+        payroll_run_id=_run.id,
+        employee_id=_named_employee.id,
+        organization_id=_org.id,
+        employee_name="Nandini Krishnan",
+        net_pay=6000,
+        status="Paid",
+    )
+)
+_db.commit()
+
 
 @pytest.fixture(scope="module")
 def client():
@@ -229,6 +270,28 @@ def test_message_flow_safe(client, headers, session_id):
     assert resp["safety_state"] == "SAFE"
     assert any(b["block_type"] == "text" for b in resp["blocks"])
     assert resp["sources"]
+
+
+def test_named_employee_query_resolves_their_own_run_not_the_latest(client, headers, ack_notice):
+    # A plain session with no bound run context — the actual real-world
+    # shape of the reported bug (a floating-widget message, not a
+    # run-detail-page-bound one). _later_run (Feb, "Approved") is the
+    # latest run overall; Nandini Krishnan's only payslip is on the earlier
+    # _run (Jan, "Draft"). Before the fix, this would have silently
+    # answered about _later_run regardless of who was asked about.
+    unbound_session = client.post("/api/assist/sessions", headers=headers, json={"title": "no context"}).json()
+    r = client.post(
+        f"/api/assist/sessions/{unbound_session['id']}/messages",
+        headers=headers,
+        json={"content": {"type": "TEXT", "text": "Nandini Krishnan payroll status"}},
+    )
+    assert r.status_code == 200, r.text
+    resp = client.get(f"/api/assist/responses/{r.json()['response_id']}", headers=headers).json()
+    text_block = next(b["content"] for b in resp["blocks"] if b["block_type"] == "text")
+    assert "Nandini Krishnan" in text_block
+    assert "Jan" in text_block
+    assert "Draft" in text_block
+    assert "Feb" not in text_block
 
 
 def test_message_history_links_each_message_to_its_response(client, headers, session_id):

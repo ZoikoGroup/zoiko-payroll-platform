@@ -66,6 +66,80 @@ _CONTENT_KEYWORDS = {
 }
 
 
+# Coarse, deterministic jurisdiction-mention detector (country names only —
+# no NLP/NER, consistent with the rest of this module). Used to distinguish
+# "no KB article matched" from "this jurisdiction isn't one we have approved
+# guidance for", which need different fallback copy (KB-GOV, unsupported
+# jurisdiction handling). A short common name (e.g. "Chad", "Georgia") can
+# collide with an unrelated word — acceptable here since it only ever
+# narrows an already-generic KB fallback to a more specific one, never
+# blocks or exposes anything.
+_COUNTRY_NAMES = [
+    "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina",
+    "Armenia", "Australia", "Austria", "Azerbaijan", "Bahamas", "Bahrain",
+    "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin",
+    "Bhutan", "Bolivia", "Bosnia", "Botswana", "Brazil", "Brunei",
+    "Bulgaria", "Burkina Faso", "Burundi", "Cambodia", "Cameroon", "Canada",
+    "Chad", "Chile", "China", "Colombia", "Comoros", "Congo", "Costa Rica",
+    "Croatia", "Cuba", "Cyprus", "Czechia", "Czech Republic", "Denmark",
+    "Djibouti", "Dominica", "Ecuador", "Egypt", "El Salvador", "Eritrea",
+    "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon",
+    "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada",
+    "Guatemala", "Guinea", "Guyana", "Haiti", "Honduras", "Hungary",
+    "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel",
+    "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati",
+    "Kosovo", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon",
+    "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania",
+    "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali",
+    "Malta", "Mauritania", "Mauritius", "Mexico", "Moldova", "Monaco",
+    "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia",
+    "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger",
+    "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
+    "Pakistan", "Palau", "Panama", "Papua New Guinea", "Paraguay", "Peru",
+    "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia",
+    "Rwanda", "Samoa", "San Marino", "Saudi Arabia", "Senegal", "Serbia",
+    "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia",
+    "Somalia", "South Africa", "South Korea", "South Sudan", "Spain",
+    "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria",
+    "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo",
+    "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan",
+    "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom",
+    "United States", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City",
+    "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe",
+]
+_COUNTRY_NAME_RE = re.compile(
+    r"\b(" + "|".join(re.escape(n) for n in _COUNTRY_NAMES) + r")\b", re.IGNORECASE
+)
+
+
+def find_mentioned_country(text: str) -> str | None:
+    """Return the first country name mentioned in `text`, or None."""
+    match = _COUNTRY_NAME_RE.search(text or "")
+    return match.group(1) if match else None
+
+
+def is_jurisdiction_supported(db: Session, org_id: int, country_name: str) -> bool:
+    """Whether `country_name` is one of the org's assigned tax jurisdictions.
+
+    Local import avoids a hard module-level dependency between the Assist
+    package and the tax-hierarchy package for an org-scoped check used only
+    here (mirrors the lazy-import style already used for KB seeding).
+    """
+    from app.modules.payroll.hierarchy.models import Country, Jurisdiction, OrganizationJurisdictionAssignment
+
+    match = (
+        db.query(Country.id)
+        .join(Jurisdiction, Jurisdiction.country_id == Country.id)
+        .join(OrganizationJurisdictionAssignment, OrganizationJurisdictionAssignment.jurisdiction_id == Jurisdiction.id)
+        .filter(
+            OrganizationJurisdictionAssignment.organization_id == org_id,
+            Country.name.ilike(country_name),
+        )
+        .first()
+    )
+    return match is not None
+
+
 def _is_retrieval_eligible(item: AssistKbItem, today: date) -> bool:
     if item.state != KnowledgeState.PUBLISHED.value:
         return False

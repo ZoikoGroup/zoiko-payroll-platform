@@ -1077,16 +1077,35 @@ export default function AssistLauncher() {
 
   return createPortal(
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={t("assist.open")}
-        className={`fixed bottom-6 right-6 z-[9997] flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl shadow-[0_12px_32px_rgba(0,0,0,0.22)] transition-all duration-200 hover:-translate-y-[2px] ${
-          open ? `rotate-90 text-white ${ACCENT} ${ACCENT_HOVER}` : ""
-        }`}
-      >
-        {open ? <X size={22} /> : <img src={zoikoPayrollIcon} alt="" className="h-full w-full object-cover" />}
-      </button>
+      <style>{`
+        @keyframes assistLauncherGlow {
+          0%, 100% { opacity: 0.55; transform: scale(1); }
+          50% { opacity: 0.9; transform: scale(1.12); }
+        }
+        .assist-launcher-glow { animation: assistLauncherGlow 2.8s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .assist-launcher-glow { animation: none; }
+        }
+      `}</style>
+      <div className="fixed bottom-6 right-6 z-[9997] h-14 w-14">
+        {/* Ambient glow halo — sits behind the button, pulses gently */}
+        <div
+          aria-hidden="true"
+          className={`assist-launcher-glow pointer-events-none absolute inset-0 rounded-2xl bg-primary blur-xl transition-opacity duration-300 ${
+            open ? "opacity-80" : "opacity-55"
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={t("assist.open")}
+          className={`relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_32%_26%,var(--color-primary-hover)_0%,var(--color-primary)_55%,var(--color-primary-active)_100%)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),inset_0_-8px_14px_-6px_rgba(0,0,0,0.4),0_16px_30px_-8px_rgba(0,0,0,0.45)] transition-all duration-200 hover:-translate-y-[3px] hover:scale-[1.04] hover:shadow-[inset_0_1px_1px_rgba(255,255,255,0.45),inset_0_-8px_14px_-6px_rgba(0,0,0,0.4),0_20px_36px_-8px_rgba(0,0,0,0.5)] active:translate-y-0 active:scale-100 ${
+            open ? "rotate-90 text-white" : ""
+          }`}
+        >
+          {open ? <X size={22} /> : <img src={zoikoPayrollIcon} alt="" className="h-full w-full object-cover" />}
+        </button>
+      </div>
 
       {open ? (
         <div className="fixed bottom-24 right-6 z-[9997] flex h-[560px] max-h-[calc(100dvh-8rem)] w-[min(550px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[22px] border border-border bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]">

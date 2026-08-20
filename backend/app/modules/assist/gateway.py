@@ -145,9 +145,6 @@ def generate_llm_answer(
 
 def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dict | None) -> str:
     """Compose a clear, governed answer from a deterministic tool result."""
-    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data"):
-        return "That action is outside what Assist is allowed to do."
-
     if not tool_result or not tool_result.get("found"):
         reason = (tool_result or {}).get("reason") or "No payroll record is visible in your authorized scope."
         if reason == "No visible payroll run.":
@@ -157,20 +154,26 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
             )
         return f"I couldn't find a payroll run to answer this. {reason}"
 
+    # Set only when resolve_run matched a specific named employee mentioned
+    # in the message rather than falling back to the latest/bound run — so
+    # e.g. "Nandini Krishnan payroll status" answers about *her* run instead
+    # of silently substituting whichever run happens to be latest.
+    employee_prefix = f"For {tool_result['employee_name']}: " if tool_result.get("employee_name") else ""
+
     if intent_id == "review.run_readiness":
         blockers = tool_result.get("blockers", [])
         run = tool_result.get("run", {})
         if blockers:
-            lines = [f"The {run.get('period')} run is not ready for approval. Blockers:"]
+            lines = [f"{employee_prefix}The {run.get('period')} run is not ready for approval. Blockers:"]
             lines += [f"  - {b['description']} ({b['severity']})" for b in blockers]
             return "\n".join(lines)
-        return f"The {run.get('period')} run has no open blockers and is in {run.get('status')} state. I can open the approval screen for the authorized decision."
+        return f"{employee_prefix}The {run.get('period')} run has no open blockers and is in {run.get('status')} state. I can open the approval screen for the authorized decision."
 
     if intent_id == "review.exception":
         exceptions = tool_result.get("exceptions", [])
         if not exceptions:
-            return f"No exceptions are recorded for the {tool_result.get('run', {}).get('period')} run."
-        lines = [f"{len(exceptions)} exception(s) recorded for {tool_result.get('run', {}).get('period')}:"]
+            return f"{employee_prefix}No exceptions are recorded for the {tool_result.get('run', {}).get('period')} run."
+        lines = [f"{employee_prefix}{len(exceptions)} exception(s) recorded for {tool_result.get('run', {}).get('period')}:"]
         for exc in exceptions:
             owner = f"assigned to {exc['assignee_role']}" if exc.get("assignee_role") else "unassigned"
             lines.append(f"  - {exc['description']} ({exc['severity']}, {owner})")
@@ -237,7 +240,7 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
     # explain.status / find.object / kb.answer defaults
     if run_summary:
         return (
-            f"The {run_summary.get('period')} payroll run is currently **{run_summary.get('status')}** "
+            f"{employee_prefix}The {run_summary.get('period')} payroll run is currently **{run_summary.get('status')}** "
             f"({run_summary.get('employees')} employees, net {run_summary.get('net'):,.2f}). "
             "You can open it from Payroll Runs."
         )
@@ -258,6 +261,7 @@ def deterministic_answer(
     user_text: str,
     tool_result: dict | None,
     knowledge_items: list[dict],
+    refusal: str | None = None,
 ) -> dict:
     """Build a fully grounded structured answer using only deterministic data."""
     if intent_id == "chat.greeting":
@@ -287,9 +291,9 @@ def deterministic_answer(
             "safety_state": "SAFE",
         }
 
-    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data"):
+    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data", "action.delete_record"):
         return {
-            "answer": (
+            "answer": refusal or (
                 "I can summarize the payroll run and its unresolved exceptions, but I cannot approve payroll, "
                 "release payments, submit filings, or change protected data. Use the relevant screen inside "
                 "Zoiko Payroll to make the authorized decision."
@@ -303,6 +307,55 @@ def deterministic_answer(
             "safety_state": "REFUSED",
         }
 
+    if intent_id == "explain.identity":
+        return {
+            "answer": (
+                "I'm Zoiko Payroll Assist, an AI assistant — not your employer, accountant, bank, lawyer or a "
+                "tax authority, and I don't have approval authority. I can explain payroll concepts and your "
+                "own records, but for legal, tax or employment decisions, please consult the appropriate "
+                "professional or your organization's authorized approver."
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": [],
+            "next_steps": [],
+            "sources": [],
+            "confidence": "HIGH",
+            "safety_state": "SAFE",
+        }
+
+    if intent_id == "boundary.no_code_execution":
+        return {
+            "answer": (
+                "I can't execute code, SQL or scripts — I only use Zoiko Payroll's own registered capabilities "
+                "to explain, find, review, prepare and route payroll work. Tell me what payroll data you're "
+                "trying to find and I can look it up directly."
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": ["out_of_scope"],
+            "next_steps": [],
+            "sources": [],
+            "confidence": "HIGH",
+            "safety_state": "SAFE",
+        }
+
+    if tool_result and tool_result.get("unsupported_jurisdiction"):
+        country = tool_result["unsupported_jurisdiction"]
+        return {
+            "answer": (
+                f"Approved guidance is not currently available for {country} for this period. "
+                "I don't substitute another jurisdiction's rule for one that isn't covered."
+            ),
+            "facts": [],
+            "inferences": [],
+            "limitations": ["unsupported_jurisdiction"],
+            "next_steps": [f"Route this to your local payroll or compliance specialist for {country}-specific guidance."],
+            "sources": [],
+            "confidence": "LOW",
+            "safety_state": "SAFE",
+        }
+
     sources: list[dict] = []
     facts: list[str] = []
 
@@ -311,8 +364,9 @@ def deterministic_answer(
         run_summary = tool_result.get("run")
 
     if tool_result and tool_result.get("found") and run_summary:
+        employee_note = f"For {tool_result['employee_name']} — " if tool_result.get("employee_name") else ""
         facts.append(
-            f"{run_summary.get('period')} payroll run: status {run_summary.get('status')}, "
+            f"{employee_note}{run_summary.get('period')} payroll run: status {run_summary.get('status')}, "
             f"{run_summary.get('employees')} employees, net {float(run_summary.get('net') or 0):,.2f}."
         )
     elif tool_result and "total_employees" in tool_result:
