@@ -119,25 +119,29 @@ def find_mentioned_country(text: str) -> str | None:
 
 
 def is_jurisdiction_supported(db: Session, org_id: int, country_name: str) -> bool:
-    """Whether `country_name` is one of the org's assigned tax jurisdictions.
+    """Whether `country_name` is the org's configured compliance jurisdiction.
 
     Local import avoids a hard module-level dependency between the Assist
-    package and the tax-hierarchy package for an org-scoped check used only
-    here (mirrors the lazy-import style already used for KB seeding).
+    package and the payroll package for an org-scoped check used only here
+    (mirrors the lazy-import style already used for KB seeding). Was
+    previously a Country/Jurisdiction/OrganizationJurisdictionAssignment
+    join against the now-deleted payroll.hierarchy module — that module
+    never had any organization cut over to it, so this now reads the same
+    CompanyComplianceDetails.jurisdiction_country every real org's
+    Compliance page actually sets.
     """
-    from app.modules.payroll.hierarchy.models import Country, Jurisdiction, OrganizationJurisdictionAssignment
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll.models import CompanyComplianceDetails
 
-    match = (
-        db.query(Country.id)
-        .join(Jurisdiction, Jurisdiction.country_id == Country.id)
-        .join(OrganizationJurisdictionAssignment, OrganizationJurisdictionAssignment.jurisdiction_id == Jurisdiction.id)
-        .filter(
-            OrganizationJurisdictionAssignment.organization_id == org_id,
-            Country.name.ilike(country_name),
-        )
+    code = get_jurisdiction_code(country_name)
+    if not code:
+        return False
+    details = (
+        db.query(CompanyComplianceDetails.jurisdiction_country)
+        .filter(CompanyComplianceDetails.organization_id == org_id)
         .first()
     )
-    return match is not None
+    return bool(details and details[0] == code)
 
 
 def _is_retrieval_eligible(item: AssistKbItem, today: date) -> bool:

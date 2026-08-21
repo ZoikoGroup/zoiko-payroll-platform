@@ -90,7 +90,10 @@ export default function ContributionRatesTable({ documents = [], country }) {
   );
 }
 
-function RatesTable({ rows, caption }) {
+// Exported so TaxConfigurationTab.jsx can re-render an already-fetched,
+// client-side-filtered subset (e.g. India's Professional Tax rows) with
+// the exact same table presentation — no new fetch, no API change.
+export function RatesTable({ rows, caption }) {
   return (
     <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
       <div className="px-6 py-3 border-b border-border">

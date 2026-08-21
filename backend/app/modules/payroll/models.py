@@ -155,6 +155,12 @@ class PayrollEmployee(Base):
     tax_code         = Column(String(20), nullable=True)
     ni_category      = Column(String(5), nullable=True)
 
+    # Generic across every country (not UK-only) — "Monthly"/"Weekly"/
+    # "Fortnightly"/"FourWeekly". Defaults to "Monthly" so every existing
+    # employee's numbers are completely unaffected; only engine/countries/
+    # uk.py currently varies its calculation by this field.
+    pay_frequency    = Column(String(20), nullable=False, default="Monthly", server_default="Monthly")
+
     # Government study-loan repayment, deducted via payroll above an
     # income threshold — the SAME mechanism under different names in the
     # UK (Student/Postgraduate Loan, e.g. "UK_PLAN1".."UK_PLAN5",
@@ -359,6 +365,10 @@ class PayslipItem(Base):
     # Loan in the UK, HELP/HECS in Australia) — one shared line, same
     # reasoning as PayrollEmployee.study_loan_plan/study_loan_balance.
     study_loan_deduction = Column(Numeric(12, 2), default=0, server_default="0")
+    # UK: employee-side Workplace Pension deduction — distinct from
+    # employer_pension below. Zero unless an employee pension rate has
+    # been explicitly configured (see engine/countries/uk.py).
+    employee_pension  = Column(Numeric(12, 2), default=0, server_default="0")
     # Germany: Kirchensteuer (church tax), only nonzero when the employee
     # is flagged church_tax_liable.
     church_tax        = Column(Numeric(12, 2), default=0, server_default="0")
@@ -534,6 +544,12 @@ class ContributionRate(Base):
     employee_rate_pct    = Column(Numeric(6, 4), nullable=True)  # e.g. 0.1200 for 12%
     employer_rate_pct    = Column(Numeric(6, 4), nullable=True)
     flat_amount          = Column(Numeric(10, 2), nullable=True)  # for flat components like PT
+    # One generic slot for a non-numeric configuration value (UK pension
+    # calculation basis "QUALIFYING_EARNINGS"/"BASIC_PAY"/"PENSIONABLE_EARNINGS",
+    # auto-enrolment "true"/"false") — reuses this table's existing
+    # row-per-component_key convention instead of a new table. Null for
+    # every existing row.
+    text_value           = Column(String(50), nullable=True)
 
     jurisdiction_country = Column(String(10), nullable=False, server_default="IN", default="IN")
     # Null = country-level, matching the convention JurisdictionPack/
@@ -635,6 +651,14 @@ class TaxSlab(Base):
     # rule_type — additive, no existing row's behavior changes.
     flat_amount           = Column(Numeric(10, 2), nullable=True)
     adjustment_amount     = Column(Numeric(10, 2), nullable=True)
+    # NI_BAND only (UK National Insurance categories): which NI category
+    # letter ("A"/"B"/"C"/"H"/"M") this band applies to, and the employer
+    # rate for this band — `rate_pct` above doubles as the EMPLOYEE rate
+    # for NI_BAND rows. min_amount/max_amount are this band's threshold
+    # range, exactly like every other bracket row. Null for every other
+    # rule_type.
+    ni_category           = Column(String(2), nullable=True)
+    employer_rate_pct     = Column(Numeric(5, 2), nullable=True)
     # Which canonical tax pack version this row was authored under/synced from.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
@@ -785,6 +809,16 @@ class JurisdictionPack(Base):
     # stays intact by construction (new row per version).
     previous_version_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
+    # Links a sub-jurisdiction pack (e.g. a Scotland tax pack) to the
+    # national pack it inherits from for the same tax year (e.g. UK
+    # National) — a DIFFERENT relationship from previous_version_id above
+    # (which chains versions of the SAME pack over time). Null for every
+    # national-level pack, and for every sub-jurisdiction pack that hasn't
+    # been explicitly linked yet — the resolver falls back to "the
+    # country's Active national pack for this tax year" when unset, so no
+    # existing pack's behavior changes just because this column exists.
+    parent_pack_id       = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     # Per-field default values + override permission for the SAME fields
     # payroll/policy/models.py's PayrollPolicy exposes (calculation_mode,
     # employee_categories, overtime_rule) — e.g.
@@ -804,6 +838,15 @@ class JurisdictionPack(Base):
         UniqueConstraint("pack_id", "version", name="uq_jurisdiction_pack_id_version"),
         Index("ix_jurisdiction_packs_country_state", "jurisdiction_country", "jurisdiction_state"),
     )
+
+    @property
+    def scope_type(self) -> str:
+        """Computed, not a stored column — reuses the exact convention
+        jurisdiction_state already establishes (null = country-level)
+        rather than duplicating it in a second column. "NATIONAL" for a
+        country-level pack, "SUB_JURISDICTION" for a state/province/
+        devolved-nation pack (e.g. Scotland)."""
+        return "NATIONAL" if not self.jurisdiction_state else "SUB_JURISDICTION"
 
 
 # ── Tax Configuration Audit ─────────────────────────────────────────────

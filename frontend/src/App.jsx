@@ -20,6 +20,10 @@ import {
   AUCompliancePage, CACompliancePage, DECompliancePage,
 } from "./pages/JurisdictionCompliance";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
+import {
+  INStatutoryPage, USAStatutoryPage, UKStatutoryPage,
+  AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
+} from "./pages/JurisdictionStatutory";
 import FinancePage from "./pages/FinancePage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -112,6 +116,20 @@ export default function App() {
             </SuperAdminShell>
           }
         />
+        {/* Jurisdiction Statutory Rates — one dedicated page per country,
+            same split/pattern as Jurisdiction Compliance above. */}
+        <Route path="/super-admin/statutory-rates/india" element={<SuperAdminShell><INStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/india/:jurisdiction" element={<SuperAdminShell><INStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/united-states" element={<SuperAdminShell><USAStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/united-states/:jurisdiction" element={<SuperAdminShell><USAStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/united-kingdom" element={<SuperAdminShell><UKStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/united-kingdom/:jurisdiction" element={<SuperAdminShell><UKStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/australia" element={<SuperAdminShell><AUStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/australia/:jurisdiction" element={<SuperAdminShell><AUStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/canada" element={<SuperAdminShell><CAStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/canada/:jurisdiction" element={<SuperAdminShell><CAStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/germany" element={<SuperAdminShell><DEStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/germany/:jurisdiction" element={<SuperAdminShell><DEStatutoryPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={
