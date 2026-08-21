@@ -71,6 +71,12 @@ class PayrollContext:
     study_loan_balance: Decimal = None
     church_tax_liable: bool = False  # Germany Kirchensteuer opt-in
     tax_regime: str = None          # India's "Old"/"New" — None means "not set," same as every employee today
+    # Generic across every country — "Monthly"/"Weekly"/"Fortnightly"/
+    # "FourWeekly". Defaults to "Monthly", matching the existing
+    # gross/attendance model every country's calculator already assumes,
+    # so no existing calculation changes. Only engine/countries/uk.py
+    # currently reads this.
+    pay_frequency: str = "Monthly"
 
 
 @dataclass
@@ -123,6 +129,11 @@ class PayrollResult:
     employer_pension: Decimal = Decimal("0")
     employer_ni: Decimal = Decimal("0")
     employer_futa: Decimal = Decimal("0")
+    # UK: employee-side Workplace Pension deduction — distinct from
+    # employer_pension above. Zero unless a country calculator explicitly
+    # sets it (only uk.py does, and only when an employee-pension rate is
+    # configured) — every other country's output is unaffected.
+    employee_pension: Decimal = Decimal("0")
 
     # Totals
     total_deductions: Decimal = Decimal("0")

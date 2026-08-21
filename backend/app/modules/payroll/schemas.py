@@ -809,6 +809,7 @@ class CanonicalContributionRateUpsert(BaseModel):
     employeeSharePct: Optional[Decimal] = None
     employerSharePct: Optional[Decimal] = None
     flatAmount: Optional[Decimal] = None
+    textValue: Optional[str] = None
     sortOrder: int = 0
 
 
@@ -845,6 +846,7 @@ class CanonicalContributionRateResponse(BaseModel):
     employeeRatePct: Optional[Decimal] = Field(None, validation_alias="employee_rate_pct", serialization_alias="employeeRatePct")
     employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
+    textValue: Optional[str] = Field(None, validation_alias="text_value", serialization_alias="textValue")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

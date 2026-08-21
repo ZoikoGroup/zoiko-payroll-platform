@@ -214,6 +214,31 @@ def test_uk_student_loan_zero_without_outstanding_balance():
     assert result.study_loan_deduction == Decimal("0")
 
 
+# Student/Postgraduate Loan thresholds are configurable per plan (Statutory
+# Thresholds tab in Compliance) — a configured row must override the
+# hardcoded default, exactly like every other UK threshold already does.
+
+def test_uk_student_loan_plan1_threshold_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN1", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "sl_plan1_thresh": Rate(flat_amount=Decimal("10000"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_PLAN1", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+def test_uk_student_loan_plan2_threshold_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN2", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "sl_plan2_thresh": Rate(flat_amount=Decimal("10000"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_PLAN2", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+def test_uk_postgrad_loan_threshold_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "pg_loan_thresh": Rate(flat_amount=Decimal("5000"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
 def test_uk_scotland_uses_its_own_bands():
     national = calc("UK", 5000, UK_RATES, UK_SLABS)
     scotland_slabs = [Slab(Decimal("0"), None, Decimal("45"))]
@@ -221,12 +246,41 @@ def test_uk_scotland_uses_its_own_bands():
     assert scottish.tds != national.tds
 
 
-def test_uk_non_scotland_region_ignores_state_slabs():
-    # state_slabs only apply when work_state == "Scotland" specifically —
-    # England/Wales/NI share the national bands even if a state was set.
+def test_uk_no_state_slabs_falls_back_to_national_regardless_of_state_name():
+    # The engine itself no longer compares work_state against a
+    # jurisdiction name (Section 5's "no hardcoded if state == Scotland").
+    # Whether a sub-jurisdiction's own bands apply is decided upstream by
+    # resolve_uk_configuration() — the engine only ever reads whichever
+    # slabs actually ended up in ctx.state_slabs. With none supplied at
+    # all, any work_state (including a real one like "England") falls
+    # back to the national bands.
     national = calc("UK", 5000, UK_RATES, UK_SLABS)
-    with_state_but_not_scotland = calc("UK", 5000, UK_RATES, UK_SLABS, work_state="England", state_slabs=[Slab(Decimal("0"), None, Decimal("99"))])
-    assert with_state_but_not_scotland.tds == national.tds
+    england_no_state_slabs = calc("UK", 5000, UK_RATES, UK_SLABS, work_state="England")
+    assert england_no_state_slabs.tds == national.tds
+
+
+def test_uk_engine_uses_whatever_state_slabs_it_is_given():
+    # Conversely: if the resolver DID populate ctx.state_slabs for some
+    # sub-jurisdiction, the engine uses them — it doesn't re-check the
+    # jurisdiction's name itself. This is what makes Wales/Northern
+    # Ireland genuinely addressable the moment real data exists for them,
+    # without any engine change.
+    national = calc("UK", 5000, UK_RATES, UK_SLABS)
+    wales_with_real_state_slabs = calc(
+        "UK", 5000, UK_RATES, UK_SLABS, work_state="Wales",
+        state_slabs=[Slab(Decimal("0"), None, Decimal("99"))],
+    )
+    assert wales_with_real_state_slabs.tds != national.tds
+
+
+def test_normalize_uk_sub_jurisdiction_recognizes_all_four_nations():
+    from app.modules.payroll.service import _normalize_uk_sub_jurisdiction
+    assert _normalize_uk_sub_jurisdiction("England") == "England"
+    assert _normalize_uk_sub_jurisdiction("scotland") == "Scotland"
+    assert _normalize_uk_sub_jurisdiction("WALES") == "Wales"
+    assert _normalize_uk_sub_jurisdiction("Northern Ireland") == "Northern Ireland"
+    assert _normalize_uk_sub_jurisdiction("Not A Real Place") is None
+    assert _normalize_uk_sub_jurisdiction(None) is None
 
 
 # ── Germany: church tax opt-in ──────────────────────────────────────────────
@@ -423,3 +477,183 @@ def test_india_tax_regime_defaults_to_new_when_unset():
     unset = calc("IN", monthly, IN_RATES, IN_SLABS)               # tax_regime not passed at all
     explicit_new = calc("IN", monthly, IN_RATES, IN_SLABS, tax_regime="New")
     assert unset.annual_tax == explicit_new.annual_tax == Decimal("10000")
+
+
+# ── UK production refactor: tax-code interpretation ─────────────────────
+
+from app.modules.payroll.engine.countries.uk import interpret_tax_code, _resolve_ni_bands, _calculate_ni_from_bands
+
+
+def test_tax_code_standard_code_sets_allowance_from_digits():
+    result = interpret_tax_code("1257L", Decimal("12570"))
+    assert result["personal_allowance"] == Decimal("12570")
+    assert result["flat_rate_pct"] is None
+
+
+def test_tax_code_br_is_flat_20pct_no_allowance():
+    result = interpret_tax_code("BR", Decimal("12570"))
+    assert result["personal_allowance"] == Decimal("0")
+    assert result["flat_rate_pct"] == Decimal("20")
+
+
+def test_tax_code_d0_is_flat_40pct():
+    assert interpret_tax_code("D0", Decimal("12570"))["flat_rate_pct"] == Decimal("40")
+
+
+def test_tax_code_d1_is_flat_45pct():
+    assert interpret_tax_code("D1", Decimal("12570"))["flat_rate_pct"] == Decimal("45")
+
+
+def test_tax_code_nt_means_zero_tax():
+    result = interpret_tax_code("NT", Decimal("12570"))
+    assert result["flat_rate_pct"] == Decimal("0")
+
+
+def test_tax_code_k_code_gives_negative_allowance():
+    # K475 -> a NEGATIVE allowance of 4750, added to taxable income rather
+    # than subtracted from it (an untaxed benefit clawed back via payroll).
+    result = interpret_tax_code("K475", Decimal("12570"))
+    assert result["personal_allowance"] == Decimal("-4750")
+    assert result["flat_rate_pct"] is None
+
+
+def test_tax_code_unset_falls_back_to_default_allowance():
+    result = interpret_tax_code(None, Decimal("12570"))
+    assert result["personal_allowance"] == Decimal("12570")
+    assert result["basis"] == "CUMULATIVE"
+
+
+def test_uk_br_code_taxes_full_income_at_20pct_no_allowance():
+    with_code = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="BR")
+    without_code = calc("UK", 5000, UK_RATES, UK_SLABS)
+    # BR gives up the personal allowance entirely -- strictly different
+    # tax than the standard code's allowance-then-slabs calculation.
+    assert with_code.annual_tax != without_code.annual_tax
+
+
+def test_uk_nt_code_means_zero_annual_tax():
+    result = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="NT")
+    assert result.annual_tax == Decimal("0")
+    assert result.tds == Decimal("0")
+
+
+# ── UK production refactor: NI category bands (regression guard) ───────
+
+_NI_CAT_A_BANDS = [
+    Slab(Decimal("0"), Decimal("9100"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("9100"), Decimal("12570"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("12570"), Decimal("50270"), Decimal("8"), rule_type="NI_BAND"),
+    Slab(Decimal("50270"), None, Decimal("2"), rule_type="NI_BAND"),
+]
+# employer_rate_pct/ni_category are not Slab dataclass fields (kept
+# engine-only rather than editing the shared test dataclass used by every
+# other country's tests) -- set via setattr to mirror the live-DB row shape.
+for _band, _empr in zip(_NI_CAT_A_BANDS, [Decimal("0"), Decimal("13.8"), Decimal("13.8"), Decimal("13.8")]):
+    _band.employer_rate_pct = _empr
+    _band.ni_category = "A"
+
+
+def test_ni_category_a_bands_match_flat_calculation_exactly():
+    # The banded representation is additive (Section D) -- for Category A
+    # specifically, it must reproduce today's flat ContributionRate-based
+    # NI figures exactly, since the band boundaries are the union of the
+    # employee (PT/UEL) and employer (ST) thresholds.
+    flat_result = calc("UK", 5000, UK_RATES, UK_SLABS)
+    banded_result = calc("UK", 5000, UK_RATES, UK_SLABS + _NI_CAT_A_BANDS, ni_category="A")
+    assert banded_result.ni_employee == flat_result.ni_employee
+    assert banded_result.employer_ni == flat_result.employer_ni
+
+
+def test_ni_bands_ignored_without_a_category_set():
+    with_bands_no_category = calc("UK", 5000, UK_RATES, UK_SLABS + _NI_CAT_A_BANDS)
+    flat_result = calc("UK", 5000, UK_RATES, UK_SLABS)
+    assert with_bands_no_category.ni_employee == flat_result.ni_employee
+
+
+def test_resolve_ni_bands_filters_by_category_and_sorts():
+    other_category = Slab(Decimal("0"), None, Decimal("0"), rule_type="NI_BAND")
+    other_category.ni_category = "B"
+    other_category.employer_rate_pct = Decimal("0")
+    all_slabs = _NI_CAT_A_BANDS + [other_category]
+    bands = _resolve_ni_bands(all_slabs, "A")
+    assert len(bands) == 4
+    assert [b.min_amount for b in bands] == [Decimal("0"), Decimal("9100"), Decimal("12570"), Decimal("50270")]
+
+
+def test_calculate_ni_from_bands_matches_hand_calculation():
+    annual_gross = Decimal("60000")
+    employee_annual, employer_annual = _calculate_ni_from_bands(annual_gross, _NI_CAT_A_BANDS)
+    # Employee: (50270-12570)*8% + (60000-50270)*2% = 3016 + 194.60 = 3210.60
+    assert employee_annual == Decimal("3210.60")
+    # Employer: (60000-9100)*13.8% = 7024.20
+    assert employer_annual == Decimal("7024.20")
+
+
+# ── UK production refactor: pension (employee + employer, basis-aware) ──
+
+UK_RATES_WITH_EMPLOYEE_PENSION = {
+    **UK_RATES,
+    "employer-pension": Rate("employer-pension", employee_rate_pct=Decimal("5"), employer_rate_pct=Decimal("3")),
+}
+
+
+def test_uk_employee_pension_zero_when_no_employee_rate_configured():
+    # Today's exact behavior: UK_RATES' employer-pension row has no
+    # employee_rate_pct at all -- must not silently start deducting.
+    result = calc("UK", 5000, UK_RATES, UK_SLABS)
+    assert result.employee_pension == Decimal("0")
+
+
+def test_uk_employee_pension_qualifying_earnings_basis():
+    result = calc("UK", 5000, UK_RATES_WITH_EMPLOYEE_PENSION, UK_SLABS)
+    qe_lower_monthly = Decimal("6240") / Decimal("12")
+    qe_upper_monthly = Decimal("50270") / Decimal("12")
+    pensionable = min(Decimal("5000"), qe_upper_monthly) - qe_lower_monthly
+    expected = (pensionable * Decimal("5") / Decimal("100")).quantize(Decimal("0.01"))
+    assert result.employee_pension == expected
+    assert result.employee_pension > Decimal("0")
+
+
+def test_uk_employee_pension_basic_pay_basis():
+    rates = {**UK_RATES_WITH_EMPLOYEE_PENSION, "pension_basis": Rate(flat_amount=None)}
+    rates["pension_basis"].text_value = "BASIC_PAY"
+    result = calc("UK", 5000, rates, UK_SLABS, basic=Decimal("3000"))
+    expected = (Decimal("3000") * Decimal("5") / Decimal("100")).quantize(Decimal("0.01"))
+    assert result.employee_pension == expected
+
+
+def test_uk_employer_pension_still_calculated_independently_of_employee_pension():
+    with_employee = calc("UK", 5000, UK_RATES_WITH_EMPLOYEE_PENSION, UK_SLABS)
+    without_employee = calc("UK", 5000, UK_RATES, UK_SLABS)
+    assert with_employee.employer_pension == without_employee.employer_pension
+    assert with_employee.employer_pension > Decimal("0")
+
+
+# ── UK production refactor: Student Loan Plan 5 ─────────────────────────
+
+def test_uk_student_loan_plan5_deducts_above_threshold():
+    result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN5", study_loan_balance=Decimal("20000"))
+    assert result.study_loan_deduction > Decimal("0")
+
+
+def test_uk_student_loan_plan5_threshold_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN5", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "sl_plan5_thresh": Rate(flat_amount=Decimal("10000"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_PLAN5", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+# ── UK production refactor: pay frequency ────────────────────────────────
+
+def test_uk_weekly_frequency_annualizes_to_same_annual_tax_as_monthly():
+    monthly = calc("UK", 5000, UK_RATES, UK_SLABS, pay_frequency="Monthly")
+    weekly_equivalent_gross = Decimal("5000") * 12 / 52
+    weekly = calc("UK", weekly_equivalent_gross, UK_RATES, UK_SLABS, pay_frequency="Weekly")
+    assert abs(weekly.annual_tax - monthly.annual_tax) < Decimal("1")
+
+
+def test_uk_pay_frequency_defaults_to_monthly_when_unset():
+    explicit_monthly = calc("UK", 5000, UK_RATES, UK_SLABS, pay_frequency="Monthly")
+    unset = calc("UK", 5000, UK_RATES, UK_SLABS)
+    assert explicit_monthly.tds == unset.tds
+    assert explicit_monthly.ni_employee == unset.ni_employee

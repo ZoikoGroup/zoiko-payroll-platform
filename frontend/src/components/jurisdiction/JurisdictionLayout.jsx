@@ -44,6 +44,8 @@ const BASE_TABS = [
 export default function JurisdictionLayout({
   country, countryName, initialState = "", onStateChange,
   extraTabs = [], slabsTabOverride,
+  hiddenTabs = [], slabsLabel = "Tax Slabs", countryLevelLabel = "Country-level (no state)",
+  additionalStateOptions = [], slabsFilter = (s) => s,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -86,6 +88,17 @@ export default function JurisdictionLayout({
   useEffect(() => { loadJurisdictions(); }, [loadJurisdictions]);
 
   const selectedJurisdiction = jurisdictions.find((j) => j.code === country);
+  // additionalStateOptions lets a country (UK: England/Wales/Northern
+  // Ireland) offer a sub-jurisdiction as selectable in the dropdown even
+  // before any real pack exists for it — selecting it and hitting "New
+  // Tax" is the real, data-driven way to configure it, exactly like every
+  // other state on this page. Never fabricates pack DATA — only the
+  // option to create one. Real states already in jurisdictions.states
+  // (Scotland today) aren't duplicated.
+  const stateOptions = [
+    ...(selectedJurisdiction?.states || []),
+    ...additionalStateOptions.filter((s) => !(selectedJurisdiction?.states || []).includes(s)),
+  ];
 
   // Policy packs aren't a state-level concept in this app (nothing today
   // scopes a Policy pack to a state) — once a state is selected, force
@@ -165,11 +178,20 @@ export default function JurisdictionLayout({
   // base six plus any visible extra tabs.
   const visibleExtraTabs = selectedPack ? extraTabs.filter((t) => t.isVisible(selectedPack)) : [];
   const restrictTo = slabsOverrideActive ? slabsTabOverride.restrictTabsTo : null;
-  let tabs = [
-    ...BASE_TABS.slice(0, 3),
-    ...visibleExtraTabs,
-    ...BASE_TABS.slice(3),
-  ];
+  // hiddenTabs drops base tabs unconditionally (not pack-dependent, unlike
+  // restrictTabsTo above) — UK uses this to drop the generic "Contribution
+  // Rates"/"Versions" tabs in favor of its own NI & Pension Rates /
+  // Statutory Thresholds extra tabs. Every other country passes [].
+  let tabs = BASE_TABS.filter((t) => !hiddenTabs.includes(t.key));
+  // Each extra tab anchors after a given base-tab key (default "slabs",
+  // preserving the original fixed insertion point so India's existing Tax
+  // Parameters tab — which doesn't set `after` — lands exactly where it
+  // always has). Lets UK insert "NI & Pension Rates" before Slabs while
+  // "HMRC Statutory Thresholds" lands after it, in one pass.
+  visibleExtraTabs.forEach((extraTab) => {
+    const anchorIndex = tabs.findIndex((t) => t.key === (extraTab.after || "slabs"));
+    tabs.splice(anchorIndex === -1 ? tabs.length : anchorIndex + 1, 0, extraTab);
+  });
   if (restrictTo) tabs = tabs.filter((t) => restrictTo.includes(t.key));
 
   return (
@@ -183,8 +205,8 @@ export default function JurisdictionLayout({
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <select className={inputClass + " w-auto min-w-[160px]"} value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">Country-level (no state)</option>
-          {(selectedJurisdiction?.states || []).map((s) => <option key={s} value={s}>{s}</option>)}
+          <option value="">{countryLevelLabel}</option>
+          {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         {!state && (
         <div className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-surface-muted p-1">
@@ -229,7 +251,7 @@ export default function JurisdictionLayout({
                 >
                   <span className="font-semibold">{p.packId}</span>
                   <span className="flex items-center gap-2 text-foreground-muted">
-                    v{p.version} <StatusPill status={STATUS_PILL_MAP[p.status] || "pending"} label={p.status} />
+                    v{p.version}{p.taxYear ? ` · FY ${p.taxYear}` : ""} <StatusPill status={STATUS_PILL_MAP[p.status] || "pending"} label={p.status} />
                   </span>
                 </button>
               ))}
@@ -299,7 +321,7 @@ export default function JurisdictionLayout({
                       tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
                     }`}
                   >
-                    <t.icon size={13} /> {slabsOverrideActive && t.key === "slabs" ? slabsTabOverride.label : t.label}
+                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? slabsTabOverride.label : slabsLabel) : t.label}
                   </button>
                 ))}
               </div>
@@ -328,11 +350,11 @@ export default function JurisdictionLayout({
                 />
               )}
               {tab === "slabs" && slabsOverrideActive && (
-                slabsTabOverride.renderTab({ pack: selectedPack, slabs, onAdd: () => setShowNewSlab(true), onEdit: setEditingSlab, onDelete: setDeletingSlab })
+                slabsTabOverride.renderTab({ pack: selectedPack, slabs: slabsFilter(slabs), onAdd: () => setShowNewSlab(true), onEdit: setEditingSlab, onDelete: setDeletingSlab })
               )}
               {tab === "slabs" && !slabsOverrideActive && (
                 <SlabsTab
-                  pack={selectedPack} slabs={slabs} onAdd={() => setShowNewSlab(true)}
+                  pack={selectedPack} slabs={slabsFilter(slabs)} onAdd={() => setShowNewSlab(true)}
                   onEdit={setEditingSlab} onDelete={setDeletingSlab}
                 />
               )}
@@ -343,6 +365,9 @@ export default function JurisdictionLayout({
                       pack: selectedPack, rates, slabs, addToast,
                       onReload: reloadRatesAndSlabs,
                       onPublish: () => changeStatus("Active"),
+                      onAddRate: () => setShowNewRate(true),
+                      onEditRate: setEditingRate,
+                      onDeleteRate: setDeletingRate,
                     })}
                   </div>
                 )

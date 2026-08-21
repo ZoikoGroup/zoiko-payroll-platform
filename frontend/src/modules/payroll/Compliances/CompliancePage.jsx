@@ -5,7 +5,7 @@ import { useToast } from "../ToastContext";
 import ComplianceForm from "./ComplianceForm";
 import PackMetadataPanel from "./PackMetadataPanel";
 import ContributionRatesTable from "./ContributionRatesTable";
-import TaxSlabTable from "./TaxSlabTable";
+import TaxConfigurationTab from "./TaxConfigurationTab";
 import ComplianceDocumentUpload from "./ComplianceDocuments";
 import EnterpriseOnboardingBanner from "./EnterpriseOnboarding/EnterpriseOnboardingBanner";
 import EnterpriseJurisdictionsTab from "./EnterpriseOnboarding/EnterpriseJurisdictionsTab";
@@ -21,7 +21,7 @@ import {
 import { getJurisdictionTaxFields } from "../../../utils/jurisdictionTax";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
-const BASE_TABS = ["Overview", "Company Details", "Contribution Rates", "Tax Slabs", "Documents"];
+const BASE_TABS = ["Overview", "Company Details", "Contribution Rates", "Tax Configuration", "Documents"];
 
 const defaultCompany = {
   name: "",
@@ -174,7 +174,7 @@ export default function CompliancePage() {
 
       <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
         {tabs.map((t, i) => {
-          const disabled = (calcMode === "simple" && (t === "Contribution Rates" || t === "Tax Slabs" || t === "Documents" || t === "Jurisdiction Hierarchy" || t === "Enterprise Jurisdictions")) || (calcMode === "standard" && !arrivedForOnboarding && t === "Enterprise Jurisdictions");
+          const disabled = (calcMode === "simple" && (t === "Contribution Rates" || t === "Tax Configuration" || t === "Documents" || t === "Jurisdiction Hierarchy" || t === "Enterprise Jurisdictions")) || (calcMode === "standard" && !arrivedForOnboarding && t === "Enterprise Jurisdictions");
           return (
             <button
               key={t}
@@ -264,15 +264,19 @@ export default function CompliancePage() {
       )}
 
       {activeTab === 3 && calcMode !== "simple" && (
-        <TaxSlabTable documents={documents} country={companyDetails.jurisdictionCountry} />
+        <TaxConfigurationTab
+          documents={documents}
+          country={companyDetails.jurisdictionCountry}
+          jurisdictionState={companyDetails.jurisdictionState}
+        />
       )}
       {activeTab === 3 && calcMode === "simple" && (
         <div className="bg-surface border border-border rounded-[18px] p-12 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center">
           <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-foreground-muted/10 flex items-center justify-center">
             <Lock size={24} className="text-foreground-muted" />
           </div>
-          <h3 className="text-[17px] font-bold text-foreground mb-2">Tax Slabs</h3>
-          <p className="text-[13px] text-foreground-muted max-w-md mx-auto">Tax slabs are not available in Simple Payroll mode.</p>
+          <h3 className="text-[17px] font-bold text-foreground mb-2">Tax Configuration</h3>
+          <p className="text-[13px] text-foreground-muted max-w-md mx-auto">Tax configuration is not available in Simple Payroll mode.</p>
         </div>
       )}
 

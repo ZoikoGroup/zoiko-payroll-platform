@@ -151,6 +151,7 @@ class StandardStrategy(PayrollStrategy):
             + deductions.get("medicare", Decimal("0"))
             + deductions.get("ni_employee", Decimal("0"))
             + deductions.get("study_loan_deduction", Decimal("0"))
+            + deductions.get("employee_pension", Decimal("0"))
             + deductions.get("church_tax", Decimal("0"))
             + deductions.get("cpp2", Decimal("0"))
         )
@@ -178,6 +179,7 @@ class StandardStrategy(PayrollStrategy):
             medicare=deductions.get("medicare", Decimal("0")),
             ni_employee=deductions.get("ni_employee", Decimal("0")),
             study_loan_deduction=deductions.get("study_loan_deduction", Decimal("0")),
+            employee_pension=deductions.get("employee_pension", Decimal("0")),
             church_tax=deductions.get("church_tax", Decimal("0")),
             cpp2=deductions.get("cpp2", Decimal("0")),
             employer_social_security=deductions.get("employer_social_security", Decimal("0")),

@@ -25,6 +25,7 @@ import os
 import os as _os
 import re
 import copy
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
@@ -958,6 +959,107 @@ def get_state_scoped_config(db: Session, country: str, state: Optional[str]) -> 
     return state_rate_map, slab_rows
 
 
+# ── UK: centralized configuration resolver ─────────────────────────────
+# One resolver for every UK calculation entry point (preview, generation,
+# recalculation, manual payslip) — see build_context_from_employee's
+# callers. Layers, in precedence order:
+#   UK National (canonical or org-synced, via _resolve_effective_rate_inputs —
+#       already org-override-aware, so "organization override" isn't a
+#       separate step here, it falls out of calling this with the real
+#       organization_id)
+#       overridden-by
+#   Sub-jurisdiction (England/Scotland/Wales/Northern Ireland, via
+#       get_state_scoped_config)
+# "Employee-specific statutory profile" (tax_code/ni_category/
+# study_loan_plan) isn't a rate_map layer either — engine/countries/uk.py
+# reads those straight off PayrollContext and applies them at calculation
+# time (tax-code interpretation, NI category bands), not as a config
+# merge step. Hardcoded module constants in uk.py remain the emergency
+# fallback of last resort, used only when NOTHING resolves at any layer —
+# resolve_jurisdiction_parameter already logs when that happens.
+_UK_SUB_JURISDICTIONS = {
+    "england": "England", "scotland": "Scotland", "wales": "Wales", "northern ireland": "Northern Ireland",
+}
+
+
+def _normalize_uk_sub_jurisdiction(work_state: Optional[str]) -> Optional[str]:
+    """The ONE place a UK jurisdiction name is ever compared against —
+    engine/countries/uk.py itself never does `if work_state == "Scotland"`;
+    it only reads whatever this resolver already put into
+    ctx.state_slabs/ctx.state_rate_map. Unrecognized/blank work_state
+    resolves to None (no sub-jurisdiction — national rules only), exactly
+    like today's behavior for any non-Scotland employee."""
+    if not work_state:
+        return None
+    return _UK_SUB_JURISDICTIONS.get(work_state.strip().lower())
+
+
+@dataclass
+class ResolvedUKPayrollConfiguration:
+    """Return type of resolve_uk_configuration() — field names deliberately
+    match build_context_from_employee()'s kwargs so a caller can spread
+    the relevant ones straight in. `source_map` and the two pack
+    references exist for traceability (Section 16: a payslip should be
+    able to name which pack version applied) — snapshotting them onto the
+    payslip is the caller's job, this resolver only exposes them."""
+    rate_map: dict
+    slabs: list
+    state_rate_map: dict
+    state_slabs: list
+    sub_jurisdiction: Optional[str]
+    national_pack: Optional["JurisdictionPack"]
+    sub_pack: Optional["JurisdictionPack"]
+    canonical_rates: list
+    source_map: dict
+
+
+def resolve_uk_configuration(
+    db: Session, organization_id: int, employee, payroll_date, tax_regime: Optional[str] = None,
+) -> "ResolvedUKPayrollConfiguration":
+    """The one centralized UK configuration resolver. Every UK calculation
+    entry point should call this instead of assembling rate_map/slabs/
+    state_rate_map/state_slabs ad hoc — see preview_payroll_run,
+    _compute_payslip_values, and add_payslip_item, all updated to call
+    this."""
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    national_rate_map, national_slabs, canonical_rates, national_pack = _resolve_effective_rate_inputs(
+        db, organization_id, "UK", payroll_date, org_opted_in, state=None, tax_regime=tax_regime,
+    )
+
+    sub_jurisdiction = _normalize_uk_sub_jurisdiction(getattr(employee, "work_state", None))
+    sub_rate_map, sub_slabs = get_state_scoped_config(db, "UK", sub_jurisdiction)
+
+    source_map = {key: "NATIONAL" for key in national_rate_map}
+    source_map.update({key: "SUB_JURISDICTION" for key in sub_rate_map})
+    # Sub-jurisdiction rate_map rows are layered OVER national, not a
+    # replacement — real UK NI/Pension/thresholds aren't devolved at all
+    # (this dict is empty for every sub-jurisdiction today), but a future
+    # genuinely devolved parameter would correctly take precedence here
+    # without any code change.
+    resolved_rate_map = {**national_rate_map, **sub_rate_map}
+
+    sub_pack = None
+    if sub_jurisdiction:
+        sub_pack = (
+            db.query(JurisdictionPack)
+            .filter(
+                JurisdictionPack.jurisdiction_country == "UK",
+                JurisdictionPack.jurisdiction_state == sub_jurisdiction,
+                JurisdictionPack.pack_type == "tax",
+                JurisdictionPack.status == "Active",
+            )
+            .order_by(JurisdictionPack.id.desc())
+            .first()
+        )
+
+    return ResolvedUKPayrollConfiguration(
+        rate_map=resolved_rate_map, slabs=national_slabs,
+        state_rate_map=sub_rate_map, state_slabs=sub_slabs,
+        sub_jurisdiction=sub_jurisdiction, national_pack=national_pack, sub_pack=sub_pack,
+        canonical_rates=canonical_rates or [], source_map=source_map,
+    )
+
+
 def sync_org_rates_from_canonical(
     db: Session, organization_id: int, country: str, state: Optional[str] = None,
     tax_regime: Optional[str] = None, payroll_date=None,
@@ -1175,6 +1277,22 @@ def upsert_canonical_contribution_rate(
     # Dividing again here would silently store a value 100x too small.
     employee_pct = data.employeeSharePct
     employer_pct = data.employerSharePct
+    # A flat-amount-only row has no employee/employer percentage to sum —
+    # the old unconditional f"{... or 0}%" silently displayed "0%" for
+    # every one of these instead of the real amount. Two different shapes
+    # share the same flatAmount slot though: most (Professional Tax,
+    # Standard Deduction, ESI Wage Ceiling, Section 87A limits) are genuine
+    # currency thresholds, but a few Tax Parameters (surcharge_cap_pct,
+    # cess_pct, ...) are percentages that just happen to be stored via
+    # flatAmount too — the "_pct" component_key suffix is the existing,
+    # already-established convention distinguishing the two.
+    is_flat_only = employee_pct is None and employer_pct is None and data.flatAmount is not None
+    if is_flat_only and data.componentKey.endswith("_pct"):
+        total_display = f"{data.flatAmount}%"
+    elif is_flat_only:
+        total_display = f"{_get_currency_symbol(data.jurisdictionCountry)}{data.flatAmount:,.2f}"
+    else:
+        total_display = f"{(employee_pct or 0) + (employer_pct or 0)}%"
     fields = dict(
         jurisdiction_country=_normalize_country(data.jurisdictionCountry),
         jurisdiction_state=data.jurisdictionState,
@@ -1183,8 +1301,9 @@ def upsert_canonical_contribution_rate(
         component_key=_normalize_engine_component_key(data.componentKey), label=data.label,
         employee_share=f"{data.employeeSharePct}%" if data.employeeSharePct is not None else "",
         employer_share=f"{data.employerSharePct}%" if data.employerSharePct is not None else "",
-        total=f"{(data.employeeSharePct or 0) + (data.employerSharePct or 0)}%",
+        total=total_display,
         employee_rate_pct=employee_pct, employer_rate_pct=employer_pct, flat_amount=data.flatAmount,
+        text_value=data.textValue,
         sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
     )
     action = "update" if data.id else "create"
@@ -1704,6 +1823,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         "totalContributions": Decimal("0"),
         "totalNet": Decimal("0"),
     }
+    # Per-distinct-work_state cache, same reasoning as generate_payslips_for_run's
+    # cache below — a preview batch can span several employees' states
+    # (e.g. one in Scotland, one in England); without this, a region-scoped
+    # employee (Scotland's own tax bands, India's state PT, ...) would
+    # silently get NATIONAL-only figures here while a real run for the
+    # same employee correctly used their region's config — exactly the
+    # "preview must never disagree with a real run" gap this closes.
+    _state_scoped_cache: dict = {}
 
     for emp in employees:
         ctc = Decimal(str(getattr(emp, "ctc", 0) or 0))
@@ -1753,6 +1880,11 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         # named allowances/Special), not a change to gross itself.
         gross = basic + hra + special + allowance_total + overtime + additional_compensation
 
+        work_state = getattr(emp, "work_state", None)
+        if work_state not in _state_scoped_cache:
+            _state_scoped_cache[work_state] = get_state_scoped_config(db, country, work_state)
+        state_rate_map, state_slabs = _state_scoped_cache[work_state]
+
         # Delegate to the strategy engine
         ctx = build_context_from_employee(
             emp, gross=gross, basic=basic, hra=hra,
@@ -1760,6 +1892,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             additional_compensation=additional_compensation,
             unpaid_leave_days=unpaid_leave_days,
             country=country, rate_map=rate_map, slabs=slabs,
+            work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
         )
         calc = calculate_payroll(ctx, calculation_mode)
 
@@ -1784,6 +1917,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "monthlySocialSecurity": float(calc.social_security),
             "monthlyMedicare": float(calc.medicare),
             "monthlyNi": float(calc.ni_employee),
+            "monthlyEmployeePension": float(calc.employee_pension),
             # total_deductions includes tds; subtract it here so "Contributions"
             # and "Taxes" are non-overlapping components that add up to the
             # actual total deduction, matching how the UI displays them side
@@ -1795,6 +1929,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "employerSs": float(calc.employer_social_security),
             "employerMedicare": float(calc.employer_medicare),
             "employerPension": float(calc.employer_pension),
+            "employeePension": float(calc.employee_pension),
             "taxSlabRate": _get_slab_label(calc.gross * MONTHS_PER_YEAR, slabs, country, annual_tax=calc.annual_tax),
         })
 
@@ -2257,6 +2392,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "medicare": result.medicare,
         "ni_employee": result.ni_employee,
         "study_loan_deduction": result.study_loan_deduction,
+        "employee_pension": result.employee_pension,
         "church_tax": result.church_tax,
         "cpp2": result.cpp2,
         "tds": result.tds,
@@ -2746,6 +2882,7 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
     _fill_missing_basic_hra(employee_data, db, organization_id)
     strategy = get_employee_validation_strategy(country_code)
     employee_data["compliance_fields"] = strategy.validate(employee_data.get("compliance_fields") or {})
+    employee_data.update(strategy.sync_to_columns(employee_data["compliance_fields"]))
 
     check_duplicate_employee_identifiers(
         db, organization_id, employee_data.get("email"), country_code,
@@ -2791,6 +2928,7 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
         merged_compliance = {**(employee.compliance_fields or {}), **(updates.get("compliance_fields") or {})}
         updates["compliance_fields"] = strategy.validate(merged_compliance)
         updates["country_code"] = country_code
+        updates.update(strategy.sync_to_columns(updates["compliance_fields"]))
 
     check_duplicate_employee_identifiers(
         db, organization_id,
@@ -2896,6 +3034,7 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
         try:
             strategy = get_employee_validation_strategy(country_code)
             mapped["compliance_fields"] = strategy.validate(row.complianceFields or {})
+            mapped.update(strategy.sync_to_columns(mapped["compliance_fields"]))
             check_duplicate_employee_identifiers(
                 db, organization_id, mapped.get("email"), country_code,
                 mapped.get("pan"), mapped["compliance_fields"],
@@ -3005,6 +3144,7 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
                 merged_compliance = {**(employee.compliance_fields or {}), **(row.complianceFields or {})}
                 mapped["compliance_fields"] = strategy.validate(merged_compliance)
                 mapped["country_code"] = country_code
+                mapped.update(strategy.sync_to_columns(mapped["compliance_fields"]))
             check_duplicate_employee_identifiers(
                 db, organization_id,
                 mapped.get("email", employee.email),
@@ -3493,10 +3633,18 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # _resolve_effective_rate_inputs) — a manually-added payslip should be
     # governed by the same period-correct rates a normal run would use.
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    work_state = getattr(employee, "work_state", None)
     rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
         db, organization_id, country, run.pay_date, org_opted_in,
-        state=getattr(employee, "work_state", None), tax_regime=getattr(employee, "tax_regime", None),
+        state=work_state, tax_regime=getattr(employee, "tax_regime", None),
     )
+    # Region-specific rules (Scotland's own tax bands, India's state PT,
+    # ...) — the SAME call generate_payslips_for_run's per-employee
+    # compute already makes. Without this, a manually-added payslip for a
+    # region-scoped employee could silently use national-only figures
+    # while a real run for the same employee correctly used their
+    # region's config.
+    state_rate_map, state_slabs = get_state_scoped_config(db, country, work_state)
 
     calculation_mode = getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
     gross = data.basic_salary + (data.hra or 0) + (data.special_allowance or 0) + (data.overtime or 0)
@@ -3509,6 +3657,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         overtime=data.overtime or Decimal("0"),
         unpaid_leave_days=0,
         country=country, rate_map=rate_map, slabs=slabs,
+        work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
     )
     calc = calculate_payroll(ctx, calculation_mode)
 
@@ -3545,6 +3694,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         social_security=calc.social_security,
         medicare=calc.medicare,
         ni_employee=calc.ni_employee,
+        employee_pension=calc.employee_pension,
         tds=calc.tds,
         total_deductions=calc.total_deductions,
         employer_pf=calc.employer_pf,
@@ -3766,6 +3916,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "socialSecurity": item.social_security or z,
         "medicare": item.medicare or z,
         "niEmployee": item.ni_employee or z,
+        "employeePension": item.employee_pension or z,
         "employerPf": item.employer_pf or z,
         "employerEsi": item.employer_esi or z,
         "employerSs": item.employer_social_security or z,

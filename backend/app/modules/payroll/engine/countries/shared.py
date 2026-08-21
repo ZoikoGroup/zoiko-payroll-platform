@@ -15,6 +15,32 @@ from decimal import Decimal
 MONTHS_PER_YEAR = Decimal("12")
 _logger = logging.getLogger("zoiko")
 
+# ── Pay frequency (generic — any country's calculator may use this) ────────
+# PayrollContext.pay_frequency defaults to "Monthly", so
+# PERIODS_PER_YEAR["Monthly"] == MONTHS_PER_YEAR by construction — every
+# existing calculation (which never set pay_frequency) is completely
+# unaffected. Only engine/countries/uk.py currently varies its own
+# annualization by this.
+PERIODS_PER_YEAR = {
+    "Weekly": Decimal("52"),
+    "Fortnightly": Decimal("26"),
+    "FourWeekly": Decimal("13"),
+    "Monthly": MONTHS_PER_YEAR,
+}
+
+
+def resolve_periods_per_year(pay_frequency: str | None) -> Decimal:
+    return PERIODS_PER_YEAR.get(pay_frequency or "Monthly", PERIODS_PER_YEAR["Monthly"])
+
+
+def resolve_period_threshold(annual_threshold: Decimal, pay_frequency: str | None) -> Decimal:
+    """An annual statutory threshold (e.g. the NI Primary Threshold),
+    converted to the equivalent per-period figure for this pay frequency —
+    the reusable piece of "annualize, calculate, de-annualize" that every
+    country calculator already does inline, factored out so it isn't
+    duplicated once frequency-awareness spreads beyond UK."""
+    return annual_threshold / resolve_periods_per_year(pay_frequency)
+
 
 # ── Government-mandated scalar parameters (Global Payroll Tax Engine) ──────
 # A rate_map row (ContributionRate, org-scoped, synced from the Super-
@@ -38,6 +64,34 @@ def _param_pct(rate_map: dict, key: str, side: str, default: Decimal) -> Decimal
         if value is not None:
             return value
     return default
+
+
+def _param_text(rate_map: dict, key: str, default: str) -> str:
+    """Same convention as _param_amount/_param_pct, for a non-numeric
+    configuration value (ContributionRate.text_value) — e.g. UK's pension
+    calculation basis. A configured row overrides the hardcoded default;
+    no row means unaffected/as-before."""
+    row = rate_map.get(key)
+    if row is not None and getattr(row, "text_value", None):
+        return row.text_value
+    return default
+
+
+def is_parameter_configured(rate_map: dict, key: str, side: str = None) -> bool:
+    """Whether `key` resolves from a real configured row rather than
+    falling back to a hardcoded default — the same check
+    resolve_jurisdiction_parameter already does internally to decide
+    whether to log a warning, exposed here so a caller can build a
+    fallback-parameter list (Section 16 traceability) WITHOUT changing
+    resolve_jurisdiction_parameter's own return shape, which every
+    existing call site across every country relies on staying a plain
+    scalar."""
+    row = rate_map.get(key)
+    if row is None:
+        return False
+    if side is not None:
+        return getattr(row, f"{side}_rate_pct", None) is not None
+    return row.flat_amount is not None
 
 
 def resolve_jurisdiction_parameter(
@@ -157,8 +211,21 @@ def _calculate_annual_tax(annual_income: Decimal, slabs) -> Decimal:
     # tax amount above an income threshold — India's high-earner surcharge),
     # not an ordinary income bracket — they're consumed separately (see
     # india.py's _apply_surcharge) and must be excluded here or they'd be
-    # double-counted as if they were plain marginal brackets.
-    bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) != "SURCHARGE"]
+    # double-counted as if they were plain marginal brackets. PT_FLAT rows
+    # (India's state-level Professional Tax, resolved additively elsewhere
+    # via get_state_scoped_config) are excluded for the same reason — if one
+    # ever ends up in this list by mistake (see tax_resolver.py's
+    # _pack_has_income_tax_slabs guard, the primary fix), it must not be
+    # silently summed as a 0%-rate income bracket.
+    bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT")]
+
+    if slabs and not bracket_slabs:
+        _logger.warning(
+            "[income-tax-slabs-unusable] %d configured slab row(s) contained no usable "
+            "income-tax bracket (MARGINAL_RATE/FORMULA/TABLE_LOOKUP/FIXED_PLUS_MARGINAL) — "
+            "income tax will compute as 0 for every income.",
+            len(slabs),
+        )
 
     tax = Decimal("0")
     for slab in sorted(bracket_slabs, key=lambda s: s.min_amount):

@@ -14,7 +14,7 @@ const WITHHOLDING_TERM_BY_COUNTRY = {
   CA: "Federal Income Tax Withholding",
 };
 
-function withholdingTerm(country) {
+export function withholdingTerm(country) {
   return WITHHOLDING_TERM_BY_COUNTRY[country] || "income tax";
 }
 
@@ -55,7 +55,7 @@ export default function TaxSlabTable({ documents = [], country, onStatusChange }
     <div className="space-y-6">
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <h3 className="text-[15px] font-bold text-foreground">Active Income Tax Slabs</h3>
+          <h3 className="text-[15px] font-bold text-foreground">Active {withholdingTerm(country)} Slabs</h3>
           {loadState === "ready" && (
             <span className="flex items-center gap-1 text-[11px] font-bold text-primary">
               <CheckCircle2 size={12} /> Live from payroll engine
@@ -113,7 +113,10 @@ export default function TaxSlabTable({ documents = [], country, onStatusChange }
   );
 }
 
-function SlabsTable({ rows, caption }) {
+// Exported for the same reason as ContributionRatesTable's RatesTable —
+// TaxConfigurationTab.jsx re-presents already-fetched rows under
+// jurisdiction-specific labels without a second fetch or API change.
+export function SlabsTable({ rows, caption }) {
   return (
     <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
       <div className="px-6 py-3 border-b border-border">
