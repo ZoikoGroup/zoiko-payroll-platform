@@ -68,7 +68,7 @@ if resolved_database_url.startswith("sqlite"):
 else:
     engine = create_engine(
         resolved_database_url,
-        connect_args={"sslmode": "require"},
+        connect_args={"sslmode": settings.PAYROLL_DB_SSL_MODE},
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,

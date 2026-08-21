@@ -6,7 +6,7 @@ import {
   Sparkles,
   ShieldCheck,
   RotateCcw,
-  MoreVertical,
+  Info,
   ThumbsUp,
   ThumbsDown,
   Loader2,
@@ -30,6 +30,7 @@ import {
   submitAssistFeedback,
   submitAssistMessage,
   createAssistSession,
+  updateAssistSession,
   archiveAssistSession,
   listAssistSessions,
   listAssistMessages,
@@ -80,6 +81,47 @@ function NoticeGate({ notice, onAcknowledge, busy }) {
         {busy ? <Loader2 size={15} className="animate-spin" /> : null}
         {t("assist.notice.acknowledge")}
       </button>
+    </div>
+  );
+}
+
+function AboutAssistSection({ title, body }) {
+  return (
+    <div>
+      <p className="text-[12px] font-bold text-foreground">{title}</p>
+      <p className="mt-1 text-[12px] leading-relaxed text-foreground-muted">{body}</p>
+    </div>
+  );
+}
+
+function AboutAssistPanel({ onClose }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("assist.about.title")}
+      className="absolute inset-0 z-20 flex flex-col bg-white"
+    >
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <p className="text-[13px] font-bold text-primary">{t("assist.about.title")}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("assist.close")}
+          title={t("assist.close")}
+          className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <AboutAssistSection title={t("assist.about.can.title")} body={t("assist.about.can.body")} />
+        <AboutAssistSection title={t("assist.about.cannot.title")} body={t("assist.about.cannot.body")} />
+        <AboutAssistSection title={t("assist.about.how.title")} body={t("assist.about.how.body")} />
+        <AboutAssistSection title={t("assist.about.data.title")} body={t("assist.about.data.body")} />
+        <AboutAssistSection title={t("assist.about.feedback.title")} body={t("assist.about.feedback.body")} />
+        <AboutAssistSection title={t("assist.about.support.title")} body={t("assist.about.support.body")} />
+      </div>
     </div>
   );
 }
@@ -793,6 +835,8 @@ function LocalePicker() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={t("assist.locale")}
+        aria-label={t("assist.locale")}
+        aria-expanded={open}
         className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
       >
         <Languages size={15} />
@@ -835,7 +879,7 @@ export default function AssistLauncher() {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("chat");
   const [showHandoff, setShowHandoff] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [pendingResponseId, setPendingResponseId] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
@@ -900,9 +944,20 @@ export default function AssistLauncher() {
     if (!trimmed || !sessionId || sending) return;
     setInput("");
     setError("");
+    const isFirstMessage = messages.length === 0;
     const userMsg = { id: `u-${Date.now()}`, role: "user", content: trimmed };
     setMessages((prev) => [...prev, userMsg]);
     setSending(true);
+
+    // History lists every session as "Payroll Assist" otherwise — every row
+    // looked identical with no way to tell sessions apart. Rename once, from
+    // the opening message, the same pattern chat apps title conversations by.
+    // Fire-and-forget: renaming is cosmetic, never worth blocking or failing
+    // the actual send over.
+    if (isFirstMessage) {
+      const derivedTitle = trimmed.replace(/\s+/g, " ").slice(0, 60) + (trimmed.length > 60 ? "…" : "");
+      updateAssistSession(sessionId, { title: derivedTitle }).catch(() => {});
+    }
 
     const pendingId = `a-${Date.now()}`;
     const patch = (updater) => setMessages((prev) => prev.map((m) => (m.id === pendingId ? updater(m) : m)));
@@ -1108,7 +1163,13 @@ export default function AssistLauncher() {
       </div>
 
       {open ? (
-        <div className="fixed bottom-24 right-6 z-[9997] flex h-[560px] max-h-[calc(100dvh-8rem)] w-[min(550px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[22px] border border-border bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("assist.title")}
+          className="fixed inset-0 z-[9997] flex flex-col overflow-hidden bg-white sm:inset-auto sm:bottom-24 sm:right-6 sm:h-[560px] sm:max-h-[calc(100dvh-8rem)] sm:w-[min(550px,calc(100vw-2rem))] sm:max-w-[calc(100vw-2rem)] sm:rounded-[22px] sm:border sm:border-border sm:shadow-[0_24px_64px_rgba(0,0,0,0.18)] lg:w-[380px]"
+        >
+          {showAbout ? <AboutAssistPanel onClose={() => setShowAbout(false)} /> : null}
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border bg-white px-4 py-3">
             <div className="flex items-center gap-2.5">
@@ -1122,6 +1183,8 @@ export default function AssistLauncher() {
                 type="button"
                 onClick={() => setShowHandoff((v) => !v)}
                 title={t("assist.handoff.title")}
+                aria-label={t("assist.handoff.title")}
+                aria-pressed={showHandoff}
                 className={`rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary ${showHandoff ? "bg-background text-primary" : ""}`}
               >
                 <LifeBuoy size={15} />
@@ -1130,57 +1193,25 @@ export default function AssistLauncher() {
                 type="button"
                 onClick={handleNewSession}
                 title={t("assist.newSession")}
+                aria-label={t("assist.newSession")}
                 className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
               >
                 <RotateCcw size={15} />
               </button>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowMoreMenu((v) => !v)}
-                  title={t("assist.more")}
-                  className={`rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary ${showMoreMenu ? "bg-background text-primary" : ""}`}
-                >
-                  <MoreVertical size={15} />
-                </button>
-                {showMoreMenu ? (
-                  <div className="absolute right-0 top-9 z-10 w-40 overflow-hidden rounded-[12px] border border-border bg-white py-1 shadow-lg">
-                    {tabs.map((tabDef) => {
-                      const Icon = tabDef.icon;
-                      return (
-                        <button
-                          key={tabDef.id}
-                          type="button"
-                          onClick={() => {
-                            setTab(tabDef.id);
-                            setShowMoreMenu(false);
-                          }}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium transition hover:bg-background ${
-                            tab === tabDef.id ? "text-primary" : "text-foreground-muted"
-                          }`}
-                        >
-                          <Icon size={13} /> {tabDef.label}
-                        </button>
-                      );
-                    })}
-                    <div className="my-1 border-t border-border-light" />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowMoreMenu(false);
-                        handleNewSession();
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium text-foreground-muted transition hover:bg-background"
-                    >
-                      <RotateCcw size={13} /> {t("assist.newSession")}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowAbout(true)}
+                title={t("assist.about")}
+                aria-label={t("assist.about")}
+                className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
+              >
+                <Info size={15} />
+              </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 title={t("assist.close")}
+                aria-label={t("assist.close")}
                 className="rounded-[10px] p-1.5 text-foreground-muted transition hover:bg-background hover:text-primary"
               >
                 <X size={16} />
@@ -1268,6 +1299,16 @@ export default function AssistLauncher() {
                       </div>
                     </div>
                   ) : null}
+                  {/* Screen-reader-only status announcer — separate from the
+                      visible streaming text so assistive tech gets one concise
+                      state change, not a re-read on every appended character. */}
+                  <div aria-live="polite" aria-atomic="true" className="sr-only">
+                    {sending
+                      ? t("assist.thinking")
+                      : messages[messages.length - 1]?.loading
+                        ? t("assist.sse.live")
+                        : ""}
+                  </div>
                 </div>
 
                 <div className="border-t border-border-light p-3">

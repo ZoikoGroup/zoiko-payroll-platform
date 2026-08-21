@@ -123,25 +123,30 @@ def is_jurisdiction_supported(db: Session, org_id: int, country_name: str) -> bo
 
     Local import avoids a hard module-level dependency between the Assist
     package and the payroll package for an org-scoped check used only here
-    (mirrors the lazy-import style already used for KB seeding). Was
-    previously a Country/Jurisdiction/OrganizationJurisdictionAssignment
-    join against the now-deleted payroll.hierarchy module — that module
-    never had any organization cut over to it, so this now reads the same
-    CompanyComplianceDetails.jurisdiction_country every real org's
-    Compliance page actually sets.
+    (mirrors the lazy-import style already used for KB seeding). Reuses
+    app.core.jurisdiction's canonical name<->code resolver rather than a
+    second, separately-maintained country map — CompanyComplianceDetails
+    stores a 2-letter code ("IN"/"US"/...), while a message names a full
+    country ("India"), so a bare string comparison would never match.
+
+    The org<->jurisdiction hierarchy tables (Country/Jurisdiction/
+    OrganizationJurisdictionAssignment) this originally checked were removed
+    by a later refactor in favor of this single jurisdiction_country field —
+    see payroll/models.py's CompanyComplianceDetails.
     """
     from app.core.jurisdiction import get_jurisdiction_code
     from app.modules.payroll.models import CompanyComplianceDetails
 
-    code = get_jurisdiction_code(country_name)
-    if not code:
-        return False
-    details = (
-        db.query(CompanyComplianceDetails.jurisdiction_country)
+    compliance = (
+        db.query(CompanyComplianceDetails)
         .filter(CompanyComplianceDetails.organization_id == org_id)
         .first()
     )
-    return bool(details and details[0] == code)
+    if not compliance or not compliance.jurisdiction_country:
+        return False
+    mentioned_code = get_jurisdiction_code(country_name)
+    org_code = get_jurisdiction_code(compliance.jurisdiction_country)
+    return bool(mentioned_code) and mentioned_code == org_code
 
 
 def _is_retrieval_eligible(item: AssistKbItem, today: date) -> bool:
