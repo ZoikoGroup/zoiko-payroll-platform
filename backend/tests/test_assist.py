@@ -476,6 +476,40 @@ def test_handoff_preview_lifecycle(client, headers):
     assert client.get(f"/api/assist/handoffs/{h.json()['handoff_id']}", headers=headers).status_code == 200
 
 
+def test_handoff_blocked_within_24h_cooldown(client, headers):
+    # client/headers are module-scoped and shared with every other test in
+    # this file (including test_handoff_preview_lifecycle just above) — clear
+    # any handoff this same user already has on record so this test's "first
+    # request succeeds" step isn't accidentally blocked by a prior test's.
+    from app.modules.assist.models import AssistHandoff, AssistHandoffPreview
+
+    _db.query(AssistHandoff).delete()
+    _db.query(AssistHandoffPreview).delete()
+    _db.commit()
+
+    # First request goes through and sends the one allowed email.
+    p1 = client.post(
+        "/api/assist/handoff-previews",
+        headers=headers,
+        json={"destination": "PAYROLL_SUPPORT", "reason_code": "USER_REQUESTED", "summary": "First request."},
+    )
+    assert p1.status_code == 200, p1.text
+    h1 = client.post(f"/api/assist/handoff-previews/{p1.json()['preview_id']}/confirm", headers=headers)
+    assert h1.status_code == 200, h1.text
+    case_id = h1.json()["case_id"]
+
+    # A second request from the same user, still within the 24h window,
+    # must be blocked before it ever creates a new case or preview — not
+    # silently allowed to send another email.
+    p2 = client.post(
+        "/api/assist/handoff-previews",
+        headers=headers,
+        json={"destination": "PAYROLL_SUPPORT", "reason_code": "USER_REQUESTED", "summary": "Second request, same day."},
+    )
+    assert p2.status_code == 400, p2.text
+    assert case_id in p2.json()["message"]
+
+
 def test_drafts_crud(client, headers):
     d = client.post("/api/assist/drafts", headers=headers, json={"draft_type": "note", "content": "v1"})
     did = d.json()["id"]

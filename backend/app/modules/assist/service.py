@@ -1086,7 +1086,47 @@ def delete_draft(db, org_id, user, draft_id) -> None:
 
 # ── Handoffs ────────────────────────────────────────────────────────────
 
+# One support notification per user per org per rolling 24h window — the
+# repeat-escalation path had no dedup at all: every confirmed handoff
+# unconditionally created a new case and sent both emails regardless of how
+# recently the same user had already escalated, so an accidental double-
+# request (or a genuine but still-unresolved repeat) generated a fresh case
+# and a fresh email storm every time. Enterprise support tooling (Zendesk,
+# Freshdesk, ServiceNow) treats "same requester, still within the window" as
+# a duplicate to surface against the existing case, not a new one.
+HANDOFF_COOLDOWN_HOURS = 24
+
+
+def _recent_handoff(db, org_id, user_id) -> AssistHandoff | None:
+    """Most recent handoff this user raised in this org, if within the
+    cooldown window — None once 24h have passed, so a genuinely new request
+    goes through normally."""
+    cutoff = _utcnow() - timedelta(hours=HANDOFF_COOLDOWN_HOURS)
+    return (
+        db.query(AssistHandoff)
+        .filter(
+            AssistHandoff.organization_id == org_id,
+            AssistHandoff.user_id == user_id,
+            AssistHandoff.created_at > cutoff,
+        )
+        .order_by(AssistHandoff.created_at.desc())
+        .first()
+    )
+
+
+def _handoff_cooldown_message(handoff: AssistHandoff) -> str:
+    available_at = _as_aware(handoff.created_at) + timedelta(hours=HANDOFF_COOLDOWN_HOURS)
+    return (
+        f"A support request was already sent to the support team for case {handoff.case_id}. "
+        f"Only one support email is sent every {HANDOFF_COOLDOWN_HOURS} hours — "
+        f"you can send another after {available_at.strftime('%Y-%m-%d %H:%M UTC')}."
+    )
+
+
 def create_handoff_preview(db, org_id, user, payload: dict) -> AssistHandoffPreview:
+    existing = _recent_handoff(db, org_id, user.id)
+    if existing is not None:
+        raise BadRequestException(_handoff_cooldown_message(existing))
     preview = AssistHandoffPreview(
         organization_id=org_id,
         user_id=user.id,
@@ -1118,6 +1158,14 @@ def confirm_handoff(db, org_id, user, preview_id) -> AssistHandoff:
     preview = get_handoff_preview(db, org_id, user, preview_id)
     if preview.state != "PREVIEWED":
         raise BadRequestException(f"Handoff preview is in state {preview.state}.")
+    # Authoritative re-check, not just belt-and-suspenders: create_handoff_preview
+    # already blocks new previews during the cooldown, but a preview created
+    # just before another request's confirm landed could otherwise slip
+    # through — this is the actual point emails get sent, so it's the check
+    # that must never be skippable.
+    existing = _recent_handoff(db, org_id, user.id)
+    if existing is not None:
+        raise BadRequestException(_handoff_cooldown_message(existing))
     if preview.expires_at and _as_aware(preview.expires_at) < _utcnow():
         preview.state = "EXPIRED"
         db.commit()
