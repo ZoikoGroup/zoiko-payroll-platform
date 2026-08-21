@@ -22,6 +22,11 @@ class Settings(BaseSettings):
 
     # ── Database (own, separate from the main platform) ────────────────
     PAYROLL_DATABASE_URL: str = ""
+    # Neon (production/dev default) always requires SSL. A local/docker-
+    # compose Postgres container has no SSL configured at all, so this must
+    # be overridable rather than hardcoded — see docker-compose.yml's
+    # backend service, which sets this to "disable".
+    PAYROLL_DB_SSL_MODE: str = "require"
 
     # ── JWT / Auth (own secret — never reuse the main platform's) ──────
     PAYROLL_SECRET_KEY: str = "change-me-payroll-platform-secret"

@@ -119,25 +119,34 @@ def find_mentioned_country(text: str) -> str | None:
 
 
 def is_jurisdiction_supported(db: Session, org_id: int, country_name: str) -> bool:
-    """Whether `country_name` is one of the org's assigned tax jurisdictions.
+    """Whether `country_name` is the org's configured compliance jurisdiction.
 
     Local import avoids a hard module-level dependency between the Assist
-    package and the tax-hierarchy package for an org-scoped check used only
-    here (mirrors the lazy-import style already used for KB seeding).
-    """
-    from app.modules.payroll.hierarchy.models import Country, Jurisdiction, OrganizationJurisdictionAssignment
+    package and the payroll package for an org-scoped check used only here
+    (mirrors the lazy-import style already used for KB seeding). Reuses
+    app.core.jurisdiction's canonical name<->code resolver rather than a
+    second, separately-maintained country map — CompanyComplianceDetails
+    stores a 2-letter code ("IN"/"US"/...), while a message names a full
+    country ("India"), so a bare string comparison would never match.
 
-    match = (
-        db.query(Country.id)
-        .join(Jurisdiction, Jurisdiction.country_id == Country.id)
-        .join(OrganizationJurisdictionAssignment, OrganizationJurisdictionAssignment.jurisdiction_id == Jurisdiction.id)
-        .filter(
-            OrganizationJurisdictionAssignment.organization_id == org_id,
-            Country.name.ilike(country_name),
-        )
+    The org<->jurisdiction hierarchy tables (Country/Jurisdiction/
+    OrganizationJurisdictionAssignment) this originally checked were removed
+    by a later refactor in favor of this single jurisdiction_country field —
+    see payroll/models.py's CompanyComplianceDetails.
+    """
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll.models import CompanyComplianceDetails
+
+    compliance = (
+        db.query(CompanyComplianceDetails)
+        .filter(CompanyComplianceDetails.organization_id == org_id)
         .first()
     )
-    return match is not None
+    if not compliance or not compliance.jurisdiction_country:
+        return False
+    mentioned_code = get_jurisdiction_code(country_name)
+    org_code = get_jurisdiction_code(compliance.jurisdiction_country)
+    return bool(mentioned_code) and mentioned_code == org_code
 
 
 def _is_retrieval_eligible(item: AssistKbItem, today: date) -> bool:

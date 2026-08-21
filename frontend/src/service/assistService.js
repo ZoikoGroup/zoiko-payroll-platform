@@ -50,6 +50,14 @@ export const getAssistSession = async (sessionId) => {
   return api.get(`/api/assist/sessions/${sessionId}`);
 };
 
+export const updateAssistSession = async (sessionId, { title, context, caseLink } = {}) => {
+  const payload = {};
+  if (title !== undefined) payload.title = title;
+  if (context !== undefined) payload.context = context;
+  if (caseLink !== undefined) payload.case_link = caseLink;
+  return api.patch(`/api/assist/sessions/${sessionId}`, payload);
+};
+
 export const archiveAssistSession = async (sessionId) => {
   return api.post(`/api/assist/sessions/${sessionId}/archive`);
 };
