@@ -165,11 +165,15 @@ def admin_reset_password(
     if user is None:
         raise NotFoundException("User", "id")
 
-    raw_token, _ = auth_service._issue_action_token(
+    raw_token, expires_at = auth_service._issue_action_token(
         db, user.email, user.organization_id, SecurityActionPurpose.RESET
     )
     link = auth_service._action_link(SecurityActionPurpose.RESET, raw_token)
-    auth_service._send_reset_email(db, user, link)
+    auth_service._send_reset_email(
+        db, user, link,
+        expires_at_local=auth_service._format_expiry_local(expires_at),
+        reference_id=auth_service._reference_id(raw_token),
+    )
     db.commit()
     logger.info("Super Admin %s reset password for %s", current_user.email, user.email)
     return {"message": "Password reset link sent to the user."}

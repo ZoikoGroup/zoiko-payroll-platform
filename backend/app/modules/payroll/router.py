@@ -55,6 +55,7 @@ from sqlalchemy.orm import Session
 import io
 
 from app.database import get_db
+from app.core import object_storage
 from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
     require_active_subscription,
@@ -862,14 +863,16 @@ async def upload_compliance_document(
     country: Optional[str] = Form(None, max_length=10),
 ):
     resolved_title = title or document_type or file.filename or "Untitled Document"
-    upload_dir = service._COMPLIANCE_DOC_UPLOAD_DIR
-    os.makedirs(upload_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1]
-    unique_name = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(upload_dir, unique_name)
     contents = await file.read()
-    with open(file_path, "wb") as fh:
-        fh.write(contents)
+    ext = os.path.splitext(file.filename or "")[1] or ".bin"
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    # Persisted via the object-storage abstraction: Cloud Storage in prod
+    # (gs:// ref stored on the row), local disk under UPLOAD_BASE_DIR in dev.
+    file_path = object_storage.save_upload(
+        subdir="payroll_compliance_documents",
+        filename=unique_name,
+        data=contents,
+    )
 
     doc = service.upload_compliance_document(
         db=db,

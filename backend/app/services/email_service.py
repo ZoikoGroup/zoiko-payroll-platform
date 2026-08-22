@@ -27,6 +27,22 @@ logger = logging.getLogger("zoiko_payroll")
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "email_templates")
 
+# Fixed anti-phishing notice — single source of truth (§10 copy standard).
+# Templates embed it via the {{security_advisory_block}} placeholder so the
+# wording is never duplicated (or allowed to drift) across template files.
+SECURITY_ADVISORY_TEXT = (
+    "Zoiko Payroll will never ask you to send your password, multifactor "
+    "authentication code, bank details, tax identifiers or payroll files by email."
+)
+_SECURITY_ADVISORY_HTML = (
+    '<table width="100%" cellpadding="0" cellspacing="0" border="0" '
+    'style="background:rgba(49,46,129,0.2); border:1px solid #312e81; border-radius:8px;"><tr>'
+    '<td style="padding:14px 16px;">'
+    '<p style="color:#e2e8f0; font-size:12px; font-weight:bold; margin:0 0 4px 0;">Security Advisory</p>'
+    f'<p style="color:#94a3b8; font-size:12px; line-height:1.6; margin:0;">{SECURITY_ADVISORY_TEXT}</p>'
+    "</td></tr></table>"
+)
+
 _IF_BLOCK_RE = re.compile(r"\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}", re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -178,6 +194,16 @@ def send_approval_email(
 
     branding = _get_org_branding(organization_id, db=db)
     full_context = {**branding, **context}
+    # Logo fallback: absolute URL to the SPA-hosted brand asset (public/ dir),
+    # used by any template referencing {{logo_url}} / {{frontend_url}} when the
+    # org has no configured logo.
+    if not full_context.get("logo_url") or not str(full_context.get("logo_url", "")).startswith("http"):
+        from app.config import settings as _cfg
+
+        frontend_base = os.environ.get("FRONTEND_BASE_URL", "").rstrip("/") or _cfg.FRONTEND_URL.rstrip("/")
+        full_context["logo_url"] = f"{frontend_base}/zoikopayroll-logo-light.png"
+        full_context["frontend_url"] = frontend_base
+    full_context.setdefault("security_advisory_block", _SECURITY_ADVISORY_HTML)
     body = _render_template(template, full_context)
     smtp = _get_smtp_settings(db=db)
 
@@ -204,6 +230,11 @@ def send_approval_email(
             part = MIMEApplication(data, _subtype="pdf")
             part.add_header("Content-Disposition", "attachment", filename=filename)
             msg.attach(part)
+
+    if not smtp["host"]:
+        logger.info(f"[email] SMTP_HOST not configured. Mock sending email to {email} | subject='{subject}' | template={template_name}")
+        logger.debug(f"[email] Body content:\n{_html_to_text(body)}")
+        return True
 
     try:
         port = int(smtp["port"])
@@ -392,18 +423,27 @@ def send_user_invite_email(
     email: str,
     first_name: str,
     invite_link: str,
-    invited_by: str = "",
+    inviter_name: str = "",
+    role_name: str = "Payroll Administrator",
+    organization_name: str = "",
+    expires_at_local: str = "",
+    reference_id: str = "",
     organization_id=None,
     db=None,
 ) -> bool:
-    workspace = _get_org_branding(organization_id, db=db).get("company_name", "your organization")
+    """IAM-002 (Class P1): user invitation. organization_name/role_name/
+    expires_at_local/reference_id are rendered explicitly — never relative
+    expiry strings (§10)."""
+    workspace = organization_name or _get_org_branding(organization_id, db=db).get("company_name", "your organization")
     return send_approval_email(email, "org_admin_invite.html", {
-        "subject": "You have been invited to {{workspace_name}}",
+        "subject": "You have been invited to Zoiko Payroll",
+        "preheader": f"Accept the invitation to access {workspace}.",
         "first_name": first_name,
-        "inviter_name": invited_by or "your administrator",
-        "workspace_name": workspace,
-        "expires_at_local": "24 hours",
-        "timezone": "UTC",
+        "inviter_name": inviter_name or "your administrator",
+        "organization_name": workspace,
+        "role_name": role_name,
+        "expires_at_local": expires_at_local,
+        "reference_id": reference_id,
         "action_url": invite_link,
         "support_email": "",
     }, db=db, organization_id=organization_id, from_display_name_override=SECURITY_SENDER)
@@ -413,14 +453,19 @@ def send_org_admin_password_reset_email(
     email: str,
     first_name: str,
     reset_link: str,
+    expires_at_local: str = "",
+    reference_id: str = "",
     organization_id=None,
     db=None,
 ) -> bool:
+    """IAM-007 (Class P1): password reset requested. `expires_at_local` must be
+    an absolute date/time with named time zone, preformatted by the caller."""
     return send_approval_email(email, "org_admin_password_reset.html", {
         "subject": "Reset your Zoiko Payroll password",
+        "preheader": "Use the secure link only if you requested a reset.",
         "first_name": first_name,
-        "expires_at_local": "24 hours",
-        "timezone": "UTC",
+        "expires_at_local": expires_at_local,
+        "reference_id": reference_id,
         "action_url": reset_link,
         "support_email": "",
     }, db=db, organization_id=organization_id, from_display_name_override=SECURITY_SENDER)
@@ -431,6 +476,126 @@ def send_registration_received(email: str, org_name: str, db=None):
         "subject": f"Registration Received — {org_name} | Zoiko Payroll",
         "organization_name": org_name,
     }, db=db)
+
+
+def send_organization_created_email(
+    email: str,
+    recipient_first_name: str,
+    organization_name: str,
+    reference_id: str = "",
+    product_route: str = "standalone_payroll",
+    setup_link: str = "",
+    organization_id=None,
+    db=None,
+) -> bool:
+    """COM-001 (Class P1): Organization account created notification.
+    Sent only to the primary administrator upon organization creation."""
+    from app.config import settings
+    if not reference_id:
+        import uuid
+        reference_id = f"ORG-{uuid.uuid4().hex[:4].upper()}-INIT"
+    if not setup_link:
+        frontend_base = os.environ.get("ACTION_BASE_URL", "").rstrip("/") or settings.FRONTEND_URL.rstrip("/")
+        setup_link = f"{frontend_base}/login"
+
+    return send_approval_email(
+        email,
+        "org_created.html",
+        {
+            "subject": "Your Zoiko Payroll organization has been created",
+            "preheader": "Complete administrative and security setup.",
+            "recipient_first_name": recipient_first_name or "Admin",
+            "organization_name": organization_name,
+            "product_route": product_route,
+            "reference_id": reference_id,
+            "action_url": setup_link,
+        },
+        db=db,
+        organization_id=organization_id,
+        from_display_name_override=SECURITY_SENDER,
+    )
+
+
+def send_super_admin_org_created_notification_email(
+    org: object,
+    admin_user: object = None,
+    reference_id: str = "",
+    db=None,
+) -> bool:
+    """ADM-001: Operational alert sent to Super Admins whenever a new organization
+    is created in the platform, containing complete organization and admin metadata."""
+    from app.config import settings
+    from datetime import datetime
+
+    # 1. Resolve Super Admin recipients from DB
+    recipients = []
+    if db is not None:
+        try:
+            from app.modules.auth.models import User, UserRole
+            super_admins = db.query(User).filter(
+                User.role == UserRole.SUPER_ADMIN,
+                User.is_active == True,
+            ).all()
+            recipients = [u.email for u in super_admins if u.email]
+        except Exception as exc:
+            logger.warning(f"[email] Failed querying Super Admins for notification: {exc}")
+
+    # Fallback to configured support email or SMTP from email if no Super Admins found
+    if not recipients:
+        fallback = settings.ASSIST_SUPPORT_EMAIL or settings.SMTP_FROM_EMAIL
+        if fallback:
+            recipients = [fallback]
+
+    if not recipients:
+        logger.warning("[email] No Super Admin recipients or fallback email configured; skipping org creation notification")
+        return False
+
+    if not reference_id:
+        reference_id = f"ADM-ORG-{getattr(org, 'id', 0):04d}"
+
+    frontend_base = os.environ.get("ACTION_BASE_URL", "").rstrip("/") or settings.FRONTEND_URL.rstrip("/")
+    action_url = f"{frontend_base}/super-admin/organizations"
+
+    # Format location summary
+    location_parts = [p for p in [getattr(org, "city", None), getattr(org, "state", None), getattr(org, "country", None)] if p]
+    location_summary = ", ".join(location_parts) if location_parts else ""
+
+    created_at = getattr(org, "created_at", None)
+    created_at_display = created_at.strftime("%d %b %Y, %H:%M UTC") if created_at else datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
+
+    context = {
+        "subject": f"[Platform Alert] New Organization Created — {getattr(org, 'organization_name', 'Org')}",
+        "preheader": f"New organization {getattr(org, 'organization_name', '')} ({getattr(org, 'organization_code', '')}) created.",
+        "organization_name": getattr(org, "organization_name", ""),
+        "organization_code": getattr(org, "organization_code", ""),
+        "admin_name": f"{getattr(admin_user, 'first_name', '')} {getattr(admin_user, 'last_name', '')}".strip() if admin_user else "",
+        "admin_email": getattr(admin_user, "email", None) or getattr(org, "email", ""),
+        "admin_phone": getattr(admin_user, "phone", None) or getattr(org, "phone", ""),
+        "country": getattr(org, "country", ""),
+        "industry": getattr(org, "industry", ""),
+        "company_type": getattr(org, "company_type", ""),
+        "tax_no": getattr(org, "tax_no", "") or getattr(org, "registration_number", ""),
+        "location_summary": location_summary,
+        "created_at_display": created_at_display,
+        "reference_id": reference_id,
+        "action_url": action_url,
+    }
+
+    success = True
+    for recipient_email in recipients:
+        ok = send_approval_email(
+            recipient_email,
+            "super_admin_org_created.html",
+            context,
+            db=db,
+            organization_id=getattr(org, "id", None),
+            from_display_name_override="Zoiko Platform Alert",
+        )
+        if not ok:
+            success = False
+    return success
+
+
 
 
 # ── Assist handoff (support escalation) emails ──────────────────────────────
