@@ -771,6 +771,11 @@ class JurisdictionPackUpsert(BaseModel):
     defaultTaxRegime: Optional[str] = None
     approvedById: Optional[int] = None
     currency: Optional[str] = None
+    # Free-text "why" for this specific edit — persisted onto the audit
+    # row (TaxConfigurationAudit.reason already exists and is already
+    # read by the Compliance UI's Audit tab; no form ever offered it
+    # until now).
+    reason: Optional[str] = None
 
 
 # ── Canonical Tax Rates (Super Admin-owned; organization_id IS NULL) ─────
@@ -794,7 +799,16 @@ class CanonicalTaxSlabUpsert(BaseModel):
     # optional override for whichever month absorbs annual-cap rounding.
     flatAmount: Optional[Decimal] = None
     adjustmentAmount: Optional[Decimal] = None
+    # NI_BAND only (UK National Insurance category bands): which HMRC
+    # category letter this band belongs to, and the employer-side rate
+    # for the band — ratePct above is always the EMPLOYEE rate. Both
+    # already exist as TaxSlab columns; this is the first schema/UI path
+    # that can actually set them (previously only reachable by a direct
+    # DB write / test fixture).
+    niCategory: Optional[str] = None
+    employerRatePct: Optional[Decimal] = None
     sortOrder: int = 0
+    reason: Optional[str] = None
 
 
 class CanonicalContributionRateUpsert(BaseModel):
@@ -811,6 +825,7 @@ class CanonicalContributionRateUpsert(BaseModel):
     flatAmount: Optional[Decimal] = None
     textValue: Optional[str] = None
     sortOrder: int = 0
+    reason: Optional[str] = None
 
 
 class CanonicalTaxSlabResponse(BaseModel):
@@ -829,6 +844,8 @@ class CanonicalTaxSlabResponse(BaseModel):
     formulaExpression: Optional[str] = Field(None, validation_alias="formula_expression", serialization_alias="formulaExpression")
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     adjustmentAmount: Optional[Decimal] = Field(None, validation_alias="adjustment_amount", serialization_alias="adjustmentAmount")
+    niCategory: Optional[str] = Field(None, validation_alias="ni_category", serialization_alias="niCategory")
+    employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

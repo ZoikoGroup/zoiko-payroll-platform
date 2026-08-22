@@ -25,6 +25,12 @@ export const getCompliancePolicyVersions = (packId) =>
 export const setCompliancePolicyStatus = (id, status) =>
   apiFetch(`/api/super-admin/compliance/policies/${id}/status`, { method: "PUT", body: { status } });
 
+// Maker-checker: records the CALLING Super Admin as this pack's approver.
+// Must be a different person than whoever last edited it before the
+// pack can go Active — enforced server-side, see set_jurisdiction_pack_status.
+export const approveCompliancePolicy = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/approve`, { method: "PUT" });
+
 export const getCompliancePolicyOrganizations = (id) =>
   apiFetch(`/api/super-admin/compliance/policies/${id}/organizations`);
 

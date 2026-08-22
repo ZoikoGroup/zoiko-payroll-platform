@@ -6,7 +6,7 @@ import StatusPill from "../StatusPill";
 import { useToast } from "../../context/ToastContext";
 import {
   getComplianceJurisdictions, getCompliancePolicies, upsertCompliancePolicy,
-  getCompliancePolicyVersions, setCompliancePolicyStatus,
+  getCompliancePolicyVersions, setCompliancePolicyStatus, approveCompliancePolicy,
   getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations, assignCompliancePolicy,
   hardDeleteCompliancePolicy,
   getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab,
@@ -137,6 +137,17 @@ export default function JurisdictionLayout({
       loadPacks();
     } catch (err) {
       addToast?.(err.message || "Failed to change status.", "error");
+    }
+  }
+
+  async function handleApprove() {
+    try {
+      const updated = await approveCompliancePolicy(selectedPack.id);
+      addToast?.("You're now recorded as this pack's approver.", "success");
+      setSelectedPack(updated);
+      loadPacks();
+    } catch (err) {
+      addToast?.(err.message || "Failed to record approval.", "error");
     }
   }
 
@@ -280,12 +291,27 @@ export default function JurisdictionLayout({
                 </div>
                 <div className="flex items-center gap-2">
                   {selectedPack.packType === "tax" && (
-                    <button
-                      onClick={() => setShowEditOverview(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setShowEditOverview(true)}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                      {/* Maker-checker (ZP-TAX-UK-2026-27-001 section 19.2): a
+                          distinct Super Admin from whoever last edited the pack
+                          must approve it before it can go Active — enforced
+                          server-side in set_jurisdiction_pack_status; this
+                          button just records "I approve this," it doesn't
+                          change status itself. */}
+                      <button
+                        onClick={handleApprove}
+                        title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <ShieldCheck size={13} /> Approve
+                      </button>
+                    </>
                   )}
                   {selectedPack.packType === "policy" && (
                     <>
@@ -368,6 +394,9 @@ export default function JurisdictionLayout({
                       onAddRate: () => setShowNewRate(true),
                       onEditRate: setEditingRate,
                       onDeleteRate: setDeletingRate,
+                      onAddSlab: () => setShowNewSlab(true),
+                      onEditSlab: setEditingSlab,
+                      onDeleteSlab: setDeletingSlab,
                     })}
                   </div>
                 )
@@ -397,15 +426,36 @@ export default function JurisdictionLayout({
                 <div className="space-y-2">
                   {audit.length === 0 ? (
                     <p className="py-6 text-center text-xs text-foreground-disabled">No audit history yet.</p>
-                  ) : audit.map((a) => (
-                    <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-foreground">{a.action} — {a.entityType}</span>
-                        <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
+                  ) : audit.map((a) => {
+                    // oldValue/newValue were always in the API response —
+                    // just never rendered. Only show keys that actually
+                    // changed, so a no-op field isn't noise in the diff.
+                    const changedKeys = Object.keys({ ...(a.oldValue || {}), ...(a.newValue || {}) })
+                      .filter((k) => JSON.stringify(a.oldValue?.[k]) !== JSON.stringify(a.newValue?.[k]));
+                    return (
+                      <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-foreground">
+                            {a.action} — {a.entityType} {a.actorId ? <span className="text-foreground-disabled">· by user #{a.actorId}</span> : null}
+                          </span>
+                          <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
+                        </div>
+                        {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
+                        {changedKeys.length > 0 && (
+                          <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
+                            {changedKeys.map((k) => (
+                              <div key={k} className="flex items-center gap-1.5 font-mono text-[11px]">
+                                <span className="text-foreground-disabled">{k}:</span>
+                                <span className="text-error line-through">{a.oldValue?.[k] ?? "—"}</span>
+                                <span className="text-foreground-disabled">→</span>
+                                <span className="text-success">{a.newValue?.[k] ?? "—"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

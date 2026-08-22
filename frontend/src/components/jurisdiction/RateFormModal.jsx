@@ -10,7 +10,7 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
     componentKey: rate?.componentKey || "", label: rate?.label || "",
     jurisdictionState: rate?.jurisdictionState || pack.jurisdictionState || "",
     employeeSharePct: rate?.employeeRatePct ?? "", employerSharePct: rate?.employerRatePct ?? "",
-    flatAmount: rate?.flatAmount ?? "", sortOrder: rate?.sortOrder ?? 0,
+    flatAmount: rate?.flatAmount ?? "", sortOrder: rate?.sortOrder ?? 0, reason: "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -29,7 +29,7 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
         employeeSharePct: form.employeeSharePct === "" ? null : form.employeeSharePct,
         employerSharePct: form.employerSharePct === "" ? null : form.employerSharePct,
         flatAmount: form.flatAmount === "" ? null : form.flatAmount,
-        sortOrder: Number(form.sortOrder) || 0,
+        sortOrder: Number(form.sortOrder) || 0, reason: form.reason || null,
       });
       addToast?.("Rate saved.", "success");
       onSaved();
@@ -50,6 +50,7 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
         <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerSharePct} onChange={set("employerSharePct")} placeholder="12.00" /></div>
         <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={form.flatAmount} onChange={set("flatAmount")} placeholder="e.g. 200 for a flat fee" /></div>
         <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
+        <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>

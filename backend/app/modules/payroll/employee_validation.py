@@ -181,8 +181,14 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
         },
         "paye_tax_code": {
             "required": True, "upper": True,
-            "pattern": re.compile(r"^(K\d{1,6}|\d{1,4}[LMNPTY]|BR|NT|D0|D1)$"),
-            "error": "PAYE tax code format looks incorrect (e.g. 1257L).",
+            # ZP-TAX-UK-2026-27-001 section 6.2/6.3: standard/K-code
+            # allowance codes, 0T, and the flat-rate override families
+            # BR/D0/D1 (rUK), SBR/SD0-3 (Scotland), CBR/CD0/CD1 (Wales) —
+            # the leading S/C is the ONE HMRC-sanctioned region signal,
+            # never inferred from worksite (see service.py's
+            # _resolve_uk_sub_jurisdiction_with_source).
+            "pattern": re.compile(r"^([SC]?K\d{1,6}|[SC]?\d{1,4}[LMNPTY]|[SC]?0T|BR|D0|D1|SBR|SD[0-3]|CBR|CD0|CD1|NT)$"),
+            "error": "PAYE tax code format looks incorrect (e.g. 1257L, S1257L, C1257L, SD1, CBR).",
         },
         "student_loan_plan": {"choices": ["None", "Plan 1", "Plan 2", "Plan 4", "Plan 5", "Postgraduate"]},
         "auto_enrolment_pension": {"choices": ["true", "false", "True", "False"]},
@@ -191,11 +197,13 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{6}$"),
             "error": "Sort code must be 6 digits (e.g. 123456 or 12-34-56).",
         },
-        # Accepted before, but had no field spec at all — meant no
-        # validation ever ran on it and (see FIELD_COLUMN_MAP below) it
-        # never reached the dedicated column the NI calculation actually
-        # reads.
-        "ni_category": {"choices": ["A", "B", "C", "H", "M"]},
+        # All 16 letters from ZP-TAX-UK-2026-27-001 section 8.2 (AC-10).
+        # Rate DATA for a category beyond A is a separate, additive seed
+        # (uk.py's _resolve_ni_bands reads whatever NI_BAND rows exist for
+        # the category actually set here) — this just makes every real
+        # HMRC letter selectable; it was previously accepted with no
+        # validation at all.
+        "ni_category": {"choices": ["A", "B", "C", "D", "E", "F", "H", "I", "J", "K", "L", "M", "N", "S", "V", "Z"]},
         "study_loan_balance": {
             "pattern": re.compile(r"^\d+(\.\d{1,2})?$"),
             "error": "Student/Postgraduate Loan balance must be a number.",

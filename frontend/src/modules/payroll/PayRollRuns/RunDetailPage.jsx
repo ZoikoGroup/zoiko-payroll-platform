@@ -242,7 +242,7 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
       )}
 
       <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-        <RunsTable employees={enrichedEmployees} selectedEmployees={selectedEmployees} toggleEmployee={toggleEmployee} toggleAllEmployees={toggleAllEmployees} isWizardMode={true} fmtCurrency={fmtCurrency} calculationMode={calculationMode} />
+        <RunsTable employees={enrichedEmployees} selectedEmployees={selectedEmployees} toggleEmployee={toggleEmployee} toggleAllEmployees={toggleAllEmployees} isWizardMode={true} fmtCurrency={fmtCurrency} calculationMode={calculationMode} jurisdictionCountry={jurisdictionCountry} />
       </div>
 
       <div className="flex items-center justify-between pt-1">
