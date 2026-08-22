@@ -26,20 +26,24 @@ _UK_NI_UPPER_THRESHOLD = Decimal("50270")
 _UK_NI_PRIMARY_RATE = Decimal("8")
 _UK_NI_UPPER_RATE = Decimal("2")
 _UK_PENSION_MIN_ENPLOYER = Decimal("3")
-# Employer NI — genuinely absent until now (only employee NI was ever
-# modeled). Secondary Threshold + standard employer rate.
-_UK_NI_SECONDARY_THRESHOLD = Decimal("9100")
-_UK_NI_EMPLOYER_RATE = Decimal("13.8")
+# Employer NI — Secondary Threshold + standard employer rate. Per
+# ZP-TAX-UK-2026-27-001 section 8.1/9.1: ST is £5,000 annual (2026-27),
+# below the LEL (£6,708) — that gap is real, not a typo (see uk.py's
+# _resolve_ni_bands docstring for why LEL itself never needs to be a
+# breakpoint). Standard (Category A/B/C/J) employer rate is 15% for 2026-27.
+_UK_NI_SECONDARY_THRESHOLD = Decimal("5000")
+_UK_NI_EMPLOYER_RATE = Decimal("15")
 # Real 2025/26 Qualifying Earnings band for Workplace Pension auto-enrolment.
 _UK_PENSION_QE_LOWER = Decimal("6240")
 _UK_PENSION_QE_UPPER = Decimal("50270")
 # Student/Postgraduate Loan — real UK mechanism. Plan 5 covers post-2023
 # starters (in effect from April 2026). Any other/unset study_loan_plan
-# value deducts 0, same as having no loan at all.
+# value deducts 0, same as having no loan at all. 2026-27 thresholds per
+# ZP-TAX-UK-2026-27-001 section 10.1.
 _UK_STUDENT_LOAN_PLANS = {
-    "UK_PLAN1": (Decimal("24990"), Decimal("9")),
-    "UK_PLAN2": (Decimal("27295"), Decimal("9")),
-    "UK_PLAN4": (Decimal("31395"), Decimal("9")),
+    "UK_PLAN1": (Decimal("26900"), Decimal("9")),
+    "UK_PLAN2": (Decimal("29385"), Decimal("9")),
+    "UK_PLAN4": (Decimal("33795"), Decimal("9")),
     "UK_PLAN5": (Decimal("25000"), Decimal("9")),
     "UK_POSTGRAD": (Decimal("21000"), Decimal("6")),
 }
@@ -53,35 +57,67 @@ _UK_STUDENT_LOAN_PARAM_KEYS = {
     "UK_PLAN5": "sl_plan5_thresh",
     "UK_POSTGRAD": "pg_loan_thresh",
 }
+# 2026-27 special single-rate PAYE codes (ZP-TAX-UK-2026-27-001 section
+# 6.3) — flat percentage on all pay, no Personal Allowance. The S/C prefix
+# selects which regional rate a BR/D-family code actually means (Scottish
+# SD0-3 have no rUK equivalent letter, Welsh C-codes mirror rUK 2026-27).
+_UK_FLAT_RATE_CODES = {
+    "BR": Decimal("20"), "D0": Decimal("40"), "D1": Decimal("45"),
+    "SBR": Decimal("20"), "SD0": Decimal("21"), "SD1": Decimal("42"), "SD2": Decimal("45"), "SD3": Decimal("48"),
+    "CBR": Decimal("20"), "CD0": Decimal("40"), "CD1": Decimal("45"),
+}
 
 
 # ── PAYE tax-code interpretation ────────────────────────────────────────
-# Handles standard codes ("1257L" -> allowance = digits x 10), K-codes
-# (negative allowance -- untaxed benefit added to income, never tapered),
-# and the flat-rate override codes BR/D0/D1/NT. Deliberately NOT
-# implementing true cumulative (Week1/Month1 vs cumulative YTD) PAYE basis
-# -- that requires year-to-date income tracking this engine doesn't have
-# for ANY country yet (same explicit deferral already on record for
-# Student Loan balance tracking, below). `basis` is recorded on the
-# result but every calculation stays period-by-period, as today.
+# Handles standard codes ("1257L"/"S1257L"/"C1257L" -> allowance = digits
+# x 10), K-codes (negative allowance -- untaxed benefit added to income,
+# never tapered), 0T (zero allowance, still uses the regime's progressive
+# bands), NT (no deduction), and the flat-rate override code families
+# BR/D0/D1, SBR/SD0-3, CBR/CD0/CD1 (ZP-TAX-UK-2026-27-001 section 6.3).
+#
+# `region_prefix` ("S"/"C"/None) is the ONE place this file reads the
+# code's leading letter — per the doc's non-negotiable control ("operate
+# the HMRC-issued tax code prefix, never the worksite"), resolve_uk_
+# configuration() in service.py uses this to pick the sub-jurisdiction,
+# preferring it over employee.work_state. NT is explicitly never given an
+# S/C prefix by HMRC (section 6.1) even though its own letters don't
+# start with S/C anyway, so no special-casing is needed here.
+#
+# Deliberately NOT implementing true cumulative (Week1/Month1 vs
+# cumulative YTD) PAYE basis -- that requires year-to-date income
+# tracking this engine doesn't have for ANY country yet (same explicit
+# deferral already on record for Student Loan balance tracking, below).
+# `basis` is recorded on the result but every calculation stays
+# period-by-period, as today.
 def interpret_tax_code(tax_code: str | None, default_personal_allowance: Decimal) -> dict:
     if not tax_code:
-        return {"personal_allowance": default_personal_allowance, "flat_rate_pct": None, "basis": "CUMULATIVE"}
+        return {"personal_allowance": default_personal_allowance, "flat_rate_pct": None, "basis": "CUMULATIVE", "region_prefix": None}
     code = tax_code.upper().strip()
-    if code == "BR":
-        return {"personal_allowance": Decimal("0"), "flat_rate_pct": Decimal("20"), "basis": "NONCUMULATIVE"}
-    if code == "D0":
-        return {"personal_allowance": Decimal("0"), "flat_rate_pct": Decimal("40"), "basis": "NONCUMULATIVE"}
-    if code == "D1":
-        return {"personal_allowance": Decimal("0"), "flat_rate_pct": Decimal("45"), "basis": "NONCUMULATIVE"}
+
+    # Flat-rate families are matched on the FULL code first: "SD0" and
+    # "D0" are different HMRC codes at different rates (21% Scottish
+    # intermediate vs 40% rUK higher) — stripping the prefix before this
+    # check would wrongly collapse them onto the same rate.
+    if code in _UK_FLAT_RATE_CODES:
+        region_prefix = code[0] if code[0] in ("S", "C") else None
+        return {"personal_allowance": Decimal("0"), "flat_rate_pct": _UK_FLAT_RATE_CODES[code], "basis": "NONCUMULATIVE", "region_prefix": region_prefix}
     if code == "NT":
-        return {"personal_allowance": None, "flat_rate_pct": Decimal("0"), "basis": "NONCUMULATIVE"}
-    if code.startswith("K") and code[1:].isdigit():
-        return {"personal_allowance": -(Decimal(code[1:]) * 10), "flat_rate_pct": None, "basis": "CUMULATIVE"}
-    digits = "".join(ch for ch in code if ch.isdigit())
+        return {"personal_allowance": None, "flat_rate_pct": Decimal("0"), "basis": "NONCUMULATIVE", "region_prefix": None}
+
+    region_prefix = None
+    body = code
+    if code[:1] in ("S", "C") and len(code) > 1:
+        region_prefix = code[0]
+        body = code[1:]
+
+    if body == "0T":
+        return {"personal_allowance": Decimal("0"), "flat_rate_pct": None, "basis": "CUMULATIVE", "region_prefix": region_prefix}
+    if body.startswith("K") and body[1:].isdigit():
+        return {"personal_allowance": -(Decimal(body[1:]) * 10), "flat_rate_pct": None, "basis": "CUMULATIVE", "region_prefix": region_prefix}
+    digits = "".join(ch for ch in body if ch.isdigit())
     if digits:
-        return {"personal_allowance": Decimal(digits) * 10, "flat_rate_pct": None, "basis": "CUMULATIVE"}
-    return {"personal_allowance": default_personal_allowance, "flat_rate_pct": None, "basis": "CUMULATIVE"}
+        return {"personal_allowance": Decimal(digits) * 10, "flat_rate_pct": None, "basis": "CUMULATIVE", "region_prefix": region_prefix}
+    return {"personal_allowance": default_personal_allowance, "flat_rate_pct": None, "basis": "CUMULATIVE", "region_prefix": region_prefix}
 
 
 def _calculate_annual_tax_uk(annual_gross: Decimal, slabs, rate_map: dict, tax_code: str | None = None) -> Decimal:

@@ -18,7 +18,7 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
     regulatoryAuthority: pack.regulatoryAuthority || "", complianceCategory: pack.complianceCategory || "",
     complianceOwner: pack.complianceOwner || "", engineeringOwner: pack.engineeringOwner || "",
     nextReviewDate: pack.nextReviewDate || "", sourceReferences: pack.sourceReferences || "",
-    changeSummary: pack.changeSummary || "",
+    changeSummary: pack.changeSummary || "", reason: "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -35,7 +35,7 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
         regulatoryAuthority: form.regulatoryAuthority || null, complianceCategory: form.complianceCategory || null,
         complianceOwner: form.complianceOwner || null, engineeringOwner: form.engineeringOwner || null,
         nextReviewDate: form.nextReviewDate || null, sourceReferences: form.sourceReferences || null,
-        changeSummary: form.changeSummary || null,
+        changeSummary: form.changeSummary || null, reason: form.reason || null,
       });
       addToast?.("Overview details saved.", "success");
       onSaved(updated);
@@ -61,6 +61,7 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
         <div className="col-span-2"><label className={labelClass}>Engineering Owner</label><input className={inputClass} value={form.engineeringOwner} onChange={set("engineeringOwner")} /></div>
         <div className="col-span-2"><label className={labelClass}>Source References</label><input className={inputClass} value={form.sourceReferences} onChange={set("sourceReferences")} /></div>
         <div className="col-span-2"><label className={labelClass}>Change Summary</label><textarea className={inputClass} rows={2} value={form.changeSummary} onChange={set("changeSummary")} /></div>
+        <div className="col-span-2"><label className={labelClass}>Reason for this edit (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. Corrected per ZP-TAX-UK-2026-27-001" /></div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>

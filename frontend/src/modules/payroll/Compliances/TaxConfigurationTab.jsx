@@ -55,12 +55,18 @@ const COUNTRY_TAX_CONFIG = {
         key: "state", label: "State Taxes", stateAware: true,
         items: [
           {
-            key: "pt", label: "Professional Tax", source: "mixed",
+            key: "pt", label: "Professional Tax", source: "mixed", shareShape: "single",
             matches: (state) => Boolean(state),
-            filter: (slabs, rates) => ({
-              slabRows: slabs.filter((r) => !isPercentageBracket(r)),
-              rateRows: rates.filter((r) => labelIncludes(r, "professional tax")),
-            }),
+            // Professional Tax has no employer share in any Indian state,
+            // and once real salary brackets exist for a state (Telangana),
+            // the flat ContributionRate row is a less-precise duplicate of
+            // the same obligation — show ONLY the brackets in that case
+            // rather than stacking a redundant summary row above them.
+            filter: (slabs, rates) => {
+              const slabRows = slabs.filter((r) => !isPercentageBracket(r));
+              const rateRows = slabRows.length > 0 ? [] : rates.filter((r) => labelIncludes(r, "professional tax"));
+              return { slabRows, rateRows };
+            },
             noStatePlaceholder: "Set an organization state under Company Details to see state-level Professional Tax.",
           },
         ],
@@ -72,7 +78,16 @@ const COUNTRY_TAX_CONFIG = {
       {
         key: "national", label: "National Income Tax",
         items: [
-          { key: "paye", label: "PAYE Income Tax", source: "slabs", matches: () => true, filter: (rows) => rows },
+          {
+            // Same isPercentageBracket filter India's Income Tax/TDS item
+            // already uses, for the same reason: the API doesn't expose a
+            // row's rule_type, but a real PAYE bracket's label always has
+            // a "%" ("Basic Rate 20%") while an NI Category band's never
+            // does ("NI Category A band 1") — without this, every NI band
+            // seeded for this org shows up here as if it were income tax.
+            key: "paye", label: "PAYE Income Tax", source: "slabs", matches: () => true,
+            filter: (rows) => rows.filter(isPercentageBracket),
+          },
         ],
       },
       {
@@ -80,7 +95,7 @@ const COUNTRY_TAX_CONFIG = {
         items: ["England", "Scotland", "Wales", "Northern Ireland"].map((region) => ({
           key: region.toLowerCase().replace(/\s+/g, "-"), label: region, source: "slabs",
           matches: (state) => (state || "").toLowerCase() === region.toLowerCase(),
-          filter: (rows) => rows,
+          filter: (rows) => rows.filter(isPercentageBracket),
         })),
       },
     ],
@@ -158,7 +173,7 @@ const COUNTRY_TAX_CONFIG = {
         key: "special", label: "Special Taxes",
         items: [
           {
-            key: "church-tax", label: "Church Tax", source: "rates",
+            key: "church-tax", label: "Church Tax", source: "rates", shareShape: "single",
             matches: () => true,
             filter: (rates) => rates.filter((r) => labelIncludes(r, "church")),
             noStatePlaceholder: "Church Tax isn't configured for this organization yet.",
@@ -175,7 +190,7 @@ const COUNTRY_TAX_CONFIG = {
           { key: "payg", label: "PAYG Withholding", source: "slabs", matches: () => true, filter: (rows) => rows },
           { key: "income-tax", label: "Income Tax", source: "slabs", matches: () => true, filter: (rows) => rows },
           {
-            key: "medicare-levy", label: "Medicare Levy", source: "rates",
+            key: "medicare-levy", label: "Medicare Levy", source: "rates", shareShape: "single",
             matches: () => true,
             filter: (rates) => rates.filter((r) => labelIncludes(r, "medicare")),
             noStatePlaceholder: "Medicare Levy isn't configured for this organization yet.",
@@ -237,6 +252,22 @@ function Level3Tabs({ items, active, onChange }) {
   );
 }
 
+// For a stateAware group (e.g. UK's "Regional Income Tax", with a fixed
+// England/Scotland/Wales/Northern Ireland item list), an organization is
+// only ever actually registered in ONE state — showing all 4 as equal
+// tabs implied the other 3 were equally relevant, when clicking any of
+// them just produces the "not this organization's jurisdiction"
+// placeholder. Narrows to whichever item(s) genuinely match the org's
+// own jurisdictionState; falls back to the full list when nothing
+// matches (state not set yet, or a state this config doesn't know about)
+// so the tab row — and the placeholder telling the org to set a state —
+// stays reachable instead of disappearing entirely.
+function getVisibleItems(group, jurisdictionState) {
+  if (!group.stateAware) return group.items;
+  const matching = group.items.filter((it) => it.matches(jurisdictionState));
+  return matching.length > 0 ? matching : group.items;
+}
+
 export default function TaxConfigurationTab({ documents = [], country, jurisdictionState }) {
   const [slabRows, setSlabRows] = useState([]);
   const [rateRows, setRateRows] = useState([]);
@@ -259,13 +290,14 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
   const config = COUNTRY_TAX_CONFIG[country] || COUNTRY_TAX_CONFIG.US;
   const [activeGroupKey, setActiveGroupKey] = useState(config.groups[0].key);
   const activeGroup = config.groups.find((g) => g.key === activeGroupKey) || config.groups[0];
-  const [activeItemKey, setActiveItemKey] = useState(activeGroup.items[0].key);
-  const activeItem = activeGroup.items.find((it) => it.key === activeItemKey) || activeGroup.items[0];
+  const visibleItems = getVisibleItems(activeGroup, jurisdictionState);
+  const [activeItemKey, setActiveItemKey] = useState(visibleItems[0].key);
+  const activeItem = visibleItems.find((it) => it.key === activeItemKey) || visibleItems[0];
 
   function changeGroup(key) {
     setActiveGroupKey(key);
     const group = config.groups.find((g) => g.key === key);
-    setActiveItemKey(group.items[0].key);
+    setActiveItemKey(getVisibleItems(group, jurisdictionState)[0].key);
   }
 
   const extractedRows = [];
@@ -290,7 +322,7 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
         </p>
       )}
 
-      <Level3Tabs items={activeGroup.items} active={activeItemKey} onChange={setActiveItemKey} />
+      <Level3Tabs items={visibleItems} active={activeItemKey} onChange={setActiveItemKey} />
 
       <div>
         <div className="flex items-center gap-2 mb-2">
@@ -345,7 +377,7 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
               No {activeItem.label.toLowerCase()} rate configured for this jurisdiction yet.
             </p>
           ) : (
-            <RatesTable rows={rows} caption={`Currently applied to every payslip in this jurisdiction.`} />
+            <RatesTable rows={rows} caption={`Currently applied to every payslip in this jurisdiction.`} singleColumn={activeItem.shareShape === "single"} />
           );
         })()}
 
@@ -360,7 +392,7 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
           }
           return (
             <div className="space-y-4">
-              {filteredRates.length > 0 && <RatesTable rows={filteredRates} caption={`Currently applied to every payslip in this jurisdiction.`} />}
+              {filteredRates.length > 0 && <RatesTable rows={filteredRates} caption={`Currently applied to every payslip in this jurisdiction.`} singleColumn={activeItem.shareShape === "single"} />}
               {filteredSlabs.length > 0 && <SlabsTable rows={filteredSlabs} caption={`Currently applied when calculating ${activeItem.label} in this jurisdiction.`} />}
             </div>
           );

@@ -735,7 +735,11 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         currency=data.currency,
     )
     if existing:
-        old_value = {k: (str(v) if v is not None else None) for k, v in fields.items()}
+        # Snapshot the row's values BEFORE mutating it — using `fields`
+        # (the incoming/new values) here was a real bug: old_value and
+        # new_value ended up identical for every pack-level edit, making
+        # the Audit tab's diff meaningless.
+        old_value = {k: (str(getattr(existing, k)) if getattr(existing, k) is not None else None) for k in fields}
         for k, v in fields.items():
             setattr(existing, k, v)
         existing.updated_by_id = actor_id
@@ -746,6 +750,7 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
             db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=row.id,
             jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
             old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
+            reason=data.reason,
         )
         return row
 
@@ -767,6 +772,7 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=row.id,
         jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
         old_value=None, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
+        reason=data.reason,
     )
     return row
 
@@ -980,6 +986,12 @@ def get_state_scoped_config(db: Session, country: str, state: Optional[str]) -> 
 _UK_SUB_JURISDICTIONS = {
     "england": "England", "scotland": "Scotland", "wales": "Wales", "northern ireland": "Northern Ireland",
 }
+# ZP-TAX-UK-2026-27-001 section 6.1: the S/C tax-code prefix is the ONLY
+# HMRC-sanctioned region signal ("Do not infer a Scottish or Welsh tax
+# regime from the employer's office or worksite"). No prefix means
+# England/Northern Ireland/main UK PAYE — this map only ever names the
+# two nations that actually have a distinct prefix.
+_UK_TAX_CODE_REGION_PREFIX = {"S": "Scotland", "C": "Wales"}
 
 
 def _normalize_uk_sub_jurisdiction(work_state: Optional[str]) -> Optional[str]:
@@ -992,6 +1004,69 @@ def _normalize_uk_sub_jurisdiction(work_state: Optional[str]) -> Optional[str]:
     if not work_state:
         return None
     return _UK_SUB_JURISDICTIONS.get(work_state.strip().lower())
+
+
+def _resolve_org_jurisdiction_state_fallback(db: Session, organization_id: int, country: str) -> Optional[str]:
+    """The organization's own configured jurisdiction state (Company
+    Details / Compliance) — used ONLY as a fallback when an employee has
+    no work_state of their own set. Real-world default: most employees
+    work wherever the organization itself is registered unless told
+    otherwise, so a state-scoped component (India's Professional Tax, US
+    state income tax, ...) shouldn't silently resolve to nothing just
+    because the employee record's work_state field was never filled in.
+    Only applies when the org's own jurisdiction country matches —
+    otherwise this org has no state to offer for THIS country anyway."""
+    if not organization_id:
+        return None
+    compliance = (
+        db.query(CompanyComplianceDetails)
+        .filter(CompanyComplianceDetails.organization_id == organization_id)
+        .first()
+    )
+    if not compliance or not compliance.jurisdiction_state:
+        return None
+    if _normalize_country(compliance.jurisdiction_country) != _normalize_country(country):
+        return None
+    return compliance.jurisdiction_state
+
+
+def _resolve_country_aware_state(country: str, employee, literal_state: Optional[str], db: Session = None, organization_id: int = None) -> Optional[str]:
+    """The value actually passed to _resolve_effective_rate_inputs's/
+    get_state_scoped_config's `state` param for rate/slab lookup.
+
+    Base layer (every country): if the employee has no work_state of
+    their own, fall back to the organization's own configured
+    jurisdiction state (_resolve_org_jurisdiction_state_fallback) —
+    without this, a state-scoped component silently computes to zero for
+    every employee who was never assigned a work_state, even when the
+    organization itself has a clear, single jurisdiction on file.
+
+    UK layer (on top): the tax-code-prefix-derived sub-jurisdiction wins
+    over either of the above when the employee's own HMRC code carries
+    one — see _resolve_uk_sub_jurisdiction_with_source."""
+    effective_state = literal_state
+    if not effective_state and db is not None:
+        effective_state = _resolve_org_jurisdiction_state_fallback(db, organization_id, country)
+    if country != "UK":
+        return effective_state
+    sub_jurisdiction, _source = _resolve_uk_sub_jurisdiction_with_source(getattr(employee, "tax_code", None), effective_state)
+    return sub_jurisdiction
+
+
+def _resolve_uk_sub_jurisdiction_with_source(tax_code: Optional[str], work_state: Optional[str]) -> tuple[Optional[str], str]:
+    """Region determination per ZP-TAX-UK-2026-27-001 AC-03/AC-04: the
+    employee's own HMRC tax-code prefix wins whenever it's present —
+    work_state (a worksite/location field) is only a fallback for an
+    employee who has no tax code yet (e.g. a brand-new starter still
+    pending their first HMRC notice). Returns (sub_jurisdiction, source)
+    where source is "TAX_CODE_PREFIX" or "WORK_STATE_FALLBACK", so the
+    caller can persist and display which rule actually decided."""
+    from app.modules.payroll.engine.countries.uk import interpret_tax_code
+
+    region_prefix = interpret_tax_code(tax_code, Decimal("0"))["region_prefix"]
+    if region_prefix:
+        return _UK_TAX_CODE_REGION_PREFIX[region_prefix], "TAX_CODE_PREFIX"
+    return _normalize_uk_sub_jurisdiction(work_state), "WORK_STATE_FALLBACK"
 
 
 @dataclass
@@ -1007,6 +1082,7 @@ class ResolvedUKPayrollConfiguration:
     state_rate_map: dict
     state_slabs: list
     sub_jurisdiction: Optional[str]
+    sub_jurisdiction_source: str
     national_pack: Optional["JurisdictionPack"]
     sub_pack: Optional["JurisdictionPack"]
     canonical_rates: list
@@ -1026,7 +1102,9 @@ def resolve_uk_configuration(
         db, organization_id, "UK", payroll_date, org_opted_in, state=None, tax_regime=tax_regime,
     )
 
-    sub_jurisdiction = _normalize_uk_sub_jurisdiction(getattr(employee, "work_state", None))
+    sub_jurisdiction, sub_jurisdiction_source = _resolve_uk_sub_jurisdiction_with_source(
+        getattr(employee, "tax_code", None), getattr(employee, "work_state", None),
+    )
     sub_rate_map, sub_slabs = get_state_scoped_config(db, "UK", sub_jurisdiction)
 
     source_map = {key: "NATIONAL" for key in national_rate_map}
@@ -1055,7 +1133,8 @@ def resolve_uk_configuration(
     return ResolvedUKPayrollConfiguration(
         rate_map=resolved_rate_map, slabs=national_slabs,
         state_rate_map=sub_rate_map, state_slabs=sub_slabs,
-        sub_jurisdiction=sub_jurisdiction, national_pack=national_pack, sub_pack=sub_pack,
+        sub_jurisdiction=sub_jurisdiction, sub_jurisdiction_source=sub_jurisdiction_source,
+        national_pack=national_pack, sub_pack=sub_pack,
         canonical_rates=canonical_rates or [], source_map=source_map,
     )
 
@@ -1083,6 +1162,33 @@ def sync_org_rates_from_canonical(
     )
     if not pack:
         return {"synced": False, "reason": "no canonical tax pack configured for this jurisdiction"}
+
+    # Additive state layer (India's state-scoped Professional Tax, etc.):
+    # resolve_tax_configuration above is winner-take-all — for a state
+    # whose own pack has no income-tax slabs (e.g. Telangana's PT-only
+    # pack), it correctly returns the COUNTRY pack instead (the 2026-08-21
+    # PT-pack-override fix), which means a single sync call can never
+    # produce both the country's income-tax brackets AND the state's own
+    # PT_FLAT brackets — whichever call happened last would wipe the
+    # other's rows out of this org's cache (TaxSlab sync below is a full
+    # delete-then-recreate per (org, country), not additive). Folding in
+    # get_state_scoped_config's rows here — the SAME additive lookup the
+    # live engine already uses for ctx.state_rate_map/ctx.state_slabs —
+    # closes that gap: MARGINAL_RATE rows are excluded from this extra
+    # layer so a state that legitimately has its OWN real income-tax pack
+    # (UK Scotland) never gets its rows duplicated (they're already in
+    # canonical_slabs via resolve_tax_configuration itself in that case).
+    if state:
+        state_rate_map, state_slabs = get_state_scoped_config(db, country, state)
+        existing_rate_keys = {_normalize_engine_component_key(cr.component_key) for cr in canonical_rates}
+        canonical_rates = canonical_rates + [
+            cr for key, cr in state_rate_map.items() if key not in existing_rate_keys
+        ]
+        existing_slab_ids = {s.id for s in canonical_slabs}
+        canonical_slabs = canonical_slabs + [
+            s for s in state_slabs
+            if s.id not in existing_slab_ids and getattr(s, "rule_type", None) not in (None, "MARGINAL_RATE")
+        ]
 
     for cr in canonical_rates:
         existing = (
@@ -1188,7 +1294,13 @@ def sync_org_rates_from_canonical(
                 min_amount=ts.min_amount, max_amount=ts.max_amount, rate_pct=ts.rate_pct,
                 rate_label=ts.rate_label, tax_formula=ts.tax_formula, sort_order=ts.sort_order,
                 rule_type=ts.rule_type, formula_expression=ts.formula_expression,
-                jurisdiction_pack_id=pack.id,
+                # Each slab keeps its OWN originating pack id (a state
+                # layer row folded in above came from a different pack
+                # than `pack` itself) rather than being force-tagged with
+                # the single resolved `pack.id` — otherwise a state PT
+                # bracket's traceability would wrongly point at the
+                # country income-tax pack it has nothing to do with.
+                jurisdiction_pack_id=getattr(ts, "jurisdiction_pack_id", None) or pack.id,
             ))
 
     db.commit()
@@ -1225,6 +1337,7 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         rate_pct=data.ratePct, rate_label=data.rateLabel, tax_formula=data.taxFormula,
         rule_type=data.ruleType, formula_expression=data.formulaExpression,
         flat_amount=data.flatAmount, adjustment_amount=data.adjustmentAmount,
+        ni_category=data.niCategory, employer_rate_pct=data.employerRatePct,
         sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
     )
     action = "update" if data.id else "create"
@@ -1245,6 +1358,7 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         db, actor_id=actor_id, action=action, entity_type="tax_slab", entity_id=row.id,
         jurisdiction_pack_id=pack.id, tax_version=pack.version,
         old_value=old_value, new_value={"min_amount": str(row.min_amount), "max_amount": str(row.max_amount) if row.max_amount is not None else None, "rate_pct": str(row.rate_pct)},
+        reason=data.reason,
     )
     return row
 
@@ -1324,6 +1438,7 @@ def upsert_canonical_contribution_rate(
         db, actor_id=actor_id, action=action, entity_type="contribution_rate", entity_id=row.id,
         jurisdiction_pack_id=pack.id, tax_version=pack.version,
         old_value=old_value, new_value={"employee_rate_pct": str(row.employee_rate_pct) if row.employee_rate_pct is not None else None, "employer_rate_pct": str(row.employer_rate_pct) if row.employer_rate_pct is not None else None, "flat_amount": str(row.flat_amount) if row.flat_amount is not None else None},
+        reason=data.reason,
     )
     return row
 
@@ -1487,6 +1602,18 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
                 f"Pack {conflict.pack_id} v{conflict.version} is already Active for this "
                 f"country/state/tax year/regime — supersede it before activating a new version."
             )
+        # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
+        # 19.2: "author cannot self-approve a production statutory
+        # version"). `row.updated_by_id` here is whoever last edited the
+        # pack's substance — captured BEFORE this call's own
+        # `row.updated_by_id = actor_id` assignment below can overwrite
+        # it, so activating a pack doesn't retroactively count as
+        # approving your own edit.
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This pack needs a distinct approver before it can go Active — "
+                "use \"Approve\" (a different Super Admin than whoever last edited it)."
+            )
     old_status = row.status
     row.status = status
     row.updated_by_id = actor_id
@@ -1497,6 +1624,30 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
             db, actor_id=actor_id, action="status_change", entity_type="jurisdiction_pack", entity_id=row.id,
             jurisdiction_pack_id=row.id, tax_version=row.version,
             old_value={"status": old_status}, new_value={"status": status},
+        )
+    return row
+
+
+def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Optional[int] = None) -> JurisdictionPack:
+    """Sets approved_by_id to the calling Super Admin — a distinct,
+    lightweight action from the general Edit flow so it means something:
+    "I, this specific person, reviewed and approve this configuration,"
+    not a side effect of saving an unrelated metadata change. Does not
+    itself change status — see set_jurisdiction_pack_status's gate, which
+    checks approved_by_id against updated_by_id before allowing Active."""
+    row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
+    if not row:
+        raise NotFoundException("JurisdictionPack", pack_row_id)
+    old_approver = row.approved_by_id
+    row.approved_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    if row.pack_type == "tax":
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=row.id,
+            jurisdiction_pack_id=row.id, tax_version=row.version,
+            old_value={"approved_by_id": old_approver}, new_value={"approved_by_id": actor_id},
+            reason="Approver set",
         )
     return row
 
@@ -1881,9 +2032,10 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         gross = basic + hra + special + allowance_total + overtime + additional_compensation
 
         work_state = getattr(emp, "work_state", None)
-        if work_state not in _state_scoped_cache:
-            _state_scoped_cache[work_state] = get_state_scoped_config(db, country, work_state)
-        state_rate_map, state_slabs = _state_scoped_cache[work_state]
+        resolution_state = _resolve_country_aware_state(country, emp, work_state, db=db, organization_id=organization_id)
+        if resolution_state not in _state_scoped_cache:
+            _state_scoped_cache[resolution_state] = get_state_scoped_config(db, country, resolution_state)
+        state_rate_map, state_slabs = _state_scoped_cache[resolution_state]
 
         # Delegate to the strategy engine
         ctx = build_context_from_employee(
@@ -1974,11 +2126,20 @@ def _get_slab_label(annual_income: Decimal, slabs: List[TaxSlab], country: str =
         if country == "IN" and taxable <= _IN_REBATE_87A_LIMIT:
             return "Nil (87A rebate)"
 
-    for slab in sorted(slabs, key=lambda s: s.min_amount):
+    # `slabs` here is the org's/pack's FULL TaxSlab set — unlike the actual
+    # calculation path (engine/countries/uk.py's calculate(), shared.py's
+    # _calculate_annual_tax), which each filter NI_BAND/PT_FLAT/SURCHARGE
+    # rows out before doing bracket math, this display-only lookup never
+    # did. Once a UK pack has real NI_BAND rows (Section D), this label
+    # could pick an NI category band instead of an income-tax bracket —
+    # same class of bug _pack_has_income_tax_slabs was written to guard
+    # against elsewhere, just missed here.
+    bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) not in ("NI_BAND", "PT_FLAT", "SURCHARGE")]
+    for slab in sorted(bracket_slabs, key=lambda s: s.min_amount):
         upper = slab.max_amount if slab.max_amount is not None else taxable
         if taxable <= upper:
             return slab.rate_label or "—"
-    return slabs[-1].rate_label if slabs else "—"
+    return bracket_slabs[-1].rate_label if bracket_slabs else "—"
 
 
 # ── Company Holidays (shared calendar for LOP proration + Attendance/Leave pages) ──
@@ -2511,14 +2672,22 @@ def _resolve_employee_calc_inputs(
     country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
     state = getattr(employee, "work_state", None)
     tax_regime = getattr(employee, "tax_regime", None)
-    cache_key = (country, state, tax_regime)
+    # Falls back to the organization's own configured jurisdiction state
+    # when the employee has no work_state of their own (every country);
+    # UK's resolution state is additionally tax-code-prefix-derived
+    # (ZP-TAX-UK-2026-27-001 AC-03/AC-04) — see _resolve_country_aware_state.
+    # `state` itself (returned below, used for ctx.work_state) stays the
+    # employee's literal worksite field either way — only which rate/slab
+    # pack gets selected changes.
+    resolution_state = _resolve_country_aware_state(country, employee, state, db=db, organization_id=organization_id)
+    cache_key = (country, resolution_state, tax_regime)
     if cache is not None and cache_key in cache:
         rate_map, slabs, canonical_rates, pack, state_rate_map, state_slabs = cache[cache_key]
     else:
         rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
-            db, organization_id, country, payroll_date, org_opted_in, state=state, tax_regime=tax_regime,
+            db, organization_id, country, payroll_date, org_opted_in, state=resolution_state, tax_regime=tax_regime,
         )
-        state_rate_map, state_slabs = get_state_scoped_config(db, country, state)
+        state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state)
         if cache is not None:
             cache[cache_key] = (rate_map, slabs, canonical_rates, pack, state_rate_map, state_slabs)
     resolved_pack = (canonical_rates, slabs, pack) if pack is not None else None
@@ -3634,9 +3803,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # governed by the same period-correct rates a normal run would use.
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
     work_state = getattr(employee, "work_state", None)
+    resolution_state = _resolve_country_aware_state(country, employee, work_state, db=db, organization_id=organization_id)
     rate_map, slabs, canonical_rates, pack = _resolve_effective_rate_inputs(
         db, organization_id, country, run.pay_date, org_opted_in,
-        state=work_state, tax_regime=getattr(employee, "tax_regime", None),
+        state=resolution_state, tax_regime=getattr(employee, "tax_regime", None),
     )
     # Region-specific rules (Scotland's own tax bands, India's state PT,
     # ...) — the SAME call generate_payslips_for_run's per-employee
@@ -3644,7 +3814,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # region-scoped employee could silently use national-only figures
     # while a real run for the same employee correctly used their
     # region's config.
-    state_rate_map, state_slabs = get_state_scoped_config(db, country, work_state)
+    state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state)
 
     calculation_mode = getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
     gross = data.basic_salary + (data.hra or 0) + (data.special_allowance or 0) + (data.overtime or 0)

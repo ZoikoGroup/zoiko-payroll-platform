@@ -93,7 +93,15 @@ export default function ContributionRatesTable({ documents = [], country }) {
 // Exported so TaxConfigurationTab.jsx can re-render an already-fetched,
 // client-side-filtered subset (e.g. India's Professional Tax rows) with
 // the exact same table presentation — no new fetch, no API change.
-export function RatesTable({ rows, caption }) {
+//
+// `singleColumn`: some statutory components (India's Professional Tax,
+// Germany's Church Tax, Australia's Medicare Levy) are employee-only —
+// there is no employer share, ever, in any jurisdiction that has them.
+// Showing Employee Share/Employer Share columns for these isn't just
+// under-populated, it's the wrong shape: one always blank, sometimes
+// both. When set, this renders a single "Amount" column instead (r.total,
+// falling back to whichever of employee/employer actually has a value).
+export function RatesTable({ rows, caption, singleColumn = false }) {
   return (
     <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
       <div className="px-6 py-3 border-b border-border">
@@ -103,18 +111,30 @@ export function RatesTable({ rows, caption }) {
         <thead>
           <tr className="border-b border-border">
             <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Component</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee Share</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employer Share</th>
-            <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total</th>
+            {singleColumn ? (
+              <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Amount</th>
+            ) : (
+              <>
+                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employee Share</th>
+                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Employer Share</th>
+                <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
           {rows.map((r, i) => (
             <tr key={r.id ?? r.label ?? i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
               <td className="px-5 py-3.5 font-bold text-foreground">{r.label}</td>
-              <td className="px-5 py-3.5 text-foreground-muted">{r.employee}</td>
-              <td className="px-5 py-3.5 text-foreground-muted">{r.employer}</td>
-              <td className="px-5 py-3.5 font-bold text-foreground">{r.total}</td>
+              {singleColumn ? (
+                <td className="px-5 py-3.5 font-bold text-foreground">{r.total || r.employee || r.employer}</td>
+              ) : (
+                <>
+                  <td className="px-5 py-3.5 text-foreground-muted">{r.employee}</td>
+                  <td className="px-5 py-3.5 text-foreground-muted">{r.employer}</td>
+                  <td className="px-5 py-3.5 font-bold text-foreground">{r.total}</td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>

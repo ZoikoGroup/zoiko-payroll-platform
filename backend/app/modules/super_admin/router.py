@@ -349,6 +349,20 @@ def set_compliance_policy_status(
     return payroll_service.set_jurisdiction_pack_status(db, id, payload.status, actor_id=current_user.id)
 
 
+@router.put(
+    "/compliance/policies/{id}/approve", response_model=JurisdictionPackResponse, response_model_by_alias=True,
+    summary="Record the calling Super Admin as this pack's approver (maker-checker: must differ from the last editor before Active)",
+)
+def approve_compliance_policy(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_jurisdiction_pack_approver(db, id, actor_id=current_user.id)
+
+
 @router.get(
     "/compliance/policies/{id}/organizations", response_model=List[ApplicableOrganization],
     summary="Organizations currently assigned to this policy version",

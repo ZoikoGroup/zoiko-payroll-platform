@@ -4,6 +4,7 @@ import { approveRun, deletePayRun } from "../../../service/payrollService";
 import ApprovalDialog from "./ApprovalDialog";
 import { useToast } from "../ToastContext";
 import { formatCurrency } from "../../../utils/currency";
+import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
 
 // Mirrors backend PAYROLL_STATUS_ORDER (models.py) — a run can advance one
 // step at a time all the way through Closed; only Closed itself is terminal.
@@ -99,6 +100,7 @@ export default function RunsTable({
   isWizardMode = false,
   fmtCurrency,
   calculationMode = "standard",
+  jurisdictionCountry = "IN",
 }) {
   const { addToast } = useToast();
   const [approvingId, setApprovingId] = useState(null);
@@ -166,6 +168,12 @@ export default function RunsTable({
     // employee's contribComponents (built country-aware in RunDetailPage)
     // defines the column set for every row — no hardcoded PF/ESI/PT here.
     const contributionColumns = employees[0]?.contribComponents || [];
+    // Same reasoning applies to the income-tax column header itself —
+    // "Tax" alone was the one static label left (TDS/PAYE/PAYG/
+    // Lohnsteuer/Federal Withholding/Federal Tax all being genuinely
+    // different terms), reusing the exact label map the payslip detail
+    // view already uses so the two never disagree on wording.
+    const incomeTaxLabel = getPayrollLabels(jurisdictionCountry).incomeTax;
     return (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -181,7 +189,7 @@ export default function RunsTable({
               {!isSimple && contributionColumns.map((col) => (
                 <th key={col.id} className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{col.label}</th>
               ))}
-              {!isSimple && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Tax</th>}
+              {!isSimple && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{incomeTaxLabel}</th>}
               <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{isSimple ? "LOP Deduction" : "Extra / Benefits"}</th>
               <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Net Pay</th>
               <th className="px-3 py-2.5 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>

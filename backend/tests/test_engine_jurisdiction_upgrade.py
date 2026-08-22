@@ -188,7 +188,8 @@ def test_us_state_income_tax_adds_to_federal():
 # ── UK: employer NI + Student Loan + Scotland bands ─────────────────────────
 
 UK_RATES = {
-    "national-insurance": Rate(employee_rate_pct=Decimal("8"), employer_rate_pct=Decimal("13.8")),
+    # 2026-27 figures per ZP-TAX-UK-2026-27-001 section 9.1 (Category A).
+    "national-insurance": Rate(employee_rate_pct=Decimal("8"), employer_rate_pct=Decimal("15")),
     "employer-pension": Rate(employer_rate_pct=Decimal("3")),
 }
 UK_SLABS = [Slab(Decimal("0"), Decimal("37700"), Decimal("20")), Slab(Decimal("37700"), None, Decimal("40"))]
@@ -540,15 +541,15 @@ def test_uk_nt_code_means_zero_annual_tax():
 # ── UK production refactor: NI category bands (regression guard) ───────
 
 _NI_CAT_A_BANDS = [
-    Slab(Decimal("0"), Decimal("9100"), Decimal("0"), rule_type="NI_BAND"),
-    Slab(Decimal("9100"), Decimal("12570"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("0"), Decimal("5000"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("5000"), Decimal("12570"), Decimal("0"), rule_type="NI_BAND"),
     Slab(Decimal("12570"), Decimal("50270"), Decimal("8"), rule_type="NI_BAND"),
     Slab(Decimal("50270"), None, Decimal("2"), rule_type="NI_BAND"),
 ]
 # employer_rate_pct/ni_category are not Slab dataclass fields (kept
 # engine-only rather than editing the shared test dataclass used by every
 # other country's tests) -- set via setattr to mirror the live-DB row shape.
-for _band, _empr in zip(_NI_CAT_A_BANDS, [Decimal("0"), Decimal("13.8"), Decimal("13.8"), Decimal("13.8")]):
+for _band, _empr in zip(_NI_CAT_A_BANDS, [Decimal("0"), Decimal("15"), Decimal("15"), Decimal("15")]):
     _band.employer_rate_pct = _empr
     _band.ni_category = "A"
 
@@ -577,7 +578,7 @@ def test_resolve_ni_bands_filters_by_category_and_sorts():
     all_slabs = _NI_CAT_A_BANDS + [other_category]
     bands = _resolve_ni_bands(all_slabs, "A")
     assert len(bands) == 4
-    assert [b.min_amount for b in bands] == [Decimal("0"), Decimal("9100"), Decimal("12570"), Decimal("50270")]
+    assert [b.min_amount for b in bands] == [Decimal("0"), Decimal("5000"), Decimal("12570"), Decimal("50270")]
 
 
 def test_calculate_ni_from_bands_matches_hand_calculation():
@@ -585,8 +586,8 @@ def test_calculate_ni_from_bands_matches_hand_calculation():
     employee_annual, employer_annual = _calculate_ni_from_bands(annual_gross, _NI_CAT_A_BANDS)
     # Employee: (50270-12570)*8% + (60000-50270)*2% = 3016 + 194.60 = 3210.60
     assert employee_annual == Decimal("3210.60")
-    # Employer: (60000-9100)*13.8% = 7024.20
-    assert employer_annual == Decimal("7024.20")
+    # Employer: (60000-5000)*15% = 8250.00
+    assert employer_annual == Decimal("8250.00")
 
 
 # ── UK production refactor: pension (employee + employer, basis-aware) ──
@@ -657,3 +658,191 @@ def test_uk_pay_frequency_defaults_to_monthly_when_unset():
     unset = calc("UK", 5000, UK_RATES, UK_SLABS)
     assert explicit_monthly.tds == unset.tds
     assert explicit_monthly.ni_employee == unset.ni_employee
+
+
+# ── ZP-TAX-UK-2026-27-001 gap closure: tax-code region prefix ───────────
+
+def test_tax_code_scottish_prefix_detected_and_allowance_still_parsed():
+    result = interpret_tax_code("S1257L", Decimal("12570"))
+    assert result["region_prefix"] == "S"
+    assert result["personal_allowance"] == Decimal("12570")
+
+
+def test_tax_code_welsh_prefix_detected_and_allowance_still_parsed():
+    result = interpret_tax_code("C1257L", Decimal("12570"))
+    assert result["region_prefix"] == "C"
+    assert result["personal_allowance"] == Decimal("12570")
+
+
+def test_tax_code_plain_code_has_no_region_prefix():
+    assert interpret_tax_code("1257L", Decimal("12570"))["region_prefix"] is None
+
+
+def test_tax_code_nt_never_carries_a_region_prefix():
+    # Section 6.1: "NT is not given S/C prefix; treat as UK-wide code."
+    assert interpret_tax_code("NT", Decimal("12570"))["region_prefix"] is None
+
+
+def test_tax_code_scottish_k_code_prefix_and_allowance_both_parsed():
+    result = interpret_tax_code("SK475", Decimal("12570"))
+    assert result["region_prefix"] == "S"
+    assert result["personal_allowance"] == Decimal("-4750")
+
+
+def test_tax_code_0t_zero_allowance_no_flat_rate():
+    result = interpret_tax_code("0T", Decimal("12570"))
+    assert result["personal_allowance"] == Decimal("0")
+    assert result["flat_rate_pct"] is None
+    assert result["region_prefix"] is None
+
+
+def test_tax_code_c0t_zero_allowance_with_welsh_prefix():
+    result = interpret_tax_code("C0T", Decimal("12570"))
+    assert result["personal_allowance"] == Decimal("0")
+    assert result["region_prefix"] == "C"
+
+
+# ── ZP-TAX-UK-2026-27-001 section 6.3: special single-rate code families ──
+
+def test_tax_code_sbr_is_flat_20pct_with_scottish_prefix():
+    result = interpret_tax_code("SBR", Decimal("12570"))
+    assert result["flat_rate_pct"] == Decimal("20")
+    assert result["region_prefix"] == "S"
+
+
+def test_tax_code_sd0_is_flat_21pct_scottish_intermediate():
+    # Distinct from rUK's D0 (40%) -- confirms the full code, not the
+    # stripped body, is what selects the rate.
+    result = interpret_tax_code("SD0", Decimal("12570"))
+    assert result["flat_rate_pct"] == Decimal("21")
+    assert result["region_prefix"] == "S"
+
+
+def test_tax_code_sd1_is_flat_42pct_scottish_higher():
+    assert interpret_tax_code("SD1", Decimal("12570"))["flat_rate_pct"] == Decimal("42")
+
+
+def test_tax_code_sd2_is_flat_45pct_scottish_advanced():
+    assert interpret_tax_code("SD2", Decimal("12570"))["flat_rate_pct"] == Decimal("45")
+
+
+def test_tax_code_sd3_is_flat_48pct_scottish_top():
+    assert interpret_tax_code("SD3", Decimal("12570"))["flat_rate_pct"] == Decimal("48")
+
+
+def test_tax_code_cbr_is_flat_20pct_with_welsh_prefix():
+    result = interpret_tax_code("CBR", Decimal("12570"))
+    assert result["flat_rate_pct"] == Decimal("20")
+    assert result["region_prefix"] == "C"
+
+
+def test_tax_code_cd0_is_flat_40pct():
+    assert interpret_tax_code("CD0", Decimal("12570"))["flat_rate_pct"] == Decimal("40")
+
+
+def test_tax_code_cd1_is_flat_45pct():
+    assert interpret_tax_code("CD1", Decimal("12570"))["flat_rate_pct"] == Decimal("45")
+
+
+# ── ZP-TAX-UK-2026-27-001 section 10.1: corrected 2026-27 thresholds ─────
+
+def test_uk_student_loan_plan1_2026_27_threshold_is_26900():
+    from app.modules.payroll.engine.countries.uk import _UK_STUDENT_LOAN_PLANS
+    assert _UK_STUDENT_LOAN_PLANS["UK_PLAN1"][0] == Decimal("26900")
+
+
+def test_uk_student_loan_plan2_2026_27_threshold_is_29385():
+    from app.modules.payroll.engine.countries.uk import _UK_STUDENT_LOAN_PLANS
+    assert _UK_STUDENT_LOAN_PLANS["UK_PLAN2"][0] == Decimal("29385")
+
+
+def test_uk_student_loan_plan4_2026_27_threshold_is_33795():
+    from app.modules.payroll.engine.countries.uk import _UK_STUDENT_LOAN_PLANS
+    assert _UK_STUDENT_LOAN_PLANS["UK_PLAN4"][0] == Decimal("33795")
+
+
+def test_uk_student_loan_plan4_threshold_now_configurable():
+    # Section 10.1 -- Plan 4 previously had no ContributionRate override
+    # key at all; sl_plan4_thresh closes that gap.
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN4", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "sl_plan4_thresh": Rate(flat_amount=Decimal("10000"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_PLAN4", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+# ── ZP-TAX-UK-2026-27-001 section 22.2: official reference NIC vectors ───
+# Weekly earnings £1,000, using the doc's own worked examples (not
+# hand-derived) -- proves the corrected ST=£5,000/employer-15% defaults
+# against an authoritative external result, not just internal consistency.
+
+_CAT_A_WEEKLY_BANDS = [
+    Slab(Decimal("0"), Decimal("96"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("96"), Decimal("242"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("242"), Decimal("967"), Decimal("8"), rule_type="NI_BAND"),
+    Slab(Decimal("967"), None, Decimal("2"), rule_type="NI_BAND"),
+]
+for _b, _er in zip(_CAT_A_WEEKLY_BANDS, [Decimal("0"), Decimal("15"), Decimal("15"), Decimal("15")]):
+    _b.employer_rate_pct = _er
+    _b.ni_category = "A"
+
+
+def test_reference_vector_category_a_weekly_1000():
+    employee_annual, employer_annual = _calculate_ni_from_bands(Decimal("1000"), _CAT_A_WEEKLY_BANDS)
+    assert employee_annual == Decimal("58.66")
+    assert employer_annual == Decimal("135.60")
+
+
+_CAT_M_WEEKLY_BANDS = [
+    Slab(Decimal("0"), Decimal("242"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("242"), Decimal("967"), Decimal("8"), rule_type="NI_BAND"),
+    Slab(Decimal("967"), None, Decimal("2"), rule_type="NI_BAND"),
+]
+for _b, _er in zip(_CAT_M_WEEKLY_BANDS, [Decimal("0"), Decimal("0"), Decimal("15")]):
+    _b.employer_rate_pct = _er
+    _b.ni_category = "M"
+
+
+def test_reference_vector_category_m_weekly_1000():
+    employee_annual, employer_annual = _calculate_ni_from_bands(Decimal("1000"), _CAT_M_WEEKLY_BANDS)
+    assert employee_annual == Decimal("58.66")
+    assert employer_annual == Decimal("4.95")
+
+
+_CAT_C_WEEKLY_BANDS = [
+    Slab(Decimal("0"), Decimal("96"), Decimal("0"), rule_type="NI_BAND"),
+    Slab(Decimal("96"), None, Decimal("0"), rule_type="NI_BAND"),
+]
+for _b, _er in zip(_CAT_C_WEEKLY_BANDS, [Decimal("0"), Decimal("15")]):
+    _b.employer_rate_pct = _er
+    _b.ni_category = "C"
+
+
+def test_reference_vector_category_c_weekly_1000():
+    employee_annual, employer_annual = _calculate_ni_from_bands(Decimal("1000"), _CAT_C_WEEKLY_BANDS)
+    assert employee_annual == Decimal("0")
+    assert employer_annual == Decimal("135.60")
+
+
+# ── ZP-TAX-UK-2026-27-001 AC-04: tax-code prefix beats work_state ────────
+
+def test_region_resolution_prefers_tax_code_prefix_over_work_state():
+    from app.modules.payroll.service import _resolve_uk_sub_jurisdiction_with_source
+    # Employee's own worksite says England, but their HMRC code says
+    # Scotland -- the code must win (the doc's non-negotiable control).
+    sub_jurisdiction, source = _resolve_uk_sub_jurisdiction_with_source("S1257L", "England")
+    assert sub_jurisdiction == "Scotland"
+    assert source == "TAX_CODE_PREFIX"
+
+
+def test_region_resolution_falls_back_to_work_state_without_a_code():
+    from app.modules.payroll.service import _resolve_uk_sub_jurisdiction_with_source
+    sub_jurisdiction, source = _resolve_uk_sub_jurisdiction_with_source(None, "Scotland")
+    assert sub_jurisdiction == "Scotland"
+    assert source == "WORK_STATE_FALLBACK"
+
+
+def test_region_resolution_welsh_prefix_overrides_english_work_state():
+    from app.modules.payroll.service import _resolve_uk_sub_jurisdiction_with_source
+    sub_jurisdiction, source = _resolve_uk_sub_jurisdiction_with_source("C1257L", "England")
+    assert sub_jurisdiction == "Wales"
+    assert source == "TAX_CODE_PREFIX"

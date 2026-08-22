@@ -160,12 +160,12 @@ function SidebarContent({ onNavigate, role, collapsed, onToggleCollapse, closeBu
       <div className={`mb-5 flex items-center gap-3 ${collapsed ? "flex-col" : "justify-between"}`}>
         {collapsed ? (
           <Link to="/payroll" onClick={onNavigate} className="flex h-9 w-9 items-center justify-center">
-            <img src="/zoikopayroll-icon.png" alt="Zoiko Payroll" className="h-9 w-9 rounded-xl object-contain" />
+            <img src="/zoikopayroll-icon-light.png" alt="Zoiko Payroll" className="h-9 w-9 object-contain" />
           </Link>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <Link to="/payroll" onClick={onNavigate} className="inline-flex w-fit rounded-lg bg-white px-3 py-2.5">
-              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-11 w-auto object-contain" />
+            <Link to="/payroll" onClick={onNavigate} className="inline-flex w-fit">
+              <img src="/zoikopayroll-logo-light.png" alt="Zoiko Payroll" className="h-10 w-auto max-w-[180px] object-contain" />
             </Link>
             {ROLE_LABELS[role] ? (
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">{ROLE_LABELS[role]}</p>
