@@ -32,5 +32,9 @@ certifi>=2024.2.2
 # app/modules/assist/scheduler.py.
 apscheduler>=3.10.4
 
+# Cloud Storage uploads (compliance documents, org logos) — see
+# app/core/object_storage.py. Only imported when PAYROLL_GCS_BUCKET is set.
+google-cloud-storage>=2.14.0
+
 # Tests (backend/tests/) — payroll tax engine boundary/regression coverage.
 pytest>=8.0.0

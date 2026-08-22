@@ -67,29 +67,34 @@ def list_jurisdiction_tax_schemas():
         "schemas": JURISDICTION_TAX_SCHEMAS,
     }
 
-# Local-disk storage, mirroring the existing pattern already used for
-# Compliance document uploads (see payroll/service.py _COMPLIANCE_DOC_UPLOAD_DIR)
-# — only the file path is stored on the Organization row; bytes never touch the DB.
-_ORG_LOGO_UPLOAD_DIR = os.environ.get(
-    "PAYROLL_ORG_LOGO_UPLOAD_DIR",
-    os.path.join(os.environ.get("UPLOAD_BASE_DIR", "/tmp/uploads"), "organization_logos"),
-)
+# Upload storage goes through the object-storage abstraction (Cloud Storage
+# in production, local disk under UPLOAD_BASE_DIR in dev) — only the
+# reference is stored on the Organization row; bytes never touch the DB.
+_LOGO_SUBDIR = "organization_logos"
 _LOGO_ALLOWED_MIME = {"image/jpeg", "image/jpg", "image/svg+xml"}
 _LOGO_ALLOWED_EXT = {".jpg", ".jpeg", ".svg"}
 _LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
 
 
-def _read_logo_data_uri(logo_path: str | None) -> str | None:
+def _read_logo_data_uri(logo_ref: str | None) -> str | None:
     """Reused by every response that includes an org's logo, so the frontend
     can just drop it straight into an <img src> — no separate authenticated
     image route needed. Safe for SVGs too: browsers never execute script
     content inside an SVG loaded via <img src>, only inline/object-embedded SVGs."""
-    if not logo_path or not os.path.isfile(logo_path):
+    if not logo_ref:
         return None
-    ext = os.path.splitext(logo_path)[1].lower()
+    from app.core import object_storage
+
+    try:
+        data = object_storage.read_bytes(logo_ref)
+    except Exception as exc:
+        # Missing/removed upload → render without logo rather than 500-ing
+        # the whole org page. GCS NotFound has no FileNotFoundError twin.
+        logger.warning("Could not load org logo %s: %s", logo_ref, exc)
+        return None
+    ext = os.path.splitext(logo_ref)[1].lower()
     mime = "image/svg+xml" if ext == ".svg" else "image/jpeg"
-    with open(logo_path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode("ascii")
+    encoded = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{encoded}"
 
 
@@ -150,18 +155,21 @@ async def upload_my_organization_logo(
     if len(contents) > _LOGO_MAX_BYTES:
         raise BadRequestException("Logo must be smaller than 2 MB.")
 
-    os.makedirs(_ORG_LOGO_UPLOAD_DIR, exist_ok=True)
-    new_path = os.path.join(_ORG_LOGO_UPLOAD_DIR, f"{uuid.uuid4().hex}{ext}")
-    with open(new_path, "wb") as f:
-        f.write(contents)
+    from app.core import object_storage
 
-    old_path = org.logo_path
-    org.logo_path = new_path
+    new_ref = object_storage.save_upload(
+        subdir=_LOGO_SUBDIR,
+        filename=f"{uuid.uuid4().hex}{ext}",
+        data=contents,
+    )
+
+    old_ref = org.logo_path
+    org.logo_path = new_ref
     db.commit()
     db.refresh(org)
 
-    if old_path and os.path.isfile(old_path):
-        os.remove(old_path)
+    if old_ref:
+        object_storage.delete_ref(old_ref)
 
     return get_my_organization_detail(current_user=current_user, db=db)
 
