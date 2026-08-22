@@ -5421,6 +5421,9 @@ def get_attendance_summary(db: Session, organization_id: int) -> dict:
 
 # ── Compliance Documents ────────────────────────────────────────────
 
+# Legacy local-disk location for compliance documents. Production stores
+# uploads in Cloud Storage via app/core/object_storage.py; this constant is
+# kept only so old local-dev rows/paths still resolve.
 _COMPLIANCE_DOC_UPLOAD_DIR = _os.environ.get(
     "PAYROLL_COMPLIANCE_DOC_UPLOAD_DIR",
     os.path.join(_os.environ.get("UPLOAD_BASE_DIR", "/tmp/uploads"), "payroll_compliance_documents"),
@@ -5440,6 +5443,8 @@ def list_compliance_documents(
 
 
 def delete_compliance_document(db: Session, document_id: int, organization_id: int) -> None:
+    from app.core.object_storage import delete_ref
+
     doc = db.query(ComplianceDocument).filter(
         ComplianceDocument.id == document_id,
         ComplianceDocument.organization_id == organization_id,
@@ -5447,25 +5452,26 @@ def delete_compliance_document(db: Session, document_id: int, organization_id: i
     if not doc:
         raise NotFoundException("Compliance document", document_id)
 
-    if _os.path.exists(doc.file_path):
-        _os.remove(doc.file_path)
+    delete_ref(doc.file_path)
 
     db.delete(doc)
     db.commit()
     log_activity(db, organization_id, f"Compliance document '{doc.title}' deleted.", ActivityStatus.INFO)
 
 
-def _ocr_image_file(file_path: str) -> str:
+def _ocr_image_file(image_data: bytes) -> str:
     # NOTE: previously this caught every exception (including a missing
     # `pytesseract`/`PIL` package or a missing system `tesseract` binary)
     # and returned "", which was indistinguishable from "OCR ran and found
     # no statutory rates in the image." Letting it raise means
     # upload_compliance_document() now records a real "failed" status +
     # error message instead of silently pretending extraction succeeded.
+    import io as _io
+
     from PIL import Image  # type: ignore
     import pytesseract  # type: ignore
 
-    image = Image.open(file_path)
+    image = Image.open(_io.BytesIO(image_data))
     try:
         text = pytesseract.image_to_string(image)
     finally:
@@ -5473,23 +5479,30 @@ def _ocr_image_file(file_path: str) -> str:
     return text or ""
 
 
-def _extract_text_from_uploaded_document(file_path: str) -> str:
-    if not file_path:
+def _extract_text_from_uploaded_document(file_ref: str) -> str:
+    """Extract raw text from a stored upload. `file_ref` is whatever the
+    DB row holds — a gs:// Cloud Storage URI (production) or a local path
+    (dev/tests); both resolve to bytes via the object-storage layer."""
+    if not file_ref:
         return ""
 
-    ext = _os.path.splitext(file_path)[1].lower()
+    from app.core.object_storage import read_bytes
+
+    data = read_bytes(file_ref)
+
+    ext = _os.path.splitext(file_ref)[1].lower()
     if ext == ".txt":
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
-            return fh.read()
+        return data.decode("utf-8", errors="ignore")
     if ext == ".csv":
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
-            return fh.read()
+        return data.decode("utf-8", errors="ignore")
     if ext in {".pdf"}:
+        import io as _io
+
         import pypdf  # type: ignore
-        reader = pypdf.PdfReader(file_path)
+        reader = pypdf.PdfReader(_io.BytesIO(data))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     if ext in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
-        return _ocr_image_file(file_path)
+        return _ocr_image_file(data)
     return ""
 
 
@@ -5822,8 +5835,6 @@ def upload_compliance_document(
     document_type: Optional[str] = None,
     uploaded_by: Optional[int] = None,
 ) -> ComplianceDocument:
-    _os.makedirs(_COMPLIANCE_DOC_UPLOAD_DIR, exist_ok=True)
-
     doc = ComplianceDocument(
         organization_id=organization_id,
         title=title,
