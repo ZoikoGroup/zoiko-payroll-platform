@@ -100,4 +100,9 @@ class SecurityActionToken(Base):
     token_hash = Column(String(64), unique=True, index=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
+    # §04 supersession: set when a newer token for the same email+purpose is
+    # issued. A superseded token can never be consumed or validated.
+    superseded_at = Column(DateTime, nullable=True)
+    # §04 idempotency key: tenant|event|recipient|template|material version.
+    idempotency_key = Column(String(160), index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
