@@ -430,6 +430,35 @@ def create_organization(
     db.commit()
     db.refresh(org)
     logger.info("Super Admin %s created organization %s (%s)", current_user.email, org.organization_name, code)
+
+    try:
+        from app.services.email_service import (
+            send_organization_created_email,
+            send_super_admin_org_created_notification_email,
+        )
+        if org.email:
+            ref_id = f"ORG-{org.id:04d}-INIT"
+            send_organization_created_email(
+                email=org.email,
+                recipient_first_name="Admin",
+                organization_name=org.organization_name,
+                reference_id=ref_id,
+                organization_id=org.id,
+                db=db,
+            )
+            logger.info(
+                "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
+                org.email, org.id, ref_id,
+            )
+        # Notify Super Admins of the new organization created
+        send_super_admin_org_created_notification_email(
+            org=org,
+            reference_id=f"ADM-ORG-{org.id:04d}",
+            db=db,
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch org creation notification emails for org %s: %s", org.id, exc)
+
     return org
 
 
