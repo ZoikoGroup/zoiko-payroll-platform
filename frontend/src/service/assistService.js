@@ -157,7 +157,8 @@ export const stopAssistResponse = async (responseId) => {
 
 // ── Drafts / handoffs ──────────────────────────────────────────────────
 export const createAssistHandoffPreview = async ({
-  destination, reason_code, summary, included_evidence_ids, excluded_data_classes, source_response_id,
+  destination, reason_code, summary, included_evidence_ids, excluded_data_classes,
+  source_response_id, source_session_id,
 }) => {
   return api.post("/api/assist/handoff-previews", {
     destination,
@@ -166,6 +167,7 @@ export const createAssistHandoffPreview = async ({
     included_evidence_ids: included_evidence_ids || [],
     excluded_data_classes: excluded_data_classes || [],
     source_response_id: source_response_id ?? null,
+    source_session_id: source_session_id ?? null,
   });
 };
 
@@ -254,4 +256,20 @@ export const publishAssistKbItem = async (itemId, { reviewer_notes } = {}) => {
 export const listAssistKbSources = async () => {
   const data = await api.get("/api/assist/knowledge/sources");
   return data || [];
+};
+
+// ── Public (unauthenticated / website) mode ────────────────────────────
+// Never attaches a bearer token, even if one happens to be in localStorage
+// (e.g. an admin has the authenticated app open in another tab on the same
+// origin) — anonymous visitors must never be treated as a logged-in user.
+export const createPublicAssistSession = async ({ locale = "en" } = {}) => {
+  return api.post("/api/assist/public/sessions", { locale }, { auth: false });
+};
+
+export const submitPublicAssistMessage = async (sessionId, text) => {
+  return api.post(`/api/assist/public/sessions/${sessionId}/messages`, { text }, { auth: false });
+};
+
+export const listPublicAssistMessages = async (sessionId) => {
+  return api.get(`/api/assist/public/sessions/${sessionId}/messages`, { auth: false });
 };

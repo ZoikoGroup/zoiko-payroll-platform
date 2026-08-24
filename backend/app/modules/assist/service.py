@@ -1097,6 +1097,31 @@ def delete_draft(db, org_id, user, draft_id) -> None:
 HANDOFF_COOLDOWN_HOURS = 24
 
 
+def _resolve_source_session_id(db, org_id, payload: dict):
+    """A preview can be attached to a session either directly
+    (source_session_id — e.g. "escalate this conversation") or via a specific
+    response (source_response_id), in which case we resolve that response's
+    own session_id rather than ever treating a response id as a session id —
+    the two are different tables with different id sequences, so passing one
+    where the other is expected either violates the session_id foreign key or,
+    worse, silently attaches the record to an unrelated session that happens
+    to share the same numeric id."""
+    session_id = payload.get("source_session_id")
+    if session_id is not None:
+        return session_id
+    response_id = payload.get("source_response_id")
+    if response_id is None:
+        return None
+    response = (
+        db.query(AssistResponse)
+        .filter(AssistResponse.id == response_id, AssistResponse.organization_id == org_id)
+        .first()
+    )
+    if response is None:
+        raise BadRequestException(f"source_response_id {response_id} does not refer to a valid response.")
+    return response.session_id
+
+
 def _recent_handoff(db, org_id, user_id) -> AssistHandoff | None:
     """Most recent handoff this user raised in this org, if within the
     cooldown window — None once 24h have passed, so a genuinely new request
@@ -1130,7 +1155,7 @@ def create_handoff_preview(db, org_id, user, payload: dict) -> AssistHandoffPrev
     preview = AssistHandoffPreview(
         organization_id=org_id,
         user_id=user.id,
-        session_id=payload.get("source_session_id"),
+        session_id=_resolve_source_session_id(db, org_id, payload),
         destination=payload["destination"],
         reason_code=payload["reason_code"],
         summary=payload["summary"],
@@ -1283,17 +1308,19 @@ def create_action_preview(db, org_id, user, payload: dict, idempotency_key: str 
     if payload.get("target", {}).get("type") in ("PAYROLL_RUN", "PAYROLL_EXCEPTION") and tool["risk_tier"] == "A3":
         pass
 
+    resolved_session_id = _resolve_source_session_id(db, org_id, payload)
+
     def _build():
         target = payload["target"]
         preview_result = tool["preview"](
-            db, org_id, payload.get("source_session_id"), user, target, payload.get("arguments") or {}
+            db, org_id, resolved_session_id, user, target, payload.get("arguments") or {}
         )
         if "error" in preview_result:
             raise BadRequestException(preview_result["error"])
         preview = AssistActionPreview(
             organization_id=org_id,
             user_id=user.id,
-            session_id=payload.get("source_session_id"),
+            session_id=resolved_session_id,
             action_id=action_id,
             risk_tier=tool["risk_tier"],
             target_type=preview_result["target"]["type"],
@@ -1309,7 +1336,7 @@ def create_action_preview(db, org_id, user, payload: dict, idempotency_key: str 
         db.add(preview)
         db.flush()
         _audit(
-            db, org_id, user, payload.get("source_session_id"), "assist.action_previewed",
+            db, org_id, user, resolved_session_id, "assist.action_previewed",
             {"preview_id": preview.id, "action_id": action_id},
         )
         db.commit()

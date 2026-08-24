@@ -728,7 +728,6 @@ def create_handoff_preview(
     org_id: int = Depends(get_organization_id),
 ):
     service_payload = payload.model_dump()
-    service_payload["source_session_id"] = payload.source_response_id
     return _handoff_preview_payload(service.create_handoff_preview(db, org_id, current_user, service_payload))
 
 
@@ -825,7 +824,6 @@ def create_action_preview(
     org_id: int = Depends(get_organization_id),
 ):
     service_payload = payload.model_dump()
-    service_payload["source_session_id"] = payload.source_response_id
     return service.create_action_preview(db, org_id, current_user, service_payload, idempotency_key=idempotency_key)
 
 

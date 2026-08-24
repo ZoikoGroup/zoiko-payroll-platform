@@ -714,3 +714,40 @@ class AssistKbItem(Base):
     __table_args__ = (
         Index("ix_assist_kb_org_state", "organization_id", "state"),
     )
+
+
+# ── Public (unauthenticated) website widget ─────────────────────────────
+# Deliberately separate from AssistSession/AssistMessage rather than making
+# organization_id/user_id nullable there — anonymous marketing-site traffic
+# has no organization or user at all, and keeping it in its own tables means
+# it can never end up entangled with real customer session data even by
+# accident. No context binding, no jurisdiction codes, no retention class:
+# this surface only ever answers from the global (organization_id IS NULL)
+# knowledge base, so none of that authenticated-session machinery applies.
+
+class AssistPublicSession(Base):
+    __tablename__ = "assist_public_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String(64), nullable=True)
+    locale = Column(String(20), default="en", nullable=False)
+    message_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    messages = relationship("AssistPublicMessage", back_populates="session", cascade="all, delete-orphan")
+
+
+class AssistPublicMessage(Base):
+    __tablename__ = "assist_public_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("assist_public_sessions.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("AssistPublicSession", back_populates="messages")
+
+    __table_args__ = (
+        Index("ix_assist_public_messages_session", "session_id", "created_at"),
+    )

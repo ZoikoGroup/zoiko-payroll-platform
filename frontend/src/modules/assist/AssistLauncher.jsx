@@ -316,7 +316,7 @@ function HandoffPanel({ sessionId, onClose }) {
         destination,
         reason_code: reasonCode,
         summary: summary.trim(),
-        source_response_id: null,
+        source_session_id: sessionId ?? null,
       });
       setPreview(result);
       setState("preview");
