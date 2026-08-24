@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Zoiko Payroll organization has been created</title>
+</head>
+<body style="margin:0; padding:0; background:#020617; font-family:Arial,Helvetica,sans-serif;">
+  <!-- Preheader (§10): verbatim, hidden from visible body -->
+  <div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; color:#020617;">Complete administrative and security setup.</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#020617; padding:24px 12px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%; background:#0f172a; border:1px solid #1e293b; border-radius:12px;">
+
+        <!-- Header branding -->
+        <tr><td style="padding:28px 32px 22px 32px; border-bottom:1px solid #1e293b;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td align="left" style="font-size:0; line-height:0;">
+              {{#if logo_url}}<a href="{{frontend_url}}" target="_blank" style="text-decoration:none;"><img src="{{logo_url}}" alt="Zoiko Payroll" height="34" style="height:34px; width:auto; display:block; border:0;"></a>{{/if}}
+            </td>
+            <td align="right" valign="middle" style="font-family:'Courier New',monospace; font-size:11px; color:#818cf8; background:#1e1b4b; border:1px solid #3730a3; border-radius:9999px; padding:4px 10px;">Setup Required</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Body (COM-001) -->
+        <tr><td style="padding:28px 32px 8px 32px;">
+          <h1 style="color:#ffffff; font-size:20px; font-weight:bold; margin:0 0 16px 0;">Your Zoiko Payroll organization has been created</h1>
+          <p style="color:#e2e8f0; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Hello {{recipient_first_name}},</p>
+          <p style="color:#cbd5e1; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+            The Zoiko Payroll organization for <span style="color:#ffffff; font-weight:bold;">{{organization_name}}</span> is ready for initial configuration.
+          </p>
+          <p style="color:#cbd5e1; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+            Production payroll remains blocked until required readiness controls — including administrator setup, security configuration and role assignment — are complete. No payroll or employee data has been loaded as part of this step.
+          </p>
+        </td></tr>
+
+        <!-- Primary CTA: single button -->
+        <tr><td style="padding:18px 32px 8px 32px;" align="center">
+          <a href="{{action_url}}" style="display:inline-block; background:#4f46e5; color:#ffffff; font-size:14px; font-weight:bold; text-decoration:none; padding:13px 28px; border-radius:8px;">Begin organization setup</a>
+        </td></tr>
+
+        <!-- Secondary guidance -->
+        <tr><td style="padding:12px 32px;">
+          <div style="background:#020617; border:1px solid #1e293b; border-radius:8px; padding:14px 16px;">
+            <p style="color:#94a3b8; font-size:12px; line-height:1.6; margin:0;">
+              <strong style="color:#cbd5e1;">Secondary guidance:</strong> Complete security settings (multifactor authentication, recovery options) before inviting additional administrators or users.
+            </p>
+          </div>
+        </td></tr>
+
+        <!-- Reference block -->
+        <tr><td style="padding:16px 32px 0 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#020617; border:1px solid #1e293b; border-radius:8px;"><tr>
+            <td style="padding:10px 14px; color:#94a3b8; font-size:11px;">Reference Code</td>
+            <td align="right" style="padding:10px 14px; font-family:'Courier New',monospace; font-size:11px; color:#cbd5e1; background:#1e293b; border-radius:6px;">{{reference_id}}</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Security disclaimer: shared partial injected as {{security_advisory_block}} (§10, no duplication) -->
+        <tr><td style="padding:16px 32px 24px 32px;">
+          {{security_advisory_block}}
+        </td></tr>
+
+        <!-- Approved support and legal footer -->
+        <tr><td style="padding:18px 32px; background:#020617; border-top:1px solid #1e293b; text-align:center;">
+          <p style="color:#64748b; font-size:11px; line-height:1.6; margin:0;">&copy; 2026 Zoiko Payroll Inc. &bull; 100 Corporate Blvd, Suite 400 &bull; Privacy Policy &bull; Terms of Service</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

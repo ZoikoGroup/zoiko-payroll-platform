@@ -129,15 +129,17 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
       <div className={`mb-5 flex items-center gap-3 ${collapsed ? "flex-col" : "justify-between"}`}>
         {collapsed ? (
           <img
-            src="/zoikopayroll-icon.png"
+            src="/zoikopayroll-icon-light.png"
             alt="Zoiko Payroll"
-            className="h-9 w-9 rounded-xl object-contain"
+            className="h-9 w-9 shrink-0 object-contain transition-all duration-200"
           />
         ) : (
-          <div className="flex flex-col gap-1.5">
-            <div className="inline-flex w-fit rounded-lg bg-white px-3 py-2.5">
-              <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-11 w-auto object-contain" />
-            </div>
+          <div className="flex flex-col gap-2">
+            <img
+              src="/zoikopayroll-logo-light.png"
+              alt="Zoiko Payroll"
+              className="h-10 w-auto max-w-[180px] object-contain transition-all duration-200"
+            />
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">Super Admin</p>
           </div>
         )}

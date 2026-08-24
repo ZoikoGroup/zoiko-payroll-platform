@@ -23,7 +23,9 @@ from datetime import date
 from app.modules.payroll import service
 from app.modules.payroll.models import (
     ContributionRate, TaxSlab, PayrollEmployee, PayrollRun, PayslipItem, JurisdictionPack,
+    CompanyComplianceDetails,
 )
+from app.modules.payroll.schemas import EmployeeCreate
 
 
 def _make_rate(country, component_key, organization_id=None, state=None, flat_amount=None, rate_pct=None, tax_regime=None):
@@ -342,6 +344,181 @@ def test_pt_bracket_absent_falls_back_to_flat_rate_for_other_states(db, organiza
     assert items[emp_high.id].professional_tax == Decimal("200")
 
 
+# ── _find_active_tax_pack must not let a PT-only state pack silently ────
+# ── replace the country's real income-tax slabs (a real, live bug) ─────
+
+def test_state_pack_with_only_pt_slabs_does_not_override_country_income_tax(db):
+    # A state-scoped pack built solely to hold Professional Tax brackets
+    # (PT_FLAT, resolved separately/additively via get_state_scoped_config)
+    # must NOT win _find_active_tax_pack's state match for income-tax
+    # purposes — otherwise the country's real MARGINAL_RATE bands get
+    # replaced by a set of 0%-rate PT rows, zeroing income tax for every
+    # employee in that state regardless of salary. This reproduces the
+    # exact live shape (Telangana's IN-PT-TG-2026-V1 pack) found on a real
+    # organization.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    national_pack = _make_active_tax_pack(db, "IN", pack_id="NATIONAL-PACK")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="IN", jurisdiction_state=None,
+        min_amount=Decimal("0"), max_amount=Decimal("400000"), rate_pct=Decimal("0"),
+        rate_label="Nil", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=national_pack.id,
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="IN", jurisdiction_state=None,
+        min_amount=Decimal("400000"), max_amount=None, rate_pct=Decimal("20"),
+        rate_label="20%", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=national_pack.id,
+    ))
+
+    tg_pack = _make_active_tax_pack(db, "IN", state="Telangana", pack_id="TG-PT-PACK")
+    pt_bracket = _make_pt_bracket("IN", "Telangana", Decimal("0"), None, Decimal("200"))
+    pt_bracket.jurisdiction_pack_id = tg_pack.id
+    db.add(pt_bracket)
+    db.commit()
+
+    rates, slabs, pack = resolve_tax_configuration(db, "IN", state="Telangana", tax_regime=None, payroll_date=date(2026, 1, 1))
+    assert pack.id == national_pack.id, "the PT-only Telangana pack must not win — country-level pack must resolve instead"
+    assert {s.rule_type for s in slabs} == {"MARGINAL_RATE"}
+
+
+def test_state_pack_with_real_income_tax_slabs_still_overrides_country_level(db):
+    # Regression guard for the fix above: a state pack that DOES hold real
+    # income-tax brackets (UK's Scotland, a US state) must still win the
+    # state match exactly as before — the fix only excludes PT_FLAT-only
+    # packs, not legitimate state-level income tax overrides.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    national_pack = _make_active_tax_pack(db, "UK", pack_id="UK-NATIONAL")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="UK", jurisdiction_state=None,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("20"),
+        rate_label="20%", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=national_pack.id,
+    ))
+
+    scotland_pack = _make_active_tax_pack(db, "UK", state="Scotland", pack_id="UK-SCOTLAND")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="UK", jurisdiction_state="Scotland",
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("19"),
+        rate_label="Starter 19%", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=scotland_pack.id,
+    ))
+    db.commit()
+
+    rates, slabs, pack = resolve_tax_configuration(db, "UK", state="Scotland", tax_regime=None, payroll_date=date(2026, 1, 1))
+    assert pack.id == scotland_pack.id
+    assert slabs[0].rate_pct == Decimal("19")
+
+
+def test_sync_org_rates_merges_country_income_tax_with_state_pt_brackets(db, organization):
+    # Reproduces the exact live bug found on Rughved_Group: a PT-only
+    # state pack (Telangana) means resolve_tax_configuration(state=...)
+    # correctly returns the COUNTRY pack (per the fix above) — so a naive
+    # single sync call would only ever write income-tax brackets OR PT
+    # brackets, never both, into the org's own cache (sync_org_rates_
+    # from_canonical does a full delete-then-recreate of the org's
+    # TaxSlab rows per call). One sync call must produce BOTH.
+    national_pack = _make_active_tax_pack(db, "IN", pack_id="NATIONAL-PACK-2")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="IN", jurisdiction_state=None,
+        min_amount=Decimal("0"), max_amount=Decimal("400000"), rate_pct=Decimal("0"),
+        rate_label="Nil", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=national_pack.id,
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="IN", jurisdiction_state=None,
+        min_amount=Decimal("400000"), max_amount=None, rate_pct=Decimal("20"),
+        rate_label="20%", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=national_pack.id,
+    ))
+    tg_pack = _make_active_tax_pack(db, "IN", state="Telangana", pack_id="TG-PT-PACK-2")
+    pt_bracket = _make_pt_bracket("IN", "Telangana", Decimal("0"), None, Decimal("200"))
+    pt_bracket.jurisdiction_pack_id = tg_pack.id
+    db.add(pt_bracket)
+    db.commit()
+
+    result = service.sync_org_rates_from_canonical(db, organization.id, "IN", state="Telangana", payroll_date=date(2026, 1, 1))
+    assert result["synced"] is True
+
+    org_slabs = db.query(TaxSlab).filter(TaxSlab.organization_id == organization.id, TaxSlab.jurisdiction_country == "IN").all()
+    rule_types = {s.rule_type for s in org_slabs}
+    assert "MARGINAL_RATE" in rule_types, "country income-tax brackets must survive the sync"
+    assert "PT_FLAT" in rule_types, "state PT brackets must also be present, not wiped out by the same sync call"
+
+
+def test_sync_org_rates_does_not_duplicate_a_state_packs_own_income_tax_slabs(db, organization):
+    # Regression guard for the fix above: when the STATE pack itself
+    # legitimately has real income-tax slabs (UK Scotland), the extra
+    # get_state_scoped_config layer must not duplicate what
+    # resolve_tax_configuration already returned.
+    national_pack = _make_active_tax_pack(db, "UK", pack_id="UK-NATIONAL-2")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="UK", jurisdiction_state=None,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("20"),
+        rate_label="20%", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=national_pack.id,
+    ))
+    scotland_pack = _make_active_tax_pack(db, "UK", state="Scotland", pack_id="UK-SCOTLAND-2")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="UK", jurisdiction_state="Scotland",
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("19"),
+        rate_label="Starter 19%", tax_formula="", rule_type="MARGINAL_RATE",
+        jurisdiction_pack_id=scotland_pack.id,
+    ))
+    db.commit()
+
+    result = service.sync_org_rates_from_canonical(db, organization.id, "UK", state="Scotland", payroll_date=date(2026, 1, 1))
+    assert result["synced"] is True
+
+    org_slabs = db.query(TaxSlab).filter(TaxSlab.organization_id == organization.id, TaxSlab.jurisdiction_country == "UK").all()
+    assert len(org_slabs) == 1
+    assert org_slabs[0].rate_pct == Decimal("19")
+
+
+# ── Org jurisdiction-state fallback (Venu/Rughved_Group real-world bug) ──
+
+def test_employee_with_no_work_state_falls_back_to_org_jurisdiction_state(db, organization):
+    # An employee who was never assigned a work_state must not silently
+    # get zero Professional Tax just because of that — the organization's
+    # own configured jurisdiction state (Company Details/Compliance) is a
+    # reasonable, real-world default: most employees work wherever the
+    # org itself is registered unless told otherwise.
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN", jurisdiction_state="Telangana"))
+    tg_pack = _make_active_tax_pack(db, "IN", state="Telangana", pack_id="TG-PT-FALLBACK")
+    high_bracket = _make_pt_bracket("IN", "Telangana", Decimal("15001"), Decimal("20000"), Decimal("150"))
+    high_bracket.jurisdiction_pack_id = tg_pack.id
+    db.add(high_bracket)
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "EMP-NO-STATE", work_state=None)
+    resolved = service._resolve_country_aware_state("IN", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "Telangana"
+
+
+def test_employee_with_own_work_state_is_not_overridden_by_org_fallback(db, organization):
+    # The org's jurisdiction state is a FALLBACK only — an employee's own
+    # explicitly-set work_state must always win.
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN", jurisdiction_state="Telangana"))
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "EMP-OWN-STATE", work_state="Karnataka")
+    resolved = service._resolve_country_aware_state("IN", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "Karnataka"
+
+
+def test_org_jurisdiction_state_fallback_ignored_for_a_different_country(db, organization):
+    # An org configured for India shouldn't hand a random state to a US
+    # employee just because the org has SOME jurisdiction_state on file.
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN", jurisdiction_state="Telangana"))
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "EMP-US", country="US", work_state=None)
+    resolved = service._resolve_country_aware_state("US", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved is None
+
+
 # ── Regime-aware resolution (Tax Parameters feature) ────────────────────
 
 def test_two_employees_different_regimes_resolve_distinct_canonical_rows(db, organization, monkeypatch):
@@ -375,3 +552,104 @@ def test_two_employees_different_regimes_resolve_distinct_canonical_rows(db, org
     # The regime-agnostic PF row must still apply to both employees.
     assert items[emp_new.id].pf > Decimal("0")
     assert items[emp_old.id].pf > Decimal("0")
+
+
+# ── UK: complianceFields -> dedicated-column mapping (the dead-plumbing fix) ─
+
+def test_uk_compliance_fields_map_onto_dedicated_columns_on_create(db, organization):
+    # Before FIELD_COLUMN_MAP existed, none of these ever reached
+    # PayrollEmployee.tax_code/ni_category/study_loan_plan/study_loan_balance
+    # — the columns engine/countries/uk.py actually reads — no matter what
+    # was submitted through complianceFields.
+    payload = EmployeeCreate(
+        name="Jane UK", employee_code="UK-E1", country_code="UK",
+        compliance_fields={
+            "nino": "AB123456C", "paye_tax_code": "1257L", "sort_code": "123456",
+            "ni_category": "A", "student_loan_plan": "Plan 2", "study_loan_balance": "15000",
+        },
+    )
+    employee = service.create_employee(db, payload, organization.id)
+
+    assert employee.tax_code == "1257L"
+    assert employee.ni_category == "A"
+    assert employee.study_loan_plan == "UK_PLAN2"
+    assert employee.study_loan_balance == Decimal("15000")
+    # The original compliance_fields values are untouched (still "Plan 2",
+    # not translated) — only the dedicated-column copy is mapped.
+    assert employee.compliance_fields["student_loan_plan"] == "Plan 2"
+
+
+def test_uk_compliance_fields_map_onto_dedicated_columns_on_update(db, organization):
+    from app.modules.payroll.schemas import EmployeeUpdate
+
+    employee = _make_employee(db, organization.id, "UK-E2", country="UK")
+    update = EmployeeUpdate(compliance_fields={
+        "nino": "AB123456C", "paye_tax_code": "BR", "sort_code": "123456",
+        "ni_category": "H", "student_loan_plan": "Postgraduate", "study_loan_balance": "8000",
+    })
+    updated = service.update_employee(db, employee.id, update, organization.id)
+
+    assert updated.tax_code == "BR"
+    assert updated.ni_category == "H"
+    assert updated.study_loan_plan == "UK_POSTGRAD"
+    assert updated.study_loan_balance == Decimal("8000")
+
+
+def test_non_uk_country_compliance_fields_do_not_touch_uk_columns(db, organization):
+    # INEmployeeValidation has no FIELD_COLUMN_MAP — sync_to_columns must
+    # be a complete no-op for it, not accidentally write into UK's columns.
+    payload = EmployeeCreate(
+        name="Priya IN", employee_code="IN-E1", country_code="IN",
+        compliance_fields={"esi_number": "1234567890"},
+    )
+    employee = service.create_employee(db, payload, organization.id)
+    assert employee.tax_code is None
+    assert employee.ni_category is None
+    assert employee.study_loan_plan is None
+
+
+# ── Section 9: preview / generation / manual payslip must never disagree ──
+
+def test_uk_scotland_consistent_across_preview_generation_and_manual_payslip(db, organization, monkeypatch):
+    from app.modules.payroll.schemas import PayslipItemCreate
+
+    _stub_business_code_generation(monkeypatch)
+    # Deliberately different flat rates so a wrong entry point is obvious
+    # rather than accidentally passing by coincidence.
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="UK", jurisdiction_state=None,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("20"),
+        rate_label="20%", tax_formula="",
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="UK", jurisdiction_state="Scotland",
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("40"),
+        rate_label="40%", tax_formula="",
+    ))
+    db.commit()
+
+    emp = _make_employee(db, organization.id, "UK-SCOT-1", country="UK", work_state="Scotland", ctc=Decimal("600000"))
+    # basic=25000, hra=10000, special=15000 -> gross=50000/month, matching
+    # _make_employee's ctc/2/0.2 split exactly, so the manual entry below
+    # (which takes these as explicit request fields) reconstructs the
+    # identical gross the other two entry points derive from ctc.
+
+    preview = service.preview_payroll_run(db, organization.id, [emp.id], country="UK")
+    preview_tax = Decimal(str(preview["employees"][0]["monthlyTax"]))
+
+    run1 = _make_run(db, organization.id, date(2026, 4, 6), date(2026, 5, 5), date(2026, 5, 6))
+    service.generate_payslips_for_run(db, run1, organization.id)
+    generated = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run1.id, PayslipItem.employee_id == emp.id,
+    ).first()
+
+    run2 = _make_run(db, organization.id, date(2026, 5, 6), date(2026, 6, 5), date(2026, 6, 6))
+    manual = service.add_payslip_item(db, run2.id, PayslipItemCreate(
+        employee_id=emp.id, basic_salary=Decimal("25000"), hra=Decimal("10000"), special_allowance=Decimal("15000"),
+    ), organization.id)
+
+    assert preview_tax == generated.tds
+    assert generated.tds == manual.tds
+    # Genuinely Scotland's 40% rate, not the national 20% one — proves the
+    # fix changed real behavior, not just "all three happen to agree."
+    assert generated.tds == Decimal("20000.00")

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform Alert: New Organization Created</title>
+</head>
+<body style="margin:0; padding:0; background:#020617; font-family:Arial,Helvetica,sans-serif;">
+  <!-- Preheader (§10): hidden from visible body -->
+  <div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; color:#020617;">New organization {{organization_name}} ({{organization_code}}) has been created.</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#020617; padding:24px 12px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%; background:#0f172a; border:1px solid #1e293b; border-radius:12px;">
+
+        <!-- Header branding -->
+        <tr><td style="padding:28px 32px 22px 32px; border-bottom:1px solid #1e293b;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td align="left" style="font-size:0; line-height:0;">
+              {{#if logo_url}}<a href="{{frontend_url}}" target="_blank" style="text-decoration:none;"><img src="{{logo_url}}" alt="Zoiko Payroll" height="34" style="height:34px; width:auto; display:block; border:0;"></a>{{/if}}
+            </td>
+            <td align="right" valign="middle" style="font-family:'Courier New',monospace; font-size:11px; color:#38bdf8; background:#0c4a6e; border:1px solid #0284c7; border-radius:9999px; padding:4px 10px;">Super Admin Notification</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Body -->
+        <tr><td style="padding:28px 32px 16px 32px;">
+          <h1 style="color:#ffffff; font-size:20px; font-weight:bold; margin:0 0 12px 0;">New Organization Created</h1>
+          <p style="color:#cbd5e1; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+            A new organization has been created on the Zoiko Payroll Platform. Review the organization details below:
+          </p>
+        </td></tr>
+
+        <!-- Organization Details Table -->
+        <tr><td style="padding:0 32px 16px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#020617; border:1px solid #1e293b; border-radius:8px;">
+            <tr>
+              <td style="padding:10px 14px; color:#94a3b8; font-size:12px; width:40%;">Organization Name</td>
+              <td align="right" style="padding:10px 14px; font-size:12px; font-weight:bold; color:#ffffff;">{{organization_name}}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Organization Code</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-family:'Courier New',monospace; font-size:12px; font-weight:bold; color:#38bdf8;">{{organization_code}}</td>
+            </tr>
+            {{#if admin_name}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Primary Admin Name</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#e2e8f0;">{{admin_name}}</td>
+            </tr>{{/if}}
+            {{#if admin_email}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Admin Email</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#a5b4fc;">{{admin_email}}</td>
+            </tr>{{/if}}
+            {{#if admin_phone}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Phone Number</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#e2e8f0;">{{admin_phone}}</td>
+            </tr>{{/if}}
+            {{#if country}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Country / Jurisdiction</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#e2e8f0;">{{country}}</td>
+            </tr>{{/if}}
+            {{#if industry}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Industry</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#e2e8f0;">{{industry}}</td>
+            </tr>{{/if}}
+            {{#if company_type}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Company Type</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#e2e8f0;">{{company_type}}</td>
+            </tr>{{/if}}
+            {{#if tax_no}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Tax / Reg Number</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-family:'Courier New',monospace; font-size:12px; color:#cbd5e1;">{{tax_no}}</td>
+            </tr>{{/if}}
+            {{#if location_summary}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Location</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#e2e8f0;">{{location_summary}}</td>
+            </tr>{{/if}}
+            {{#if created_at_display}}<tr>
+              <td style="padding:10px 14px; border-top:1px solid #1e293b; color:#94a3b8; font-size:12px;">Created At</td>
+              <td align="right" style="padding:10px 14px; border-top:1px solid #1e293b; font-size:12px; color:#cbd5e1;">{{created_at_display}}</td>
+            </tr>{{/if}}
+          </table>
+        </td></tr>
+
+        <!-- Primary CTA: Manage Organization -->
+        <tr><td style="padding:18px 32px 12px 32px;" align="center">
+          <a href="{{action_url}}" style="display:inline-block; background:#0284c7; color:#ffffff; font-size:14px; font-weight:bold; text-decoration:none; padding:13px 28px; border-radius:8px;">View in Super Admin Console</a>
+        </td></tr>
+
+        <!-- Reference block -->
+        <tr><td style="padding:16px 32px 0 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#020617; border:1px solid #1e293b; border-radius:8px;"><tr>
+            <td style="padding:10px 14px; color:#94a3b8; font-size:11px;">Reference Code</td>
+            <td align="right" style="padding:10px 14px; font-family:'Courier New',monospace; font-size:11px; color:#cbd5e1; background:#1e293b; border-radius:6px;">{{reference_id}}</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Security disclaimer -->
+        <tr><td style="padding:16px 32px 24px 32px;">
+          {{security_advisory_block}}
+        </td></tr>
+
+        <!-- Approved support and legal footer -->
+        <tr><td style="padding:18px 32px; background:#020617; border-top:1px solid #1e293b; text-align:center;">
+          <p style="color:#64748b; font-size:11px; line-height:1.6; margin:0;">&copy; 2026 Zoiko Payroll Inc. &bull; 100 Corporate Blvd, Suite 400 &bull; Super Admin Platform Operations</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

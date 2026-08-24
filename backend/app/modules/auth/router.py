@@ -157,18 +157,42 @@ def forgot_password(request: Request, data: ForgotPasswordRequest, db: Session =
     return service.request_password_reset(db, data.email)
 
 
-@router.get("/accept-invite", response_class=HTMLResponse, summary="Account-setup form from invite link", include_in_schema=False)
+def _invite_claimed_page(temp_password: str) -> HTMLResponse:
+    import html as _html
+
+    pw = _html.escape(temp_password)
+    login_url = settings.FRONTEND_URL.rstrip("/") + "/login"
+    return HTMLResponse(
+        content=(
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head>"
+            "<body style=\"font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:40px;\">"
+            "<div style=\"max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;"
+            "padding:32px;text-align:center;\">"
+            "<h1 style=\"color:#059669;\">Invite accepted</h1>"
+            "<p style=\"color:#374151;line-height:1.6;\">Your account is ready. "
+            "Use this temporary password to sign in:</p>"
+            "<p style=\"margin:20px 0;\">"
+            f"<code style=\"background:#f3f4f6;padding:12px 24px;border-radius:8px;font-size:18px;"
+            f"font-family:'Courier New',monospace;letter-spacing:2px;border:1px dashed #d1d5db;\">{pw}</code></p>"
+            "<p style=\"color:#6B7280;font-size:13px;line-height:1.6;\">"
+            "This password is shown only once. For security, change it after signing in.</p>"
+            "<a href=\"" + login_url + "\" style=\"display:inline-block;margin-top:16px;"
+            "background:#FF7A00;color:#ffffff;padding:12px 32px;border-radius:24px;"
+            "text-decoration:none;font-weight:bold;\">Go to sign in</a>"
+            "</div></body></html>"
+        ),
+    )
+
+
+@router.get("/accept-invite", response_class=HTMLResponse, summary="Accept invitation from invite link", include_in_schema=False)
 def accept_invite_form(token: str = Query(...), db: Session = Depends(get_db)):
-    ctx = service.validate_action_token(db, token, SecurityActionPurpose.INVITE)
-    if ctx is None:
+    # One-click claim: token consumed atomically, temporary password generated
+    # and shown once. Invalid/expired/used links get the generic page.
+    result = service.claim_invitation(db, token)
+    if result is None:
         return _invalid_token_page()
-    return _action_form_page("Set up your account", ctx["token"], "/auth/accept-invite")
-
-
-@router.post("/accept-invite", summary="Complete account setup from invitation link")
-@limiter.limit("10/minute")
-def accept_invite(request: Request, data: TokenPasswordRequest, db: Session = Depends(get_db)):
-    return service.complete_action_token(db, data.token, SecurityActionPurpose.INVITE, data.password)
+    _user, temp_password = result
+    return _invite_claimed_page(temp_password)
 
 
 @router.get("/reset-password", response_class=HTMLResponse, summary="Password-reset form from reset link", include_in_schema=False)
@@ -176,7 +200,7 @@ def reset_password_form(token: str = Query(...), db: Session = Depends(get_db)):
     ctx = service.validate_action_token(db, token, SecurityActionPurpose.RESET)
     if ctx is None:
         return _invalid_token_page()
-    return _action_form_page("Reset your password", ctx["token"], "/auth/reset-password")
+    return _action_form_page("Reset your password", ctx["token"], "/api/auth/reset-password")
 
 
 @router.post("/reset-password", summary="Set a new password from a reset link")
@@ -284,8 +308,6 @@ def resend_invite(
     if user.is_verified:
         raise BadRequestException("This user has already set up their account.")
 
-    raw_token, _ = service._issue_action_token(db, user.email, user.organization_id, SecurityActionPurpose.INVITE)
-    link = service._action_link(SecurityActionPurpose.INVITE, raw_token)
-    service._send_invite_email(db, user, current_user, link)
-    db.commit()
+    # Same §04 supersession / idempotency / audit path as the original invite.
+    service.resend_user_invite(db, current_user, user)
     return {"message": "Invite email resent."}

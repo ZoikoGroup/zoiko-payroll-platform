@@ -6,7 +6,7 @@ import StatusPill from "../StatusPill";
 import { useToast } from "../../context/ToastContext";
 import {
   getComplianceJurisdictions, getCompliancePolicies, upsertCompliancePolicy,
-  getCompliancePolicyVersions, setCompliancePolicyStatus,
+  getCompliancePolicyVersions, setCompliancePolicyStatus, approveCompliancePolicy,
   getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations, assignCompliancePolicy,
   hardDeleteCompliancePolicy,
   getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab,
@@ -44,6 +44,8 @@ const BASE_TABS = [
 export default function JurisdictionLayout({
   country, countryName, initialState = "", onStateChange,
   extraTabs = [], slabsTabOverride,
+  hiddenTabs = [], slabsLabel = "Tax Slabs", countryLevelLabel = "Country-level (no state)",
+  additionalStateOptions = [], slabsFilter = (s) => s,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -86,6 +88,17 @@ export default function JurisdictionLayout({
   useEffect(() => { loadJurisdictions(); }, [loadJurisdictions]);
 
   const selectedJurisdiction = jurisdictions.find((j) => j.code === country);
+  // additionalStateOptions lets a country (UK: England/Wales/Northern
+  // Ireland) offer a sub-jurisdiction as selectable in the dropdown even
+  // before any real pack exists for it — selecting it and hitting "New
+  // Tax" is the real, data-driven way to configure it, exactly like every
+  // other state on this page. Never fabricates pack DATA — only the
+  // option to create one. Real states already in jurisdictions.states
+  // (Scotland today) aren't duplicated.
+  const stateOptions = [
+    ...(selectedJurisdiction?.states || []),
+    ...additionalStateOptions.filter((s) => !(selectedJurisdiction?.states || []).includes(s)),
+  ];
 
   // Policy packs aren't a state-level concept in this app (nothing today
   // scopes a Policy pack to a state) — once a state is selected, force
@@ -127,6 +140,17 @@ export default function JurisdictionLayout({
     }
   }
 
+  async function handleApprove() {
+    try {
+      const updated = await approveCompliancePolicy(selectedPack.id);
+      addToast?.("You're now recorded as this pack's approver.", "success");
+      setSelectedPack(updated);
+      loadPacks();
+    } catch (err) {
+      addToast?.(err.message || "Failed to record approval.", "error");
+    }
+  }
+
   async function handleAssign() {
     try {
       const res = await assignCompliancePolicy(selectedPack.id, Array.from(assignIds));
@@ -165,11 +189,20 @@ export default function JurisdictionLayout({
   // base six plus any visible extra tabs.
   const visibleExtraTabs = selectedPack ? extraTabs.filter((t) => t.isVisible(selectedPack)) : [];
   const restrictTo = slabsOverrideActive ? slabsTabOverride.restrictTabsTo : null;
-  let tabs = [
-    ...BASE_TABS.slice(0, 3),
-    ...visibleExtraTabs,
-    ...BASE_TABS.slice(3),
-  ];
+  // hiddenTabs drops base tabs unconditionally (not pack-dependent, unlike
+  // restrictTabsTo above) — UK uses this to drop the generic "Contribution
+  // Rates"/"Versions" tabs in favor of its own NI & Pension Rates /
+  // Statutory Thresholds extra tabs. Every other country passes [].
+  let tabs = BASE_TABS.filter((t) => !hiddenTabs.includes(t.key));
+  // Each extra tab anchors after a given base-tab key (default "slabs",
+  // preserving the original fixed insertion point so India's existing Tax
+  // Parameters tab — which doesn't set `after` — lands exactly where it
+  // always has). Lets UK insert "NI & Pension Rates" before Slabs while
+  // "HMRC Statutory Thresholds" lands after it, in one pass.
+  visibleExtraTabs.forEach((extraTab) => {
+    const anchorIndex = tabs.findIndex((t) => t.key === (extraTab.after || "slabs"));
+    tabs.splice(anchorIndex === -1 ? tabs.length : anchorIndex + 1, 0, extraTab);
+  });
   if (restrictTo) tabs = tabs.filter((t) => restrictTo.includes(t.key));
 
   return (
@@ -183,8 +216,8 @@ export default function JurisdictionLayout({
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <select className={inputClass + " w-auto min-w-[160px]"} value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">Country-level (no state)</option>
-          {(selectedJurisdiction?.states || []).map((s) => <option key={s} value={s}>{s}</option>)}
+          <option value="">{countryLevelLabel}</option>
+          {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         {!state && (
         <div className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-surface-muted p-1">
@@ -229,7 +262,7 @@ export default function JurisdictionLayout({
                 >
                   <span className="font-semibold">{p.packId}</span>
                   <span className="flex items-center gap-2 text-foreground-muted">
-                    v{p.version} <StatusPill status={STATUS_PILL_MAP[p.status] || "pending"} label={p.status} />
+                    v{p.version}{p.taxYear ? ` · FY ${p.taxYear}` : ""} <StatusPill status={STATUS_PILL_MAP[p.status] || "pending"} label={p.status} />
                   </span>
                 </button>
               ))}
@@ -258,12 +291,27 @@ export default function JurisdictionLayout({
                 </div>
                 <div className="flex items-center gap-2">
                   {selectedPack.packType === "tax" && (
-                    <button
-                      onClick={() => setShowEditOverview(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setShowEditOverview(true)}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                      {/* Maker-checker (ZP-TAX-UK-2026-27-001 section 19.2): a
+                          distinct Super Admin from whoever last edited the pack
+                          must approve it before it can go Active — enforced
+                          server-side in set_jurisdiction_pack_status; this
+                          button just records "I approve this," it doesn't
+                          change status itself. */}
+                      <button
+                        onClick={handleApprove}
+                        title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <ShieldCheck size={13} /> Approve
+                      </button>
+                    </>
                   )}
                   {selectedPack.packType === "policy" && (
                     <>
@@ -299,7 +347,7 @@ export default function JurisdictionLayout({
                       tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
                     }`}
                   >
-                    <t.icon size={13} /> {slabsOverrideActive && t.key === "slabs" ? slabsTabOverride.label : t.label}
+                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? slabsTabOverride.label : slabsLabel) : t.label}
                   </button>
                 ))}
               </div>
@@ -328,11 +376,11 @@ export default function JurisdictionLayout({
                 />
               )}
               {tab === "slabs" && slabsOverrideActive && (
-                slabsTabOverride.renderTab({ pack: selectedPack, slabs, onAdd: () => setShowNewSlab(true), onEdit: setEditingSlab, onDelete: setDeletingSlab })
+                slabsTabOverride.renderTab({ pack: selectedPack, slabs: slabsFilter(slabs), onAdd: () => setShowNewSlab(true), onEdit: setEditingSlab, onDelete: setDeletingSlab })
               )}
               {tab === "slabs" && !slabsOverrideActive && (
                 <SlabsTab
-                  pack={selectedPack} slabs={slabs} onAdd={() => setShowNewSlab(true)}
+                  pack={selectedPack} slabs={slabsFilter(slabs)} onAdd={() => setShowNewSlab(true)}
                   onEdit={setEditingSlab} onDelete={setDeletingSlab}
                 />
               )}
@@ -343,6 +391,12 @@ export default function JurisdictionLayout({
                       pack: selectedPack, rates, slabs, addToast,
                       onReload: reloadRatesAndSlabs,
                       onPublish: () => changeStatus("Active"),
+                      onAddRate: () => setShowNewRate(true),
+                      onEditRate: setEditingRate,
+                      onDeleteRate: setDeletingRate,
+                      onAddSlab: () => setShowNewSlab(true),
+                      onEditSlab: setEditingSlab,
+                      onDeleteSlab: setDeletingSlab,
                     })}
                   </div>
                 )
@@ -372,15 +426,36 @@ export default function JurisdictionLayout({
                 <div className="space-y-2">
                   {audit.length === 0 ? (
                     <p className="py-6 text-center text-xs text-foreground-disabled">No audit history yet.</p>
-                  ) : audit.map((a) => (
-                    <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-foreground">{a.action} — {a.entityType}</span>
-                        <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
+                  ) : audit.map((a) => {
+                    // oldValue/newValue were always in the API response —
+                    // just never rendered. Only show keys that actually
+                    // changed, so a no-op field isn't noise in the diff.
+                    const changedKeys = Object.keys({ ...(a.oldValue || {}), ...(a.newValue || {}) })
+                      .filter((k) => JSON.stringify(a.oldValue?.[k]) !== JSON.stringify(a.newValue?.[k]));
+                    return (
+                      <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-foreground">
+                            {a.action} — {a.entityType} {a.actorId ? <span className="text-foreground-disabled">· by user #{a.actorId}</span> : null}
+                          </span>
+                          <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
+                        </div>
+                        {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
+                        {changedKeys.length > 0 && (
+                          <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
+                            {changedKeys.map((k) => (
+                              <div key={k} className="flex items-center gap-1.5 font-mono text-[11px]">
+                                <span className="text-foreground-disabled">{k}:</span>
+                                <span className="text-error line-through">{a.oldValue?.[k] ?? "—"}</span>
+                                <span className="text-foreground-disabled">→</span>
+                                <span className="text-success">{a.newValue?.[k] ?? "—"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

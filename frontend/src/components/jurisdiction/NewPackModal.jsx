@@ -10,6 +10,7 @@ export default function NewPackModal({ country, state, packType, onClose, onCrea
     packId: "", jurisdictionState: state || "", version: "1.0", status: "Draft",
     effectiveFrom: "", effectiveTo: "", taxYear: "", taxRegime: "", currency: "",
     regulatoryAuthority: "", complianceCategory: "", complianceOwner: "", engineeringOwner: "", changeSummary: "",
+    nextReviewDate: "", sourceReferences: "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -28,6 +29,7 @@ export default function NewPackModal({ country, state, packType, onClose, onCrea
         taxYear: form.taxYear || null, taxRegime: form.taxRegime || null, currency: form.currency || null,
         regulatoryAuthority: form.regulatoryAuthority || null, complianceCategory: form.complianceCategory || null,
         complianceOwner: form.complianceOwner || null, engineeringOwner: form.engineeringOwner || null,
+        nextReviewDate: form.nextReviewDate || null, sourceReferences: form.sourceReferences || null,
         changeSummary: form.changeSummary || null,
       });
       addToast?.("Pack created.", "success");
@@ -52,6 +54,11 @@ export default function NewPackModal({ country, state, packType, onClose, onCrea
         <div><label className={labelClass}>Tax Regime</label><input className={inputClass} value={form.taxRegime} onChange={set("taxRegime")} placeholder="Old / New" /></div>
         <div><label className={labelClass}>Currency</label><input className={inputClass} value={form.currency} onChange={set("currency")} placeholder="INR" /></div>
         <div className="col-span-2"><label className={labelClass}>Regulatory Authority</label><input className={inputClass} value={form.regulatoryAuthority} onChange={set("regulatoryAuthority")} /></div>
+        <div><label className={labelClass}>Compliance Category</label><input className={inputClass} value={form.complianceCategory} onChange={set("complianceCategory")} /></div>
+        <div><label className={labelClass}>Compliance Owner</label><input className={inputClass} value={form.complianceOwner} onChange={set("complianceOwner")} /></div>
+        <div className="col-span-2"><label className={labelClass}>Engineering Owner</label><input className={inputClass} value={form.engineeringOwner} onChange={set("engineeringOwner")} /></div>
+        <div><label className={labelClass}>Next Review Date</label><input type="date" className={inputClass} value={form.nextReviewDate} onChange={set("nextReviewDate")} /></div>
+        <div className="col-span-2"><label className={labelClass}>Source References</label><input className={inputClass} value={form.sourceReferences} onChange={set("sourceReferences")} placeholder="e.g. ZP-TAX-UK-2026-27-001 v1.0" /></div>
         <div className="col-span-2"><label className={labelClass}>Change Summary</label><textarea className={inputClass} rows={2} value={form.changeSummary} onChange={set("changeSummary")} /></div>
       </div>
       <div className="mt-5 flex justify-end gap-2">

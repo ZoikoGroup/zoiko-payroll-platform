@@ -22,6 +22,7 @@ Reuse notes (this module is deliberately additive, not a rewrite):
 """
 
 import re
+from decimal import Decimal
 from typing import Optional
 
 from app.core.exceptions import BadRequestException
@@ -49,6 +50,22 @@ class EmployeeValidationStrategy:
     country_code: str = ""
     FIELD_SPECS: dict = {}
     duplicate_field: Optional[str] = None
+
+    # Maps a compliance_fields key to the PayrollEmployee dedicated column
+    # it should ALSO populate, for strategies whose engine calculator
+    # reads that column directly (e.g. UK's engine/countries/uk.py reads
+    # tax_code/ni_category/study_loan_plan/study_loan_balance off
+    # PayrollContext, not off compliance_fields — without this map, a
+    # value submitted through complianceFields never reaches the engine
+    # at all). Empty for every strategy with no such dedicated-column
+    # consumer.
+    FIELD_COLUMN_MAP: dict = {}
+    # Optional per-field value translation applied only to the copy going
+    # into the dedicated column (the compliance_fields value itself stays
+    # exactly as entered) — e.g. UK's "Plan 2" -> "UK_PLAN2". A dict does
+    # a lookup (falling back to the original value if unmapped); a
+    # callable is invoked directly (used for e.g. numeric-string -> Decimal).
+    FIELD_VALUE_MAP: dict = {}
 
     @classmethod
     def validate(cls, compliance: dict) -> dict:
@@ -85,6 +102,31 @@ class EmployeeValidationStrategy:
             return None
         value = _clean((compliance or {}).get(cls.duplicate_field))
         return (cls.duplicate_field, value) if value else None
+
+    @classmethod
+    def sync_to_columns(cls, cleaned: dict) -> dict:
+        """Returns {column_name: value} for whichever compliance_fields
+        keys FIELD_COLUMN_MAP names and `cleaned` (the already-validated
+        compliance dict) actually has a value for. A caller merges this
+        into the same dict it's about to persist onto PayrollEmployee
+        (employee_data / updates / mapped) — plain-dict-based rather than
+        ORM-based so it works uniformly at every call site, including the
+        ones that build a dict before the ORM row even exists (create,
+        bulk upsert). Empty dict for every strategy with no
+        FIELD_COLUMN_MAP (every country except UK today) — a complete
+        no-op, doesn't touch compliance_fields itself."""
+        result = {}
+        for field_key, column_name in cls.FIELD_COLUMN_MAP.items():
+            if field_key not in cleaned:
+                continue
+            value = cleaned[field_key]
+            mapper = cls.FIELD_VALUE_MAP.get(field_key)
+            if callable(mapper):
+                value = mapper(value)
+            elif isinstance(mapper, dict):
+                value = mapper.get(value, value)
+            result[column_name] = value
+        return result
 
 
 class INEmployeeValidation(EmployeeValidationStrategy):
@@ -139,18 +181,53 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
         },
         "paye_tax_code": {
             "required": True, "upper": True,
-            "pattern": re.compile(r"^(K\d{1,6}|\d{1,4}[LMNPTY]|BR|NT|D0|D1)$"),
-            "error": "PAYE tax code format looks incorrect (e.g. 1257L).",
+            # ZP-TAX-UK-2026-27-001 section 6.2/6.3: standard/K-code
+            # allowance codes, 0T, and the flat-rate override families
+            # BR/D0/D1 (rUK), SBR/SD0-3 (Scotland), CBR/CD0/CD1 (Wales) —
+            # the leading S/C is the ONE HMRC-sanctioned region signal,
+            # never inferred from worksite (see service.py's
+            # _resolve_uk_sub_jurisdiction_with_source).
+            "pattern": re.compile(r"^([SC]?K\d{1,6}|[SC]?\d{1,4}[LMNPTY]|[SC]?0T|BR|D0|D1|SBR|SD[0-3]|CBR|CD0|CD1|NT)$"),
+            "error": "PAYE tax code format looks incorrect (e.g. 1257L, S1257L, C1257L, SD1, CBR).",
         },
-        "student_loan_plan": {"choices": ["None", "Plan 1", "Plan 2", "Plan 4", "Postgraduate"]},
+        "student_loan_plan": {"choices": ["None", "Plan 1", "Plan 2", "Plan 4", "Plan 5", "Postgraduate"]},
         "auto_enrolment_pension": {"choices": ["true", "false", "True", "False"]},
         "sort_code": {
             "required": True, "strip_chars": "- ",
             "pattern": re.compile(r"^\d{6}$"),
             "error": "Sort code must be 6 digits (e.g. 123456 or 12-34-56).",
         },
+        # All 16 letters from ZP-TAX-UK-2026-27-001 section 8.2 (AC-10).
+        # Rate DATA for a category beyond A is a separate, additive seed
+        # (uk.py's _resolve_ni_bands reads whatever NI_BAND rows exist for
+        # the category actually set here) — this just makes every real
+        # HMRC letter selectable; it was previously accepted with no
+        # validation at all.
+        "ni_category": {"choices": ["A", "B", "C", "D", "E", "F", "H", "I", "J", "K", "L", "M", "N", "S", "V", "Z"]},
+        "study_loan_balance": {
+            "pattern": re.compile(r"^\d+(\.\d{1,2})?$"),
+            "error": "Student/Postgraduate Loan balance must be a number.",
+        },
     }
     duplicate_field = "nino"
+
+    # The fix for the dead-plumbing gap: PayrollContext.tax_code/
+    # ni_category/study_loan_plan/study_loan_balance are real columns
+    # engine/countries/uk.py genuinely reads — but until this map existed,
+    # nothing ever copied a validated complianceFields value into them.
+    FIELD_COLUMN_MAP = {
+        "paye_tax_code": "tax_code",
+        "ni_category": "ni_category",
+        "student_loan_plan": "study_loan_plan",
+        "study_loan_balance": "study_loan_balance",
+    }
+    FIELD_VALUE_MAP = {
+        "student_loan_plan": {
+            "Plan 1": "UK_PLAN1", "Plan 2": "UK_PLAN2", "Plan 4": "UK_PLAN4", "Plan 5": "UK_PLAN5",
+            "Postgraduate": "UK_POSTGRAD", "None": None,
+        },
+        "study_loan_balance": lambda v: Decimal(v) if v else None,
+    }
 
 
 class AUEmployeeValidation(EmployeeValidationStrategy):

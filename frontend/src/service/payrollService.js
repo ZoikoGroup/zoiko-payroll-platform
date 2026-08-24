@@ -81,9 +81,16 @@ const STATES_BY_COUNTRY = {
 export function getStatesForCountry(country) {
   if (!country) return [];
   // jurisdictionCountry historically stored either a 2-letter code ("DE")
-  // or a full country name ("Germany") — normalize before lookup so legacy
-  // full-name records don't wrongly show "no states configured".
-  const code = normalizeCountryCode(country) || (country.length === 2 ? country.toUpperCase() : country);
+  // or a full country name ("Germany"). A 2-letter code is used as-is —
+  // NOT run through normalizeCountryCode(), which maps "uk" -> "GB" for
+  // currency purposes while STATES_BY_COUNTRY's own key is "UK" (the
+  // same bug fixed in getContributionColumns above; this function has no
+  // current callers, so it wasn't live-breaking anything today, but it's
+  // the identical bug class). A full name still goes through
+  // normalizeCountryCode, translating its one "GB" result back to "UK".
+  if (country.length === 2) return STATES_BY_COUNTRY[country.toUpperCase()] || [];
+  const normalized = normalizeCountryCode(country);
+  const code = normalized === "GB" ? "UK" : normalized;
   return STATES_BY_COUNTRY[code] || [];
 }
 
@@ -1138,6 +1145,11 @@ const CONTRIBUTION_COLUMNS_BY_COUNTRY = {
   ],
   UK: [
     { id: "ni", label: "National Insurance", previewField: "monthlyNi", payslipField: "niEmployee" },
+    // Was silently missing — an employee Workplace Pension % now genuinely
+    // deducts money (see uk.py's employee_pension), but with no column
+    // here it only showed up as an unexplained drop in Net Pay on the
+    // "what you approve is exactly what gets persisted" review screen.
+    { id: "workplace-pension", label: "Workplace Pension", previewField: "monthlyEmployeePension", payslipField: "employeePension" },
   ],
   AU: [
     { id: "medicare-levy", label: "Medicare Levy", previewField: "monthlyMedicare", payslipField: "medicare" },
@@ -1153,7 +1165,14 @@ const CONTRIBUTION_COLUMNS_BY_COUNTRY = {
 };
 
 export function getContributionColumns(country) {
-  const code = normalizeCountryCode(country) || (country || "").toUpperCase();
+  // Deliberately NOT normalizeCountryCode() here — that helper maps
+  // "uk" -> "GB" for currency/country-name purposes, but this map's own
+  // key is "UK" (matching jurisdiction_country's stored value and
+  // getPayrollLabels' identical plain-uppercase approach below). Running
+  // "UK" through normalizeCountryCode silently returned "GB", missed
+  // every key in CONTRIBUTION_COLUMNS_BY_COUNTRY, and dropped the
+  // National Insurance column entirely for every UK org.
+  const code = (country || "IN").toUpperCase();
   return CONTRIBUTION_COLUMNS_BY_COUNTRY[code] || [];
 }
 
