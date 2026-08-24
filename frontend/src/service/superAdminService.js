@@ -83,6 +83,56 @@ export const deleteCanonicalContributionRate = (id) =>
 export const getTaxConfigurationAudit = (params) =>
   apiFetch("/api/super-admin/compliance/tax-configuration/audit", { params });
 
+// ── US: Employer-Specific Tax Profiles (SUI and similar) ─────────────────
+// Tenant-specific, agency-assigned rates — a separate schema/table from
+// the canonical Contribution Rate/Tax Slab endpoints above (see
+// EmployerTaxProfile's model docstring for why).
+
+export const getEmployerTaxProfiles = (params) =>
+  apiFetch("/api/super-admin/compliance/employer-tax-profiles", { params });
+
+export const upsertEmployerTaxProfile = (payload) =>
+  apiFetch("/api/super-admin/compliance/employer-tax-profiles", { method: "PUT", body: payload });
+
+export const deleteEmployerTaxProfile = (id) =>
+  apiFetch(`/api/super-admin/compliance/employer-tax-profiles/${id}`, { method: "DELETE" });
+
+// ── US: Cross-State Reciprocity ───────────────────────────────────────────
+
+export const getReciprocityRules = () =>
+  apiFetch("/api/super-admin/compliance/reciprocity-rules");
+
+export const upsertReciprocityRule = (payload) =>
+  apiFetch("/api/super-admin/compliance/reciprocity-rules", { method: "PUT", body: payload });
+
+export const deleteReciprocityRule = (id) =>
+  apiFetch(`/api/super-admin/compliance/reciprocity-rules/${id}`, { method: "DELETE" });
+
+// ── US: Locality (county/municipal/school-district) Tax Rates ────────────
+// Manually-entered, same pattern as Employer Tax Profiles above — no
+// geocoding provider, Tax Ops types in a real published rate against a
+// known locality code.
+
+export const getLocalityRates = (params) =>
+  apiFetch("/api/super-admin/compliance/locality-rates", { params });
+
+export const upsertLocalityRate = (payload) =>
+  apiFetch("/api/super-admin/compliance/locality-rates", { method: "PUT", body: payload });
+
+export const deleteLocalityRate = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-rates/${id}`, { method: "DELETE" });
+
+// ── Source Evidence ────────────────────────────────────────────────────────
+
+export const getSourceArtifacts = () =>
+  apiFetch("/api/super-admin/compliance/source-artifacts");
+
+export const createSourceArtifact = (payload) =>
+  apiFetch("/api/super-admin/compliance/source-artifacts", { method: "POST", body: payload });
+
+export const reviewSourceArtifact = (id) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
 // ── Finance ──────────────────────────────────────────────────────────────
 
 export const getFinanceOverview = (params) => apiFetch("/api/super-admin/finance/overview", { params });

@@ -25,6 +25,33 @@ const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
 const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)" };
 
+// US-specific: federal/state/local income tax are stored as separate
+// PayslipItem columns (federal_income_tax/state_income_tax/local_tax) —
+// `tds` remains the combined total for backward compatibility. A payslip
+// generated before this split existed has all three at their default 0
+// even though `tds` is genuinely nonzero, so the split is only used when
+// at least one of the three is actually nonzero — otherwise this falls
+// back to the single combined line every other jurisdiction already uses,
+// exactly matching pre-split behavior for old US payslips. Returns
+// [label, amount] tuples so any list-based deduction table (PayslipStub,
+// RunDetailPanel, ...) can spread them in place of a single generic line.
+export function getIncomeTaxLines(payslip) {
+  const c = (payslip?.country || "IN").toUpperCase();
+  if (c === "US") {
+    const fed = Number(payslip?.federalIncomeTax) || 0;
+    const state = Number(payslip?.stateIncomeTax) || 0;
+    const local = Number(payslip?.localTax) || 0;
+    if (fed + state + local > 0) {
+      return [
+        ["Federal Withholding", fed],
+        ["State Tax", state],
+        ["Local Tax", local],
+      ];
+    }
+  }
+  return [[getPayrollLabels(c).incomeTax, Number(payslip?.tds) || 0]];
+}
+
 export function getPayrollLabels(country) {
   const c = (country || "IN").toUpperCase();
   return {

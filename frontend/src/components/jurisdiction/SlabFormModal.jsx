@@ -12,6 +12,13 @@ import { inputClass, labelClass } from "./constants";
 // all until now, so a category beyond A could never be entered.
 const RULE_TYPE_OPTIONS = ["MARGINAL_RATE", "NI_BAND", "PT_FLAT", "FORMULA"];
 const NI_CATEGORIES = ["A", "B", "C", "D", "E", "F", "H", "I", "J", "K", "L", "M", "N", "S", "V", "Z"];
+// US Form W-4 filing status — a bracket row tagged with one of these wins
+// over an untagged (filing_status IS NULL) row for a matching employee;
+// leaving it blank keeps today's exact behavior (one table for everyone).
+// See engine/countries/shared.py:_calculate_annual_tax and
+// TaxSlab.filing_status. Only surfaced for US packs — every other
+// jurisdiction has no filing-status concept.
+const US_FILING_STATUSES = ["SINGLE", "MFJ", "MFS", "HOH"];
 
 export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
   const { addToast } = useToast() || {};
@@ -21,11 +28,13 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
     jurisdictionState: slab?.jurisdictionState || pack.jurisdictionState || "",
     ruleType: slab?.ruleType || "MARGINAL_RATE",
     niCategory: slab?.niCategory || "", employerRatePct: slab?.employerRatePct ?? "",
+    filingStatus: slab?.filingStatus || "",
     sortOrder: slab?.sortOrder ?? 0, reason: "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   const isNiBand = form.ruleType === "NI_BAND";
+  const isUS = pack.jurisdictionCountry === "US";
 
   async function save() {
     if (form.minAmount === "" || form.ratePct === "" || !form.rateLabel.trim()) {
@@ -45,6 +54,7 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
         ratePct: form.ratePct, rateLabel: form.rateLabel, taxFormula: "", ruleType: form.ruleType,
         niCategory: isNiBand ? form.niCategory : null,
         employerRatePct: isNiBand && form.employerRatePct !== "" ? form.employerRatePct : null,
+        filingStatus: isUS && form.filingStatus ? form.filingStatus : null,
         sortOrder: Number(form.sortOrder) || 0, reason: form.reason || null,
       });
       addToast?.("Bracket saved.", "success");
@@ -65,6 +75,15 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
         <div><label className={labelClass}>Label</label><input className={inputClass} value={form.rateLabel} onChange={set("rateLabel")} placeholder="e.g. 20% Bracket" /></div>
         <div><label className={labelClass}>Rule Type</label><select className={inputClass} value={form.ruleType} onChange={set("ruleType")}>{RULE_TYPE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
         <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
+        {isUS && (
+          <div className="col-span-2">
+            <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
+            <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
+              <option value="">Any filing status</option>
+              {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        )}
         {isNiBand && (
           <>
             <div>

@@ -243,6 +243,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
             ) : (
               <Field key={spec.key} label={spec.label}>
                 <input
+                  type={spec.type === "date" ? "date" : "text"}
                   className={inputClass}
                   placeholder={spec.placeholder}
                   value={form.complianceFields[spec.key] || ""}

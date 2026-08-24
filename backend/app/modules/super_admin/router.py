@@ -40,6 +40,10 @@ from app.modules.payroll.schemas import (
     CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
     CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
     TaxConfigurationAuditResponse, ActiveTaxConfigurationResponse,
+    EmployerTaxProfileResponse, EmployerTaxProfileUpsert,
+    ReciprocityRuleResponse, ReciprocityRuleUpsert,
+    SourceArtifactResponse, SourceArtifactCreate,
+    LocalityRateResponse, LocalityRateUpsert,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -556,6 +560,196 @@ def get_active_tax_configuration(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.get_active_tax_configuration_for_display(db, country, state=state)
+
+
+# ── US: Employer-Specific Tax Profiles (SUI and similar) ─────────────────
+# Tenant-specific, agency-assigned rates — NOT canonical ContributionRate
+# data (see EmployerTaxProfile's model docstring). Managed here (Super
+# Admin / Tax Ops), not by the org itself, since entering these requires
+# the agency's rate notice as evidence — the same reasoning the standard's
+# §11.1 "SUI Employer Rates" Super Admin module is built around.
+
+@router.get(
+    "/compliance/employer-tax-profiles", response_model=List[EmployerTaxProfileResponse], response_model_by_alias=True,
+    summary="List employer-specific tax profiles (SUI and similar), optionally filtered",
+)
+def list_employer_tax_profiles(
+    organizationId: Optional[int] = Query(None),
+    jurisdictionId: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_employer_tax_profiles(db, organization_id=organizationId, jurisdiction_id=jurisdictionId)
+
+
+@router.put(
+    "/compliance/employer-tax-profiles", response_model=EmployerTaxProfileResponse, response_model_by_alias=True,
+    summary="Create or update an employer-specific tax profile (Super Admin only)",
+)
+def upsert_employer_tax_profile(
+    payload: EmployerTaxProfileUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_employer_tax_profile(db, payload, actor_id=current_user.id)
+
+
+@router.delete(
+    "/compliance/employer-tax-profiles/{id}", response_model=SuccessResponse,
+    summary="Permanently delete an employer-specific tax profile (Super Admin only)",
+)
+def delete_employer_tax_profile(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_employer_tax_profile(db, id, actor_id=current_user.id)
+    return {"message": "Employer tax profile deleted."}
+
+
+# ── US: Cross-State Reciprocity ───────────────────────────────────────────
+
+@router.get(
+    "/compliance/reciprocity-rules", response_model=List[ReciprocityRuleResponse], response_model_by_alias=True,
+    summary="List all cross-state reciprocity agreements",
+)
+def list_reciprocity_rules(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_reciprocity_rules(db)
+
+
+@router.put(
+    "/compliance/reciprocity-rules", response_model=ReciprocityRuleResponse, response_model_by_alias=True,
+    summary="Create or update a cross-state reciprocity agreement (Super Admin only)",
+)
+def upsert_reciprocity_rule(
+    payload: ReciprocityRuleUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_reciprocity_rule(db, payload, actor_id=current_user.id)
+
+
+@router.delete(
+    "/compliance/reciprocity-rules/{id}", response_model=SuccessResponse,
+    summary="Permanently delete a cross-state reciprocity agreement (Super Admin only)",
+)
+def delete_reciprocity_rule(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_reciprocity_rule(db, id, actor_id=current_user.id)
+    return {"message": "Reciprocity rule deleted."}
+
+
+# ── US: Locality (county/municipal/school-district) Tax Rates ────────────
+# Manually-entered, same pattern as Employer Tax Profiles above (no
+# licensed geocoding provider is wired up — Tax Ops types in a real
+# published rate against a known locality code, evidenced optionally by a
+# SourceArtifact). See service.py's get_locality_rate.
+
+@router.get(
+    "/compliance/locality-rates", response_model=List[LocalityRateResponse], response_model_by_alias=True,
+    summary="List locality tax rates for a country/state",
+)
+def list_locality_rates(
+    country: str = Query("US"),
+    state: str = Query(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_locality_rates(db, country, state)
+
+
+@router.put(
+    "/compliance/locality-rates", response_model=LocalityRateResponse, response_model_by_alias=True,
+    summary="Create or update a locality tax rate (Super Admin only)",
+)
+def upsert_locality_rate(
+    payload: LocalityRateUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_locality_rate(db, payload, actor_id=current_user.id)
+
+
+@router.delete(
+    "/compliance/locality-rates/{id}", response_model=SuccessResponse,
+    summary="Permanently delete a locality tax rate (Super Admin only)",
+)
+def delete_locality_rate(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_locality_rate(db, id, actor_id=current_user.id)
+    return {"message": "Locality rate deleted."}
+
+
+# ── Source Evidence (ZP-TAX-US-2026-001 §14) ──────────────────────────────
+# Platform-wide, not US-only — one row per official publication a
+# statutory value was taken from.
+
+@router.get(
+    "/compliance/source-artifacts", response_model=List[SourceArtifactResponse], response_model_by_alias=True,
+    summary="List all source evidence artifacts",
+)
+def list_source_artifacts(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_source_artifacts(db)
+
+
+@router.post(
+    "/compliance/source-artifacts", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Record a new source evidence artifact (Super Admin only)",
+)
+def create_source_artifact(
+    payload: SourceArtifactCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_source_artifact(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/source-artifacts/{id}/review", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Record that the calling Super Admin has reviewed this source artifact",
+)
+def review_source_artifact(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
 
 
 # ── Finance ────────────────────────────────────────────────────────────────

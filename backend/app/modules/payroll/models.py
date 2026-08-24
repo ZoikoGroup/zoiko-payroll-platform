@@ -155,6 +155,30 @@ class PayrollEmployee(Base):
     tax_code         = Column(String(20), nullable=True)
     ni_category      = Column(String(5), nullable=True)
 
+    # US-specific: Form W-4 filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and
+    # form vintage ("PRE_2020"/"2020_PLUS"). NULL for every non-US employee.
+    # A real, engine-read column — distinct from the pre-existing
+    # compliance_fields["w4_filing_status"] JSON entry, which the engine
+    # never consumed (see employee_validation.py's FIELD_COLUMN_MAP for the
+    # mapping that keeps the two in sync going forward).
+    w4_filing_status = Column(String(20), nullable=True)
+    w4_form_vintage  = Column(String(10), nullable=True)
+
+    # US-specific (but named generically in case another jurisdiction ever
+    # needs the same resident/work split): the state the employee is a tax
+    # RESIDENT of, as distinct from work_state above (where they physically
+    # perform services). NULL means "same as work_state" — the pre-existing,
+    # only-ever-had-one-state behavior. Only meaningfully different from
+    # work_state for a genuine multi-state commuter (see reciprocity fields
+    # below).
+    residence_state  = Column(String(100), nullable=True)
+    # Whether a reciprocity certificate (e.g. NJ-165) is on file for this
+    # employee's resident/work state pair, and when it expires. False/NULL
+    # for every employee today — reciprocity suppression only ever applies
+    # when this is explicitly set. See reciprocity_resolver.py.
+    reciprocity_certificate_on_file   = Column(Boolean, default=False, nullable=False, server_default="false")
+    reciprocity_certificate_expiry    = Column(Date, nullable=True)
+
     # Generic across every country (not UK-only) — "Monthly"/"Weekly"/
     # "Fortnightly"/"FourWeekly". Defaults to "Monthly" so every existing
     # employee's numbers are completely unaffected; only engine/countries/
@@ -359,6 +383,18 @@ class PayslipItem(Base):
     # US-specific
     social_security   = Column(Numeric(12, 2), default=0)
     medicare          = Column(Numeric(12, 2), default=0)
+    # US: federal/state/local income tax, broken out separately. Previously
+    # engine/countries/us.py folded state (and now local) tax straight into
+    # `tds` with no distinct field — the payslip/Payroll Register literally
+    # could not show a US employee their state or local withholding
+    # separately, and one report even read a borrowed India field
+    # (professional_tax) for "State Tax," which US never populated, always
+    # showing $0 regardless of what was actually withheld. `tds` is kept,
+    # computed as the sum of these three, for backward compatibility with
+    # any existing code/report that still sums it directly.
+    federal_income_tax = Column(Numeric(12, 2), default=0, server_default="0")
+    state_income_tax   = Column(Numeric(12, 2), default=0, server_default="0")
+    local_tax           = Column(Numeric(12, 2), default=0, server_default="0")
     # UK-specific
     ni_employee       = Column(Numeric(12, 2), default=0)
     # UK/Australia: government study-loan repayment (Student/Postgraduate
@@ -390,6 +426,10 @@ class PayslipItem(Base):
     # US: FUTA — seeded as a display row since day one but never actually
     # calculated or surfaced anywhere until now.
     employer_futa      = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: State Unemployment Insurance — tenant/employer-specific, resolved
+    # from EmployerTaxProfile (agency-assigned rate), NOT from a generic
+    # ContributionRate override. Zero until an org has a configured profile.
+    employer_sui       = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -561,6 +601,16 @@ class ContributionRate(Base):
     # convention one level down.
     jurisdiction_locality = Column(String(100), nullable=True)
     tax_regime            = Column(String(20), nullable=True)
+    # US-specific (but not US-only by construction — any country whose tax
+    # law varies by filing/marital status could use it): "SINGLE" | "MFJ" |
+    # "MFS" | "HOH", or NULL meaning "applies regardless of filing status" —
+    # NULL is the value on every row that existed before this column, so
+    # India/UK/every other jurisdiction's resolution is completely
+    # unaffected. Only a row explicitly tagged with a filing_status is
+    # preferred over a NULL row for an employee with a matching
+    # w4_filing_status (see engine/countries/shared.py:_calculate_annual_tax
+    # and resolve_jurisdiction_parameter).
+    filing_status         = Column(String(20), nullable=True)
     # Which canonical tax pack version this row was authored under/synced
     # from. NULL on org-scoped rows created before this column existed.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
@@ -588,16 +638,19 @@ class ContributionRate(Base):
             # rebate_87a_limit rows, tagged "Old" and "New") — added for
             # the Tax Parameters feature; a regime-agnostic row
             # (tax_regime NULL) is still unique per component_key on its
-            # own, same as before.
+            # own, same as before. filing_status added the same way for
+            # the same reason (e.g. Single/MFJ/HoH additional-Medicare
+            # threshold rows coexisting) — a NULL-filing-status row's
+            # uniqueness is completely unaffected by rows that do set one.
             "uq_contribution_rate_org_country_component",
-            "organization_id", "jurisdiction_country", "component_key", "tax_regime",
+            "organization_id", "jurisdiction_country", "component_key", "tax_regime", "filing_status",
             unique=True,
             postgresql_where=text("organization_id IS NOT NULL"),
             sqlite_where=text("organization_id IS NOT NULL"),
         ),
         Index(
             "uq_contribution_rate_canonical_country_state_component",
-            "jurisdiction_country", "jurisdiction_state", "component_key", "tax_regime",
+            "jurisdiction_country", "jurisdiction_state", "component_key", "tax_regime", "filing_status",
             unique=True,
             postgresql_where=text("organization_id IS NULL"),
             sqlite_where=text("organization_id IS NULL"),
@@ -632,6 +685,12 @@ class TaxSlab(Base):
     jurisdiction_state    = Column(String(100), nullable=True)   # null = country-level
     jurisdiction_locality = Column(String(100), nullable=True)   # null = state-level (or country-level if state is also null)
     tax_regime            = Column(String(20), nullable=True)
+    # Same convention/reasoning as ContributionRate.filing_status above —
+    # NULL (every pre-existing row) means "applies regardless of filing
+    # status," so India/UK/existing-US bracket resolution is unaffected.
+    # engine/countries/shared.py:_calculate_annual_tax prefers a row whose
+    # filing_status matches the employee's over a NULL row when both exist.
+    filing_status         = Column(String(20), nullable=True)
 
     # MARGINAL_RATE (default, existing brackets) | FLAT_RATE | FIXED_PLUS_MARGINAL
     # | FORMULA | TABLE_LOOKUP | CONTRIBUTION | PT_FLAT. Only FORMULA rows use
@@ -830,6 +889,12 @@ class JurisdictionPack(Base):
     # assigned, or a pack that never sets this, behaves exactly as before
     # this column existed.
     policy_defaults      = Column(JSON, nullable=True)
+
+    # Evidence chain for this pack's rates (agency, title, URL, checksum,
+    # retrieved date, reviewer — see SourceArtifact below). NULL for every
+    # existing pack; only enforced (see service.py's Active-transition
+    # gate) for packs where the enforcing jurisdiction opts in.
+    source_document_id  = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
@@ -1109,6 +1174,244 @@ class PayrollUpdateFormSubmission(Base):
     reviewed_at      = Column(DateTime(timezone=True), nullable=True)
     review_notes     = Column(String(300), nullable=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── US Jurisdiction: Source Evidence, Locality, Employer Overlay,     ────
+# ── Taxability Matrix, Reciprocity, YTD Accumulation                  ────
+# All new, purely additive tables — no existing table/column above is
+# altered. Introduced to close the gaps documented in
+# docs/ZoikoPayroll_US_Architecture_Gap_Analysis.md against
+# ZP-TAX-US-2026-001. Every FK from these tables INTO the existing schema
+# is nullable on the existing side (e.g. JurisdictionPack.source_document_id),
+# so India/UK and any pre-existing US rows are completely unaffected by
+# these tables simply existing and being empty.
+
+class SourceArtifact(Base):
+    """The standard's §14.2 minimum source record — one row per official
+    publication a statutory value was taken from. Referenced by
+    JurisdictionPack, LocalityDataset, EmployerTaxProfile, and
+    ReciprocityRule via a nullable FK; nothing requires it to be set today,
+    but the Active-transition gate (service.py) can require it per-pack."""
+    __tablename__ = "payroll_source_artifacts"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    agency                = Column(String(200), nullable=False)   # "IRS", "California EDD"
+    title                 = Column(String(300), nullable=False)   # "Publication 15-T (2026)"
+    form_number           = Column(String(50), nullable=True)
+    source_url            = Column(String(500), nullable=True)
+    publication_date      = Column(Date, nullable=True)
+    retrieved_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    checksum_sha256       = Column(String(64), nullable=True)
+    reviewer_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewer_approved_at  = Column(DateTime(timezone=True), nullable=True)
+    superseded_by_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<SourceArtifact id={self.id} agency={self.agency} title={self.title!r}>"
+
+
+class LocalityDataset(Base):
+    """A signed, versioned import of official local-tax jurisdiction codes
+    (county/municipal/school-district/PSD) for one state — the standard's
+    "Locality Dataset Manager" concept. Distinct from a single ContributionRate/
+    TaxSlab row because a real locality dataset is thousands of rows imported
+    as a unit, diffed/staged/approved/activated together, not hand-typed."""
+    __tablename__ = "payroll_locality_datasets"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    jurisdiction_country  = Column(String(10), nullable=False)   # "US"
+    jurisdiction_state    = Column(String(100), nullable=False)  # "PA", "OH", "IN"
+    version               = Column(String(50), nullable=False)
+    status                = Column(String(20), nullable=False, default="Draft", server_default="Draft")
+    # Draft | Staged | Active | Retired — mirrors JurisdictionPack's
+    # lifecycle vocabulary; only one Active dataset per (country, state)
+    # should be enforced at the service layer, same pattern as
+    # JurisdictionPack's tax-pack overlap guard.
+    source_document_id   = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    checksum_sha256       = Column(String(64), nullable=True)
+    effective_from        = Column(Date, nullable=True)
+    effective_to          = Column(Date, nullable=True)
+    imported_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+
+    rates = relationship("LocalityRate", back_populates="dataset", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<LocalityDataset id={self.id} state={self.jurisdiction_state} v{self.version} status={self.status}>"
+
+
+class LocalityRate(Base):
+    """One local-tax rate row within a LocalityDataset version — e.g. one
+    Pennsylvania PSD code's resident/nonresident EIT + LST, or one Ohio
+    municipality's income-tax rate."""
+    __tablename__ = "payroll_locality_rates"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    locality_dataset_id   = Column(Integer, ForeignKey("payroll_locality_datasets.id"), nullable=False, index=True)
+    locality_code         = Column(String(20), nullable=False)   # PA 6-digit PSD code, OH municipality ID, IN county code
+    locality_type         = Column(String(30), nullable=False)   # COUNTY | MUNICIPAL | SCHOOL_DISTRICT | PSD_EIT_LST
+    locality_name         = Column(String(200), nullable=True)
+    resident_rate_pct     = Column(Numeric(6, 4), nullable=True)
+    nonresident_rate_pct  = Column(Numeric(6, 4), nullable=True)
+    flat_amount           = Column(Numeric(12, 2), nullable=True)   # for LST-style flat local taxes
+    tax_collector_id      = Column(String(100), nullable=True)      # remittance routing destination
+
+    dataset = relationship("LocalityDataset", back_populates="rates")
+
+    __table_args__ = (
+        UniqueConstraint("locality_dataset_id", "locality_code", name="uq_locality_rate_dataset_code"),
+    )
+
+    def __repr__(self):
+        return f"<LocalityRate id={self.id} code={self.locality_code} type={self.locality_type}>"
+
+
+class EmployerTaxProfile(Base):
+    """Tenant-specific, agency-assigned rate (State Unemployment Insurance
+    and similar experience-rated assessments). Deliberately NOT a
+    ContributionRate row: a ContributionRate override is an org's own policy
+    choice (e.g. a different PF %), but a SUI rate is a statutory fact
+    assigned to this specific employer by a government agency, with its own
+    account number and evidence trail — conflating the two would make it
+    impossible to tell "the org chose this" from "the state mandated this."
+    """
+    __tablename__ = "payroll_employer_tax_profiles"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    jurisdiction_id        = Column(String(10), nullable=False)   # "US-CA", "US-NJ", "US-DC"
+    component_code         = Column(String(20), nullable=False)   # "SUI" | "ETT" | "WF" | "JDA"
+    taxable_wage_base       = Column(Numeric(12, 2), nullable=False)
+    # STATE_DEFAULT | NEW_EMPLOYER | EMPLOYER_NOTICE — provenance, per the
+    # standard's §6.1: never infer an experience rate from prior payroll
+    # deductions, only from an agency-issued notice or the state default.
+    rate_source             = Column(String(20), nullable=False, default="STATE_DEFAULT", server_default="STATE_DEFAULT")
+    employer_rate_pct       = Column(Numeric(6, 4), nullable=False)
+    assessment_rate_pct     = Column(Numeric(6, 4), nullable=True)
+    effective_from          = Column(Date, nullable=False)
+    effective_to            = Column(Date, nullable=True)
+    agency_account_id       = Column(String(100), nullable=True)   # tenant-specific; treat as sensitive
+    source_document_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    reimbursable_status      = Column(String(20), nullable=False, default="CONTRIBUTORY", server_default="CONTRIBUTORY")
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_employer_tax_profile_org_jur_comp", "organization_id", "jurisdiction_id", "component_code"),
+    )
+
+    def __repr__(self):
+        return f"<EmployerTaxProfile org={self.organization_id} jur={self.jurisdiction_id} comp={self.component_code}>"
+
+
+class TaxabilityRule(Base):
+    """Per-earning-type x per-tax-component taxability, effective-dated.
+    Platform-wide, not US-only — but every existing earning type/tax
+    component combination should be seeded as is_taxable=True (matching
+    today's "everything taxes everything" behavior) so no country's
+    calculation changes until a genuinely differentiated row (e.g. a 401(k)
+    deferral exempt from federal income tax but not from Social Security)
+    is explicitly added. NULL organization_id = canonical/platform default."""
+    __tablename__ = "payroll_taxability_rules"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    jurisdiction_country   = Column(String(10), nullable=False)
+    jurisdiction_state     = Column(String(100), nullable=True)
+    earning_type           = Column(String(50), nullable=False)   # "base_salary" | "401k_deferral" | "cafeteria_125" | ...
+    tax_component          = Column(String(30), nullable=False)   # "federal_income_tax" | "social_security" | "medicare" | "futa" | "state_income_tax"
+    is_taxable             = Column(Boolean, nullable=False, default=True, server_default="true")
+    effective_from         = Column(Date, nullable=True)
+    effective_to           = Column(Date, nullable=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "jurisdiction_country", "jurisdiction_state", "earning_type", "tax_component", "organization_id",
+            name="uq_taxability_rule_scope",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<TaxabilityRule {self.earning_type}x{self.tax_component}={self.is_taxable}>"
+
+
+class EmployeePreTaxDeductionElection(Base):
+    """An employee's elected pre-tax deduction (401(k) deferral, Section 125
+    cafeteria-plan contribution, etc.) — the concrete thing TaxabilityRule
+    above needs to exist in order to have anything to apply differentiated
+    taxability to. No such concept existed anywhere in the schema before
+    this; every earning previously just summed into gross with no
+    pre-tax/post-tax distinction at all."""
+    __tablename__ = "payroll_employee_pretax_elections"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    employee_id    = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    earning_type   = Column(String(50), nullable=False)   # matches TaxabilityRule.earning_type
+    amount         = Column(Numeric(12, 2), nullable=True)
+    percent_of_gross = Column(Numeric(6, 4), nullable=True)
+    effective_from = Column(Date, nullable=False)
+    effective_to   = Column(Date, nullable=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<EmployeePreTaxDeductionElection emp={self.employee_id} type={self.earning_type}>"
+
+
+class ReciprocityRule(Base):
+    """A directional cross-state tax reciprocity agreement (e.g. PA
+    resident working in NJ) — per the standard's §8.2, stored as data, not
+    embedded in state calculation code. Empty table = no reciprocity
+    applied anywhere = today's exact behavior (work_state alone determines
+    withholding)."""
+    __tablename__ = "payroll_reciprocity_rules"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    resident_jurisdiction    = Column(String(10), nullable=False)   # "US-PA"
+    work_jurisdiction        = Column(String(10), nullable=False)   # "US-NJ"
+    agreement_type           = Column(String(40), nullable=False, default="RECIPROCAL_WAGE_WITHHOLDING", server_default="RECIPROCAL_WAGE_WITHHOLDING")
+    employee_certificate     = Column(String(50), nullable=True)    # "NJ-165"
+    certificate_required     = Column(Boolean, nullable=False, default=True, server_default="true")
+    result_when_valid        = Column(String(200), nullable=True)
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)
+    source_document_id       = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("resident_jurisdiction", "work_jurisdiction", "effective_from", name="uq_reciprocity_pair_effective"),
+    )
+
+    def __repr__(self):
+        return f"<ReciprocityRule {self.resident_jurisdiction}->{self.work_jurisdiction}>"
+
+
+class PayrollYtdAccumulator(Base):
+    """Running year-to-date taxable-wages/tax-withheld total per employee
+    per tax component, for jurisdictions whose statutory caps (Social
+    Security wage base, FUTA wage base, Additional Medicare threshold) must
+    be resolved against actual cumulative pay-to-date rather than a flat
+    current-period-times-twelve estimate. Written only by real payslip
+    generation (never by preview), one row per (employee, tax_year,
+    component). Empty for every employee until Phase 2 engine wiring reads/
+    writes it — until then, calculation behavior is exactly what it is
+    today (see engine/countries/us.py)."""
+    __tablename__ = "payroll_ytd_accumulators"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    tax_year                  = Column(String(10), nullable=False)   # "US-CY-2026"
+    tax_component             = Column(String(30), nullable=False)   # "social_security" | "futa" | "medicare_additional" | ...
+    ytd_taxable_wages         = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    ytd_tax_withheld          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    last_updated_payslip_id   = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "tax_year", "tax_component", name="uq_ytd_accumulator_employee_year_component"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollYtdAccumulator emp={self.employee_id} year={self.tax_year} comp={self.tax_component}>"
 
     def __repr__(self):
         return f"<PayrollUpdateFormSubmission send={self.send_id} status={self.status}>"
