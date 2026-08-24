@@ -336,6 +336,11 @@ class HandoffPreviewCreate(BaseModel):
     included_evidence_ids: list[int] = Field(default_factory=list)
     excluded_data_classes: list[str] = Field(default_factory=list)
     source_response_id: Optional[int] = None
+    source_session_id: Optional[int] = Field(
+        default=None,
+        description="Attach directly to a chat session (e.g. 'escalate this conversation'), "
+        "as opposed to source_response_id which attaches to one specific response.",
+    )
 
 
 class HandoffPreviewResponse(BaseModel):
@@ -389,6 +394,7 @@ class ActionPreviewCreate(BaseModel):
     target: ActionTarget
     arguments: dict[str, Any] = Field(default_factory=dict)
     source_response_id: Optional[int] = None
+    source_session_id: Optional[int] = None
 
 
 class ActionConfirmationSchema(BaseModel):
