@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { X, ChevronDown, Loader2, RotateCcw } from "lucide-react";
 import { getRunById, getRunItems, getRunLeaveSummary, recalculateEmployeePayslip } from "../../../service/payrollService";
 import { useToast } from "../ToastContext";
-import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
+import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { formatCurrency } from "../../../utils/currency";
 import RunStatusTimeline from "./RunStatusTimeline";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
@@ -88,13 +88,15 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
 
   const deductions = [
     ["LOP Deduction", item.attendanceDeduction],
-    [labels.incomeTax, item.tds],
+    ...getIncomeTaxLines(item),
     [labels.pf, item.pf],
     [labels.esi, item.esi],
     ["Professional Tax", item.professionalTax],
     [labels.socialSecurity, item.socialSecurity],
     [labels.medicare, item.medicare],
     ["National Insurance", item.niEmployee],
+    ["Workplace Pension", item.employeePension],
+    ["Student Loan Deduction", item.studyLoanDeduction],
   ].filter(([, v]) => Number(v) > 0);
 
   const employerContributions = [
@@ -103,6 +105,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     [labels.employerSocialSecurity, item.employerSs],
     ["Employer Medicare", item.employerMedicare],
     [labels.employerPension, item.employerPension],
+    ["Employer National Insurance", item.employerNi],
   ].filter(([, v]) => Number(v) > 0);
 
   return (

@@ -1150,6 +1150,9 @@ const CONTRIBUTION_COLUMNS_BY_COUNTRY = {
     // here it only showed up as an unexplained drop in Net Pay on the
     // "what you approve is exactly what gets persisted" review screen.
     { id: "workplace-pension", label: "Workplace Pension", previewField: "monthlyEmployeePension", payslipField: "employeePension" },
+    // Same "silently missing" gap as Workplace Pension above — Student/
+    // Postgraduate Loan genuinely reduces Net Pay but had no column here.
+    { id: "student-loan", label: "Student Loan Deduction", previewField: "monthlyStudyLoanDeduction", payslipField: "studyLoanDeduction" },
   ],
   AU: [
     { id: "medicare-levy", label: "Medicare Levy", previewField: "monthlyMedicare", payslipField: "medicare" },

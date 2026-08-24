@@ -19,13 +19,14 @@ export default function RatesTab({ pack, rates, onAdd, onEdit, onDelete }) {
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-xs">
             <thead className="bg-background text-left text-foreground-muted">
-              <tr><th className="px-3 py-2">Component</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Employee %</th><th className="px-3 py-2">Employer %</th><th className="px-3 py-2">Flat Amount</th><th className="px-3 py-2 w-16"></th></tr>
+              <tr><th className="px-3 py-2">Component</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Filing Status</th><th className="px-3 py-2">Employee %</th><th className="px-3 py-2">Employer %</th><th className="px-3 py-2">Flat Amount</th><th className="px-3 py-2 w-16"></th></tr>
             </thead>
             <tbody>
               {rates.map((r) => (
                 <tr key={r.id} className="border-t border-border-light">
                   <td className="px-3 py-2"><p className="font-semibold text-foreground">{r.label}</p><p className="font-mono text-[10px] text-foreground-disabled">{r.componentKey}</p></td>
                   <td className="px-3 py-2 text-foreground-secondary">{r.jurisdictionState || "—"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{r.filingStatus || "—"}</td>
                   <td className="px-3 py-2 text-foreground-secondary">{r.employeeRatePct != null ? `${r.employeeRatePct}%` : "—"}</td>
                   <td className="px-3 py-2 text-foreground-secondary">{r.employerRatePct != null ? `${r.employerRatePct}%` : "—"}</td>
                   <td className="px-3 py-2 text-foreground-secondary">{r.flatAmount != null ? r.flatAmount : "—"}</td>

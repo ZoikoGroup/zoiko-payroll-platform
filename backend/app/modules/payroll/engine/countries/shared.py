@@ -195,14 +195,25 @@ def evaluate_tax_formula(expression: str, income: Decimal) -> Decimal:
 
 # ── Generic bracket calculator ──────────────────────────────────────────
 
-def _calculate_annual_tax(annual_income: Decimal, slabs) -> Decimal:
+def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | None = None) -> Decimal:
     """Progressive slab-based tax on annual income.
 
     If any slab row opts into rule_type="FORMULA", that row's
     formula_expression is evaluated directly against annual_income instead
     of the bracket-sum loop — one formula row replaces the whole table for
     that jurisdiction (matches how Germany's real Lohnsteuer works: one
-    continuous function, not a set of bands)."""
+    continuous function, not a set of bands).
+
+    `filing_status` (US-specific; NULL for every other jurisdiction and for
+    US callers who don't pass one): if AT LEAST ONE slab in the list
+    carries a non-NULL `filing_status` (i.e. Super Admin has configured
+    filing-status-specific brackets — e.g. separate Single/MFJ/HoH tables),
+    only rows matching this employee's filing_status are used, falling
+    back to filing-status-agnostic rows if none match. If NO slab carries a
+    filing_status at all (every jurisdiction today, and any US org that
+    hasn't configured per-filing-status brackets yet), this is a complete
+    no-op — bracket_slabs is built exactly as before this parameter
+    existed."""
     formula_row = next((s for s in slabs if getattr(s, "rule_type", None) == "FORMULA" and s.formula_expression), None)
     if formula_row is not None:
         return evaluate_tax_formula(formula_row.formula_expression, annual_income)
@@ -218,6 +229,11 @@ def _calculate_annual_tax(annual_income: Decimal, slabs) -> Decimal:
     # _pack_has_income_tax_slabs guard, the primary fix), it must not be
     # silently summed as a 0%-rate income bracket.
     bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT")]
+
+    filing_status_tagged = [s for s in bracket_slabs if getattr(s, "filing_status", None) is not None]
+    if filing_status_tagged:
+        matching = [s for s in filing_status_tagged if s.filing_status == filing_status]
+        bracket_slabs = matching if matching else [s for s in bracket_slabs if getattr(s, "filing_status", None) is None]
 
     if slabs and not bracket_slabs:
         _logger.warning(

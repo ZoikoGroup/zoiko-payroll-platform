@@ -25,6 +25,20 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"] },
     { key: "aba_routing_number", label: "ABA routing number", type: "text", placeholder: "9 digits", pattern: /^\d{9}$/, error: "ABA routing number must be exactly 9 digits." },
     { key: "state_tax_jurisdiction", label: "State tax jurisdiction", type: "text", placeholder: "e.g. CA", required: true, upper: true, pattern: /^[A-Z]{2}$/, error: "State tax jurisdiction must be a 2-letter state code (e.g. CA, NY)." },
+    // Reciprocity (backend: service.py's _resolve_us_reciprocity) — only
+    // meaningfully different from state_tax_jurisdiction (work state) for a
+    // genuine multi-state commuter, e.g. lives in PA, works in NJ. All
+    // optional: leaving these blank is the same as today's behavior for
+    // every employee whose residence and work state match.
+    { key: "residence_state", label: "Residence state (if different from work state)", type: "text", placeholder: "e.g. PA", upper: true, pattern: /^[A-Z]{2}$/, error: "Residence state must be a 2-letter state code (e.g. PA)." },
+    { key: "reciprocity_certificate_on_file", label: "Reciprocity certificate on file", type: "select", choices: ["true", "false", "True", "False"] },
+    { key: "reciprocity_certificate_expiry", label: "Reciprocity certificate expiry", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Certificate expiry must be in YYYY-MM-DD format." },
+    // Locality (backend: service.py's get_locality_rate) — only meaningful
+    // once Tax Ops has entered a matching rate in Super Admin > Compliance >
+    // United States > Locality Rates. Optional free text: no format is
+    // enforced since real-world locality codes vary (county FIPS, municipal
+    // short codes, PSD codes).
+    { key: "work_locality", label: "Work locality code (county/municipal/school-district)", type: "text", placeholder: "e.g. PHILADELPHIA" },
   ],
   UK: [
     // NOTE: the first/second letter exclusions (D,F,I,Q,U,V) are real — a

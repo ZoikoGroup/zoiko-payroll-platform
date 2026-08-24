@@ -60,6 +60,32 @@ class PayrollContext:
     state_rate_map: dict = field(default_factory=dict)   # component_key → ContributionRate, state-scoped
     state_slabs: list = field(default_factory=list)        # list[TaxSlab], state-scoped
 
+    # US: tenant-specific, agency-assigned rates (SUI and similar) for this
+    # employee's org+jurisdiction — component_code → EmployerTaxProfile.
+    # Empty dict (every employee today) means "no such profile configured,"
+    # NOT "assume the state default" — engine/countries/us.py treats an
+    # absent SUI profile as simply not calculating SUI at all, since
+    # inferring a rate would violate the standard's "never infer an
+    # experience rate" rule.
+    employer_tax_profiles: dict = field(default_factory=dict)
+
+    # US: cross-state reciprocity (see service.py's _resolve_us_reciprocity).
+    # False/empty for every employee today (no employee has a distinct
+    # residence_state from work_state, and the ReciprocityRule table is
+    # empty until Tax Ops configures a real agreement) — when True,
+    # engine/countries/us.py taxes the RESIDENT state (these two fields)
+    # instead of the work state (state_rate_map/state_slabs above).
+    reciprocity_suppresses_work_state: bool = False
+    resident_state_rate_map: dict = field(default_factory=dict)
+    resident_state_slabs: list = field(default_factory=list)
+
+    # US: manually-entered local (county/municipal/school-district) tax
+    # rate for this employee's work_locality — see service.py's
+    # get_locality_rate. None for every employee today (no employee has
+    # work_locality set through any admin-facing UI... until now — see
+    # countryFieldSpecs.js's new "Work Locality Code" field).
+    locality_rate: object = None
+
     # Employee tax-profile fields — all opt-in (None/False means "not
     # set," never inferred), threaded from PayrollEmployee so a country
     # calculator can read them without DB access. No existing employee
@@ -77,6 +103,15 @@ class PayrollContext:
     # so no existing calculation changes. Only engine/countries/uk.py
     # currently reads this.
     pay_frequency: str = "Monthly"
+
+    # US Form W-4: filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and form
+    # vintage ("PRE_2020"/"2020_PLUS"). None for every non-US employee, and
+    # for US employees until explicitly set — engine/countries/us.py falls
+    # back to today's single filing-status-agnostic table/threshold when
+    # None, so no existing calculation changes just because these fields
+    # now exist.
+    w4_filing_status: str = None
+    w4_form_vintage: str = None
 
 
 @dataclass
@@ -129,11 +164,25 @@ class PayrollResult:
     employer_pension: Decimal = Decimal("0")
     employer_ni: Decimal = Decimal("0")
     employer_futa: Decimal = Decimal("0")
+    # US: State Unemployment Insurance, tenant/employer-specific (see
+    # EmployerTaxProfile). Zero until an org has a configured profile —
+    # every other country's output is unaffected.
+    employer_sui: Decimal = Decimal("0")
     # UK: employee-side Workplace Pension deduction — distinct from
     # employer_pension above. Zero unless a country calculator explicitly
     # sets it (only uk.py does, and only when an employee-pension rate is
     # configured) — every other country's output is unaffected.
     employee_pension: Decimal = Decimal("0")
+
+    # US: federal/state/local income tax broken out separately for display/
+    # reporting — `tds` above remains the correct COMBINED total actually
+    # deducted (federal+state+local), unchanged in meaning; these three are
+    # purely additive breakdown fields, the same "informational, never
+    # summed again" convention surcharge/cess already use for India. Zero
+    # for every other country.
+    federal_income_tax: Decimal = Decimal("0")
+    state_income_tax: Decimal = Decimal("0")
+    local_tax: Decimal = Decimal("0")
 
     # Totals
     total_deductions: Decimal = Decimal("0")

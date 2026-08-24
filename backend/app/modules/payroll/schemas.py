@@ -252,6 +252,13 @@ class PayrollRunPreviewEmployee(BaseModel):
     monthlySocialSecurity: float = 0.0
     monthlyMedicare: float = 0.0
     monthlyNi: float = 0.0
+    # UK: Workplace Pension (employee side) and Student/Postgraduate Loan —
+    # both were already being computed and put into this response's dict by
+    # service.py, but this schema never declared either field, so FastAPI's
+    # response_model filtering silently stripped them before this fix —
+    # same "computed but invisible" bug as the persisted-payslip schema.
+    monthlyEmployeePension: float = 0.0
+    monthlyStudyLoanDeduction: float = 0.0
     monthlyContributions: float
     monthlyNet: float
     employerPf: float = 0.0
@@ -259,6 +266,8 @@ class PayrollRunPreviewEmployee(BaseModel):
     employerSs: float = 0.0
     employerMedicare: float = 0.0
     employerPension: float = 0.0
+    employeePension: float = 0.0
+    employerNi: float = 0.0
     taxSlabRate: str = "—"
     payableDays: Optional[float] = None
     totalWorkingDays: Optional[float] = None
@@ -359,18 +368,31 @@ class PayslipItemResponse(BaseModel):
     tds:                Decimal
     surcharge:          Decimal = Decimal("0")
     cess:               Decimal = Decimal("0")
+    federalIncomeTax:   Decimal = Decimal("0")
+    stateIncomeTax:     Decimal = Decimal("0")
+    localTax:           Decimal = Decimal("0")
     pf:                 Decimal
     esi:                Decimal
     professionalTax:    Decimal
     socialSecurity:     Decimal = Decimal("0")
     medicare:           Decimal = Decimal("0")
     niEmployee:         Decimal = Decimal("0")
+    # UK: Workplace Pension (employee side) and Student/Postgraduate Loan —
+    # both correctly computed and persisted on PayslipItem, but previously
+    # dropped here (employeePension) or never added at all
+    # (studyLoanDeduction), so FastAPI's response_model filtering silently
+    # stripped them from every payslip API response before this fix.
+    employeePension:    Decimal = Decimal("0")
+    studyLoanDeduction: Decimal = Decimal("0")
     totalDeductions:    Decimal = Decimal("0")
     employerPf:         Decimal = Decimal("0")
     employerEsi:        Decimal = Decimal("0")
     employerSs:         Decimal = Decimal("0")
     employerMedicare:   Decimal = Decimal("0")
     employerPension:    Decimal = Decimal("0")
+    # UK: employer-side National Insurance — same "computed, persisted,
+    # never serialized" gap as studyLoanDeduction above.
+    employerNi:         Decimal = Decimal("0")
     netPay:             Decimal
     bankName:           Optional[str] = None
     bankAccount:        Optional[str] = None
@@ -787,6 +809,9 @@ class CanonicalTaxSlabUpsert(BaseModel):
     jurisdictionState: Optional[str] = None
     jurisdictionLocality: Optional[str] = None
     taxRegime: Optional[str] = None
+    # US-specific (NULL/unused by every other jurisdiction): "SINGLE" |
+    # "MFJ" | "MFS" | "HOH" — see TaxSlab.filing_status.
+    filingStatus: Optional[str] = None
     minAmount: Decimal
     maxAmount: Optional[Decimal] = None
     ratePct: Decimal
@@ -818,6 +843,9 @@ class CanonicalContributionRateUpsert(BaseModel):
     jurisdictionState: Optional[str] = None
     jurisdictionLocality: Optional[str] = None
     taxRegime: Optional[str] = None
+    # US-specific (NULL/unused by every other jurisdiction): "SINGLE" |
+    # "MFJ" | "MFS" | "HOH" — see ContributionRate.filing_status.
+    filingStatus: Optional[str] = None
     componentKey: str
     label: str
     employeeSharePct: Optional[Decimal] = None
@@ -846,6 +874,7 @@ class CanonicalTaxSlabResponse(BaseModel):
     adjustmentAmount: Optional[Decimal] = Field(None, validation_alias="adjustment_amount", serialization_alias="adjustmentAmount")
     niCategory: Optional[str] = Field(None, validation_alias="ni_category", serialization_alias="niCategory")
     employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    filingStatus: Optional[str] = Field(None, validation_alias="filing_status", serialization_alias="filingStatus")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -858,6 +887,7 @@ class CanonicalContributionRateResponse(BaseModel):
     jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
     jurisdictionLocality: Optional[str] = Field(None, validation_alias="jurisdiction_locality", serialization_alias="jurisdictionLocality")
     taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
+    filingStatus: Optional[str] = Field(None, validation_alias="filing_status", serialization_alias="filingStatus")
     componentKey: str = Field(validation_alias="component_key", serialization_alias="componentKey")
     label: str
     employeeRatePct: Optional[Decimal] = Field(None, validation_alias="employee_rate_pct", serialization_alias="employeeRatePct")
@@ -895,6 +925,143 @@ class TaxConfigurationAuditResponse(BaseModel):
     newValue: Optional[dict] = Field(None, validation_alias="new_value", serialization_alias="newValue")
     reason: Optional[str] = None
     createdAt: Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── US: Employer-Specific Tax Profile (SUI and similar) ──────────────────
+# Tenant-specific, agency-assigned rates — deliberately a separate schema
+# family from the canonical Contribution Rate/Tax Slab ones above (see
+# EmployerTaxProfile's model docstring): a SUI rate is not a discretionary
+# org policy choice, it's a statutory fact assigned by a government agency.
+
+class EmployerTaxProfileUpsert(BaseModel):
+    id: Optional[int] = None
+    organizationId: int
+    jurisdictionId: str          # "US-CA"
+    componentCode: str = "SUI"   # "SUI" | "ETT" | "WF" | "JDA"
+    taxableWageBase: Decimal
+    rateSource: str = "STATE_DEFAULT"   # STATE_DEFAULT | NEW_EMPLOYER | EMPLOYER_NOTICE
+    employerRatePct: Decimal
+    assessmentRatePct: Optional[Decimal] = None
+    effectiveFrom: date
+    effectiveTo: Optional[date] = None
+    agencyAccountId: Optional[str] = None
+    reimbursableStatus: str = "CONTRIBUTORY"   # CONTRIBUTORY | REIMBURSING
+    sourceDocumentId: Optional[int] = None
+
+
+class EmployerTaxProfileResponse(BaseModel):
+    id: int
+    organizationId: int = Field(validation_alias="organization_id", serialization_alias="organizationId")
+    jurisdictionId: str = Field(validation_alias="jurisdiction_id", serialization_alias="jurisdictionId")
+    componentCode: str = Field(validation_alias="component_code", serialization_alias="componentCode")
+    taxableWageBase: Decimal = Field(validation_alias="taxable_wage_base", serialization_alias="taxableWageBase")
+    rateSource: str = Field(validation_alias="rate_source", serialization_alias="rateSource")
+    employerRatePct: Decimal = Field(validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    assessmentRatePct: Optional[Decimal] = Field(None, validation_alias="assessment_rate_pct", serialization_alias="assessmentRatePct")
+    effectiveFrom: date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    agencyAccountId: Optional[str] = Field(None, validation_alias="agency_account_id", serialization_alias="agencyAccountId")
+    reimbursableStatus: str = Field(validation_alias="reimbursable_status", serialization_alias="reimbursableStatus")
+    sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── US: Cross-State Reciprocity ───────────────────────────────────────────
+
+class ReciprocityRuleUpsert(BaseModel):
+    id: Optional[int] = None
+    residentJurisdiction: str   # "US-PA"
+    workJurisdiction: str       # "US-NJ"
+    agreementType: str = "RECIPROCAL_WAGE_WITHHOLDING"
+    employeeCertificate: Optional[str] = None
+    certificateRequired: bool = True
+    resultWhenValid: Optional[str] = None
+    effectiveFrom: date
+    effectiveTo: Optional[date] = None
+    sourceDocumentId: Optional[int] = None
+
+
+class ReciprocityRuleResponse(BaseModel):
+    id: int
+    residentJurisdiction: str = Field(validation_alias="resident_jurisdiction", serialization_alias="residentJurisdiction")
+    workJurisdiction: str = Field(validation_alias="work_jurisdiction", serialization_alias="workJurisdiction")
+    agreementType: str = Field(validation_alias="agreement_type", serialization_alias="agreementType")
+    employeeCertificate: Optional[str] = Field(None, validation_alias="employee_certificate", serialization_alias="employeeCertificate")
+    certificateRequired: bool = Field(validation_alias="certificate_required", serialization_alias="certificateRequired")
+    resultWhenValid: Optional[str] = Field(None, validation_alias="result_when_valid", serialization_alias="resultWhenValid")
+    effectiveFrom: date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Source Evidence (ZP-TAX-US-2026-001 §14) ──────────────────────────────
+# One row per official publication a statutory value was taken from —
+# referenced by JurisdictionPack/LocalityDataset/EmployerTaxProfile/
+# ReciprocityRule via a nullable FK. Platform-wide, not US-only.
+
+class SourceArtifactCreate(BaseModel):
+    agency: str
+    title: str
+    formNumber: Optional[str] = None
+    sourceUrl: Optional[str] = None
+    publicationDate: Optional[date] = None
+    checksumSha256: Optional[str] = None
+
+
+class SourceArtifactResponse(BaseModel):
+    id: int
+    agency: str
+    title: str
+    formNumber: Optional[str] = Field(None, validation_alias="form_number", serialization_alias="formNumber")
+    sourceUrl: Optional[str] = Field(None, validation_alias="source_url", serialization_alias="sourceUrl")
+    publicationDate: Optional[date] = Field(None, validation_alias="publication_date", serialization_alias="publicationDate")
+    retrievedAt: Optional[datetime] = Field(None, validation_alias="retrieved_at", serialization_alias="retrievedAt")
+    checksumSha256: Optional[str] = Field(None, validation_alias="checksum_sha256", serialization_alias="checksumSha256")
+    reviewerId: Optional[int] = Field(None, validation_alias="reviewer_id", serialization_alias="reviewerId")
+    reviewerApprovedAt: Optional[datetime] = Field(None, validation_alias="reviewer_approved_at", serialization_alias="reviewerApprovedAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── US: Locality (county/municipal/school-district) tax ──────────────────
+# Deliberately manual-entry, not auto-geocoded from an address — the same
+# trust model as EmployerTaxProfile/SUI: Tax Ops enters a real, published
+# local rate against a locality code, evidenced by a SourceArtifact if
+# desired. An automated address-to-jurisdiction-code resolver (what the
+# standard's §7 ultimately wants) needs a licensed geocoding/locality
+# dataset — a data-sourcing decision, not something to fabricate here.
+
+class LocalityRateUpsert(BaseModel):
+    id: Optional[int] = None
+    jurisdictionCountry: str = "US"
+    jurisdictionState: str
+    localityCode: str
+    localityType: str = "MUNICIPAL"   # COUNTY | MUNICIPAL | SCHOOL_DISTRICT | PSD_EIT_LST
+    localityName: Optional[str] = None
+    residentRatePct: Optional[Decimal] = None
+    nonresidentRatePct: Optional[Decimal] = None
+    flatAmount: Optional[Decimal] = None
+    taxCollectorId: Optional[str] = None
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
+    sourceDocumentId: Optional[int] = None
+
+
+class LocalityRateResponse(BaseModel):
+    id: int
+    localityDatasetId: int = Field(validation_alias="locality_dataset_id", serialization_alias="localityDatasetId")
+    localityCode: str = Field(validation_alias="locality_code", serialization_alias="localityCode")
+    localityType: str = Field(validation_alias="locality_type", serialization_alias="localityType")
+    localityName: Optional[str] = Field(None, validation_alias="locality_name", serialization_alias="localityName")
+    residentRatePct: Optional[Decimal] = Field(None, validation_alias="resident_rate_pct", serialization_alias="residentRatePct")
+    nonresidentRatePct: Optional[Decimal] = Field(None, validation_alias="nonresident_rate_pct", serialization_alias="nonresidentRatePct")
+    flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
+    taxCollectorId: Optional[str] = Field(None, validation_alias="tax_collector_id", serialization_alias="taxCollectorId")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

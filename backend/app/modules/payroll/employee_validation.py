@@ -22,6 +22,7 @@ Reuse notes (this module is deliberately additive, not a rewrite):
 """
 
 import re
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -165,8 +166,76 @@ class USEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Z]{2}$"),
             "error": "State tax jurisdiction must be a 2-letter state code (e.g. CA, NY).",
         },
+        # Reciprocity (see service.py's _resolve_us_reciprocity): only
+        # meaningfully different from state_tax_jurisdiction for a genuine
+        # multi-state commuter (e.g. lives in PA, works in NJ) — optional,
+        # since most employees' residence and work state are the same and
+        # the engine already falls back to work_state when this is unset.
+        "residence_state": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z]{2}$"),
+            "error": "Residence state must be a 2-letter state code (e.g. PA).",
+        },
+        "reciprocity_certificate_on_file": {"choices": ["true", "false", "True", "False"]},
+        "reciprocity_certificate_expiry": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Certificate expiry must be in YYYY-MM-DD format.",
+        },
+        # Optional — only meaningful once Tax Ops has entered a matching
+        # LocalityRate for this code (see service.py's get_locality_rate /
+        # Super Admin's Locality Rates panel). No format is enforced since
+        # real-world locality codes vary widely (county FIPS, municipal
+        # short codes, PSD codes) — free text, same convention as
+        # employeeCertificate on ReciprocityRule.
+        "work_locality": {},
     }
     duplicate_field = "ssn"
+
+    # The fix for the same class of dead-plumbing gap UK's FIELD_COLUMN_MAP
+    # already closed (see UKEmployeeValidation below): state_tax_jurisdiction
+    # and w4_filing_status were previously stored ONLY in compliance_fields
+    # JSON — PayrollEmployee.work_state (the column engine/countries/us.py
+    # and the state-scoped-config resolver actually read) and the new
+    # w4_filing_status column (engine/countries/us.py's filing-status-aware
+    # federal bracket/threshold resolution) never received a value, so a
+    # US employee's declared state/filing-status was silently ignored by
+    # every calculation.
+    FIELD_COLUMN_MAP = {
+        "state_tax_jurisdiction": "work_state",
+        "w4_filing_status": "w4_filing_status",
+        # Without these three, the reciprocity engine (fully built and
+        # tested — see service.py:_resolve_us_reciprocity, resolve_reciprocity)
+        # had no way to ever actually activate for a real employee: Super
+        # Admin could configure a perfectly correct PA/NJ agreement, but no
+        # org admin had any path to mark an employee as a cross-state
+        # commuter or record their certificate — the exact same class of
+        # dead-plumbing gap as state_tax_jurisdiction/w4_filing_status above.
+        "residence_state": "residence_state",
+        "reciprocity_certificate_on_file": "reciprocity_certificate_on_file",
+        "reciprocity_certificate_expiry": "reciprocity_certificate_expiry",
+        # Same dead-plumbing gap, for Locality: PayrollEmployee.work_locality
+        # (the column service.py's get_locality_rate/_resolve_employee_calc_inputs
+        # and add_payslip_item actually read) previously had no path to be
+        # set from an org admin's compliance_fields entry.
+        "work_locality": "work_locality",
+    }
+    FIELD_VALUE_MAP = {
+        # Compact codes matching what engine/countries/us.py and
+        # ContributionRate/TaxSlab.filing_status rows use — the
+        # compliance_fields value itself stays the human-readable choice
+        # exactly as entered (same convention as UK's student_loan_plan).
+        "w4_filing_status": {
+            "Single": "SINGLE",
+            "Married Filing Jointly": "MFJ",
+            "Married Filing Separately": "MFS",
+            "Head of Household": "HOH",
+        },
+        # PayrollEmployee.reciprocity_certificate_on_file is a real Boolean
+        # column (not a string) — same conversion-lambda convention as UK's
+        # study_loan_balance below.
+        "reciprocity_certificate_on_file": lambda v: str(v).lower() == "true",
+        "reciprocity_certificate_expiry": lambda v: date.fromisoformat(v) if v else None,
+    }
 
 
 class UKEmployeeValidation(EmployeeValidationStrategy):

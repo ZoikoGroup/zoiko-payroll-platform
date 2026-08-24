@@ -4,16 +4,22 @@ import { useToast } from "../../context/ToastContext";
 import { upsertCanonicalContributionRate } from "../../service/superAdminService";
 import { inputClass, labelClass } from "./constants";
 
+// See the matching note in SlabFormModal.jsx — same US-only, optional,
+// blank-means-"applies to every filing status" convention.
+const US_FILING_STATUSES = ["SINGLE", "MFJ", "MFS", "HOH"];
+
 export default function RateFormModal({ pack, rate, onClose, onSaved }) {
   const { addToast } = useToast() || {};
   const [form, setForm] = useState({
     componentKey: rate?.componentKey || "", label: rate?.label || "",
     jurisdictionState: rate?.jurisdictionState || pack.jurisdictionState || "",
     employeeSharePct: rate?.employeeRatePct ?? "", employerSharePct: rate?.employerRatePct ?? "",
-    flatAmount: rate?.flatAmount ?? "", sortOrder: rate?.sortOrder ?? 0, reason: "",
+    flatAmount: rate?.flatAmount ?? "", filingStatus: rate?.filingStatus || "",
+    sortOrder: rate?.sortOrder ?? 0, reason: "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const isUS = pack.jurisdictionCountry === "US";
 
   async function save() {
     if (!form.componentKey.trim() || !form.label.trim()) {
@@ -29,6 +35,7 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
         employeeSharePct: form.employeeSharePct === "" ? null : form.employeeSharePct,
         employerSharePct: form.employerSharePct === "" ? null : form.employerSharePct,
         flatAmount: form.flatAmount === "" ? null : form.flatAmount,
+        filingStatus: isUS && form.filingStatus ? form.filingStatus : null,
         sortOrder: Number(form.sortOrder) || 0, reason: form.reason || null,
       });
       addToast?.("Rate saved.", "success");
@@ -49,6 +56,15 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
         <div><label className={labelClass}>Employee Rate %</label><input className={inputClass} value={form.employeeSharePct} onChange={set("employeeSharePct")} placeholder="12.00" /></div>
         <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerSharePct} onChange={set("employerSharePct")} placeholder="12.00" /></div>
         <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={form.flatAmount} onChange={set("flatAmount")} placeholder="e.g. 200 for a flat fee" /></div>
+        {isUS && (
+          <div className="col-span-2">
+            <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
+            <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
+              <option value="">Any filing status</option>
+              {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        )}
         <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
         <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
       </div>
