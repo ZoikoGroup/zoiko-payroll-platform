@@ -6,6 +6,7 @@ import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "../config/roles";
 import { useAuth } from "../context/AuthContext";
 import LandingHeader from "../landing/LandingHeader";
 import Footer from "../landing/Footer";
+import PublicAssistWidget from "../modules/assist/PublicAssistWidget";
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
@@ -354,6 +355,7 @@ export default function LoginPage() {
         }
       `}</style>
       <Footer />
+      <PublicAssistWidget />
     </div>
   );
 }

@@ -255,3 +255,19 @@ export const listAssistKbSources = async () => {
   const data = await api.get("/api/assist/knowledge/sources");
   return data || [];
 };
+
+// ── Public (unauthenticated / website) mode ────────────────────────────
+// Never attaches a bearer token, even if one happens to be in localStorage
+// (e.g. an admin has the authenticated app open in another tab on the same
+// origin) — anonymous visitors must never be treated as a logged-in user.
+export const createPublicAssistSession = async ({ locale = "en" } = {}) => {
+  return api.post("/api/assist/public/sessions", { locale }, { auth: false });
+};
+
+export const submitPublicAssistMessage = async (sessionId, text) => {
+  return api.post(`/api/assist/public/sessions/${sessionId}/messages`, { text }, { auth: false });
+};
+
+export const listPublicAssistMessages = async (sessionId) => {
+  return api.get(`/api/assist/public/sessions/${sessionId}/messages`, { auth: false });
+};

@@ -1084,3 +1084,89 @@ def test_kb_expiry_sweep(client, headers):
 
     refreshed = client.get(f"/api/assist/knowledge/items/{item_id}", headers=headers).json()
     assert refreshed["state"] == "EXPIRED"
+
+
+# ── Public (unauthenticated) website mode ────────────────────────────────
+# No Authorization header anywhere below — that's the point of this surface.
+
+def _new_public_session(client) -> int:
+    r = client.post("/api/assist/public/sessions", json={"locale": "en"})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def test_public_session_requires_no_auth(client):
+    r = client.post("/api/assist/public/sessions", json={"locale": "en"})
+    assert r.status_code == 200, r.text
+    assert "id" in r.json()
+
+
+def test_public_general_question_answers_from_global_kb(client):
+    sid = _new_public_session(client)
+    r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": "What is a payslip?"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["intent_id"] == "explain.field"
+    assert "payslip" in body["answer"].lower()
+    assert body["sources"], "a general knowledge question should cite the matching KB article"
+
+
+def test_public_account_specific_request_redirects_to_sign_in_not_tools(client):
+    sid = _new_public_session(client)
+    for text in ["show my payslip", "approve payroll for this run", "assign this exception to me"]:
+        r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": text})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "sign in" in body["answer"].lower(), f"expected a sign-in redirect for: {text!r}, got: {body['answer']!r}"
+        assert body["sources"] == []
+
+
+def test_public_message_length_is_capped(client):
+    sid = _new_public_session(client)
+    r = client.post(f"/api/assist/public/sessions/{sid}/messages", json={"text": "x" * 501})
+    assert r.status_code == 400, r.text
+
+
+def test_public_session_has_a_per_session_message_cap(client):
+    # Exercised against the service function directly, not the HTTP route —
+    # the route is also IP-rate-limited (10/minute) for abuse protection,
+    # which would otherwise make 20 rapid calls in one test indistinguishable
+    # from hitting that limiter instead of the per-session cap this test is
+    # actually about.
+    from app.modules.assist import public_service
+    from app.core.exceptions import BadRequestException
+
+    sid = _new_public_session(client)
+    for _ in range(20):
+        public_service.submit_public_message(_db, sid, "Hi")
+    with pytest.raises(BadRequestException):
+        public_service.submit_public_message(_db, sid, "Hi")
+
+
+def test_public_history_is_listable_and_isolated_per_session(client):
+    sid_a = _new_public_session(client)
+    sid_b = _new_public_session(client)
+    client.post(f"/api/assist/public/sessions/{sid_a}/messages", json={"text": "What is a payslip?"})
+    history_a = client.get(f"/api/assist/public/sessions/{sid_a}/messages")
+    history_b = client.get(f"/api/assist/public/sessions/{sid_b}/messages")
+    assert history_a.status_code == 200, history_a.text
+    assert len(history_a.json()) == 2  # the user turn + the assistant turn
+    assert history_b.json() == []
+
+
+def test_public_mode_never_sees_tenant_scoped_kb_items(client, headers):
+    # A tenant-only KB item (organization_id set, not global) must never
+    # surface to an anonymous visitor, even when its text would otherwise
+    # score as the best lexical match.
+    item_id = _new_kb_item(client, headers, "tenant-secret-onboarding-code-xyzzy")
+    client.patch(f"/api/assist/knowledge/items/{item_id}", headers=headers, json={"state": "APPROVED"})
+    client.post(f"/api/assist/knowledge/items/{item_id}/publish", headers=headers, json={})
+
+    sid = _new_public_session(client)
+    r = client.post(
+        f"/api/assist/public/sessions/{sid}/messages",
+        json={"text": "what is the tenant-secret-onboarding-code-xyzzy?"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert all("tenant-secret-onboarding-code-xyzzy" not in (s.get("title") or "") for s in body["sources"])
