@@ -510,6 +510,84 @@ def test_handoff_blocked_within_24h_cooldown(client, headers):
     assert case_id in p2.json()["message"]
 
 
+def test_handoff_preview_resolves_session_from_source_response_id(client, headers, session_id):
+    # Regression test: source_response_id must never be stored directly as
+    # session_id (they're different tables/id sequences — doing so either
+    # violates the session_id foreign key, or worse, silently attaches the
+    # preview to an unrelated session that happens to share the same numeric
+    # id). Creating a preview against a real response must resolve to that
+    # response's own session, not the response's id.
+    from app.modules.assist.models import AssistHandoff, AssistHandoffPreview
+
+    _db.query(AssistHandoff).delete()
+    _db.query(AssistHandoffPreview).delete()
+    _db.commit()
+
+    msg = client.post(
+        f"/api/assist/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": {"type": "TEXT", "text": "What exceptions exist on this run?"}},
+    )
+    response_id = msg.json()["response_id"]
+    assert response_id != session_id  # sanity: these must be different ids for this test to mean anything
+
+    p = client.post(
+        "/api/assist/handoff-previews",
+        headers=headers,
+        json={
+            "destination": "PAYROLL_SUPPORT",
+            "reason_code": "USER_REQUESTED",
+            "summary": "Escalating this specific response.",
+            "source_response_id": response_id,
+        },
+    )
+    assert p.status_code == 200, p.text
+    stored = _db.query(AssistHandoffPreview).filter(AssistHandoffPreview.id == p.json()["preview_id"]).first()
+    assert stored.session_id == session_id
+
+
+def test_handoff_preview_invalid_source_response_id_is_400_not_500(client, headers):
+    from app.modules.assist.models import AssistHandoff, AssistHandoffPreview
+
+    _db.query(AssistHandoff).delete()
+    _db.query(AssistHandoffPreview).delete()
+    _db.commit()
+
+    p = client.post(
+        "/api/assist/handoff-previews",
+        headers=headers,
+        json={
+            "destination": "PAYROLL_SUPPORT",
+            "reason_code": "USER_REQUESTED",
+            "summary": "Escalating a response that doesn't exist.",
+            "source_response_id": 9_999_999,
+        },
+    )
+    assert p.status_code == 400, p.text
+
+
+def test_handoff_preview_source_session_id_direct(client, headers, session_id):
+    from app.modules.assist.models import AssistHandoff, AssistHandoffPreview
+
+    _db.query(AssistHandoff).delete()
+    _db.query(AssistHandoffPreview).delete()
+    _db.commit()
+
+    p = client.post(
+        "/api/assist/handoff-previews",
+        headers=headers,
+        json={
+            "destination": "PAYROLL_SUPPORT",
+            "reason_code": "USER_REQUESTED",
+            "summary": "Escalating this whole conversation.",
+            "source_session_id": session_id,
+        },
+    )
+    assert p.status_code == 200, p.text
+    stored = _db.query(AssistHandoffPreview).filter(AssistHandoffPreview.id == p.json()["preview_id"]).first()
+    assert stored.session_id == session_id
+
+
 def test_drafts_crud(client, headers):
     d = client.post("/api/assist/drafts", headers=headers, json={"draft_type": "note", "content": "v1"})
     did = d.json()["id"]

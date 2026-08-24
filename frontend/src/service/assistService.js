@@ -157,7 +157,8 @@ export const stopAssistResponse = async (responseId) => {
 
 // ── Drafts / handoffs ──────────────────────────────────────────────────
 export const createAssistHandoffPreview = async ({
-  destination, reason_code, summary, included_evidence_ids, excluded_data_classes, source_response_id,
+  destination, reason_code, summary, included_evidence_ids, excluded_data_classes,
+  source_response_id, source_session_id,
 }) => {
   return api.post("/api/assist/handoff-previews", {
     destination,
@@ -166,6 +167,7 @@ export const createAssistHandoffPreview = async ({
     included_evidence_ids: included_evidence_ids || [],
     excluded_data_classes: excluded_data_classes || [],
     source_response_id: source_response_id ?? null,
+    source_session_id: source_session_id ?? null,
   });
 };
 
