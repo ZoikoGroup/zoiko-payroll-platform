@@ -12,9 +12,11 @@ external credentials.
 
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 from app.config import settings
 from app.modules.assist import prompts
@@ -23,6 +25,42 @@ logger = logging.getLogger("zoiko_payroll.assist.gateway")
 
 _RETRYABLE_ATTEMPTS = 1  # one retry (two attempts total) on transient failures only
 _RETRY_BACKOFF_SECONDS = 0.5
+
+# Bounds worst-case generation length regardless of cause (a runaway
+# repetition loop, an unusually long evidence envelope, etc.) — a normal
+# payroll answer is well under 200 tokens; this is a generous ceiling, not a
+# tuned limit.
+_MAX_ANSWER_TOKENS = 900
+
+# A degenerate, highly-repetitive answer (e.g. one character repeated
+# thousands of times, seen live from a long low-signal input) compresses far
+# below normal prose. English text typically compresses to ~40-60% of its
+# original size; a repetition loop compresses to a few percent. 300 chars is
+# short enough that a legitimate answer could still trip a naive check, so
+# the length floor keeps this from firing on ordinary short replies.
+_DEGENERATE_MIN_LENGTH = 300
+_DEGENERATE_COMPRESSION_RATIO = 0.12
+
+
+def _is_degenerate_repetition(text: str) -> bool:
+    if not text or len(text) < _DEGENERATE_MIN_LENGTH:
+        return False
+    compressed = zlib.compress(text.encode("utf-8", errors="ignore"), level=6)
+    return (len(compressed) / len(text)) < _DEGENERATE_COMPRESSION_RATIO
+
+
+# The model has hallucinated its own product name under this exact wording in
+# live testing (temperature 0, correct name present throughout the system
+# prompt) — a prompt-only fix can reduce this but not guarantee it, so this
+# deterministic pass is the actual backstop. Matches whole-word "Payroll" so
+# it doesn't touch an unrelated word that happens to share a prefix.
+_BRAND_CORRECTION_RE = re.compile(r"\bZo(?:ho|zo|ko|iko)\s+Payroll\b", re.IGNORECASE)
+
+
+def _correct_brand_name(text: str) -> str:
+    if not text:
+        return text
+    return _BRAND_CORRECTION_RE.sub("Zoiko Payroll", text)
 
 
 class GatewayError(Exception):
@@ -109,6 +147,7 @@ def generate_llm_answer(
             {"role": "user", "content": f"{evidence_envelope}\n\n{task_prompt}"},
         ],
         "temperature": 0,
+        "max_tokens": _MAX_ANSWER_TOKENS,
         "response_format": {"type": "json_object"},
     }
 
@@ -138,6 +177,21 @@ def generate_llm_answer(
     answer.setdefault("sources", [])
     answer.setdefault("confidence", "LOW")
     answer.setdefault("safety_state", "SAFE")
+
+    if _is_degenerate_repetition(answer.get("answer", "")):
+        logger.warning("LLM produced a degenerate repetitive answer (%d chars); replacing with a safe fallback.", len(answer["answer"]))
+        answer["answer"] = (
+            "I wasn't able to produce a reliable answer for that. Could you rephrase your question, "
+            "or ask about a specific payroll run, policy or concept?"
+        )
+        answer["facts"] = []
+        answer["sources"] = []
+        answer["confidence"] = "LOW"
+        answer["limitations"] = list(answer.get("limitations") or []) + ["degenerate_output_detected"]
+        answer["safety_state"] = "SAFE_FALLBACK"
+    else:
+        answer["answer"] = _correct_brand_name(answer.get("answer", ""))
+
     return answer
 
 
@@ -291,7 +345,11 @@ def deterministic_answer(
             "safety_state": "SAFE",
         }
 
-    if intent_id in ("action.approve_payroll", "action.release_payment", "action.submit_filing", "action.change_protected_data", "action.delete_record"):
+    if intent_id in (
+        "action.approve_payroll", "action.release_payment", "action.submit_filing",
+        "action.change_protected_data", "action.delete_record", "action.reject_exception",
+        "action.undo_approval", "action.cancel_run", "action.schedule_auto_approve",
+    ):
         return {
             "answer": refusal or (
                 "I can summarize the payroll run and its unresolved exceptions, but I cannot approve payroll, "

@@ -23,7 +23,7 @@ INTENT_REGISTRY = [
         "id": "action.approve_payroll",
         "risk_tier": "A5",
         "blocked": True,
-        "keywords": ["approve payroll", "approve the run", "approve the payroll run", "approve this run", "approve this payroll run", "approve the payroll", "approve my payroll", "approve payroll run", "mark approved", "mark as approved", "mark the run as approved", "mark the payroll as approved", "approve run", "finalize approval", "authorize payroll", "approve the run now"],
+        "keywords": ["approve payroll", "approve the run", "approve the payroll run", "approve this run", "approve this payroll run", "approve the payroll", "approve my payroll", "approve payroll run", "mark approved", "mark as approved", "mark the run as approved", "mark the payroll as approved", "approve run", "finalize approval", "authorize payroll", "approve the run now", "approve every", "approve all", "approve every run", "approve all runs"],
         "description": "Approve a payroll run. Prohibited — Assist cannot approve payroll.",
         "refusal": (
             "I can summarize the payroll run and its unresolved exceptions, but I cannot approve payroll. "
@@ -78,6 +78,50 @@ INTENT_REGISTRY = [
         "refusal": (
             "I cannot delete payroll records, runs or employee data. Please use the employee or "
             "administration screens, with the appropriate role, to make deletions."
+        ),
+    },
+    {
+        "id": "action.reject_exception",
+        "risk_tier": "A5",
+        "blocked": True,
+        "keywords": ["reject this exception", "reject the exception", "reject exception", "deny this exception", "deny the exception"],
+        "description": "Reject or resolve a payroll exception. Prohibited — Assist cannot reject exceptions.",
+        "refusal": (
+            "I cannot reject or resolve exceptions. Only an authorized reviewer can make that decision — "
+            "please use the Exceptions tab on the payroll run."
+        ),
+    },
+    {
+        "id": "action.undo_approval",
+        "risk_tier": "A5",
+        "blocked": True,
+        "keywords": ["undo the approval", "undo this approval", "undo approval", "undo the last approval", "reverse the approval", "revert the approval", "unapprove", "roll back the approval"],
+        "description": "Undo or reverse a payroll approval. Prohibited — Assist cannot reverse approvals.",
+        "refusal": (
+            "I cannot undo or reverse an approval. Reversing an approved payroll run must be performed by "
+            "an authorized user through the approval screen."
+        ),
+    },
+    {
+        "id": "action.cancel_run",
+        "risk_tier": "A5",
+        "blocked": True,
+        "keywords": ["cancel this run", "cancel the run", "cancel this payroll run", "cancel the payroll run", "cancel payroll run", "cancel my payroll run"],
+        "description": "Cancel a payroll run. Prohibited — Assist cannot cancel runs.",
+        "refusal": (
+            "I cannot cancel a payroll run. Please use the Payroll Runs screen, with the appropriate role, "
+            "to cancel a run."
+        ),
+    },
+    {
+        "id": "action.schedule_auto_approve",
+        "risk_tier": "A5",
+        "blocked": True,
+        "keywords": ["auto-approve", "auto approve", "automatically approve", "schedule approval", "schedule this run to approve", "schedule an approval"],
+        "description": "Schedule or automate a future payroll approval. Prohibited — every approval must be a deliberate human decision.",
+        "refusal": (
+            "I cannot schedule or automate payroll approval. Every approval must be a deliberate, "
+            "authorized human decision made at the time — please use the approval screen when you're ready."
         ),
     },
     # A0 — fixed boundary/disclaimer responses. No evidence gathering or LLM
