@@ -85,16 +85,30 @@ SessionLocal = sessionmaker(
 
 Base = declarative_base()
 
+def _tables_exist() -> bool:
+    """Check if core tables already exist (skip create_all if so)."""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT 1 FROM information_schema.tables WHERE table_name = 'users' LIMIT 1")
+            )
+            return result.fetchone() is not None
+    except Exception:
+        return False
+
+
 def initialize_database() -> None:
     """Create all tables on the fresh, empty database (create_all).
 
-    This is the intended bootstrap for the standalone platform: the DB
-    starts empty and the schema is created in one shot. See
-    migrations/create_all/README.md.
+    Skips schema creation when tables already exist (migrated DB).
+    See migrations/create_all/README.md.
     """
     try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables initialized successfully.")
+        if _tables_exist():
+            logger.info("Existing tables detected — skipping schema creation.")
+        else:
+            Base.metadata.create_all(bind=engine)
+            logger.info("Database tables initialized successfully.")
         _seed_reference_content()
     except exc.SQLAlchemyError as exc_info:
         logger.error("Database initialization failed: %s", exc_info)
