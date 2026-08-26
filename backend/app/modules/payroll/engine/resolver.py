@@ -80,6 +80,11 @@ def build_context_from_employee(
     work_state: str | None = None,
     state_rate_map: dict | None = None,
     state_slabs: list | None = None,
+    employer_tax_profiles: dict | None = None,
+    reciprocity_suppresses_work_state: bool = False,
+    resident_state_rate_map: dict | None = None,
+    resident_state_slabs: list | None = None,
+    locality_rate=None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -103,6 +108,11 @@ def build_context_from_employee(
         work_state=work_state,
         state_rate_map=state_rate_map or {},
         state_slabs=state_slabs or [],
+        employer_tax_profiles=employer_tax_profiles or {},
+        reciprocity_suppresses_work_state=reciprocity_suppresses_work_state,
+        resident_state_rate_map=resident_state_rate_map or {},
+        resident_state_slabs=resident_state_slabs or [],
+        locality_rate=locality_rate,
         tax_code=getattr(employee, "tax_code", None),
         ni_category=getattr(employee, "ni_category", None),
         study_loan_plan=getattr(employee, "study_loan_plan", None),
@@ -110,4 +120,6 @@ def build_context_from_employee(
         church_tax_liable=bool(getattr(employee, "church_tax_liable", False)),
         tax_regime=getattr(employee, "tax_regime", None),
         pay_frequency=getattr(employee, "pay_frequency", None) or "Monthly",
+        w4_filing_status=getattr(employee, "w4_filing_status", None),
+        w4_form_vintage=getattr(employee, "w4_form_vintage", None),
     )

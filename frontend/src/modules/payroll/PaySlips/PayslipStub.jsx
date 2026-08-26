@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { formatCurrency } from "../../../utils/currency";
-import { getPayrollLabels, getIdentityField } from "../../../utils/jurisdictionLabels";
+import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 
 const printStyles = `
 @media print {
@@ -66,24 +66,22 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   ].filter((r) => Number(r.amount) > 0);
 
   const deductionRows = [
-    { label: labels.incomeTax, amount: payslip.tds },
+    ...getIncomeTaxLines(payslip).map(([label, amount]) => ({ label, amount })),
     { label: labels.pf, amount: payslip.pf },
     { label: labels.esi, amount: payslip.esi },
     { label: "Professional Tax", amount: payslip.professionalTax },
     { label: labels.socialSecurity, amount: payslip.socialSecurity || 0 },
     { label: labels.medicare, amount: payslip.medicare || 0 },
     { label: "NI Employee", amount: payslip.niEmployee || 0 },
+    { label: "Workplace Pension", amount: payslip.employeePension || 0 },
+    { label: "Student Loan Deduction", amount: payslip.studyLoanDeduction || 0 },
   ].filter((r) => Number(r.amount) > 0);
 
-  const employerDeductions = [
-    { label: labels.employerPf, amount: payslip.employerPf },
-    { label: labels.employerEsi, amount: payslip.employerEsi },
-    { label: labels.employerSocialSecurity, amount: payslip.employerSs || 0 },
-    { label: "Employer Medicare", amount: payslip.employerMedicare || 0 },
-    { label: labels.employerPension, amount: payslip.employerPension || 0 },
-  ].filter((r) => Number(r.amount) > 0);
-
-  const allDeductionRows = [...deductionRows, ...employerDeductions];
+  // Employer-side contributions (PF/ESI/Social Security/Medicare/Pension/NI)
+  // are deliberately NOT shown here — this is the employee's own payslip,
+  // and none of these are amounts deducted from the employee's pay. They
+  // remain visible to admins on the Run Detail / Payroll Register views.
+  const allDeductionRows = deductionRows;
 
   const computedEarnings = earningsRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const computedDeductions = allDeductionRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);

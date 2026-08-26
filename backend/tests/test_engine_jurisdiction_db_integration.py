@@ -20,12 +20,16 @@ from decimal import Decimal
 
 from datetime import date
 
+import pytest
+
 from app.modules.payroll import service
 from app.modules.payroll.models import (
     ContributionRate, TaxSlab, PayrollEmployee, PayrollRun, PayslipItem, JurisdictionPack,
-    CompanyComplianceDetails,
+    CompanyComplianceDetails, EmployerTaxProfile, LocalityDataset, LocalityRate, TaxConfigurationAudit,
 )
-from app.modules.payroll.schemas import EmployeeCreate
+from app.modules.payroll.schemas import (
+    EmployeeCreate, EmployerTaxProfileUpsert, ReciprocityRuleUpsert, LocalityRateUpsert, SourceArtifactCreate,
+)
 
 
 def _make_rate(country, component_key, organization_id=None, state=None, flat_amount=None, rate_pct=None, tax_regime=None):
@@ -608,6 +612,50 @@ def test_non_uk_country_compliance_fields_do_not_touch_uk_columns(db, organizati
     assert employee.study_loan_plan is None
 
 
+def test_us_compliance_fields_map_onto_dedicated_columns_on_create(db, organization):
+    # Before this FIELD_COLUMN_MAP fix, state_tax_jurisdiction/w4_filing_status
+    # were already mapped (a prior fix), but residence_state and the
+    # reciprocity certificate fields were NOT — meaning the fully-built
+    # reciprocity engine (service.py:_resolve_us_reciprocity) had no way to
+    # ever actually activate for a real employee, since no org admin had any
+    # path to record a cross-state residence or a certificate.
+    payload = EmployeeCreate(
+        name="Sam US", employee_code="US-E1", country_code="US",
+        compliance_fields={
+            "ssn": "123-45-6789", "flsa_status": "Exempt", "state_tax_jurisdiction": "NJ",
+            "w4_filing_status": "Married Filing Jointly",
+            "residence_state": "PA",
+            "reciprocity_certificate_on_file": "true",
+            "reciprocity_certificate_expiry": "2026-12-31",
+        },
+    )
+    employee = service.create_employee(db, payload, organization.id)
+
+    assert employee.work_state == "NJ"
+    assert employee.w4_filing_status == "MFJ"
+    assert employee.residence_state == "PA"
+    assert employee.reciprocity_certificate_on_file is True
+    assert employee.reciprocity_certificate_expiry == date(2026, 12, 31)
+    # Original compliance_fields values stay exactly as entered (human-readable/
+    # string), only the dedicated-column copy is translated/typed — same
+    # convention as UK's student_loan_plan.
+    assert employee.compliance_fields["w4_filing_status"] == "Married Filing Jointly"
+    assert employee.compliance_fields["reciprocity_certificate_on_file"] == "true"
+
+
+def test_us_reciprocity_certificate_fields_optional_and_default_none(db, organization):
+    # Every field added in this fix is optional — an employee with no
+    # cross-state situation at all must be completely unaffected.
+    payload = EmployeeCreate(
+        name="Alex US", employee_code="US-E2", country_code="US",
+        compliance_fields={"ssn": "987-65-4321", "flsa_status": "Non-Exempt", "state_tax_jurisdiction": "TX"},
+    )
+    employee = service.create_employee(db, payload, organization.id)
+    assert employee.residence_state is None
+    assert employee.reciprocity_certificate_on_file is False
+    assert employee.reciprocity_certificate_expiry is None
+
+
 # ── Section 9: preview / generation / manual payslip must never disagree ──
 
 def test_uk_scotland_consistent_across_preview_generation_and_manual_payslip(db, organization, monkeypatch):
@@ -653,3 +701,452 @@ def test_uk_scotland_consistent_across_preview_generation_and_manual_payslip(db,
     # Genuinely Scotland's 40% rate, not the national 20% one — proves the
     # fix changed real behavior, not just "all three happen to agree."
     assert generated.tds == Decimal("20000.00")
+
+
+# ── Section 10: canonical-pack immutability guard (US blueprint Phase 0) ──
+# A pack that has reached Active must not have its rates edited in place —
+# see service.py's _require_editable_pack. Before this guard existed,
+# upsert_canonical_contribution_rate/upsert_canonical_tax_slab had no
+# status check at all, so an "edit" to an Active pack's rate silently
+# changed what the live resolver returns for any not-yet-generated or
+# still-Draft payslip, even for a past pay period within the pack's own
+# effective_from/effective_to window.
+
+def test_editing_a_rate_on_an_active_pack_via_service_is_rejected(db, organization):
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll.schemas import CanonicalContributionRateUpsert
+
+    pack = _make_active_tax_pack(db, "US", pack_id="US-IMMUTABILITY-TEST")
+    rate = _make_rate("US", "social-security", organization_id=None, rate_pct=Decimal("6.20"))
+    rate.jurisdiction_pack_id = pack.id
+    db.add(rate)
+    db.commit()
+    db.refresh(rate)
+
+    with pytest.raises(BadRequestException):
+        service.upsert_canonical_contribution_rate(
+            db,
+            CanonicalContributionRateUpsert(
+                id=rate.id, jurisdictionPackId=pack.id, jurisdictionCountry="US",
+                componentKey="social-security", label="Social Security", employeeSharePct=Decimal("7.00"),
+            ),
+        )
+    db.refresh(rate)
+    assert rate.employee_rate_pct == Decimal("6.20")  # unchanged
+
+
+def test_editing_a_slab_on_a_draft_pack_via_service_is_allowed(db, organization):
+    from app.modules.payroll.schemas import CanonicalTaxSlabUpsert
+
+    pack = JurisdictionPack(
+        pack_id="US-DRAFT-TEST", jurisdiction_country="US", pack_type="tax", version="1.0", status="Draft",
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    slab = TaxSlab(
+        organization_id=None, jurisdiction_country="US", jurisdiction_pack_id=pack.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("10"), rate_label="10%", tax_formula="",
+    )
+    db.add(slab)
+    db.commit()
+    db.refresh(slab)
+
+    updated = service.upsert_canonical_tax_slab(
+        db,
+        CanonicalTaxSlabUpsert(
+            id=slab.id, jurisdictionPackId=pack.id, jurisdictionCountry="US",
+            minAmount=Decimal("0"), maxAmount=None, ratePct=Decimal("12"), rateLabel="12%",
+        ),
+    )
+    assert updated.rate_pct == Decimal("12")
+
+
+def test_new_pack_version_clones_previous_versions_rates(db, organization):
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+
+    v1 = _make_active_tax_pack(db, "US", pack_id="US-VERSION-CLONE-TEST", state="TestState")
+    db.add(_make_rate("US", "social-security", organization_id=None, state="TestState", rate_pct=Decimal("6.20")))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="TestState", jurisdiction_pack_id=v1.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("10"), rate_label="10%", tax_formula="",
+    ))
+    db.commit()
+    # The rate above wasn't linked to v1 via jurisdiction_pack_id at
+    # creation (matching _make_rate's own signature) — link it now so the
+    # clone helper (which reads by jurisdiction_pack_id) has something to
+    # find, exactly as a real canonical ContributionRate created through
+    # the Super Admin UI would already be.
+    rate = db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_state == "TestState", ContributionRate.component_key == "social-security",
+    ).first()
+    rate.jurisdiction_pack_id = v1.id
+    db.commit()
+
+    v2 = service.upsert_jurisdiction_pack(
+        db,
+        JurisdictionPackUpsert(
+            packId="US-VERSION-CLONE-TEST", version="2.0", jurisdictionCountry="US", jurisdictionState="TestState",
+            packType="tax", status="Draft",
+        ),
+    )
+    assert v2.previous_version_id == v1.id
+
+    cloned_rate = db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == v2.id, ContributionRate.component_key == "social-security",
+    ).first()
+    cloned_slab = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == v2.id).first()
+    assert cloned_rate is not None and cloned_rate.id != rate.id and cloned_rate.employee_rate_pct == Decimal("6.20")
+    assert cloned_slab is not None and cloned_slab.rate_pct == Decimal("10")
+
+
+# ── Section 11: US filing-status-aware ContributionRate resolution ───────
+
+def test_get_contribution_rates_prefers_filing_status_tagged_row(db, organization):
+    db.add(_make_rate("US", "medicare_addl_thresh", organization_id=organization.id, flat_amount=Decimal("200000")))
+    mfj_row = _make_rate("US", "medicare_addl_thresh", organization_id=organization.id, flat_amount=Decimal("250000"))
+    mfj_row.filing_status = "MFJ"
+    db.add(mfj_row)
+    db.commit()
+
+    mfj_rates = service.get_contribution_rates(db, organization.id, "US", filing_status="MFJ")
+    single_rates = service.get_contribution_rates(db, organization.id, "US", filing_status="SINGLE")
+
+    mfj_map = {r.component_key: r for r in mfj_rates}
+    single_map = {r.component_key: r for r in single_rates}
+    assert mfj_map["medicare_addl_thresh"].flat_amount == Decimal("250000")
+    # No SINGLE-tagged row exists — falls back to the generic (filing_status
+    # IS NULL) row, same value an org with no filing-status overrides at
+    # all would already see.
+    assert single_map["medicare_addl_thresh"].flat_amount == Decimal("200000")
+
+
+# ── Section 12: US employer-specific tax profile (SUI) resolution ────────
+
+def test_get_employer_tax_profiles_resolves_by_org_jurisdiction_and_date(db, organization):
+    db.add(EmployerTaxProfile(
+        organization_id=organization.id, jurisdiction_id="US-CA", component_code="SUI",
+        taxable_wage_base=Decimal("7000"), employer_rate_pct=Decimal("3.4"),
+        effective_from=date(2026, 1, 1), effective_to=None, rate_source="EMPLOYER_NOTICE",
+    ))
+    db.commit()
+
+    profiles = service.get_employer_tax_profiles(db, organization.id, "US-CA", as_of=date(2026, 6, 1))
+    assert profiles["SUI"].employer_rate_pct == Decimal("3.4")
+
+    # Wrong jurisdiction and no jurisdiction_id at all both resolve empty —
+    # never guessed, never falls back to a different state's profile.
+    assert service.get_employer_tax_profiles(db, organization.id, "US-NY", as_of=date(2026, 6, 1)) == {}
+    assert service.get_employer_tax_profiles(db, organization.id, None, as_of=date(2026, 6, 1)) == {}
+
+
+def test_get_employer_tax_profiles_respects_effective_dates(db, organization):
+    db.add(EmployerTaxProfile(
+        organization_id=organization.id, jurisdiction_id="US-CA", component_code="SUI",
+        taxable_wage_base=Decimal("7000"), employer_rate_pct=Decimal("2.0"),
+        effective_from=date(2025, 1, 1), effective_to=date(2025, 12, 31),
+    ))
+    db.add(EmployerTaxProfile(
+        organization_id=organization.id, jurisdiction_id="US-CA", component_code="SUI",
+        taxable_wage_base=Decimal("7000"), employer_rate_pct=Decimal("3.4"),
+        effective_from=date(2026, 1, 1), effective_to=None,
+    ))
+    db.commit()
+
+    old_profile = service.get_employer_tax_profiles(db, organization.id, "US-CA", as_of=date(2025, 6, 1))
+    new_profile = service.get_employer_tax_profiles(db, organization.id, "US-CA", as_of=date(2026, 6, 1))
+    assert old_profile["SUI"].employer_rate_pct == Decimal("2.0")
+    assert new_profile["SUI"].employer_rate_pct == Decimal("3.4")
+
+
+def test_sui_and_futa_credit_flow_through_real_payslip_generation(db, organization, monkeypatch):
+    _stub_business_code_generation(monkeypatch)
+    db.add(EmployerTaxProfile(
+        organization_id=organization.id, jurisdiction_id="US-CA", component_code="SUI",
+        taxable_wage_base=Decimal("7000"), employer_rate_pct=Decimal("3.4"),
+        effective_from=date(2026, 1, 1), effective_to=None,
+    ))
+    db.commit()
+
+    emp = _make_employee_with_monthly_gross(db, organization.id, "US-SUI-1", Decimal("5000"), country="US", work_state="CA")
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
+    assert item.employer_sui == pytest.approx(Decimal("19.83"), abs=Decimal("0.01"))
+    # FUTA credited down to ~0.6% effective rate because a real SUI profile exists.
+    assert item.employer_futa == pytest.approx(Decimal("3.50"), abs=Decimal("0.01"))
+
+
+# ── Section 13: US cross-state reciprocity ────────────────────────────────
+
+def test_resolve_reciprocity_matches_directional_pair_and_date(db, organization):
+    from app.modules.payroll.models import ReciprocityRule
+
+    db.add(ReciprocityRule(
+        resident_jurisdiction="US-PA", work_jurisdiction="US-NJ",
+        employee_certificate="NJ-165", certificate_required=True,
+        effective_from=date(2026, 1, 1), effective_to=None,
+    ))
+    db.commit()
+
+    assert service.resolve_reciprocity(db, "US-PA", "US-NJ", as_of=date(2026, 6, 1)) is not None
+    # Reversed direction must NOT match — reciprocity is directional.
+    assert service.resolve_reciprocity(db, "US-NJ", "US-PA", as_of=date(2026, 6, 1)) is None
+    # Before effective_from must not match.
+    assert service.resolve_reciprocity(db, "US-PA", "US-NJ", as_of=date(2025, 1, 1)) is None
+    # Same jurisdiction on both sides is not a cross-state question at all.
+    assert service.resolve_reciprocity(db, "US-PA", "US-PA", as_of=date(2026, 6, 1)) is None
+
+
+def test_reciprocity_requires_certificate_on_file_and_unexpired(db, organization):
+    from app.modules.payroll.models import ReciprocityRule
+
+    rule = ReciprocityRule(
+        resident_jurisdiction="US-PA", work_jurisdiction="US-NJ",
+        employee_certificate="NJ-165", certificate_required=True,
+        effective_from=date(2026, 1, 1), effective_to=None,
+    )
+    emp_no_cert = _make_employee(db, organization.id, "US-RECIP-NOCERT", country="US")
+    emp_with_cert = _make_employee(db, organization.id, "US-RECIP-CERT", country="US")
+    emp_with_cert.reciprocity_certificate_on_file = True
+    emp_with_cert.reciprocity_certificate_expiry = date(2026, 12, 31)
+    emp_expired = _make_employee(db, organization.id, "US-RECIP-EXPIRED", country="US")
+    emp_expired.reciprocity_certificate_on_file = True
+    emp_expired.reciprocity_certificate_expiry = date(2026, 1, 1)
+    db.commit()
+
+    as_of = date(2026, 6, 1)
+    assert service._reciprocity_certificate_satisfied(emp_no_cert, rule, as_of) is False
+    assert service._reciprocity_certificate_satisfied(emp_with_cert, rule, as_of) is True
+    assert service._reciprocity_certificate_satisfied(emp_expired, rule, as_of) is False
+
+
+def test_reciprocity_flows_through_real_payslip_generation(db, organization, monkeypatch):
+    """A PA-resident employee who works in NJ, with a valid PA/NJ
+    reciprocity agreement and certificate on file, must be taxed on PA's
+    (resident) rates, not NJ's (work) rates."""
+    from app.modules.payroll.models import ReciprocityRule
+
+    _stub_business_code_generation(monkeypatch)
+    db.add(ReciprocityRule(
+        resident_jurisdiction="US-PA", work_jurisdiction="US-NJ",
+        employee_certificate="NJ-165", certificate_required=True,
+        effective_from=date(2026, 1, 1), effective_to=None,
+    ))
+    # NJ (work state): 8% flat. PA (resident state): 3% flat. Deliberately
+    # different so a wrong entry point is obvious rather than passing by
+    # coincidence.
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="NJ",
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("8"), rate_label="8%", tax_formula="",
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="PA",
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("3"), rate_label="3%", tax_formula="",
+    ))
+    db.commit()
+
+    emp = _make_employee_with_monthly_gross(db, organization.id, "US-RECIP-FLOW", Decimal("5000"), country="US", work_state="NJ")
+    emp.residence_state = "PA"
+    emp.reciprocity_certificate_on_file = True
+    emp.reciprocity_certificate_expiry = date(2026, 12, 31)
+    db.commit()
+
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
+    # PA's 3% of $60,000/yr / 12 = $150.00 — NOT NJ's 8% ($400.00).
+    assert item.state_income_tax == pytest.approx(Decimal("150.00"), abs=Decimal("0.01"))
+
+
+# ── Section 14: US locality (county/municipal/school-district) rates ─────
+
+def test_get_locality_rate_resolves_by_country_code_and_date(db, organization):
+    dataset = LocalityDataset(
+        jurisdiction_country="US", jurisdiction_state="PA", version="MANUAL-1", status="Active",
+        effective_from=date(2026, 1, 1), effective_to=None,
+    )
+    db.add(dataset)
+    db.commit()
+    db.add(LocalityRate(
+        locality_dataset_id=dataset.id, locality_code="PHILADELPHIA", locality_type="MUNICIPAL",
+        resident_rate_pct=Decimal("3.75"),
+    ))
+    db.commit()
+
+    rate = service.get_locality_rate(db, "US", "PHILADELPHIA", as_of=date(2026, 6, 1))
+    assert rate.resident_rate_pct == Decimal("3.75")
+
+    # No code, wrong code, and no configuration at all all resolve None —
+    # never guessed, never falls back to a different locality.
+    assert service.get_locality_rate(db, "US", None, as_of=date(2026, 6, 1)) is None
+    assert service.get_locality_rate(db, "US", "PITTSBURGH", as_of=date(2026, 6, 1)) is None
+
+
+def test_get_locality_rate_respects_dataset_effective_dates(db, organization):
+    old_dataset = LocalityDataset(
+        jurisdiction_country="US", jurisdiction_state="PA", version="MANUAL-1", status="Active",
+        effective_from=date(2025, 1, 1), effective_to=date(2025, 12, 31),
+    )
+    db.add(old_dataset)
+    db.commit()
+    db.add(LocalityRate(locality_dataset_id=old_dataset.id, locality_code="PHILADELPHIA", locality_type="MUNICIPAL", resident_rate_pct=Decimal("3.00")))
+    db.commit()
+
+    assert service.get_locality_rate(db, "US", "PHILADELPHIA", as_of=date(2026, 6, 1)) is None
+    assert service.get_locality_rate(db, "US", "PHILADELPHIA", as_of=date(2025, 6, 1)).resident_rate_pct == Decimal("3.00")
+
+
+def test_locality_tax_flows_through_real_payslip_generation(db, organization, monkeypatch):
+    """An employee whose work_locality matches a configured LocalityRate
+    must have local_tax computed from it during a real payroll run — the
+    same end-to-end wiring already proven for SUI and reciprocity above."""
+    _stub_business_code_generation(monkeypatch)
+    dataset = LocalityDataset(jurisdiction_country="US", jurisdiction_state="PA", version="MANUAL-1", status="Active")
+    db.add(dataset)
+    db.commit()
+    db.add(LocalityRate(
+        locality_dataset_id=dataset.id, locality_code="PHILADELPHIA", locality_type="MUNICIPAL",
+        resident_rate_pct=Decimal("3.75"),
+    ))
+    db.commit()
+
+    emp = _make_employee_with_monthly_gross(db, organization.id, "US-LOCALITY-1", Decimal("5000"), country="US", work_state="PA")
+    emp.work_locality = "PHILADELPHIA"
+    db.commit()
+
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
+    # 3.75% of $5,000 monthly gross.
+    assert item.local_tax == pytest.approx(Decimal("187.50"), abs=Decimal("0.01"))
+
+
+def test_no_locality_configured_leaves_local_tax_zero_through_real_payslip_generation(db, organization, monkeypatch):
+    """An employee with no work_locality set — every employee before this
+    feature existed — must keep local_tax at exactly zero through a real
+    run, never a guess."""
+    _stub_business_code_generation(monkeypatch)
+    emp = _make_employee_with_monthly_gross(db, organization.id, "US-LOCALITY-NONE", Decimal("5000"), country="US", work_state="PA")
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
+    assert item.local_tax == Decimal("0")
+
+
+# ── Section 15: audit trail for SUI/Reciprocity/Locality/Source Evidence ──
+# Before this, a Super Admin editing/deleting one of these left no history
+# of who changed what — unlike every canonical ContributionRate/TaxSlab
+# edit, which has always gone through record_tax_audit. These reuse the
+# SAME TaxConfigurationAudit table (jurisdiction_pack_id left None — none
+# of these four are pack-scoped).
+
+def _last_audit(db, entity_type, entity_id):
+    return (
+        db.query(TaxConfigurationAudit)
+        .filter(TaxConfigurationAudit.entity_type == entity_type, TaxConfigurationAudit.entity_id == entity_id)
+        .order_by(TaxConfigurationAudit.created_at.desc(), TaxConfigurationAudit.id.desc())
+        .first()
+    )
+
+
+def test_employer_tax_profile_upsert_and_delete_are_audited(db, organization):
+    actor_id = 42
+    profile = service.upsert_employer_tax_profile(
+        db,
+        EmployerTaxProfileUpsert(
+            organizationId=organization.id, jurisdictionId="US-CA", componentCode="SUI",
+            taxableWageBase=Decimal("7000"), employerRatePct=Decimal("3.4"),
+            effectiveFrom=date(2026, 1, 1),
+        ),
+        actor_id=actor_id,
+    )
+    created = _last_audit(db, "employer_tax_profile", profile.id)
+    assert created.action == "create"
+    assert created.actor_id == actor_id
+    assert Decimal(created.new_value["employer_rate_pct"]) == Decimal("3.4")
+
+    service.upsert_employer_tax_profile(
+        db,
+        EmployerTaxProfileUpsert(
+            id=profile.id, organizationId=organization.id, jurisdictionId="US-CA", componentCode="SUI",
+            taxableWageBase=Decimal("7000"), employerRatePct=Decimal("4.0"),
+            effectiveFrom=date(2026, 1, 1),
+        ),
+        actor_id=actor_id,
+    )
+    updated = _last_audit(db, "employer_tax_profile", profile.id)
+    assert updated.action == "update"
+    assert Decimal(updated.old_value["employer_rate_pct"]) == Decimal("3.4")
+    assert Decimal(updated.new_value["employer_rate_pct"]) == Decimal("4.0")
+
+    service.delete_employer_tax_profile(db, profile.id, actor_id=actor_id)
+    deleted = _last_audit(db, "employer_tax_profile", profile.id)
+    assert deleted.action == "delete"
+    assert Decimal(deleted.old_value["employerRatePct"]) == Decimal("4.0")
+
+
+def test_reciprocity_rule_upsert_and_delete_are_audited(db, organization):
+    actor_id = 42
+    rule = service.upsert_reciprocity_rule(
+        db,
+        ReciprocityRuleUpsert(
+            residentJurisdiction="US-PA", workJurisdiction="US-NJ",
+            employeeCertificate="NJ-165", certificateRequired=True,
+            effectiveFrom=date(2026, 1, 1),
+        ),
+        actor_id=actor_id,
+    )
+    created = _last_audit(db, "reciprocity_rule", rule.id)
+    assert created.action == "create"
+    assert created.actor_id == actor_id
+    assert created.new_value["resident_jurisdiction"] == "US-PA"
+
+    service.delete_reciprocity_rule(db, rule.id, actor_id=actor_id)
+    deleted = _last_audit(db, "reciprocity_rule", rule.id)
+    assert deleted.action == "delete"
+    assert deleted.old_value["workJurisdiction"] == "US-NJ"
+
+
+def test_locality_rate_upsert_and_delete_are_audited(db, organization):
+    actor_id = 42
+    rate = service.upsert_locality_rate(
+        db,
+        LocalityRateUpsert(
+            jurisdictionCountry="US", jurisdictionState="PA", localityCode="PHILADELPHIA",
+            residentRatePct=Decimal("3.75"),
+        ),
+        actor_id=actor_id,
+    )
+    created = _last_audit(db, "locality_rate", rate.id)
+    assert created.action == "create"
+    assert created.actor_id == actor_id
+    assert Decimal(created.new_value["resident_rate_pct"]) == Decimal("3.75")
+
+    service.delete_locality_rate(db, rate.id, actor_id=actor_id)
+    deleted = _last_audit(db, "locality_rate", rate.id)
+    assert deleted.action == "delete"
+    assert deleted.old_value["localityCode"] == "PHILADELPHIA"
+
+
+def test_source_artifact_create_and_review_are_audited(db, organization):
+    actor_id = 42
+    artifact = service.create_source_artifact(
+        db,
+        SourceArtifactCreate(agency="IRS", title="2026 Publication 15-T"),
+        actor_id=actor_id,
+    )
+    created = _last_audit(db, "source_artifact", artifact.id)
+    assert created.action == "create"
+    assert created.actor_id == actor_id
+    assert created.new_value["title"] == "2026 Publication 15-T"
+
+    service.mark_source_artifact_reviewed(db, artifact.id, reviewer_id=actor_id)
+    reviewed = _last_audit(db, "source_artifact", artifact.id)
+    assert reviewed.action == "review"
+    assert reviewed.actor_id == actor_id
+    assert reviewed.new_value["reviewerId"] == actor_id

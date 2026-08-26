@@ -21,7 +21,7 @@ export default function SlabsTab({ pack, slabs, onAdd, onEdit, onDelete }) {
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-xs">
             <thead className="bg-background text-left text-foreground-muted">
-              <tr><th className="px-3 py-2">Min</th><th className="px-3 py-2">Max</th><th className="px-3 py-2">Rate %</th><th className="px-3 py-2">Label</th><th className="px-3 py-2">State</th><th className="px-3 py-2 w-16"></th></tr>
+              <tr><th className="px-3 py-2">Min</th><th className="px-3 py-2">Max</th><th className="px-3 py-2">Rate %</th><th className="px-3 py-2">Label</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Filing Status</th><th className="px-3 py-2 w-16"></th></tr>
             </thead>
             <tbody>
               {slabs.map((s) => (
@@ -31,6 +31,7 @@ export default function SlabsTab({ pack, slabs, onAdd, onEdit, onDelete }) {
                   <td className="px-3 py-2 font-medium text-foreground">{s.ratePct}%</td>
                   <td className="px-3 py-2 text-foreground-secondary">{s.rateLabel}</td>
                   <td className="px-3 py-2 text-foreground-secondary">{s.jurisdictionState || "—"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.filingStatus || "—"}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1">
                       <button onClick={() => onEdit(s)} className="rounded p-1 text-foreground-disabled hover:text-primary hover:bg-surface-muted"><Pencil size={12} /></button>
