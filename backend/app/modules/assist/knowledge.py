@@ -407,6 +407,33 @@ DEFAULT_KB_ITEMS = [
         "keywords": ["state", "approval", "payment", "lifecycle"],
         "jurisdiction_codes": [],
     },
+    {
+        # Deliberately last in this list — search_kb's tie-break
+        # (`-pair[1].id` in its sort key) favors the *highest* id when two
+        # items score identically, and every other item's title also
+        # contains the word "payroll". The most basic possible visitor
+        # question, "what is payroll?", reduces to the single query term
+        # "payroll" (a stop-word filter drops "what"/"is"), so it tied on
+        # title-match score with four unrelated articles and lost the tie to
+        # whichever of them happened to have the highest id — producing a
+        # nonsensical answer (e.g. "Comparing payroll periods") to a
+        # first-time visitor's most natural question. Being last in this
+        # list gives it the highest id once seeded, so it correctly wins
+        # that tie instead.
+        "title": "What is payroll?",
+        "content_type": "FIELD_DEFINITION",
+        "summary": "Payroll is the process of calculating what each employee is owed for a pay period, withholding the correct taxes and deductions, and paying them accurately and on time.",
+        "body": (
+            "Payroll is the process an organization uses to calculate what each employee is owed for a pay "
+            "period, withhold the correct taxes and statutory deductions, and pay employees accurately and on "
+            "time. Zoiko Payroll automates this end to end: it calculates gross pay, applies statutory and "
+            "voluntary deductions, computes net pay, generates payslips, and tracks every payroll run through a "
+            "governed approval lifecycle (Draft, Review, Approved, Authorized, Paid, Closed) so a human always "
+            "reviews and authorizes payment before it is released."
+        ),
+        "keywords": ["payroll", "what is payroll", "payroll definition", "payroll meaning"],
+        "jurisdiction_codes": [],
+    },
 ]
 
 
