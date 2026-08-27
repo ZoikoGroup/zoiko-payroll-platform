@@ -512,7 +512,8 @@ export default function UKCompliancePage() {
       country="UK" countryName="United Kingdom"
       initialState={jurisdiction ? decodeURIComponent(jurisdiction) : ""}
       onStateChange={(state) =>
-        navigate(state ? `/super-admin/compliance/united-kingdom/${encodeURIComponent(state)}` : "/super-admin/compliance/united-kingdom", { replace: true })
+        // Push (not replace) — see INCompliancePage.jsx's matching comment.
+        navigate(state ? `/super-admin/compliance/united-kingdom/${encodeURIComponent(state)}` : "/super-admin/compliance/united-kingdom")
       }
       {...ukComplianceConfig}
     />

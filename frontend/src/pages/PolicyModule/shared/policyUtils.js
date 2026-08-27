@@ -1,10 +1,10 @@
-// Field taxonomy/lock-node helpers for PolicyConfigPage.jsx's full-page
-// Policy configuration. Originally extracted so it and the old
-// pages/CompliancePage.jsx's Tax modal (since retired) could share one
-// copy instead of drifting apart — kept as its own module since
-// PolicyConfigPage.jsx alone still depends on it.
-import { Lock, Unlock } from "lucide-react";
-
+// Field taxonomy/lock-node helpers for the Super Admin Policy module
+// (frontend/src/pages/PolicyModule/). Moved from the old, single-page
+// policyFormShared.jsx as part of splitting Policy authoring into
+// per-jurisdiction pages (INPolicyPage.jsx, USPolicyPage.jsx, ...), mirroring
+// how frontend/src/config/jurisdictions/*.jsx already does this for the Tax
+// side. Every export here is unchanged in behavior from policyFormShared.jsx
+// — this file is a relocation, not a rewrite.
 export const STATUS_OPTIONS = ["Draft", "In Review", "QA", "Approved", "Active", "Deprecated", "Retired"];
 export const STATUS_PILL_MAP = {
   Active: "active", Approved: "approved", Draft: "pending", "In Review": "pending",
@@ -42,17 +42,42 @@ export function emptyForm(country, state, packType) {
 // vocabulary invented here, just default values + an allowOverride flag
 // layered on top of the same calculation_mode / employee_categories /
 // overtime_rule / allowance_components fields Organization Admin already edits.
+//
+// These are the DEFAULT (shared) field lists every jurisdiction page uses
+// unless it explicitly overrides one via its own config — see
+// PolicyLayout.jsx's `categoryFields`/`overtimeFields`/`payTypeChoices`
+// props. No jurisdiction overrides any of these today (no real per-country
+// policy divergence exists in the backend yet), so every page currently
+// renders identically — the override slot exists so a future
+// jurisdiction-specific field can be added to ONE country's file without
+// touching this shared default or any other country's file.
 export const CATEGORY_KEYS = ["full_time", "part_time", "intern", "contract", "consultant", "freelancer"];
-export const CATEGORY_FIELDS = [
+export const DEFAULT_CATEGORY_FIELDS = [
   { key: "working_days", label: "Working Days", type: "number" },
-  { key: "expected_hours", label: "Expected Hours", type: "number" },
+  // Label only — the stored key stays "expected_hours" on purpose. The
+  // Org Admin side (PayrollPolicyPage.jsx) reads this exact key for its
+  // own lock/inheritance display and isn't part of this relabel.
+  { key: "expected_hours", label: "Minimum Weekly Working Hours", type: "number" },
   { key: "minimum_hours", label: "Minimum Hours", type: "number" },
   { key: "paid_leave_eligible", label: "Paid Leave Eligible", type: "boolean" },
 ];
-export const OVERTIME_FIELDS = [
+export const DEFAULT_OVERTIME_FIELDS = [
   { key: "enabled", label: "Overtime Enabled", type: "boolean" },
   { key: "minimum_overtime_minutes", label: "Minimum OT Minutes", type: "number" },
   { key: "approval_required", label: "Approval Required", type: "boolean" },
+];
+
+// "Pay Type" — additive policyDefaults key alongside Calculation Mode, same
+// LockableField/Overridable pattern. Not wired into any calculation yet
+// (out of scope) — the existing PayrollEmployee.pay_frequency field used by
+// the UK engine calculator is a separate, already-consumed concept,
+// deliberately not reused here to avoid conflating the two.
+export const DEFAULT_PAY_TYPE_CHOICES = [
+  { value: "Monthly", label: "Monthly" },
+  { value: "Weekly", label: "Weekly" },
+  { value: "Biweekly", label: "Biweekly" },
+  { value: "Hourly", label: "Hourly" },
+  { value: "Daily", label: "Daily" },
 ];
 
 // Admin types a display label ("Transport Allowance"); the machine-readable
@@ -93,66 +118,4 @@ export function setLockNode(setForm, path, patch) {
     node[leafKey] = { ...existing, ...patch };
     return { ...f, policyDefaults: next };
   });
-}
-
-// A default value (this pack's own suggestion) plus an independent
-// "Allow override" flag (whether an assigned organization may replace that
-// value). The two are unrelated to each other's editability — Super Admin
-// can always edit the value here regardless of the lock state, since the
-// lock only governs what an ORGANIZATION can later do with it — so the
-// value control is never disabled by allowOverride, only visually paired
-// with a lock/unlock indicator for the flag next to it.
-export function LockableField({ label, node, type, choices, onChangeValue, onChangeAllow }) {
-  const value = node.value;
-  const allowOverride = node.allowOverride !== false;
-  return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-foreground-secondary">{label}</span>
-        <label
-          className="flex cursor-pointer select-none items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap"
-          style={
-            allowOverride
-              ? { background: "var(--color-success-light)", color: "var(--color-success)" }
-              : { background: "var(--color-surface-muted)", color: "var(--color-foreground-muted)" }
-          }
-          title={allowOverride ? "Organizations may override this value" : "Locked — organizations must keep this value"}
-        >
-          <input
-            type="checkbox"
-            checked={allowOverride}
-            onChange={(e) => onChangeAllow(e.target.checked)}
-            className="sr-only"
-          />
-          {allowOverride ? <Unlock size={10} /> : <Lock size={10} />}
-          {allowOverride ? "Overridable" : "Locked"}
-        </label>
-      </div>
-      {type === "select" ? (
-        <select value={value ?? ""} onChange={(e) => onChangeValue(e.target.value || null)} className={compactInputClass}>
-          <option value="">No default</option>
-          {choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
-      ) : type === "boolean" ? (
-        <select
-          value={value === true ? "true" : value === false ? "false" : ""}
-          onChange={(e) => onChangeValue(e.target.value === "" ? null : e.target.value === "true")}
-          className={compactInputClass}
-        >
-          <option value="">No default</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
-      ) : (
-        <input
-          type="number"
-          min={0}
-          value={value ?? ""}
-          onChange={(e) => onChangeValue(e.target.value === "" ? null : Number(e.target.value))}
-          placeholder="No default"
-          className={compactInputClass}
-        />
-      )}
-    </div>
-  );
 }
