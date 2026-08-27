@@ -46,6 +46,12 @@ export default function JurisdictionLayout({
   extraTabs = [], slabsTabOverride,
   hiddenTabs = [], slabsLabel = "Tax Slabs", countryLevelLabel = "Country-level (no state)",
   additionalStateOptions = [], slabsFilter = (s) => s,
+  // Safe, purely-additive override for the "New Tax Pack" form — defaults
+  // to the shared NewPackModal used by every country. Only USA passes its
+  // own (USANewPackModal, which hides the India/UK-oriented Tax Regime
+  // field and uses a wider layout); every other country is unaffected
+  // since this prop is never passed for them.
+  newPackFormComponent: NewPackFormComponent = NewPackModal,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -391,6 +397,13 @@ export default function JurisdictionLayout({
                       pack: selectedPack, rates, slabs, addToast,
                       onReload: reloadRatesAndSlabs,
                       onPublish: () => changeStatus("Active"),
+                      // Purely additive — lets one extraTab switch to a
+                      // sibling extraTab (e.g. USA's "Federal Income Tax"
+                      // picker entry jumping to the Income Tax Brackets
+                      // tab). No existing key changed; every extraTab that
+                      // doesn't use this (every country besides USA today)
+                      // is completely unaffected.
+                      onNavigateTab: setTab,
                       onAddRate: () => setShowNewRate(true),
                       onEditRate: setEditingRate,
                       onDeleteRate: setDeletingRate,
@@ -464,7 +477,7 @@ export default function JurisdictionLayout({
       </div>
 
       {showNewPack && (
-        <NewPackModal
+        <NewPackFormComponent
           country={country} state={state} packType={packType}
           onClose={() => setShowNewPack(false)}
           onCreated={(created) => {

@@ -67,42 +67,76 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={slab ? "Edit Tax Bracket" : "Add Tax Bracket"} onClose={onClose} maxWidth="max-w-md">
-      <div className="grid grid-cols-2 gap-3">
-        <div><label className={labelClass}>Min Amount</label><input className={inputClass} value={form.minAmount} onChange={set("minAmount")} /></div>
-        <div><label className={labelClass}>Max Amount (blank = and above)</label><input className={inputClass} value={form.maxAmount} onChange={set("maxAmount")} /></div>
-        <div><label className={labelClass}>Rate % {isNiBand ? "(Employee)" : ""}</label><input className={inputClass} value={form.ratePct} onChange={set("ratePct")} /></div>
-        <div><label className={labelClass}>Label</label><input className={inputClass} value={form.rateLabel} onChange={set("rateLabel")} placeholder="e.g. 20% Bracket" /></div>
-        <div><label className={labelClass}>Rule Type</label><select className={inputClass} value={form.ruleType} onChange={set("ruleType")}>{RULE_TYPE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
-        <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
-        {isUS && (
-          <div className="col-span-2">
-            <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
-            <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
-              <option value="">Any filing status</option>
-              {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+    <Modal title={slab ? "Edit Tax Bracket" : "Add Tax Bracket"} onClose={onClose} maxWidth="max-w-2xl">
+      <div className="space-y-5">
+        <FormSection title="General">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelClass}>Label</label><input className={inputClass} value={form.rateLabel} onChange={set("rateLabel")} placeholder="e.g. 20% Bracket" /></div>
+            <div><label className={labelClass}>Rule Type</label><select className={inputClass} value={form.ruleType} onChange={set("ruleType")}>{RULE_TYPE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+            <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
           </div>
-        )}
-        {isNiBand && (
-          <>
-            <div>
-              <label className={labelClass}>NI Category</label>
-              <select className={inputClass} value={form.niCategory} onChange={set("niCategory")}>
-                <option value="">Select…</option>
-                {NI_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+        </FormSection>
+
+        <FormSection title="Bracket">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelClass}>Min Amount</label><input className={inputClass} value={form.minAmount} onChange={set("minAmount")} /></div>
+            <div><label className={labelClass}>Max Amount (blank = and above)</label><input className={inputClass} value={form.maxAmount} onChange={set("maxAmount")} /></div>
+            <div><label className={labelClass}>Rate % {isNiBand ? "(Employee)" : ""}</label><input className={inputClass} value={form.ratePct} onChange={set("ratePct")} /></div>
+          </div>
+        </FormSection>
+
+        {(isUS || isNiBand) && (
+          <FormSection title="Applicability">
+            <div className="grid grid-cols-3 gap-3">
+              {isUS && (
+                <div>
+                  <label className={labelClass}>Filing Status (optional — leave blank to apply to every filing status)</label>
+                  <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
+                    <option value="">Any filing status</option>
+                    {US_FILING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              )}
+              {isNiBand && (
+                <>
+                  <div>
+                    <label className={labelClass}>NI Category</label>
+                    <select className={inputClass} value={form.niCategory} onChange={set("niCategory")}>
+                      <option value="">Select…</option>
+                      {NI_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="e.g. 15" /></div>
+                </>
+              )}
             </div>
-            <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="e.g. 15" /></div>
-          </>
+          </FormSection>
         )}
-        <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
-        <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
+
+        <FormSection title="Administration">
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
+            <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-UK-2026-27-001 section 9.1" /></div>
+          </div>
+        </FormSection>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
         <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
       </div>
     </Modal>
+  );
+}
+
+// Pure presentational grouping — no field/state/payload changes. Shared by
+// every country's Add/Edit Tax Slab modal (SlabFormModal is not US-only);
+// groups the same fields into labeled fieldsets instead of one flat grid,
+// per the USA compliance UI/UX refactor.
+function FormSection({ title, children }) {
+  return (
+    <div>
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-foreground-muted">{title}</p>
+      {children}
+    </div>
   );
 }

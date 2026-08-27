@@ -9,7 +9,7 @@ export default function LandingHeader() {
           to="/"
           className="flex items-center gap-2 shrink-0 no-underline rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
-          <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-7 w-auto object-contain" />
+          <img src="/zoikopayroll-logo.png" alt="Zoiko Payroll" className="h-10 w-auto object-contain" />
         </Link>
 
         <div className="flex items-center gap-2 sm:gap-3 text-sm font-semibold">
