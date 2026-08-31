@@ -71,6 +71,7 @@ class EnterpriseStrategy(PayrollStrategy):
             + deductions.get("study_loan_deduction", Decimal("0"))
             + deductions.get("church_tax", Decimal("0"))
             + deductions.get("cpp2", Decimal("0"))
+            + deductions.get("state_disability_insurance", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -111,6 +112,7 @@ class EnterpriseStrategy(PayrollStrategy):
             federal_income_tax=deductions.get("federal_income_tax", Decimal("0")),
             state_income_tax=deductions.get("state_income_tax", Decimal("0")),
             local_tax=deductions.get("local_tax", Decimal("0")),
+            state_disability_insurance=deductions.get("state_disability_insurance", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
         )

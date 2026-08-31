@@ -19,52 +19,26 @@ from app.modules.payroll.engine.countries.shared import (
     _param_text, resolve_periods_per_year,
 )
 
-_UK_PERSONAL_ALLOWANCE = Decimal("12570")
-_UK_PA_TAPER_THRESHOLD = Decimal("100000")
-_UK_NI_PRIMARY_THRESHOLD = Decimal("12570")
-_UK_NI_UPPER_THRESHOLD = Decimal("50270")
-_UK_NI_PRIMARY_RATE = Decimal("8")
-_UK_NI_UPPER_RATE = Decimal("2")
-_UK_PENSION_MIN_ENPLOYER = Decimal("3")
-# Employer NI — Secondary Threshold + standard employer rate. Per
-# ZP-TAX-UK-2026-27-001 section 8.1/9.1: ST is £5,000 annual (2026-27),
-# below the LEL (£6,708) — that gap is real, not a typo (see uk.py's
-# _resolve_ni_bands docstring for why LEL itself never needs to be a
-# breakpoint). Standard (Category A/B/C/J) employer rate is 15% for 2026-27.
-_UK_NI_SECONDARY_THRESHOLD = Decimal("5000")
-_UK_NI_EMPLOYER_RATE = Decimal("15")
-# Real 2025/26 Qualifying Earnings band for Workplace Pension auto-enrolment.
-_UK_PENSION_QE_LOWER = Decimal("6240")
-_UK_PENSION_QE_UPPER = Decimal("50270")
-# Student/Postgraduate Loan — real UK mechanism. Plan 5 covers post-2023
-# starters (in effect from April 2026). Any other/unset study_loan_plan
-# value deducts 0, same as having no loan at all. 2026-27 thresholds per
-# ZP-TAX-UK-2026-27-001 section 10.1.
-_UK_STUDENT_LOAN_PLANS = {
-    "UK_PLAN1": (Decimal("26900"), Decimal("9")),
-    "UK_PLAN2": (Decimal("29385"), Decimal("9")),
-    "UK_PLAN4": (Decimal("33795"), Decimal("9")),
-    "UK_PLAN5": (Decimal("25000"), Decimal("9")),
-    "UK_POSTGRAD": (Decimal("21000"), Decimal("6")),
-}
+# Fallback constants moved to hardcoded_defaults.py — imported back under
+# their original names so nothing else needs to change. See that file for
+# the provenance comments on each.
+from app.modules.payroll.hardcoded_defaults import (
+    _UK_PERSONAL_ALLOWANCE, _UK_PA_TAPER_THRESHOLD, _UK_NI_PRIMARY_THRESHOLD,
+    _UK_NI_UPPER_THRESHOLD, _UK_NI_PRIMARY_RATE, _UK_NI_UPPER_RATE,
+    _UK_PENSION_MIN_ENPLOYER, _UK_NI_SECONDARY_THRESHOLD, _UK_NI_EMPLOYER_RATE,
+    _UK_PENSION_QE_LOWER, _UK_PENSION_QE_UPPER, _UK_STUDENT_LOAN_PLANS, _UK_FLAT_RATE_CODES,
+)
+
 # Threshold-only override keys for the plans exposed in the Compliance UI's
 # Statutory Thresholds tab. Kept to <=20 chars — ContributionRate.component_key
-# is varchar(20).
+# is varchar(20). This is a DB-key-name registry, not a hardcoded value
+# itself, so it stays here rather than moving to hardcoded_defaults.py.
 _UK_STUDENT_LOAN_PARAM_KEYS = {
     "UK_PLAN1": "sl_plan1_thresh",
     "UK_PLAN2": "sl_plan2_thresh",
     "UK_PLAN4": "sl_plan4_thresh",
     "UK_PLAN5": "sl_plan5_thresh",
     "UK_POSTGRAD": "pg_loan_thresh",
-}
-# 2026-27 special single-rate PAYE codes (ZP-TAX-UK-2026-27-001 section
-# 6.3) — flat percentage on all pay, no Personal Allowance. The S/C prefix
-# selects which regional rate a BR/D-family code actually means (Scottish
-# SD0-3 have no rUK equivalent letter, Welsh C-codes mirror rUK 2026-27).
-_UK_FLAT_RATE_CODES = {
-    "BR": Decimal("20"), "D0": Decimal("40"), "D1": Decimal("45"),
-    "SBR": Decimal("20"), "SD0": Decimal("21"), "SD1": Decimal("42"), "SD2": Decimal("45"), "SD3": Decimal("48"),
-    "CBR": Decimal("20"), "CD0": Decimal("40"), "CD1": Decimal("45"),
 }
 
 

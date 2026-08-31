@@ -10,16 +10,12 @@ from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
-
-_DE_GRUNDFREIBETRAG = Decimal("11784")
-_DE_CONTRIBUTION_CEILING = Decimal("96600")
-_DE_SOLI_THRESHOLD = Decimal("18130")
-_DE_SOLI_RATE = Decimal("5.5")
-# Kirchensteuer (church tax) — a % surcharge on the base income tax
-# (before Soli), only for employees who opt in (church_tax_liable).
-# Real rate varies by federal state (8% in Bavaria/Baden-Württemberg,
-# 9% elsewhere); 9% is used as the representative default.
-_DE_CHURCH_TAX_RATE = Decimal("9")
+# Fallback constants moved to hardcoded_defaults.py — imported back under
+# their original names so nothing else needs to change.
+from app.modules.payroll.hardcoded_defaults import (
+    _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, _DE_SOLI_THRESHOLD,
+    _DE_SOLI_RATE, _DE_CHURCH_TAX_RATE,
+)
 
 
 def _calculate_annual_tax_de(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:

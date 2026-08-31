@@ -10,20 +10,18 @@ from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
-
-_CA_CPP_YMPE = Decimal("71300")
-_CA_CPP_BASIC_EXEMPTION = Decimal("3500")
-_CA_EI_MIE = Decimal("65700")
-_CA_BASIC_PERSONAL_AMOUNT = Decimal("15705")
-# CPP2 — the real, current (2024+) second-tier CPP contribution on
-# earnings between the YMPE and the Year's Additional Maximum
-# Pensionable Earnings (YAMPE), employee and employer each.
-_CA_CPP2_YAMPE = Decimal("81200")
-_CA_CPP2_RATE = Decimal("4")
+# Fallback constants moved to hardcoded_defaults.py — imported back under
+# their original names so nothing else needs to change.
+from app.modules.payroll.hardcoded_defaults import (
+    _CA_CPP_YMPE, _CA_CPP_BASIC_EXEMPTION, _CA_EI_MIE, _CA_BASIC_PERSONAL_AMOUNT,
+    _CA_CPP2_YAMPE, _CA_CPP2_RATE,
+)
 
 
 def _calculate_annual_tax_ca(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    bpa = resolve_jurisdiction_parameter(rate_map, "basic_personal_amount", _CA_BASIC_PERSONAL_AMOUNT, country="CA")
+    # Key shortened from "basic_personal_amount" (21 chars) to fit
+    # payroll_contribution_rates.component_key's VARCHAR(20).
+    bpa = resolve_jurisdiction_parameter(rate_map, "basic_personal_amt", _CA_BASIC_PERSONAL_AMOUNT, country="CA")
     taxable = max(Decimal("0"), annual_gross - bpa)
     return _calculate_annual_tax(taxable, slabs)
 

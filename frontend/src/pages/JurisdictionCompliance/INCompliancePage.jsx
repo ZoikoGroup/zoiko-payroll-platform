@@ -39,22 +39,33 @@ const PARAM_SECTIONS = [
     fields: [
       { key: "rebate_87a_limit", label: "Income Eligibility Limit", type: "currency", perRegime: true },
       { key: "rebate_87a_max", label: "Maximum Rebate Amount", type: "currency", perRegime: true },
-      { key: "rebate_87a_marginal_relief", label: "Marginal Relief", type: "toggle", appliesToBoth: true },
+      // componentKey max 20 chars (payroll_contribution_rates.component_key
+      // is VARCHAR(20)) — "rebate_87a_marginal_relief" (26 chars) always
+      // 500'd on save. Shortened; also renamed in india.py's
+      // resolve_jurisdiction_parameter() call and its test fixtures so the
+      // engine keeps reading the same key it's saved under.
+      { key: "rebate_87a_mrelief", label: "Marginal Relief", type: "toggle", appliesToBoth: true },
     ],
   },
   {
     key: "surcharge", title: "Surcharge Slabs & Caps", subtitle: "Tiered — its own table below",
     fields: [
       { key: "surcharge_cap_pct", label: "Maximum Surcharge Cap", type: "percent", perRegime: true },
-      { key: "surcharge_marginal_relief", label: "Marginal Relief on Surcharge", type: "toggle", appliesToBoth: true },
+      // Same VARCHAR(20) fix as rebate_87a_mrelief above — also renamed in
+      // india.py and its test fixtures.
+      { key: "surcharge_mrelief", label: "Marginal Relief on Surcharge", type: "toggle", appliesToBoth: true },
     ],
   },
   {
     key: "retirement", title: "Retirement & Exemption Limits", subtitle: "Section 80C shown only under Old Regime",
     fields: [
-      { key: "nps_80ccd2_employer_cap_pct", label: "NPS Employer Contribution Cap — 80CCD(2)", type: "percent", appliesToBoth: true, notApplied: true },
-      { key: "gratuity_exemption_limit", label: "Gratuity Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
-      { key: "leave_encashment_exemption_limit", label: "Leave Encashment Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
+      // componentKey max 20 chars (payroll_contribution_rates.component_key
+      // is VARCHAR(20)) — these three's original keys (27/24/32 chars)
+      // always 500'd on save. Frontend-only rename — not read anywhere in
+      // the engine yet (notApplied), so no backend change needed.
+      { key: "nps_80ccd2_cap_pct", label: "NPS Employer Contribution Cap — 80CCD(2)", type: "percent", appliesToBoth: true, notApplied: true },
+      { key: "gratuity_exempt_lim", label: "Gratuity Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
+      { key: "leave_encash_exempt", label: "Leave Encashment Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
       { key: "section_80c_limit", label: "Section 80C Limit", type: "currency", perRegime: true, oldOnly: true, notApplied: true },
     ],
   },

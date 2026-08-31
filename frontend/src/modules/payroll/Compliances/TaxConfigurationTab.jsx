@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { fetchContributionRates, fetchTaxSlabs } from "../../../service/payrollService";
-import { SlabsTable, withholdingTerm } from "./TaxSlabTable";
+import { SlabsTable, PTSlabsTable, withholdingTerm } from "./TaxSlabTable";
 import { RatesTable } from "./ContributionRatesTable";
 
 // Organization Compliance > Tax Configuration — UI/UX ONLY.
@@ -10,24 +10,34 @@ import { RatesTable } from "./ContributionRatesTable";
 // aware navigation (Central/State, Federal/Provincial, National/Regional,
 // ...) built entirely on top of the SAME two fetches ContributionRatesTable
 // and TaxSlabTable already make (fetchContributionRates/fetchTaxSlabs) —
-// no new endpoint, no changed response shape, no calculation logic here.
+// no new endpoint (schemas.py's TaxSlabResponse gained one additive field,
+// ruleType), no calculation logic here.
 //
-// The underlying API doesn't (and isn't being asked to) expose a row's
-// rule_type or jurisdiction_state, so every split below is either:
-//   (a) a client-side content filter over rows already being fetched today
-//       (e.g. a real income-tax bracket's rate_label always contains "%";
-//       a flat/PT-style bracket's does not — visible directly in the
-//       existing screenshots), or
-//   (b) a label-substring match against the existing display label
-//       (e.g. a ContributionRate row literally labeled "Professional Tax"
-//       or "Church Tax"), or
-//   (c) an honest "not separately broken out" placeholder where the
-//       current data model genuinely has no second dataset to show,
-//       rather than inventing or duplicating numbers.
-// None of this changes what the two source fetches return.
+// Every slab-side split below filters on the row's real `ruleType`
+// (MARGINAL_RATE for a genuine income-tax bracket, PT_FLAT for a state
+// Professional Tax bracket, ...) — NOT a guess from the display label.
+// A previous version guessed "does rate_label contain %", which silently
+// misclassified a 0%-rate bracket labeled "Nil" (India's own lowest income-
+// tax bracket) as a flat/PT-style row, showing it under Professional Tax
+// instead of Income Tax/TDS. Rate-side (ContributionRate) splits still use
+// a label-substring match (e.g. a row literally labeled "Professional Tax"
+// or "Church Tax") since that API doesn't carry a componentKey today —
+// that part isn't broken, so it's left as-is. An honest "not separately
+// broken out" placeholder is used where the current data model genuinely
+// has no second dataset to show, rather than inventing or duplicating numbers.
+//
+// PT_FLAT rows (India's state Professional Tax) render via PTSlabsTable,
+// not the generic SlabsTable — a fixed monthly amount per gross-income
+// bracket has no meaningful "Rate"/"Tax Calculation" columns the way a
+// percentage bracket does. PTSlabsTable mirrors Super Admin's own PT
+// Slabs table (JurisdictionCompliance/INCompliancePage.jsx) column-for-
+// column — Gross Income From/To, Monthly PT Amount, Adjustment Month
+// Amount — reading the raw minAmount/maxAmount/flatAmount/adjustmentAmount
+// fields TaxSlabResponse now exposes, instead of the pre-formatted
+// currency strings (min/max/rate) used elsewhere in this file.
 
-function isPercentageBracket(row) {
-  return typeof row.rate === "string" && row.rate.includes("%");
+function isRuleType(row, ruleType) {
+  return row.ruleType === ruleType;
 }
 
 function labelIncludes(row, needle) {
@@ -47,7 +57,7 @@ const COUNTRY_TAX_CONFIG = {
           {
             key: "income-tax", label: "Income Tax / TDS", source: "slabs",
             matches: () => true,
-            filter: (rows) => rows.filter(isPercentageBracket),
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
           },
         ],
       },
@@ -63,7 +73,7 @@ const COUNTRY_TAX_CONFIG = {
             // the same obligation — show ONLY the brackets in that case
             // rather than stacking a redundant summary row above them.
             filter: (slabs, rates) => {
-              const slabRows = slabs.filter((r) => !isPercentageBracket(r));
+              const slabRows = slabs.filter((r) => isRuleType(r, "PT_FLAT"));
               const rateRows = slabRows.length > 0 ? [] : rates.filter((r) => labelIncludes(r, "professional tax"));
               return { slabRows, rateRows };
             },
@@ -79,14 +89,13 @@ const COUNTRY_TAX_CONFIG = {
         key: "national", label: "National Income Tax",
         items: [
           {
-            // Same isPercentageBracket filter India's Income Tax/TDS item
-            // already uses, for the same reason: the API doesn't expose a
-            // row's rule_type, but a real PAYE bracket's label always has
-            // a "%" ("Basic Rate 20%") while an NI Category band's never
-            // does ("NI Category A band 1") — without this, every NI band
-            // seeded for this org shows up here as if it were income tax.
+            // Same real-ruleType filter India's Income Tax/TDS item uses,
+            // for the same reason: a real PAYE bracket is MARGINAL_RATE,
+            // an NI Category band is NI_BAND — without this, any NI band
+            // synced into this org's cache would show up here as if it
+            // were income tax.
             key: "paye", label: "PAYE Income Tax", source: "slabs", matches: () => true,
-            filter: (rows) => rows.filter(isPercentageBracket),
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
           },
         ],
       },
@@ -95,7 +104,7 @@ const COUNTRY_TAX_CONFIG = {
         items: ["England", "Scotland", "Wales", "Northern Ireland"].map((region) => ({
           key: region.toLowerCase().replace(/\s+/g, "-"), label: region, source: "slabs",
           matches: (state) => (state || "").toLowerCase() === region.toLowerCase(),
-          filter: (rows) => rows.filter(isPercentageBracket),
+          filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
         })),
       },
     ],
@@ -393,7 +402,12 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
           return (
             <div className="space-y-4">
               {filteredRates.length > 0 && <RatesTable rows={filteredRates} caption={`Currently applied to every payslip in this jurisdiction.`} singleColumn={activeItem.shareShape === "single"} />}
-              {filteredSlabs.length > 0 && <SlabsTable rows={filteredSlabs} caption={`Currently applied when calculating ${activeItem.label} in this jurisdiction.`} />}
+              {filteredSlabs.length > 0 && (
+                <PTSlabsTable
+                  rows={filteredSlabs}
+                  caption={`${activeItem.label} brackets — a fixed monthly deduction per gross-income range, applied to every payslip in this jurisdiction.`}
+                />
+              )}
             </div>
           );
         })()}

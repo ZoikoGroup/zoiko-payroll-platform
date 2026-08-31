@@ -10,21 +10,14 @@ from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
-
-ESI_MONTHLY_WAGE_CEILING = Decimal("21000")
-_IN_STANDARD_DEDUCTION = Decimal("75000")
-# Old Regime's own standard deduction — only read when ctx.tax_regime == "Old".
-_IN_STANDARD_DEDUCTION_OLD = Decimal("50000")
-# New Regime Section 87A defaults (today's only regime, unchanged).
-_IN_REBATE_87A_LIMIT = Decimal("1200000")
-_IN_REBATE_87A_MAX = Decimal("60000")
-# Old Regime Section 87A defaults — only read when ctx.tax_regime == "Old".
-_IN_REBATE_87A_LIMIT_OLD = Decimal("500000")
-_IN_REBATE_87A_MAX_OLD = Decimal("12500")
-# Health & Education Cess — applied on (tax + surcharge). Absent from this
-# engine entirely before this change; every Indian org's computed TDS grows
-# by ~4% as of this change, a deliberate, confirmed correction, not a bug.
-_IN_CESS_PCT = Decimal("4")
+# Fallback constants moved to hardcoded_defaults.py (the consolidated home
+# for every hardcoded fallback value in the payroll module) — imported
+# back under their original names so nothing else needs to change.
+from app.modules.payroll.hardcoded_defaults import (
+    ESI_MONTHLY_WAGE_CEILING, _IN_STANDARD_DEDUCTION, _IN_STANDARD_DEDUCTION_OLD,
+    _IN_REBATE_87A_LIMIT, _IN_REBATE_87A_MAX, _IN_REBATE_87A_LIMIT_OLD,
+    _IN_REBATE_87A_MAX_OLD, _IN_CESS_PCT,
+)
 
 
 def _capped_marginal_amount(base_amount: Decimal, added_amount: Decimal, amount_at_threshold: Decimal, excess_income: Decimal) -> Decimal:
@@ -45,7 +38,10 @@ def _apply_section_87a_rebate(annual_tax: Decimal, taxable_income: Decimal, rate
     default_max = _IN_REBATE_87A_MAX_OLD if is_old else _IN_REBATE_87A_MAX
     rebate_limit = resolve_jurisdiction_parameter(rate_map, "rebate_87a_limit", default_limit, country="IN")
     rebate_max = resolve_jurisdiction_parameter(rate_map, "rebate_87a_max", default_max, country="IN")
-    marginal_relief_on = resolve_jurisdiction_parameter(rate_map, "rebate_87a_marginal_relief", Decimal("1"), country="IN") == Decimal("1")
+    # Key shortened from "rebate_87a_marginal_relief" (26 chars) to fit
+    # payroll_contribution_rates.component_key's VARCHAR(20) — the original
+    # name always failed to save from the Tax Parameters UI.
+    marginal_relief_on = resolve_jurisdiction_parameter(rate_map, "rebate_87a_mrelief", Decimal("1"), country="IN") == Decimal("1")
 
     if taxable_income <= rebate_limit:
         rebate = min(annual_tax, rebate_max)
@@ -75,7 +71,9 @@ def _apply_surcharge(annual_tax: Decimal, taxable_income: Decimal, slabs, rate_m
     tier = applicable[-1]  # highest threshold crossed
     surcharge = annual_tax * (tier.rate_pct / Decimal("100"))
 
-    marginal_relief_on = resolve_jurisdiction_parameter(rate_map, "surcharge_marginal_relief", Decimal("1"), country="IN") == Decimal("1")
+    # Key shortened from "surcharge_marginal_relief" (25 chars) — same
+    # VARCHAR(20) fix as rebate_87a_mrelief above.
+    marginal_relief_on = resolve_jurisdiction_parameter(rate_map, "surcharge_mrelief", Decimal("1"), country="IN") == Decimal("1")
     if not marginal_relief_on:
         return surcharge
     # Relief caps (tax + surcharge) at (plain tax at the tier's own

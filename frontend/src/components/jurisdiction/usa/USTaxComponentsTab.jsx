@@ -1,111 +1,90 @@
 import { useMemo, useState } from "react";
-import { Percent, Plus } from "lucide-react";
-import USAComponentCard from "./USAComponentCard";
+import { Percent, Plus, Search, RotateCcw } from "lucide-react";
+import USComponentSummaryCards from "./USComponentSummaryCards";
+import USTaxComponentTable from "./USTaxComponentTable";
+import USAAddComponentModal from "./USAAddComponentModal";
 import USAComponentFormModal from "./USAComponentFormModal";
-import USAComponentPickerModal from "./USAComponentPickerModal";
+import { inputClass } from "../constants";
 import { classifyContributionRate } from "./usaComponentConfig";
 
-// Wired into usaComplianceConfig.jsx's extraTabs, replacing the plain
-// Contribution Rates table (hidden via JurisdictionLayout's `hiddenTabs`)
-// with a grouped, component-driven, US-specific presentation of the EXACT
-// SAME data — `rates` is what JurisdictionLayout's extraTabs.render()
-// already passes down, so there is zero new fetching. Income Tax Brackets
-// now live in their own adjacent tab (USIncomeTaxBracketsTab.jsx), per
-// Venu's request to not mix them into this section.
-//
-// This is also the orchestrator for Contribution Rate Add/Edit: it
-// deliberately does NOT call the onAddRate/onEditRate callbacks handed
-// down by JurisdictionLayout (those just flip JurisdictionLayout's own
-// showNewRate/editingRate state to open the generic, every-country-shared
-// RateFormModal) — instead it owns its own modal state and renders the
-// USA-only, component-type-driven USAComponentFormModal, then calls the
-// existing `onReload` prop to refresh rates in JurisdictionLayout after a
-// save, exactly like the shared modal already does. This means
-// JurisdictionLayout.jsx and RateFormModal.jsx needed ZERO changes — they
-// simply become unreachable for the USA path (nothing sets
-// showNewRate/editingRate anymore here) while staying fully reachable,
-// byte-for-byte unchanged, for every other country (RatesTab still calls
-// those callbacks).
-//
-// Delete is the one exception, kept on the existing shared path
-// (onDeleteRate -> JurisdictionLayout's own ConfirmDialog +
-// deleteCanonicalContributionRate) since deletion needs no
-// field-type-awareness — reusing it is simpler and safer.
-export default function USTaxComponentsTab({ pack, rates, onReload, onDeleteRate, onNavigateTab }) {
-  const [showPicker, setShowPicker] = useState(false);
-  const [addingRate, setAddingRate] = useState(false); // false | true (custom) | {componentKey,label,uiType} (known component)
+// USA-only "Tax Components" tab. Wired into usaComplianceConfig's extraTabs,
+// fed the exact same `rates`/`onReload`/`onDeleteRate` props JurisdictionLayout
+// already passes. Replaces the old stacked USAComponentCard presentation with
+// compact summary cards + client-side filters + a clean one-row-per-rate
+// table. No new fetching; save refreshes only this pack's rates via onReload.
+export default function USTaxComponentsTab({ pack, rates, slabs, onReload, onDeleteRate, onNavigateTab }) {
+  const [showWizard, setShowWizard] = useState(false);
   const [editingRate, setEditingRate] = useState(null);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [appliesFilter, setAppliesFilter] = useState("");
 
-  // A component like Social Security's wage base, or Additional Medicare's
-  // threshold, is shown as an inline line INSIDE its parent's card (see
-  // USAComponentCard) instead of as its own separate top-level card — that
-  // was pure duplication (the same value shown twice). Only excluded from
-  // the top-level list when its parent's card is actually present, so a
-  // wage-base/threshold row is never silently hidden if its parent is
-  // missing for some pack.
-  const rateGroups = useMemo(() => {
-    const all = groupByComponentKey(rates || []);
-    const presentKeys = new Set(all.map((g) => g.componentKey));
-    const mergedAway = new Set();
-    for (const g of all) {
-      const desc = classifyContributionRate(g.rows[0]);
-      if (desc.associatedKey && presentKeys.has(desc.associatedKey)) mergedAway.add(desc.associatedKey);
-    }
-    return all.filter((g) => !mergedAway.has(g.componentKey));
-  }, [rates]);
+  const rows = useMemo(() => {
+    const arr = (rates || []).slice();
+    const q = search.trim().toLowerCase();
+    return arr
+      .filter((r) => {
+        if (typeFilter) {
+          const { uiType } = classifyContributionRate(r);
+          if (uiType !== typeFilter) return false;
+        }
+        if (appliesFilter) {
+          const applies = r.filingStatus || r.jurisdictionState || "Any";
+          if (applies !== appliesFilter) return false;
+        }
+        if (q) {
+          const hay = `${r.label || ""} ${r.componentKey || ""} ${r.filingStatus || ""} ${r.jurisdictionState || ""}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.label || "").localeCompare(b.label || ""));
+  }, [rates, search, typeFilter, appliesFilter]);
+
+  const hasFilter = search !== "" || typeFilter !== "" || appliesFilter !== "";
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Percent size={15} /> Contribution Components</h3>
-          <p className="mt-0.5 text-xs text-foreground-muted">Social Security, Medicare, FUTA, and every other scalar rate configured for this pack.</p>
+          <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Percent size={15} /> Tax Components</h3>
+          <p className="mt-0.5 text-xs text-foreground-muted">Contribution rates for social security, Medicare, FUTA, and more — grouped into a single view.</p>
         </div>
         <button
-          onClick={() => setShowPicker(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-hover"
+          onClick={() => setShowWizard(true)}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-hover"
         >
           <Plus size={13} /> Add Component
         </button>
       </div>
 
-      {rateGroups.length === 0 ? (
-        <EmptyState text="No contribution components configured yet." />
-      ) : (
-        <div className="space-y-2">
-          {rateGroups.map((group) => (
-            <USAComponentCard
-              key={group.componentKey} group={group} allRates={rates || []}
-              onEdit={setEditingRate} onDelete={onDeleteRate}
-            />
-          ))}
-        </div>
-      )}
+      <div className="mb-4">
+        <USComponentSummaryCards rates={rates} slabs={slabs} />
+      </div>
 
-      {showPicker && (
-        <USAComponentPickerModal
+      <FilterBar
+        search={search} onSearch={setSearch}
+        typeFilter={typeFilter} onTypeFilter={setTypeFilter}
+        appliesFilter={appliesFilter} onAppliesFilter={setAppliesFilter}
+        rates={rates}
+        hasFilter={hasFilter}
+        onReset={() => { setSearch(""); setTypeFilter(""); setAppliesFilter(""); }}
+      />
+
+      <USTaxComponentTable
+        rates={rows}
+        packStatus={pack?.status}
+        onEdit={setEditingRate}
+        onDelete={onDeleteRate}
+      />
+
+      {showWizard && (
+        <USAAddComponentModal
           pack={pack} rates={rates || []}
-          onClose={() => setShowPicker(false)}
-          onEditExisting={(row) => { setShowPicker(false); setEditingRate(row); }}
-          onAddNew={(entry) => {
-            setShowPicker(false);
-            // A not-yet-configured catalog entry still resolves to a real
-            // uiType via the static map (classifyContributionRate checks
-            // componentKey first, before any populated-field heuristics),
-            // so the Add form goes straight to the right fields — no
-            // technical-type screen, matching an already-configured Edit.
-            const { uiType } = classifyContributionRate({ componentKey: entry.componentKey });
-            setAddingRate({ componentKey: entry.componentKey, displayName: entry.displayName, uiType });
-          }}
-          onCustom={() => { setShowPicker(false); setAddingRate(true); }}
-          onNavigateIncomeTax={() => { setShowPicker(false); onNavigateTab?.("incomeTax"); }}
-        />
-      )}
-      {addingRate && (
-        <USAComponentFormModal
-          pack={pack} initial={addingRate === true ? undefined : addingRate}
-          onClose={() => setAddingRate(false)}
-          onSaved={() => { setAddingRate(false); onReload(); }}
+          onClose={() => setShowWizard(false)}
+          onEditExisting={(row) => { setShowWizard(false); setEditingRate(row); }}
+          onSaved={() => { setShowWizard(false); onReload(); }}
+          onNavigateIncomeTax={() => { setShowWizard(false); onNavigateTab?.("incomeTax"); }}
         />
       )}
       {editingRate && (
@@ -118,20 +97,58 @@ export default function USTaxComponentsTab({ pack, rates, onReload, onDeleteRate
   );
 }
 
-function groupByComponentKey(rates) {
-  const map = new Map();
-  for (const r of rates) {
-    const key = r.componentKey || "—";
-    if (!map.has(key)) map.set(key, { componentKey: key, label: r.label || key, rows: [] });
-    map.get(key).rows.push(r);
-  }
-  return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-}
+function FilterBar({ search, onSearch, typeFilter, onTypeFilter, appliesFilter, onAppliesFilter, rates, hasFilter, onReset }) {
+  const typeOptions = useMemo(() => {
+    const set = new Set();
+    for (const r of rates || []) set.add(classifyContributionRate(r).uiType);
+    return Array.from(set).sort();
+  }, [rates]);
 
-function EmptyState({ text }) {
+  const appliesOptions = useMemo(() => {
+    const set = new Set();
+    for (const r of rates || []) set.add(r.filingStatus || r.jurisdictionState || "Any");
+    return Array.from(set).sort();
+  }, [rates]);
+
+  const TYPE_LABELS = {
+    PERCENTAGE: "Percentage",
+    EMPLOYEE_EMPLOYER_PERCENTAGE: "Employee + Employer",
+    EMPLOYER_ASSIGNED_RATE: "Employer Rate",
+    WAGE_BASE: "Wage Base",
+    THRESHOLD: "Threshold",
+    FIXED_AMOUNT: "Fixed",
+    DEDUCTION_AMOUNT: "Deduction",
+    INCOME_TAX_POINTER: "Income Tax",
+  };
+
   return (
-    <div className="rounded-xl border border-dashed border-border bg-surface-muted py-8 text-center text-xs text-foreground-disabled">
-      {text}
+    <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-muted p-3">
+      <div className="min-w-[200px] flex-1">
+        <label className="mb-1.5 block text-xs font-medium text-foreground-muted">Search</label>
+        <div className="relative">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-disabled" />
+          <input className={inputClass + " pl-8"} value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search by name, key, or filing status…" />
+        </div>
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-foreground-muted">Type</label>
+        <select className={inputClass + " w-auto min-w-[160px]"} value={typeFilter} onChange={(e) => onTypeFilter(e.target.value)}>
+          <option value="">All Types</option>
+          {typeOptions.map((t) => <option key={t} value={t}>{TYPE_LABELS[t] || t}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-foreground-muted">Applies To</label>
+        <select className={inputClass + " w-auto min-w-[150px]"} value={appliesFilter} onChange={(e) => onAppliesFilter(e.target.value)}>
+          <option value="">All</option>
+          {appliesOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+      </div>
+      {hasFilter && (
+        <button onClick={onReset} className="flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface">
+          <RotateCcw size={12} /> Reset
+        </button>
+      )}
     </div>
   );
 }

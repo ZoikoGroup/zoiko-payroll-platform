@@ -9,50 +9,15 @@ from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
-
-_US_STANDARD_DEDUCTION = Decimal("15000")
-_US_SOCIAL_SECURITY_WAGE_BASE = Decimal("176100")
-_US_SOCIAL_SECURITY_RATE = Decimal("6.2")
-_US_MEDICARE_RATE = Decimal("1.45")
-_US_MEDICARE_ADDITIONAL_RATE = Decimal("0.9")
-# Previously inlined at its one call site — named so it can be sourced
-# from rate_map like every other parameter here. The real IRS thresholds
-# differ by W-4 filing status (only MFJ/MFS actually diverge from the
-# Single/HOH figure) — this dict is the DEFAULT used when Super Admin
-# hasn't configured a filing-status-tagged "medicare_addl_thresh"
-# ContributionRate row (same override convention every other parameter
-# here follows: a configured row always wins). Falls back to the flat
-# constant below for a missing/unrecognized filing_status (None — every
-# employee before w4_filing_status existed, and any status outside the
-# four known codes), so this is a no-op for every employee who predates
-# filing-status tracking.
-_US_MEDICARE_ADDL_THRESHOLD_DEFAULTS = {
-    "SINGLE": Decimal("200000"),
-    "HOH": Decimal("200000"),
-    "MFJ": Decimal("250000"),
-    "MFS": Decimal("125000"),
-}
-_US_MEDICARE_ADDITIONAL_THRESHOLD = Decimal("200000")
-# FUTA has been seeded as a display-only ContributionRate row ("futa")
-# since day one but was never actually read anywhere until now. Real
-# FUTA is 6.0% on the first $7,000 of annual wages per employee, BEFORE
-# the standard state-unemployment-tax credit — see the credit calculation
-# below, added alongside real SUI wiring (EmployerTaxProfile) — employer
-# only, no employee side.
-_US_FUTA_RATE = Decimal("6.0")
-_US_FUTA_WAGE_BASE = Decimal("7000")
-# The standard federal credit against FUTA for timely-paid state
-# unemployment tax — a stable, Congress-set number (IRC §3302), not
-# tenant- or state-specific data, so it's treated the same way the SS
-# rate/wage base already are: a configurable-with-fallback constant, not
-# something invented per component. Applied only when an employer_tax_
-# profiles["SUI"] entry exists (i.e. Super Admin/Tax Ops has actually
-# configured this employer's SUI rate for this state) — an org with no
-# SUI profile continues to compute FUTA at the full 6.0% statutory rate,
-# exactly as before this credit existed, since "SUI is being paid timely"
-# cannot be inferred, only configured (per the standard's §6.2: never
-# infer an experience rate from prior payroll deductions).
-_US_FUTA_CREDIT_PCT = Decimal("5.4")
+# Fallback constants moved to hardcoded_defaults.py — imported back under
+# their original names so nothing else needs to change. See that file for
+# the provenance comments on each (filing-status thresholds, FUTA credit
+# convention, etc.).
+from app.modules.payroll.hardcoded_defaults import (
+    _US_STANDARD_DEDUCTION, _US_SOCIAL_SECURITY_WAGE_BASE, _US_SOCIAL_SECURITY_RATE,
+    _US_MEDICARE_RATE, _US_MEDICARE_ADDITIONAL_RATE, _US_MEDICARE_ADDL_THRESHOLD_DEFAULTS,
+    _US_MEDICARE_ADDITIONAL_THRESHOLD, _US_FUTA_RATE, _US_FUTA_WAGE_BASE, _US_FUTA_CREDIT_PCT,
+)
 
 
 def _calculate_annual_tax_us(annual_gross: Decimal, slabs, rate_map: dict, filing_status: str | None = None) -> Decimal:
@@ -188,6 +153,22 @@ def calculate(ctx: PayrollContext) -> dict:
             if locality_rate_pct is not None:
                 local_tax = _round2((annual_gross * locality_rate_pct / Decimal("100")) / MONTHS_PER_YEAR)
 
+    # State-level statutory payroll programs (CA SDI, WA PFML, NY PFL, ...):
+    # a flat employee-side percentage of gross, resolved the same
+    # additive way india.py's PT_FLAT-fallback flat rate is (ctx.
+    # state_rate_map, populated via get_state_scoped_config regardless of
+    # any jurisdiction pack's Active/Draft status — see that function's
+    # own docstring). Previously looked up nowhere in this file: a state
+    # program could be fully configured by Super Admin and still deduct
+    # $0 forever, because nothing here ever read this field. Only "sdi"
+    # is wired today (California); a future capped program (e.g. NJ FLI's
+    # $171,100 cap) needs its own wage-base handling, not assumed here.
+    sdi_rate = (ctx.state_rate_map or {}).get("sdi")
+    state_disability_insurance = (
+        _round2((annual_gross * sdi_rate.employee_rate_pct / Decimal("100")) / MONTHS_PER_YEAR)
+        if sdi_rate and sdi_rate.employee_rate_pct else Decimal("0")
+    )
+
     filing_status = ctx.w4_filing_status
     annual_tax = _calculate_annual_tax_us(annual_gross, ctx.slabs, rate_map, filing_status=filing_status)
     federal_income_tax = _round2(annual_tax / MONTHS_PER_YEAR)
@@ -204,5 +185,6 @@ def calculate(ctx: PayrollContext) -> dict:
         medicare=medicare, employer_medicare=employer_medicare,
         employer_futa=employer_futa, employer_sui=employer_sui,
         federal_income_tax=federal_income_tax, state_income_tax=state_income_tax, local_tax=local_tax,
+        state_disability_insurance=state_disability_insurance,
         tds=tds, annual_tax=annual_tax,
     )

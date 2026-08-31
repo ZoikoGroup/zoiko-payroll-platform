@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Globe2, ChevronRight } from "lucide-react";
+import { Globe2, ChevronRight, Eye } from "lucide-react";
 import { getComplianceJurisdictions } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
@@ -28,11 +28,19 @@ export default function CompliancePage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Compliance</h1>
-        <p className="text-sm text-foreground-muted mt-0.5">
-          Select a jurisdiction to manage its tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
-        </p>
+      <div className="mb-6 flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Compliance</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
+            Select a jurisdiction to manage its tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
+          </p>
+        </div>
+        <Link
+          to="/super-admin/compliance/engine-defaults"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+        >
+          <Eye size={14} /> View Engine Fallback Defaults
+        </Link>
       </div>
 
       {loading ? (
