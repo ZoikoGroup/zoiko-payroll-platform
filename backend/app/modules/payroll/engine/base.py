@@ -183,6 +183,11 @@ class PayrollResult:
     federal_income_tax: Decimal = Decimal("0")
     state_income_tax: Decimal = Decimal("0")
     local_tax: Decimal = Decimal("0")
+    # US: state-level statutory payroll program (California SDI first;
+    # see engine/countries/us.py). A real employee-side deduction, NOT
+    # part of the informational federal/state/local income-tax breakdown
+    # above — it's summed into total_deductions like PF/ESI/professional_tax.
+    state_disability_insurance: Decimal = Decimal("0")
 
     # Totals
     total_deductions: Decimal = Decimal("0")

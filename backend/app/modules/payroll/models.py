@@ -395,6 +395,10 @@ class PayslipItem(Base):
     federal_income_tax = Column(Numeric(12, 2), default=0, server_default="0")
     state_income_tax   = Column(Numeric(12, 2), default=0, server_default="0")
     local_tax           = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: state-level statutory payroll program (California SDI first) —
+    # its own line, distinct from state_income_tax, since it's a separate
+    # statutory deduction category, not part of income-tax withholding.
+    state_disability_insurance = Column(Numeric(12, 2), default=0, server_default="0")
     # UK-specific
     ni_employee       = Column(Numeric(12, 2), default=0)
     # UK/Australia: government study-loan repayment (Student/Postgraduate
@@ -677,7 +681,11 @@ class TaxSlab(Base):
     min_amount           = Column(Numeric(14, 2), nullable=False)
     max_amount           = Column(Numeric(14, 2), nullable=True)   # null = "and above"
     rate_pct             = Column(Numeric(5, 2), nullable=False)   # e.g. 5.00 for 5%
-    rate_label           = Column(String(20), nullable=False)      # → s.rate, e.g. "5%" or "Nil"
+    # Was String(20) — sized for short values like "5%"/"Nil". Widened for
+    # NI_BAND rows, whose label is a real descriptive name (e.g. "Main Rate
+    # Band (PT to UEL)") rather than a short percentage — see migration
+    # 048c9fc1d64f.
+    rate_label           = Column(String(150), nullable=False)     # → s.rate, e.g. "5%" or "Nil"
     tax_formula          = Column(String(150), nullable=False)     # → s.tax, display text
     sort_order           = Column(Integer, default=0)
 

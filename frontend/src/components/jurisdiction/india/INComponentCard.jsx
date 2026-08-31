@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { ChevronDown, Pencil, Trash2, ArrowRight } from "lucide-react";
-import { classifyContributionRate } from "./usaComponentConfig";
+import { classifyIndiaContributionRate } from "./inComponentConfig";
 
-// USA-only replacement for the generic "Employee % / Employer % / Flat
-// Amount / Filing Status / Sort Order" table — each group renders only the
-// field(s) actually relevant to that component, per classifyContributionRate.
-// Only used for USA (imported solely by USTaxComponentsTab.jsx); every
+// India-only replacement for the generic "Employee % / Employer % / Flat
+// Amount / Sort Order" table row — each group renders only the field(s)
+// actually relevant to that component, per classifyIndiaContributionRate.
+// Only used for India (imported solely by INTaxComponentsTab.jsx); every
 // other country still renders the original RatesTab.jsx table untouched.
-export default function USAComponentCard({ group, allRates, onEdit, onDelete }) {
+// Direct structural port of usa/USAComponentCard.jsx.
+export default function INComponentCard({ group, allRates, onEdit, onDelete }) {
   const [open, setOpen] = useState(true);
-  const desc = classifyContributionRate(group.rows[0]);
+  const desc = classifyIndiaContributionRate(group.rows[0]);
 
   if (desc.pointer) {
     return (
@@ -20,19 +21,15 @@ export default function USAComponentCard({ group, allRates, onEdit, onDelete }) 
             <span className="rounded-md bg-surface px-1.5 py-0.5 font-mono text-[11px] text-foreground-muted">{group.componentKey}</span>
           </div>
           <p className="mt-0.5 flex items-center gap-1 text-xs text-foreground-muted">
-            Configured via Income Tax Brackets below <ArrowRight size={11} />
+            Configured via the Tax Slabs tab <ArrowRight size={11} />
           </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => onEdit(group.rows[0])} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface"><Pencil size={13} /></button>
         </div>
       </div>
     );
   }
 
   const associatedRow = desc.associatedKey ? allRates.find((r) => r.componentKey === desc.associatedKey) : null;
-  const associatedDesc = associatedRow ? classifyContributionRate(associatedRow) : null;
-  const anyFilingStatus = desc.filingStatus || group.rows.some((r) => r.filingStatus);
+  const associatedDesc = associatedRow ? classifyIndiaContributionRate(associatedRow) : null;
 
   return (
     <div className="rounded-xl border border-border bg-surface">
@@ -50,40 +47,31 @@ export default function USAComponentCard({ group, allRates, onEdit, onDelete }) 
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border-light text-left text-foreground-muted">
-                  {desc.employeeRate && desc.employerRate && (<><th className="px-4 py-2">Employee %</th><th className="px-4 py-2">Employer %</th></>)}
-                  {desc.singleRate && <th className="px-4 py-2">{desc.rateLabel}</th>}
+                  {desc.employeeRate && desc.employerRate && (<><th className="px-4 py-2">Employee Contribution Rate %</th><th className="px-4 py-2">Employer Contribution Rate %</th></>)}
                   {desc.flatAmount && <th className="px-4 py-2">{desc.flatAmountLabel}</th>}
-                  {anyFilingStatus && <th className="px-4 py-2">Filing Status</th>}
                   <th className="px-4 py-2">Sort Order</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {group.rows.map((r) => {
-                  const rowDesc = classifyContributionRate(r);
-                  return (
-                    <tr key={r.id} className="border-b border-border-light last:border-0">
-                      {desc.employeeRate && desc.employerRate && (
-                        <>
-                          <td className="px-4 py-2.5">{r.employeeRatePct != null ? `${r.employeeRatePct}%` : "—"}</td>
-                          <td className="px-4 py-2.5">{r.employerRatePct != null ? `${r.employerRatePct}%` : "—"}</td>
-                        </>
-                      )}
-                      {desc.singleRate && (
-                        <td className="px-4 py-2.5">{r[rowDesc.rateField] != null ? `${r[rowDesc.rateField]}%` : "—"}</td>
-                      )}
-                      {desc.flatAmount && <td className="px-4 py-2.5">{r.flatAmount ?? "—"}</td>}
-                      {anyFilingStatus && <td className="px-4 py-2.5">{r.filingStatus || "Any"}</td>}
-                      <td className="px-4 py-2.5">{r.sortOrder ?? "—"}</td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => onEdit(r)} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-muted"><Pencil size={13} /></button>
-                          <button onClick={() => onDelete(r)} className="rounded-md p-1.5 text-error hover:bg-error-light"><Trash2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {group.rows.map((r) => (
+                  <tr key={r.id} className="border-b border-border-light last:border-0">
+                    {desc.employeeRate && desc.employerRate && (
+                      <>
+                        <td className="px-4 py-2.5">{r.employeeRatePct != null ? `${r.employeeRatePct}%` : "—"}</td>
+                        <td className="px-4 py-2.5">{r.employerRatePct != null ? `${r.employerRatePct}%` : "—"}</td>
+                      </>
+                    )}
+                    {desc.flatAmount && <td className="px-4 py-2.5">{r.flatAmount ?? "—"}</td>}
+                    <td className="px-4 py-2.5">{r.sortOrder ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => onEdit(r)} className="rounded-md p-1.5 text-foreground-muted hover:bg-surface-muted"><Pencil size={13} /></button>
+                        <button onClick={() => onDelete(r)} className="rounded-md p-1.5 text-error hover:bg-error-light"><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

@@ -349,7 +349,7 @@ export default function PayrollPolicyPage() {
 
       {/* General */}
       {activeTab === 0 && (
-        <Card className="space-y-5 max-w-2xl">
+        <Card className="space-y-5">
           <div className="rounded-[12px] bg-info/5 border border-info/15 px-4 py-3 text-[12px] text-foreground-muted flex items-center gap-2">
             <Info size={14} className="text-info shrink-0" />
             <span>Values below are inherited from the <strong>Super Admin's</strong> master configuration. You can overwrite any unlocked field — changes apply only to your organization.</span>
@@ -556,7 +556,8 @@ export default function PayrollPolicyPage() {
 
       {/* Employee Categories */}
       {activeTab === 1 && (
-        <div className="space-y-3 max-w-3xl">
+        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
           {policy.employeeCategories.map((cat) => {
             const isIntern = cat.category === "intern";
             const wdLock = getLock(policy.policyLocks, ["employee_categories", cat.category, "working_days"]);
@@ -631,6 +632,7 @@ export default function PayrollPolicyPage() {
               </ExpandableCard>
             );
           })}
+        </div>
           <div className="flex justify-end">
             <button
               onClick={handleSaveCategories}
@@ -645,7 +647,7 @@ export default function PayrollPolicyPage() {
 
       {/* Leave & Overtime */}
       {activeTab === 2 && (
-        <div className="space-y-4 max-w-2xl">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <Card>
             <div className="flex items-center gap-2 mb-3">
               <CalendarClock size={16} className="text-foreground-muted" />
@@ -716,7 +718,7 @@ export default function PayrollPolicyPage() {
 
       {/* Integrations */}
       {activeTab === 3 && (
-        <div className="space-y-4 max-w-3xl">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {INTEGRATION_CATEGORY_ORDER.map((cat) => {
             const items = policy.integrations.filter((i) => i.category === cat);
             if (!items.length) return null;

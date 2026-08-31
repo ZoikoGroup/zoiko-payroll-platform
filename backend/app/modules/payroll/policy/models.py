@@ -27,6 +27,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+# Hardcoded column defaults moved to hardcoded_defaults.py (the
+# consolidated home for every hardcoded fallback value in the payroll
+# module) — imported back under their original meaning, same values.
+from app.modules.payroll.hardcoded_defaults import (
+    _POLICY_DEFAULT_BASIC_PCT, _POLICY_DEFAULT_HRA_PCT, _POLICY_DEFAULT_WORKING_DAYS,
+    _POLICY_DEFAULT_EXPECTED_HOURS, _POLICY_DEFAULT_MINIMUM_HOURS,
+    _POLICY_DEFAULT_GRACE_TIME_MINUTES, _POLICY_DEFAULT_MINIMUM_OVERTIME_MINUTES,
+)
 
 
 class CalculationMode(str, enum.Enum):
@@ -83,8 +91,8 @@ class PayrollPolicy(Base):
     # calculation_mode) rather than on the canonical tax pack. Only applies
     # to employees who don't have their own explicit Basic/HRA amounts set
     # (see _resolve_salary_split_pct in payroll/service.py).
-    basic_pct = Column(Numeric(5, 2), default=40, nullable=False)
-    hra_pct   = Column(Numeric(5, 2), default=20, nullable=False)
+    basic_pct = Column(Numeric(5, 2), default=_POLICY_DEFAULT_BASIC_PCT, nullable=False)
+    hra_pct   = Column(Numeric(5, 2), default=_POLICY_DEFAULT_HRA_PCT, nullable=False)
 
     # Format used to generate the post-approval bank transfer file for a
     # payroll run (see app/modules/payroll/bank_export/). Independent of the
@@ -146,12 +154,12 @@ class PolicyEmployeeCategory(Base):
     policy_id = Column(Integer, ForeignKey("payroll_policies.id"), nullable=False, index=True)
 
     category         = Column(String(20), nullable=False)   # EmployeeCategoryType value
-    working_days     = Column(Integer, nullable=False, default=5)
+    working_days     = Column(Integer, nullable=False, default=_POLICY_DEFAULT_WORKING_DAYS)
     weekly_off       = Column(JSON, nullable=True)           # e.g. ["Saturday", "Sunday"]
-    expected_hours   = Column(Integer, nullable=False, default=8)
-    minimum_hours    = Column(Integer, nullable=False, default=4)
+    expected_hours   = Column(Integer, nullable=False, default=_POLICY_DEFAULT_EXPECTED_HOURS)
+    minimum_hours    = Column(Integer, nullable=False, default=_POLICY_DEFAULT_MINIMUM_HOURS)
     paid_leave_eligible = Column(Boolean, nullable=False, default=True)
-    grace_time_minutes  = Column(Integer, nullable=False, default=10)
+    grace_time_minutes  = Column(Integer, nullable=False, default=_POLICY_DEFAULT_GRACE_TIME_MINUTES)
     half_day_rule       = Column(JSON, nullable=True)        # e.g. {"thresholdHours": 4}
 
     policy = relationship("PayrollPolicy", back_populates="employee_categories")
@@ -224,7 +232,7 @@ class PolicyOvertimeRule(Base):
     policy_id = Column(Integer, ForeignKey("payroll_policies.id"), nullable=False, unique=True, index=True)
 
     enabled              = Column(Boolean, nullable=False, default=False)
-    minimum_overtime_minutes = Column(Integer, nullable=False, default=30)
+    minimum_overtime_minutes = Column(Integer, nullable=False, default=_POLICY_DEFAULT_MINIMUM_OVERTIME_MINUTES)
     approval_required    = Column(Boolean, nullable=False, default=True)
 
     policy = relationship("PayrollPolicy", back_populates="overtime_rule")

@@ -10,7 +10,8 @@ export default function DECompliancePage() {
       country="DE" countryName="Germany"
       initialState={jurisdiction ? decodeURIComponent(jurisdiction) : ""}
       onStateChange={(state) =>
-        navigate(state ? `/super-admin/compliance/germany/${encodeURIComponent(state)}` : "/super-admin/compliance/germany", { replace: true })
+        // Push (not replace) — see INCompliancePage.jsx's matching comment.
+        navigate(state ? `/super-admin/compliance/germany/${encodeURIComponent(state)}` : "/super-admin/compliance/germany")
       }
       {...germanyComplianceConfig}
     />

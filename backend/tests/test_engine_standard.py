@@ -433,9 +433,9 @@ def test_canada_cpp_and_ei():
 
 
 # ── Australia / Germany / Canada named scalar parameters ────────────────
-# Fallback-default thresholds (no override rows): AU medicare_levy_low_
-# income_threshold=24276, mls_threshold=97000/mls_rate=1.0%,
-# super_max_contribution_base=260280; DE contribution_ceiling=96600;
+# Fallback-default thresholds (no override rows): AU medicare_low_inc_thr
+# =24276, mls_threshold=97000/mls_rate=1.0%,
+# super_max_contrib=260280; DE contribution_ceiling=96600;
 # CA cpp_ympe=71300/cpp_basic_exemption=3500/ei_mie=65700. Flat 10% slab
 # used throughout so income-tax math never obscures the contribution
 # assertions being tested.

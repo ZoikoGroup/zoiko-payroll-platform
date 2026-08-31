@@ -14,6 +14,10 @@ export const getComplianceJurisdictions = () => apiFetch("/api/super-admin/compl
 // jurisdiction card grid landing view.
 export const getJurisdictionSummary = () => apiFetch("/api/super-admin/compliance/jurisdiction-summary");
 
+// Read-only: every hardcoded fallback value the payroll engine uses when no
+// canonical/org rate exists — powers the "Engine Fallback Defaults" viewer.
+export const getEngineFallbackDefaults = () => apiFetch("/api/super-admin/compliance/engine-fallback-defaults");
+
 export const getCompliancePolicies = (params) => apiFetch("/api/super-admin/compliance/policies", { params });
 
 export const upsertCompliancePolicy = (payload) =>

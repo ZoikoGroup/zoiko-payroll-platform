@@ -115,185 +115,12 @@ def log_activity(db: Session, organization_id: int, description: str,
 
 # ── Contribution rates / tax slabs (seeded, then DB-backed) ────────────
 
-_CONTRIBUTION_RATES_BY_COUNTRY = {
-    "IN": [
-        dict(component_key="pf", label="Employee Provident Fund (EPF)",
-             employee_share="12% of Basic", employer_share="12% of Basic", total="24% of Basic",
-             employee_rate_pct=Decimal("12.00"), employer_rate_pct=Decimal("12.00"), sort_order=1),
-        dict(component_key="esi", label="Employee State Insurance (ESI)",
-             employee_share="0.75% of Gross", employer_share="3.25% of Gross", total="4% of Gross",
-             employee_rate_pct=Decimal("0.75"), employer_rate_pct=Decimal("3.25"), sort_order=2),
-        dict(component_key="pt", label="Professional Tax (PT)",
-             employee_share="₹200/month (fixed)", employer_share="—", total="₹200",
-             flat_amount=Decimal("200.00"), sort_order=3),
-        dict(component_key="tds", label="TDS / Income Tax",
-             employee_share="As per income slab", employer_share="—", total="As per slab",
-             sort_order=4),
-        # Previously never seeded anywhere — every one of these ran on its
-        # hardcoded engine/countries/india.py fallback constant for every
-        # org, always. Now real, editable ContributionRate rows (amount
-        # parameters use flat_amount, consumed via resolve_jurisdiction_parameter).
-        dict(component_key="esi_wage_ceiling", label="ESI Wage Ceiling (Monthly)",
-             employee_share="—", employer_share="—", total="₹21,000",
-             flat_amount=Decimal("21000.00"), sort_order=5),
-        dict(component_key="standard_deduction", label="Standard Deduction",
-             employee_share="—", employer_share="—", total="₹75,000",
-             flat_amount=Decimal("75000.00"), sort_order=6),
-        dict(component_key="rebate_87a_limit", label="Section 87A Rebate — Income Limit",
-             employee_share="—", employer_share="—", total="₹12,00,000",
-             flat_amount=Decimal("1200000.00"), sort_order=7),
-        dict(component_key="rebate_87a_max", label="Section 87A Rebate — Max Amount",
-             employee_share="—", employer_share="—", total="₹60,000",
-             flat_amount=Decimal("60000.00"), sort_order=8),
-    ],
-    "US": [
-        dict(component_key="social-security", label="Social Security",
-             employee_share="6.2%", employer_share="6.2%", total="12.4%",
-             employee_rate_pct=Decimal("6.20"), employer_rate_pct=Decimal("6.20"), sort_order=1),
-        dict(component_key="medicare", label="Medicare",
-             employee_share="1.45%", employer_share="1.45%", total="2.9%",
-             employee_rate_pct=Decimal("1.45"), employer_rate_pct=Decimal("1.45"), sort_order=2),
-        dict(component_key="futa", label="Federal Unemployment (FUTA)",
-             employee_share="—", employer_share="6.0%", total="6.0%",
-             employer_rate_pct=Decimal("6.00"), sort_order=3),
-        dict(component_key="federal-income-tax", label="Federal Income Tax",
-             employee_share="As per W-4", employer_share="—", total="As per W-4",
-             sort_order=4),
-        # Previously never seeded — see the India block's comment above,
-        # same story. FUTA itself was seeded (row above) but never
-        # actually read by the engine until this pass; its wage base
-        # never existed as a configurable row at all.
-        dict(component_key="ss_wage_base", label="Social Security Wage Base",
-             employee_share="—", employer_share="—", total="$176,100",
-             flat_amount=Decimal("176100.00"), sort_order=5),
-        dict(component_key="medicare_addl_thresh", label="Additional Medicare Threshold",
-             employee_share="—", employer_share="—", total="$200,000",
-             flat_amount=Decimal("200000.00"), sort_order=6),
-        dict(component_key="futa_wage_base", label="FUTA Wage Base",
-             employee_share="—", employer_share="—", total="$7,000",
-             flat_amount=Decimal("7000.00"), sort_order=7),
-    ],
-    "UK": [
-        dict(component_key="national-insurance", label="National Insurance",
-             employee_share="8% (primary) / 2% (upper)", employer_share="13.8%", total="21.8% (employee) + 13.8%",
-             employee_rate_pct=Decimal("8.00"), employer_rate_pct=Decimal("13.80"), sort_order=1),
-        dict(component_key="employer-pension", label="Workplace Pension (Employer)",
-             employee_share="—", employer_share="3% minimum", total="3%",
-             employer_rate_pct=Decimal("3.00"), sort_order=2),
-        # Previously never seeded — see the India block's comment above.
-        # The "national-insurance" row's employer_rate_pct (13.8%, above)
-        # was ALSO seeded from day one but never read by the engine until
-        # this pass added employer NI — it was purely a display value.
-        dict(component_key="personal_allowance", label="Personal Allowance",
-             employee_share="—", employer_share="—", total="£12,570",
-             flat_amount=Decimal("12570.00"), sort_order=3),
-        dict(component_key="pa_taper_threshold", label="Personal Allowance Taper Threshold",
-             employee_share="—", employer_share="—", total="£100,000",
-             flat_amount=Decimal("100000.00"), sort_order=4),
-        dict(component_key="ni_primary_thresh", label="NI Primary Threshold",
-             employee_share="—", employer_share="—", total="£12,570",
-             flat_amount=Decimal("12570.00"), sort_order=5),
-        dict(component_key="ni_upper_threshold", label="NI Upper Earnings Limit",
-             employee_share="—", employer_share="—", total="£50,270",
-             flat_amount=Decimal("50270.00"), sort_order=6),
-        dict(component_key="ni_secondary_thresh", label="NI Secondary Threshold (Employer)",
-             employee_share="—", employer_share="—", total="£9,100",
-             flat_amount=Decimal("9100.00"), sort_order=7),
-        dict(component_key="ni_upper_rate", label="NI Upper Rate (Employee)",
-             employee_share="2%", employer_share="—", total="2%",
-             employee_rate_pct=Decimal("2.00"), sort_order=8),
-    ],
-    # Representative defaults — Enterprise Policy jurisdictions. Unlike US/UK
-    # above (display-only; the engine's US/UK calculators use hardcoded
-    # constants), these component_keys are the actual keys _calc_australia/
-    # _calc_germany/_calc_canada read from rate_map — genuinely
-    # configuration-driven. Verify/adjust against current statutory rates
-    # before relying on these for real payroll.
-    "AU": [
-        dict(component_key="super", label="Superannuation Guarantee",
-             employee_share="—", employer_share="11.5%", total="11.5%",
-             employer_rate_pct=Decimal("11.50"), sort_order=1),
-        dict(component_key="medicare-levy", label="Medicare Levy",
-             employee_share="2.0%", employer_share="—", total="2.0%",
-             employee_rate_pct=Decimal("2.00"), sort_order=2),
-        dict(component_key="income-tax", label="Income Tax (PAYG)",
-             employee_share="As per income slab", employer_share="—", total="As per slab",
-             sort_order=3),
-        dict(component_key="super_max_contribution_base", label="Superannuation Max Contribution Base",
-             employee_share="—", employer_share="—", total="A$260,280",
-             flat_amount=Decimal("260280.00"), sort_order=4),
-        dict(component_key="medicare_levy_low_income_threshold", label="Medicare Levy Low-Income Threshold",
-             employee_share="—", employer_share="—", total="A$24,276",
-             flat_amount=Decimal("24276.00"), sort_order=5),
-        dict(component_key="mls_threshold", label="Medicare Levy Surcharge Threshold",
-             employee_share="—", employer_share="—", total="A$97,000",
-             flat_amount=Decimal("97000.00"), sort_order=6),
-        dict(component_key="mls_rate", label="Medicare Levy Surcharge Rate",
-             employee_share="1.0%", employer_share="—", total="1.0%",
-             employee_rate_pct=Decimal("1.00"), sort_order=7),
-        dict(component_key="help_threshold", label="HELP/HECS Repayment Threshold",
-             employee_share="—", employer_share="—", total="A$54,435",
-             flat_amount=Decimal("54435.00"), sort_order=8),
-        dict(component_key="help_rate", label="HELP/HECS Repayment Rate",
-             employee_share="4.5%", employer_share="—", total="4.5%",
-             employee_rate_pct=Decimal("4.50"), sort_order=9),
-    ],
-    "DE": [
-        dict(component_key="pension", label="Pension Insurance (Rentenversicherung)",
-             employee_share="9.3%", employer_share="9.3%", total="18.6%",
-             employee_rate_pct=Decimal("9.30"), employer_rate_pct=Decimal("9.30"), sort_order=1),
-        dict(component_key="social-insurance", label="Social Insurance (Health / Unemployment / Care)",
-             employee_share="9.0%", employer_share="9.0%", total="18.0%",
-             employee_rate_pct=Decimal("9.00"), employer_rate_pct=Decimal("9.00"), sort_order=2),
-        dict(component_key="income-tax", label="Income Tax (Lohnsteuer)",
-             employee_share="As per income slab", employer_share="—", total="As per slab",
-             sort_order=3),
-        dict(component_key="grundfreibetrag", label="Basic Tax-Free Allowance (Grundfreibetrag)",
-             employee_share="—", employer_share="—", total="€11,784",
-             flat_amount=Decimal("11784.00"), sort_order=4),
-        dict(component_key="soli_threshold", label="Solidarity Surcharge Threshold",
-             employee_share="—", employer_share="—", total="€18,130",
-             flat_amount=Decimal("18130.00"), sort_order=5),
-        dict(component_key="soli_rate", label="Solidarity Surcharge Rate",
-             employee_share="5.5%", employer_share="—", total="5.5%",
-             employee_rate_pct=Decimal("5.50"), sort_order=6),
-        dict(component_key="contribution_ceiling", label="Social Insurance Contribution Ceiling",
-             employee_share="—", employer_share="—", total="€96,600",
-             flat_amount=Decimal("96600.00"), sort_order=7),
-        dict(component_key="church_tax_rate", label="Church Tax Rate (Kirchensteuer)",
-             employee_share="9%", employer_share="—", total="9%",
-             employee_rate_pct=Decimal("9.00"), sort_order=8),
-    ],
-    "CA": [
-        dict(component_key="cpp", label="Canada Pension Plan (CPP)",
-             employee_share="5.95%", employer_share="5.95%", total="11.9%",
-             employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"), sort_order=1),
-        dict(component_key="ei", label="Employment Insurance (EI)",
-             employee_share="1.66%", employer_share="2.32%", total="3.98%",
-             employee_rate_pct=Decimal("1.66"), employer_rate_pct=Decimal("2.32"), sort_order=2),
-        dict(component_key="income-tax", label="Federal Income Tax",
-             employee_share="As per income slab", employer_share="—", total="As per slab",
-             sort_order=3),
-        dict(component_key="basic_personal_amount", label="Basic Personal Amount",
-             employee_share="—", employer_share="—", total="C$15,705",
-             flat_amount=Decimal("15705.00"), sort_order=4),
-        dict(component_key="cpp_ympe", label="CPP Year's Maximum Pensionable Earnings (YMPE)",
-             employee_share="—", employer_share="—", total="C$71,300",
-             flat_amount=Decimal("71300.00"), sort_order=5),
-        dict(component_key="cpp_basic_exemption", label="CPP Basic Exemption Amount",
-             employee_share="—", employer_share="—", total="C$3,500",
-             flat_amount=Decimal("3500.00"), sort_order=6),
-        dict(component_key="ei_mie", label="EI Maximum Insurable Earnings",
-             employee_share="—", employer_share="—", total="C$65,700",
-             flat_amount=Decimal("65700.00"), sort_order=7),
-        dict(component_key="cpp2_yampe", label="CPP2 Year's Additional Maximum Pensionable Earnings (YAMPE)",
-             employee_share="—", employer_share="—", total="C$81,200",
-             flat_amount=Decimal("81200.00"), sort_order=8),
-        dict(component_key="cpp2_rate", label="CPP2 Rate",
-             employee_share="4%", employer_share="—", total="4%",
-             employee_rate_pct=Decimal("4.00"), sort_order=9),
-    ],
-}
+# Moved to hardcoded_defaults.py (the consolidated home for every
+# hardcoded fallback/statutory value in the payroll module) — imported
+# back under this exact name so scripts/populate_canonical_tax_v1.py and
+# engine/fallback_registry.py, which import it directly from this module,
+# keep working unchanged.
+from app.modules.payroll.hardcoded_defaults import _CONTRIBUTION_RATES_BY_COUNTRY  # noqa: E402
 
 
 def _seed_contribution_rates(db: Session, organization_id: int, country: str = "IN") -> List[ContributionRate]:
@@ -368,72 +195,9 @@ def get_contribution_rates(
     return rows
 
 
-_TAX_SLABS_BY_COUNTRY = {
-    "IN": [
-        # FY 2025-26 New Regime — standard deduction of ₹75,000 already
-        # factored into the effective taxable income passed to the engine.
-        dict(min_amount=Decimal("0"),        max_amount=Decimal("400000"),   rate_pct=Decimal("0"),   rate_label="Nil",  tax_formula="Basic exemption (up to ₹4L)", sort_order=1),
-        dict(min_amount=Decimal("400000"),   max_amount=Decimal("800000"),   rate_pct=Decimal("5"),   rate_label="5%",   tax_formula="5% of income over ₹4L", sort_order=2),
-        dict(min_amount=Decimal("800000"),   max_amount=Decimal("1200000"),  rate_pct=Decimal("10"),  rate_label="10%",  tax_formula="₹20,000 + 10% over ₹8L", sort_order=3),
-        dict(min_amount=Decimal("1200000"),  max_amount=Decimal("1600000"),  rate_pct=Decimal("15"),  rate_label="15%",  tax_formula="₹60,000 + 15% over ₹12L", sort_order=4),
-        dict(min_amount=Decimal("1600000"),  max_amount=Decimal("2000000"),  rate_pct=Decimal("20"),  rate_label="20%",  tax_formula="₹1,20,000 + 20% over ₹16L", sort_order=5),
-        dict(min_amount=Decimal("2000000"),  max_amount=Decimal("2400000"),  rate_pct=Decimal("25"),  rate_label="25%",  tax_formula="₹2,00,000 + 25% over ₹20L", sort_order=6),
-        dict(min_amount=Decimal("2400000"),  max_amount=None,                rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="₹3,00,000 + 30% over ₹24L", sort_order=7),
-    ],
-    "US": [
-        # Tax Year 2025 — Single filer. Standard deduction $15,000 is
-        # applied by _calculate_annual_tax_us before these brackets.
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("11925"),    rate_pct=Decimal("10"),  rate_label="10%",  tax_formula="10% of income", sort_order=1),
-        dict(min_amount=Decimal("11925"),   max_amount=Decimal("48475"),    rate_pct=Decimal("12"),  rate_label="12%",  tax_formula="$1,192.50 + 12% over $11,925", sort_order=2),
-        dict(min_amount=Decimal("48475"),   max_amount=Decimal("103350"),   rate_pct=Decimal("22"),  rate_label="22%",  tax_formula="$5,570.50 + 22% over $48,475", sort_order=3),
-        dict(min_amount=Decimal("103350"),  max_amount=Decimal("197300"),   rate_pct=Decimal("24"),  rate_label="24%",  tax_formula="$17,645 + 24% over $103,350", sort_order=4),
-        dict(min_amount=Decimal("197300"),  max_amount=Decimal("250525"),   rate_pct=Decimal("32"),  rate_label="32%",  tax_formula="$40,199 + 32% over $197,300", sort_order=5),
-        dict(min_amount=Decimal("250525"),  max_amount=Decimal("626350"),   rate_pct=Decimal("35"),  rate_label="35%",  tax_formula="$57,131 + 35% over $250,525", sort_order=6),
-        dict(min_amount=Decimal("626350"),  max_amount=None,                rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="$188,364.75 + 37% over $626,350", sort_order=7),
-    ],
-    "UK": [
-        # Tax Year 2025-26. Personal allowance £12,570 (tapered above
-        # £100k — handled in _calculate_annual_tax_uk).
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("12570"),    rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="Personal allowance", sort_order=1),
-        dict(min_amount=Decimal("12570"),   max_amount=Decimal("50270"),    rate_pct=Decimal("20"),  rate_label="20%",  tax_formula="20% of income above £12,570", sort_order=2),
-        dict(min_amount=Decimal("50270"),   max_amount=Decimal("125140"),   rate_pct=Decimal("40"),  rate_label="40%",  tax_formula="£7,540 + 40% above £50,270", sort_order=3),
-        dict(min_amount=Decimal("125140"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="£37,488 + 45% above £125,140", sort_order=4),
-    ],
-    # Enterprise Policy jurisdictions — representative/simplified brackets,
-    # genuinely read by the engine (see _CONTRIBUTION_RATES_BY_COUNTRY note
-    # above). Verify against current statutory brackets before production use.
-    "AU": [
-        # Resident individual rates, simplified (excludes Medicare Levy,
-        # calculated separately in _calc_australia).
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("18200"),    rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="Tax-free threshold", sort_order=1),
-        dict(min_amount=Decimal("18200"),   max_amount=Decimal("45000"),    rate_pct=Decimal("16"),  rate_label="16%",  tax_formula="16% of income above A$18,200", sort_order=2),
-        dict(min_amount=Decimal("45000"),   max_amount=Decimal("135000"),   rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="A$4,288 + 30% above A$45,000", sort_order=3),
-        dict(min_amount=Decimal("135000"),  max_amount=Decimal("190000"),   rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="A$31,288 + 37% above A$135,000", sort_order=4),
-        dict(min_amount=Decimal("190000"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="A$51,638 + 45% above A$190,000", sort_order=5),
-    ],
-    "DE": [
-        # Simplified bracket approximation of Germany's continuous income
-        # tax formula (real Lohnsteuer uses a smooth curve, not flat bands).
-        # Boundaries are expressed in TAXABLE-income terms (i.e. already
-        # net of the Grundfreibetrag) — _calculate_annual_tax_de subtracts
-        # the "grundfreibetrag" parameter (engine/standard.py) from annual
-        # gross BEFORE applying these slabs, so there is no separate 0%
-        # bracket here (that would double-count the same tax-free zone
-        # the parameter already represents).
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("5216"),     rate_pct=Decimal("14"),  rate_label="14%",  tax_formula="14% of taxable income (after Grundfreibetrag)", sort_order=1),
-        dict(min_amount=Decimal("5216"),    max_amount=Decimal("54216"),    rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="€730 + 30% above €5,216 taxable", sort_order=2),
-        dict(min_amount=Decimal("54216"),   max_amount=Decimal("265216"),   rate_pct=Decimal("42"),  rate_label="42%",  tax_formula="€15,430 + 42% above €54,216 taxable", sort_order=3),
-        dict(min_amount=Decimal("265216"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="€104,050 + 45% above €265,216 taxable", sort_order=4),
-    ],
-    "CA": [
-        # Federal brackets only — provincial tax excluded for simplicity.
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("55000"),    rate_pct=Decimal("15"),    rate_label="15%",    tax_formula="15% of income", sort_order=1),
-        dict(min_amount=Decimal("55000"),   max_amount=Decimal("111000"),   rate_pct=Decimal("20.5"),  rate_label="20.5%",  tax_formula="C$8,250 + 20.5% above C$55,000", sort_order=2),
-        dict(min_amount=Decimal("111000"),  max_amount=Decimal("173000"),   rate_pct=Decimal("26"),    rate_label="26%",    tax_formula="C$19,730 + 26% above C$111,000", sort_order=3),
-        dict(min_amount=Decimal("173000"),  max_amount=Decimal("246000"),   rate_pct=Decimal("29"),    rate_label="29%",    tax_formula="C$35,850 + 29% above C$173,000", sort_order=4),
-        dict(min_amount=Decimal("246000"),  max_amount=None,                rate_pct=Decimal("33"),    rate_label="33%",    tax_formula="C$57,020 + 33% above C$246,000", sort_order=5),
-    ],
-}
+# Moved to hardcoded_defaults.py — imported back under this exact name,
+# same reasoning as _CONTRIBUTION_RATES_BY_COUNTRY above.
+from app.modules.payroll.hardcoded_defaults import _TAX_SLABS_BY_COUNTRY  # noqa: E402
 
 
 def _seed_tax_slabs(db: Session, organization_id: int, country: str = "IN") -> List[TaxSlab]:
@@ -1801,6 +1565,15 @@ def sync_org_rates_from_canonical(
                 min_amount=ts.min_amount, max_amount=ts.max_amount, rate_pct=ts.rate_pct,
                 rate_label=ts.rate_label, tax_formula=ts.tax_formula, sort_order=ts.sort_order,
                 rule_type=ts.rule_type, formula_expression=ts.formula_expression,
+                # PT_FLAT (flat_amount/adjustment_amount) and NI_BAND
+                # (ni_category/employer_rate_pct) fields were added to the
+                # TaxSlab model after this copy list was first written and
+                # were never added here — every org-scoped PT_FLAT/NI_BAND
+                # row synced through this path silently lost its actual
+                # amount/category, even though it was correctly selected
+                # and copied for every other field.
+                flat_amount=ts.flat_amount, adjustment_amount=ts.adjustment_amount,
+                ni_category=ts.ni_category, employer_rate_pct=ts.employer_rate_pct,
                 # Each slab keeps its OWN originating pack id (a state
                 # layer row folded in above came from a different pack
                 # than `pack` itself) rather than being force-tagged with
@@ -2147,22 +1920,34 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
 def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Optional[int] = None) -> JurisdictionPack:
     """Sets approved_by_id to the calling Super Admin — a distinct,
     lightweight action from the general Edit flow so it means something:
-    "I, this specific person, reviewed and approve this configuration,"
-    not a side effect of saving an unrelated metadata change. Does not
-    itself change status — see set_jurisdiction_pack_status's gate, which
-    checks approved_by_id against updated_by_id before allowing Active."""
+    "I, this specific person, reviewed and approve this configuration."
+
+    Auto-advances status Draft -> Approved so the two-step maker-checker
+    sequence (editor drafts -> a DIFFERENT Super Admin approves -> status
+    visibly reflects that -> that pack can then be moved to Active) is
+    reflected without a separate manual dropdown pick for the first step.
+    Only fires from Draft — a pack someone deliberately moved to "In
+    Review"/"QA" first keeps that status; approving it still records the
+    approver (still required before Active, per set_jurisdiction_pack_status's
+    gate below), it just doesn't overwrite a status chosen on purpose.
+    Approving a pack already past Draft (Approved/Active/...) does not
+    move it backwards."""
     row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not row:
         raise NotFoundException("JurisdictionPack", pack_row_id)
     old_approver = row.approved_by_id
+    old_status = row.status
     row.approved_by_id = actor_id
+    if row.status == "Draft":
+        row.status = "Approved"
     db.commit()
     db.refresh(row)
     if row.pack_type == "tax":
         record_tax_audit(
             db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=row.id,
             jurisdiction_pack_id=row.id, tax_version=row.version,
-            old_value={"approved_by_id": old_approver}, new_value={"approved_by_id": actor_id},
+            old_value={"approved_by_id": old_approver, "status": old_status},
+            new_value={"approved_by_id": actor_id, "status": row.status},
             reason="Approver set",
         )
     return row
@@ -3090,6 +2875,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "federal_income_tax": result.federal_income_tax,
         "state_income_tax": result.state_income_tax,
         "local_tax": result.local_tax,
+        "state_disability_insurance": result.state_disability_insurance,
         "total_deductions": result.total_deductions,
         "employer_pf": result.employer_pf,
         "employer_esi": result.employer_esi,
@@ -3462,8 +3248,7 @@ def get_employee_by_id(db: Session, employee_id: int, organization_id: int) -> P
     return employee
 
 
-_DEFAULT_BASIC_PCT = Decimal("40")
-_DEFAULT_HRA_PCT = Decimal("20")
+from app.modules.payroll.hardcoded_defaults import _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT  # noqa: E402
 
 
 def _resolve_salary_split_pct(db: Session, organization_id: Optional[int]) -> tuple:
@@ -3472,9 +3257,9 @@ def _resolve_salary_split_pct(db: Session, organization_id: Optional[int]) -> tu
     the org's own PayrollPolicy (basic_pct/hra_pct — Super Admin can set a
     default and lock it via policy_defaults, same mechanism as
     calculation_mode; the org can override when allowed). Falls back to
-    the historical 40%/20% split if no policy exists yet or organization_id
-    is unavailable — additive, zero behavior change for anyone who hasn't
-    touched this."""
+    the platform default 50%/40% split (Special Allowance remainder: 10%) if no
+    policy exists yet or organization_id is unavailable — every org with its
+    own PayrollPolicy basic_pct/hra_pct is unaffected by this constant either way."""
     if not organization_id:
         return _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT
     try:
@@ -4455,6 +4240,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         federal_income_tax=calc.federal_income_tax,
         state_income_tax=calc.state_income_tax,
         local_tax=calc.local_tax,
+        state_disability_insurance=calc.state_disability_insurance,
         total_deductions=calc.total_deductions,
         employer_pf=calc.employer_pf,
         employer_esi=calc.employer_esi,
@@ -4680,6 +4466,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "federalIncomeTax": item.federal_income_tax or z,
         "stateIncomeTax": item.state_income_tax or z,
         "localTax": item.local_tax or z,
+        "stateDisabilityInsurance": item.state_disability_insurance or z,
         "pf": item.pf or z,
         "esi": item.esi or z,
         "professionalTax": item.professional_tax or z,

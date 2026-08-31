@@ -16,6 +16,7 @@ import OrganizationsPage from "./pages/OrganizationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import PolicyConfigPage from "./pages/PolicyConfigPage";
 import CompliancePage from "./pages/CompliancePage";
+import EngineFallbackDefaultsPage from "./pages/EngineFallbackDefaultsPage";
 import {
   INCompliancePage, USACompliancePage, UKCompliancePage,
   AUCompliancePage, CACompliancePage, DECompliancePage,
@@ -91,6 +92,14 @@ export default function App() {
           element={
             <SuperAdminShell>
               <CompliancePage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/compliance/engine-defaults"
+          element={
+            <SuperAdminShell>
+              <EngineFallbackDefaultsPage />
             </SuperAdminShell>
           }
         />

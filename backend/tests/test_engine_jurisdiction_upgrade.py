@@ -426,7 +426,7 @@ def test_india_surcharge_marginal_relief_caps_at_excess_income():
 
 
 def test_india_surcharge_marginal_relief_can_be_disabled():
-    rates = dict(IN_RATES, surcharge_marginal_relief=Rate(flat_amount=Decimal("0")))
+    rates = dict(IN_RATES, surcharge_mrelief=Rate(flat_amount=Decimal("0")))
     slabs_with_surcharge = IN_SLABS + [_make_surcharge_tier("5000000", "10")]
     monthly = Decimal("5000000") / Decimal("12") + Decimal("1000") / Decimal("12")
     relieved = calc("IN", monthly, IN_RATES, slabs_with_surcharge)
@@ -460,7 +460,7 @@ def test_india_87a_old_regime_uses_its_own_lower_limit():
 
 
 def test_india_87a_marginal_relief_can_be_disabled():
-    rates = dict(IN_RATES, rebate_87a_marginal_relief=Rate(flat_amount=Decimal("0")))
+    rates = dict(IN_RATES, rebate_87a_mrelief=Rate(flat_amount=Decimal("0")))
     annual_gross = Decimal("1210000") + Decimal("75000")
     monthly = annual_gross / Decimal("12")
     relieved = calc("IN", monthly, IN_RATES, IN_SLABS, tax_regime="New")

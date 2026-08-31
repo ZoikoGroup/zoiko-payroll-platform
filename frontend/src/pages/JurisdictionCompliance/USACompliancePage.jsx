@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, Landmark, MapPin, Building2, Percent, ArrowLeftRight,
   FileCheck2, Users, History, ScrollText,
@@ -41,29 +41,56 @@ const SECTIONS = [
   { key: "audit", label: "Audit", icon: ScrollText },
 ];
 
+// Builds the URL for a given (state, section) pair — the single source of
+// truth `goToScope`/`selectSection` both push through, and what the sync
+// effect below reads back out via useParams/useSearchParams. Keeping this
+// one function is what guarantees the URL and the on-screen section/state
+// never drift apart.
+function pathForScope(scope, section) {
+  const base = scope ? `/super-admin/compliance/united-states/${encodeURIComponent(scope)}` : "/super-admin/compliance/united-states";
+  return `${base}?section=${section}`;
+}
+
 export default function USACompliancePage() {
   const { jurisdiction } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const initialState = jurisdiction ? decodeURIComponent(jurisdiction) : "";
-  const [section, setSection] = useState(initialState ? "stateDistrict" : "overview");
+  const sectionFromUrl = searchParams.get("section");
+  const [section, setSection] = useState(sectionFromUrl || (initialState ? "stateDistrict" : "overview"));
   // Remembers whichever scope (Federal = "", or a state name) was last
   // viewed via Overview/Federal/State-District, so Organizations/Versions/
   // Audit default to something sensible instead of always starting at
   // Federal — pure UI convenience, not a new data concept.
   const [activeScope, setActiveScope] = useState(initialState);
 
+  // Keeps on-screen state in sync when the URL changes WITHOUT going
+  // through goToScope/selectSection below — specifically, clicking the
+  // browser/Back-button and landing on a previously-pushed URL. Without
+  // this, the component stays mounted (same route) and React Router just
+  // hands it new params — nothing else would ever re-read them.
+  useEffect(() => {
+    setSection(sectionFromUrl || (initialState ? "stateDistrict" : "overview"));
+    setActiveScope(initialState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jurisdiction, sectionFromUrl]);
+
   function goToScope(scope) {
+    const nextSection = scope ? "stateDistrict" : "federal";
     setActiveScope(scope);
-    setSection(scope ? "stateDistrict" : "federal");
-    navigate(
-      scope ? `/super-admin/compliance/united-states/${encodeURIComponent(scope)}` : "/super-admin/compliance/united-states",
-      { replace: true }
-    );
+    setSection(nextSection);
+    // Push (not replace) — each state/section change is its own history
+    // entry, so Back walks through Federal/State-District/a specific
+    // state one step at a time instead of collapsing them all into one
+    // overwritten entry (the bug this whole change fixes).
+    navigate(pathForScope(scope, nextSection));
   }
 
   function selectSection(key) {
+    const nextScope = key === "federal" ? "" : activeScope;
     setSection(key);
     if (key === "federal") setActiveScope("");
+    navigate(pathForScope(nextScope, key));
   }
 
   return (

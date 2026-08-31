@@ -270,6 +270,16 @@ def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin),
 
 
 @router.get(
+    "/compliance/engine-fallback-defaults",
+    summary="Read-only: every hardcoded fallback value the payroll engine uses when no canonical/org rate exists",
+)
+def get_engine_fallback_defaults(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll.engine.fallback_registry import get_engine_fallback_inventory
+
+    return get_engine_fallback_inventory()
+
+
+@router.get(
     "/compliance/jurisdiction-summary",
     summary="One row per jurisdiction with real counts (tax/policy packs, statutory rates, orgs) — powers the jurisdiction card grid",
 )

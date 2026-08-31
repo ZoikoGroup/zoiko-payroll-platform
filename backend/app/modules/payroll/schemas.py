@@ -638,6 +638,25 @@ class TaxSlabResponse(BaseModel):
     max:  str = ""
     rate: str = Field(validation_alias="rate_label", serialization_alias="rate")
     tax:  str = Field(validation_alias="tax_formula", serialization_alias="tax")
+    # The real classification (MARGINAL_RATE | PT_FLAT | NI_BAND | FORMULA |
+    # SURCHARGE | ...) — added so org-facing consumers (TaxConfigurationTab.jsx)
+    # can filter on the actual row type instead of guessing from the display
+    # label. Previously omitted entirely; a 0%-rate MARGINAL_RATE bracket
+    # labeled "Nil" was indistinguishable from a flat-amount PT_FLAT bracket
+    # without this field.
+    ruleType: str = Field(validation_alias="rule_type", serialization_alias="ruleType")
+    # Raw numeric bounds, additive alongside the pre-formatted min/max/rate
+    # strings above. Needed so PT_FLAT rows (state Professional Tax — a
+    # fixed monthly amount per gross-income bracket, not a percentage) can
+    # be rendered as their own business-language table (Gross Income
+    # From/To, Monthly PT Amount, Adjustment Month Amount), mirroring
+    # Super Admin's CanonicalTaxSlabResponse columns exactly, instead of
+    # forcing PT data through the generic Min/Max/Rate table built for
+    # percentage brackets. None for every rule_type that doesn't use them.
+    minAmount: Optional[Decimal] = Field(None, validation_alias="min_amount", serialization_alias="minAmount")
+    maxAmount: Optional[Decimal] = Field(None, validation_alias="max_amount", serialization_alias="maxAmount")
+    flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
+    adjustmentAmount: Optional[Decimal] = Field(None, validation_alias="adjustment_amount", serialization_alias="adjustmentAmount")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

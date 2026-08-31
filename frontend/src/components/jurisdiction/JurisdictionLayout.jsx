@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Pencil, Trash2, History, ShieldCheck, Users, ScrollText } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, History, ShieldCheck, Users, ScrollText } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -32,6 +32,15 @@ import SlabFormModal from "./SlabFormModal";
 // monolithic CompliancePage.jsx). `extraTabs`/`slabsTabOverride` are the
 // only two country-specific extension points that exist anywhere in this
 // codebase today (both India-only) — every other country passes neither.
+// Resolves a slabsTabOverride field that may be a plain value (every
+// existing override) or a function of the selected pack (lets one override
+// vary its label/restricted-tabs/delete-title by pack shape — e.g. India's
+// state-scoped PT pack vs. country-level TDS pack — without affecting any
+// other country, since only INCompliancePage.jsx populates this prop).
+function resolveOverride(value, pack) {
+  return typeof value === "function" ? value(pack) : value;
+}
+
 const BASE_TABS = [
   { key: "overview", label: "Overview", icon: ShieldCheck },
   { key: "rates", label: "Contribution Rates", icon: ScrollText },
@@ -194,7 +203,7 @@ export default function JurisdictionLayout({
   // pack). Every other country's tab set is untouched, always the full
   // base six plus any visible extra tabs.
   const visibleExtraTabs = selectedPack ? extraTabs.filter((t) => t.isVisible(selectedPack)) : [];
-  const restrictTo = slabsOverrideActive ? slabsTabOverride.restrictTabsTo : null;
+  const restrictTo = slabsOverrideActive ? resolveOverride(slabsTabOverride.restrictTabsTo, selectedPack) : null;
   // hiddenTabs drops base tabs unconditionally (not pack-dependent, unlike
   // restrictTabsTo above) — UK uses this to drop the generic "Contribution
   // Rates"/"Versions" tabs in favor of its own NI & Pension Rates /
@@ -214,6 +223,12 @@ export default function JurisdictionLayout({
   return (
     <div>
       <div className="mb-6">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground"
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
         <h1 className="text-2xl font-bold text-foreground">{countryName} Compliance</h1>
         <p className="text-sm text-foreground-muted mt-0.5">
           Manage {countryName}'s tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
@@ -353,7 +368,7 @@ export default function JurisdictionLayout({
                       tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
                     }`}
                   >
-                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? slabsTabOverride.label : slabsLabel) : t.label}
+                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label}
                   </button>
                 ))}
               </div>
@@ -555,7 +570,7 @@ export default function JurisdictionLayout({
       )}
       {deletingSlab && (
         <ConfirmDialog
-          title={slabsOverrideActive ? (slabsTabOverride.deleteTitle || "Delete Slab") : "Delete Tax Slab"}
+          title={slabsOverrideActive ? (resolveOverride(slabsTabOverride.deleteTitle, selectedPack) || "Delete Slab") : "Delete Tax Slab"}
           message={slabsOverrideActive ? slabsTabOverride.deleteMessage(deletingSlab) : `Delete the "${deletingSlab.rateLabel}" bracket? This cannot be undone.`}
           onConfirm={async () => {
             try { await deleteCanonicalTaxSlab(deletingSlab.id); addToast?.("Deleted.", "success"); }

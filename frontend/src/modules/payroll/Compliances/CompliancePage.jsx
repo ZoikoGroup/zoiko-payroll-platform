@@ -245,7 +245,6 @@ export default function CompliancePage() {
           <PackMetadataPanel
             country={companyDetails.jurisdictionCountry}
             state={companyDetails.jurisdictionState}
-            addToast={addToast}
           />
         </div>
       )}

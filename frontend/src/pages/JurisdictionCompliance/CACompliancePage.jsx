@@ -10,7 +10,8 @@ export default function CACompliancePage() {
       country="CA" countryName="Canada"
       initialState={jurisdiction ? decodeURIComponent(jurisdiction) : ""}
       onStateChange={(state) =>
-        navigate(state ? `/super-admin/compliance/canada/${encodeURIComponent(state)}` : "/super-admin/compliance/canada", { replace: true })
+        // Push (not replace) — see INCompliancePage.jsx's matching comment.
+        navigate(state ? `/super-admin/compliance/canada/${encodeURIComponent(state)}` : "/super-admin/compliance/canada")
       }
       {...canadaComplianceConfig}
     />
