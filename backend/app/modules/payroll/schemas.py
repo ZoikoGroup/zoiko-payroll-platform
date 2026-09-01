@@ -819,6 +819,222 @@ class JurisdictionPackUpsert(BaseModel):
     reason: Optional[str] = None
 
 
+# ── Report Templates (jurisdiction-wide; Super Admin-authored) ───────────
+
+class ReportTemplateFieldResponse(BaseModel):
+    id:             int
+    componentId:    int = Field(validation_alias="component_id", serialization_alias="componentId")
+    fieldKey:       str = Field(validation_alias="field_key", serialization_alias="fieldKey")
+    label:          str
+    fieldType:      str = Field(validation_alias="field_type", serialization_alias="fieldType")
+    dataSourceKind: str = Field(validation_alias="data_source_kind", serialization_alias="dataSourceKind")
+    sourceColumn:   str = Field(validation_alias="source_column", serialization_alias="sourceColumn")
+    aggregation:    Optional[str] = None
+    enumValues:     Optional[list] = Field(None, validation_alias="enum_values", serialization_alias="enumValues")
+    formatHint:     Optional[str] = Field(None, validation_alias="format_hint", serialization_alias="formatHint")
+    isRequired:     bool = Field(False, validation_alias="is_required", serialization_alias="isRequired")
+    sortOrder:      int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ReportTemplateFieldUpsert(BaseModel):
+    id: Optional[int] = None
+    fieldKey: str
+    label: str
+    fieldType: str
+    dataSourceKind: str
+    sourceColumn: str
+    aggregation: Optional[str] = None
+    enumValues: Optional[list] = None
+    formatHint: Optional[str] = None
+    isRequired: bool = False
+    sortOrder: int = 0
+
+
+class ReportTemplateComponentResponse(BaseModel):
+    id:                int
+    reportTemplateId:  int = Field(validation_alias="report_template_id", serialization_alias="reportTemplateId")
+    componentKey:      str = Field(validation_alias="component_key", serialization_alias="componentKey")
+    label:             str
+    componentCategory: str = Field("standard", validation_alias="component_category", serialization_alias="componentCategory")
+    sortOrder:         int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+    fields:            List[ReportTemplateFieldResponse] = []
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ReportTemplateComponentUpsert(BaseModel):
+    id: Optional[int] = None
+    componentKey: str
+    label: str
+    componentCategory: str = "standard"
+    sortOrder: int = 0
+
+
+class ReportTemplateResponse(BaseModel):
+    id:                  int
+    templateKey:         str = Field(validation_alias="template_key", serialization_alias="templateKey")
+    name:                str
+    reportType:          str = Field(validation_alias="report_type", serialization_alias="reportType")
+    jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState:   Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    jurisdictionLocality: Optional[str] = Field(None, validation_alias="jurisdiction_locality", serialization_alias="jurisdictionLocality")
+    reportingYear:       str = Field(validation_alias="reporting_year", serialization_alias="reportingYear")
+    version:             str
+    status:              str
+    description:         Optional[str] = None
+    regulatoryAuthority: Optional[str] = Field(None, validation_alias="regulatory_authority", serialization_alias="regulatoryAuthority")
+    effectiveFrom:       Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    changeSummary:       Optional[str] = Field(None, validation_alias="change_summary", serialization_alias="changeSummary")
+    sourceReferences:    Optional[str] = Field(None, validation_alias="source_references", serialization_alias="sourceReferences")
+    documentScope:       str = Field("AGGREGATE", validation_alias="document_scope", serialization_alias="documentScope")
+    sourceDocumentId:    Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    reconciliationTolerance: Optional[float] = Field(None, validation_alias="reconciliation_tolerance", serialization_alias="reconciliationTolerance")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    updatedById:         Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    components:          List[ReportTemplateComponentResponse] = []
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class ReportTemplateUpsert(BaseModel):
+    id: Optional[int] = None
+    templateKey: str
+    name: str
+    reportType: str
+    jurisdictionCountry: str
+    jurisdictionState: Optional[str] = None
+    jurisdictionLocality: Optional[str] = None
+    reportingYear: str
+    version: str = "1.0"
+    status: str = "Draft"
+    description: Optional[str] = None
+    regulatoryAuthority: Optional[str] = None
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
+    changeSummary: Optional[str] = None
+    sourceReferences: Optional[str] = None
+    documentScope: str = "AGGREGATE"
+    sourceDocumentId: Optional[int] = None
+    reconciliationTolerance: Optional[float] = None
+    approvedById: Optional[int] = None
+    reason: Optional[str] = None
+
+
+class ReportTemplateStatusUpdate(BaseModel):
+    status: str
+
+
+# ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
+
+class FilingCalendarResponse(BaseModel):
+    id:                  int
+    jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState:   Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    reportType:          str = Field(validation_alias="report_type", serialization_alias="reportType")
+    reportingYear:       str = Field(validation_alias="reporting_year", serialization_alias="reportingYear")
+    periodKey:           str = Field(validation_alias="period_key", serialization_alias="periodKey")
+    periodLabel:         str = Field(validation_alias="period_label", serialization_alias="periodLabel")
+    dueDate:             date = Field(validation_alias="due_date", serialization_alias="dueDate")
+    status:              str
+    sourceDocumentId:    Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class FilingCalendarUpsert(BaseModel):
+    id: Optional[int] = None
+    jurisdictionCountry: str
+    jurisdictionState: Optional[str] = None
+    reportType: str
+    reportingYear: str
+    periodKey: str
+    periodLabel: str
+    dueDate: date
+    status: str = "Draft"
+    sourceDocumentId: Optional[int] = None
+    reason: Optional[str] = None
+
+
+class FilingCalendarStatusUpdate(BaseModel):
+    status: str
+
+
+class AvailableComponentItem(BaseModel):
+    key: str
+    label: str
+
+
+class AvailableDataFieldItem(BaseModel):
+    key: str
+    label: str
+    dataSourceKind: str
+    sourceColumn: str
+    fieldType: str
+    aggregatable: bool = False
+
+
+class ReportGenerationValidation(BaseModel):
+    jurisdictionMatch: bool
+    runFinalized: bool
+    periodMatch: bool
+    templatePublished: bool
+    reasons: List[str] = []
+
+    @property
+    def passed(self) -> bool:
+        return self.jurisdictionMatch and self.runFinalized and self.periodMatch and self.templatePublished
+
+
+class ApplicableTemplateResponse(BaseModel):
+    template: Optional[ReportTemplateResponse] = None
+    validation: Optional[ReportGenerationValidation] = None
+
+
+class GenerateReportRequest(BaseModel):
+    reportTemplateId: int
+    payrollRunId: int
+    reportingPeriod: Optional[str] = None
+
+
+class GeneratedReportResponse(BaseModel):
+    id:                  int
+    organizationId:       int = Field(validation_alias="organization_id", serialization_alias="organizationId")
+    reportTemplateId:     int = Field(validation_alias="report_template_id", serialization_alias="reportTemplateId")
+    templateVersion:      str = Field(validation_alias="template_version", serialization_alias="templateVersion")
+    reportType:           str = Field(validation_alias="report_type", serialization_alias="reportType")
+    documentScope:        str = Field("AGGREGATE", validation_alias="document_scope", serialization_alias="documentScope")
+    payrollRunId:          int = Field(validation_alias="payroll_run_id", serialization_alias="payrollRunId")
+    jurisdictionCountry:  str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState:    Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    reportingYear:        str = Field(validation_alias="reporting_year", serialization_alias="reportingYear")
+    reportingPeriod:      Optional[str] = Field(None, validation_alias="reporting_period", serialization_alias="reportingPeriod")
+    applicableTaxPackId:  Optional[int] = Field(None, validation_alias="applicable_tax_pack_id", serialization_alias="applicableTaxPackId")
+    applicableTaxPackVersion: Optional[str] = Field(None, validation_alias="applicable_tax_pack_version", serialization_alias="applicableTaxPackVersion")
+    status:               str
+    generatedById:         Optional[int] = Field(None, validation_alias="generated_by_id", serialization_alias="generatedById")
+    generatedAt:           Optional[datetime] = Field(None, validation_alias="generated_at", serialization_alias="generatedAt")
+    renderedData:          dict = Field(validation_alias="rendered_data", serialization_alias="renderedData")
+    reconciliation:        Optional[dict] = None
+    notes:                 Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class VoidGeneratedReportRequest(BaseModel):
+    reason: str
+
+
 # ── Canonical Tax Rates (Super Admin-owned; organization_id IS NULL) ─────
 
 class CanonicalTaxSlabUpsert(BaseModel):

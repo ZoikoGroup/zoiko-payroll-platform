@@ -84,6 +84,8 @@ from app.modules.payroll.schemas import (
     LeaveAllocationCreate, BulkLeaveRequest, LeaveAllocationResponse,
     PayrollLeaveRequestCreate, PayrollLeaveRequestUpdate, PayrollLeaveRequestResponse,
     HolidayCreate, BulkHolidayRequest, HolidayResponse,
+    ApplicableTemplateResponse, GenerateReportRequest, GeneratedReportResponse, VoidGeneratedReportRequest,
+    FilingCalendarResponse,
 )
 
 payroll_router = APIRouter(
@@ -928,6 +930,169 @@ def download_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="payroll-report-{report_id}.pdf"'},
     )
+
+
+# ── Report Templates (Organization consumption of Super Admin-published
+# templates — authoring lives under /super-admin/report-templates) ──────
+
+@payroll_router.get(
+    "/report-templates/available",
+    summary="Distinct report types/names with a Published/Active template covering this org's jurisdiction+year",
+)
+def list_available_reports(
+    reportingYear: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_available_reports_for_org(db, current_user.organization_id, reportingYear)
+
+
+@payroll_router.get(
+    "/report-templates/applicable", response_model=ApplicableTemplateResponse, response_model_by_alias=True,
+    summary="Resolve the applicable Published/Active template for a jurisdiction+year+report, plus generation validation for a run",
+)
+def get_applicable_report_template(
+    reportingYear: str = Query(...),
+    reportType: str = Query(...),
+    payrollRunId: Optional[int] = Query(None, description="If provided, also returns generation validation for this run"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_applicable_report_template_for_org(
+        db, current_user.organization_id, reportingYear, reportType, payroll_run_id=payrollRunId,
+    )
+
+
+@payroll_router.post(
+    "/generated-reports", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate an actual report from a published template + a finalized payroll run",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_report(
+    payload: GenerateReportRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_report_from_template(
+        db, current_user.organization_id, payload.reportTemplateId, payload.payrollRunId,
+        reporting_period=payload.reportingPeriod, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/generated-reports", response_model=List[GeneratedReportResponse], response_model_by_alias=True,
+    summary="List this organization's generated reports",
+)
+def list_generated_reports(
+    payrollRunId: Optional[int] = Query(None),
+    reportType: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_generated_reports(
+        db, current_user.organization_id, payroll_run_id=payrollRunId, report_type=reportType, status=status,
+    )
+
+
+@payroll_router.get(
+    "/generated-reports/{generated_report_id}", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Get a single generated report",
+)
+def get_generated_report(
+    generated_report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_generated_report(db, current_user.organization_id, generated_report_id)
+
+
+@payroll_router.get(
+    "/generated-reports/{generated_report_id}/reconciliation",
+    summary="The frozen rendering-consistency check computed at generation time (no recomputation on read)",
+)
+def get_generated_report_reconciliation(
+    generated_report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    report = service.get_generated_report(db, current_user.organization_id, generated_report_id)
+    return report.reconciliation or {}
+
+
+@payroll_router.post(
+    "/generated-reports/{generated_report_id}/void", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Void a generated report (kept for history, never deleted)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def void_generated_report(
+    generated_report_id: int,
+    payload: VoidGeneratedReportRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.void_generated_report(db, current_user.organization_id, generated_report_id, payload.reason, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/generated-reports/{generated_report_id}/certificate/{employee_id}",
+    summary="Download a single-employee statutory certificate PDF (only for PER_EMPLOYEE-scoped templates)",
+)
+def download_report_certificate(
+    generated_report_id: int,
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    pdf_bytes = service.generate_report_certificate_pdf_bytes(db, current_user.organization_id, generated_report_id, employee_id)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="certificate-{generated_report_id}-{employee_id}.pdf"'},
+    )
+
+
+@payroll_router.get(
+    "/generated-reports/{generated_report_id}/certificates.zip",
+    summary="Download every employee's certificate PDF for a PER_EMPLOYEE-scoped generated report as one ZIP",
+)
+def download_report_certificates_zip(
+    generated_report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    import zipfile
+
+    report = service.get_generated_report(db, current_user.organization_id, generated_report_id)
+    employees = report.rendered_data.get("employees", [])
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for entry in employees:
+            pdf_bytes = service.generate_report_certificate_pdf_bytes(
+                db, current_user.organization_id, generated_report_id, entry["employeeId"],
+            )
+            safe_name = (entry.get("employeeName") or f"employee_{entry['employeeId']}").replace(" ", "_")
+            zf.writestr(f"certificate_{safe_name}_{entry['employeeId']}.pdf", pdf_bytes)
+    zip_buf.seek(0)
+
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="certificates-{generated_report_id}.zip"'},
+    )
+
+
+@payroll_router.get(
+    "/report-templates/filing-calendar", response_model=List[FilingCalendarResponse], response_model_by_alias=True,
+    summary="This organization's upcoming Active statutory filing due dates, soonest first",
+)
+def get_upcoming_filing_dates(
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_upcoming_filing_dates_for_org(db, current_user.organization_id, limit=limit)
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────

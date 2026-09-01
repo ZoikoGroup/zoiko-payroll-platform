@@ -15,29 +15,14 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
   const [editingSlab, setEditingSlab] = useState(null);
   const [filingStatus, setFilingStatus] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [yearFilter, setYearFilter] = useState("");
 
   const availableFilingStatuses = useMemo(() => collectFilingStatuses(slabs || []), [slabs]);
-  const availableYears = useMemo(() => {
-    const set = new Set();
-    for (const s of slabs || []) {
-      if (s.effectiveFrom) set.add(String(s.effectiveFrom).slice(0, 4));
-      if (s.effectiveTo) set.add(String(s.effectiveTo).slice(0, 4));
-    }
-    return Array.from(set).sort();
-  }, [slabs]);
 
   const filteredSlabs = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (slabs || [])
       .filter((s) => {
         if (filingStatus && s.filingStatus !== filingStatus) return false;
-        if (statusFilter && (s.status || pack?.status) !== statusFilter) return false;
-        if (yearFilter) {
-          const eff = String(s.effectiveFrom || s.effectiveTo || "").slice(0, 4);
-          if (eff !== yearFilter) return false;
-        }
         if (q) {
           const hay = `${s.rateLabel || ""} ${s.ratePct || ""} ${s.minAmount || ""} ${s.maxAmount || ""} ${s.filingStatus || ""}`.toLowerCase();
           if (!hay.includes(q)) return false;
@@ -49,9 +34,9 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
         if (fs !== 0) return fs;
         return Number(a.minAmount) - Number(b.minAmount);
       });
-  }, [slabs, filingStatus, search, statusFilter, yearFilter, pack]);
+  }, [slabs, filingStatus, search]);
 
-  const hasFilter = filingStatus !== "" || search !== "" || statusFilter !== "" || yearFilter !== "";
+  const hasFilter = filingStatus !== "" || search !== "";
 
   return (
     <div>
@@ -71,16 +56,19 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
       <FilterBar
         filingStatus={filingStatus} onFilingStatus={setFilingStatus}
         search={search} onSearch={setSearch}
-        statusFilter={statusFilter} onStatusFilter={setStatusFilter}
-        yearFilter={yearFilter} onYearFilter={setYearFilter}
         availableFilingStatuses={availableFilingStatuses}
-        availableYears={availableYears}
         hasFilter={hasFilter}
-        onReset={() => { setFilingStatus(""); setSearch(""); setStatusFilter(""); setYearFilter(""); }}
+        onReset={() => { setFilingStatus(""); setSearch(""); }}
       />
 
       {filteredSlabs.length === 0 ? (
-        <EmptyState text={(slabs || []).length === 0 ? "No tax brackets configured yet." : "No brackets match the current filters."} />
+        <EmptyState
+          text={
+            (slabs || []).length === 0
+              ? `${pack?.jurisdictionState || "Federal"} does not have a configured individual ${pack?.jurisdictionState ? "state " : ""}income-tax bracket.`
+              : "No brackets match the current filters."
+          }
+        />
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-surface">
           <div className="overflow-x-auto">
@@ -91,7 +79,6 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
                   <th className="px-3 py-2.5 text-right">Min Income</th>
                   <th className="px-3 py-2.5 text-right">Max Income</th>
                   <th className="px-3 py-2.5 text-right">Rate %</th>
-                  <th className="px-3 py-2.5">Effective Period</th>
                   <th className="px-3 py-2.5">Status</th>
                   <th className="px-3 py-2.5 text-right">Actions</th>
                 </tr>
@@ -103,11 +90,8 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
                     <td className="px-3 py-2.5 text-right tabular-nums">{s.minAmount}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{s.maxAmount ?? "and above"}</td>
                     <td className="px-3 py-2.5 text-right font-semibold text-foreground tabular-nums">{s.ratePct}%</td>
-                    <td className="px-3 py-2.5 text-foreground-secondary">
-                      <EffectivePeriod slab={s} />
-                    </td>
                     <td className="px-3 py-2.5">
-                      <StatusPill status={STATUS_PILL_MAP[s.status || pack?.status] || "pending"} label={s.status || pack?.status || "—"} />
+                      <StatusPill status={STATUS_PILL_MAP[pack?.status] || "pending"} label={pack?.status || "—"} />
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
@@ -139,15 +123,15 @@ export default function USIncomeTaxBracketsTab({ pack, slabs, onReload, onDelete
   );
 }
 
-function EffectivePeriod({ slab }) {
-  const from = slab.effectiveFrom;
-  const to = slab.effectiveTo;
-  if (from && to) return <span>{from} → {to}</span>;
-  if (from) return <span>{from} → open</span>;
-  return <span className="text-foreground-disabled">—</span>;
-}
-
-function FilterBar({ filingStatus, onFilingStatus, search, onSearch, statusFilter, onStatusFilter, yearFilter, onYearFilter, availableFilingStatuses, availableYears, hasFilter, onReset }) {
+// Status isn't filterable here — every slab row's effective status is
+// always the owning pack's single status (TaxSlab rows carry no per-row
+// status of their own), so a multi-option filter could only ever match
+// one value at a time; the Status column above still shows it for
+// context, just without a dropdown pretending it varies row to row.
+// Effective Year was removed entirely (not just left empty) — TaxSlab has
+// no per-row effective-date fields (only JurisdictionPack does), so that
+// filter/column could never have anything to show.
+function FilterBar({ filingStatus, onFilingStatus, search, onSearch, availableFilingStatuses, hasFilter, onReset }) {
   return (
     <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface-muted p-3">
       <div className="min-w-[200px] flex-1">
@@ -164,25 +148,6 @@ function FilterBar({ filingStatus, onFilingStatus, search, onSearch, statusFilte
           {availableFilingStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
-      <div>
-        <label className="mb-1.5 block text-xs font-medium text-foreground-muted">Status</label>
-        <select className={inputClass + " w-auto min-w-[130px]"} value={statusFilter} onChange={(e) => onStatusFilter(e.target.value)}>
-          <option value="">All Statuses</option>
-          <option value="Active">Active</option>
-          <option value="Draft">Draft</option>
-          <option value="In Review">In Review</option>
-          <option value="Approved">Approved</option>
-        </select>
-      </div>
-      {availableYears.length > 0 && (
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground-muted">Effective Year</label>
-          <select className={inputClass + " w-auto min-w-[130px]"} value={yearFilter} onChange={(e) => onYearFilter(e.target.value)}>
-            <option value="">All Years</option>
-            {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
-      )}
       {hasFilter && (
         <button onClick={onReset} className="flex items-center gap-1 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface">
           <RotateCcw size={12} /> Reset

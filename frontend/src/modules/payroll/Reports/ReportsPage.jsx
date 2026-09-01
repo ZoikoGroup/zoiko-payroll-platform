@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { BarChart3, FileSpreadsheet, FileText, Download, TrendingUp, Loader2, Banknote } from "lucide-react";
+import { BarChart3, FileText, History, Download, TrendingUp, Banknote } from "lucide-react";
 import { useToast } from "../ToastContext";
-import { getPayrollReports, downloadReport, downloadRunPayslips, downloadBankTransferFile, getEmployees, getPayslips } from "../../../service/payrollService";
-import { generateAnnualTaxSummary, generateTDSReport, generatePFStatement, generateESIReport, generateContributionStatement } from "./pdfGenerators";
+import { getPayrollReports, downloadReport, downloadBankTransferFile } from "../../../service/payrollService";
+import ReportGenerationPanel from "./ReportGenerationPanel";
+import GeneratedReportPreview from "./GeneratedReportPreview";
+import GeneratedReportsHistoryTable from "./GeneratedReportsHistoryTable";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const tabs = [
-  { id: "payroll-reports",   label: "Payroll Reports",  icon: BarChart3 },
-  { id: "tax-reports",       label: "Tax Reports",      icon: FileText },
-  { id: "compliance-reports", label: "Compliance",      icon: FileSpreadsheet },
+  { id: "payroll-reports", label: "Payroll Reports", icon: BarChart3 },
+  { id: "generate-report",  label: "Generate Report", icon: FileText },
+  { id: "report-history",   label: "Report History",  icon: History },
 ];
 
 export default function ReportsPage() {
@@ -18,15 +20,16 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState(null);
   const [downloadCount, setDownloadCount] = useState(0);
-  const [employees, setEmployees] = useState([]);
-  const [payslips, setPayslips] = useState([]);
-  const [generatingReport, setGeneratingReport] = useState(null);
   const [bankFileFormat, setBankFileFormat] = useState({});
   const [downloadingBankFileId, setDownloadingBankFileId] = useState(null);
-  // Sourced from the shared, once-per-session PayrollSetupContext instead of
-  // this page's own independent getCompanyProfile() call.
-  const { company: companyProfile, currencyCode } = usePayrollSetup();
-  const jurisdictionCountry = companyProfile?.jurisdictionCountry || companyProfile?.jurisdiction_country || "IN";
+  const { currencyCode } = usePayrollSetup();
+
+  // The most recently generated statutory report (Generate Report tab) —
+  // shown as a preview until the user generates another one or leaves
+  // the tab. History of every past generation lives in Report History,
+  // driven independently by GeneratedReportsHistoryTable's own fetch.
+  const [latestGenerated, setLatestGenerated] = useState(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   const latestReport = useMemo(() => {
     if (!reports.length) return null;
@@ -51,23 +54,6 @@ export default function ReportsPage() {
     }
   }, [addToast]);
 
-  const handleDownloadLatestRun = useCallback(async () => {
-    if (!latestReport) {
-      addToast?.("No payroll runs available to download.", "info");
-      return;
-    }
-    setDownloadingId(latestReport.id);
-    try {
-      await downloadRunPayslips(latestReport.id);
-      setDownloadCount((c) => c + 1);
-      addToast?.("Report downloaded successfully.", "success");
-    } catch {
-      addToast?.("Failed to download report.", "error");
-    } finally {
-      setDownloadingId(null);
-    }
-  }, [addToast, latestReport]);
-
   const handleDownloadBankFile = useCallback(async (report) => {
     if (!report?.id) return;
     const format = bankFileFormat[report.id] || "csv";
@@ -82,37 +68,6 @@ export default function ReportsPage() {
       setDownloadingBankFileId(null);
     }
   }, [addToast, bankFileFormat]);
-
-  const handleDownloadNotAvailable = useCallback(() => {
-    addToast?.("This report type is not yet available for the current cycle.", "info");
-  }, [addToast]);
-
-  const handleGenerateReport = useCallback(async (type) => {
-    if (!payslips.length) {
-      addToast?.("No payslip data available to generate reports.", "info");
-      return;
-    }
-    setGeneratingReport(type);
-    try {
-      const generators = {
-        "annual-tax": () => generateAnnualTaxSummary(employees, payslips, currencyCode, companyProfile, jurisdictionCountry),
-        "tds": () => generateTDSReport(employees, payslips, currencyCode, companyProfile),
-        "pf": () => generatePFStatement(employees, payslips, currencyCode, companyProfile),
-        "esi": () => generateESIReport(employees, payslips, currencyCode, companyProfile),
-        "contributions": () => generateContributionStatement(employees, payslips, currencyCode, companyProfile, jurisdictionCountry),
-      };
-      const fn = generators[type];
-      if (fn) {
-        await fn();
-        setDownloadCount((c) => c + 1);
-        addToast?.("Report generated and downloading.", "success");
-      }
-    } catch {
-      addToast?.("Failed to generate report.", "error");
-    } finally {
-      setGeneratingReport(null);
-    }
-  }, [employees, payslips, currencyCode, companyProfile, jurisdictionCountry, addToast]);
 
   const thisPeriodLabel = useMemo(() => {
     if (!latestReport) return "--";
@@ -134,11 +89,6 @@ export default function ReportsPage() {
   useEffect(() => {
     loadReports();
   }, [loadReports]);
-
-  useEffect(() => {
-    getEmployees().then((data) => setEmployees(Array.isArray(data) ? data : [])).catch(() => {});
-    getPayslips().then((data) => setPayslips(Array.isArray(data) ? data : [])).catch(() => {});
-  }, []);
 
   return (
     <div className="bg-background min-h-screen p-6 lg:p-8 space-y-6">
@@ -282,72 +232,24 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {activeTab === "tax-reports" && (
-        <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="text-[15px] font-bold text-foreground mb-4">Tax Reports</h3>
-          <div className="space-y-3">
-            {(jurisdictionCountry === "IN" ? [
-              { id: "annual-tax", name: "Annual Tax Summary", desc: "Yearly income tax projection vs actual TDS for each employee" },
-              { id: "tds", name: "TDS Report", desc: "Tax deducted at source — Form 24Q (Annexure II)" },
-              { id: "pf", name: "PF Statement", desc: "Provident fund contribution report (ECR format)" },
-              { id: "esi", name: "ESI Report", desc: "Employee State Insurance monthly contribution statement" },
-            ] : [
-              { id: "annual-tax", name: "Annual Tax Summary", desc: "Yearly income tax projection vs actual tax withheld for each employee" },
-              { id: "contributions", name: "Contribution Statement", desc: "Statutory contribution summary for the active payroll jurisdiction" },
-            ]).map((report) => (
-              <div key={report.id} className="flex items-center justify-between rounded-[12px] border border-border bg-background px-4 py-3.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
-                <div>
-                  <p className="text-[13px] font-bold text-foreground">{report.name}</p>
-                  <p className="text-[13px] text-foreground-muted">{report.desc}</p>
-                </div>
-                <button
-                  onClick={() => handleGenerateReport(report.id)}
-                  disabled={generatingReport === report.id}
-                  className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {generatingReport === report.id ? (
-                    <><Loader2 size={12} className="animate-spin" /> Generating...</>
-                  ) : (
-                    <><Download size={12} /> Generate PDF</>
-                  )}
-                </button>
-              </div>
-            ))}
-          </div>
+      {activeTab === "generate-report" && (
+        <div className="space-y-6">
+          <ReportGenerationPanel
+            onGenerated={(report) => {
+              setLatestGenerated(report);
+              setHistoryRefreshKey((k) => k + 1);
+            }}
+          />
+          {latestGenerated && <GeneratedReportPreview report={latestGenerated} currencyCode={currencyCode} />}
         </div>
       )}
 
-      {activeTab === "compliance-reports" && (
-        <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="text-[15px] font-bold text-foreground mb-4">Compliance Reports</h3>
-          <div className="grid md:grid-cols-2 gap-4">
-            {[
-              { name: "Compliance Checklist", icon: FileText, color: "text-primary", bg: "bg-primary/10" },
-              { name: "Statutory Filings", icon: FileSpreadsheet, color: "text-info", bg: "bg-info/10" },
-              { name: "Audit Trail", icon: FileText, color: "text-warning", bg: "bg-warning/10" },
-              { name: "Regulatory Submissions", icon: FileSpreadsheet, color: "text-category-teal", bg: "bg-category-teal/10" },
-            ].map((report) => (
-              <div key={report.name} className="flex items-center justify-between rounded-[12px] border border-border bg-surface p-4 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] transition-all duration-200">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-[10px] ${report.bg}`}>
-                    <report.icon size={16} className={report.color} />
-                  </div>
-                  <p className="text-[13px] font-bold text-foreground">{report.name}</p>
-                </div>
-                {latestReport ? (
-                  <button
-                    onClick={() => handleDownloadReport(latestReport)}
-                    disabled={downloadingId === latestReport.id}
-                    className="flex items-center gap-1.5 rounded-[12px] bg-primary text-white px-3.5 py-2 text-[13px] font-bold hover:bg-primary-hover transition-all duration-200 shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download size={12} /> {downloadingId === latestReport.id ? "Downloading..." : "Download"}
-                  </button>
-                ) : (
-                  <span className="text-[12px] font-semibold text-foreground-muted">Not yet available</span>
-                )}
-              </div>
-            ))}
-          </div>
+      {activeTab === "report-history" && (
+        <div className="bg-surface border border-border rounded-[18px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+          <GeneratedReportsHistoryTable
+            refreshKey={historyRefreshKey}
+            onView={(report) => { setLatestGenerated(report); setActiveTab("generate-report"); }}
+          />
         </div>
       )}
     </div>

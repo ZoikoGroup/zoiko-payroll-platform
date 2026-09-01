@@ -1315,3 +1315,121 @@ export const submitPublicForm = async (token, values) => {
     throw err;
   }
 };
+
+// ── Report Generation (template-driven) ──────────────────────────────
+// Organization-side consumption of Super Admin-published Report Templates
+// — the org only ever selects a jurisdiction/year/period/run/report and
+// generates; it never authors template structure (that's superAdminService.js).
+
+// Mirrors backend PAYROLL_STATUS_ORDER (models.py) — kept as its own local
+// copy, same convention RunStatusTimeline.jsx already uses, rather than
+// importing across files for a single constant.
+export const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
+
+export const isRunFinalized = (run) => PAYROLL_STATUS_ORDER.indexOf(run?.status) >= PAYROLL_STATUS_ORDER.indexOf("Approved");
+
+export const getAvailableReports = async (params = {}) => {
+  // { reportingYear } -> [{ reportType, name }] — real, backend-owned list
+  // of reports with a Published/Active template for this org's jurisdiction+year.
+  try {
+    const res = await api.get("/api/payroll/report-templates/available", { params });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+export const getApplicableReportTemplate = async (params = {}) => {
+  // { reportingYear, reportType, payrollRunId? } — returns { template, validation }.
+  // validation is only populated when payrollRunId is passed.
+  try {
+    return await api.get("/api/payroll/report-templates/applicable", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const generateReport = async (payload) => {
+  // { reportTemplateId, payrollRunId, reportingPeriod? }
+  try {
+    return await api.post("/api/payroll/generated-reports", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGeneratedReports = async (params = {}) => {
+  try {
+    const res = await api.get("/api/payroll/generated-reports", { params });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+export const getGeneratedReport = async (id) => {
+  try {
+    return await api.get(`/api/payroll/generated-reports/${id}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const voidGeneratedReport = async (id, reason) => {
+  try {
+    return await api.post(`/api/payroll/generated-reports/${id}/void`, { reason });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// This org's upcoming Active statutory filing due dates — never
+// hardcoded/guessed client-side, always whatever Super Admin has
+// published for this org's jurisdiction.
+export const getUpcomingFilingDates = async (limit = 10) => {
+  try {
+    const res = await api.get("/api/payroll/report-templates/filing-calendar", { params: { limit } });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+// Single-employee certificate download (Form 130/P60-style PER_EMPLOYEE
+// reports only) — same manual-fetch-blob-download pattern as downloadReport.
+export const downloadReportCertificate = async (generatedReportId, employeeId, employeeName) => {
+  const token = getAccessToken();
+  const res = await fetch(
+    `${API_BASE_URL}/api/payroll/generated-reports/${generatedReportId}/certificate/${employeeId}`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+  if (!res.ok) throw new Error("Failed to download certificate");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `certificate-${(employeeName || employeeId).toString().replace(/\s+/g, "_")}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
+
+// All employees' certificates for a PER_EMPLOYEE generated report, as one ZIP.
+export const downloadReportCertificatesZip = async (generatedReportId) => {
+  const token = getAccessToken();
+  const res = await fetch(
+    `${API_BASE_URL}/api/payroll/generated-reports/${generatedReportId}/certificates.zip`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+  if (!res.ok) throw new Error("Failed to download certificates");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `certificates-${generatedReportId}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
