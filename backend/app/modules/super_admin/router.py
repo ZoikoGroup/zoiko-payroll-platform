@@ -44,6 +44,11 @@ from app.modules.payroll.schemas import (
     ReciprocityRuleResponse, ReciprocityRuleUpsert,
     SourceArtifactResponse, SourceArtifactCreate,
     LocalityRateResponse, LocalityRateUpsert,
+    ReportTemplateResponse, ReportTemplateUpsert, ReportTemplateStatusUpdate,
+    ReportTemplateComponentResponse, ReportTemplateComponentUpsert,
+    ReportTemplateFieldResponse, ReportTemplateFieldUpsert,
+    AvailableComponentItem, AvailableDataFieldItem,
+    FilingCalendarResponse, FilingCalendarUpsert, FilingCalendarStatusUpdate,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -446,6 +451,277 @@ def hard_delete_compliance_policy(
 
     result = payroll_service.hard_delete_jurisdiction_pack(db, id)
     return {"message": f"{result['packId']} v{result['version']} permanently deleted."}
+
+
+# ── Report Templates (jurisdiction-wide, Super Admin-authored statutory
+# report blueprints — separate from JurisdictionPack, since a report
+# template has no rates/slabs/org-assignment) ────────────────────────────
+# Reuses app.modules.payroll's ReportTemplate model/schemas/service
+# functions directly, exactly like the /compliance/policies/* block above
+# reuses JurisdictionPack — no parallel model or business logic here.
+
+@router.get(
+    "/report-templates", response_model=List[ReportTemplateResponse], response_model_by_alias=True,
+    summary="Cross-jurisdiction report template list (latest version per template)",
+)
+def list_report_templates(
+    country: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    reportingYear: Optional[str] = Query(None),
+    reportType: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_report_templates(
+        db, country=country, state=state, reporting_year=reportingYear, report_type=reportType,
+        status=status, search=search,
+    )
+
+
+@router.get(
+    "/report-templates/available-components", response_model=List[AvailableComponentItem],
+    summary="Components a report of this type may have — never a generic unrelated dropdown",
+)
+def get_available_report_components(
+    reportType: str = Query(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_available_report_components(reportType)
+
+
+@router.get(
+    "/report-templates/available-data-fields", response_model=List[AvailableDataFieldItem],
+    summary="Real, already-computed data fields a template field may map to for this jurisdiction — never free-typed",
+)
+def get_available_report_data_fields(
+    jurisdictionCountry: str = Query(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_available_report_data_fields(jurisdictionCountry)
+
+
+@router.get(
+    "/report-templates/{id}", response_model=ReportTemplateResponse, response_model_by_alias=True,
+    summary="Full template detail with nested components and fields",
+)
+def get_report_template_detail(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_report_template_detail(db, id)
+
+
+@router.put(
+    "/report-templates", response_model=ReportTemplateResponse, response_model_by_alias=True,
+    summary="Create a report template, or a new version of an existing one",
+)
+def upsert_report_template(
+    payload: ReportTemplateUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_report_template(db, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/report-templates/by-key/{template_key}/versions", response_model=List[ReportTemplateResponse], response_model_by_alias=True,
+    summary="Full version history for one report template, oldest first",
+)
+def get_report_template_versions(
+    template_key: str,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_report_template_versions(db, template_key)
+
+
+@router.put(
+    "/report-templates/{id}/status", response_model=ReportTemplateResponse, response_model_by_alias=True,
+    summary="Advance/supersede a report template's lifecycle status",
+)
+def set_report_template_status(
+    id: int,
+    payload: ReportTemplateStatusUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_report_template_status(db, id, payload.status, actor_id=current_user.id)
+
+
+@router.put(
+    "/report-templates/{id}/approve", response_model=ReportTemplateResponse, response_model_by_alias=True,
+    summary="Record the calling Super Admin as this template's approver (maker-checker: must differ from the last editor before Published/Active)",
+)
+def approve_report_template(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_report_template_approver(db, id, actor_id=current_user.id)
+
+
+@router.get(
+    "/report-templates/{id}/audit", response_model=List[TaxConfigurationAuditResponse], response_model_by_alias=True,
+    summary="Audit trail for one report template",
+)
+def get_report_template_audit(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_report_template_audit(db, id)
+
+
+@router.delete(
+    "/report-templates/{id}", response_model=SuccessResponse,
+    summary="Permanently delete a report template — only allowed with no generated-report history and not Published/Active",
+)
+def hard_delete_report_template(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    result = payroll_service.hard_delete_report_template(db, id)
+    return {"message": f"{result['templateKey']} v{result['version']} permanently deleted."}
+
+
+@router.put(
+    "/report-templates/{template_id}/components", response_model=ReportTemplateComponentResponse, response_model_by_alias=True,
+    summary="Add or update a component on a report template",
+)
+def upsert_report_template_component(
+    template_id: int,
+    payload: ReportTemplateComponentUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_report_component(db, template_id, payload, actor_id=current_user.id)
+
+
+@router.delete(
+    "/report-templates/components/{component_id}", response_model=SuccessResponse,
+    summary="Remove a component (and its fields) from a report template",
+)
+def delete_report_template_component(
+    component_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_report_component(db, component_id, actor_id=current_user.id)
+    return {"message": "Component deleted."}
+
+
+@router.put(
+    "/report-templates/components/{component_id}/fields", response_model=ReportTemplateFieldResponse, response_model_by_alias=True,
+    summary="Add or update a field on a report template component (source_column validated against the real-data allow-list)",
+)
+def upsert_report_template_field(
+    component_id: int,
+    payload: ReportTemplateFieldUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_report_field(db, component_id, payload, actor_id=current_user.id)
+
+
+@router.delete(
+    "/report-templates/fields/{field_id}", response_model=SuccessResponse,
+    summary="Remove a field from a report template component",
+)
+def delete_report_template_field(
+    field_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_report_field(db, field_id, actor_id=current_user.id)
+    return {"message": "Field deleted."}
+
+
+# ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
+# A genuinely new asset — Organizations read this to know when a report is
+# actually due (e.g. India Form 138's Q1-Q4 dates); never hardcoded
+# client-side.
+
+@router.get(
+    "/report-templates/filing-calendar", response_model=List[FilingCalendarResponse], response_model_by_alias=True,
+    summary="List statutory filing-calendar entries",
+)
+def list_filing_calendar_entries(
+    country: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    reportType: Optional[str] = Query(None),
+    reportingYear: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_filing_calendar(
+        db, country=country, state=state, report_type=reportType, reporting_year=reportingYear, status=status,
+    )
+
+
+@router.put(
+    "/report-templates/filing-calendar", response_model=FilingCalendarResponse, response_model_by_alias=True,
+    summary="Create or correct a filing-calendar entry (a correction is a new version, never an edit of a published due date)",
+)
+def upsert_filing_calendar_entry(
+    payload: FilingCalendarUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_filing_calendar_entry(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/report-templates/filing-calendar/{id}/status", response_model=FilingCalendarResponse, response_model_by_alias=True,
+    summary="Advance/supersede a filing-calendar entry's lifecycle status",
+)
+def set_filing_calendar_entry_status(
+    id: int,
+    payload: FilingCalendarStatusUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_filing_calendar_status(db, id, payload.status, actor_id=current_user.id)
 
 
 # ── Canonical Tax Configuration (government-mandated values; Super Admin-only) ──

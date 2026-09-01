@@ -954,6 +954,259 @@ class TaxConfigurationAudit(Base):
     )
 
 
+# ── Report Templates (Super Admin-authored; jurisdiction-wide, NOT
+# org-scoped — same "describes a jurisdiction, reused by every org in it"
+# philosophy as JurisdictionPack) ────────────────────────────────────────
+# Lifecycle is deliberately its own vocabulary (Draft -> Review -> Approved
+# -> Published -> Active -> Superseded), NOT JurisdictionPack's
+# (Draft|In Review|QA|Approved|Active|Deprecated|Retired) — a report
+# template has a genuine "Published but not yet the live version" state
+# (reviewable/assignable, but not the one Organizations resolve against)
+# that JurisdictionPack's lifecycle has no equivalent for.
+class ReportTemplate(Base):
+    """Versioned identity/metadata for a jurisdiction-specific statutory
+    report template (e.g. India's Salary TDS Report, UK's P60). Super
+    Admin authors and publishes these; Organizations only ever consume the
+    Active version for their jurisdiction/report/tax year — they never
+    edit a template directly."""
+    __tablename__ = "payroll_report_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    template_key = Column(String(100), nullable=False)   # e.g. "IN-TDS-SALARY"
+    name         = Column(String(200), nullable=False)   # "Salary TDS Report"
+    report_type  = Column(String(50), nullable=False)    # "TDS" | "P60" | "941" | ... — open, not a DB enum
+
+    jurisdiction_country  = Column(String(100), nullable=False)
+    jurisdiction_state    = Column(String(100), nullable=True)   # null = country-level template
+    jurisdiction_locality = Column(String(100), nullable=True)
+
+    reporting_year = Column(String(20), nullable=False)   # e.g. "2026-27" or "2026"
+    version        = Column(String(20), nullable=False, default="1.0")
+    status         = Column(String(20), nullable=False, default="Draft")
+    # Draft | Review | Approved | Published | Active | Superseded.
+
+    description           = Column(Text, nullable=True)
+    regulatory_authority   = Column(String(200), nullable=True)
+    effective_from         = Column(Date, nullable=True)
+    effective_to           = Column(Date, nullable=True)
+    change_summary         = Column(Text, nullable=True)
+    source_references      = Column(Text, nullable=True)
+
+    # "AGGREGATE" (one document for the whole run — e.g. Form 138, an
+    # EPS/FPS-style employer summary) | "PER_EMPLOYEE" (one document per
+    # employee — e.g. Form 130, P60). Drives which PDF renderer and
+    # download shape (single file vs ZIP) a generated report uses; does
+    # NOT change generation or the rendered_data snapshot shape itself.
+    document_scope = Column(String(20), nullable=False, default="AGGREGATE")
+
+    # Evidence chain for the actual government form/publication this
+    # template is based on — reuses SourceArtifact verbatim (same FK
+    # pattern as LocalityDataset.source_document_id), never a parallel
+    # evidence system. source_references above stays free-text citation;
+    # this is the real, hash-verified link.
+    source_document_id = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    # Absolute currency tolerance for the generation-time reconciliation
+    # check (see generate_report_from_template) — NULL means exact match
+    # is required.
+    reconciliation_tolerance = Column(Numeric(12, 2), nullable=True)
+
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Self-reference so a new version can point back at what it replaced —
+    # same "never overwrite, chain instead" convention as
+    # JurisdictionPack.previous_version_id.
+    previous_version_id = Column(Integer, ForeignKey("payroll_report_templates.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("template_key", "version", name="uq_report_template_key_version"),
+        Index(
+            "ix_report_templates_jurisdiction_year_type",
+            "jurisdiction_country", "jurisdiction_state", "reporting_year", "report_type",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<ReportTemplate {self.template_key} v{self.version} status={self.status}>"
+
+
+class ReportTemplateComponent(Base):
+    """One section of a ReportTemplate (Employer Info, Earnings, Tax, ...).
+    A real child table, not a JSON blob, because the set of components is
+    admin-defined per template and each one needs to be individually
+    orderable/deletable/referenced by its own fields — the same reasoning
+    PayslipAllowanceItem uses for admin-defined allowance rows, rather
+    than the fixed-key-bag reasoning behind policy_defaults-style JSON
+    columns."""
+    __tablename__ = "payroll_report_template_components"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_template_id = Column(Integer, ForeignKey("payroll_report_templates.id"), nullable=False, index=True)
+
+    component_key       = Column(String(50), nullable=False)   # "employer_info" | "earnings" | "tax" | ...
+    label                = Column(String(150), nullable=False)
+    component_category   = Column(String(30), nullable=False, default="standard")  # "standard" | "jurisdiction_specific" — descriptive only
+    sort_order            = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("report_template_id", "component_key", name="uq_report_component_template_key"),
+    )
+
+
+class ReportTemplateComponentField(Base):
+    """One field within a ReportTemplateComponent. `source_column` is
+    validated at upsert time (service.py's upsert_report_field) against
+    _REPORT_FIELD_ALLOWED_COLUMNS — a real column on PayslipItem/PayrollRun/
+    CompanyComplianceDetails, never a free-typed/fabricated value."""
+    __tablename__ = "payroll_report_template_component_fields"
+
+    id = Column(Integer, primary_key=True, index=True)
+    component_id = Column(Integer, ForeignKey("payroll_report_template_components.id"), nullable=False, index=True)
+
+    field_key  = Column(String(50), nullable=False)    # "pf_employee", "gross_pay", "employer_name"
+    label      = Column(String(150), nullable=False)
+    field_type = Column(String(20), nullable=False)     # percentage | currency | date | boolean | enum | text | tax-bracket-table
+
+    data_source_kind = Column(String(20), nullable=False)   # PAYSLIP_ITEM | PAYROLL_RUN | EMPLOYER_PROFILE
+    source_column     = Column(String(50), nullable=False)
+    aggregation        = Column(String(20), nullable=True)   # NULL | SUM_RUN | SUM_YTD — only meaningful for numeric PAYSLIP_ITEM columns
+
+    enum_values  = Column(JSON, nullable=True)   # only used when field_type == "enum"
+    format_hint  = Column(String(50), nullable=True)
+    is_required  = Column(Boolean, nullable=False, default=False)
+    sort_order   = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("component_id", "field_key", name="uq_report_field_component_key"),
+    )
+
+
+class GeneratedReport(Base):
+    """An immutable, organization-scoped output artifact: the result of
+    rendering a specific ReportTemplate version against a specific
+    PayrollRun. Freezes template_version + a full rendered_data snapshot
+    (mirrors PayslipItem.tax_policy_version + tax_rule_snapshot) so a
+    later template edit/republish can never retroactively change a
+    historical report."""
+    __tablename__ = "payroll_generated_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    report_template_id = Column(Integer, ForeignKey("payroll_report_templates.id"), nullable=False, index=True)
+    template_version    = Column(String(20), nullable=False)   # snapshotted at generation time
+    report_type          = Column(String(50), nullable=False)   # denormalized from template, for cheap listing
+
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id"), nullable=False, index=True)
+
+    jurisdiction_country = Column(String(100), nullable=False)
+    jurisdiction_state    = Column(String(100), nullable=True)
+    reporting_year         = Column(String(20), nullable=False)
+    reporting_period        = Column(String(50), nullable=True)   # denormalized from PayrollRun.period_label at generation time
+
+    applicable_tax_pack_id      = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+    applicable_tax_pack_version = Column(String(20), nullable=True)
+
+    status = Column(String(20), nullable=False, default="Generated")  # Generated | Superseded | Void
+
+    generated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    generated_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    rendered_data  = Column(JSON, nullable=False)   # frozen template-structure + resolved values
+    reconciliation = Column(JSON, nullable=True)    # frozen rendering-consistency check, computed at generation time
+    notes          = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_generated_reports_org_run", "organization_id", "payroll_run_id"),
+        Index("ix_generated_reports_template", "report_template_id"),
+        # Only one "live" generated report per (org, run, template) at a
+        # time — regenerating flips the old row to Superseded rather than
+        # deleting/overwriting it, so history is preserved (same NULL-safe
+        # partial-unique-index pattern as ContributionRate).
+        Index(
+            "uq_generated_report_org_run_template_active",
+            "organization_id", "payroll_run_id", "report_template_id",
+            unique=True,
+            postgresql_where=text("status = 'Generated'"),
+            sqlite_where=text("status = 'Generated'"),
+        ),
+    )
+
+    def __repr__(self):
+        return f"<GeneratedReport org={self.organization_id} run={self.payroll_run_id} template={self.report_template_id} status={self.status}>"
+
+
+# ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
+# A genuinely new concept in this codebase — no due-date/deadline table
+# existed anywhere before this. Modeled after SourceArtifact/
+# JurisdictionPack's established idioms (status lifecycle string,
+# previous_version_id self-FK so a corrected due date is a new version
+# rather than an edited one, own source_document_id link so the calendar
+# itself is evidence-backed) rather than inventing new conventions.
+class StatutoryFilingCalendar(Base):
+    """One row per filing obligation within a reporting period (e.g.
+    India Form 138's Q1 due 31 Jul 2026) for a jurisdiction + report type.
+    Never hardcoded in application/frontend code — Organizations read this
+    table to know when a report is actually due."""
+    __tablename__ = "payroll_statutory_filing_calendar"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    jurisdiction_country  = Column(String(100), nullable=False)
+    jurisdiction_state    = Column(String(100), nullable=True)   # null = country-level
+    report_type           = Column(String(50), nullable=False)   # "TDS" | "P60" | ... — matches ReportTemplate.report_type
+    reporting_year        = Column(String(20), nullable=False)
+
+    period_key    = Column(String(20), nullable=False)    # "Q1", "Q2", "ANNUAL", ...
+    period_label  = Column(String(100), nullable=False)   # "April-June"
+    due_date      = Column(Date, nullable=False)
+
+    status = Column(String(20), nullable=False, default="Draft")
+    # Draft | Approved | Active | Superseded — same vocabulary as ReportTemplate.
+
+    source_document_id  = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    previous_version_id = Column(Integer, ForeignKey("payroll_statutory_filing_calendar.id"), nullable=True)
+
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # No DB-level UniqueConstraint on (jurisdiction, report_type, year,
+    # period) — a corrected due date is a NEW row (chained via
+    # previous_version_id), so multiple rows for the same period are
+    # expected over time. "Only one Active row per period" is enforced in
+    # the service layer (mirrors set_report_template_status's overlap
+    # guard), matching JurisdictionPack's own established pattern rather
+    # than a DB constraint that can't distinguish current-vs-historical.
+    __table_args__ = (
+        Index(
+            "ix_filing_calendar_lookup",
+            "jurisdiction_country", "jurisdiction_state", "report_type", "reporting_year",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<StatutoryFilingCalendar {self.jurisdiction_country} {self.report_type} {self.period_key} due={self.due_date}>"
+
+
 class ComplianceDocument(Base):
     """Uploaded compliance documents for payroll (e.g. statutory filings)."""
     __tablename__ = "payroll_compliance_documents"

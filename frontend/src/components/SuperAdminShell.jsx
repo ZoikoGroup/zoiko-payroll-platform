@@ -19,6 +19,7 @@ import {
   FileBarChart,
   ShieldCheck,
   Landmark,
+  ScrollText,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
@@ -52,7 +53,10 @@ const NAV_GROUPS = [
   },
   {
     title: "Reporting",
-    items: [{ label: "Reports", href: "/super-admin/reports", icon: FileBarChart }],
+    items: [
+      { label: "Reports", href: "/super-admin/reports", icon: FileBarChart },
+      { label: "Report Templates", href: "/super-admin/report-templates", icon: ScrollText },
+    ],
   },
   {
     title: "System",

@@ -194,3 +194,63 @@ export const getDashboardCharts = (params) => apiFetch("/api/super-admin/dashboa
 
 export const listAllOrganizationsBrief = () =>
   apiFetch("/api/organizations", { params: { limit: 200, include_inactive: true } });
+
+// ── Report Templates (jurisdiction-wide, Super Admin-authored statutory
+// report blueprints — separate from Compliance's JurisdictionPack, since a
+// report template has no rates/slabs/org-assignment) ────────────────────
+
+export const getReportTemplates = (params) => apiFetch("/api/super-admin/report-templates", { params });
+
+export const getReportTemplateDetail = (id) => apiFetch(`/api/super-admin/report-templates/${id}`);
+
+export const upsertReportTemplate = (payload) =>
+  apiFetch("/api/super-admin/report-templates", { method: "PUT", body: payload });
+
+export const getReportTemplateVersions = (templateKey) =>
+  apiFetch(`/api/super-admin/report-templates/by-key/${encodeURIComponent(templateKey)}/versions`);
+
+export const setReportTemplateStatus = (id, status) =>
+  apiFetch(`/api/super-admin/report-templates/${id}/status`, { method: "PUT", body: { status } });
+
+// Maker-checker: records the CALLING Super Admin as this template's
+// approver. Must be a different person than whoever last edited it before
+// the template can go Published/Active — enforced server-side.
+export const approveReportTemplate = (id) =>
+  apiFetch(`/api/super-admin/report-templates/${id}/approve`, { method: "PUT" });
+
+export const getReportTemplateAudit = (id) => apiFetch(`/api/super-admin/report-templates/${id}/audit`);
+
+export const hardDeleteReportTemplate = (id) =>
+  apiFetch(`/api/super-admin/report-templates/${id}`, { method: "DELETE" });
+
+// The enumerable, backend-owned component/data-field catalogs a template's
+// authoring UI must pick from — never a free-typed or generic-unrelated
+// dropdown; see get_available_report_components/get_available_report_data_fields.
+export const getAvailableReportComponents = (reportType) =>
+  apiFetch("/api/super-admin/report-templates/available-components", { params: { reportType } });
+
+export const getAvailableReportDataFields = (jurisdictionCountry) =>
+  apiFetch("/api/super-admin/report-templates/available-data-fields", { params: { jurisdictionCountry } });
+
+export const upsertReportTemplateComponent = (templateId, payload) =>
+  apiFetch(`/api/super-admin/report-templates/${templateId}/components`, { method: "PUT", body: payload });
+
+export const deleteReportTemplateComponent = (componentId) =>
+  apiFetch(`/api/super-admin/report-templates/components/${componentId}`, { method: "DELETE" });
+
+export const upsertReportTemplateField = (componentId, payload) =>
+  apiFetch(`/api/super-admin/report-templates/components/${componentId}/fields`, { method: "PUT", body: payload });
+
+export const deleteReportTemplateField = (fieldId) =>
+  apiFetch(`/api/super-admin/report-templates/fields/${fieldId}`, { method: "DELETE" });
+
+// ── Statutory Filing Calendar (jurisdiction-wide, Super Admin-authored) ──
+
+export const getFilingCalendarEntries = (params) =>
+  apiFetch("/api/super-admin/report-templates/filing-calendar", { params });
+
+export const upsertFilingCalendarEntry = (payload) =>
+  apiFetch("/api/super-admin/report-templates/filing-calendar", { method: "PUT", body: payload });
+
+export const setFilingCalendarEntryStatus = (id, status) =>
+  apiFetch(`/api/super-admin/report-templates/filing-calendar/${id}/status`, { method: "PUT", body: { status } });

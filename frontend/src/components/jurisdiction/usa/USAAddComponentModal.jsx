@@ -3,11 +3,15 @@ import { Search, ChevronRight, CornerDownRight, ChevronLeft, Check } from "lucid
 import Drawer from "../../Drawer";
 import { useToast } from "../../../context/ToastContext";
 import { upsertCanonicalContributionRate } from "../../../service/superAdminService";
+import { getStatesForCountryCode } from "../../../utils/registrationRegions";
 import { inputClass, labelClass } from "../constants";
 import {
   PAYROLL_COMPONENT_CATALOG, PAYROLL_COMPONENT_CATEGORIES,
   UI_TYPES, US_FILING_STATUSES, classifyContributionRate, describeUiType,
 } from "./usaComponentConfig";
+import { STATE_COMPONENT_CATALOG, STATE_COMPONENT_CATEGORIES } from "./stateComponentCatalog";
+
+const US_STATE_OPTIONS = getStatesForCountryCode("US");
 
 // USA-only step-based "+ Add Component" drawer (Select → Configure →
 // Review & Save). Reuses the existing business-component catalog and the
@@ -29,12 +33,23 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Level-exclusive, not merged: a State/District pack (jurisdictionState
+  // set) only ever offers the state catalog; a Federal pack (no state) only
+  // ever offers the federal one. Previously this spread the federal catalog
+  // INTO every state pack's picker too, which is why Social Security/
+  // Medicare/FUTA incorrectly appeared under e.g. California's "Add
+  // Component" — usaComponentConfig.js (Federal-only) and
+  // stateComponentCatalog.js (State-only) were already correctly scoped;
+  // only this selection was wrong.
+  const catalog = pack.jurisdictionState ? STATE_COMPONENT_CATALOG : PAYROLL_COMPONENT_CATALOG;
+  const categories = pack.jurisdictionState ? STATE_COMPONENT_CATEGORIES : PAYROLL_COMPONENT_CATEGORIES;
+
   const q = search.trim().toLowerCase();
   const entries = useMemo(() => {
-    return PAYROLL_COMPONENT_CATALOG
+    return catalog
       .map((e) => ({ entry: e, rows: (rates || []).filter((r) => r.componentKey === e.componentKey) }))
       .filter(({ entry }) => !q || entry.displayName.toLowerCase().includes(q) || entry.description.toLowerCase().includes(q));
-  }, [rates, q]);
+  }, [catalog, rates, q]);
 
   const grouped = useMemo(() => {
     const map = new Map();
@@ -51,7 +66,6 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
     const rows = (rates || []).filter((r) => r.componentKey === entryItem.componentKey);
     if (rows.length > 0) { onEditExisting(rows[0]); return; }
     setEntry(entryItem);
-    const { uiType } = classifyContributionRate({ componentKey: entryItem.componentKey });
     setForm({
       componentKey: entryItem.componentKey,
       label: entryItem.displayName,
@@ -62,10 +76,13 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
     setStep(2);
   }
 
-  const desc = entry ? describeUiType(classifyContributionRate({ componentKey: entry.componentKey }).uiType) : null;
-  const rateField = [UI_TYPES.PERCENTAGE, UI_TYPES.EMPLOYER_ASSIGNED_RATE].includes(classifyContributionRate({ componentKey: entry?.componentKey }).uiType)
-    ? classifyContributionRate({ componentKey: entry?.componentKey }).rateField || "employeeRatePct"
-    : null;
+  // State-catalog entries carry their own uiTypeHint (no STATIC_MAP entry
+  // exists for them in usaComponentConfig.js, so classifyContributionRate's
+  // heuristic fallback would otherwise have to guess) — prefer that hint,
+  // falling back to the existing federal classification when absent.
+  const resolvedUiType = entry ? (entry.uiTypeHint || classifyContributionRate({ componentKey: entry.componentKey }).uiType) : null;
+  const desc = resolvedUiType ? describeUiType(resolvedUiType) : null;
+  const rateField = resolvedUiType === UI_TYPES.EMPLOYER_ASSIGNED_RATE ? "employerRatePct" : "employeeRatePct";
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
   async function save() {
@@ -150,13 +167,21 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
             />
           </div>
           <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
-            {Object.keys(PAYROLL_COMPONENT_CATEGORIES).map((catKey) => {
+            {Object.keys(categories).map((catKey) => {
               const items = grouped.get(catKey);
               if (!items || items.length === 0) return null;
+              // `categories` is now always ONE level's set (never merged —
+              // see the catalog/categories selection above), so every
+              // category shown here genuinely belongs to the open pack's
+              // level: state name prefix for a state pack, "Federal" for
+              // the country-level pack.
+              const categoryLabel = pack.jurisdictionState
+                ? `${pack.jurisdictionState} ${categories[catKey]}`
+                : `Federal ${categories[catKey]}`;
               return (
                 <div key={catKey}>
                   <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-foreground-muted">
-                    {pack.jurisdictionState || "Federal"} {PAYROLL_COMPONENT_CATEGORIES[catKey]}
+                    {categoryLabel}
                   </p>
                   <div className="space-y-1">
                     {items.map(({ entry, rows }) => (
@@ -195,7 +220,10 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2"><label className={labelClass}>Label</label><input className={inputClass} value={form.label} onChange={set("label")} /></div>
               <div><label className={labelClass}>State / District</label>
-                <input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder={pack.jurisdictionState || "Federal"} />
+                <select className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")}>
+                  <option value="">Federal / Country-level</option>
+                  {US_STATE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
             </div>
           </FormSection>

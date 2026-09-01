@@ -26,6 +26,8 @@ import {
   INStatutoryPage, USAStatutoryPage, UKStatutoryPage,
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
 } from "./pages/JurisdictionStatutory";
+import ReportTemplatesPage from "./pages/ReportTemplatesPage";
+import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage } from "./pages/ReportTemplates";
 import FinancePage from "./pages/FinancePage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -141,6 +143,22 @@ export default function App() {
         <Route path="/super-admin/statutory-rates/canada/:jurisdiction" element={<SuperAdminShell><CAStatutoryPage /></SuperAdminShell>} />
         <Route path="/super-admin/statutory-rates/germany" element={<SuperAdminShell><DEStatutoryPage /></SuperAdminShell>} />
         <Route path="/super-admin/statutory-rates/germany/:jurisdiction" element={<SuperAdminShell><DEStatutoryPage /></SuperAdminShell>} />
+        <Route
+          path="/super-admin/report-templates"
+          element={
+            <SuperAdminShell>
+              <ReportTemplatesPage />
+            </SuperAdminShell>
+          }
+        />
+        {/* Report Templates — Phase 2: India, UK, USA. AU/CA/DE get their
+            own page here in a later phase (see pages/ReportTemplates/index.js). */}
+        <Route path="/super-admin/report-templates/india" element={<SuperAdminShell><INReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/india/:jurisdiction" element={<SuperAdminShell><INReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/united-kingdom" element={<SuperAdminShell><UKReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/united-kingdom/:jurisdiction" element={<SuperAdminShell><UKReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/united-states" element={<SuperAdminShell><USAReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/united-states/:jurisdiction" element={<SuperAdminShell><USAReportTemplatesPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={

@@ -43,6 +43,8 @@ from app.modules.payroll.models import (
     PayrollStatus, PayslipStatus, ActivityStatus, ComplianceDocumentStatus,
     PAYROLL_STATUS_ORDER,
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate,
+    ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
+    StatutoryFilingCalendar,
 )
 from app.modules.payroll.employee_validation import get_employee_validation_strategy
 from app.modules.payroll.schemas import (
@@ -52,6 +54,8 @@ from app.modules.payroll.schemas import (
     AttendanceRecordCreate, BulkAttendanceRequest,
     JurisdictionPackUpsert, CanonicalTaxSlabUpsert, CanonicalContributionRateUpsert,
     EmployerTaxProfileUpsert, ReciprocityRuleUpsert, SourceArtifactCreate, LocalityRateUpsert,
+    ReportTemplateUpsert, ReportTemplateComponentUpsert, ReportTemplateFieldUpsert,
+    FilingCalendarUpsert,
 )
 from app.core.exceptions import NotFoundException, BadRequestException
 from fastapi import HTTPException, status as http_status
@@ -2088,6 +2092,1361 @@ def hard_delete_jurisdiction_pack(db: Session, pack_row_id: int) -> dict:
         f"[compliance] Super Admin permanently deleted jurisdiction pack {pack_id_label} v{version_label} (id={pack_row_id})."
     )
     return {"packId": pack_id_label, "version": version_label}
+
+
+# ── Report Templates (jurisdiction-wide; Super Admin-authored) ──────────
+# Lifecycle: Draft -> Review -> Approved -> Published -> Active -> Superseded.
+# Mirrors JurisdictionPack's versioning/maker-checker/audit conventions
+# above, with its own vocabulary and its own component/field structure
+# (see models.py's ReportTemplate docstring for why) instead of
+# ContributionRate/TaxSlab rows.
+
+# Real, already-computed columns a report field is allowed to map to — the
+# enforcement point for "never a fabricated statutory value." Each entry:
+# field_key -> (label, field_type, aggregatable).
+_PAYSLIP_ITEM_FIELD_CATALOG = {
+    "employee_name": ("Employee Name", "text", False),
+    "department": ("Department", "text", False),
+    "designation": ("Designation", "text", False),
+    "pan": ("PAN", "text", False),
+    "uan": ("UAN", "text", False),
+    "bank_name": ("Bank Name", "text", False),
+    "bank_account": ("Bank Account", "text", False),
+    "basic_salary": ("Basic Salary", "currency", True),
+    "hra": ("HRA", "currency", True),
+    "special_allowance": ("Special Allowance", "currency", True),
+    "overtime": ("Overtime", "currency", True),
+    "additional_compensation": ("Additional Compensation", "currency", True),
+    "gross_pay": ("Gross Pay", "currency", True),
+    "payable_days": ("Payable Days", "text", False),
+    "total_working_days": ("Total Working Days", "text", False),
+    "pf": ("Provident Fund (Employee)", "currency", True),
+    "esi": ("ESI (Employee)", "currency", True),
+    "professional_tax": ("Professional Tax", "currency", True),
+    "tds": ("TDS / Income Tax Withheld", "currency", True),
+    "surcharge": ("Surcharge", "currency", True),
+    "cess": ("Health & Education Cess", "currency", True),
+    "social_security": ("Social Security", "currency", True),
+    "medicare": ("Medicare", "currency", True),
+    "federal_income_tax": ("Federal Income Tax", "currency", True),
+    "state_income_tax": ("State Income Tax", "currency", True),
+    "local_tax": ("Local Tax", "currency", True),
+    "state_disability_insurance": ("State Disability Insurance", "currency", True),
+    "ni_employee": ("National Insurance (Employee)", "currency", True),
+    "study_loan_deduction": ("Student/Postgraduate Loan Deduction", "currency", True),
+    "employee_pension": ("Workplace Pension (Employee)", "currency", True),
+    "church_tax": ("Church Tax", "currency", True),
+    "cpp2": ("CPP2", "currency", True),
+    "total_deductions": ("Total Deductions", "currency", True),
+    "employer_pf": ("Provident Fund (Employer)", "currency", True),
+    "employer_esi": ("ESI (Employer)", "currency", True),
+    "employer_social_security": ("Social Security (Employer)", "currency", True),
+    "employer_medicare": ("Medicare (Employer)", "currency", True),
+    "employer_pension": ("Pension (Employer)", "currency", True),
+    "employer_ni": ("National Insurance (Employer)", "currency", True),
+    "employer_futa": ("FUTA (Employer)", "currency", True),
+    "employer_sui": ("SUI (Employer)", "currency", True),
+    "net_pay": ("Net Pay", "currency", True),
+}
+
+_PAYROLL_RUN_FIELD_CATALOG = {
+    "run_code": ("Run Code", "text", False),
+    "period_label": ("Period", "text", False),
+    "period_start": ("Period Start", "date", False),
+    "period_end": ("Period End", "date", False),
+    "pay_date": ("Pay Date", "date", False),
+    "employee_count": ("Employee Count", "text", False),
+    "total_gross": ("Total Gross Pay", "currency", False),
+    "total_deductions": ("Total Deductions", "currency", False),
+    "total_taxes": ("Total Taxes", "currency", False),
+    "total_employer_contribution": ("Total Employer Contribution", "currency", False),
+    "total_net": ("Total Net Pay", "currency", False),
+}
+
+_EMPLOYER_PROFILE_FIELD_CATALOG = {
+    "name": ("Employer Name", "text", False),
+    "type": ("Employer Type", "text", False),
+    "tax_no": ("Tax Registration Number", "text", False),
+    "employer_id": ("Employer / Registration ID", "text", False),
+    "address": ("Registered Address", "text", False),
+    "industry": ("Industry", "text", False),
+    "email": ("Employer Email", "text", False),
+    "phone": ("Employer Phone", "text", False),
+}
+
+_REPORT_FIELD_ALLOWED_COLUMNS = {
+    "PAYSLIP_ITEM": _PAYSLIP_ITEM_FIELD_CATALOG,
+    "PAYROLL_RUN": _PAYROLL_RUN_FIELD_CATALOG,
+    "EMPLOYER_PROFILE": _EMPLOYER_PROFILE_FIELD_CATALOG,
+}
+
+# Which PAYSLIP_ITEM fields are actually relevant per country — narrows the
+# Super Admin's "available data fields" picker to a sensible subset only.
+# upsert_report_field's validation always accepts any real column in the
+# catalogs above regardless of country, since a field being real is what
+# matters, not whether this file guesses it's "typical" for a jurisdiction.
+_PAYSLIP_FIELDS_BY_COUNTRY = {
+    "IN": ["employee_name", "department", "designation", "pan", "uan", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "payable_days", "total_working_days", "pf", "esi", "professional_tax", "tds", "surcharge", "cess",
+           "total_deductions", "employer_pf", "employer_esi", "net_pay"],
+    "UK": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "tds", "ni_employee", "study_loan_deduction", "employee_pension", "total_deductions",
+           "employer_ni", "employer_pension", "net_pay"],
+    "US": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "federal_income_tax", "state_income_tax", "local_tax", "social_security", "medicare",
+           "state_disability_insurance", "total_deductions",
+           "employer_social_security", "employer_medicare", "employer_futa", "employer_sui", "net_pay"],
+}
+_DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
+
+
+def get_available_report_data_fields(country: str) -> List[dict]:
+    """The enumerable, backend-owned list a Report Template Field's
+    data-mapping dropdown must be populated from — never free-typed.
+    Always includes every PAYROLL_RUN/EMPLOYER_PROFILE field (period/
+    employer info are the same shape for every jurisdiction) plus the
+    PAYSLIP_ITEM fields this country actually populates."""
+    country = _normalize_country(country)
+    payslip_keys = _PAYSLIP_FIELDS_BY_COUNTRY.get(country, _DEFAULT_PAYSLIP_FIELDS)
+    items = []
+    for key in payslip_keys:
+        label, field_type, aggregatable = _PAYSLIP_ITEM_FIELD_CATALOG[key]
+        items.append({"key": key, "label": label, "dataSourceKind": "PAYSLIP_ITEM", "sourceColumn": key,
+                      "fieldType": field_type, "aggregatable": aggregatable})
+    for key, (label, field_type, aggregatable) in _PAYROLL_RUN_FIELD_CATALOG.items():
+        items.append({"key": key, "label": label, "dataSourceKind": "PAYROLL_RUN", "sourceColumn": key,
+                      "fieldType": field_type, "aggregatable": aggregatable})
+    for key, (label, field_type, aggregatable) in _EMPLOYER_PROFILE_FIELD_CATALOG.items():
+        items.append({"key": key, "label": label, "dataSourceKind": "EMPLOYER_PROFILE", "sourceColumn": key,
+                      "fieldType": field_type, "aggregatable": aggregatable})
+    return items
+
+
+# Report components a report of a given type is allowed to have — same
+# "never a generic unrelated dropdown" enforcement as the field catalog
+# above, just for components instead of fields. Keyed by report_type;
+# falls back to a generic set for an unrecognized type.
+_REPORT_COMPONENTS_BY_TYPE = {
+    "TDS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("deductions", "Deductions"), ("tax", "Tax"),
+        ("contributions", "Contributions"), ("employer_contributions", "Employer Contributions"),
+        ("ytd", "Year-to-Date"),
+    ],
+    "P60": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "Tax"), ("contributions", "National Insurance"),
+        ("employer_contributions", "Employer Contributions"), ("ytd", "Year-to-Date"),
+    ],
+    "941": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "Federal Tax"), ("contributions", "Social Security & Medicare"),
+        ("employer_contributions", "Employer Contributions"),
+    ],
+    # Distinct report_type keys for named forms that would otherwise share
+    # the generic "TDS" category — report_type is the disambiguating key
+    # Organizations select by (see list_available_reports_for_org), so two
+    # differently-named reports (a per-employee certificate vs. an
+    # aggregate quarterly statement) must not collide under one key.
+    "FORM_130": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "Tax"), ("ytd", "Year-to-Date"),
+    ],
+    "FORM_138": [
+        ("employer_info", "Employer Information"), ("tax", "Tax"), ("contributions", "Contributions"),
+    ],
+    "EPS_FPS": [
+        ("employer_info", "Employer Information"), ("contributions", "Contributions"),
+        ("employer_contributions", "Employer Contributions"),
+    ],
+}
+_DEFAULT_REPORT_COMPONENTS = [
+    ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+    ("earnings", "Earnings"), ("deductions", "Deductions"), ("tax", "Tax"),
+    ("contributions", "Contributions"), ("employer_contributions", "Employer Contributions"),
+    ("ytd", "Year-to-Date"),
+]
+
+
+def get_available_report_components(report_type: str) -> List[dict]:
+    """The enumerable component catalog for a given report type — Super
+    Admin can only add components from this list, never a free-typed or
+    unrelated one."""
+    options = _REPORT_COMPONENTS_BY_TYPE.get((report_type or "").upper(), _DEFAULT_REPORT_COMPONENTS)
+    return [{"key": key, "label": label} for key, label in options]
+
+
+_EDITABLE_TEMPLATE_STATUSES = ("Draft", "Review", "Approved")
+
+
+def _require_editable_report_template(template: "ReportTemplate") -> None:
+    if template.status not in _EDITABLE_TEMPLATE_STATUSES:
+        raise BadRequestException(
+            f"Template {template.template_key} v{template.version} is {template.status} — it is no "
+            "longer editable. Create a new version (\"New Version\") to make changes; "
+            "published report templates must not be edited in place."
+        )
+
+
+def list_report_templates(
+    db: Session, country: Optional[str] = None, state: Optional[str] = None,
+    reporting_year: Optional[str] = None, report_type: Optional[str] = None,
+    status: Optional[str] = None, search: Optional[str] = None,
+) -> List[ReportTemplate]:
+    """Cross-jurisdiction template list — latest version per template_key,
+    same convention as list_all_jurisdiction_packs."""
+    query = db.query(ReportTemplate)
+    if country:
+        query = query.filter(ReportTemplate.jurisdiction_country == country)
+        if state:
+            query = query.filter(ReportTemplate.jurisdiction_state == state)
+        else:
+            query = query.filter(ReportTemplate.jurisdiction_state.is_(None))
+    elif state:
+        query = query.filter(ReportTemplate.jurisdiction_state == state)
+    if reporting_year:
+        query = query.filter(ReportTemplate.reporting_year == reporting_year)
+    if report_type:
+        query = query.filter(ReportTemplate.report_type == report_type)
+    if status:
+        query = query.filter(ReportTemplate.status == status)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(ReportTemplate.name.ilike(like), ReportTemplate.template_key.ilike(like)))
+    rows = query.order_by(ReportTemplate.template_key, ReportTemplate.created_at.desc()).all()
+
+    latest_by_key = {}
+    for row in rows:
+        if row.template_key not in latest_by_key:
+            latest_by_key[row.template_key] = row
+    return list(latest_by_key.values())
+
+
+def get_report_template_versions(db: Session, template_key: str) -> List[ReportTemplate]:
+    return (
+        db.query(ReportTemplate)
+        .filter(ReportTemplate.template_key == template_key)
+        .order_by(ReportTemplate.created_at.asc())
+        .all()
+    )
+
+
+def get_report_template(db: Session, template_id: int) -> ReportTemplate:
+    row = db.query(ReportTemplate).filter(ReportTemplate.id == template_id).first()
+    if not row:
+        raise NotFoundException("ReportTemplate", template_id)
+    return row
+
+
+def get_report_template_detail(db: Session, template_id: int) -> dict:
+    """Full template with nested components+fields, assembled explicitly
+    (ReportTemplate has no ORM `.components` relationship — deliberately
+    kept out of the model to keep it a plain identity/metadata row, same
+    as JurisdictionPack) — used by the Super Admin authoring UI's detail
+    view."""
+    template = get_report_template(db, template_id)
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == template_id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    component_dicts = []
+    for component in components:
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        component_dicts.append({
+            "id": component.id, "report_template_id": component.report_template_id,
+            "component_key": component.component_key, "label": component.label,
+            "component_category": component.component_category, "sort_order": component.sort_order,
+            "fields": fields,
+        })
+    return {
+        "id": template.id, "template_key": template.template_key, "name": template.name,
+        "report_type": template.report_type, "jurisdiction_country": template.jurisdiction_country,
+        "jurisdiction_state": template.jurisdiction_state, "jurisdiction_locality": template.jurisdiction_locality,
+        "reporting_year": template.reporting_year, "version": template.version, "status": template.status,
+        "description": template.description, "regulatory_authority": template.regulatory_authority,
+        "effective_from": template.effective_from, "effective_to": template.effective_to,
+        "change_summary": template.change_summary, "source_references": template.source_references,
+        "reconciliation_tolerance": template.reconciliation_tolerance, "approved_by_id": template.approved_by_id,
+        "created_by_id": template.created_by_id, "updated_by_id": template.updated_by_id,
+        "previous_version_id": template.previous_version_id, "created_at": template.created_at,
+        "updated_at": template.updated_at, "components": component_dicts,
+    }
+
+
+def _clone_report_template_structure(db: Session, source_template_id: int, target_template_id: int) -> None:
+    """Copies every component+field from source onto target as brand-new
+    rows — same rationale as _clone_pack_rates: without this, creating a
+    new version for a one-field correction would force re-authoring the
+    entire template from scratch."""
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == source_template_id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    for component in components:
+        new_component = ReportTemplateComponent(
+            report_template_id=target_template_id,
+            component_key=component.component_key, label=component.label,
+            component_category=component.component_category, sort_order=component.sort_order,
+        )
+        db.add(new_component)
+        db.flush()
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        for field in fields:
+            db.add(ReportTemplateComponentField(
+                component_id=new_component.id, field_key=field.field_key, label=field.label,
+                field_type=field.field_type, data_source_kind=field.data_source_kind,
+                source_column=field.source_column, aggregation=field.aggregation,
+                enum_values=field.enum_values, format_hint=field.format_hint,
+                is_required=field.is_required, sort_order=field.sort_order,
+            ))
+    db.commit()
+
+
+def upsert_report_template(db: Session, data: "ReportTemplateUpsert", actor_id: Optional[int] = None) -> ReportTemplate:
+    """Create or update a Report Template, or create a new version — same
+    id-first-then-(template_key, version) lookup, same "version bump is a
+    deliberate act" contract, as upsert_jurisdiction_pack."""
+    existing = None
+    if data.id:
+        existing = db.query(ReportTemplate).filter(ReportTemplate.id == data.id).first()
+    if not existing:
+        existing = (
+            db.query(ReportTemplate)
+            .filter(ReportTemplate.template_key == data.templateKey, ReportTemplate.version == data.version)
+            .first()
+        )
+    fields = dict(
+        template_key=data.templateKey, name=data.name, report_type=data.reportType,
+        jurisdiction_country=data.jurisdictionCountry, jurisdiction_state=data.jurisdictionState,
+        jurisdiction_locality=data.jurisdictionLocality, reporting_year=data.reportingYear,
+        version=data.version, status=data.status, description=data.description,
+        regulatory_authority=data.regulatoryAuthority, effective_from=data.effectiveFrom,
+        effective_to=data.effectiveTo, change_summary=data.changeSummary,
+        source_references=data.sourceReferences, document_scope=data.documentScope,
+        source_document_id=data.sourceDocumentId, reconciliation_tolerance=data.reconciliationTolerance,
+        approved_by_id=data.approvedById,
+    )
+    if existing:
+        _require_editable_report_template(existing)
+        old_value = {k: (str(getattr(existing, k)) if getattr(existing, k) is not None else None) for k in fields}
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        existing.updated_by_id = actor_id
+        row = existing
+        db.commit()
+        db.refresh(row)
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type="report_template", entity_id=row.id,
+            tax_version=row.version, legal_reference=row.source_references,
+            old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
+            reason=data.reason,
+        )
+        return row
+
+    previous = (
+        db.query(ReportTemplate)
+        .filter(ReportTemplate.template_key == data.templateKey)
+        .order_by(ReportTemplate.created_at.desc())
+        .first()
+    )
+    row = ReportTemplate(
+        previous_version_id=previous.id if previous else None,
+        created_by_id=actor_id, updated_by_id=actor_id,
+        **fields,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    if previous:
+        _clone_report_template_structure(db, source_template_id=previous.id, target_template_id=row.id)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="report_template", entity_id=row.id,
+        tax_version=row.version, legal_reference=row.source_references,
+        old_value=None, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
+        reason=data.reason,
+    )
+    return row
+
+
+def upsert_report_component(
+    db: Session, report_template_id: int, data: "ReportTemplateComponentUpsert", actor_id: Optional[int] = None,
+) -> ReportTemplateComponent:
+    template = get_report_template(db, report_template_id)
+    _require_editable_report_template(template)
+
+    allowed = {item["key"] for item in get_available_report_components(template.report_type)}
+    if data.componentKey not in allowed:
+        raise BadRequestException(
+            f"'{data.componentKey}' is not an available component for report type {template.report_type!r}."
+        )
+
+    existing = None
+    if data.id:
+        existing = db.query(ReportTemplateComponent).filter(
+            ReportTemplateComponent.id == data.id, ReportTemplateComponent.report_template_id == report_template_id,
+        ).first()
+    if not existing:
+        # Falls back to the natural key (report_template_id, component_key)
+        # — matches upsert_report_template's own id-first-then-natural-key
+        # lookup, and makes re-running a seed script idempotent instead of
+        # hitting uq_report_component_template_key on the second run.
+        existing = db.query(ReportTemplateComponent).filter(
+            ReportTemplateComponent.report_template_id == report_template_id,
+            ReportTemplateComponent.component_key == data.componentKey,
+        ).first()
+    fields = dict(component_key=data.componentKey, label=data.label,
+                  component_category=data.componentCategory, sort_order=data.sortOrder)
+    if existing:
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        db.commit()
+        db.refresh(existing)
+        return existing
+    row = ReportTemplateComponent(report_template_id=report_template_id, **fields)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_report_component(db: Session, component_id: int, actor_id: Optional[int] = None) -> None:
+    component = db.query(ReportTemplateComponent).filter(ReportTemplateComponent.id == component_id).first()
+    if not component:
+        raise NotFoundException("ReportTemplateComponent", component_id)
+    template = get_report_template(db, component.report_template_id)
+    _require_editable_report_template(template)
+    db.query(ReportTemplateComponentField).filter(ReportTemplateComponentField.component_id == component_id).delete()
+    db.delete(component)
+    db.commit()
+
+
+def upsert_report_field(
+    db: Session, component_id: int, data: "ReportTemplateFieldUpsert", actor_id: Optional[int] = None,
+) -> ReportTemplateComponentField:
+    """The allow-list enforcement point: source_column must be a real,
+    already-computed column for the chosen data_source_kind — this is
+    what makes "never a fabricated statutory value" an enforced API
+    contract rather than a UI convention."""
+    component = db.query(ReportTemplateComponent).filter(ReportTemplateComponent.id == component_id).first()
+    if not component:
+        raise NotFoundException("ReportTemplateComponent", component_id)
+    template = get_report_template(db, component.report_template_id)
+    _require_editable_report_template(template)
+
+    catalog = _REPORT_FIELD_ALLOWED_COLUMNS.get(data.dataSourceKind)
+    if not catalog:
+        raise BadRequestException(f"Unknown data source kind {data.dataSourceKind!r}.")
+    if data.sourceColumn not in catalog:
+        raise BadRequestException(
+            f"'{data.sourceColumn}' is not a recognized {data.dataSourceKind} field — "
+            "select a field from the available data fields list."
+        )
+    if data.aggregation and data.aggregation not in ("SUM_RUN", "SUM_YTD"):
+        raise BadRequestException(f"Unknown aggregation {data.aggregation!r}.")
+    if data.aggregation and not catalog[data.sourceColumn][2]:
+        raise BadRequestException(f"'{data.sourceColumn}' is not a numeric field and cannot be aggregated.")
+
+    existing = None
+    if data.id:
+        existing = db.query(ReportTemplateComponentField).filter(
+            ReportTemplateComponentField.id == data.id, ReportTemplateComponentField.component_id == component_id,
+        ).first()
+    if not existing:
+        # Same natural-key fallback as upsert_report_component, for the
+        # same idempotency reason (uq_report_field_component_key).
+        existing = db.query(ReportTemplateComponentField).filter(
+            ReportTemplateComponentField.component_id == component_id,
+            ReportTemplateComponentField.field_key == data.fieldKey,
+        ).first()
+    fields = dict(
+        field_key=data.fieldKey, label=data.label, field_type=data.fieldType,
+        data_source_kind=data.dataSourceKind, source_column=data.sourceColumn, aggregation=data.aggregation,
+        enum_values=data.enumValues, format_hint=data.formatHint, is_required=data.isRequired,
+        sort_order=data.sortOrder,
+    )
+    if existing:
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        db.commit()
+        db.refresh(existing)
+        return existing
+    row = ReportTemplateComponentField(component_id=component_id, **fields)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_report_field(db: Session, field_id: int, actor_id: Optional[int] = None) -> None:
+    field = db.query(ReportTemplateComponentField).filter(ReportTemplateComponentField.id == field_id).first()
+    if not field:
+        raise NotFoundException("ReportTemplateComponentField", field_id)
+    component = db.query(ReportTemplateComponent).filter(ReportTemplateComponent.id == field.component_id).first()
+    if component:
+        template = get_report_template(db, component.report_template_id)
+        _require_editable_report_template(template)
+    db.delete(field)
+    db.commit()
+
+
+def set_report_template_status(db: Session, template_id: int, status: str, actor_id: Optional[int] = None) -> ReportTemplate:
+    row = get_report_template(db, template_id)
+    if status in ("Published", "Active"):
+        # Minimum viable maker-checker gate, same contract as
+        # set_jurisdiction_pack_status: author cannot self-approve.
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This template needs a distinct approver before it can be Published/Activated — "
+                "use \"Approve\" (a different Super Admin than whoever last edited it)."
+            )
+    if status == "Active":
+        conflict = (
+            db.query(ReportTemplate)
+            .filter(
+                ReportTemplate.id != row.id,
+                ReportTemplate.status == "Active",
+                ReportTemplate.jurisdiction_country == row.jurisdiction_country,
+                ReportTemplate.jurisdiction_state == row.jurisdiction_state,
+                ReportTemplate.reporting_year == row.reporting_year,
+                ReportTemplate.report_type == row.report_type,
+            )
+            .first()
+        )
+        if conflict:
+            raise BadRequestException(
+                f"Template {conflict.template_key} v{conflict.version} is already Active for this "
+                f"jurisdiction/reporting year/report type — supersede it before activating a new version."
+            )
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="report_template", entity_id=row.id,
+        tax_version=row.version, old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_report_template_approver(db: Session, template_id: int, actor_id: Optional[int] = None) -> ReportTemplate:
+    """Sets approved_by_id to the calling Super Admin — a distinct action
+    from general editing, same semantics as set_jurisdiction_pack_approver.
+    Auto-advances Draft -> Approved only; leaves any later status alone."""
+    row = get_report_template(db, template_id)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "Draft":
+        row.status = "Approved"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="report_template", entity_id=row.id,
+        tax_version=row.version, old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status}, reason="Approver set",
+    )
+    return row
+
+
+def get_report_template_audit(db: Session, template_id: int) -> List[TaxConfigurationAudit]:
+    return (
+        db.query(TaxConfigurationAudit)
+        .filter(TaxConfigurationAudit.entity_type == "report_template", TaxConfigurationAudit.entity_id == template_id)
+        .order_by(TaxConfigurationAudit.created_at.desc())
+        .all()
+    )
+
+
+def hard_delete_report_template(db: Session, template_id: int) -> dict:
+    row = get_report_template(db, template_id)
+    has_generated_history = (
+        db.query(GeneratedReport.id).filter(GeneratedReport.report_template_id == row.id).first() is not None
+    )
+    if has_generated_history:
+        raise BadRequestException(
+            f"{row.template_key} v{row.version} has generated reports referencing it and must keep "
+            "existing — supersede it instead of deleting."
+        )
+    if row.status in ("Published", "Active"):
+        raise BadRequestException(
+            f"{row.template_key} v{row.version} is {row.status} — supersede it before deleting."
+        )
+    db.query(ReportTemplate).filter(ReportTemplate.previous_version_id == row.id).update(
+        {"previous_version_id": None}, synchronize_session=False,
+    )
+    component_ids = [
+        c.id for c in db.query(ReportTemplateComponent.id)
+        .filter(ReportTemplateComponent.report_template_id == row.id).all()
+    ]
+    if component_ids:
+        db.query(ReportTemplateComponentField).filter(
+            ReportTemplateComponentField.component_id.in_(component_ids)
+        ).delete(synchronize_session=False)
+    db.query(ReportTemplateComponent).filter(ReportTemplateComponent.report_template_id == row.id).delete(synchronize_session=False)
+    template_key_label, version_label = row.template_key, row.version
+    db.delete(row)
+    db.commit()
+    return {"templateKey": template_key_label, "version": version_label}
+
+
+# ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
+# A genuinely new concept — no due-date/deadline asset existed anywhere in
+# this codebase before. Follows the exact same versioning/maker-checker
+# conventions as ReportTemplate above (never edit a published due date in
+# place; a correction is a new row chained via previous_version_id; only
+# one Active row per period, enforced here rather than by a DB
+# constraint, matching JurisdictionPack's own overlap-guard pattern).
+
+_EDITABLE_FILING_CALENDAR_STATUSES = ("Draft",)
+
+
+def list_filing_calendar(
+    db: Session, country: Optional[str] = None, state: Optional[str] = None,
+    report_type: Optional[str] = None, reporting_year: Optional[str] = None, status: Optional[str] = None,
+) -> List[StatutoryFilingCalendar]:
+    query = db.query(StatutoryFilingCalendar)
+    if country:
+        query = query.filter(StatutoryFilingCalendar.jurisdiction_country == country)
+    if state:
+        query = query.filter(StatutoryFilingCalendar.jurisdiction_state == state)
+    if report_type:
+        query = query.filter(StatutoryFilingCalendar.report_type == report_type)
+    if reporting_year:
+        query = query.filter(StatutoryFilingCalendar.reporting_year == reporting_year)
+    if status:
+        query = query.filter(StatutoryFilingCalendar.status == status)
+    return query.order_by(StatutoryFilingCalendar.due_date.asc()).all()
+
+
+def get_filing_calendar_entry(db: Session, entry_id: int) -> StatutoryFilingCalendar:
+    row = db.query(StatutoryFilingCalendar).filter(StatutoryFilingCalendar.id == entry_id).first()
+    if not row:
+        raise NotFoundException("StatutoryFilingCalendar", entry_id)
+    return row
+
+
+def upsert_filing_calendar_entry(
+    db: Session, data: "FilingCalendarUpsert", actor_id: Optional[int] = None,
+) -> StatutoryFilingCalendar:
+    existing = db.query(StatutoryFilingCalendar).filter(StatutoryFilingCalendar.id == data.id).first() if data.id else None
+    if not existing:
+        # Falls back to the natural key when no id is given — same
+        # reasoning as ReportTemplate/Component/Field's own id-first-then-
+        # natural-key lookup: without this, re-running a seed script (or
+        # any repeat call) would create an unbounded number of duplicate
+        # Draft rows for the same period instead of updating the one
+        # already-Draft entry (a genuinely published/Active entry is still
+        # protected by _require_editable_filing_calendar_status below —
+        # this only ever finds/updates a still-editable Draft row).
+        existing = (
+            db.query(StatutoryFilingCalendar)
+            .filter(
+                StatutoryFilingCalendar.jurisdiction_country == data.jurisdictionCountry,
+                StatutoryFilingCalendar.jurisdiction_state == data.jurisdictionState,
+                StatutoryFilingCalendar.report_type == data.reportType,
+                StatutoryFilingCalendar.reporting_year == data.reportingYear,
+                StatutoryFilingCalendar.period_key == data.periodKey,
+                StatutoryFilingCalendar.status.in_(_EDITABLE_FILING_CALENDAR_STATUSES),
+            )
+            .order_by(StatutoryFilingCalendar.created_at.desc())
+            .first()
+        )
+    fields = dict(
+        jurisdiction_country=data.jurisdictionCountry, jurisdiction_state=data.jurisdictionState,
+        report_type=data.reportType, reporting_year=data.reportingYear,
+        period_key=data.periodKey, period_label=data.periodLabel, due_date=data.dueDate,
+        status=data.status, source_document_id=data.sourceDocumentId,
+    )
+    if existing:
+        if existing.status not in _EDITABLE_FILING_CALENDAR_STATUSES:
+            raise BadRequestException(
+                f"Filing calendar entry for {existing.report_type} {existing.period_key} {existing.reporting_year} "
+                f"is {existing.status} — create a corrected entry instead of editing a published due date in place."
+            )
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        existing.updated_by_id = actor_id
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    previous = (
+        db.query(StatutoryFilingCalendar)
+        .filter(
+            StatutoryFilingCalendar.jurisdiction_country == data.jurisdictionCountry,
+            StatutoryFilingCalendar.jurisdiction_state == data.jurisdictionState,
+            StatutoryFilingCalendar.report_type == data.reportType,
+            StatutoryFilingCalendar.reporting_year == data.reportingYear,
+            StatutoryFilingCalendar.period_key == data.periodKey,
+        )
+        .order_by(StatutoryFilingCalendar.created_at.desc())
+        .first()
+    )
+    row = StatutoryFilingCalendar(
+        previous_version_id=previous.id if previous else None,
+        created_by_id=actor_id, updated_by_id=actor_id, **fields,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def set_filing_calendar_status(db: Session, entry_id: int, status: str, actor_id: Optional[int] = None) -> StatutoryFilingCalendar:
+    row = get_filing_calendar_entry(db, entry_id)
+    if status == "Active":
+        conflict = (
+            db.query(StatutoryFilingCalendar)
+            .filter(
+                StatutoryFilingCalendar.id != row.id,
+                StatutoryFilingCalendar.status == "Active",
+                StatutoryFilingCalendar.jurisdiction_country == row.jurisdiction_country,
+                StatutoryFilingCalendar.jurisdiction_state == row.jurisdiction_state,
+                StatutoryFilingCalendar.report_type == row.report_type,
+                StatutoryFilingCalendar.reporting_year == row.reporting_year,
+                StatutoryFilingCalendar.period_key == row.period_key,
+            )
+            .first()
+        )
+        if conflict:
+            raise BadRequestException(
+                f"An Active due-date entry already exists for {row.report_type} {row.period_key} "
+                f"{row.reporting_year} — supersede it before activating a new one."
+            )
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_upcoming_filing_dates_for_org(db: Session, organization_id: int, limit: int = 10) -> List[StatutoryFilingCalendar]:
+    """Org-facing: this org's own jurisdiction's upcoming Active filing
+    obligations, soonest first. Never guessed/hardcoded client-side — the
+    frontend just renders whatever this returns."""
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    state = getattr(company, "jurisdiction_state", None) or None
+
+    query = (
+        db.query(StatutoryFilingCalendar)
+        .filter(
+            StatutoryFilingCalendar.jurisdiction_country == country,
+            StatutoryFilingCalendar.status == "Active",
+            StatutoryFilingCalendar.due_date >= date.today(),
+        )
+        .filter(or_(StatutoryFilingCalendar.jurisdiction_state.is_(None), StatutoryFilingCalendar.jurisdiction_state == state))
+    )
+    return query.order_by(StatutoryFilingCalendar.due_date.asc()).limit(limit).all()
+
+
+# ── Report Template Resolution + Generation (Organization consumption) ──
+
+def get_applicable_report_template(
+    db: Session, country: str, state: Optional[str], reporting_year: str, report_type: str,
+    as_of: Optional[date] = None,
+) -> Optional[ReportTemplate]:
+    """Mirrors engine/tax_resolver.py's _find_active_tax_pack: prefers an
+    exact state match, falls back to the country-level (state IS NULL)
+    template, filters on report_type/reporting_year and effective dates.
+    Falls back to a Published (not yet Active) template only when no
+    Active version exists — a Published template is a legitimate preview
+    candidate, but an Active version always wins when both exist. Returns
+    None (never raises) when nothing resolves."""
+    country = _normalize_country(country)
+    as_of = as_of or date.today()
+
+    def _query(state_filter, statuses):
+        q = (
+            db.query(ReportTemplate)
+            .filter(
+                ReportTemplate.jurisdiction_country == country,
+                ReportTemplate.reporting_year == reporting_year,
+                ReportTemplate.report_type == report_type,
+                ReportTemplate.status.in_(statuses),
+            )
+        )
+        q = state_filter(q)
+        q = q.filter(
+            (ReportTemplate.effective_from.is_(None)) | (ReportTemplate.effective_from <= as_of),
+        ).filter(
+            (ReportTemplate.effective_to.is_(None)) | (ReportTemplate.effective_to >= as_of),
+        )
+        return q.order_by(ReportTemplate.updated_at.desc()).first()
+
+    for statuses in (["Active"], ["Published"]):
+        if state:
+            template = _query(lambda q: q.filter(ReportTemplate.jurisdiction_state == state), statuses)
+            if template:
+                return template
+        template = _query(lambda q: q.filter(ReportTemplate.jurisdiction_state.is_(None)), statuses)
+        if template:
+            return template
+    return None
+
+
+def list_available_reports_for_org(db: Session, organization_id: int, reporting_year: str) -> List[dict]:
+    """Distinct (reportType, name) combinations with a Published/Active
+    template covering this org's jurisdiction + reporting year — the real,
+    backend-owned list the Org's "Report" dropdown must populate from
+    (never a hardcoded frontend list of report names)."""
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    state = getattr(company, "jurisdiction_state", None) or None
+
+    query = (
+        db.query(ReportTemplate)
+        .filter(
+            ReportTemplate.jurisdiction_country == country,
+            ReportTemplate.reporting_year == reporting_year,
+            ReportTemplate.status.in_(["Published", "Active"]),
+        )
+        .filter(or_(ReportTemplate.jurisdiction_state.is_(None), ReportTemplate.jurisdiction_state == state))
+    )
+    seen = {}
+    for row in query.all():
+        seen.setdefault(row.report_type, row.name)
+    return [{"reportType": rt, "name": name} for rt, name in seen.items()]
+
+
+def get_applicable_report_template_for_org(
+    db: Session, organization_id: int, reporting_year: str, report_type: str, payroll_run_id: Optional[int] = None,
+) -> dict:
+    """Org-facing wrapper: resolves the org's own jurisdiction from
+    CompanyComplianceDetails (the same lookup every other org-scoped
+    Compliance query in this file uses) before calling
+    get_applicable_report_template, and — when a payroll_run_id is given —
+    also runs validate_report_generation_context for it. Keeps the router
+    thin, matching this module's convention of routers passing only
+    organization_id/params and services doing every lookup themselves."""
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    state = getattr(company, "jurisdiction_state", None) or None
+
+    template = get_applicable_report_template(db, country, state, reporting_year, report_type)
+    validation = None
+    if template and payroll_run_id:
+        run = db.query(PayrollRun).filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id).first()
+        if not run:
+            raise NotFoundException("PayrollRun", payroll_run_id)
+        validation = validate_report_generation_context(db, organization_id, template, run)
+    return {"template": template, "validation": validation}
+
+
+def validate_report_generation_context(
+    db: Session, organization_id: int, template: ReportTemplate, run: PayrollRun, reporting_period: Optional[str] = None,
+) -> dict:
+    """Real backend-computed validation object — the frontend must never
+    guess these booleans client-side. Returns the same shape regardless
+    of pass/fail so the UI always has something to render."""
+    reasons = []
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    org_country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    org_state = getattr(company, "jurisdiction_state", None) or None
+
+    jurisdiction_match = (org_country == template.jurisdiction_country) and (
+        template.jurisdiction_state is None or template.jurisdiction_state == org_state
+    )
+    if not jurisdiction_match:
+        reasons.append(
+            f"Organization jurisdiction ({org_country}{'/' + org_state if org_state else ''}) does not "
+            f"match this template's jurisdiction ({template.jurisdiction_country}"
+            f"{'/' + template.jurisdiction_state if template.jurisdiction_state else ''})."
+        )
+
+    try:
+        run_status_index = PAYROLL_STATUS_ORDER.index(PayrollStatus(run.status))
+    except ValueError:
+        run_status_index = -1
+    approved_index = PAYROLL_STATUS_ORDER.index(PayrollStatus.APPROVED)
+    run_finalized = run_status_index >= approved_index
+    if not run_finalized:
+        reasons.append(f"Payroll run {run.run_code or run.id} is {run.status} — it must be Approved or later.")
+
+    period_match = True
+    if reporting_period and run.period_label != reporting_period:
+        period_match = False
+        reasons.append(f"Selected period ({reporting_period}) does not match this run's period ({run.period_label}).")
+
+    template_published = template.status in ("Published", "Active")
+    if not template_published:
+        reasons.append(f"Template {template.template_key} v{template.version} is {template.status}, not Published/Active.")
+
+    return {
+        "jurisdictionMatch": jurisdiction_match, "runFinalized": run_finalized,
+        "periodMatch": period_match, "templatePublished": template_published, "reasons": reasons,
+    }
+
+
+def _resolve_field_value(
+    db: Session, field: ReportTemplateComponentField, run: PayrollRun, item: Optional[PayslipItem],
+    company: Optional[CompanyComplianceDetails], organization_id: int,
+):
+    if field.data_source_kind == "PAYROLL_RUN":
+        value = getattr(run, field.source_column, None)
+    elif field.data_source_kind == "EMPLOYER_PROFILE":
+        value = getattr(company, field.source_column, None) if company else None
+    elif field.data_source_kind == "PAYSLIP_ITEM":
+        if field.aggregation == "SUM_RUN":
+            total = sum(
+                (Decimal(str(getattr(i, field.source_column, 0) or 0)) for i in (run.payslip_items or [])),
+                Decimal("0"),
+            )
+            value = float(total)
+        elif field.aggregation == "SUM_YTD" and item is not None:
+            # Approximated as "this employee's runs within the same calendar
+            # year up to and including this run" — a real sum over real
+            # rows, not fabricated data, but a simplification where a
+            # jurisdiction's fiscal year doesn't start January 1 (e.g.
+            # India Apr-Mar, UK Apr-Apr). Revisit if/when PayrollRun gains
+            # its own fiscal-year assignment.
+            year_start = date(run.period_end.year, 1, 1) if run.period_end else None
+            ytd_query = (
+                db.query(PayslipItem)
+                .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+                .filter(
+                    PayslipItem.organization_id == organization_id,
+                    PayslipItem.employee_id == item.employee_id,
+                    PayrollRun.period_end <= run.period_end,
+                )
+            )
+            if year_start:
+                ytd_query = ytd_query.filter(PayrollRun.period_end >= year_start)
+            total = sum(
+                (Decimal(str(getattr(i, field.source_column, 0) or 0)) for i in ytd_query.all()),
+                Decimal("0"),
+            )
+            value = float(total)
+        else:
+            value = getattr(item, field.source_column, None) if item else None
+    else:
+        value = None
+    if isinstance(value, Decimal):
+        value = float(value)
+    if isinstance(value, (date, datetime)):
+        value = value.isoformat()
+    return value
+
+
+def _compute_report_reconciliation(run: PayrollRun, rendered_data: dict, tolerance: Optional[float]) -> dict:
+    """Rendering-consistency check against the run's own aggregates — NOT
+    an independent statutory recomputation, since no second calculation
+    path exists anywhere in this codebase. Documented as such in the
+    stored result."""
+    tolerance_dec = Decimal(str(tolerance)) if tolerance is not None else Decimal("0")
+    run_totals = {
+        "grossPay": float(run.total_gross or 0), "totalDeductions": float(run.total_deductions or 0),
+        "totalNet": float(run.total_net or 0),
+    }
+    totals = rendered_data.get("totals", {})
+    report_totals = {
+        "grossPay": float(totals.get("gross_pay", 0) or 0),
+        "totalDeductions": float(totals.get("total_deductions", 0) or 0),
+        "totalNet": float(totals.get("net_pay", 0) or 0),
+    }
+    field_diffs = []
+    mismatch = False
+    for key in ("grossPay", "totalDeductions", "totalNet"):
+        delta = Decimal(str(run_totals[key])) - Decimal(str(report_totals[key]))
+        if abs(delta) > tolerance_dec:
+            mismatch = True
+        field_diffs.append({"field": key, "runSum": run_totals[key], "reportSum": report_totals[key], "delta": float(delta)})
+
+    row_count_run = len(run.payslip_items or [])
+    row_count_report = len(rendered_data.get("employees", []))
+    if row_count_run != row_count_report:
+        mismatch = True
+
+    return {
+        "checkedAt": datetime.utcnow().isoformat(), "runTotals": run_totals, "reportTotals": report_totals,
+        "rowCountRun": row_count_run, "rowCountReport": row_count_report, "fieldDiffs": field_diffs,
+        "status": "MISMATCH" if mismatch else "MATCH",
+        "note": "Rendering-consistency check against PayrollRun/PayslipItem aggregates — the same single "
+                "source of truth the report was generated from, not an independent recomputation.",
+    }
+
+
+def generate_report_from_template(
+    db: Session, organization_id: int, report_template_id: int, payroll_run_id: int,
+    reporting_period: Optional[str] = None, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    template = get_report_template(db, report_template_id)
+    run = (
+        db.query(PayrollRun)
+        .filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id)
+        .first()
+    )
+    if not run:
+        raise NotFoundException("PayrollRun", payroll_run_id)
+
+    validation = validate_report_generation_context(db, organization_id, template, run, reporting_period)
+    if not (validation["jurisdictionMatch"] and validation["runFinalized"] and validation["periodMatch"] and validation["templatePublished"]):
+        raise BadRequestException(
+            "; ".join(validation["reasons"]) or "This run/template combination is not valid for report generation."
+        )
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == template.id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    component_snapshots = []
+    employee_values: dict = {}
+    header_values: dict = {}
+    totals: dict = {}
+    items = run.payslip_items or []
+
+    for component in components:
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        field_snapshots = []
+        for field in fields:
+            field_snapshots.append({
+                "fieldKey": field.field_key, "label": field.label, "type": field.field_type,
+                "dataSourceKind": field.data_source_kind, "sourceColumn": field.source_column,
+                "aggregation": field.aggregation,
+            })
+            if field.data_source_kind in ("PAYROLL_RUN", "EMPLOYER_PROFILE") or field.aggregation == "SUM_RUN":
+                header_values[field.field_key] = _resolve_field_value(db, field, run, None, company, organization_id)
+                if field.aggregation == "SUM_RUN":
+                    totals[field.source_column] = header_values[field.field_key]
+            else:
+                # Plain PAYSLIP_ITEM field, or SUM_YTD (per-employee).
+                for item in items:
+                    per_emp = employee_values.setdefault(
+                        item.id, {"employeeId": item.employee_id, "payslipItemId": item.id,
+                                  "employeeName": item.employee_name, "values": {}},
+                    )
+                    per_emp["values"][field.field_key] = _resolve_field_value(db, field, run, item, company, organization_id)
+        component_snapshots.append({"componentKey": component.component_key, "label": component.label, "fields": field_snapshots})
+
+    # Always populate these three for reconciliation, even if the template
+    # itself doesn't map them — a report with no explicit gross/deduction/
+    # net field mappings must still be reconcilable against the run.
+    if "gross_pay" not in totals:
+        totals["gross_pay"] = float(sum((Decimal(str(i.gross_pay or 0)) for i in items), Decimal("0")))
+    if "total_deductions" not in totals:
+        totals["total_deductions"] = float(sum((Decimal(str(i.total_deductions or 0)) for i in items), Decimal("0")))
+    if "net_pay" not in totals:
+        totals["net_pay"] = float(sum((Decimal(str(i.net_pay or 0)) for i in items), Decimal("0")))
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": header_values,
+        "period": {
+            "periodLabel": run.period_label,
+            "periodStart": run.period_start.isoformat() if run.period_start else None,
+            "periodEnd": run.period_end.isoformat() if run.period_end else None,
+            "payDate": run.pay_date.isoformat() if run.pay_date else None,
+        },
+        "employees": list(employee_values.values()),
+        "totals": totals,
+    }
+    reconciliation = _compute_report_reconciliation(run, rendered_data, float(template.reconciliation_tolerance) if template.reconciliation_tolerance is not None else None)
+
+    distinct_pack_ids = {i.tax_policy_pack_id for i in items if i.tax_policy_pack_id}
+    applicable_pack_id = next(iter(distinct_pack_ids)) if len(distinct_pack_ids) == 1 else None
+    applicable_pack_version = None
+    if applicable_pack_id:
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == applicable_pack_id).first()
+        applicable_pack_version = pack.version if pack else None
+    if len(distinct_pack_ids) > 1:
+        rendered_data["metadata"] = {"taxPacksUsed": list(distinct_pack_ids)}
+
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.payroll_run_id == payroll_run_id,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=run.id,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=template.reporting_year, reporting_period=reporting_period or run.period_label,
+        applicable_tax_pack_id=applicable_pack_id, applicable_tax_pack_version=applicable_pack_version,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=reconciliation,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def _attach_document_scope(db: Session, rows: List[GeneratedReport]) -> List[GeneratedReport]:
+    """Sets a transient (non-persisted) `document_scope` attribute on each
+    row from its ReportTemplate — lets GeneratedReportResponse expose
+    whether a report is PER_EMPLOYEE (certificate + ZIP download) or
+    AGGREGATE (single-document download) without a schema migration or a
+    second round-trip from the frontend."""
+    template_ids = {r.report_template_id for r in rows}
+    scopes = {
+        t.id: t.document_scope
+        for t in db.query(ReportTemplate.id, ReportTemplate.document_scope).filter(ReportTemplate.id.in_(template_ids)).all()
+    } if template_ids else {}
+    for row in rows:
+        row.document_scope = scopes.get(row.report_template_id, "AGGREGATE")
+    return rows
+
+
+def get_generated_reports(
+    db: Session, organization_id: int, payroll_run_id: Optional[int] = None,
+    report_type: Optional[str] = None, status: Optional[str] = None,
+) -> List[GeneratedReport]:
+    query = db.query(GeneratedReport).filter(GeneratedReport.organization_id == organization_id)
+    if payroll_run_id:
+        query = query.filter(GeneratedReport.payroll_run_id == payroll_run_id)
+    if report_type:
+        query = query.filter(GeneratedReport.report_type == report_type)
+    if status:
+        query = query.filter(GeneratedReport.status == status)
+    rows = query.order_by(GeneratedReport.generated_at.desc()).all()
+    return _attach_document_scope(db, rows)
+
+
+def get_generated_report(db: Session, organization_id: int, generated_report_id: int) -> GeneratedReport:
+    row = (
+        db.query(GeneratedReport)
+        .filter(GeneratedReport.id == generated_report_id, GeneratedReport.organization_id == organization_id)
+        .first()
+    )
+    if not row:
+        raise NotFoundException("GeneratedReport", generated_report_id)
+    _attach_document_scope(db, [row])
+    return row
+
+
+def void_generated_report(db: Session, organization_id: int, generated_report_id: int, reason: str, actor_id: Optional[int] = None) -> GeneratedReport:
+    row = get_generated_report(db, organization_id, generated_report_id)
+    row.status = "Void"
+    row.notes = reason
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _format_certificate_field_value(value, field_type: str, currency_symbol: str) -> str:
+    """Presentation formatting only — the value itself is whatever
+    generate_report_from_template already resolved and stored; this
+    function never computes anything, only formats for display."""
+    if value is None:
+        return "-"
+    if field_type == "currency":
+        try:
+            return f"{currency_symbol} {float(value):,.2f}"
+        except (TypeError, ValueError):
+            return str(value)
+    if field_type == "percentage":
+        try:
+            return f"{float(value):.2f}%"
+        except (TypeError, ValueError):
+            return str(value)
+    if field_type == "boolean":
+        return "Yes" if value else "No"
+    return str(value)
+
+
+def generate_report_certificate_pdf_bytes(db: Session, organization_id: int, generated_report_id: int, employee_id: int) -> bytes:
+    """Renders a single-employee, form-shaped statutory certificate (e.g.
+    India's Form 130 TDS certificate, UK's P60) — modeled directly on
+    generate_payslip_pdf_bytes's header/sub-header/bordered-detail-grid
+    layout (the only other single-record document in this codebase),
+    reusing the same font/color primitives, but fed from a GeneratedReport
+    snapshot instead of a live payslip. Only valid for a template whose
+    document_scope is PER_EMPLOYEE — an AGGREGATE report (e.g. Form 138)
+    has no single-employee document to render this way."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas
+    import io
+
+    report = get_generated_report(db, organization_id, generated_report_id)
+    template = get_report_template(db, report.report_template_id)
+    if template.document_scope != "PER_EMPLOYEE":
+        raise BadRequestException(
+            f"{template.name} is an AGGREGATE report (one document for the whole run) — "
+            "there is no per-employee certificate to render for it."
+        )
+    employee_entry = next(
+        (e for e in report.rendered_data.get("employees", []) if e.get("employeeId") == employee_id), None,
+    )
+    if not employee_entry:
+        raise NotFoundException("Employee entry in generated report", employee_id)
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    company_name = getattr(company, "name", None) or "Company Name"
+    sym = _get_currency_symbol(_normalize_country(report.jurisdiction_country))
+    period = report.rendered_data.get("period", {})
+    field_defs = {
+        f["fieldKey"]: f
+        for component in report.rendered_data.get("templateSnapshot", {}).get("components", [])
+        for f in (component.get("fields") or [])
+    }
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    base_font = _register_rupee_font(c)
+    F = base_font or "Helvetica"
+    FB = f"{base_font}-Bold" if base_font else "Helvetica-Bold"
+
+    navy = colors.HexColor("#1e3a8a")
+    gray_100 = colors.HexColor("#F3F4F6")
+    gray_300 = colors.HexColor("#D1D5DB")
+    gray_500 = colors.HexColor("#6B7280")
+    gray_900 = colors.HexColor("#111827")
+    white = colors.white
+
+    card_margin = 6 * mm
+    margin_l = 14 * mm
+    margin_r = width - 14 * mm
+    page_w = margin_r - margin_l
+    col_mid = width / 2
+    y = height - card_margin
+
+    # ── 1. HEADER — navy banner, employer name ──
+    header_h = 22 * mm
+    c.setFillColor(navy)
+    c.rect(card_margin, y - header_h, width - 2 * card_margin, header_h, fill=True, stroke=False)
+    c.setFillColor(white)
+    c.setFont(FB, 18)
+    c.drawString(margin_l + 5 * mm, y - 9 * mm, company_name.upper())
+    c.setFont(F, 10)
+    c.drawString(margin_l + 5 * mm, y - 16 * mm, "Statutory Certificate — Not a payment instrument")
+    y -= header_h
+
+    # ── 2. SUB-HEADER — report name + period ──
+    sub_h = 14 * mm
+    c.setFillColor(gray_100)
+    c.rect(card_margin, y - sub_h, width - 2 * card_margin, sub_h, fill=True, stroke=False)
+    c.setFillColor(gray_900)
+    c.setFont(FB, 16)
+    c.drawCentredString(col_mid, y - 5.5 * mm, template.name.upper())
+    c.setFont(F, 10)
+    c.setFillColor(gray_500)
+    c.drawCentredString(
+        col_mid, y - 11.5 * mm,
+        f"Reporting Year {report.reporting_year} · Period {period.get('periodLabel', report.reporting_period or '-')} "
+        f"· Template v{report.template_version}",
+    )
+    y -= sub_h + 9 * mm
+
+    # ── 3. EMPLOYEE DETAILS — bordered grid, same primitive as payslips ──
+    c.setFillColor(gray_900)
+    c.setFont(FB, 13)
+    c.drawString(margin_l, y, "Employee Details")
+    y -= 6 * mm
+
+    row_h = 8.5 * mm
+    label_w = page_w * 0.22
+    value_w = page_w * 0.28
+    col_x = [margin_l, margin_l + label_w, margin_l + label_w + value_w,
+             margin_l + 2 * label_w + value_w, margin_r]
+
+    def draw_row(y_top, cells):
+        c.setStrokeColor(gray_300)
+        c.setLineWidth(0.4)
+        c.rect(margin_l, y_top - row_h, page_w, row_h, fill=False, stroke=True)
+        for cx in col_x[1:-1]:
+            c.line(cx, y_top, cx, y_top - row_h)
+        baseline = y_top - row_h / 2 - 1.5 * mm
+        for i, (lbl, val) in enumerate(cells):
+            lx, vx = col_x[i * 2], col_x[i * 2 + 1]
+            c.setFillColor(gray_900)
+            c.setFont(FB, 9.5)
+            c.drawString(lx + 3 * mm, baseline, lbl)
+            c.setFont(F, 9.5)
+            c.drawString(vx + 3 * mm, baseline, str(val)[:40])
+
+    draw_row(y, [("Employee Name", employee_entry.get("employeeName") or "-"), ("Employee ID", str(employee_id))])
+    y -= row_h
+
+    # ── 4. STATUTORY COMPONENTS — one labeled section + bordered rows per
+    # ReportTemplateComponent, in the exact order Super Admin configured
+    # them (mirrors the payslip's Earnings/Deductions mini-tables, but as
+    # single-column label:value rows since a certificate's fields aren't
+    # naturally a two-column employee-detail grid). ──
+    y -= 6 * mm
+    for component in report.rendered_data.get("templateSnapshot", {}).get("components", []):
+        fields = component.get("fields") or []
+        if not fields:
+            continue
+        c.setFillColor(gray_900)
+        c.setFont(FB, 12)
+        c.drawString(margin_l, y, component.get("label", ""))
+        y -= 6 * mm
+
+        c.setFillColor(navy)
+        c.rect(margin_l, y - 8 * mm, page_w, 8 * mm, fill=True, stroke=False)
+        c.setFillColor(white)
+        c.setFont(FB, 9.5)
+        c.drawString(margin_l + 3 * mm, y - 8 * mm + 2.7 * mm, "Item")
+        c.drawRightString(margin_r - 3 * mm, y - 8 * mm + 2.7 * mm, "Value")
+        y -= 8 * mm
+
+        for field in fields:
+            value = employee_entry.get("values", {}).get(field["fieldKey"])
+            field_type = field_defs.get(field["fieldKey"], {}).get("type", "text")
+            display = _format_certificate_field_value(value, field_type, sym)
+            c.setStrokeColor(gray_300)
+            c.setLineWidth(0.3)
+            c.rect(margin_l, y - 8 * mm, page_w, 8 * mm, fill=False, stroke=True)
+            c.setFillColor(gray_900)
+            c.setFont(F, 9.5)
+            c.drawString(margin_l + 3 * mm, y - 8 * mm + 2.7 * mm, field.get("label", field["fieldKey"]))
+            c.drawRightString(margin_r - 3 * mm, y - 8 * mm + 2.7 * mm, display)
+            y -= 8 * mm
+        y -= 5 * mm
+
+        if y < 30 * mm:
+            c.showPage()
+            y = height - card_margin
+
+    # ── 5. FOOTER ──
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.5)
+    c.line(margin_l, 15 * mm, margin_r, 15 * mm)
+    c.setFillColor(gray_500)
+    c.setFont(F, 8)
+    c.drawCentredString(col_mid, 11 * mm, "This is a system-generated statutory report. It does not require a signature.")
+    c.drawCentredString(col_mid, 8 * mm, f"{company_name} | Confidential | Generated {report.generated_at.strftime('%d-%b-%Y') if report.generated_at else '-'}")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
 
 
 def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids: List[int], actor_id: Optional[int] = None) -> dict:
