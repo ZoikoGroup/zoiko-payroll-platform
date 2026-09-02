@@ -113,6 +113,21 @@ class PayrollContext:
     w4_filing_status: str = None
     w4_form_vintage: str = None
 
+    # Canada TD1 federal total claim amount. None for every non-CA
+    # employee, and for CA employees until explicitly set —
+    # engine/countries/canada.py falls back to the dynamic income-tapered
+    # BPAF (Phase 2) when None, so no existing calculation changes just
+    # because this field now exists.
+    td1_claim_amount: Decimal = None
+    # Canada TD1X employee-requested additional per-pay-period
+    # withholding — additive on top of tds, never touching the statutory
+    # base calculation. None/0 for every employee until explicitly set.
+    td1_additional_tax: Decimal = None
+    # Canada CPT30 CPP/QPP election — "STOPPED" suppresses CPP/QPP (and
+    # CPP2/QPP2) entirely for this employee; None/"ACTIVE" (every
+    # employee today) changes nothing from existing behavior.
+    cpp_qpp_election_status: str = None
+
 
 @dataclass
 class PayrollResult:

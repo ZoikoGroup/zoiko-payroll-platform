@@ -122,4 +122,7 @@ def build_context_from_employee(
         pay_frequency=getattr(employee, "pay_frequency", None) or "Monthly",
         w4_filing_status=getattr(employee, "w4_filing_status", None),
         w4_form_vintage=getattr(employee, "w4_form_vintage", None),
+        td1_claim_amount=getattr(employee, "td1_claim_amount", None),
+        td1_additional_tax=getattr(employee, "td1_additional_tax", None),
+        cpp_qpp_election_status=getattr(employee, "cpp_qpp_election_status", None),
     )

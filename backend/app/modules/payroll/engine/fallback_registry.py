@@ -94,6 +94,15 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "CA", "module": "canada", "attr": "_CA_BASIC_PERSONAL_AMOUNT", "label": "Federal Basic Personal Amount", "resolverKey": "basic_personal_amt"},
     {"country": "CA", "module": "canada", "attr": "_CA_CPP2_YAMPE", "label": "CPP2 Year's Additional Maximum Pensionable Earnings", "resolverKey": "cpp2_yampe"},
     {"country": "CA", "module": "canada", "attr": "_CA_CPP2_RATE", "label": "CPP2 Second-Tier Contribution Rate", "resolverKey": "cpp2_rate"},
+    {"country": "CA", "module": "canada", "attr": "_CA_BPAF_MIN", "label": "Federal Basic Personal Amount — Minimum (tapered)", "resolverKey": "bpaf_min"},
+    {"country": "CA", "module": "canada", "attr": "_CA_BPAF_NI_THRESHOLD_LOW", "label": "BPAF Taper — Net Income Threshold (Low)", "resolverKey": "bpaf_ni_thresh_lo"},
+    {"country": "CA", "module": "canada", "attr": "_CA_BPAF_NI_THRESHOLD_HIGH", "label": "BPAF Taper — Net Income Threshold (High)", "resolverKey": "bpaf_ni_thresh_hi"},
+    {"country": "CA", "module": "canada", "attr": "_CA_CEA", "label": "Canada Employment Amount (credit)", "resolverKey": "cea"},
+    {"country": "CA", "module": "canada", "attr": "_CA_LOWEST_FEDERAL_RATE", "label": "Lowest Federal Rate (credit conversion)", "resolverKey": "lowest_fed_rate"},
+    {"country": "CA", "module": "canada", "attr": "_CA_QUEBEC_FEDERAL_ABATEMENT_PCT", "label": "Quebec Federal Abatement", "resolverKey": "qc_fed_abatement", "note": "Configured but not yet applied — awaits the Quebec/POE calculation branch."},
+    {"country": "CA", "module": "canada", "attr": "_CA_BEYOND_PROVINCE_SURTAX_PCT", "label": "Beyond-Province Surtax Factor (% of T3)", "resolverKey": "beyond_prov_surtax", "note": "Configured but not yet applied — awaits the CA-XP/POE calculation branch."},
+    {"country": "CA", "module": "canada", "attr": "_CA_LSVCC_CREDIT_RATE", "label": "Labour-Sponsored Fund Credit Rate", "resolverKey": "lsvcc_credit_rate", "note": "Configured but not yet applied — no employee LSVCC-investment declaration is captured yet."},
+    {"country": "CA", "module": "canada", "attr": "_CA_LSVCC_CREDIT_MAX", "label": "Labour-Sponsored Fund Credit Max", "resolverKey": "lsvcc_credit_max", "note": "Configured but not yet applied — no employee LSVCC-investment declaration is captured yet."},
 
     # ── Germany ──────────────────────────────────────────────────────────
     {"country": "DE", "module": "germany", "attr": "_DE_GRUNDFREIBETRAG", "label": "Basic Tax-Free Allowance (Grundfreibetrag)", "resolverKey": "grundfreibetrag"},

@@ -16,6 +16,7 @@ import pytest
 
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.standard import StandardStrategy, evaluate_tax_formula
+from app.modules.payroll.engine.countries.canada import _resolve_ca_bpaf
 
 
 @dataclass
@@ -59,7 +60,9 @@ STRATEGY = StandardStrategy()
 
 
 def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status=None, employer_tax_profiles=None,
-         state_slabs=None, reciprocity_suppresses_work_state=False, resident_state_slabs=None, locality_rate=None):
+         state_slabs=None, reciprocity_suppresses_work_state=False, resident_state_slabs=None, locality_rate=None,
+         work_state=None, state_rate_map=None, td1_claim_amount=None, td1_additional_tax=None,
+         cpp_qpp_election_status=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -68,6 +71,9 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         reciprocity_suppresses_work_state=reciprocity_suppresses_work_state,
         resident_state_slabs=resident_state_slabs or [],
         locality_rate=locality_rate,
+        work_state=work_state, state_rate_map=state_rate_map or {},
+        td1_claim_amount=td1_claim_amount, td1_additional_tax=td1_additional_tax,
+        cpp_qpp_election_status=cpp_qpp_election_status,
     )
     return STRATEGY.calculate(ctx)
 
@@ -436,9 +442,9 @@ def test_canada_cpp_and_ei():
 # Fallback-default thresholds (no override rows): AU medicare_low_inc_thr
 # =24276, mls_threshold=97000/mls_rate=1.0%,
 # super_max_contrib=260280; DE contribution_ceiling=96600;
-# CA cpp_ympe=71300/cpp_basic_exemption=3500/ei_mie=65700. Flat 10% slab
-# used throughout so income-tax math never obscures the contribution
-# assertions being tested.
+# CA cpp_ympe=74600/cpp_basic_exemption=3500/ei_mie=68900 (2026 values,
+# ZP-TAX-CA-2026-001). Flat 10% slab used throughout so income-tax math
+# never obscures the contribution assertions being tested.
 
 _FLAT_10_SLAB = [Slab(Decimal("0"), None, Decimal("10"))]
 
@@ -483,12 +489,244 @@ def test_canada_cpp_exempts_basic_amount_and_caps_at_ympe_ei_caps_separately():
         "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
         "ei": Rate("ei", employee_rate_pct=Decimal("1.66"), employer_rate_pct=Decimal("2.32")),
     }
-    result = calc("CA", 7000, rates, _FLAT_10_SLAB)  # annual 84,000 > both YMPE (71,300) and MIE (65,700)
-    # CPP pensionable = min(84000, 71300) - 3500 = 67800 -> (67800*5.95%)/12
-    assert result.social_security == Decimal("336.18")
-    # EI insurable = min(84000, 65700) = 65700 -> (65700*1.66%)/12 — capped
+    result = calc("CA", 7000, rates, _FLAT_10_SLAB)  # annual 84,000 > both YMPE (74,600) and MIE (68,900)
+    # CPP pensionable = min(84000, 74600) - 3500 = 71100 -> (71100*5.95%)/12
+    assert result.social_security == Decimal("352.54")
+    # EI insurable = min(84000, 68900) = 68900 -> (68900*1.66%)/12 — capped
     # independently of CPP's own (lower) cap.
-    assert result.employee_esi == Decimal("90.89")
+    assert result.employee_esi == Decimal("95.31")
+
+
+def test_canada_bpaf_flat_at_max_below_taper_threshold():
+    # NI (60,000) <= the $181,440 low threshold -> flat BPAF max.
+    assert _resolve_ca_bpaf(Decimal("60000"), {}) == Decimal("16452")
+
+
+def test_canada_bpaf_tapers_linearly_between_thresholds():
+    # NI (240,000) between the $181,440/$258,482 thresholds:
+    # reduction = (240000-181440) * (16452-14829) / (258482-181440)
+    assert _resolve_ca_bpaf(Decimal("240000"), {}) == Decimal("15218.35")
+
+
+def test_canada_bpaf_flat_at_min_above_taper_threshold():
+    # NI (300,000) >= the $258,482 high threshold -> flat BPAF min.
+    assert _resolve_ca_bpaf(Decimal("300000"), {}) == Decimal("14829")
+
+
+def test_canada_cea_credit_reduces_annual_tax_at_lowest_rate():
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
+    }
+    result = calc("CA", 5000, rates, _FLAT_10_SLAB)  # annual 60,000, BPAF flat at max (16,452)
+    # taxable = 60000 - 16452 = 43548; tax_before_credits = 43548 * 10% = 4354.80
+    # CEA credit = 1501 * 14% = 210.14; annual_tax = 4354.80 - 210.14 = 4144.66
+    assert result.annual_tax == Decimal("4144.66")
+    assert result.tds == Decimal("345.39")  # 4144.66 / 12
+
+
+def test_canada_provincial_tax_zero_when_unconfigured():
+    # No state_slabs configured for the resolved province (the situation
+    # for every CA province today, until real data is seeded) -> the new
+    # state_income_tax field stays exactly 0, federal tax is unaffected.
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="ON")
+    assert result.state_income_tax == Decimal("0")
+    assert result.federal_income_tax == result.tds
+
+
+def test_canada_provincial_tax_added_on_top_of_federal():
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
+    }
+    provincial_rates = {"provincial_bpa": Rate("provincial_bpa", flat_amount=Decimal("10000"))}
+    result = calc(
+        "CA", 5000, rates, _FLAT_10_SLAB, work_state="ON",
+        state_slabs=_FLAT_10_SLAB, state_rate_map=provincial_rates,
+    )
+    # Federal: BPA=16452 (60000 NI <= threshold) -> taxable 43548 * 10% =
+    # 4354.80, less CEA credit 210.14 = 4144.66 -> federal_income_tax 345.39
+    assert result.federal_income_tax == Decimal("345.39")
+    # Provincial: taxable = 60000 - 10000 (provincial_bpa) = 50000 * 10% =
+    # 5000.00 -> state_income_tax 416.67
+    assert result.state_income_tax == Decimal("416.67")
+    assert result.tds == result.federal_income_tax + result.state_income_tax
+    assert result.annual_tax == Decimal("9144.66")
+
+
+def test_canada_quebec_provincial_tax_ignores_generic_provincial_bpa_key():
+    # Quebec's provincial tax runs through its own dedicated path, not
+    # the generic one — the generic "provincial_bpa" key must be
+    # completely ignored for a Quebec employee, even if populated.
+    state_rates = {"provincial_bpa": Rate("provincial_bpa", flat_amount=Decimal("10000"))}
+    result = calc(
+        "CA", 5000, {}, _FLAT_10_SLAB, work_state="QC",
+        state_slabs=_FLAT_10_SLAB, state_rate_map=state_rates,
+    )
+    # "quebec_bpa" isn't set -> bpa resolves to 0, not the ignored 10000
+    # -> taxable = 60000 * 10% = 6000.00 -> state_income_tax 500.00
+    assert result.state_income_tax == Decimal("500.00")
+
+
+def test_canada_quebec_provincial_tax_uses_quebec_bpa_key():
+    state_rates = {"quebec_bpa": Rate("quebec_bpa", flat_amount=Decimal("18952"))}
+    result = calc(
+        "CA", 5000, {}, _FLAT_10_SLAB, work_state="QC",
+        state_slabs=_FLAT_10_SLAB, state_rate_map=state_rates,
+    )
+    # taxable = max(0, 60000 - 18952) = 41048 * 10% = 4104.80 -> 342.07/mo
+    assert result.state_income_tax == Decimal("342.07")
+
+
+def test_canada_quebec_uses_qpp_instead_of_cpp():
+    cpp_rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    state_rates = {"qpp": Rate("qpp", employee_rate_pct=Decimal("6.30"), employer_rate_pct=Decimal("6.30"))}
+    result = calc("CA", 5000, cpp_rates, _FLAT_10_SLAB, work_state="QC", state_rate_map=state_rates)
+    # annual 60000 <= YMPE (74600); pensionable = 60000 - 3500 = 56500.
+    # QPP's 6.30% must apply, NOT CPP's 5.95% from rate_map: 56500*6.30%
+    # = 3559.50 -> /12 = 296.625 -> 296.63.
+    assert result.social_security == Decimal("296.63")
+    assert result.employer_social_security == Decimal("296.63")
+
+
+def test_canada_non_quebec_still_uses_cpp_not_qpp():
+    cpp_rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    state_rates = {"qpp": Rate("qpp", employee_rate_pct=Decimal("6.30"), employer_rate_pct=Decimal("6.30"))}
+    result = calc("CA", 5000, cpp_rates, _FLAT_10_SLAB, work_state="ON", state_rate_map=state_rates)
+    # A stray "qpp" row in state_rate_map must never leak into a non-QC
+    # calculation: 56500*5.95%/12 = 3361.75/12 = 280.1458 -> 280.15.
+    assert result.social_security == Decimal("280.15")
+
+
+def test_canada_quebec_uses_qpip_instead_of_ei():
+    ei_rates = {"ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282"))}
+    state_rates = {
+        "qpip": Rate("qpip", employee_rate_pct=Decimal("0.430"), employer_rate_pct=Decimal("0.602")),
+        "qpip_mie": Rate("qpip_mie", flat_amount=Decimal("103000")),
+    }
+    result = calc("CA", 5000, ei_rates, _FLAT_10_SLAB, work_state="QC", state_rate_map=state_rates)
+    # annual 60000 < QPIP MIE (103000) -> insurable = 60000.
+    # QPIP must apply, NOT EI's rates from rate_map:
+    # employee 60000*0.430%/12 = 21.50; employer 60000*0.602%/12 = 30.10.
+    assert result.employee_esi == Decimal("21.50")
+    assert result.employer_esi == Decimal("30.10")
+
+
+def test_canada_quebec_qpip_zero_when_cap_not_configured():
+    # Rate alone isn't enough — QPIP requires both its rate AND its MIE
+    # cap configured before computing anything, never inferring one.
+    state_rates = {"qpip": Rate("qpip", employee_rate_pct=Decimal("0.430"), employer_rate_pct=Decimal("0.602"))}
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="QC", state_rate_map=state_rates)
+    assert result.employee_esi == Decimal("0")
+    assert result.employer_esi == Decimal("0")
+
+
+def test_canada_quebec_federal_abatement_reduces_federal_tax():
+    result_qc = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="QC")
+    result_on = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="ON")
+    assert result_qc.federal_income_tax < result_on.federal_income_tax
+    # Pre-abatement annual federal tax is 4144.66 (same inputs as the CEA
+    # credit test above); 16.5% abatement -> 4144.66*0.835 = 3460.7911
+    # -> 3460.79 -> /12 = 288.40.
+    assert result_qc.federal_income_tax == Decimal("288.40")
+    assert result_on.federal_income_tax == Decimal("345.39")
+
+
+def test_canada_territorial_payroll_tax_nwt():
+    state_rates = {"nwt_payroll_tax": Rate("nwt_payroll_tax", employee_rate_pct=Decimal("2"))}
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="NT", state_rate_map=state_rates)
+    # annual 60000 * 2% / 12 = 100.00
+    assert result.local_tax == Decimal("100.00")
+    # Must be folded into tds (and therefore net_pay) — not left orphaned.
+    assert result.tds == result.federal_income_tax + result.local_tax
+    assert result.net_pay == Decimal("4554.61")  # 5000 - (345.39 + 100.00)
+
+
+def test_canada_territorial_payroll_tax_nunavut():
+    state_rates = {"nu_payroll_tax": Rate("nu_payroll_tax", employee_rate_pct=Decimal("2"))}
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="NU", state_rate_map=state_rates)
+    assert result.local_tax == Decimal("100.00")
+
+
+def test_canada_territorial_payroll_tax_zero_outside_territories():
+    # A stray nwt_payroll_tax row must never leak into a non-territory
+    # province's calculation.
+    state_rates = {"nwt_payroll_tax": Rate("nwt_payroll_tax", employee_rate_pct=Decimal("2"))}
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="ON", state_rate_map=state_rates)
+    assert result.local_tax == Decimal("0")
+
+
+def test_canada_wcb_employer_levy_via_employer_tax_profile():
+    profiles = {"WCB": EmployerTaxProfileStub(taxable_wage_base=Decimal("50000"), employer_rate_pct=Decimal("2.5"))}
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, employer_tax_profiles=profiles)
+    # annual 60000 capped at wage base 50000 -> 50000 * 2.5% / 12 = 104.17
+    assert result.employer_sui == Decimal("104.17")
+
+
+def test_canada_wcb_zero_when_no_profile_configured():
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB)
+    assert result.employer_sui == Decimal("0")
+
+
+def test_canada_td1_claim_amount_overrides_dynamic_bpaf():
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_claim_amount=Decimal("20000"))
+    # taxable = 60000 - 20000 (TD1, not the default 16452 BPAF) = 40000
+    # * 10% = 4000.00, less CEA credit 210.14 = 3789.86 -> /12 = 315.82
+    assert result.federal_income_tax == Decimal("315.82")
+
+
+def test_canada_td1_claim_amount_zero_is_honored_not_treated_as_unset():
+    # An employee who explicitly claims $0 must get $0 BPA, not silently
+    # fall back to the dynamic default — only a real TD1 of None means
+    # "no TD1 on file."
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_claim_amount=Decimal("0"))
+    # taxable = 60000 - 0 = 60000 * 10% = 6000.00, less CEA 210.14 =
+    # 5789.86 -> /12 = 482.49
+    assert result.federal_income_tax == Decimal("482.49")
+
+
+def test_canada_no_td1_falls_back_to_dynamic_bpaf():
+    result_no_td1 = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_claim_amount=None)
+    result_default = calc("CA", 5000, {}, _FLAT_10_SLAB)
+    assert result_no_td1.federal_income_tax == result_default.federal_income_tax == Decimal("345.39")
+
+
+def test_canada_td1_additional_tax_added_to_tds():
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_additional_tax=Decimal("50"))
+    # 345.39 (federal, unchanged from the plain default-BPAF test) + 50
+    # flat additional withholding, never touching the statutory base.
+    assert result.tds == Decimal("395.39")
+    assert result.federal_income_tax == Decimal("345.39")
+
+
+def test_canada_td1_additional_tax_zero_when_unset():
+    result = calc("CA", 5000, {}, _FLAT_10_SLAB)
+    assert result.tds == Decimal("345.39")
+
+
+def test_canada_cpt30_stopped_suppresses_cpp_and_cpp2():
+    rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    result = calc("CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED")
+    assert result.social_security == Decimal("0")
+    assert result.employer_social_security == Decimal("0")
+    assert result.cpp2 == Decimal("0")
+
+
+def test_canada_cpt30_active_does_not_suppress_cpp():
+    rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    result = calc("CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="ACTIVE")
+    assert result.social_security > Decimal("0")
+
+
+def test_canada_cpt30_stopped_does_not_affect_ei():
+    # CPT30 is a CPP/QPP-specific election — EI must be untouched.
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
+    }
+    result = calc("CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED")
+    assert result.social_security == Decimal("0")
+    assert result.employee_esi > Decimal("0")
 
 
 def test_unknown_country_falls_back_to_generic():

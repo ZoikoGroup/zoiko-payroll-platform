@@ -27,7 +27,7 @@ import {
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
 } from "./pages/JurisdictionStatutory";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
-import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage } from "./pages/ReportTemplates";
+import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage } from "./pages/ReportTemplates";
 import FinancePage from "./pages/FinancePage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -159,6 +159,8 @@ export default function App() {
         <Route path="/super-admin/report-templates/united-kingdom/:jurisdiction" element={<SuperAdminShell><UKReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/united-states" element={<SuperAdminShell><USAReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/united-states/:jurisdiction" element={<SuperAdminShell><USAReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/canada" element={<SuperAdminShell><CAReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/canada/:jurisdiction" element={<SuperAdminShell><CAReportTemplatesPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={

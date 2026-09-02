@@ -344,8 +344,57 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{3}$"),
             "error": "Financial institution number must be 3 digits.",
         },
+        "td1_additional_tax": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "TD1X additional tax must be a number."},
+        "cpp_qpp_election_status": {"upper": True, "choices": ["ACTIVE", "STOPPED"]},
+        "cpp_election_effective_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "CPP/QPP election effective date must be YYYY-MM-DD.",
+        },
+        "remote_work_agreement": {
+            "pattern": re.compile(r"^(?i:true|false)$"),
+            "error": "Remote work agreement must be true or false.",
+        },
+        "remote_attachment_province": {
+            "upper": True,
+            "choices": ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"],
+        },
+        "remote_agreement_effective_from": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Remote agreement effective date must be YYYY-MM-DD.",
+        },
     }
     duplicate_field = "sin"
+    # Same class of dead-plumbing gap already closed for US
+    # (state_tax_jurisdiction) and UK (paye_tax_code/ni_category/etc.)
+    # above: "province" and "td1_claim_amount" were previously stored
+    # ONLY in compliance_fields JSON — PayrollEmployee.work_state (the
+    # column every country's state/province-scoped config resolver
+    # actually reads) and the new td1_claim_amount column (the federal
+    # BPA override engine/countries/canada.py now reads) never received
+    # a value, so a CA employee's declared province and TD1 claim amount
+    # were silently invisible to jurisdiction resolution and tax
+    # calculation respectively, even though both have always been
+    # collectible via the employee form. td1_additional_tax/
+    # cpp_qpp_election_status/remote_work_agreement and their supporting
+    # fields are NEW as of this promotion — never previously collectible
+    # at all, backend or frontend.
+    FIELD_COLUMN_MAP = {
+        "province": "work_state",
+        "td1_claim_amount": "td1_claim_amount",
+        "td1_additional_tax": "td1_additional_tax",
+        "cpp_qpp_election_status": "cpp_qpp_election_status",
+        "cpp_election_effective_date": "cpp_election_effective_date",
+        "remote_work_agreement": "remote_work_agreement",
+        "remote_attachment_province": "remote_attachment_province",
+        "remote_agreement_effective_from": "remote_agreement_effective_from",
+    }
+    FIELD_VALUE_MAP = {
+        "td1_claim_amount": lambda v: Decimal(v) if v else None,
+        "td1_additional_tax": lambda v: Decimal(v) if v else None,
+        "cpp_election_effective_date": lambda v: date.fromisoformat(v) if v else None,
+        "remote_work_agreement": lambda v: str(v).strip().lower() == "true",
+        "remote_agreement_effective_from": lambda v: date.fromisoformat(v) if v else None,
+    }
 
 
 class DEEmployeeValidation(EmployeeValidationStrategy):

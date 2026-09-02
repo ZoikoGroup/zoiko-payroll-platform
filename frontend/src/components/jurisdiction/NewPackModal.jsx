@@ -4,7 +4,7 @@ import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
 import { inputClass, labelClass, STATUS_OPTIONS } from "./constants";
 
-export default function NewPackModal({ country, state, packType, onClose, onCreated }) {
+export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated }) {
   const { addToast } = useToast() || {};
   const [form, setForm] = useState({
     packId: "", jurisdictionState: state || "", version: "1.0", status: "Draft",
@@ -45,7 +45,21 @@ export default function NewPackModal({ country, state, packType, onClose, onCrea
     <Modal title={`New ${packType === "tax" ? "Tax" : "Policy"} Pack`} onClose={onClose} maxWidth="max-w-2xl">
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2"><label className={labelClass}>Pack ID</label><input className={inputClass} value={form.packId} onChange={set("packId")} placeholder="e.g. IN-PAYROLL-2026-V1" /></div>
-        <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder="e.g. Maharashtra" /></div>
+        <div>
+          <label className={labelClass}>State (optional)</label>
+          {stateOptions.length > 0 ? (
+            // A fixed state list (e.g. Canada's 13 provinces/territories)
+            // prevents a typo (e.g. "Ontario" instead of "ON") from
+            // silently creating a pack the engine's exact-match state
+            // resolver will never actually select for any employee.
+            <select className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")}>
+              <option value="">— Country-level (no state) —</option>
+              {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : (
+            <input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder="e.g. Maharashtra" />
+          )}
+        </div>
         <div><label className={labelClass}>Version</label><input className={inputClass} value={form.version} onChange={set("version")} /></div>
         <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
         <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026-27" /></div>

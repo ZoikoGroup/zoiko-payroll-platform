@@ -9,13 +9,16 @@ import {
 } from "../../service/superAdminService";
 import { inputClass, labelClass } from "./constants";
 
-// Tenant-specific, agency-assigned rates (SUI and similar) — deliberately
-// NOT rendered as a JurisdictionLayout extraTab, since this data is
-// org+jurisdiction-scoped, not attached to any single JurisdictionPack
-// version the way Contribution Rates/Tax Slabs are. See
-// EmployerTaxProfile's backend model docstring for why this is kept
-// entirely separate from the canonical rate/slab CRUD.
-export default function SuiEmployerRatesPanel() {
+// Tenant-specific, agency-assigned rates (US SUI, Canada workers'
+// compensation/WCB, and similar) — deliberately NOT rendered as a
+// JurisdictionLayout extraTab, since this data is org+jurisdiction-
+// scoped, not attached to any single JurisdictionPack version the way
+// Contribution Rates/Tax Slabs are. See EmployerTaxProfile's backend
+// model docstring for why this is kept entirely separate from the
+// canonical rate/slab CRUD. `country` defaults to "US" (its original,
+// only caller) so USACompliancePage.jsx's existing usage is completely
+// unaffected — CACompliancePage.jsx is the first caller to pass "CA".
+export default function SuiEmployerRatesPanel({ country = "US" }) {
   const { addToast } = useToast() || {};
   const [orgs, setOrgs] = useState([]);
   const [organizationId, setOrganizationId] = useState("");
@@ -26,10 +29,10 @@ export default function SuiEmployerRatesPanel() {
   const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
-    getReportsOrganizations({ country: "US", limit: 200 })
+    getReportsOrganizations({ country, limit: 200 })
       .then((res) => setOrgs(res.items || []))
       .catch(() => setOrgs([]));
-  }, []);
+  }, [country]);
 
   const loadProfiles = useCallback(() => {
     if (!organizationId) { setProfiles([]); return; }
@@ -41,14 +44,16 @@ export default function SuiEmployerRatesPanel() {
 
   useEffect(() => { loadProfiles(); }, [loadProfiles]);
 
+  const heading = country === "CA" ? "Workers' Compensation (WCB/WSIB/CNESST)" : "SUI Employer Rates";
+  const description = country === "CA"
+    ? "Tenant-specific, agency-assigned workers' compensation rates — enter these against the employer's actual rate notice, never a global provincial default. See ZP-TAX-CA-2026-001 CA-D06/AC-24."
+    : "Tenant-specific, agency-assigned State Unemployment Insurance rates — enter these against the employer's actual rate notice, never guessed from a state default. See ZP-TAX-US-2026-001 §6.";
+
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
       <div className="mb-4">
-        <h2 className="text-lg font-bold text-foreground">SUI Employer Rates</h2>
-        <p className="mt-0.5 text-xs text-foreground-muted">
-          Tenant-specific, agency-assigned State Unemployment Insurance rates — enter these against the employer's
-          actual rate notice, never guessed from a state default. See ZP-TAX-US-2026-001 §6.
-        </p>
+        <h2 className="text-lg font-bold text-foreground">{heading}</h2>
+        <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -68,7 +73,7 @@ export default function SuiEmployerRatesPanel() {
       </div>
 
       {!organizationId ? (
-        <p className="py-8 text-center text-xs text-foreground-disabled">Select an organization to view its configured SUI/employer-specific rates.</p>
+        <p className="py-8 text-center text-xs text-foreground-disabled">Select an organization to view its configured employer-specific rates.</p>
       ) : loading ? (
         <p className="py-8 text-center text-xs text-foreground-disabled">Loading…</p>
       ) : profiles.length === 0 ? (
@@ -113,7 +118,7 @@ export default function SuiEmployerRatesPanel() {
 
       {(showForm || editing) && (
         <SuiProfileFormModal
-          organizationId={organizationId} profile={editing}
+          organizationId={organizationId} profile={editing} country={country}
           onClose={() => { setShowForm(false); setEditing(null); }}
           onSaved={() => { setShowForm(false); setEditing(null); loadProfiles(); }}
         />
@@ -139,12 +144,18 @@ export default function SuiEmployerRatesPanel() {
   );
 }
 
-function SuiProfileFormModal({ organizationId, profile, onClose, onSaved }) {
+const COMPONENT_OPTIONS_BY_COUNTRY = {
+  US: ["SUI", "ETT", "WF", "JDA"],
+  CA: ["WCB"],
+};
+
+function SuiProfileFormModal({ organizationId, profile, country = "US", onClose, onSaved }) {
   const { addToast } = useToast() || {};
   const [sources, setSources] = useState([]);
+  const componentOptions = COMPONENT_OPTIONS_BY_COUNTRY[country] || COMPONENT_OPTIONS_BY_COUNTRY.US;
   const [form, setForm] = useState({
-    jurisdictionId: profile?.jurisdictionId || "US-",
-    componentCode: profile?.componentCode || "SUI",
+    jurisdictionId: profile?.jurisdictionId || `${country}-`,
+    componentCode: profile?.componentCode || componentOptions[0],
     taxableWageBase: profile?.taxableWageBase ?? "",
     employerRatePct: profile?.employerRatePct ?? "",
     rateSource: profile?.rateSource || "EMPLOYER_NOTICE",
@@ -189,13 +200,10 @@ function SuiProfileFormModal({ organizationId, profile, onClose, onSaved }) {
   return (
     <Modal title={profile ? "Edit Employer Tax Profile" : "Add Employer Tax Profile"} onClose={onClose} maxWidth="max-w-lg">
       <div className="grid grid-cols-2 gap-3">
-        <div><label className={labelClass}>Jurisdiction</label><input className={inputClass} value={form.jurisdictionId} onChange={set("jurisdictionId")} placeholder="US-CA" /></div>
+        <div><label className={labelClass}>Jurisdiction</label><input className={inputClass} value={form.jurisdictionId} onChange={set("jurisdictionId")} placeholder={country === "CA" ? "CA-ON" : "US-CA"} /></div>
         <div><label className={labelClass}>Component</label>
           <select className={inputClass} value={form.componentCode} onChange={set("componentCode")}>
-            <option value="SUI">SUI</option>
-            <option value="ETT">ETT</option>
-            <option value="WF">WF</option>
-            <option value="JDA">JDA</option>
+            {componentOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
