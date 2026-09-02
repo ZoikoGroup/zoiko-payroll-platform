@@ -513,6 +513,10 @@ def delete_organization(
     # the subquery selects nothing (orphans on FK-disabled SQLite, FK
     # violation on Postgres).
     from sqlalchemy import text
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.get_bind())
+    existing_tables = set(inspector.get_table_names())
 
     _org_direct = [
         "payroll_email_settings",
@@ -548,6 +552,8 @@ def delete_organization(
     # parent-table row is deleted; payroll_policies is removed in the
     # second, explicit pass below.
     for table, fk_column, parent in _org_via_parent:
+        if table not in existing_tables:
+            continue
         db.execute(
             text(
                 f'DELETE FROM "{table}" WHERE "{fk_column}" IN '
@@ -556,18 +562,22 @@ def delete_organization(
             {"org_id": organization_id},
         )
     for table in _org_direct:
+        if table not in existing_tables:
+            continue
         db.execute(
             text(f'DELETE FROM "{table}" WHERE organization_id = :org_id'),
             {"org_id": organization_id},
         )
-    db.execute(
-        text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :org_id'),
-        {"org_id": organization_id},
-    )
-    db.execute(
-        text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
-        {"org_id": organization_id},
-    )
+    if "payroll_inbound_messages" in existing_tables:
+        db.execute(
+            text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+    if "payroll_policies" in existing_tables:
+        db.execute(
+            text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
 
     # Login users + their action tokens (users has ondelete CASCADE from org).
     db.execute(

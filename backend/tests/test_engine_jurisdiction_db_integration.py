@@ -523,6 +523,155 @@ def test_org_jurisdiction_state_fallback_ignored_for_a_different_country(db, org
     assert resolved is None
 
 
+# ── Canada Province of Employment (ZP-TAX-CA-2026-001 §5, partial) ──────
+
+def test_ca_employee_with_own_province_resolves_physical_single(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-ON", country="CA", work_state="ON")
+    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "ON"
+    assert service._resolve_ca_poe_with_source(employee.work_state, None) == ("ON", "PHYSICAL_SINGLE")
+
+
+def test_ca_employee_with_no_province_falls_back_to_org_jurisdiction_state(db, organization):
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="CA", jurisdiction_state="QC"))
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "EMP-CA-NOSTATE", country="CA", work_state=None)
+    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "QC"
+
+
+def test_ca_employee_with_invalid_province_code_does_not_pass_through(db, organization):
+    # Unlike the generic fallback chain other countries use, CA validates
+    # against the doc's actual province/territory list — bad data resolves
+    # to no jurisdiction rather than being silently passed through to
+    # state-scoped config lookup.
+    employee = _make_employee(db, organization.id, "EMP-CA-BAD", country="CA", work_state="ZZ")
+    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved is None
+    assert service._resolve_ca_poe_with_source("ZZ", None) == (None, "UNRESOLVED")
+
+
+# ── Canada remote-work "reasonable attachment" POE (ZP-TAX-CA-2026-001
+# §5 step 4) ──────────────────────────────────────────────────────────
+
+def test_ca_employee_with_remote_agreement_resolves_remote_attached(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-REMOTE", country="CA", work_state=None)
+    employee.remote_work_agreement = True
+    employee.remote_attachment_province = "BC"
+    db.commit()
+
+    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "BC"
+    assert service._resolve_ca_poe_with_source(None, None, remote_work_agreement=True, remote_attachment_province="BC") == ("BC", "REMOTE_ATTACHED")
+
+
+def test_ca_physical_work_state_wins_over_remote_agreement(db, organization):
+    # An employee's own physical work_state must never be overridden by a
+    # remote-attachment flag — §5's precedence is physical-single first.
+    employee = _make_employee(db, organization.id, "EMP-CA-PHYS-OVER-REMOTE", country="CA", work_state="ON")
+    employee.remote_work_agreement = True
+    employee.remote_attachment_province = "BC"
+    db.commit()
+
+    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "ON"
+
+
+def test_ca_remote_agreement_with_invalid_province_falls_through(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-REMOTE-BAD", country="CA", work_state=None)
+    employee.remote_work_agreement = True
+    employee.remote_attachment_province = "ZZ"
+    db.commit()
+
+    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved is None
+
+
+# ── Canada H1/H2 effective-dated package selection (ZP-TAX-CA-2026-001
+# §4 "VERSIONING TEST": "A pay date of June 30, 2026 must resolve
+# CA-2026-H1. A pay date of July 1, 2026 must resolve CA-2026-H2.") ─────
+#
+# Uses the EXISTING generic effective_from/effective_to mechanism
+# tax_resolver.py already provides for every country — no new versioning
+# code is Canada-specific. Synthetic pack IDs/values only (no real 2026
+# CRA figures — real statutory data entry is a separate, manual Super
+# Admin task per Venu's own decision, not something this test fabricates).
+
+def test_ca_h1_h2_versioning_boundary_jun30_resolves_h1(db):
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    h1 = JurisdictionPack(
+        pack_id="CA-2026-H1-TEST", jurisdiction_country="CA", jurisdiction_state=None,
+        pack_type="tax", version="1.0", status="Active",
+        effective_from=date(2026, 1, 1), effective_to=date(2026, 6, 30),
+    )
+    h2 = JurisdictionPack(
+        pack_id="CA-2026-H2-TEST", jurisdiction_country="CA", jurisdiction_state=None,
+        pack_type="tax", version="1.0", status="Active",
+        effective_from=date(2026, 7, 1), effective_to=date(2026, 12, 31),
+    )
+    db.add_all([h1, h2])
+    db.commit()
+
+    _, _, pack = resolve_tax_configuration(db, "CA", state=None, payroll_date=date(2026, 6, 30))
+    assert pack.pack_id == "CA-2026-H1-TEST"
+
+
+def test_ca_h1_h2_versioning_boundary_jul1_resolves_h2(db):
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    h1 = JurisdictionPack(
+        pack_id="CA-2026-H1-TEST", jurisdiction_country="CA", jurisdiction_state=None,
+        pack_type="tax", version="1.0", status="Active",
+        effective_from=date(2026, 1, 1), effective_to=date(2026, 6, 30),
+    )
+    h2 = JurisdictionPack(
+        pack_id="CA-2026-H2-TEST", jurisdiction_country="CA", jurisdiction_state=None,
+        pack_type="tax", version="1.0", status="Active",
+        effective_from=date(2026, 7, 1), effective_to=date(2026, 12, 31),
+    )
+    db.add_all([h1, h2])
+    db.commit()
+
+    _, _, pack = resolve_tax_configuration(db, "CA", state=None, payroll_date=date(2026, 7, 1))
+    assert pack.pack_id == "CA-2026-H2-TEST"
+
+
+def test_ca_historical_payroll_replays_from_h1_after_h2_is_published(db):
+    # AC-32: re-running/replaying a payroll originally calculated under H1
+    # must still resolve H1 after H2 has since become the "current" pack —
+    # the resolver keys off the ORIGINAL pay date, never "today"/whichever
+    # pack is newest. Mirrors the existing historical-reproducibility
+    # tests for other countries in this file, applied to CA's H1/H2 split.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    h1 = JurisdictionPack(
+        pack_id="CA-2026-H1-REPLAY", jurisdiction_country="CA", jurisdiction_state=None,
+        pack_type="tax", version="1.0", status="Active",
+        effective_from=date(2026, 1, 1), effective_to=date(2026, 6, 30),
+    )
+    db.add(h1)
+    db.commit()
+
+    # A March 2026 payroll resolves H1 (the only pack that exists yet).
+    _, _, original_pack = resolve_tax_configuration(db, "CA", state=None, payroll_date=date(2026, 3, 15))
+    assert original_pack.pack_id == "CA-2026-H1-REPLAY"
+
+    # H2 is published later (simulating the mid-year statutory update).
+    h2 = JurisdictionPack(
+        pack_id="CA-2026-H2-REPLAY", jurisdiction_country="CA", jurisdiction_state=None,
+        pack_type="tax", version="1.0", status="Active",
+        effective_from=date(2026, 7, 1), effective_to=date(2026, 12, 31),
+    )
+    db.add(h2)
+    db.commit()
+
+    # Replaying the SAME March 2026 pay date must still resolve H1, not H2.
+    _, _, replayed_pack = resolve_tax_configuration(db, "CA", state=None, payroll_date=date(2026, 3, 15))
+    assert replayed_pack.pack_id == "CA-2026-H1-REPLAY"
+
+
 # ── Regime-aware resolution (Tax Parameters feature) ────────────────────
 
 def test_two_employees_different_regimes_resolve_distinct_canonical_rows(db, organization, monkeypatch):

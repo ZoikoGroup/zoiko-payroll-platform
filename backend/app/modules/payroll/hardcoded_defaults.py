@@ -219,12 +219,17 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
              employee_rate_pct=Decimal("9.00"), sort_order=8),
     ],
     "CA": [
+        # 2026 values per ZP-TAX-CA-2026-001 (CRA T4127 122nd/123rd Ed.) —
+        # federal-only fallback; provincial tax still excluded (see
+        # canada.py). BPA below is the flat statutory default (NI <=
+        # $181,440); the income-tapered reduction above that threshold is
+        # not yet implemented — flat value only.
         dict(component_key="cpp", label="Canada Pension Plan (CPP)",
              employee_share="5.95%", employer_share="5.95%", total="11.9%",
              employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"), sort_order=1),
         dict(component_key="ei", label="Employment Insurance (EI)",
-             employee_share="1.66%", employer_share="2.32%", total="3.98%",
-             employee_rate_pct=Decimal("1.66"), employer_rate_pct=Decimal("2.32"), sort_order=2),
+             employee_share="1.63%", employer_share="2.282%", total="3.912%",
+             employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282"), sort_order=2),
         dict(component_key="income-tax", label="Federal Income Tax",
              employee_share="As per income slab", employer_share="—", total="As per slab",
              sort_order=3),
@@ -233,23 +238,52 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         # on insert. Also renamed in canada.py's resolve_jurisdiction_parameter()
         # call and fallback_registry.py.
         dict(component_key="basic_personal_amt", label="Basic Personal Amount",
-             employee_share="—", employer_share="—", total="C$15,705",
-             flat_amount=Decimal("15705.00"), sort_order=4),
+             employee_share="—", employer_share="—", total="C$16,452",
+             flat_amount=Decimal("16452.00"), sort_order=4),
         dict(component_key="cpp_ympe", label="CPP Year's Maximum Pensionable Earnings (YMPE)",
-             employee_share="—", employer_share="—", total="C$71,300",
-             flat_amount=Decimal("71300.00"), sort_order=5),
+             employee_share="—", employer_share="—", total="C$74,600",
+             flat_amount=Decimal("74600.00"), sort_order=5),
         dict(component_key="cpp_basic_exemption", label="CPP Basic Exemption Amount",
              employee_share="—", employer_share="—", total="C$3,500",
              flat_amount=Decimal("3500.00"), sort_order=6),
         dict(component_key="ei_mie", label="EI Maximum Insurable Earnings",
-             employee_share="—", employer_share="—", total="C$65,700",
-             flat_amount=Decimal("65700.00"), sort_order=7),
+             employee_share="—", employer_share="—", total="C$68,900",
+             flat_amount=Decimal("68900.00"), sort_order=7),
         dict(component_key="cpp2_yampe", label="CPP2 Year's Additional Maximum Pensionable Earnings (YAMPE)",
-             employee_share="—", employer_share="—", total="C$81,200",
-             flat_amount=Decimal("81200.00"), sort_order=8),
+             employee_share="—", employer_share="—", total="C$85,000",
+             flat_amount=Decimal("85000.00"), sort_order=8),
         dict(component_key="cpp2_rate", label="CPP2 Rate",
              employee_share="4%", employer_share="—", total="4%",
              employee_rate_pct=Decimal("4.00"), sort_order=9),
+        dict(component_key="bpaf_min", label="Federal Basic Personal Amount — Minimum (tapered)",
+             employee_share="—", employer_share="—", total="C$14,829",
+             flat_amount=Decimal("14829.00"), sort_order=10),
+        dict(component_key="bpaf_ni_thresh_lo", label="BPAF Taper — Net Income Threshold (Low)",
+             employee_share="—", employer_share="—", total="C$181,440",
+             flat_amount=Decimal("181440.00"), sort_order=11),
+        dict(component_key="bpaf_ni_thresh_hi", label="BPAF Taper — Net Income Threshold (High)",
+             employee_share="—", employer_share="—", total="C$258,482",
+             flat_amount=Decimal("258482.00"), sort_order=12),
+        dict(component_key="cea", label="Canada Employment Amount (credit)",
+             employee_share="—", employer_share="—", total="C$1,501",
+             flat_amount=Decimal("1501.00"), sort_order=13),
+        dict(component_key="lowest_fed_rate", label="Lowest Federal Rate (credit conversion)",
+             employee_share="—", employer_share="—", total="14%",
+             employee_rate_pct=Decimal("14.00"), sort_order=14),
+        # Prepared but not yet consumed by calculate() — see the
+        # corresponding _CA_* constants in this file for why.
+        dict(component_key="qc_fed_abatement", label="Quebec Federal Abatement (not yet active)",
+             employee_share="—", employer_share="—", total="16.5%",
+             employee_rate_pct=Decimal("16.50"), sort_order=15),
+        dict(component_key="beyond_prov_surtax", label="Beyond-Province Surtax Factor (not yet active)",
+             employee_share="—", employer_share="—", total="48% of T3",
+             employee_rate_pct=Decimal("48.00"), sort_order=16),
+        dict(component_key="lsvcc_credit_rate", label="Labour-Sponsored Fund Credit Rate (not yet active)",
+             employee_share="—", employer_share="—", total="15%",
+             employee_rate_pct=Decimal("15.00"), sort_order=17),
+        dict(component_key="lsvcc_credit_max", label="Labour-Sponsored Fund Credit Max (not yet active)",
+             employee_share="—", employer_share="—", total="C$750",
+             flat_amount=Decimal("750.00"), sort_order=18),
     ],
 }
 
@@ -360,12 +394,13 @@ _TAX_SLABS_BY_COUNTRY = {
         dict(min_amount=Decimal("265216"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="€104,050 + 45% above €265,216 taxable", sort_order=4),
     ],
     "CA": [
-        # Federal brackets only — provincial tax excluded for simplicity.
-        dict(min_amount=Decimal("0"),       max_amount=Decimal("55000"),    rate_pct=Decimal("15"),    rate_label="15%",    tax_formula="15% of income", sort_order=1),
-        dict(min_amount=Decimal("55000"),   max_amount=Decimal("111000"),   rate_pct=Decimal("20.5"),  rate_label="20.5%",  tax_formula="C$8,250 + 20.5% above C$55,000", sort_order=2),
-        dict(min_amount=Decimal("111000"),  max_amount=Decimal("173000"),   rate_pct=Decimal("26"),    rate_label="26%",    tax_formula="C$19,730 + 26% above C$111,000", sort_order=3),
-        dict(min_amount=Decimal("173000"),  max_amount=Decimal("246000"),   rate_pct=Decimal("29"),    rate_label="29%",    tax_formula="C$35,850 + 29% above C$173,000", sort_order=4),
-        dict(min_amount=Decimal("246000"),  max_amount=None,                rate_pct=Decimal("33"),    rate_label="33%",    tax_formula="C$57,020 + 33% above C$246,000", sort_order=5),
+        # 2026 federal brackets per ZP-TAX-CA-2026-001 §6 (CRA T4127 122nd
+        # Ed.) — provincial tax still excluded for simplicity (see canada.py).
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("58523"),    rate_pct=Decimal("14"),    rate_label="14%",    tax_formula="14% of income", sort_order=1),
+        dict(min_amount=Decimal("58523"),   max_amount=Decimal("117045"),   rate_pct=Decimal("20.5"),  rate_label="20.5%",  tax_formula="C$8,193 + 20.5% above C$58,523", sort_order=2),
+        dict(min_amount=Decimal("117045"),  max_amount=Decimal("181440"),   rate_pct=Decimal("26"),    rate_label="26%",    tax_formula="C$20,190 + 26% above C$117,045", sort_order=3),
+        dict(min_amount=Decimal("181440"),  max_amount=Decimal("258482"),   rate_pct=Decimal("29"),    rate_label="29%",    tax_formula="C$36,933 + 29% above C$181,440", sort_order=4),
+        dict(min_amount=Decimal("258482"),  max_amount=None,                rate_pct=Decimal("33"),    rate_label="33%",    tax_formula="C$59,275 + 33% above C$258,482", sort_order=5),
     ],
 }
 
@@ -483,15 +518,41 @@ _DE_SOLI_RATE = Decimal("5.5")
 _DE_CHURCH_TAX_RATE = Decimal("9")
 
 # ── Canada (previously engine/countries/canada.py) ──────────────────────
-_CA_CPP_YMPE = Decimal("71300")
+# 2026 values per ZP-TAX-CA-2026-001 (CRA T4127 122nd Ed., effective
+# Jan 1 2026). _CA_BASIC_PERSONAL_AMOUNT is BPAF at NI <= $181,440 (the
+# income-tapered reduction between $181,440 and $258,482 down to
+# _CA_BPAF_MIN is implemented in canada.py's _resolve_ca_bpaf()).
+_CA_CPP_YMPE = Decimal("74600")
 _CA_CPP_BASIC_EXEMPTION = Decimal("3500")
-_CA_EI_MIE = Decimal("65700")
-_CA_BASIC_PERSONAL_AMOUNT = Decimal("15705")
+_CA_EI_MIE = Decimal("68900")
+_CA_BASIC_PERSONAL_AMOUNT = Decimal("16452")
 # CPP2 — the real, current (2024+) second-tier CPP contribution on
 # earnings between the YMPE and the Year's Additional Maximum
 # Pensionable Earnings (YAMPE), employee and employer each.
-_CA_CPP2_YAMPE = Decimal("81200")
+_CA_CPP2_YAMPE = Decimal("85000")
 _CA_CPP2_RATE = Decimal("4")
+# BPAF income-taper bounds (doc §6): BPAF = BPAF_MAX below the low
+# threshold, linearly reduced to BPAF_MIN by the high threshold, flat
+# BPAF_MIN above it.
+_CA_BPAF_MIN = Decimal("14829")
+_CA_BPAF_NI_THRESHOLD_LOW = Decimal("181440")
+_CA_BPAF_NI_THRESHOLD_HIGH = Decimal("258482")
+# Canada Employment Amount — non-refundable credit converted to a tax
+# reduction at the lowest federal rate (doc §6), wired into
+# _calculate_annual_tax_ca.
+_CA_CEA = Decimal("1501")
+_CA_LOWEST_FEDERAL_RATE = Decimal("14")
+# Prepared parameters, NOT yet wired into calculate() — each requires a
+# jurisdiction/data source this engine doesn't resolve yet: Quebec
+# abatement needs the CA-XP/Quebec POE branch (Phase 3/5), the
+# beyond-province surtax needs the same POE resolution, and the
+# labour-sponsored-fund credit needs an employee LSVCC-investment
+# declaration nothing in this system currently captures. Left here as
+# configured values so those phases don't reintroduce a hardcoded number.
+_CA_QUEBEC_FEDERAL_ABATEMENT_PCT = Decimal("16.5")
+_CA_BEYOND_PROVINCE_SURTAX_PCT = Decimal("48")
+_CA_LSVCC_CREDIT_RATE = Decimal("15")
+_CA_LSVCC_CREDIT_MAX = Decimal("750")
 
 
 # ═════════════════════════════════════════════════════════════════════

@@ -6,11 +6,18 @@ import { inputClass, labelClass } from "./constants";
 
 // Rule Type stays a plain text-ish choice rather than a big schema
 // change — NI_BAND is UK National Insurance's per-category-letter band
-// shape (uk.py's _resolve_ni_bands reads it); every other country keeps
-// using the default MARGINAL_RATE. Selecting it reveals NI Category/
-// Employer Rate % — both real TaxSlab columns that had no form field at
-// all until now, so a category beyond A could never be entered.
-const RULE_TYPE_OPTIONS = ["MARGINAL_RATE", "NI_BAND", "PT_FLAT", "FORMULA"];
+// shape (uk.py's _resolve_ni_bands reads it); PT_FLAT is India's
+// Professional Tax bracket shape. Neither means anything for a country
+// that doesn't read them, so the dropdown is scoped per jurisdiction
+// (below) instead of always offering all four to everyone. Selecting
+// NI_BAND reveals NI Category/Employer Rate % — both real TaxSlab
+// columns that had no form field at all until now, so a category beyond
+// A could never be entered.
+const RULE_TYPE_OPTIONS_BY_COUNTRY = {
+  UK: ["MARGINAL_RATE", "NI_BAND", "FORMULA"],
+  IN: ["MARGINAL_RATE", "PT_FLAT", "FORMULA"],
+};
+const DEFAULT_RULE_TYPE_OPTIONS = ["MARGINAL_RATE", "FORMULA"];
 const NI_CATEGORIES = ["A", "B", "C", "D", "E", "F", "H", "I", "J", "K", "L", "M", "N", "S", "V", "Z"];
 // US Form W-4 filing status — a bracket row tagged with one of these wins
 // over an untagged (filing_status IS NULL) row for a matching employee;
@@ -35,6 +42,14 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   const isNiBand = form.ruleType === "NI_BAND";
   const isUS = pack.jurisdictionCountry === "US";
+  // Always includes whatever this row is already set to, even if it's
+  // outside the country's normal set — editing an existing row must
+  // never silently change its rule type just because the dropdown
+  // narrowed under it.
+  const ruleTypeOptions = Array.from(new Set([
+    ...(RULE_TYPE_OPTIONS_BY_COUNTRY[pack.jurisdictionCountry] || DEFAULT_RULE_TYPE_OPTIONS),
+    form.ruleType,
+  ]));
 
   async function save() {
     if (form.minAmount === "" || form.ratePct === "" || !form.rateLabel.trim()) {
@@ -72,7 +87,7 @@ export default function SlabFormModal({ pack, slab, onClose, onSaved }) {
         <FormSection title="General">
           <div className="grid grid-cols-3 gap-3">
             <div><label className={labelClass}>Label</label><input className={inputClass} value={form.rateLabel} onChange={set("rateLabel")} placeholder="e.g. 20% Bracket" /></div>
-            <div><label className={labelClass}>Rule Type</label><select className={inputClass} value={form.ruleType} onChange={set("ruleType")}>{RULE_TYPE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+            <div><label className={labelClass}>Rule Type</label><select className={inputClass} value={form.ruleType} onChange={set("ruleType")}>{ruleTypeOptions.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
             <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} /></div>
           </div>
         </FormSection>

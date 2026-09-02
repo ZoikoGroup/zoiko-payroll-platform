@@ -1305,6 +1305,49 @@ def _resolve_org_jurisdiction_state_fallback(db: Session, organization_id: int, 
     return compliance.jurisdiction_state
 
 
+
+# ZP-TAX-CA-2026-001 §5 — Province of Employment (POE). Covers the
+# single-physical-establishment, remote-attachment, and payroll-fallback
+# cases the current data model supports (PayrollEmployee.work_state,
+# remote_work_agreement/remote_attachment_province, and the org's own
+# configured jurisdiction state). The doc's multi-establishment time-
+# weighting and the CA-XP "beyond limits of any province/territory"
+# branch still require establishment records nothing in this schema
+# captures, and are deliberately NOT implemented here rather than
+# guessed at.
+_CA_PROVINCES_TERRITORIES = {"ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"}
+
+
+def _resolve_ca_poe_with_source(
+    work_state: Optional[str], org_jurisdiction_state: Optional[str],
+    remote_work_agreement: bool = False, remote_attachment_province: Optional[str] = None,
+) -> tuple[Optional[str], str]:
+    """Returns (poe_result, poe_reason) using the doc's own machine-
+    readable reason-code vocabulary, checked in the doc's own §5
+    precedence order: PHYSICAL_SINGLE (the employee's own recorded
+    work_state — treated as their one physical reporting establishment)
+    wins first; REMOTE_ATTACHED (a full-time remote-work agreement is on
+    file, with a declared attachment province) only applies when there's
+    no physical work_state — an employee who reports somewhere physical
+    is never overridden by a stale/unrelated remote-agreement flag;
+    PAYROLL_FALLBACK (neither of the above; falls back to the org's own
+    jurisdiction state, same fallback every other country already uses);
+    or UNRESOLVED (nothing is a recognized province/territory code —
+    returns None rather than passing bad data through to jurisdiction-
+    scoped config lookup). remote_agreement_effective_from is stored as
+    evidence but not enforced against the payroll date here — no other
+    employee declaration field (TD1, tax_code, w4_filing_status, ...) in
+    this codebase enforces its own effective-dating at this layer either,
+    only the current value is ever read."""
+    if work_state and work_state.strip().upper() in _CA_PROVINCES_TERRITORIES:
+        return work_state.strip().upper(), "PHYSICAL_SINGLE"
+    if remote_work_agreement and remote_attachment_province and remote_attachment_province.strip().upper() in _CA_PROVINCES_TERRITORIES:
+        return remote_attachment_province.strip().upper(), "REMOTE_ATTACHED"
+    if org_jurisdiction_state and org_jurisdiction_state.strip().upper() in _CA_PROVINCES_TERRITORIES:
+        return org_jurisdiction_state.strip().upper(), "PAYROLL_FALLBACK"
+    return None, "UNRESOLVED"
+
+
 def _resolve_country_aware_state(country: str, employee, literal_state: Optional[str], db: Session = None, organization_id: int = None) -> Optional[str]:
     """The value actually passed to _resolve_effective_rate_inputs's/
     get_state_scoped_config's `state` param for rate/slab lookup.
@@ -1318,14 +1361,29 @@ def _resolve_country_aware_state(country: str, employee, literal_state: Optional
 
     UK layer (on top): the tax-code-prefix-derived sub-jurisdiction wins
     over either of the above when the employee's own HMRC code carries
-    one — see _resolve_uk_sub_jurisdiction_with_source."""
-    effective_state = literal_state
-    if not effective_state and db is not None:
-        effective_state = _resolve_org_jurisdiction_state_fallback(db, organization_id, country)
-    if country != "UK":
-        return effective_state
-    sub_jurisdiction, _source = _resolve_uk_sub_jurisdiction_with_source(getattr(employee, "tax_code", None), effective_state)
-    return sub_jurisdiction
+    one — see _resolve_uk_sub_jurisdiction_with_source.
+
+    CA layer (on top): resolved via the POE reason-code resolver above
+    (physical work_state -> remote attachment -> payroll fallback)
+    instead of the raw fallback chain, so an unrecognized province code
+    resolves to no jurisdiction rather than being passed through as-is
+    — see _resolve_ca_poe_with_source."""
+    org_fallback_state = None
+    if not literal_state and db is not None:
+        org_fallback_state = _resolve_org_jurisdiction_state_fallback(db, organization_id, country)
+    effective_state = literal_state or org_fallback_state
+
+    if country == "UK":
+        sub_jurisdiction, _source = _resolve_uk_sub_jurisdiction_with_source(getattr(employee, "tax_code", None), effective_state)
+        return sub_jurisdiction
+    if country == "CA":
+        poe_result, _reason = _resolve_ca_poe_with_source(
+            literal_state, org_fallback_state,
+            remote_work_agreement=bool(getattr(employee, "remote_work_agreement", False)),
+            remote_attachment_province=getattr(employee, "remote_attachment_province", None),
+        )
+        return poe_result
+    return effective_state
 
 
 def _resolve_uk_sub_jurisdiction_with_source(tax_code: Optional[str], work_state: Optional[str]) -> tuple[Optional[str], str]:
@@ -2199,8 +2257,33 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
            "federal_income_tax", "state_income_tax", "local_tax", "social_security", "medicare",
            "state_disability_insurance", "total_deductions",
            "employer_social_security", "employer_medicare", "employer_futa", "employer_sui", "net_pay"],
+    # CPP/QPP -> social_security/employer_social_security, EI/QPIP ->
+    # esi/employer_esi (the same reused PayrollResult fields India's PF/
+    # ESI already populate — see engine/countries/canada.py's own
+    # "Reused PayrollResult fields" docstring), CPP2/QPP2 -> cpp2,
+    # NWT/Nunavut territorial tax -> local_tax, workers' compensation ->
+    # employer_sui. See _PAYSLIP_FIELD_LABEL_OVERRIDES below for the
+    # country-appropriate display labels on the reused fields.
+    "CA": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "federal_income_tax", "state_income_tax", "local_tax", "social_security", "esi", "cpp2",
+           "total_deductions", "employer_social_security", "employer_esi", "employer_sui", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
+
+# Per-country display-label overrides for a field this country reuses
+# under a different name than the catalog's original (first) owner —
+# e.g. Canada's EI/QPIP reuses India's "esi"/"employer_esi" fields, and
+# its workers' compensation reuses US's "employer_sui" field. Never
+# changes which PayslipItem column is read, only the label shown in the
+# Report Template field picker.
+_PAYSLIP_FIELD_LABEL_OVERRIDES = {
+    "CA": {
+        "esi": "Employment Insurance (Employee)",
+        "employer_esi": "Employment Insurance (Employer)",
+        "employer_sui": "Workers' Compensation (Employer)",
+    },
+}
 
 
 def get_available_report_data_fields(country: str) -> List[dict]:
@@ -2211,9 +2294,11 @@ def get_available_report_data_fields(country: str) -> List[dict]:
     PAYSLIP_ITEM fields this country actually populates."""
     country = _normalize_country(country)
     payslip_keys = _PAYSLIP_FIELDS_BY_COUNTRY.get(country, _DEFAULT_PAYSLIP_FIELDS)
+    label_overrides = _PAYSLIP_FIELD_LABEL_OVERRIDES.get(country, {})
     items = []
     for key in payslip_keys:
         label, field_type, aggregatable = _PAYSLIP_ITEM_FIELD_CATALOG[key]
+        label = label_overrides.get(key, label)
         items.append({"key": key, "label": label, "dataSourceKind": "PAYSLIP_ITEM", "sourceColumn": key,
                       "fieldType": field_type, "aggregatable": aggregatable})
     for key, (label, field_type, aggregatable) in _PAYROLL_RUN_FIELD_CATALOG.items():
@@ -4390,10 +4475,13 @@ def _resolve_employee_calc_inputs(
             filing_status=filing_status,
         )
         state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state)
-        # US-specific (jurisdiction_id stays None, so get_employer_tax_profiles
-        # is a no-op, for every other country): tenant-specific SUI/etc.
-        # rates, resolved by (org, "US-<state>") rather than by pack/regime.
-        jurisdiction_id = f"{country}-{resolution_state}" if (country == "US" and resolution_state) else None
+        # US SUI/etc. and CA workers'-comp/similar employer-specific
+        # notices both resolve through the same tenant-specific-rate
+        # mechanism (jurisdiction_id stays None for every other country,
+        # so get_employer_tax_profiles is a no-op there): "US-<state>" or
+        # "CA-<province>" rather than by pack/regime. CA-D06/AC-24: never
+        # a global-default rate, only an employer-specific notice.
+        jurisdiction_id = f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state) else None
         employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=payroll_date)
         if cache is not None:
             cache[cache_key] = (rate_map, slabs, canonical_rates, pack, state_rate_map, state_slabs, employer_tax_profiles)
@@ -5531,7 +5619,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # while a real run for the same employee correctly used their
     # region's config.
     state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state)
-    jurisdiction_id = f"{country}-{resolution_state}" if (country == "US" and resolution_state) else None
+    jurisdiction_id = f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state) else None
     employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=run.pay_date)
     reciprocity = _resolve_us_reciprocity(db, employee, country, resolution_state, as_of=run.pay_date)
     locality_rate = (

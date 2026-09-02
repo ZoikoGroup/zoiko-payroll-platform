@@ -493,7 +493,7 @@ export default function JurisdictionLayout({
 
       {showNewPack && (
         <NewPackFormComponent
-          country={country} state={state} packType={packType}
+          country={country} state={state} packType={packType} stateOptions={stateOptions}
           onClose={() => setShowNewPack(false)}
           onCreated={(created) => {
             setShowNewPack(false);

@@ -59,9 +59,15 @@ export const COUNTRY_FIELD_SPECS = {
   CA: [
     { key: "sin", label: "SIN", type: "text", placeholder: "9 digits", required: true, strip: "- ", pattern: /^\d{9}$/, error: "SIN must be 9 digits (e.g. 123-456-789)." },
     { key: "td1_claim_amount", label: "TD1 claim amount", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TD1 claim amount must be a number." },
+    { key: "td1_additional_tax", label: "TD1X additional tax per pay period", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TD1X additional tax must be a number." },
     { key: "province", label: "Province of employment", type: "select", required: true, upper: true, choices: ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"] },
     { key: "transit_number", label: "Bank transit number", type: "text", placeholder: "5 digits", pattern: /^\d{5}$/, error: "Transit number must be 5 digits." },
     { key: "financial_institution_number", label: "Financial institution number", type: "text", placeholder: "3 digits", pattern: /^\d{3}$/, error: "Financial institution number must be 3 digits." },
+    { key: "cpp_qpp_election_status", label: "CPT30 CPP/QPP election", type: "select", upper: true, choices: ["ACTIVE", "STOPPED"] },
+    { key: "cpp_election_effective_date", label: "CPP/QPP election effective date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Election effective date must be in YYYY-MM-DD format." },
+    { key: "remote_work_agreement", label: "Full-time remote work agreement", type: "select", choices: ["true", "false", "True", "False"] },
+    { key: "remote_attachment_province", label: "Remote attachment province", type: "select", upper: true, choices: ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"] },
+    { key: "remote_agreement_effective_from", label: "Remote agreement effective from", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Remote agreement effective date must be in YYYY-MM-DD format." },
   ],
   DE: [
     { key: "steuer_id", label: "Steuer-ID", type: "text", placeholder: "11 digits", required: true, strip: " ", pattern: /^\d{11}$/, error: "Steuer-ID must be exactly 11 digits." },

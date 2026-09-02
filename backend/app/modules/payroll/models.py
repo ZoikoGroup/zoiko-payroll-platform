@@ -164,6 +164,46 @@ class PayrollEmployee(Base):
     w4_filing_status = Column(String(20), nullable=True)
     w4_form_vintage  = Column(String(10), nullable=True)
 
+    # Canada-specific: TD1 federal total claim amount. NULL for every
+    # non-CA employee, and for CA employees until explicitly set — the
+    # engine falls back to the standard income-tapered BPAF (Phase 2)
+    # when unset, matching ZP-TAX-CA-2026-001 §6's "Federal TD1 default:
+    # Dynamic BPAF. If no TD1 is on file, follow T4127 default logic."
+    # Distinct from the pre-existing compliance_fields["td1_claim_amount"]
+    # JSON entry (already collected via the employee form/
+    # CAEmployeeValidation) which the engine never consumed until now —
+    # same class of dead-plumbing gap already closed for US w4_filing_status
+    # and UK tax_code (see employee_validation.py's FIELD_COLUMN_MAP).
+    td1_claim_amount = Column(Numeric(12, 2), nullable=True)
+
+    # Canada-specific: TD1X employee-requested additional per-pay-period
+    # withholding — additive on top of the statutory calculation, never
+    # overwriting it (ZP-TAX-CA-2026-001 §18). NULL means "none requested."
+    td1_additional_tax = Column(Numeric(12, 2), nullable=True)
+    # Canada-specific: CPT30 CPP/QPP election — "ACTIVE" (default
+    # behavior, contribute normally) or "STOPPED" (eligible age-65-69
+    # retirement-pension recipient has filed to stop CPP/QPP withholding).
+    # NULL/"ACTIVE" changes nothing from today's behavior. Age-based
+    # automatic start (18) / stop (70) is NOT modeled — this column only
+    # ever reflects an explicit employee election, never an inferred one;
+    # there's no date_of_birth field on this model for any country today.
+    cpp_qpp_election_status = Column(String(20), nullable=True)
+    cpp_election_effective_date = Column(Date, nullable=True)
+
+    # Canada-specific: full-time remote-work "reasonable attachment" to an
+    # employer establishment in a specific province, per
+    # ZP-TAX-CA-2026-001 §5 step 4 — an employee working from home whose
+    # POE should still resolve to the employer's establishment province,
+    # not wherever they happen to be sitting. NULL/False means "no remote
+    # agreement on file," same as every employee today; work_state (or
+    # the org fallback) resolves POE exactly as it already does. Does NOT
+    # model multi-establishment time-weighting (§5 steps 2-3) — that
+    # needs real establishment records this schema doesn't have for any
+    # country, a materially larger feature left for a later decision.
+    remote_work_agreement = Column(Boolean, default=False, nullable=False, server_default="false")
+    remote_attachment_province = Column(String(10), nullable=True)
+    remote_agreement_effective_from = Column(Date, nullable=True)
+
     # US-specific (but named generically in case another jurisdiction ever
     # needs the same resident/work split): the state the employee is a tax
     # RESIDENT of, as distinct from work_state above (where they physically
