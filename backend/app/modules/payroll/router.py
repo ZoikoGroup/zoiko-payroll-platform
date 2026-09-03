@@ -736,7 +736,7 @@ def get_contribution_rates(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_contribution_rates(db, current_user.organization_id, country)
+    return service.get_contribution_rates(db, current_user.organization_id, country=country)
 
 
 @payroll_router.get(
@@ -748,7 +748,7 @@ def get_tax_slabs(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_tax_slabs(db, current_user.organization_id, country)
+    return service.get_tax_slabs(db, current_user.organization_id, country=country)
 
 
 @payroll_router.post(

@@ -85,6 +85,10 @@ def build_context_from_employee(
     resident_state_rate_map: dict | None = None,
     resident_state_slabs: list | None = None,
     locality_rate=None,
+    ytd_pensionable_earnings: Decimal | None = None,
+    ytd_cpp2_pensionable_earnings: Decimal | None = None,
+    ytd_insurable_earnings: Decimal | None = None,
+    ytd_basic_exemption_used: Decimal | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -125,4 +129,8 @@ def build_context_from_employee(
         td1_claim_amount=getattr(employee, "td1_claim_amount", None),
         td1_additional_tax=getattr(employee, "td1_additional_tax", None),
         cpp_qpp_election_status=getattr(employee, "cpp_qpp_election_status", None),
+        ytd_pensionable_earnings=ytd_pensionable_earnings,
+        ytd_cpp2_pensionable_earnings=ytd_cpp2_pensionable_earnings,
+        ytd_insurable_earnings=ytd_insurable_earnings,
+        ytd_basic_exemption_used=ytd_basic_exemption_used,
     )

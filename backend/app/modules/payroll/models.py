@@ -380,6 +380,15 @@ class PayslipItem(Base):
     tax_policy_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
     tax_policy_version  = Column(String(20), nullable=True)
     tax_rule_snapshot   = Column(JSON, nullable=True)
+    # Same immutability contract as tax_rule_snapshot above, for YTD-based
+    # caps (Canada CPP/CPP2/EI today) instead of rate/slab values: freezes
+    # the before/after cumulative figures this payslip actually consumed
+    # per component, e.g. {"cpp": {"ytd_before": "71100.00", "ytd_after":
+    # "79100.00"}, "cpp2": {...}, "ei": {...}, "cpp_basic_exemption": {...}}.
+    # NULL for every payslip generated before this column existed, and for
+    # every country/employee where YTD accumulation isn't wired/enabled —
+    # see engine/countries/shared.py's _YTD_ACCUMULATOR_ENABLED_COUNTRIES.
+    ytd_snapshot        = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -474,6 +483,12 @@ class PayslipItem(Base):
     # from EmployerTaxProfile (agency-assigned rate), NOT from a generic
     # ContributionRate override. Zero until an org has a configured profile.
     employer_sui       = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: employer-side CPP2/QPP2 — previously entirely unmodeled (only
+    # the employee-side cpp2 column above existed); the employer's own
+    # second-tier contribution is legally distinct and must be tracked
+    # separately, same reasoning as employer_social_security vs.
+    # social_security above.
+    employer_cpp2      = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -1713,6 +1728,3 @@ class PayrollYtdAccumulator(Base):
 
     def __repr__(self):
         return f"<PayrollYtdAccumulator emp={self.employee_id} year={self.tax_year} comp={self.tax_component}>"
-
-    def __repr__(self):
-        return f"<PayrollUpdateFormSubmission send={self.send_id} status={self.status}>"

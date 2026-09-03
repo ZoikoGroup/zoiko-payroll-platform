@@ -3,10 +3,15 @@
 //
 // shape: "rate_pair" = Employee % + Employer %, "rate_single" = Employee
 // % only (every single-sided rate this engine reads is employee-side —
-// cpp2_rate, lowest_fed_rate, qc_fed_abatement, territorial payroll tax),
-// "flat" = Flat Amount only. Matches exactly what engine/countries/
-// canada.py reads via resolve_jurisdiction_parameter()/rate_map.get() —
-// every key below is a real, engine-read key; nothing here invents one.
+// lowest_fed_rate, qc_fed_abatement, territorial payroll tax), "flat" =
+// Flat Amount only. Matches exactly what engine/countries/canada.py reads
+// via resolve_jurisdiction_parameter()/rate_map.get() — every key below is
+// a real, engine-read key; nothing here invents one.
+//
+// cpp2_rate is "rate_pair", not "rate_single" — CPP2/QPP2 genuinely has an
+// employer-side contribution (4.00% each, per ZP-TAX-CA-2026-001 §10/§12),
+// previously entirely unresolved by the engine (only the employee side was
+// ever read); see canada.py's calculate() for the fix.
 
 export const CPP_EI_KEYS = [
   { key: "cpp", label: "Canada Pension Plan (CPP)", shape: "rate_pair" },
@@ -15,7 +20,7 @@ export const CPP_EI_KEYS = [
   { key: "cpp_basic_exemption", label: "CPP Basic Exemption Amount", shape: "flat" },
   { key: "ei_mie", label: "EI Maximum Insurable Earnings", shape: "flat" },
   { key: "cpp2_yampe", label: "CPP2 Year's Additional Maximum Pensionable Earnings (YAMPE)", shape: "flat" },
-  { key: "cpp2_rate", label: "CPP2 Second-Tier Rate", shape: "rate_single" },
+  { key: "cpp2_rate", label: "CPP2 Second-Tier Rate", shape: "rate_pair" },
 ];
 
 export const FEDERAL_PARAM_KEYS = [

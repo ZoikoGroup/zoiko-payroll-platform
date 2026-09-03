@@ -103,3 +103,26 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def _is_development_environment() -> bool:
+    # Deliberately NOT identical to app/database.py's same-named function:
+    # that one treats DEBUG's own default (True) as sufficient to count as
+    # "development" even when ENVIRONMENT is explicitly set to something
+    # else (e.g. "production") — fine for choosing a DB fallback, but it
+    # would make this fail-closed secret-key guard never actually fire in
+    # the most realistic misconfiguration (ENVIRONMENT set correctly,
+    # DEBUG's default left untouched). Here, an explicit ENVIRONMENT/APP_ENV
+    # value is authoritative; DEBUG is consulted only when neither is set.
+    import os
+    env_name = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").strip().lower()
+    if env_name:
+        return env_name == "development"
+    return bool(settings.DEBUG)
+
+
+if settings.PAYROLL_SECRET_KEY == "change-me-payroll-platform-secret" and not _is_development_environment():
+    raise RuntimeError(
+        "PAYROLL_SECRET_KEY is still the placeholder default. Refusing to start outside a "
+        "development environment — set a real PAYROLL_SECRET_KEY in your .env file."
+    )

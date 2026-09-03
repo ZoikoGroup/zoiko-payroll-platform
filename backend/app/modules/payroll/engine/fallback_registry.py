@@ -113,6 +113,47 @@ _ENGINE_CONSTANT_REGISTRY = [
 ]
 
 
+def get_required_parameter_keys(country: str) -> list[dict]:
+    """The generic, per-jurisdiction list of resolver keys the engine
+    actually reads via resolve_jurisdiction_parameter for this country —
+    derived live from _ENGINE_CONSTANT_REGISTRY (the same metadata that
+    already powers the Super Admin 'Engine Fallback Defaults' viewer
+    above), not a second, hand-maintained catalog. Adding a required
+    parameter for a country means adding one registry row, same as it
+    already does today for that viewer.
+
+    Compound `resolverKey` values (e.g. UK's student loan plans — one
+    registry row covering 5 distinct keys) are split into individual
+    entries. Entries whose resolverKey isn't actually resolver-backed
+    (marked "N/A..." — a pure code constant with no DB counterpart at
+    all) are excluded, since a readiness check has nothing to verify for
+    them. Deduplicates by (key, side) — India's Old/New Regime variants of
+    the same parameter collapse to one required entry, since at runtime
+    there is only ever one "standard_deduction" key being resolved,
+    regardless of which regime's hardcoded default backs it."""
+    seen = set()
+    required = []
+    for entry in _ENGINE_CONSTANT_REGISTRY:
+        if entry["country"] != country:
+            continue
+        resolver_key = entry["resolverKey"]
+        if resolver_key.startswith("N/A"):
+            continue
+        side = entry.get("side")
+        for key in (k.strip() for k in resolver_key.split("/")):
+            dedupe_key = (key, side)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            required.append({
+                "key": key,
+                "side": side,
+                "label": entry["label"],
+                "constantName": entry["attr"],
+            })
+    return required
+
+
 def _jsonable(value):
     """Recursively converts Decimal (and tuples/dicts containing them) into
     plain JSON-safe types, without altering the live constant object itself."""

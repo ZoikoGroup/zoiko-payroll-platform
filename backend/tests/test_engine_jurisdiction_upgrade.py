@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
+import pytest
+
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
 from app.modules.payroll.engine.resolver import calculate_payroll
@@ -58,6 +60,48 @@ def test_resolve_jurisdiction_parameter_uses_configured_amount_row():
 def test_resolve_jurisdiction_parameter_falls_back_when_unconfigured():
     value = resolve_jurisdiction_parameter({}, "standard_deduction", Decimal("75000"), country="IN")
     assert value == Decimal("75000")
+
+
+# ── Fallback Removal Fix Plan Phase 3: required-configuration validation ──
+# _VALIDATION_ENABLED_COUNTRIES starts empty (Phase 6 is what actually adds
+# a country) — these tests exercise the capability directly by adding/
+# removing a country themselves, restoring the module-level set afterward
+# so this doesn't leak into any other test.
+
+def test_resolve_jurisdiction_parameter_raises_when_country_opted_into_validation():
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._VALIDATION_ENABLED_COUNTRIES.add("ZZ")
+    try:
+        with pytest.raises(shared_module.MissingComplianceConfigurationError):
+            resolve_jurisdiction_parameter({}, "standard_deduction", Decimal("75000"), country="ZZ")
+    finally:
+        shared_module._VALIDATION_ENABLED_COUNTRIES.discard("ZZ")
+
+
+def test_resolve_jurisdiction_parameter_still_falls_back_for_a_country_not_opted_in():
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._VALIDATION_ENABLED_COUNTRIES.add("ZZ")
+    try:
+        # A DIFFERENT, genuinely-not-enabled country (not "IN" — that's
+        # opted in for real as of Phase 6, so it's no longer a valid
+        # "not opted in" example) — must still silently fall back exactly
+        # as before, proving this is per-country, not a global switch
+        # flipped by any one country being enabled.
+        value = resolve_jurisdiction_parameter({}, "standard_deduction", Decimal("75000"), country="DE")
+        assert value == Decimal("75000")
+    finally:
+        shared_module._VALIDATION_ENABLED_COUNTRIES.discard("ZZ")
+
+
+def test_resolve_jurisdiction_parameter_configured_row_never_raises_even_when_opted_in():
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._VALIDATION_ENABLED_COUNTRIES.add("ZZ")
+    try:
+        rate_map = {"standard_deduction": Rate(flat_amount=Decimal("90000"))}
+        value = resolve_jurisdiction_parameter(rate_map, "standard_deduction", Decimal("75000"), country="ZZ")
+        assert value == Decimal("90000")
+    finally:
+        shared_module._VALIDATION_ENABLED_COUNTRIES.discard("ZZ")
 
 
 def test_resolve_jurisdiction_parameter_pct_side_employee_vs_employer():

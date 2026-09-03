@@ -344,6 +344,17 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
     if existing:
         raise AlreadyExistsException("User", "email")
 
+    # Reject registration outright for a jurisdiction with no valid Active
+    # canonical compliance pack — never silently register the org and let
+    # it fall back to hardcoded statutory defaults at payroll time. Checked
+    # before validate_tax_identifiers_or_raise below so an unsupported
+    # country surfaces this clear message, not a confusing tax-ID error.
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+    block_reason = get_jurisdiction_onboarding_block_reason(db, data.country)
+    if block_reason:
+        raise BadRequestException(block_reason)
+
     # Deduplication / reuse rule: only ever persist tax identifiers that match
     # the selected jurisdiction's schema. Unknown keys and blank values are
     # dropped rather than stored — so repeated registrations / resubmissions

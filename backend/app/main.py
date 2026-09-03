@@ -33,6 +33,7 @@ from app.core.exceptions import (
 )
 from app.core.rate_limiter import limiter
 from app.database import initialize_database
+from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
 
 logger = logging.getLogger("zoiko_payroll")
 
@@ -72,9 +73,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+async def _missing_compliance_configuration_handler(request: Request, exc: MissingComplianceConfigurationError):
+    """Converts the payroll engine's plain (framework-free by design)
+    MissingComplianceConfigurationError into the same clean JSON error
+    shape every other Zoiko error uses — kept here rather than in
+    core/exceptions.py so that module doesn't have to import a
+    payroll-specific engine class."""
+    from app.core.exceptions import _cors_headers
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=400,
+        content={
+            "success": False,
+            "error": "MISSING_COMPLIANCE_CONFIGURATION",
+            "message": str(exc),
+            "detail": str(exc),
+        },
+        headers=_cors_headers(request),
+    )
+
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_exception_handler(ZoikoException, zoiko_exception_handler)
+app.add_exception_handler(MissingComplianceConfigurationError, _missing_compliance_configuration_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # ── CORS ─────────────────────────────────────────────────────────────────────

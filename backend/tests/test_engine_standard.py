@@ -62,7 +62,8 @@ STRATEGY = StandardStrategy()
 def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status=None, employer_tax_profiles=None,
          state_slabs=None, reciprocity_suppresses_work_state=False, resident_state_slabs=None, locality_rate=None,
          work_state=None, state_rate_map=None, td1_claim_amount=None, td1_additional_tax=None,
-         cpp_qpp_election_status=None):
+         cpp_qpp_election_status=None, ytd_pensionable_earnings=None, ytd_cpp2_pensionable_earnings=None,
+         ytd_insurable_earnings=None, ytd_basic_exemption_used=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -74,6 +75,8 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         work_state=work_state, state_rate_map=state_rate_map or {},
         td1_claim_amount=td1_claim_amount, td1_additional_tax=td1_additional_tax,
         cpp_qpp_election_status=cpp_qpp_election_status,
+        ytd_pensionable_earnings=ytd_pensionable_earnings, ytd_cpp2_pensionable_earnings=ytd_cpp2_pensionable_earnings,
+        ytd_insurable_earnings=ytd_insurable_earnings, ytd_basic_exemption_used=ytd_basic_exemption_used,
     )
     return STRATEGY.calculate(ctx)
 
@@ -237,11 +240,11 @@ def test_us_sui_computed_and_futa_credit_applied_when_profile_exists():
 
 
 def test_us_futa_credit_reduction_configurable_via_rate_map():
-    """A Super-Admin-configured futa_credit_reduction_pct (state-scoped)
-    must reduce the effective credit — simulating a credit-reduction state
-    — without any hardcoded list of which states those are."""
+    """A Super-Admin-configured futa_credit_red_pct (state-scoped) must
+    reduce the effective credit — simulating a credit-reduction state —
+    without any hardcoded list of which states those are."""
     profiles = {"SUI": EmployerTaxProfileStub()}
-    rates = dict(US_RATES, futa_credit_reduction_pct=Rate(flat_amount=Decimal("0.6")))
+    rates = dict(US_RATES, futa_credit_red_pct=Rate(flat_amount=Decimal("0.6")))
     reduced = calc("US", 5000, rates, US_SLABS, employer_tax_profiles=profiles)
     normal = calc("US", 5000, US_RATES, US_SLABS, employer_tax_profiles=profiles)
     assert reduced.employer_futa > normal.employer_futa
@@ -710,6 +713,7 @@ def test_canada_cpt30_stopped_suppresses_cpp_and_cpp2():
     assert result.social_security == Decimal("0")
     assert result.employer_social_security == Decimal("0")
     assert result.cpp2 == Decimal("0")
+    assert result.employer_cpp2 == Decimal("0")
 
 
 def test_canada_cpt30_active_does_not_suppress_cpp():
@@ -727,6 +731,165 @@ def test_canada_cpt30_stopped_does_not_affect_ei():
     result = calc("CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED")
     assert result.social_security == Decimal("0")
     assert result.employee_esi > Decimal("0")
+
+
+def test_canada_cpp2_employer_side_computed_from_own_rate():
+    # $8,000/month = $96,000/year, crosses YMPE ($74,600) and sits inside
+    # the CPP2 corridor up to YAMPE ($85,000) -> full $10,400 corridor.
+    # Employee and employer rates configured independently (rate_pair),
+    # matching how CPP's own first-tier rate is already split.
+    rates = {"cpp2_rate": Rate("cpp2_rate", employee_rate_pct=Decimal("4.00"), employer_rate_pct=Decimal("4.00"))}
+    result = calc("CA", 8000, rates, _FLAT_10_SLAB)
+    assert result.cpp2 == Decimal("34.67")           # 10400 * 4% / 12
+    assert result.employer_cpp2 == Decimal("34.67")
+
+
+def test_canada_cpp2_employee_and_employer_rates_resolved_independently():
+    rates = {"cpp2_rate": Rate("cpp2_rate", employee_rate_pct=Decimal("4.00"), employer_rate_pct=Decimal("3.50"))}
+    result = calc("CA", 8000, rates, _FLAT_10_SLAB)
+    assert result.cpp2 == Decimal("34.67")            # 10400 * 4.00% / 12
+    assert result.employer_cpp2 == Decimal("30.33")   # 10400 * 3.50% / 12
+
+
+def test_canada_cpp2_employer_side_never_reduces_net_pay():
+    # employer_cpp2 is an employer-side contribution, not an employee
+    # deduction — engine/standard.py's total_employee_deductions must
+    # never include it (mirrors employer_social_security's own contract).
+    # Two very different employer rates, same employee rate: net_pay must
+    # be identical regardless, since only the employee side can affect it.
+    rates_low = {"cpp2_rate": Rate("cpp2_rate", employee_rate_pct=Decimal("4.00"), employer_rate_pct=Decimal("4.00"))}
+    rates_high = {"cpp2_rate": Rate("cpp2_rate", employee_rate_pct=Decimal("4.00"), employer_rate_pct=Decimal("20.00"))}
+    result_low = calc("CA", 8000, rates_low, _FLAT_10_SLAB)
+    result_high = calc("CA", 8000, rates_high, _FLAT_10_SLAB)
+    assert result_low.net_pay == result_high.net_pay
+    assert result_low.cpp2 == result_high.cpp2 == Decimal("34.67")
+    assert result_low.employer_cpp2 == Decimal("34.67")
+    assert result_high.employer_cpp2 == Decimal("173.33")  # 10400 * 20% / 12
+
+
+# ── Canada CPP/CPP2/EI real YTD accumulator (ctx.ytd_* fields) ──────────
+# Dormant in production behind engine/countries/shared.py's
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES (empty today) — these tests exercise
+# the engine directly via ctx.ytd_* fields, independent of that
+# service-layer rollout switch, proving the calculation itself is correct
+# whenever it IS wired.
+
+def test_canada_ytd_pensionable_room_mid_period_crossing():
+    # Employee already has $74,000 YTD pensionable (room: $600 left to
+    # YMPE $74,600) and $1,100 of a $1,200 (overridden, clean) annual
+    # basic exemption already used ($100/mo remaining). A $8,000 gross
+    # period both fills the remaining first-layer room AND crosses into
+    # the CPP2 corridor within the SAME period.
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "cpp_basic_exemption": Rate("cpp_basic_exemption", flat_amount=Decimal("1200")),
+    }
+    result = calc(
+        "CA", 8000, rates, _FLAT_10_SLAB,
+        ytd_pensionable_earnings=Decimal("74000"), ytd_cpp2_pensionable_earnings=Decimal("0"),
+        ytd_insurable_earnings=Decimal("0"), ytd_basic_exemption_used=Decimal("1100"),
+    )
+    # period_first_layer_pensionable = min(8000, room=600) - exemption(100) = 500
+    assert result.social_security == Decimal("29.75")             # 500 * 5.95%
+    assert result.employer_social_security == Decimal("29.75")
+    assert result.ytd_pensionable_earnings == Decimal("74500.00")  # 74000 + 500
+    assert result.ytd_basic_exemption_used == Decimal("1200.00")   # 1100 + 100
+    # period_gross_over_ympe = 8000 - 600(room) = 7400, fits inside the
+    # full $10,400 CPP2 corridor (ytd_cpp2 before = 0) with room to spare.
+    assert result.cpp2 == Decimal("296.00")                        # 7400 * 4% (fallback rate)
+    assert result.ytd_cpp2_pensionable_earnings == Decimal("7400.00")
+
+
+def test_canada_ytd_cpp2_corridor_fills_exactly_at_boundary():
+    # First layer already fully maxed (YTD == YMPE); CPP2 corridor has
+    # exactly $400 of its $10,400 remaining — this period's $8,000 gross
+    # must cap CPP2 pensionable at exactly that $400, not spill over.
+    result = calc(
+        "CA", 8000, {}, _FLAT_10_SLAB,
+        ytd_pensionable_earnings=Decimal("74600"), ytd_cpp2_pensionable_earnings=Decimal("10000"),
+        ytd_insurable_earnings=Decimal("0"), ytd_basic_exemption_used=Decimal("3500"),
+    )
+    assert result.social_security == Decimal("0")           # first-layer room is 0
+    assert result.cpp2 == Decimal("16.00")                   # 400 * 4% (fallback rate)
+    assert result.ytd_cpp2_pensionable_earnings == Decimal("10400.00")  # exactly the $10,400 cap
+
+
+def test_canada_ytd_ei_stays_zero_after_mie_reached_regardless_of_raise():
+    # EI already at its $68,900 MIE for the year; a raise to $10,000/mo
+    # must not reopen room — EI stays $0. CPP is a SEPARATE accumulator
+    # and must be completely unaffected by EI being maxed out.
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
+        "cpp_basic_exemption": Rate("cpp_basic_exemption", flat_amount=Decimal("1200")),
+    }
+    result = calc(
+        "CA", 10000, rates, _FLAT_10_SLAB,
+        ytd_pensionable_earnings=Decimal("50000"), ytd_cpp2_pensionable_earnings=Decimal("0"),
+        ytd_insurable_earnings=Decimal("68900"), ytd_basic_exemption_used=Decimal("1100"),
+    )
+    assert result.employee_esi == Decimal("0")
+    assert result.employer_esi == Decimal("0")
+    assert result.ytd_insurable_earnings == Decimal("68900.00")  # unchanged, still capped
+    # CPP unaffected by EI's own accumulator being maxed:
+    # room = 74600-50000=24600, period_pensionable = min(10000,24600)-100 = 9900
+    assert result.social_security == Decimal("589.05")  # 9900 * 5.95%
+    assert result.ytd_pensionable_earnings == Decimal("59900.00")  # 50000 + 9900
+
+
+def test_canada_ytd_cpt30_stopped_freezes_accumulator_not_just_withheld_amounts():
+    # CPT30-stopped must not just zero the withheld $, it must also leave
+    # YTD unchanged — a later un-stopped period must see the SAME room as
+    # if the stopped period never happened, not room reduced by earnings
+    # nothing was ever collected against.
+    rates = {
+        "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
+        "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
+    }
+    result = calc(
+        "CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED",
+        ytd_pensionable_earnings=Decimal("50000"), ytd_cpp2_pensionable_earnings=Decimal("0"),
+        ytd_insurable_earnings=Decimal("30000"), ytd_basic_exemption_used=Decimal("3500"),
+    )
+    assert result.social_security == Decimal("0")
+    assert result.cpp2 == Decimal("0")
+    assert result.ytd_pensionable_earnings == Decimal("50000")   # unchanged, not grown
+    assert result.ytd_cpp2_pensionable_earnings == Decimal("0")  # unchanged
+    # EI is untouched by CPT30 (a CPP/QPP-only election) — continues normally.
+    assert result.employee_esi > Decimal("0")
+    assert result.ytd_insurable_earnings == Decimal("37000.00")  # 30000 + 7000
+
+
+def test_canada_ytd_basic_exemption_never_exceeds_annual_total():
+    # Only $50 of the $1,200 annual exemption remains (irregular pay
+    # history) — this period's exemption must be capped at that $50, not
+    # the usual $100/mo pro-rata share.
+    rates = {"cpp_basic_exemption": Rate("cpp_basic_exemption", flat_amount=Decimal("1200"))}
+    result = calc(
+        "CA", 8000, rates, _FLAT_10_SLAB,
+        ytd_pensionable_earnings=Decimal("0"), ytd_cpp2_pensionable_earnings=Decimal("0"),
+        ytd_insurable_earnings=Decimal("0"), ytd_basic_exemption_used=Decimal("1150"),
+    )
+    assert result.ytd_basic_exemption_used == Decimal("1200.00")  # capped, not 1250
+
+
+def test_canada_ytd_quebec_qpp_qpip_share_the_same_accumulator_mechanism():
+    # Same ctx.ytd_* fields drive QPP/QPIP for a Quebec employee —
+    # confirms the mechanism isn't CPP-name-specific. QPIP already at its
+    # (Quebec-specific) MIE cap; QPP still has first-layer room.
+    state_rates = {
+        "qpp": Rate("qpp", employee_rate_pct=Decimal("6.30"), employer_rate_pct=Decimal("6.30")),
+        "qpip": Rate("qpip", employee_rate_pct=Decimal("0.430"), employer_rate_pct=Decimal("0.602")),
+        "qpip_mie": Rate("qpip_mie", flat_amount=Decimal("103000")),
+    }
+    result = calc(
+        "CA", 8000, {}, _FLAT_10_SLAB, work_state="QC", state_rate_map=state_rates,
+        ytd_pensionable_earnings=Decimal("74000"), ytd_cpp2_pensionable_earnings=Decimal("0"),
+        ytd_insurable_earnings=Decimal("103000"), ytd_basic_exemption_used=Decimal("3500"),
+    )
+    assert result.employee_esi == Decimal("0")           # QPIP already at its MIE cap
+    assert result.ytd_insurable_earnings == Decimal("103000.00")  # unchanged
+    assert result.social_security > Decimal("0")          # QPP still has first-layer room
 
 
 def test_unknown_country_falls_back_to_generic():

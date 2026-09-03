@@ -15,6 +15,79 @@ from decimal import Decimal
 MONTHS_PER_YEAR = Decimal("12")
 _logger = logging.getLogger("zoiko")
 
+
+class MissingComplianceConfigurationError(Exception):
+    """A federal/national-scope statutory parameter has no configured row
+    (canonical or org-scoped) for a country that has opted into required-
+    configuration validation (see _VALIDATION_ENABLED_COUNTRIES below).
+
+    Plain Exception, not a FastAPI HTTPException — this module is
+    deliberately framework/ORM-free (see this file's own docstring) so it
+    stays import-safe from anywhere. The service/router layer is
+    responsible for catching this and turning it into a proper 4xx
+    response (see app.core.exceptions' handler, registered in main.py)."""
+    def __init__(self, key: str, country: str, organization_id: int = None):
+        self.key = key
+        self.country = country
+        self.organization_id = organization_id
+        super().__init__(
+            f"No statutory configuration found for '{key}' ({country}) — "
+            f"configure it under Super Admin > Compliance before running payroll for this jurisdiction."
+        )
+
+
+# Per-jurisdiction rollout switch for the fail-fast behavior above — a
+# plain in-code set, not a DB-backed flag, deliberately: this module has
+# no DB access by design, and this is a rollout switch a developer flips
+# per phase, not something an admin should toggle at runtime.
+#
+# Fallback Removal Fix Plan, Phase 6 rollout log:
+#   IN — attempted 2026-09-03, REVERTED same day. Canonical data was
+#        confirmed complete (component_key rebate_87a_mrelief/
+#        surcharge_mrelief backfilled that day, linked to Active pack
+#        IN-PAYROLL-FY2026-27 id=2) — but enabling it broke 35 existing
+#        tests immediately, because canonical completeness does NOT imply
+#        an EXISTING org's own already-synced ContributionRate rows are
+#        complete: sync_org_rates_from_canonical only runs on an org's
+#        FIRST use of a jurisdiction, never re-runs when canonical data
+#        gains a new key later. The one real India org in the live DB
+#        synced its rows before this backfill existed, so it almost
+#        certainly lacks rebate_87a_mrelief/surcharge_mrelief today —
+#        enabling validation would have broken its very next payroll run.
+#        A real fix needs a re-sync mechanism (or a one-time backfill of
+#        EVERY existing org's own rows, not just canonical) before this
+#        can be safely re-attempted — not done here; flagged for a
+#        separate, explicit decision.
+#   US — same unresolved risk applies (never actually attempted).
+#   UK — also blocked by its tax pack still being Draft (see history above
+#        this rewrite) — _find_active_tax_pack only matches status=="Active".
+_VALIDATION_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for real YTD-accumulator-based caps (Canada
+# CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
+# year-to-date accumulators," not the current-period-annualized estimate
+# engine/countries/canada.py uses today). Same deliberate plain-set
+# convention as _VALIDATION_ENABLED_COUNTRIES above: a developer-flipped
+# rollout gate, not a runtime admin toggle. service.py's _load_ca_ytd only
+# queries/returns YTD data when the country is in this set; canada.py's own
+# `ctx.ytd_pensionable_earnings is not None` check is the second,
+# independent dormancy gate at the calculation layer — both must be true
+# for YTD-based caps to actually apply.
+#
+# CA — not yet enabled. No backfill of existing PayslipItems is possible
+#      (their figures were computed with the isolated-period bug, not just
+#      missing metadata), so flipping this mid-tax-year for an org with
+#      existing 2026 CA payslips would create a partial-year gap (prior
+#      periods' pensionable/insurable earnings excluded from the room
+#      calculation for the rest of the year). Flip only at a tax-year
+#      boundary (Jan 1) for orgs with existing CA payslips; a CA org
+#      onboarding fresh can be enabled immediately.
+# US — Social Security wage base / FUTA wage base / Additional Medicare
+#      threshold share the identical current-period-annualized bug (see
+#      engine/countries/us.py) and are designed to reuse this exact
+#      mechanism — not enabled here, tracked as a separate follow-up.
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = set()
+
 # ── Pay frequency (generic — any country's calculator may use this) ────────
 # PayrollContext.pay_frequency defaults to "Monthly", so
 # PERIODS_PER_YEAR["Monthly"] == MONTHS_PER_YEAR by construction — every
@@ -141,6 +214,8 @@ def resolve_jurisdiction_parameter(
         configured = row is not None and row.flat_amount is not None
 
     if not configured:
+        if country in _VALIDATION_ENABLED_COUNTRIES:
+            raise MissingComplianceConfigurationError(key, country, organization_id)
         _logger.warning(
             "[jurisdiction-param-fallback] key=%s country=%s organization_id=%s "
             "no configured row found — using hardcoded default %s",

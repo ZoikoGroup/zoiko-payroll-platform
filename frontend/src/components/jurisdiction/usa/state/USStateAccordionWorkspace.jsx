@@ -146,7 +146,6 @@ export default function USStateAccordionWorkspace({ initialSelectedState = "", o
                 isExpanded={expanded === state}
                 onToggle={() => toggle(state)}
                 onPackUpdated={reloadDetail}
-                onPackDeleted={() => { setExpanded(null); reloadAfterStructuralChange(); }}
                 onReloadSummary={reloadDetail}
               />
             );

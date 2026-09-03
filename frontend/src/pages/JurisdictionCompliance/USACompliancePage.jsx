@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  LayoutDashboard, Landmark, MapPin, Building2, Percent, ArrowLeftRight,
+  ArrowLeft, LayoutDashboard, Landmark, MapPin, Building2, Percent, ArrowLeftRight,
   FileCheck2, Users, History, ScrollText,
 } from "lucide-react";
 import SuiEmployerRatesPanel from "../../components/jurisdiction/SuiEmployerRatesPanel";
@@ -96,6 +96,20 @@ export default function USACompliancePage() {
   return (
     <div>
       <div className="mb-2">
+        {/* Single, always-visible Back button — every other jurisdiction
+            page (IN/UK/CA/AU/DE) gets one for free from JurisdictionLayout's
+            own header, but USA replaces that header entirely with this
+            page-level nav. Previously the ONLY back affordance was
+            JurisdictionLayout's own nested one inside the "Federal"
+            section specifically (hidden everywhere else via
+            hideBackButton in usaComplianceConfig.jsx now) — confusing,
+            and inconsistent with every other jurisdiction. */}
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground"
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
         <h1 className="text-lg font-bold text-foreground">USA Payroll Compliance</h1>
         <p className="text-xs text-foreground-muted">Manage federal, state, and available jurisdiction-level payroll configuration.</p>
       </div>
