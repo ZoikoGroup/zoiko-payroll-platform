@@ -52,6 +52,11 @@ export const usaComplianceConfig = {
   ],
   hiddenTabs: ["rates", "slabs", "organizations", "versions", "audit"],
   slabsTabOverride: undefined,
+  // USACompliancePage.jsx renders its own single, always-visible top-level
+  // Back button — this layout's own nested one (only ever visible once
+  // you'd clicked into "Federal," nowhere else on the page) was a
+  // confusing second back affordance in an unexpected mid-page spot.
+  hideBackButton: true,
   // Drops the India/UK-oriented "Tax Regime" field (never populated on any
   // real US pack) and uses a wider, multi-column layout instead of one
   // tall column — see USANewPackModal.jsx. JurisdictionLayout defaults to

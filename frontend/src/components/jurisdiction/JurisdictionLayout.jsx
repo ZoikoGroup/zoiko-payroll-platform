@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Pencil, Trash2, History, ShieldCheck, Users, ScrollText } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, History, ShieldCheck, Users, ScrollText } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -8,7 +8,6 @@ import {
   getComplianceJurisdictions, getCompliancePolicies, upsertCompliancePolicy,
   getCompliancePolicyVersions, setCompliancePolicyStatus, approveCompliancePolicy,
   getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations, assignCompliancePolicy,
-  hardDeleteCompliancePolicy,
   getCanonicalTaxSlabs, upsertCanonicalTaxSlab, deleteCanonicalTaxSlab,
   getCanonicalContributionRates, upsertCanonicalContributionRate, deleteCanonicalContributionRate,
   getTaxConfigurationAudit,
@@ -55,6 +54,16 @@ export default function JurisdictionLayout({
   extraTabs = [], slabsTabOverride,
   hiddenTabs = [], slabsLabel = "Tax Slabs", countryLevelLabel = "Country-level (no state)",
   additionalStateOptions = [], slabsFilter = (s) => s,
+  // USA's own page (USACompliancePage.jsx) already renders a single,
+  // always-visible top-level Back button above its own section nav — this
+  // layout's own Back button, nested inside the "Federal" section's
+  // content area, was a confusing SECOND back affordance in an unexpected
+  // mid-page location (found via a live screenshot: it only ever showed
+  // up once you'd clicked into Federal, nowhere else on the USA page).
+  // Same suppress-the-duplicate pattern as hiddenTabs above — see
+  // config/jurisdictions/usaComplianceConfig.jsx, the only place this is
+  // ever set to true.
+  hideBackButton = false,
   // Safe, purely-additive override for the "New Tax Pack" form — defaults
   // to the shared NewPackModal used by every country. Only USA passes its
   // own (USANewPackModal, which hides the India/UK-oriented Tax Regime
@@ -89,7 +98,6 @@ export default function JurisdictionLayout({
   const [showNewSlab, setShowNewSlab] = useState(false);
   const [editingSlab, setEditingSlab] = useState(null);
   const [deletingSlab, setDeletingSlab] = useState(null);
-  const [deletingPack, setDeletingPack] = useState(null);
 
   function setState(next) {
     setStateRaw(next);
@@ -178,19 +186,6 @@ export default function JurisdictionLayout({
     }
   }
 
-  async function handleDeletePack() {
-    try {
-      const res = await hardDeleteCompliancePolicy(deletingPack.id);
-      addToast?.(res.message || "Deleted.", "success");
-      setDeletingPack(null);
-      setSelectedPack(null);
-      loadPacks();
-    } catch (err) {
-      addToast?.(err.message || "Failed to delete — it may have assigned organizations or payroll history.", "error");
-      setDeletingPack(null);
-    }
-  }
-
   function reloadRatesAndSlabs() {
     getCanonicalContributionRates({ jurisdictionPackId: selectedPack.id }).then(setRates);
     getCanonicalTaxSlabs({ jurisdictionPackId: selectedPack.id }).then(setSlabs);
@@ -223,12 +218,14 @@ export default function JurisdictionLayout({
   return (
     <div>
       <div className="mb-6">
-        <button
-          onClick={() => navigate(-1)}
-          className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground"
-        >
-          <ArrowLeft size={14} /> Back
-        </button>
+        {!hideBackButton && (
+          <button
+            onClick={() => navigate(-1)}
+            className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+        )}
         <h1 className="text-2xl font-bold text-foreground">{countryName} Compliance</h1>
         <p className="text-sm text-foreground-muted mt-0.5">
           Manage {countryName}'s tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
@@ -291,7 +288,17 @@ export default function JurisdictionLayout({
           )}
         </div>
 
-        <div className="rounded-xl border border-border bg-surface p-5">
+        {/* min-w-0 is load-bearing: this is a CSS Grid item in the
+            280px_1fr row above, and grid items default to min-width:auto,
+            not 0 — without this, a pack with enough tabs to overflow (UK's
+            8, vs. e.g. Canada's fewer) forces this track wider than its
+            fair share instead of letting the tab row's own overflow-x-auto
+            (below) scroll within its bounds, which pushes the WHOLE grid —
+            and therefore the page header above it — wider than the
+            viewport. Selecting a wide-tabbed pack is what makes this
+            content wide enough to trigger it in the first place; nothing
+            about pack selection itself moves or transforms anything. */}
+        <div className="min-w-0 rounded-xl border border-border bg-surface p-5">
           {!selectedPack ? (
             <div className="flex h-64 items-center justify-center">
               <p className="text-sm text-foreground-disabled">Select a pack from the list to view/edit it.</p>
@@ -356,7 +363,6 @@ export default function JurisdictionLayout({
                   >
                     {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <button onClick={() => setDeletingPack(selectedPack)} className="rounded-lg border border-border p-2 text-error hover:bg-error-light"><Trash2 size={14} /></button>
                 </div>
               </div>
 
@@ -579,12 +585,6 @@ export default function JurisdictionLayout({
             getCanonicalTaxSlabs({ jurisdictionPackId: selectedPack.id }).then(setSlabs);
           }}
           onClose={() => setDeletingSlab(null)}
-        />
-      )}
-      {deletingPack && (
-        <ConfirmDialog
-          title="Delete Pack" message={`Permanently delete "${deletingPack.packId}" v${deletingPack.version}? Only allowed with no assigned organizations and no payroll history.`}
-          onConfirm={handleDeletePack} onClose={() => setDeletingPack(null)}
         />
       )}
     </div>

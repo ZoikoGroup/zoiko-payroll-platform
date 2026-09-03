@@ -83,15 +83,22 @@ def calculate(ctx: PayrollContext) -> dict:
     if sui_profile is not None:
         # Real SUI is being paid for this employer/state (a configured,
         # evidence-backed profile exists) — the standard federal credit
-        # applies. futa_credit_reduction_pct (state-scoped, Super-Admin-
-        # configurable) is how much of the 5.4% credit a credit-reduction
-        # state has taken away this tax year — 0 (full credit, ~0.6%
-        # effective rate) unless Super Admin has explicitly configured
-        # otherwise. No list of "which states are credit-reduced" is
-        # hardcoded anywhere — that changes yearly and must come from
+        # applies. futa_credit_red_pct (state-scoped, Super-Admin-
+        # configurable — named "_red_" rather than the natural
+        # "_reduction_" so it fits payroll_contribution_rates.component_key's
+        # VARCHAR(20) limit; same reason AU's super_max_contrib and
+        # Canada's basic_personal_amt were shortened. The un-shortened
+        # name was never actually storable in the DB, silently breaking
+        # this exact "Super-Admin-configurable" claim since it was
+        # written — found and fixed as part of the Fallback Removal Fix
+        # Plan's P6 readiness check) is how much of the 5.4% credit a
+        # credit-reduction state has taken away this tax year — 0 (full
+        # credit, ~0.6% effective rate) unless Super Admin has explicitly
+        # configured otherwise. No list of "which states are credit-reduced"
+        # is hardcoded anywhere — that changes yearly and must come from
         # Tax Operations, not a guess baked into application code.
         futa_credit_pct = resolve_jurisdiction_parameter(rate_map, "futa_credit_pct", _US_FUTA_CREDIT_PCT, country="US")
-        futa_credit_reduction_pct = resolve_jurisdiction_parameter(rate_map, "futa_credit_reduction_pct", Decimal("0"), country="US")
+        futa_credit_reduction_pct = resolve_jurisdiction_parameter(rate_map, "futa_credit_red_pct", Decimal("0"), country="US")
         effective_futa_rate = max(Decimal("0"), futa_rate - futa_credit_pct + futa_credit_reduction_pct)
     else:
         effective_futa_rate = futa_rate

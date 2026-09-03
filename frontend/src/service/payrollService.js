@@ -46,54 +46,6 @@ export function getCountryMeta(country) {
   return { name };
 }
 
-// Flat state/province list per country. This is intentionally NOT the
-// recursive country → state → city → district hierarchy the jurisdiction
-// pack spec calls for — that needs a real backend model. This is just
-// enough structure to stop jurisdictionState from being free text, so
-// values stay consistent with what the tax/contribution engine expects.
-const STATES_BY_COUNTRY = {
-  IN: [
-    "Andhra Pradesh", "Delhi", "Karnataka", "Kerala", "Maharashtra",
-    "Punjab", "Tamil Nadu", "Telangana", "Uttar Pradesh", "West Bengal",
-  ],
-  US: [
-    "California", "New York", "Texas", "Florida", "Illinois",
-    "Washington", "Massachusetts",
-  ],
-  UK: ["England", "Scotland", "Wales", "Northern Ireland"],
-  AU: [
-    "New South Wales", "Victoria", "Queensland", "Western Australia",
-    "South Australia", "Tasmania", "Australian Capital Territory", "Northern Territory",
-  ],
-  DE: [
-    "Baden-Württemberg", "Bavaria", "Berlin", "Brandenburg", "Bremen",
-    "Hamburg", "Hesse", "Lower Saxony", "Mecklenburg-Vorpommern",
-    "North Rhine-Westphalia", "Rhineland-Palatinate", "Saarland", "Saxony",
-    "Saxony-Anhalt", "Schleswig-Holstein", "Thuringia",
-  ],
-  CA: [
-    "Ontario", "Quebec", "British Columbia", "Alberta", "Manitoba",
-    "Saskatchewan", "Nova Scotia", "New Brunswick", "Newfoundland and Labrador",
-    "Prince Edward Island", "Northwest Territories", "Yukon", "Nunavut",
-  ],
-};
-
-export function getStatesForCountry(country) {
-  if (!country) return [];
-  // jurisdictionCountry historically stored either a 2-letter code ("DE")
-  // or a full country name ("Germany"). A 2-letter code is used as-is —
-  // NOT run through normalizeCountryCode(), which maps "uk" -> "GB" for
-  // currency purposes while STATES_BY_COUNTRY's own key is "UK" (the
-  // same bug fixed in getContributionColumns above; this function has no
-  // current callers, so it wasn't live-breaking anything today, but it's
-  // the identical bug class). A full name still goes through
-  // normalizeCountryCode, translating its one "GB" result back to "UK".
-  if (country.length === 2) return STATES_BY_COUNTRY[country.toUpperCase()] || [];
-  const normalized = normalizeCountryCode(country);
-  const code = normalized === "GB" ? "UK" : normalized;
-  return STATES_BY_COUNTRY[code] || [];
-}
-
 export function getFieldPack(country) {
   return [
     { label: "Company Legal Name", field: "name", type: "text" },
@@ -593,16 +545,20 @@ export const upsertJurisdictionPack = async (payload) => {
 
 // ── Compliance / Filings ───────────────────────────────
 //
-// fetchContributionRates / fetchTaxSlabs are now country-aware:
-//   1. They ask the backend for country-specific data (?country=XX).
-//   2. If the backend returns nothing yet (most backends won't have
-//      per-country data on day one) they fall back to the local
-//      compliancePacks.js lookup, so the UI is never empty and never
-//      silently shows the wrong country's numbers.
-//
-// This is the seam described in the earlier analysis: once the backend
-// grows real per-country compliance data, only the "if (data.length > 0)"
-// branch matters — no component changes needed.
+// fetchContributionRates / fetchTaxSlabs return exactly what the backend
+// has — including an empty array when nothing is configured yet — and
+// REJECT on a real fetch failure. Every current caller (ContributionRatesTable,
+// TaxSlabTable, TaxConfigurationTab) already has its own loading/error/
+// empty-state handling built for this; previously this function intercepted
+// both cases and silently substituted the hardcoded RATES_BY_COUNTRY/
+// SLABS_BY_COUNTRY tables instead, so an org with real rate-fetch failures
+// (or a genuinely unconfigured jurisdiction) still saw a "Live from payroll
+// engine" badge over fabricated numbers, with no way to tell the difference.
+// RATES_BY_COUNTRY/SLABS_BY_COUNTRY themselves are NOT removed — they're
+// still the correct, honestly-labeled source for getPolicyBasedExtraction's
+// "policy-based preview" (ComplianceDocuments.jsx explicitly flags that
+// path as a fallback to the reader); only this silent, unlabeled use of
+// them as a stand-in for live configuration is removed.
 
 export const fetchComplianceData = async (params) => {
   try {
@@ -613,30 +569,17 @@ export const fetchComplianceData = async (params) => {
 };
 
 export const fetchContributionRates = async (countryCode = DEFAULT_COUNTRY) => {
-  try {
-    const res = await api.get("/api/payroll/compliance/contribution-rates", {
-      params: { country: countryCode },
-    });
-    const data = Array.isArray(res) ? res : res?.data || res?.items || [];
-    if (data.length > 0) return data;
-    return getComplianceRates(countryCode).rows;
-  } catch {
-    // Backend not reachable / not country-aware yet — use the local pack.
-    return getComplianceRates(countryCode).rows;
-  }
+  const res = await api.get("/api/payroll/compliance/contribution-rates", {
+    params: { country: countryCode },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
 };
 
 export const fetchTaxSlabs = async (countryCode = DEFAULT_COUNTRY) => {
-  try {
-    const res = await api.get("/api/payroll/compliance/tax-slabs", {
-      params: { country: countryCode },
-    });
-    const data = Array.isArray(res) ? res : res?.data || res?.items || [];
-    if (data.length > 0) return data;
-    return getTaxSlabs(countryCode).slabs;
-  } catch {
-    return getTaxSlabs(countryCode).slabs;
-  }
+  const res = await api.get("/api/payroll/compliance/tax-slabs", {
+    params: { country: countryCode },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
 };
 
 export const updateCompanyDetails = async (payload) => {

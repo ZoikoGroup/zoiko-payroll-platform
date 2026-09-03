@@ -404,6 +404,17 @@ def create_organization(
         validate_tax_identifiers_or_raise,
     )
     from app.modules.organizations.models import Organization
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+    # Same gate as public self-registration (auth/service.py's
+    # register_enterprise) — reused, not duplicated, so Super Admin can't
+    # bypass the "no active compliance pack" rejection just by using this
+    # endpoint instead. Checked before any tax-ID validation for the same
+    # reason: an unsupported country should surface this message, not a
+    # confusing tax-ID schema error.
+    block_reason = get_jurisdiction_onboarding_block_reason(db, data.country)
+    if block_reason:
+        raise BadRequestException(block_reason)
 
     tax_identifiers = validate_tax_identifiers_or_raise(data.country, data.tax_identifiers) \
         if data.tax_identifiers else None

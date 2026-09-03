@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  ChevronDown, ChevronRight, MapPin, Pencil, ShieldCheck, Trash2,
+  ChevronDown, ChevronRight, MapPin, Pencil, ShieldCheck,
   Percent, ScrollText, ArrowLeftRight, FileCheck2, History,
 } from "lucide-react";
 import ConfirmDialog from "../../../ConfirmDialog";
@@ -9,7 +9,7 @@ import { useToast } from "../../../../context/ToastContext";
 import {
   getCanonicalContributionRates, getCanonicalTaxSlabs,
   deleteCanonicalContributionRate, deleteCanonicalTaxSlab,
-  setCompliancePolicyStatus, approveCompliancePolicy, hardDeleteCompliancePolicy,
+  setCompliancePolicyStatus, approveCompliancePolicy,
 } from "../../../../service/superAdminService";
 import { inputClass, STATUS_PILL_MAP, STATUS_OPTIONS } from "../../constants";
 import EditOverviewModal from "../../EditOverviewModal";
@@ -39,7 +39,7 @@ const TABS = [
 // workspace only ever caches each state's ACTIVE-or-first pack.
 export default function USStateAccordionRow({
   stateName, pack, packs, rates: initialRates, slabs: initialSlabs,
-  isExpanded, onToggle, onPackUpdated, onPackDeleted, onReloadSummary,
+  isExpanded, onToggle, onPackUpdated, onReloadSummary,
 }) {
   const { addToast } = useToast() || {};
   const [selectedPack, setSelectedPack] = useState(pack);
@@ -47,7 +47,6 @@ export default function USStateAccordionRow({
   const [slabs, setSlabs] = useState(initialSlabs || []);
   const [tab, setTab] = useState("components");
   const [showEditOverview, setShowEditOverview] = useState(false);
-  const [deletingPack, setDeletingPack] = useState(false);
   const [deletingRate, setDeletingRate] = useState(null);
   const [deletingSlab, setDeletingSlab] = useState(null);
 
@@ -87,18 +86,6 @@ export default function USStateAccordionRow({
       onPackUpdated?.(updated);
     } catch (err) {
       addToast?.(err.message || "Failed to record approval.", "error");
-    }
-  }
-
-  async function handleDeletePack() {
-    try {
-      const res = await hardDeleteCompliancePolicy(selectedPack.id);
-      addToast?.(res.message || "Deleted.", "success");
-      setDeletingPack(false);
-      onPackDeleted?.();
-    } catch (err) {
-      addToast?.(err.message || "Failed to delete — it may have assigned organizations or payroll history.", "error");
-      setDeletingPack(false);
     }
   }
 
@@ -166,7 +153,6 @@ export default function USStateAccordionRow({
                   <select className={inputClass + " w-auto"} value={selectedPack.status} onChange={(e) => changeStatus(e.target.value)}>
                     {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <button onClick={() => setDeletingPack(true)} className="rounded-lg border border-border p-2 text-error hover:bg-error-light"><Trash2 size={14} /></button>
                 </div>
               </div>
 
@@ -233,12 +219,6 @@ export default function USStateAccordionRow({
             reloadRatesAndSlabs();
           }}
           onClose={() => setDeletingSlab(null)}
-        />
-      )}
-      {deletingPack && (
-        <ConfirmDialog
-          title="Delete Pack" message={`Permanently delete "${selectedPack?.packId}" v${selectedPack?.version}? Only allowed with no assigned organizations and no payroll history.`}
-          onConfirm={handleDeletePack} onClose={() => setDeletingPack(false)}
         />
       )}
     </div>

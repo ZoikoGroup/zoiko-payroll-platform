@@ -22,6 +22,7 @@ from datetime import date
 
 import pytest
 
+from app.core.exceptions import BadRequestException
 from app.modules.payroll import service
 from app.modules.payroll.models import (
     ContributionRate, TaxSlab, PayrollEmployee, PayrollRun, PayslipItem, JurisdictionPack,
@@ -117,7 +118,7 @@ def test_org_own_rate_wins_even_when_canonical_differs(db, organization):
     db.add(_make_rate("IN", "pt", organization_id=None, flat_amount=Decimal("999")))
     db.commit()
 
-    rows = service.get_contribution_rates(db, organization.id, "IN")
+    rows = service.get_contribution_rates(db, organization.id, country="IN")
     pt = next(r for r in rows if r.component_key == "pt")
     assert pt.flat_amount == Decimal("150")
 
@@ -134,7 +135,7 @@ def test_canonical_rate_seeds_org_on_first_use(db, organization):
     db.add(rate)
     db.commit()
 
-    rows = service.get_contribution_rates(db, organization.id, "IN")
+    rows = service.get_contribution_rates(db, organization.id, country="IN")
     pt = next(r for r in rows if r.component_key == "pt")
     assert pt.flat_amount == Decimal("300")
     assert pt.organization_id == organization.id  # seeded as the org's own row
@@ -144,7 +145,7 @@ def test_hardcoded_fallback_when_no_canonical_and_no_org_row(db, organization):
     # Nothing configured anywhere for this org+country — must fall back to
     # the hardcoded _CONTRIBUTION_RATES_BY_COUNTRY default (India "pt" = 200)
     # instead of returning empty or raising.
-    rows = service.get_contribution_rates(db, organization.id, "IN")
+    rows = service.get_contribution_rates(db, organization.id, country="IN")
     pt = next(r for r in rows if r.component_key == "pt")
     assert pt.flat_amount == Decimal("200")
 
@@ -152,9 +153,9 @@ def test_hardcoded_fallback_when_no_canonical_and_no_org_row(db, organization):
 def test_unknown_country_falls_back_cleanly_with_no_rows(db, organization):
     # A jurisdiction with zero canonical data AND no hardcoded defaults
     # must not crash — just return an empty list.
-    rows = service.get_contribution_rates(db, organization.id, "ZZ")
+    rows = service.get_contribution_rates(db, organization.id, country="ZZ")
     assert rows == []
-    slabs = service.get_tax_slabs(db, organization.id, "ZZ")
+    slabs = service.get_tax_slabs(db, organization.id, country="ZZ")
     assert slabs == []
 
 
@@ -958,8 +959,8 @@ def test_get_contribution_rates_prefers_filing_status_tagged_row(db, organizatio
     db.add(mfj_row)
     db.commit()
 
-    mfj_rates = service.get_contribution_rates(db, organization.id, "US", filing_status="MFJ")
-    single_rates = service.get_contribution_rates(db, organization.id, "US", filing_status="SINGLE")
+    mfj_rates = service.get_contribution_rates(db, organization.id, country="US", filing_status="MFJ")
+    single_rates = service.get_contribution_rates(db, organization.id, country="US", filing_status="SINGLE")
 
     mfj_map = {r.component_key: r for r in mfj_rates}
     single_map = {r.component_key: r for r in single_rates}
@@ -1299,3 +1300,50 @@ def test_source_artifact_create_and_review_are_audited(db, organization):
     assert reviewed.action == "review"
     assert reviewed.actor_id == actor_id
     assert reviewed.new_value["reviewerId"] == actor_id
+
+
+# ── Country-resolution: no more silent "IN" default (fallback-removal Phase 4) ──
+# The `organization` fixture is exactly the "nothing configured anywhere"
+# case: a bare Organization row with no `country` set and no
+# CompanyComplianceDetails row at all — this never had test coverage before
+# since every call site used to silently default to "IN" instead of
+# reaching an actually-untested branch.
+
+def test_resolve_org_country_none_when_nothing_configured(db, organization):
+    assert service._resolve_org_country(db, organization.id) is None
+
+
+def test_resolve_org_country_falls_back_to_organization_country(db, organization):
+    # CompanyComplianceDetails intentionally left unset/absent — the
+    # Organization's own `country` (set at registration) is a real value
+    # and must win over guessing "IN".
+    organization.country = "Germany"
+    db.commit()
+    assert service._resolve_org_country(db, organization.id) == "DE"
+
+
+def test_resolve_org_country_required_raises_when_nothing_configured(db, organization):
+    with pytest.raises(BadRequestException):
+        service._resolve_org_country(db, organization.id, required=True)
+
+
+def test_resolve_employee_country_raises_for_new_employee_with_no_jurisdiction(db, organization):
+    # No explicit_country_code, no CompanyComplianceDetails, no
+    # Organization.country — must raise rather than silently assigning
+    # this employee to India.
+    with pytest.raises(BadRequestException):
+        service._resolve_employee_country(db, organization.id, None)
+
+
+def test_resolve_employee_country_explicit_code_bypasses_org_lookup(db, organization):
+    # An explicit per-employee country always wins, even with nothing
+    # configured at the org level — no reason to touch org resolution at all.
+    assert service._resolve_employee_country(db, organization.id, "US") == "US"
+
+
+def test_filing_dates_empty_not_india_when_org_unconfigured(db, organization):
+    # Previously this silently resolved to "IN" and could return India's
+    # filing calendar for an org that hasn't configured its jurisdiction —
+    # must now return an empty list instead.
+    dates = service.get_upcoming_filing_dates_for_org(db, organization.id)
+    assert dates == []

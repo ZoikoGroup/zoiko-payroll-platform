@@ -132,3 +132,58 @@ def resolve_tax_configuration(
         .all()
     )
     return rates, slabs, pack
+
+
+def find_active_tax_pack(
+    db: Session,
+    country: str,
+    state: Optional[str] = None,
+    tax_regime: Optional[str] = None,
+    as_of: Optional[date_cls] = None,
+) -> Optional[JurisdictionPack]:
+    """Public wrapper over _find_active_tax_pack — same resolution rules
+    (state match only wins if it holds real income-tax slabs, respects
+    effective_from/effective_to, excludes Draft), exposed under a public
+    name for callers outside this module that need the pack itself rather
+    than resolve_tax_configuration's (rates, slabs, pack) tuple."""
+    return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
+
+
+def get_jurisdiction_onboarding_block_reason(
+    db: Session,
+    country: Optional[str],
+    state: Optional[str] = None,
+    as_of: Optional[date_cls] = None,
+) -> Optional[str]:
+    """Whether an organization should be allowed to onboard into `country`
+    right now — never raises, returns None when onboarding should proceed,
+    else a clean, business-friendly reason string safe to show a user
+    directly (no stack traces, no internal names).
+
+    Deliberately uses the EXACT SAME acceptance test
+    _resolve_effective_rate_inputs (service.py) already uses to decide
+    whether canonical configuration is usable for payroll
+    (`pack is not None and (rates or slabs)`) — so registration accepts
+    precisely what payroll would accept for this jurisdiction, one source
+    of truth, not a parallel "is configured" notion.
+
+    Country is normalized via app.core.jurisdiction.get_jurisdiction_code,
+    NOT payroll.service._normalize_country — that function silently
+    defaults unrecognized/empty input to "IN", which would be actively
+    dangerous at a rejection gate (an unrecognized country would silently
+    pass as if it were India)."""
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    code = get_jurisdiction_code(country)
+    if not code:
+        return (
+            f"'{country}' is not a supported payroll jurisdiction yet — "
+            "please contact your administrator or select a supported country."
+        )
+    rates, slabs, pack = resolve_tax_configuration(db, code, state=state, tax_regime=None, payroll_date=as_of)
+    if pack is None or not (rates or slabs):
+        return (
+            "This jurisdiction is not yet configured for organization registration — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+    return None

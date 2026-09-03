@@ -180,7 +180,8 @@ def calculate(ctx: PayrollContext) -> dict:
 
     Reused PayrollResult fields: `social_security`/`employer_social_security`
     (CPP or QPP), `employee_esi`/`employer_esi` (EI or QPIP), `local_tax`
-    (NWT/Nunavut territorial tax), `employer_sui` (workers' comp)."""
+    (NWT/Nunavut territorial tax), `employer_sui` (workers' comp). Canada-
+    specific fields: `cpp2`/`employer_cpp2` (CPP2 or QPP2, both sides)."""
     rate_map = ctx.rate_map
     state_rate_map = ctx.state_rate_map or {}
     gross = ctx.gross
@@ -195,37 +196,89 @@ def calculate(ctx: PayrollContext) -> dict:
     # Super Admin like every other province's own rates.
     cpp_ympe = resolve_jurisdiction_parameter(rate_map, "cpp_ympe", _CA_CPP_YMPE, country="CA")
     cpp_basic_exemption = resolve_jurisdiction_parameter(rate_map, "cpp_basic_exemption", _CA_CPP_BASIC_EXEMPTION, country="CA")
-    annual_first_layer_pensionable = max(Decimal("0"), min(annual_gross, cpp_ympe) - cpp_basic_exemption)
+
+    # ZP-TAX-CA-2026-001 §10: "YTD caps: Employee and employer contribution
+    # caps enforced independently with exact year-to-date accumulators."
+    # ctx.ytd_pensionable_earnings is None for every employee/country until
+    # engine/countries/shared.py's _YTD_ACCUMULATOR_ENABLED_COUNTRIES opts
+    # CA in AND service.py's _load_ca_ytd finds a real accumulator row —
+    # the `is not None` branch below is net-new; the `else` branch is the
+    # EXACT prior current-period-annualized behavior, byte-for-byte
+    # unchanged, so nothing changes for anyone until both gates are open.
+    if ctx.ytd_pensionable_earnings is not None:
+        # The $3,500 basic exemption is allocated pro-rata per pay period
+        # against YTD-consumed exemption, not applied once against a
+        # single period's annualized figure (§10: "allocated using CRA
+        # pay-period rules; store irregular-pay treatment separately").
+        ytd_exemption_used = ctx.ytd_basic_exemption_used or Decimal("0")
+        period_exemption = min(
+            cpp_basic_exemption / MONTHS_PER_YEAR,
+            max(Decimal("0"), cpp_basic_exemption - ytd_exemption_used),
+        )
+        pensionable_room = max(Decimal("0"), cpp_ympe - ctx.ytd_pensionable_earnings)
+        period_first_layer_pensionable = max(Decimal("0"), min(gross, pensionable_room) - period_exemption)
+        ytd_pensionable_earnings_after = ctx.ytd_pensionable_earnings + period_first_layer_pensionable
+        ytd_basic_exemption_used_after = ytd_exemption_used + period_exemption
+        # This period's gross beyond first-layer room is the pool eligible
+        # for CPP2/QPP2 below — correctly starts CPP2 exactly at the pay
+        # period where the employee crosses YMPE mid-period, not before.
+        period_gross_over_ympe = max(Decimal("0"), gross - pensionable_room)
+    else:
+        annual_first_layer_pensionable = max(Decimal("0"), min(annual_gross, cpp_ympe) - cpp_basic_exemption)
+        period_first_layer_pensionable = annual_first_layer_pensionable / MONTHS_PER_YEAR
+        ytd_pensionable_earnings_after = None
+        ytd_basic_exemption_used_after = None
+        period_gross_over_ympe = max(Decimal("0"), annual_gross - cpp_ympe) / MONTHS_PER_YEAR
+
     pension_rate = state_rate_map.get("qpp") if is_quebec else rate_map.get("cpp")
     social_security = (
-        _round2((annual_first_layer_pensionable * (pension_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
+        _round2(period_first_layer_pensionable * (pension_rate.employee_rate_pct / 100))
         if pension_rate and pension_rate.employee_rate_pct else Decimal("0")
     )
     employer_social_security = (
-        _round2((annual_first_layer_pensionable * (pension_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
+        _round2(period_first_layer_pensionable * (pension_rate.employer_rate_pct / 100))
         if pension_rate and pension_rate.employer_rate_pct else Decimal("0")
     )
 
     # CPP2/QPP2 — identical corridor and rate in both cases per the doc
     # ("QPP2 rate/max: 4.00% each on $10,400 corridor; max $416 each" —
     # the same figures as CPP2), so no Quebec branching is needed here.
-    # rate_map has no dedicated "cpp2" ContributionRate row seeded (a %
-    # is enough here; there's no separate employer-vs-employee rate
-    # story beyond the shared 4%), so this is resolved as a plain
-    # percentage parameter, not a rate_map.get() lookup like "cpp"/"qpp".
+    # Employee and employer sides are both resolved from the same "cpp2_rate"
+    # ContributionRate row (componentKeyOptions now offers Employee %/
+    # Employer % — previously employer-side was never resolved at all, so
+    # the employer's own CPP2/QPP2 contribution went entirely untracked).
     cpp2_yampe = resolve_jurisdiction_parameter(rate_map, "cpp2_yampe", _CA_CPP2_YAMPE, country="CA")
     cpp2_rate = resolve_jurisdiction_parameter(rate_map, "cpp2_rate", _CA_CPP2_RATE, side="employee", country="CA")
-    annual_cpp2_pensionable = max(Decimal("0"), min(annual_gross, cpp2_yampe) - cpp_ympe)
-    cpp2 = _round2((annual_cpp2_pensionable * cpp2_rate / Decimal("100")) / MONTHS_PER_YEAR)
+    cpp2_rate_employer = resolve_jurisdiction_parameter(rate_map, "cpp2_rate", _CA_CPP2_RATE, side="employer", country="CA")
+    if ctx.ytd_cpp2_pensionable_earnings is not None:
+        cpp2_room = max(Decimal("0"), (cpp2_yampe - cpp_ympe) - ctx.ytd_cpp2_pensionable_earnings)
+        period_cpp2_pensionable = max(Decimal("0"), min(period_gross_over_ympe, cpp2_room))
+        ytd_cpp2_pensionable_earnings_after = ctx.ytd_cpp2_pensionable_earnings + period_cpp2_pensionable
+    else:
+        annual_cpp2_pensionable = max(Decimal("0"), min(annual_gross, cpp2_yampe) - cpp_ympe)
+        period_cpp2_pensionable = annual_cpp2_pensionable / MONTHS_PER_YEAR
+        ytd_cpp2_pensionable_earnings_after = None
+    cpp2 = _round2(period_cpp2_pensionable * (cpp2_rate / Decimal("100")))
+    employer_cpp2 = _round2(period_cpp2_pensionable * (cpp2_rate_employer / Decimal("100")))
 
     # CPT30 election — an eligible age-65-69 retirement-pension recipient
     # who has filed to STOP CPP/QPP withholding. Applies to the first-
-    # layer contribution and CPP2/QPP2 alike; EI/QPIP is untouched (CPT30
-    # is specifically a CPP/QPP election per ZP-TAX-CA-2026-001 §18).
+    # layer contribution and CPP2/QPP2 alike (both sides); EI/QPIP is
+    # untouched (CPT30 is specifically a CPP/QPP election per
+    # ZP-TAX-CA-2026-001 §18). Stopped means no obligation accrues this
+    # period at all, so YTD must NOT grow either — not just the withheld
+    # amounts — otherwise a later un-stopped period would under-collect
+    # against room that was never actually used.
     if (ctx.cpp_qpp_election_status or "").strip().upper() == "STOPPED":
         social_security = Decimal("0")
         employer_social_security = Decimal("0")
         cpp2 = Decimal("0")
+        employer_cpp2 = Decimal("0")
+        if ytd_pensionable_earnings_after is not None:
+            ytd_pensionable_earnings_after = ctx.ytd_pensionable_earnings
+            ytd_basic_exemption_used_after = ctx.ytd_basic_exemption_used or Decimal("0")
+        if ytd_cpp2_pensionable_earnings_after is not None:
+            ytd_cpp2_pensionable_earnings_after = ctx.ytd_cpp2_pensionable_earnings
 
     if is_quebec:
         # QPIP entirely replaces EI for a Quebec employee. Both its rate
@@ -236,32 +289,34 @@ def calculate(ctx: PayrollContext) -> dict:
         # guess one from the other.
         qpip_rate = state_rate_map.get("qpip")
         qpip_mie_row = state_rate_map.get("qpip_mie")
-        qpip_mie = qpip_mie_row.flat_amount if qpip_mie_row and qpip_mie_row.flat_amount else None
-        if qpip_rate and qpip_mie is not None:
-            annual_qpip_insurable = min(annual_gross, qpip_mie)
-            employee_esi = (
-                _round2((annual_qpip_insurable * (qpip_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-                if qpip_rate.employee_rate_pct else Decimal("0")
-            )
-            employer_esi = (
-                _round2((annual_qpip_insurable * (qpip_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-                if qpip_rate.employer_rate_pct else Decimal("0")
-            )
-        else:
-            employee_esi = Decimal("0")
-            employer_esi = Decimal("0")
+        insurable_mie = qpip_mie_row.flat_amount if qpip_mie_row and qpip_mie_row.flat_amount else None
+        rate_row = qpip_rate
     else:
-        ei_mie = resolve_jurisdiction_parameter(rate_map, "ei_mie", _CA_EI_MIE, country="CA")
-        annual_ei_insurable = min(annual_gross, ei_mie)
-        ei_rate = rate_map.get("ei")
+        insurable_mie = resolve_jurisdiction_parameter(rate_map, "ei_mie", _CA_EI_MIE, country="CA")
+        rate_row = rate_map.get("ei")
+
+    if insurable_mie is not None:
+        if ctx.ytd_insurable_earnings is not None:
+            insurable_room = max(Decimal("0"), insurable_mie - ctx.ytd_insurable_earnings)
+            period_insurable = max(Decimal("0"), min(gross, insurable_room))
+            ytd_insurable_earnings_after = ctx.ytd_insurable_earnings + period_insurable
+        else:
+            period_insurable = min(annual_gross, insurable_mie) / MONTHS_PER_YEAR
+            ytd_insurable_earnings_after = None
         employee_esi = (
-            _round2((annual_ei_insurable * (ei_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-            if ei_rate and ei_rate.employee_rate_pct else Decimal("0")
+            _round2(period_insurable * (rate_row.employee_rate_pct / 100))
+            if rate_row and rate_row.employee_rate_pct else Decimal("0")
         )
         employer_esi = (
-            _round2((annual_ei_insurable * (ei_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-            if ei_rate and ei_rate.employer_rate_pct else Decimal("0")
+            _round2(period_insurable * (rate_row.employer_rate_pct / 100))
+            if rate_row and rate_row.employer_rate_pct else Decimal("0")
         )
+    else:
+        # Quebec with no qpip_mie configured — matches prior behavior
+        # exactly (never guess a cap from an unconfigured row).
+        employee_esi = Decimal("0")
+        employer_esi = Decimal("0")
+        ytd_insurable_earnings_after = ctx.ytd_insurable_earnings if ctx.ytd_insurable_earnings is not None else None
 
     annual_federal_tax = _calculate_annual_tax_ca(annual_gross, ctx.slabs, rate_map, ctx.td1_claim_amount)
     if is_quebec:
@@ -313,7 +368,16 @@ def calculate(ctx: PayrollContext) -> dict:
     return dict(
         social_security=social_security, employer_social_security=employer_social_security,
         employee_esi=employee_esi, employer_esi=employer_esi,
-        cpp2=cpp2,
+        cpp2=cpp2, employer_cpp2=employer_cpp2,
+        # Cumulative YTD state AFTER this period — None unless YTD
+        # accumulation was actually wired for this calculation (see the
+        # ctx.ytd_* is not None checks above). service.py persists these
+        # into PayrollYtdAccumulator/PayslipItem.ytd_snapshot; harmless to
+        # return None when dormant, since nothing reads these keys yet.
+        ytd_pensionable_earnings=ytd_pensionable_earnings_after,
+        ytd_cpp2_pensionable_earnings=ytd_cpp2_pensionable_earnings_after,
+        ytd_insurable_earnings=ytd_insurable_earnings_after,
+        ytd_basic_exemption_used=ytd_basic_exemption_used_after,
         federal_income_tax=federal_income_tax, state_income_tax=state_income_tax,
         local_tax=local_tax, employer_sui=employer_sui,
         tds=tds, annual_tax=annual_tax,

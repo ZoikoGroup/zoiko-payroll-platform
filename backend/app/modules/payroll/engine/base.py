@@ -128,6 +128,20 @@ class PayrollContext:
     # employee today) changes nothing from existing behavior.
     cpp_qpp_election_status: str = None
 
+    # Canada CPP/CPP2/EI (and Quebec QPP/QPP2/QPIP) year-to-date state,
+    # as of BEFORE this pay period — read from PayrollYtdAccumulator by
+    # service.py's _load_ca_ytd, gated on
+    # engine/countries/shared.py's _YTD_ACCUMULATOR_ENABLED_COUNTRIES.
+    # None (every employee/country today) means "no YTD wired" —
+    # engine/countries/canada.py MUST fall back to its existing
+    # current-period-annualized cap logic when None, never treat None as
+    # 0. This is the calculation-layer dormancy switch; the rollout set
+    # above is the read-layer one.
+    ytd_pensionable_earnings: Decimal = None       # CPP/QPP first-layer
+    ytd_cpp2_pensionable_earnings: Decimal = None  # CPP2/QPP2
+    ytd_insurable_earnings: Decimal = None         # EI/QPIP
+    ytd_basic_exemption_used: Decimal = None       # CPP/QPP $3,500 exemption, YTD-consumed
+
 
 @dataclass
 class PayrollResult:
@@ -171,6 +185,15 @@ class PayrollResult:
     church_tax: Decimal = Decimal("0")
     cpp2: Decimal = Decimal("0")
 
+    # Canada: cumulative YTD figures AFTER this period, for service.py to
+    # persist into PayrollYtdAccumulator/PayslipItem.ytd_snapshot without
+    # recomputing. None (every country/employee until YTD is wired) means
+    # "not applicable" — see PayrollContext's matching ytd_* fields above.
+    ytd_pensionable_earnings: Decimal = None
+    ytd_cpp2_pensionable_earnings: Decimal = None
+    ytd_insurable_earnings: Decimal = None
+    ytd_basic_exemption_used: Decimal = None
+
     # Employer-side contributions
     employer_pf: Decimal = Decimal("0")
     employer_esi: Decimal = Decimal("0")
@@ -179,6 +202,10 @@ class PayrollResult:
     employer_pension: Decimal = Decimal("0")
     employer_ni: Decimal = Decimal("0")
     employer_futa: Decimal = Decimal("0")
+    # Canada: employer-side CPP2/QPP2 — see cpp2 above; distinct field
+    # because it is NOT an employee deduction and must never be summed
+    # into total_employee_deductions (engine/standard.py).
+    employer_cpp2: Decimal = Decimal("0")
     # US: State Unemployment Insurance, tenant/employer-specific (see
     # EmployerTaxProfile). Zero until an org has a configured profile —
     # every other country's output is unaffected.

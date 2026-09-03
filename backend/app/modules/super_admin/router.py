@@ -285,6 +285,32 @@ def get_engine_fallback_defaults(current_user=Depends(get_current_super_admin), 
 
 
 @router.get(
+    "/compliance/readiness",
+    summary="Read-only: which organizations are actually ready for fail-fast validation, per jurisdiction — the audit that was missing before India's brief enablement attempt broke 35 tests",
+)
+def get_jurisdiction_readiness(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import service as payroll_service
+
+    rows = []
+    orgs = db.query(Organization).filter(Organization.is_active == True).all()  # noqa: E712
+    for org in orgs:
+        country = payroll_service._resolve_org_country(db, org.id)
+        if not country:
+            rows.append({
+                "organizationId": org.id, "organizationName": org.organization_name,
+                "country": None, "ready": False, "missingKeys": [], "missingSlabs": False,
+                "reason": "No jurisdiction configured for this organization yet.",
+            })
+            continue
+        readiness = payroll_service.check_jurisdiction_readiness(db, org.id, country)
+        rows.append({
+            "organizationId": org.id, "organizationName": org.organization_name,
+            **readiness,
+        })
+    return {"organizations": rows}
+
+
+@router.get(
     "/compliance/jurisdiction-summary",
     summary="One row per jurisdiction with real counts (tax/policy packs, statutory rates, orgs) — powers the jurisdiction card grid",
 )
@@ -438,19 +464,15 @@ def assign_compliance_policy(
     }
 
 
-@router.delete(
-    "/compliance/policies/{id}", response_model=SuccessResponse,
-    summary="Permanently delete a policy/tax pack version — only allowed with no assigned organizations and no payroll history",
-)
-def hard_delete_compliance_policy(
-    id: int,
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    from app.modules.payroll import service as payroll_service
-
-    result = payroll_service.hard_delete_jurisdiction_pack(db, id)
-    return {"message": f"{result['packId']} v{result['version']} permanently deleted."}
+# Hard-delete route intentionally removed (Production-Grade Refactor:
+# Remove Hardcoded Payroll Fallbacks, Enforce Active Compliance Packs).
+# Production compliance packs should never be permanently destroyed —
+# use PUT /compliance/policies/{id}/status to Deactivate/Retire instead,
+# which every resolver already treats as unresolvable (status=="Active" is
+# the only status every pack-lookup function filters on). The underlying
+# service function (payroll/service.py's hard_delete_jurisdiction_pack)
+# is kept, unexposed, for one-off maintenance use only — see its own
+# docstring before reintroducing a route to it.
 
 
 # ── Report Templates (jurisdiction-wide, Super Admin-authored statutory

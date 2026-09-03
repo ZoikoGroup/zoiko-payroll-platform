@@ -44,7 +44,7 @@ from app.modules.payroll.models import (
     PAYROLL_STATUS_ORDER,
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate,
     ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
-    StatutoryFilingCalendar,
+    StatutoryFilingCalendar, PayrollYtdAccumulator,
 )
 from app.modules.payroll.employee_validation import get_employee_validation_strategy
 from app.modules.payroll.schemas import (
@@ -67,6 +67,7 @@ from fastapi import HTTPException, status as http_status
 # deduction constants; it imports the rest of what it needs at its own
 # definition further down for the same reason.
 from app.modules.payroll.engine.standard import MONTHS_PER_YEAR
+from app.modules.payroll.engine.countries.shared import _YTD_ACCUMULATOR_ENABLED_COUNTRIES
 
 
 # ── Country code normalization ──────────────────────────────────────────
@@ -127,7 +128,7 @@ def log_activity(db: Session, organization_id: int, description: str,
 from app.modules.payroll.hardcoded_defaults import _CONTRIBUTION_RATES_BY_COUNTRY  # noqa: E402
 
 
-def _seed_contribution_rates(db: Session, organization_id: int, country: str = "IN") -> List[ContributionRate]:
+def _seed_contribution_rates(db: Session, organization_id: int, country: str) -> List[ContributionRate]:
     defaults = _CONTRIBUTION_RATES_BY_COUNTRY.get(country, [])
     if not defaults:
         import logging
@@ -159,7 +160,7 @@ def _seed_org_rates_for_country(db: Session, organization_id: int, country: str)
 
 
 def get_contribution_rates(
-    db: Session, organization_id: int = None, country: str = "IN", tax_regime: str = None,
+    db: Session, organization_id: int = None, *, country: str, tax_regime: str = None,
     filing_status: str = None,
 ) -> List[ContributionRate]:
     query = db.query(ContributionRate)
@@ -204,7 +205,7 @@ def get_contribution_rates(
 from app.modules.payroll.hardcoded_defaults import _TAX_SLABS_BY_COUNTRY  # noqa: E402
 
 
-def _seed_tax_slabs(db: Session, organization_id: int, country: str = "IN") -> List[TaxSlab]:
+def _seed_tax_slabs(db: Session, organization_id: int, country: str) -> List[TaxSlab]:
     defaults = _TAX_SLABS_BY_COUNTRY.get(country, [])
     if not defaults:
         import logging
@@ -223,7 +224,7 @@ def _seed_tax_slabs(db: Session, organization_id: int, country: str = "IN") -> L
     return rows
 
 
-def get_tax_slabs(db: Session, organization_id: int = None, country: str = "IN", tax_regime: str = None) -> List[TaxSlab]:
+def get_tax_slabs(db: Session, organization_id: int = None, *, country: str, tax_regime: str = None) -> List[TaxSlab]:
     query = db.query(TaxSlab)
     query = _apply_org_filter(query, TaxSlab, organization_id)
     query = query.filter(TaxSlab.jurisdiction_country == country)
@@ -518,6 +519,17 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         approved_by_id=data.approvedById,
         currency=data.currency,
     )
+    # An inverted effective-date range (effective_to before effective_from)
+    # makes the pack permanently unresolvable by _find_active_tax_pack's
+    # date filter regardless of its status — it can sit "Active" in the UI
+    # while every calculation silently treats it as absent. This exact
+    # defect class silently broke India's canonical sync until caught and
+    # fixed by hand; validating it here closes the gap at the source
+    # instead of relying on someone noticing later.
+    if data.effectiveFrom and data.effectiveTo and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException(
+            "Effective To date cannot be before Effective From date — this pack would never resolve for any calculation."
+        )
     if existing:
         # A tax pack's own metadata (effective_from/to, tax_year, ...) is
         # part of what makes a published release resolvable for a given
@@ -743,6 +755,90 @@ def _pack_to_tax_snapshot(rates, slabs, pack) -> dict:
     return {"tax_policy_pack_id": pack.id, "tax_policy_version": pack.version, "tax_rule_snapshot": snapshot}
 
 
+def _check_missing_required_keys(rate_map: dict, slabs: list, country: str) -> List[dict]:
+    """Shared predicate used by BOTH check_jurisdiction_readiness (the
+    read-only audit tool) and _resolve_effective_rate_inputs's own dormant
+    enforcement call below, so the two can never disagree about what
+    "ready" means. Operates on an ALREADY-RESOLVED rate_map/slabs — never
+    resolves anything itself, so calling this from inside
+    _resolve_effective_rate_inputs can't re-enter it.
+
+    Mirrors resolve_jurisdiction_parameter's own "configured" predicate
+    exactly (engine/countries/shared.py) — a row present AND the relevant
+    employee_rate_pct/employer_rate_pct/flat_amount actually set — so this
+    can never say "ready" when the engine would actually fall back."""
+    from app.modules.payroll.engine.fallback_registry import get_required_parameter_keys
+
+    missing = []
+    for req in get_required_parameter_keys(country):
+        row = rate_map.get(req["key"])
+        if req["side"] is not None:
+            configured = row is not None and getattr(row, f"{req['side']}_rate_pct", None) is not None
+        else:
+            configured = row is not None and row.flat_amount is not None
+        if not configured:
+            missing.append({"key": req["key"], "side": req["side"], "label": req["label"]})
+    return missing
+
+
+def _assert_jurisdiction_ready(rate_map: dict, slabs: list, country: str, organization_id: Optional[int]) -> None:
+    """Dormant enforcement — raises only when `country` has been
+    explicitly opted into fail-fast validation
+    (engine/countries/shared.py's _VALIDATION_ENABLED_COUNTRIES, currently
+    empty for every country — see that file's rollout log). While
+    dormant, this is a true no-op: every existing calculation proceeds
+    exactly as before. Reuses the ONE existing rollout switch rather than
+    adding a second one."""
+    from app.modules.payroll.engine.countries.shared import (
+        _VALIDATION_ENABLED_COUNTRIES, MissingComplianceConfigurationError,
+    )
+
+    if country not in _VALIDATION_ENABLED_COUNTRIES:
+        return
+    missing = _check_missing_required_keys(rate_map, slabs, country)
+    if missing or not slabs:
+        bad_key = missing[0]["key"] if missing else "tax slabs"
+        raise MissingComplianceConfigurationError(bad_key, country, organization_id)
+
+
+def check_jurisdiction_readiness(
+    db: Session, organization_id: int, country: str, state: Optional[str] = None,
+    tax_regime: Optional[str] = None, payroll_date=None,
+) -> dict:
+    """Read-only: is this org's (country, state, tax_regime) combination
+    actually ready for payroll calculation to run without falling back to
+    ANY hardcoded engine default? Never writes, never raises — the tool
+    that was missing when fail-fast validation was briefly enabled for
+    India: it broke 35 tests and would have broken that org's next real
+    payroll run, because canonical-data completeness alone said nothing
+    about whether the ORG'S OWN already-synced rows were complete (see
+    engine/countries/shared.py's rollout log for the full incident).
+
+    Uses the exact resolution path real calculation uses
+    (_resolve_effective_rate_inputs) and the exact "is this key actually
+    configured" predicate (_check_missing_required_keys, shared with the
+    dormant enforcement wrapper) — so this can never say "ready" when the
+    engine would actually fall back, or vice versa."""
+    from datetime import date as date_cls
+
+    as_of = payroll_date or date_cls.today()
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    rate_map, slabs, _canonical_rates, pack = _resolve_effective_rate_inputs(
+        db, organization_id, country, as_of, org_opted_in, state=state, tax_regime=tax_regime,
+    )
+    missing_keys = _check_missing_required_keys(rate_map, slabs, country)
+    return {
+        "country": country,
+        "state": state,
+        "packId": pack.pack_id if pack else None,
+        "packVersion": pack.version if pack else None,
+        "source": "canonical" if pack else ("org-cached" if rate_map else "none"),
+        "ready": not missing_keys and bool(slabs),
+        "missingKeys": missing_keys,
+        "missingSlabs": not bool(slabs),
+    }
+
+
 def _resolve_effective_rate_inputs(
     db: Session, organization_id: int, country: str, payroll_date,
     org_opted_in: bool, state: Optional[str] = None, tax_regime: Optional[str] = None,
@@ -791,12 +887,15 @@ def _resolve_effective_rate_inputs(
             # as defense in depth — a canonical row saved before either fix
             # existed can still carry a wrong-cased key on disk; this
             # guarantees the live calculation path never misses it even so.
-            return {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}, canonical_slabs, canonical_rates, pack
+            canonical_rate_map = {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}
+            _assert_jurisdiction_ready(canonical_rate_map, canonical_slabs, country, organization_id)
+            return canonical_rate_map, canonical_slabs, canonical_rates, pack
     rate_map = {
         _normalize_engine_component_key(r.component_key): r
-        for r in get_contribution_rates(db, organization_id, country, tax_regime=tax_regime, filing_status=filing_status)
+        for r in get_contribution_rates(db, organization_id, country=country, tax_regime=tax_regime, filing_status=filing_status)
     }
-    slabs = get_tax_slabs(db, organization_id, country, tax_regime=tax_regime)
+    slabs = get_tax_slabs(db, organization_id, country=country, tax_regime=tax_regime)
+    _assert_jurisdiction_ready(rate_map, slabs, country, organization_id)
     return rate_map, slabs, None, None
 
 
@@ -1451,17 +1550,16 @@ def resolve_uk_configuration(
 
     sub_pack = None
     if sub_jurisdiction:
-        sub_pack = (
-            db.query(JurisdictionPack)
-            .filter(
-                JurisdictionPack.jurisdiction_country == "UK",
-                JurisdictionPack.jurisdiction_state == sub_jurisdiction,
-                JurisdictionPack.pack_type == "tax",
-                JurisdictionPack.status == "Active",
-            )
-            .order_by(JurisdictionPack.id.desc())
-            .first()
-        )
+        # Routed through the one canonical pack resolver (engine/tax_resolver.py)
+        # instead of this function's own prior ad-hoc query — that query
+        # didn't apply effective_from/effective_to filtering the way
+        # _find_active_tax_pack does, which is exactly the class of bug
+        # that silently made India's canonical pack unresolvable for
+        # months (see the Fallback Removal effort). This function has no
+        # live callers today, so the fix changes no observable behavior;
+        # it closes the gap before this becomes a live one.
+        from app.modules.payroll.engine.tax_resolver import find_active_tax_pack
+        sub_pack = find_active_tax_pack(db, "UK", state=sub_jurisdiction, as_of=payroll_date)
 
     return ResolvedUKPayrollConfiguration(
         rate_map=resolved_rate_map, slabs=national_slabs,
@@ -1934,7 +2032,18 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
         raise NotFoundException("JurisdictionPack", pack_row_id)
     if status == "Active" and row.pack_type == "tax":
         # Prevent two simultaneously-Active tax versions for the same
-        # country+state+tax_year+regime (Phase 22 duplicate/overlap guard).
+        # country+state+regime whose EFFECTIVE DATE RANGES actually overlap
+        # (Phase 22 duplicate/overlap guard). Originally compared tax_year
+        # equality instead of real date ranges — that blocked legitimate
+        # non-overlapping same-year splits (e.g. Canada's CA-2026-H1
+        # Jan-Jun / CA-2026-H2 Jul-Dec, both tax_year "2026") from ever
+        # being Active together, even though _find_active_tax_pack's own
+        # resolver already picks between multiple Active packs by date
+        # range. A NULL effective_to is treated as open-ended (unbounded).
+        far_future = date(9999, 12, 31)
+        far_past = date(1, 1, 1)
+        target_from = row.effective_from or far_past
+        target_to = row.effective_to or far_future
         conflict = (
             db.query(JurisdictionPack)
             .filter(
@@ -1943,15 +2052,25 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
                 JurisdictionPack.status == "Active",
                 JurisdictionPack.jurisdiction_country == row.jurisdiction_country,
                 JurisdictionPack.jurisdiction_state == row.jurisdiction_state,
-                JurisdictionPack.tax_year == row.tax_year,
                 JurisdictionPack.tax_regime == row.tax_regime,
+                JurisdictionPack.effective_from <= target_to,
+                or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= target_from),
             )
             .first()
         )
         if conflict:
             raise BadRequestException(
                 f"Pack {conflict.pack_id} v{conflict.version} is already Active for this "
-                f"country/state/tax year/regime — supersede it before activating a new version."
+                f"country/state/regime and its effective dates overlap with this pack's — "
+                f"supersede it before activating a new version."
+            )
+        # Same inverted-date guard as upsert_jurisdiction_pack — belt and
+        # suspenders, since a pack saved before that guard existed could
+        # still be activated here without ever going back through upsert.
+        if row.effective_from and row.effective_to and row.effective_to < row.effective_from:
+            raise BadRequestException(
+                "This pack's Effective To date is before its Effective From date — "
+                "fix the date range before activating it; it would never resolve for any calculation."
             )
         # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
         # 19.2: "author cannot self-approve a production statutory
@@ -2076,7 +2195,21 @@ def get_organizations_eligible_for_pack(db: Session, pack_row_id: int) -> List[d
 
 
 def hard_delete_jurisdiction_pack(db: Session, pack_row_id: int) -> dict:
-    """Permanently delete a Tax or Policy pack — the pack row itself, its
+    """NOT EXPOSED over HTTP — the Super Admin "Hard Delete Pack" UI action
+    and its backend route were deliberately removed (Production-Grade
+    Refactor: Remove Hardcoded Payroll Fallbacks, Enforce Active Compliance
+    Packs). A production compliance pack should never be casually,
+    permanently destroyed. Use set_jurisdiction_pack_status(..., "Retired")
+    for normal lifecycle retirement instead — every pack resolver already
+    filters on status=="Active", so a Retired pack is already unresolvable
+    to any calculation or onboarding check, without losing its history.
+
+    This function is kept only as a one-off maintenance escape hatch (e.g.
+    cleaning up a test pack created by mistake) — call it directly from a
+    script/shell if that's ever genuinely needed. Do not re-add an HTTP
+    route to this without explicit product sign-off.
+
+    Permanently delete a Tax or Policy pack — the pack row itself, its
     canonical ContributionRate/TaxSlab rows, and its TaxConfigurationAudit
     trail. Unlike set_jurisdiction_pack_status("Retired"), nothing about
     this pack survives.
@@ -2204,6 +2337,7 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "employer_ni": ("National Insurance (Employer)", "currency", True),
     "employer_futa": ("FUTA (Employer)", "currency", True),
     "employer_sui": ("SUI (Employer)", "currency", True),
+    "employer_cpp2": ("CPP2 (Employer)", "currency", True),
     "net_pay": ("Net Pay", "currency", True),
 }
 
@@ -2267,7 +2401,8 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "CA": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
            "federal_income_tax", "state_income_tax", "local_tax", "social_security", "esi", "cpp2",
-           "total_deductions", "employer_social_security", "employer_esi", "employer_sui", "net_pay"],
+           "total_deductions", "employer_social_security", "employer_esi", "employer_sui", "employer_cpp2",
+           "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -2928,7 +3063,10 @@ def get_upcoming_filing_dates_for_org(db: Session, organization_id: int, limit: 
     obligations, soonest first. Never guessed/hardcoded client-side — the
     frontend just renders whatever this returns."""
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # None (not "IN") when nothing is configured anywhere — the query
+    # below naturally returns an empty list for a None country rather than
+    # showing India's filing calendar to an org that hasn't set one up yet.
+    country = _resolve_org_country(db, organization_id)
     state = getattr(company, "jurisdiction_state", None) or None
 
     query = (
@@ -2946,7 +3084,7 @@ def get_upcoming_filing_dates_for_org(db: Session, organization_id: int, limit: 
 # ── Report Template Resolution + Generation (Organization consumption) ──
 
 def get_applicable_report_template(
-    db: Session, country: str, state: Optional[str], reporting_year: str, report_type: str,
+    db: Session, country: Optional[str], state: Optional[str], reporting_year: str, report_type: str,
     as_of: Optional[date] = None,
 ) -> Optional[ReportTemplate]:
     """Mirrors engine/tax_resolver.py's _find_active_tax_pack: prefers an
@@ -2955,8 +3093,11 @@ def get_applicable_report_template(
     Falls back to a Published (not yet Active) template only when no
     Active version exists — a Published template is a legitimate preview
     candidate, but an Active version always wins when both exist. Returns
-    None (never raises) when nothing resolves."""
-    country = _normalize_country(country)
+    None (never raises) when nothing resolves — including when `country`
+    itself is None (caller's jurisdiction isn't configured yet); NOT
+    normalized to "IN" in that case, since the query below already
+    returns nothing for a None country, exactly the correct outcome."""
+    country = _normalize_country(country) if country else None
     as_of = as_of or date.today()
 
     def _query(state_filter, statuses):
@@ -2994,7 +3135,9 @@ def list_available_reports_for_org(db: Session, organization_id: int, reporting_
     backend-owned list the Org's "Report" dropdown must populate from
     (never a hardcoded frontend list of report names)."""
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # None when nothing is configured anywhere — correctly yields an empty
+    # report list rather than offering an unconfigured org India's reports.
+    country = _resolve_org_country(db, organization_id)
     state = getattr(company, "jurisdiction_state", None) or None
 
     query = (
@@ -3023,7 +3166,9 @@ def get_applicable_report_template_for_org(
     thin, matching this module's convention of routers passing only
     organization_id/params and services doing every lookup themselves."""
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # None when nothing is configured anywhere — get_applicable_report_template
+    # correctly resolves to no template (rather than India's) for a None country.
+    country = _resolve_org_country(db, organization_id)
     state = getattr(company, "jurisdiction_state", None) or None
 
     template = get_applicable_report_template(db, country, state, reporting_year, report_type)
@@ -3044,18 +3189,24 @@ def validate_report_generation_context(
     of pass/fail so the UI always has something to render."""
     reasons = []
     company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
-    org_country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # None when nothing is configured anywhere — reported as its own clear
+    # reason below rather than silently comparing against an assumed "IN".
+    org_country = _resolve_org_country(db, organization_id)
     org_state = getattr(company, "jurisdiction_state", None) or None
 
-    jurisdiction_match = (org_country == template.jurisdiction_country) and (
-        template.jurisdiction_state is None or template.jurisdiction_state == org_state
-    )
-    if not jurisdiction_match:
-        reasons.append(
-            f"Organization jurisdiction ({org_country}{'/' + org_state if org_state else ''}) does not "
-            f"match this template's jurisdiction ({template.jurisdiction_country}"
-            f"{'/' + template.jurisdiction_state if template.jurisdiction_state else ''})."
+    if org_country is None:
+        reasons.append("This organization hasn't configured a jurisdiction yet — set it under Compliance > Company Details.")
+        jurisdiction_match = False
+    else:
+        jurisdiction_match = (org_country == template.jurisdiction_country) and (
+            template.jurisdiction_state is None or template.jurisdiction_state == org_state
         )
+        if not jurisdiction_match:
+            reasons.append(
+                f"Organization jurisdiction ({org_country}{'/' + org_state if org_state else ''}) does not "
+                f"match this template's jurisdiction ({template.jurisdiction_country}"
+                f"{'/' + template.jurisdiction_state if template.jurisdiction_state else ''})."
+            )
 
     try:
         run_status_index = PAYROLL_STATUS_ORDER.index(PayrollStatus(run.status))
@@ -3644,19 +3795,19 @@ def _resolve_calculation_mode(db: Session, organization_id: int, calculation_mod
 
     If *calculation_mode* is already provided (from the request), use it
     directly.  Otherwise, look up the organisation's active policy via
-    ``policy.service.get_active_policy`` and read its ``calculation_mode``.
-    Falls back to ``"standard"`` if no policy is found."""
+    ``policy.service.get_active_policy`` — a get-or-create that always
+    returns a real policy (auto-seeding a default one on first use), so
+    there's no legitimate "no policy configured" failure to swallow here;
+    a real error (DB issue, a bug in the seed path) is left to propagate
+    rather than being silently hidden behind ``"standard"``."""
     if calculation_mode:
         return calculation_mode
-    try:
-        from app.modules.payroll.policy.service import get_active_policy
-        policy = get_active_policy(db, organization_id)
-        return policy.calculation_mode or "standard"
-    except Exception:
-        return "standard"
+    from app.modules.payroll.policy.service import get_active_policy
+    policy = get_active_policy(db, organization_id)
+    return policy.calculation_mode or "standard"
 
 
-def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[int], country: str = "IN",
+def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[int], country: str,
                          period_start=None, period_end=None, calculation_mode: str = None) -> dict:
     """Dry-run payroll calculation: returns per-employee breakdowns without
     writing anything to the database. Uses the strategy-based payroll engine,
@@ -3782,6 +3933,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _state_scoped_cache[resolution_state] = get_state_scoped_config(db, country, resolution_state)
         state_rate_map, state_slabs = _state_scoped_cache[resolution_state]
 
+        # Canada YTD — READ ONLY (see _load_ca_ytd's own docstring): this
+        # function persists no PayrollRun/PayslipItem, so it must never
+        # write to PayrollYtdAccumulator, only reflect its current state.
+        ytd_inputs = (
+            _load_ca_ytd(db, emp.id, period_end or date.today(), work_state)
+            if country == "CA" else {}
+        )
+
         # Delegate to the strategy engine
         ctx = build_context_from_employee(
             emp, gross=gross, basic=basic, hra=hra,
@@ -3790,6 +3949,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             unpaid_leave_days=unpaid_leave_days,
             country=country, rate_map=rate_map, slabs=slabs,
             work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
+            **ytd_inputs,
         )
         calc = calculate_payroll(ctx, calculation_mode)
 
@@ -3834,6 +3994,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "employerPension": float(calc.employer_pension),
             "employeePension": float(calc.employee_pension),
             "employerNi": float(calc.employer_ni),
+            "employerCpp2": float(calc.employer_cpp2),
             "taxSlabRate": _get_slab_label(calc.gross * MONTHS_PER_YEAR, slabs, country, annual_tax=calc.annual_tax),
         })
 
@@ -3856,7 +4017,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     }
 
 
-def _get_slab_label(annual_income: Decimal, slabs: List[TaxSlab], country: str = "IN",
+def _get_slab_label(annual_income: Decimal, slabs: List[TaxSlab], country: str,
                      annual_tax: Decimal = None) -> str:
     """Return the rate label of the applicable tax slab for display.
     When annual_tax is provided and equals 0 (e.g. after Section 87A
@@ -4189,12 +4350,104 @@ def _resolve_tax_snapshot(db: Session, country: str, payroll_date, state=None, t
     return _pack_to_tax_snapshot(rates, slabs, pack)
 
 
-def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
+# ── Canada YTD accumulator (CPP/CPP2/EI, QPP/QPP2/QPIP) ─────────────────
+# Dormant until "CA" is added to engine/countries/shared.py's
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES (a plain in-code rollout switch, same
+# convention as _VALIDATION_ENABLED_COUNTRIES) — see that file's own
+# rollout-log comment for why it isn't flipped on yet.
+
+_CA_YTD_COMPONENTS = ("cpp", "cpp2", "ei", "cpp_basic_exemption")
+_QC_YTD_COMPONENTS = ("qpp", "qpp2", "qpip", "qpp_basic_exemption")
+
+
+def _ca_ytd_tax_year(pay_date, work_state: str = None) -> str:
+    """Calendar-year accumulator key — deliberately its own concept, not
+    JurisdictionPack.tax_year (a free-text display label like "2026") or
+    the report-only SUM_YTD helper's Jan-1 approximation (see
+    _resolve_field_value's SUM_YTD branch) — this is the real key an
+    accumulator row is looked up/upserted by."""
+    prefix = "CA-QC" if (work_state or "").strip().upper() == "QC" else "CA"
+    return f"{prefix}-CY-{pay_date.year}"
+
+
+def _load_ca_ytd(db: Session, employee_id: int, pay_date, work_state: str = None) -> dict:
+    """Returns kwargs for build_context_from_employee's ytd_* params —
+    empty dict (today, for every employee) when CA hasn't opted into the
+    rollout switch, or when no accumulator rows exist yet for this
+    employee/tax-year (a brand-new employee's first CA payslip of the
+    year). Never guesses/backfills a starting value — see
+    engine/countries/shared.py's own rollout-log note on why no
+    retroactive backfill is possible."""
+    if "CA" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _ca_ytd_tax_year(pay_date, work_state)
+    is_qc = (work_state or "").strip().upper() == "QC"
+    components = _QC_YTD_COMPONENTS if is_qc else _CA_YTD_COMPONENTS
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component.in_(components),
+        )
+        .all()
+    )
+    by_component = {r.tax_component: r.ytd_taxable_wages for r in rows}
+    pension_key, cpp2_key, insurable_key, exemption_key = components
+    return dict(
+        ytd_pensionable_earnings=by_component.get(pension_key, Decimal("0")),
+        ytd_cpp2_pensionable_earnings=by_component.get(cpp2_key, Decimal("0")),
+        ytd_insurable_earnings=by_component.get(insurable_key, Decimal("0")),
+        ytd_basic_exemption_used=by_component.get(exemption_key, Decimal("0")),
+    )
+
+
+def _upsert_ca_ytd_accumulator(db: Session, employee_id: int, pay_date, work_state: str, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative YTD values back to
+    PayrollYtdAccumulator — get-or-create per (employee, tax_year,
+    component), flush (not commit; caller's own transaction boundary
+    still governs). No-op if the result carries no YTD figures (i.e. the
+    calculation ran dormant — result.ytd_pensionable_earnings is None),
+    so calling this unconditionally from every persisting entry point is
+    safe even while the rollout switch is off."""
+    if result.ytd_pensionable_earnings is None:
+        return
+    tax_year = _ca_ytd_tax_year(pay_date, work_state)
+    is_qc = (work_state or "").strip().upper() == "QC"
+    components = _QC_YTD_COMPONENTS if is_qc else _CA_YTD_COMPONENTS
+    pension_key, cpp2_key, insurable_key, exemption_key = components
+    values = {
+        pension_key: result.ytd_pensionable_earnings,
+        cpp2_key: result.ytd_cpp2_pensionable_earnings,
+        insurable_key: result.ytd_insurable_earnings,
+        exemption_key: result.ytd_basic_exemption_used,
+    }
+    for component, value in values.items():
+        if value is None:
+            continue
+        row = (
+            db.query(PayrollYtdAccumulator)
+            .filter(
+                PayrollYtdAccumulator.employee_id == employee_id,
+                PayrollYtdAccumulator.tax_year == tax_year,
+                PayrollYtdAccumulator.tax_component == component,
+            )
+            .first()
+        )
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=component)
+            db.add(row)
+        row.ytd_taxable_wages = value
+        row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str,
                              calculation_mode: str = "standard", attendance_records: List["PayrollAttendanceRecord"] = None,
                              allowance_components: list = None, resolved_pack=None,
                              state_rate_map: dict = None, state_slabs: list = None,
                              employer_tax_profiles: dict = None, reciprocity: dict = None,
-                             locality_rate=None) -> dict:
+                             locality_rate=None, ytd_inputs: dict = None) -> dict:
     """Compute every payslip figure for an employee within a run and return
     them as a dict, without touching the database. Shared by initial payslip
     generation (_generate_single_payslip) and recalculation
@@ -4218,7 +4471,13 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     `allowance_components`: the org's configured components (see
     _resolve_allowance_components), pre-fetched once per run by the caller —
     this is org-level, not per-employee, so it's threaded through the same
-    way rate_map/slabs already are rather than re-queried per employee."""
+    way rate_map/slabs already are rather than re-queried per employee.
+
+    `ytd_inputs`: Canada CPP/CPP2/EI year-to-date state (see _load_ca_ytd),
+    pre-loaded by the caller — this function stays read-only/side-effect-
+    free by design (shared by generation AND recalculation), so it never
+    queries or writes PayrollYtdAccumulator itself. None (every non-CA
+    calculation, and CA until the caller opts in) means no YTD wired."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
@@ -4267,6 +4526,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         employer_tax_profiles=employer_tax_profiles,
         locality_rate=locality_rate,
         **(reciprocity or {}),
+        **(ytd_inputs or {}),
     )
     result = calculate_payroll(ctx, calculation_mode)
 
@@ -4329,20 +4589,40 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "employer_ni": result.employer_ni,
         "employer_futa": result.employer_futa,
         "employer_sui": result.employer_sui,
+        "employer_cpp2": result.employer_cpp2,
         "net_pay": result.net_pay,
         "unpaid_leave_days": result.unpaid_leave_days,
         "attendance_deduction": result.attendance_deduction,
         "per_day_salary": result.per_day_salary,
+        # Canada YTD — same immutability contract as tax_rule_snapshot
+        # above, for the before/after cumulative figures this payslip
+        # actually consumed per component. None unless YTD accumulation
+        # was actually wired for this calculation (result.
+        # ytd_pensionable_earnings is None otherwise — see canada.py).
+        # "_ytd_result" is NOT a PayslipItem column — callers that splat
+        # this dict into PayslipItem(**values) MUST pop it first; it
+        # carries the raw post-period values _upsert_ca_ytd_accumulator
+        # needs, so the accumulator write and the frozen snapshot can
+        # never disagree.
+        "ytd_snapshot": (
+            {
+                "cpp": {"ytd_before": str(ctx.ytd_pensionable_earnings), "ytd_after": str(result.ytd_pensionable_earnings)},
+                "cpp2": {"ytd_before": str(ctx.ytd_cpp2_pensionable_earnings), "ytd_after": str(result.ytd_cpp2_pensionable_earnings)},
+                "ei": {"ytd_before": str(ctx.ytd_insurable_earnings), "ytd_after": str(result.ytd_insurable_earnings)},
+                "cpp_basic_exemption": {"ytd_before": str(ctx.ytd_basic_exemption_used), "ytd_after": str(result.ytd_basic_exemption_used)},
+            } if result.ytd_pensionable_earnings is not None else None
+        ),
+        "_ytd_result": result if result.ytd_pensionable_earnings is not None else None,
     }
 
 
-def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str = "IN",
+def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str,
                               calculation_mode: str = "standard", payslip_number: str = None,
                               attendance_records: List["PayrollAttendanceRecord"] = None,
                               allowance_components: list = None, resolved_pack=None,
                               state_rate_map: dict = None, state_slabs: list = None,
                               employer_tax_profiles: dict = None, reciprocity: dict = None,
-                              locality_rate=None) -> PayslipItem:
+                              locality_rate=None, ytd_inputs: dict = None) -> PayslipItem:
     """Generate a single payslip using the strategy-based payroll engine.
 
     Fixed 30-Day Payroll Model:
@@ -4356,15 +4636,19 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     deductions are computed on the full gross by the resolved strategy.
 
     `resolved_pack`: passed straight through to _compute_payslip_values —
-    see its docstring.
+    see its docstring. `ytd_inputs`: same — Canada YTD state, pre-loaded
+    by the caller (see _load_ca_ytd); this function is the one place that
+    then WRITES the resulting post-period state back to
+    PayrollYtdAccumulator, once the new PayslipItem has a real id.
     """
     values = _compute_payslip_values(
         db, run, employee, rate_map, slabs, country, calculation_mode,
         attendance_records=attendance_records, allowance_components=allowance_components,
         resolved_pack=resolved_pack, state_rate_map=state_rate_map, state_slabs=state_slabs,
         employer_tax_profiles=employer_tax_profiles, reciprocity=reciprocity,
-        locality_rate=locality_rate,
+        locality_rate=locality_rate, ytd_inputs=ytd_inputs,
     )
+    ytd_result = values.pop("_ytd_result", None)
 
     item = PayslipItem(
         payroll_run_id=run.id,
@@ -4375,6 +4659,10 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         **values,
     )
     db.add(item)
+    if ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        work_state = getattr(employee, "work_state", None)
+        _upsert_ca_ytd_accumulator(db, employee.id, run.pay_date, work_state, ytd_result, payslip_id=item.id)
     return item
 
 
@@ -4386,7 +4674,7 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
     run.total_taxes = sum((i.tds for i in items), Decimal("0"))
     run.total_employer_contribution = sum(
         (i.employer_pf + i.employer_esi + i.employer_social_security + i.employer_medicare + i.employer_pension
-         + i.employer_ni + i.employer_futa + i.employer_sui for i in items),
+         + i.employer_ni + i.employer_futa + i.employer_sui + i.employer_cpp2 for i in items),
         Decimal("0"),
     )
     run.total_net = sum((i.net_pay for i in items), Decimal("0"))
@@ -4577,12 +4865,16 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             payroll_date=run.pay_date, org_opted_in=org_opted_in,
         )
         payslip_number = f"{base_payslip_code}{seq:05d}" if base_payslip_code else None
+        ytd_inputs = (
+            _load_ca_ytd(db, emp.id, run.pay_date, getattr(emp, "work_state", None))
+            if country == "CA" else None
+        )
         _generate_single_payslip(
             db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
             attendance_records=attendance_by_employee.get(emp.id, []),
             allowance_components=allowance_components, resolved_pack=resolved_pack,
             state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-            reciprocity=reciprocity, locality_rate=locality_rate,
+            reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs,
         )
         seq += 1
 
@@ -4627,12 +4919,48 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in,
     )
     allowance_components = _resolve_allowance_components(db, organization_id)
+
+    # Canada YTD — this is a CORRECTION path, not initial generation: it
+    # must NOT read the live accumulator and write a new post-period
+    # state, because that would silently cascade into every LATER
+    # payslip's own already-frozen ytd_snapshot for this employee/tax-year
+    # (a real, separate piece of work — the retroactive-correction
+    # cascade — intentionally not built here). Instead, recalculate using
+    # THIS payslip's own frozen ytd_snapshot.*_before values (if it has
+    # one), reproducing identical CPP/CPP2/EI figures when nothing else
+    # about the employee/rates changed. Never write to
+    # PayrollYtdAccumulator from this function.
+    ytd_inputs = {}
+    existing_snapshot = getattr(existing_item, "ytd_snapshot", None)
+    if country == "CA" and existing_snapshot:
+        component_to_field = {
+            "cpp": "ytd_pensionable_earnings", "cpp2": "ytd_cpp2_pensionable_earnings",
+            "ei": "ytd_insurable_earnings", "cpp_basic_exemption": "ytd_basic_exemption_used",
+        }
+        for component, field_name in component_to_field.items():
+            before = (existing_snapshot.get(component) or {}).get("ytd_before")
+            if before is not None:
+                ytd_inputs[field_name] = Decimal(before)
+
     values = _compute_payslip_values(
         db, run, employee, rate_map, slabs, country, calculation_mode,
         allowance_components=allowance_components, resolved_pack=resolved_pack,
         state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-        reciprocity=reciprocity, locality_rate=locality_rate,
+        reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs or None,
     )
+    ytd_result = values.pop("_ytd_result", None)
+    if ytd_result is not None and not existing_snapshot:
+        # Recalculating with YTD wired for the first time on a payslip
+        # that was originally generated without it (e.g. the rollout
+        # switch flipped on between the original run and this
+        # recalculation) — this genuinely differs from a same-input
+        # reproduction, so surface it rather than silently accepting
+        # whatever number comes out.
+        logging.getLogger("zoiko").warning(
+            "[ca-ytd-recalc] payslip %s recalculated with YTD accumulation now available but no prior "
+            "ytd_snapshot to reproduce from — figures may differ from the original run.",
+            existing_item.id,
+        )
     for field, value in values.items():
         setattr(existing_item, field, value)
     existing_item.status = PayslipStatus.PENDING
@@ -4781,13 +5109,13 @@ def _fill_missing_basic_hra(fields: dict, db: Session = None, organization_id: O
 def _resolve_employee_country(db: Session, organization_id: int, explicit_country_code: Optional[str]) -> str:
     """Per-employee jurisdiction override if given, else the org's default —
     same fallback pattern _resolve_employee_calc_inputs uses for payroll
-    calculation's country resolution."""
+    calculation's country resolution. Raises rather than silently assigning
+    a new employee to India when the org itself has no jurisdiction
+    configured anywhere yet — that assignment is permanent on the employee
+    record and directly drives which jurisdiction's payroll rules apply."""
     if explicit_country_code:
         return _normalize_country(explicit_country_code)
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first()
-    return _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    return _resolve_org_country(db, organization_id, required=True)
 
 
 def check_duplicate_employee_identifiers(
@@ -5321,6 +5649,25 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
                 detail="No attendance records found for the selected period and employees. Please record attendance before creating a payroll run.",
             )
 
+    # Upfront jurisdiction-config guard — refuse to create the run row at
+    # all if this org's country has opted into fail-fast validation and
+    # isn't ready, rather than letting per-employee resolution inside
+    # generate_payslips_for_run raise only after the run row already
+    # exists (which would leave an orphaned empty Draft run behind).
+    # Dormant while _VALIDATION_ENABLED_COUNTRIES is empty — a no-op for
+    # every organization today. The per-employee check inside
+    # _resolve_effective_rate_inputs remains the real backstop, since an
+    # employee's own country_code override can differ from the org's.
+    from app.modules.payroll.engine.countries.shared import (
+        _VALIDATION_ENABLED_COUNTRIES, MissingComplianceConfigurationError,
+    )
+    org_country = _resolve_org_country(db, organization_id)
+    if org_country and org_country in _VALIDATION_ENABLED_COUNTRIES:
+        readiness = check_jurisdiction_readiness(db, organization_id, org_country)
+        if not readiness["ready"]:
+            bad_key = readiness["missingKeys"][0]["key"] if readiness["missingKeys"] else "tax slabs"
+            raise MissingComplianceConfigurationError(bad_key, org_country, organization_id)
+
     payload = data.model_dump(exclude={"auto_generate_payslips", "schedule", "employeeIds", "totals", "calculation_mode"})
     run = PayrollRun(created_by=created_by, calculation_mode=calculation_mode, **payload)
     if organization_id is not None:
@@ -5630,6 +5977,14 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     calculation_mode = getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
     gross = data.basic_salary + (data.hra or 0) + (data.special_allowance or 0) + (data.overtime or 0)
 
+    # Canada YTD — READ before calculating (see _load_ca_ytd's docstring);
+    # this path DOES persist a real PayslipItem below, so it also WRITEs
+    # the resulting post-period state back once the item has a real id
+    # (the "manually add a payslip" path — easy to miss, and CPP/CPP2/EI
+    # would silently regress to the old annualized-only behavior here even
+    # after the run-generation path is fixed, if this weren't wired too).
+    ytd_inputs = _load_ca_ytd(db, employee.id, run.pay_date, work_state) if country == "CA" else {}
+
     # Delegate to the strategy engine (no attendance data for manual payslips)
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     ctx = build_context_from_employee(
@@ -5642,6 +5997,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         employer_tax_profiles=employer_tax_profiles,
         locality_rate=locality_rate,
         **reciprocity,
+        **ytd_inputs,
     )
     calc = calculate_payroll(ctx, calculation_mode)
 
@@ -5679,6 +6035,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         medicare=calc.medicare,
         ni_employee=calc.ni_employee,
         employee_pension=calc.employee_pension,
+        # Canada: CPP2 — genuinely missing here before (computed and
+        # deducted from net_pay correctly via total_employee_deductions,
+        # but never actually written onto a manually-added payslip item,
+        # so its own line always showed 0 despite reducing net pay).
+        cpp2=calc.cpp2,
         tds=calc.tds,
         # US: broken-out federal/state/local tax — added alongside tds
         # above so a manually-added US payslip doesn't reintroduce the
@@ -5695,6 +6056,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         employer_medicare=calc.employer_medicare,
         employer_pension=calc.employer_pension,
         employer_sui=calc.employer_sui,
+        employer_cpp2=calc.employer_cpp2,
         net_pay=calc.net_pay,
         unpaid_leave_days=calc.unpaid_leave_days,
         attendance_deduction=calc.attendance_deduction,
@@ -5703,8 +6065,19 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         total_working_days=Decimal(calc.payroll_days),
         status=PayslipStatus.PENDING,
         notes=data.notes,
+        ytd_snapshot=(
+            {
+                "cpp": {"ytd_before": str(ctx.ytd_pensionable_earnings), "ytd_after": str(calc.ytd_pensionable_earnings)},
+                "cpp2": {"ytd_before": str(ctx.ytd_cpp2_pensionable_earnings), "ytd_after": str(calc.ytd_cpp2_pensionable_earnings)},
+                "ei": {"ytd_before": str(ctx.ytd_insurable_earnings), "ytd_after": str(calc.ytd_insurable_earnings)},
+                "cpp_basic_exemption": {"ytd_before": str(ctx.ytd_basic_exemption_used), "ytd_after": str(calc.ytd_basic_exemption_used)},
+            } if calc.ytd_pensionable_earnings is not None else None
+        ),
     )
     db.add(item)
+    if calc.ytd_pensionable_earnings is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_ca_ytd_accumulator(db, employee.id, run.pay_date, work_state, calc, payslip_id=item.id)
     db.commit()
     db.refresh(item)
     _recompute_run_aggregates(db, run)
@@ -5787,13 +6160,20 @@ def get_bank_transfer_summary(db: Session, run_id: int, organization_id: int = N
     }
 
 
-def _build_bank_export_rows(run: PayrollRun, items: List[PayslipItem], company, org_currency: str = None) -> list:
+def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipItem], organization_id: int, org_currency: str = None) -> list:
     from app.modules.payroll.bank_export import BankExportRow
+
+    company = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == organization_id
+    ).first() if organization_id else None
 
     # Use the org's explicit currency override if set, otherwise derive
     # from the jurisdiction — implements the Super Admin → Org Admin
-    # inheritance model for currency.
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # inheritance model for currency. A bank transfer file is a real
+    # payment instruction, so an org with no jurisdiction configured
+    # anywhere raises here rather than silently paying out under an
+    # assumed (India) currency.
+    country = _resolve_org_country(db, organization_id, required=True)
     currency_code = org_currency or _get_currency_code(country)
     company_name = getattr(company, "name", None) or ""
 
@@ -5829,9 +6209,6 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
     run = get_payroll_run_by_id(db, run_id, organization_id)
     items = get_payslips_for_run(db, run_id, organization_id)
     policy = get_active_policy(db, organization_id)
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first()
 
     # Resolve the org's explicit currency override for bank exports.
     from app.modules.organizations.models import Organization
@@ -5839,7 +6216,7 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
     org_currency = org_row.currency if org_row else None
 
     export_format = format_override or policy.bank_export_format
-    rows = _build_bank_export_rows(run, items, company, org_currency=org_currency)
+    rows = _build_bank_export_rows(db, run, items, organization_id, org_currency=org_currency)
     try:
         exporter = get_exporter(export_format)
     except ValueError as exc:
@@ -5855,14 +6232,38 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
     return file_bytes, exporter.content_type, exporter.file_extension, filename
 
 
-def _resolve_org_country(db: Session, organization_id: int = None) -> str:
+def _resolve_org_country(db: Session, organization_id: int = None, *, required: bool = False) -> Optional[str]:
     """The org's current jurisdiction country — payslips/runs don't snapshot
     a country of their own, so this always reflects the org's *current*
-    Compliance setting, same as the PDF generators already do."""
+    Compliance setting, same as the PDF generators already do.
+
+    Prefers CompanyComplianceDetails.jurisdiction_country (set on the
+    Compliance page); when that's blank — the default state of every
+    organization until someone explicitly saves that page — falls back to
+    Organization.country (set at registration, before Compliance Details is
+    ever touched) rather than silently assuming India. When NEITHER is set:
+    `required=True` raises a clear error (used where guessing wrong has a
+    real financial/data-integrity consequence — employee jurisdiction
+    assignment, bank export currency); `required=False` (default) returns
+    None and leaves the caller's own already-graceful "unknown jurisdiction"
+    handling to take over (an empty report list, a neutral $/USD display,
+    the generic statutory-column set) instead of a guessed country."""
     company = db.query(CompanyComplianceDetails).filter(
         CompanyComplianceDetails.organization_id == organization_id
     ).first() if organization_id else None
-    return _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    raw = getattr(company, "jurisdiction_country", None)
+    if not raw and organization_id:
+        from app.modules.organizations.models import Organization
+        org_row = db.query(Organization).filter(Organization.id == organization_id).first()
+        raw = getattr(org_row, "country", None)
+    if not raw:
+        if required:
+            raise BadRequestException(
+                "This organization hasn't configured a jurisdiction yet — "
+                "set it under Compliance > Company Details before continuing."
+            )
+        return None
+    return _normalize_country(raw)
 
 
 def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) -> dict:
@@ -5921,6 +6322,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "medicare": item.medicare or z,
         "niEmployee": item.ni_employee or z,
         "employeePension": item.employee_pension or z,
+        # Canada: CPP2 — computed and persisted (see PayslipItem.cpp2) and
+        # already correctly folded into total_deductions/net_pay, but this
+        # dict never actually serialized it, so no payslip API response
+        # ever surfaced the number despite it genuinely reducing net pay.
+        "cpp2": item.cpp2 or z,
         # UK: Student/Postgraduate Loan deduction — correctly reduces net_pay
         # (engine/standard.py's total_employee_deductions) since it was
         # calculated, but was never added to this dict, so it never reached
@@ -5934,6 +6340,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # UK: employer-side National Insurance — same "computed, persisted,
         # never serialized" gap as studyLoanDeduction above.
         "employerNi": item.employer_ni or z,
+        "employerCpp2": item.employer_cpp2 or z,
         "totalDeductions": item.total_deductions or z,
         "netPay": item.net_pay or z,
         "bankName": item.bank_name,
@@ -8294,10 +8701,10 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
     items = run.payslip_items or []
 
     # ── Currency helpers ──
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first() if organization_id else None
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # None when nothing is configured anywhere — _get_currency_symbol below
+    # already falls back to a neutral "$" for an unrecognized (including
+    # None) country, rather than assuming India.
+    country = _resolve_org_country(db, organization_id)
     # Use the org's explicit currency override if set, otherwise derive
     # from the jurisdiction.
     org_currency_code = None
@@ -8641,10 +9048,11 @@ def generate_report_csv_bytes(db: Session, report_id: int, organization_id: int 
     run = _get_report_run(db, report_id, organization_id)
     items = run.payslip_items or []
 
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first() if organization_id else None
-    country = _normalize_country(getattr(company, "jurisdiction_country", None) or "IN")
+    # None when nothing is configured anywhere — .get() below already
+    # falls back to the generic statutory-column set for any unrecognized
+    # (including None) key, so this correctly avoids showing India-specific
+    # columns (PF/ESI/PT) on an unconfigured org's compliance export.
+    country = _resolve_org_country(db, organization_id)
     statutory_cols = _STATUTORY_COLUMNS_BY_COUNTRY.get(country, _DEFAULT_STATUTORY_COLUMNS)
 
     def _other_deductions(it):
