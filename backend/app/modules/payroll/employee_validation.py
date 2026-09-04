@@ -332,6 +332,12 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
             "error": "SIN must be 9 digits (e.g. 123-456-789).",
         },
         "td1_claim_amount": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "TD1 claim amount must be a number."},
+        # ZP-TAX-CA-2026-001 §18: provincial/territorial TD1 and Quebec's
+        # own TP-1015.3-V are legally distinct declarations from federal
+        # TD1 — same "was collectible nowhere, engine reads it, now wired
+        # end to end" gap this promotion already closed for td1_claim_amount.
+        "provincial_td1_claim_amount": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "Provincial TD1 claim amount must be a number."},
+        "qc_tp1015_claim_amount": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "TP-1015.3-V claim amount must be a number."},
         "province": {
             "required": True, "upper": True,
             "choices": ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"],
@@ -381,6 +387,8 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
     FIELD_COLUMN_MAP = {
         "province": "work_state",
         "td1_claim_amount": "td1_claim_amount",
+        "provincial_td1_claim_amount": "provincial_td1_claim_amount",
+        "qc_tp1015_claim_amount": "qc_tp1015_claim_amount",
         "td1_additional_tax": "td1_additional_tax",
         "cpp_qpp_election_status": "cpp_qpp_election_status",
         "cpp_election_effective_date": "cpp_election_effective_date",
@@ -390,6 +398,8 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
     }
     FIELD_VALUE_MAP = {
         "td1_claim_amount": lambda v: Decimal(v) if v else None,
+        "provincial_td1_claim_amount": lambda v: Decimal(v) if v else None,
+        "qc_tp1015_claim_amount": lambda v: Decimal(v) if v else None,
         "td1_additional_tax": lambda v: Decimal(v) if v else None,
         "cpp_election_effective_date": lambda v: date.fromisoformat(v) if v else None,
         "remote_work_agreement": lambda v: str(v).strip().lower() == "true",

@@ -16,6 +16,13 @@ import { inputClass, labelClass } from "./constants";
 const RULE_TYPE_OPTIONS_BY_COUNTRY = {
   UK: ["MARGINAL_RATE", "NI_BAND", "FORMULA"],
   IN: ["MARGINAL_RATE", "PT_FLAT", "FORMULA"],
+  // ON_EHT_BAND: Ontario Employer Health Tax's rate table — ONE flat
+  // rate applies to the org's whole (aggregate, exemption-adjusted)
+  // Ontario remuneration total for the band it falls in, not a marginal
+  // bracket sum like MARGINAL_RATE — see engine/countries/canada.py's
+  // _on_eht_rate_for_total (ZP-TAX-CA-2026-001 §15/§16). State should be
+  // set to "ON" on each band row, same as any other provincial slab.
+  CA: ["MARGINAL_RATE", "ON_EHT_BAND", "FORMULA"],
 };
 const DEFAULT_RULE_TYPE_OPTIONS = ["MARGINAL_RATE", "FORMULA"];
 const NI_CATEGORIES = ["A", "B", "C", "D", "E", "F", "H", "I", "J", "K", "L", "M", "N", "S", "V", "Z"];

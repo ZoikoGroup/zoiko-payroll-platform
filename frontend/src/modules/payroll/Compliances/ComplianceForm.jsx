@@ -10,7 +10,7 @@ import { uploadOrganizationLogo } from "../../../service/orgAdminService";
 import { useOrganization } from "../../../context/OrganizationContext";
 
 function getBaseFields(country) {
-  return [
+  const fields = [
     { label: "Company Legal Name", field: "name", type: "text" },
     { label: "Company Type", field: "type", type: "text" },
     { label: "Employer ID / Registration No.", field: "employerId", type: "text" },
@@ -24,6 +24,38 @@ function getBaseFields(country) {
     { label: "Settlement Bank", field: "settlementBank", type: "text" },
     { label: "Settlement Account Number", field: "settlementAcc", type: "text" },
   ];
+  // ZP-TAX-CA-2026-001 §15/AC-20 — determines which BC Employer Health
+  // Tax thresholds/rates apply (ordinary vs. registered charity/
+  // nonprofit). Shown for any Canada org, not gated to jurisdictionState
+  // === "BC" specifically — the engine checks each EMPLOYEE's own work
+  // state, not the org's single default state, so an org whose default
+  // state is elsewhere can still have BC employees.
+  if (country === "CA") {
+    fields.push({
+      label: "BC Employer Health Tax — Employer Classification",
+      field: "bcEhtEmployerClassification",
+      type: "select",
+      options: [
+        { value: "", label: "Ordinary employer (default)" },
+        { value: "CHARITY_NONPROFIT", label: "Registered charity / non-profit" },
+      ],
+    });
+    // ZP-TAX-CA-2026-001 §13 — determines which Quebec Health Services
+    // Fund rate schedule applies. Same "shown for any CA org" reasoning
+    // as BC's classification above — the engine checks each employee's
+    // own work state, not the org's default state.
+    fields.push({
+      label: "Quebec HSF — Employer Category",
+      field: "qcHsfEmployerCategory",
+      type: "select",
+      options: [
+        { value: "", label: "General employer (default)" },
+        { value: "PRIMARY_MANUFACTURING", label: "Primary / manufacturing sector" },
+        { value: "PUBLIC_SECTOR", label: "Public sector" },
+      ],
+    });
+  }
+  return fields;
 }
 
 function CompanyLogoField({ addToast }) {
@@ -125,6 +157,18 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
                 onChange={(e) => handleChange(f.field, e.target.value)}
                 className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
               />
+            )}
+
+            {f.type === "select" && (
+              <select
+                value={companyDetails?.[f.field] || ""}
+                onChange={(e) => handleChange(f.field, e.target.value)}
+                className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
+              >
+                {f.options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             )}
 
             {(f.type === "readonly" || f.type === "readonly-country") && (
