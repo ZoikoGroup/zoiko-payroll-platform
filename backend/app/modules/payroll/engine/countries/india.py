@@ -9,14 +9,17 @@ backward-compatibility contract this preserves.
 from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
-from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
+from app.modules.payroll.engine.countries.shared import (
+    MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter,
+    _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES,
+)
 # Fallback constants moved to hardcoded_defaults.py (the consolidated home
 # for every hardcoded fallback value in the payroll module) — imported
 # back under their original names so nothing else needs to change.
 from app.modules.payroll.hardcoded_defaults import (
     ESI_MONTHLY_WAGE_CEILING, _IN_STANDARD_DEDUCTION, _IN_STANDARD_DEDUCTION_OLD,
     _IN_REBATE_87A_LIMIT, _IN_REBATE_87A_MAX, _IN_REBATE_87A_LIMIT_OLD,
-    _IN_REBATE_87A_MAX_OLD, _IN_CESS_PCT,
+    _IN_REBATE_87A_MAX_OLD, _IN_CESS_PCT, _IN_PF_WAGE_CEILING,
 )
 
 
@@ -129,8 +132,18 @@ def calculate(ctx: PayrollContext) -> dict:
     basic = ctx.basic
 
     pf_rate = rate_map.get("pf")
-    employee_pf = _round2(basic * (pf_rate.employee_rate_pct / 100)) if pf_rate and pf_rate.employee_rate_pct else Decimal("0")
-    employer_pf = _round2(basic * (pf_rate.employer_rate_pct / 100)) if pf_rate and pf_rate.employer_rate_pct else Decimal("0")
+    # ZP-TAX-IN-2026-27-001 §9.1: EPF's contribution base is capped at the
+    # statutory monthly wage ceiling (₹15,000), not full uncapped Basic.
+    # Dormant by default (_IN_PF_WAGE_CEILING_ENABLED_COUNTRIES) — see
+    # shared.py's switch comment for why this real correctness fix still
+    # ships behind a rollout gate rather than changing live withholding
+    # the moment it merges.
+    pf_wage_base = basic
+    if "IN" in _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES:
+        pf_ceiling = resolve_jurisdiction_parameter(rate_map, "pf_wage_ceiling", _IN_PF_WAGE_CEILING, country="IN")
+        pf_wage_base = min(basic, pf_ceiling)
+    employee_pf = _round2(pf_wage_base * (pf_rate.employee_rate_pct / 100)) if pf_rate and pf_rate.employee_rate_pct else Decimal("0")
+    employer_pf = _round2(pf_wage_base * (pf_rate.employer_rate_pct / 100)) if pf_rate and pf_rate.employer_rate_pct else Decimal("0")
 
     esi_rate = rate_map.get("esi")
     esi_ceiling = resolve_jurisdiction_parameter(rate_map, "esi_wage_ceiling", ESI_MONTHLY_WAGE_CEILING, country="IN")

@@ -66,6 +66,13 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="rebate_87a_max", label="Section 87A Rebate — Max Amount",
              employee_share="—", employer_share="—", total="₹60,000",
              flat_amount=Decimal("60000.00"), sort_order=8),
+        # Read behind _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES (dormant by
+        # default) — see india.py's calculate() and shared.py's switch
+        # comment. Configurable/editable from day one even while dormant,
+        # same convention as every other parameter row in this block.
+        dict(component_key="pf_wage_ceiling", label="EPF Wage Ceiling (Monthly)",
+             employee_share="—", employer_share="—", total="₹15,000",
+             flat_amount=Decimal("15000.00"), sort_order=9),
     ],
     "US": [
         dict(component_key="social-security", label="Social Security",
@@ -299,6 +306,45 @@ _TAX_SLABS_BY_COUNTRY = {
         dict(min_amount=Decimal("1600000"),  max_amount=Decimal("2000000"),  rate_pct=Decimal("20"),  rate_label="20%",  tax_formula="₹1,20,000 + 20% over ₹16L", sort_order=5),
         dict(min_amount=Decimal("2000000"),  max_amount=Decimal("2400000"),  rate_pct=Decimal("25"),  rate_label="25%",  tax_formula="₹2,00,000 + 25% over ₹20L", sort_order=6),
         dict(min_amount=Decimal("2400000"),  max_amount=None,                rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="₹3,00,000 + 30% over ₹24L", sort_order=7),
+        # Old Regime — non-senior/nonresident bands (ZP-TAX-IN-2026-27-001
+        # §4.1). tax_regime="Old" so service.get_tax_slabs returns ONLY
+        # this table (not summed with the New Regime rows above) for an
+        # employee with ctx.tax_regime=="Old" — see get_tax_slabs' own
+        # MARGINAL_RATE-exclusion comment. Senior (60-79) and super-senior
+        # (80+) resident bands are NOT included here: they need an
+        # employee age/residency fact PayrollContext doesn't carry yet
+        # (see india.py's calculate() docstring) — a deliberate, disclosed
+        # scope boundary, not an oversight. New sort_order range (11-14)
+        # so re-running populate_canonical_tax_v1.py never collides with
+        # the New Regime rows' sort_order (1-7) it dedupes by.
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("250000"),   rate_pct=Decimal("0"),   rate_label="Nil",  tax_formula="Basic exemption (up to ₹2.5L)", tax_regime="Old", sort_order=11),
+        dict(min_amount=Decimal("250000"),  max_amount=Decimal("500000"),   rate_pct=Decimal("5"),   rate_label="5%",   tax_formula="5% of income over ₹2.5L", tax_regime="Old", sort_order=12),
+        dict(min_amount=Decimal("500000"),  max_amount=Decimal("1000000"),  rate_pct=Decimal("20"),  rate_label="20%",  tax_formula="₹12,500 + 20% over ₹5L", tax_regime="Old", sort_order=13),
+        dict(min_amount=Decimal("1000000"), max_amount=None,                rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="₹1,12,500 + 30% over ₹10L", tax_regime="Old", sort_order=14),
+        # Surcharge tiers (§5) — rule_type="SURCHARGE" rows read by
+        # india.py's _apply_surcharge (min_amount=income threshold,
+        # rate_pct=surcharge % of TAX, not of income). The first three
+        # tiers are tax_regime=None (shared — identical for both regimes
+        # per the document's own table), so a New Regime employee's tax
+        # correctly caps at 25% above ₹5cr (no fourth tier exists for
+        # them). The >₹5cr 37% tier is tax_regime="Old" only, per the
+        # document's regime split at that top bracket.
+        dict(min_amount=Decimal("5000000"),  max_amount=None, rate_pct=Decimal("10"), rate_label="10%", tax_formula="Surcharge on tax, income > ₹50L", rule_type="SURCHARGE", sort_order=21),
+        dict(min_amount=Decimal("10000000"), max_amount=None, rate_pct=Decimal("15"), rate_label="15%", tax_formula="Surcharge on tax, income > ₹1Cr", rule_type="SURCHARGE", sort_order=22),
+        dict(min_amount=Decimal("20000000"), max_amount=None, rate_pct=Decimal("25"), rate_label="25%", tax_formula="Surcharge on tax, income > ₹2Cr", rule_type="SURCHARGE", sort_order=23),
+        dict(min_amount=Decimal("50000000"), max_amount=None, rate_pct=Decimal("37"), rate_label="37%", tax_formula="Surcharge on tax, income > ₹5Cr (Old Regime only)", rule_type="SURCHARGE", tax_regime="Old", sort_order=24),
+        # Telangana Professional Tax brackets (§13.3) — rule_type="PT_FLAT",
+        # resolved via ctx.state_slabs/_resolve_state_pt_bracket, not the
+        # country-level MARGINAL_RATE/SURCHARGE rows above (jurisdiction_
+        # state makes these state-scoped; get_state_scoped_config's
+        # single-pack fast path applies since no other pack contends for
+        # this state/rule_type, so no JurisdictionPack attachment or
+        # maker-checker promotion is needed for these to resolve).
+        # rate_pct=0 is required (NOT NULL column) but unread for PT_FLAT —
+        # flat_amount is what _resolve_state_pt_bracket actually consumes.
+        dict(min_amount=Decimal("0"),      max_amount=Decimal("15000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),   jurisdiction_state="Telangana", sort_order=31),
+        dict(min_amount=Decimal("15001"),  max_amount=Decimal("20000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("150.00"), jurisdiction_state="Telangana", sort_order=32),
+        dict(min_amount=Decimal("20001"),  max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("200.00"), jurisdiction_state="Telangana", sort_order=33),
     ],
     "US": [
         # Tax Year 2026, IRS Pub 15-T Worksheet 1A annualized schedules
@@ -425,6 +471,9 @@ _IN_REBATE_87A_LIMIT_OLD = Decimal("500000")
 _IN_REBATE_87A_MAX_OLD = Decimal("12500")
 # Health & Education Cess — applied on (tax + surcharge).
 _IN_CESS_PCT = Decimal("4")
+# EPF statutory wage ceiling (ZP-TAX-IN-2026-27-001 §9.1) — only read when
+# _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES has "IN" (see shared.py).
+_IN_PF_WAGE_CEILING = Decimal("15000")
 
 # ── United States (previously engine/countries/us.py) ──────────────────
 _US_STANDARD_DEDUCTION = Decimal("15000")
@@ -542,13 +591,15 @@ _CA_BPAF_NI_THRESHOLD_HIGH = Decimal("258482")
 # _calculate_annual_tax_ca.
 _CA_CEA = Decimal("1501")
 _CA_LOWEST_FEDERAL_RATE = Decimal("14")
-# Prepared parameters, NOT yet wired into calculate() — each requires a
-# jurisdiction/data source this engine doesn't resolve yet: Quebec
-# abatement needs the CA-XP/Quebec POE branch (Phase 3/5), the
-# beyond-province surtax needs the same POE resolution, and the
-# labour-sponsored-fund credit needs an employee LSVCC-investment
-# declaration nothing in this system currently captures. Left here as
-# configured values so those phases don't reintroduce a hardcoded number.
+# Quebec abatement is wired into calculate() unconditionally (Phase 2).
+# The beyond-province surtax and LSVCC credit are ALSO wired in now
+# (Phase 8), each behind its own dormant rollout switch — see
+# shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES /
+# _CA_LSVCC_CREDIT_ENABLED_COUNTRIES — since the surtax needs an
+# employee's work_state manually set to the CA-XP code "XP" (no
+# automated POE path produces it yet — that's Phase 9's scope) and the
+# credit needs an employee LSVCC-investment declaration most orgs won't
+# have entered.
 _CA_QUEBEC_FEDERAL_ABATEMENT_PCT = Decimal("16.5")
 _CA_BEYOND_PROVINCE_SURTAX_PCT = Decimal("48")
 _CA_LSVCC_CREDIT_RATE = Decimal("15")

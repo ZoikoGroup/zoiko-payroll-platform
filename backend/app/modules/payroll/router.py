@@ -211,7 +211,7 @@ def update_employee(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.update_employee(db, employee_id, data, current_user.organization_id)
+    return service.update_employee(db, employee_id, data, current_user.organization_id, actor_id=current_user.id)
 
 
 @payroll_router.delete(

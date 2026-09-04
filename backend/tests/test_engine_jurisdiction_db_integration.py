@@ -197,6 +197,253 @@ def test_state_scoped_config_ignores_org_scoped_rows(db, organization):
     assert rates == {}
 
 
+def _make_slab(country, min_amount, max_amount, rate_pct, rule_type="MARGINAL_RATE", tax_regime=None, sort_order=0):
+    return TaxSlab(
+        organization_id=None, jurisdiction_country=country,
+        min_amount=min_amount, max_amount=max_amount, rate_pct=rate_pct,
+        rate_label=f"{rate_pct}%", tax_formula="", rule_type=rule_type,
+        tax_regime=tax_regime, sort_order=sort_order,
+    )
+
+
+# ── India Old/New regime bracket disambiguation (ZP-TAX-IN-2026-27-001) ──
+# get_tax_slabs used to return New Regime (tax_regime=NULL) MARGINAL_RATE
+# rows CONCATENATED with any Old-regime-tagged rows for the same country,
+# for an "Old" regime request — summing two mutually exclusive bracket
+# tables together. These tests prove the fix, and that it's a strict
+# superset (an employee with no Old-regime data configured, or no regime
+# declared at all, sees exactly today's behavior).
+
+def test_get_tax_slabs_old_regime_excludes_new_regime_brackets(db):
+    db.add(_make_slab("IN", Decimal("0"), Decimal("400000"), Decimal("0"), sort_order=1))
+    db.add(_make_slab("IN", Decimal("400000"), None, Decimal("5"), sort_order=2))
+    db.add(_make_slab("IN", Decimal("0"), Decimal("250000"), Decimal("0"), tax_regime="Old", sort_order=11))
+    db.add(_make_slab("IN", Decimal("250000"), None, Decimal("5"), tax_regime="Old", sort_order=12))
+    db.commit()
+
+    old_slabs = service.get_tax_slabs(db, None, country="IN", tax_regime="Old")
+    assert len(old_slabs) == 2
+    assert all(s.tax_regime == "Old" for s in old_slabs)
+    assert {s.min_amount for s in old_slabs} == {Decimal("0"), Decimal("250000")}
+
+
+def test_get_tax_slabs_new_regime_unaffected_by_old_regime_rows(db):
+    db.add(_make_slab("IN", Decimal("0"), Decimal("400000"), Decimal("0"), sort_order=1))
+    db.add(_make_slab("IN", Decimal("400000"), None, Decimal("5"), sort_order=2))
+    db.add(_make_slab("IN", Decimal("0"), Decimal("250000"), Decimal("0"), tax_regime="Old", sort_order=11))
+    db.commit()
+
+    new_slabs = service.get_tax_slabs(db, None, country="IN", tax_regime="New")
+    assert len(new_slabs) == 2
+    assert all(s.tax_regime is None for s in new_slabs)
+
+
+def test_get_tax_slabs_no_old_regime_data_is_unaffected_strict_superset(db):
+    # No Old-regime rows configured at all (today's actual live state) —
+    # requesting "Old" must fall back to exactly the NULL/shared rows,
+    # never an empty result.
+    db.add(_make_slab("IN", Decimal("0"), Decimal("400000"), Decimal("0"), sort_order=1))
+    db.add(_make_slab("IN", Decimal("400000"), None, Decimal("5"), sort_order=2))
+    db.commit()
+
+    old_slabs = service.get_tax_slabs(db, None, country="IN", tax_regime="Old")
+    assert len(old_slabs) == 2
+
+
+def test_get_tax_slabs_surcharge_tiers_not_excluded_by_bracket_disambiguation(db):
+    # SURCHARGE rows are additive-override (only the top tier differs by
+    # regime), unlike MARGINAL_RATE brackets — an Old-regime request must
+    # get the shared tiers AND its own extra top tier, not just the top one.
+    db.add(_make_slab("IN", Decimal("0"), Decimal("400000"), Decimal("0"), sort_order=1))
+    db.add(_make_slab("IN", Decimal("400000"), None, Decimal("5"), sort_order=2))
+    db.add(_make_slab("IN", Decimal("0"), Decimal("250000"), Decimal("0"), tax_regime="Old", sort_order=11))
+    db.add(_make_slab("IN", Decimal("250000"), None, Decimal("5"), tax_regime="Old", sort_order=12))
+    db.add(_make_slab("IN", Decimal("5000000"), None, Decimal("10"), rule_type="SURCHARGE", sort_order=21))
+    db.add(_make_slab("IN", Decimal("50000000"), None, Decimal("37"), rule_type="SURCHARGE", tax_regime="Old", sort_order=24))
+    db.commit()
+
+    old_slabs = service.get_tax_slabs(db, None, country="IN", tax_regime="Old")
+    surcharge_rows = [s for s in old_slabs if s.rule_type == "SURCHARGE"]
+    assert len(surcharge_rows) == 2, "old regime must see both the shared 10% tier and its own 37% tier"
+    bracket_rows = [s for s in old_slabs if s.rule_type == "MARGINAL_RATE"]
+    assert len(bracket_rows) == 2, "old regime must see only its own 2 brackets, not the new regime's 2 as well"
+
+
+def test_resolve_tax_configuration_regime_disambiguation_within_one_pack(db):
+    # Reproduces a real live bug found on org 1 (2 real India employees,
+    # canonical-pack opted in): a single JurisdictionPack held BOTH New
+    # Regime (tax_regime=None) and Old Regime (tax_regime="Old")
+    # MARGINAL_RATE rows — resolve_tax_configuration used to return every
+    # row attached to the pack with NO row-level regime filtering at all,
+    # so an employee's tax got computed off 11 summed brackets from two
+    # incompatible tables instead of the correct 7 (New) or 4 (Old).
+    # get_tax_slabs (the legacy path) already had this exact class of fix
+    # for its own callers; this covers the SEPARATE canonical-pack path.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "IN", pack_id="IN-REGIME-TEST")
+    for min_a, max_a, rate in [(0, 400000, 0), (400000, 800000, 5), (800000, None, 10)]:
+        s = _make_slab("IN", Decimal(min_a), Decimal(max_a) if max_a else None, Decimal(rate))
+        s.jurisdiction_pack_id = pack.id
+        db.add(s)
+    for min_a, max_a, rate in [(0, 250000, 0), (250000, None, 30)]:
+        s = _make_slab("IN", Decimal(min_a), Decimal(max_a) if max_a else None, Decimal(rate), tax_regime="Old")
+        s.jurisdiction_pack_id = pack.id
+        db.add(s)
+    db.commit()
+
+    _, new_slabs, new_pack = resolve_tax_configuration(db, "IN", tax_regime=None, payroll_date=date(2026, 9, 1))
+    assert new_pack.id == pack.id
+    assert len(new_slabs) == 3, "unset regime must resolve to exactly the New Regime's 3 brackets, not 5"
+    assert all(s.tax_regime is None for s in new_slabs)
+
+    _, old_slabs, old_pack = resolve_tax_configuration(db, "IN", tax_regime="Old", payroll_date=date(2026, 9, 1))
+    assert len(old_slabs) == 2, "Old regime must resolve to exactly its own 2 brackets, not summed with New's 3"
+    assert all(s.tax_regime == "Old" for s in old_slabs)
+
+
+def test_resolve_effective_rate_inputs_defaults_unset_india_regime_to_new(db, organization):
+    # An employee with no declared tax_regime must resolve against New
+    # Regime — never the raw "no filter at all" behavior get_tax_slabs
+    # has when tax_regime=None is passed straight through, which would
+    # concatenate New+Old brackets the moment Old-regime data exists.
+    # Uses the org's real seeded data (includes the new Old-regime rows
+    # this same change adds to _TAX_SLABS_BY_COUNTRY) rather than a
+    # hand-picked minimal set, so this is an end-to-end check against
+    # what a real org's rows actually look like today.
+    rate_map, slabs, canonical_rates, pack = service._resolve_effective_rate_inputs(
+        db, organization.id, "IN", date(2026, 4, 1), org_opted_in=False, tax_regime=None,
+    )
+    bracket_rows = [s for s in slabs if s.rule_type == "MARGINAL_RATE"]
+    assert bracket_rows, "New Regime brackets must still resolve for an employee with no declared regime"
+    assert all(s.tax_regime is None for s in bracket_rows), "no Old-regime bracket must leak in for an unset regime"
+    assert len(bracket_rows) == 7  # exactly the New Regime's own 7 brackets, never 7+4
+
+
+# ── H1/H2-style multi-pack disambiguation (ZP-TAX-CA-2026-001 S0 fix) ───
+# get_state_scoped_config used to have NO JurisdictionPack/date filtering
+# at all — two packages' worth of canonical rows for the same
+# (state, component_key)/(state, rule_type) would resolve arbitrarily
+# (ContributionRate) or get silently CONCATENATED and summed together
+# (TaxSlab). These tests prove the fix, and that it's a strict superset
+# of the old behavior (never regresses to fewer/empty rows).
+
+def _make_tax_pack(db, country, state, pack_id, status="Active", effective_from=None, effective_to=None):
+    pack = JurisdictionPack(
+        pack_id=pack_id, jurisdiction_country=country, jurisdiction_state=state,
+        pack_type="tax", version="1.0", status=status,
+        effective_from=effective_from, effective_to=effective_to,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    return pack
+
+
+def test_state_scoped_config_disambiguates_by_pack_date_when_active(db, organization):
+    h1 = _make_tax_pack(db, "CA", "BC", "TEST-CA-BC-H1", effective_from=date(2026, 1, 1), effective_to=date(2026, 6, 30))
+    h2 = _make_tax_pack(db, "CA", "BC", "TEST-CA-BC-H2", effective_from=date(2026, 7, 1), effective_to=date(2026, 12, 31))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="BC", jurisdiction_pack_id=h1.id,
+        component_key="provincial_bpa", label="BPA H1", employee_share="—", employer_share="—", total="—",
+        flat_amount=Decimal("575"),
+    ))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="BC", jurisdiction_pack_id=h2.id,
+        component_key="provincial_bpa", label="BPA H2", employee_share="—", employer_share="—", total="—",
+        flat_amount=Decimal("805"),
+    ))
+    db.commit()
+
+    h1_rates, _ = service.get_state_scoped_config(db, "CA", "BC", as_of=date(2026, 3, 1))
+    assert h1_rates["provincial_bpa"].flat_amount == Decimal("575")
+
+    h2_rates, _ = service.get_state_scoped_config(db, "CA", "BC", as_of=date(2026, 9, 1))
+    assert h2_rates["provincial_bpa"].flat_amount == Decimal("805")
+
+
+def test_state_scoped_config_falls_back_when_no_pack_qualifies(db, organization):
+    # Mirrors BC's ACTUAL live state today: both packages exist but are
+    # still Draft. Must not crash and must not return empty — falls back
+    # to today's (arbitrary but non-regressing) behavior.
+    h1 = _make_tax_pack(db, "CA", "BC", "TEST-CA-BC-H1-DRAFT", status="Draft",
+                         effective_from=date(2026, 1, 1), effective_to=date(2026, 6, 30))
+    h2 = _make_tax_pack(db, "CA", "BC", "TEST-CA-BC-H2-DRAFT", status="Draft",
+                         effective_from=date(2026, 7, 1), effective_to=date(2026, 12, 31))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="BC", jurisdiction_pack_id=h1.id,
+        component_key="provincial_bpa", label="BPA H1", employee_share="—", employer_share="—", total="—",
+        flat_amount=Decimal("575"),
+    ))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="BC", jurisdiction_pack_id=h2.id,
+        component_key="provincial_bpa", label="BPA H2", employee_share="—", employer_share="—", total="—",
+        flat_amount=Decimal("805"),
+    ))
+    db.commit()
+
+    rates, _ = service.get_state_scoped_config(db, "CA", "BC", as_of=date(2026, 3, 1))
+    assert rates["provincial_bpa"].flat_amount in (Decimal("575"), Decimal("805"))
+
+
+def test_state_scoped_config_taxslab_no_longer_concatenates_across_packs(db, organization):
+    h1 = _make_tax_pack(db, "CA", "BC", "TEST-CA-BC-SLAB-H1", effective_from=date(2026, 1, 1), effective_to=date(2026, 6, 30))
+    h2 = _make_tax_pack(db, "CA", "BC", "TEST-CA-BC-SLAB-H2", effective_from=date(2026, 7, 1), effective_to=date(2026, 12, 31))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="BC", jurisdiction_pack_id=h1.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("5.06"), rate_label="H1", tax_formula="",
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="BC", jurisdiction_pack_id=h2.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("6.14"), rate_label="H2", tax_formula="",
+    ))
+    db.commit()
+
+    _, h1_slabs = service.get_state_scoped_config(db, "CA", "BC", as_of=date(2026, 3, 1))
+    assert len(h1_slabs) == 1
+    assert h1_slabs[0].rate_pct == Decimal("5.06")
+
+    _, h2_slabs = service.get_state_scoped_config(db, "CA", "BC", as_of=date(2026, 9, 1))
+    assert len(h2_slabs) == 1
+    assert h2_slabs[0].rate_pct == Decimal("6.14")
+
+
+def test_state_scoped_config_single_pack_unaffected_by_as_of(db, organization):
+    pack = _make_tax_pack(db, "CA", "ON", "TEST-CA-ON-SINGLE")
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="ON", jurisdiction_pack_id=pack.id,
+        component_key="on_eht_exemption", label="ON EHT Exemption", employee_share="—", employer_share="—", total="—",
+        flat_amount=Decimal("1000000"),
+    ))
+    db.commit()
+
+    rates_early, _ = service.get_state_scoped_config(db, "CA", "ON", as_of=date(2026, 1, 1))
+    rates_late, _ = service.get_state_scoped_config(db, "CA", "ON", as_of=date(2026, 12, 31))
+    assert rates_early["on_eht_exemption"].flat_amount == Decimal("1000000")
+    assert rates_late["on_eht_exemption"].flat_amount == Decimal("1000000")
+
+
+def test_state_scoped_config_ontario_eht_bands_independent_of_income_tax_brackets(db, organization):
+    # ON_EHT_BAND rows and ordinary MARGINAL_RATE brackets share the same
+    # (country, state) scope but are functionally separate tables — a
+    # pack-ambiguity in one must never affect resolution of the other.
+    pack = _make_tax_pack(db, "CA", "ON", "TEST-CA-ON-MIXED")
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="ON", jurisdiction_pack_id=pack.id,
+        min_amount=Decimal("0"), max_amount=Decimal("200000"), rate_pct=Decimal("0.980"),
+        rate_label="EHT", tax_formula="", rule_type="ON_EHT_BAND",
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="ON", jurisdiction_pack_id=pack.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("5.05"),
+        rate_label="Income tax", tax_formula="",
+    ))
+    db.commit()
+
+    _, slabs = service.get_state_scoped_config(db, "CA", "ON", as_of=date(2026, 3, 1))
+    assert len(slabs) == 2
+    assert {s.rule_type for s in slabs} == {"ON_EHT_BAND", "MARGINAL_RATE"}
+
+
 # ── Multi-region resolution within one org, via real payslip generation ─
 
 def _stub_business_code_generation(monkeypatch):
@@ -498,7 +745,7 @@ def test_employee_with_no_work_state_falls_back_to_org_jurisdiction_state(db, or
     db.commit()
 
     employee = _make_employee(db, organization.id, "EMP-NO-STATE", work_state=None)
-    resolved = service._resolve_country_aware_state("IN", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("IN", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved == "Telangana"
 
 
@@ -509,7 +756,7 @@ def test_employee_with_own_work_state_is_not_overridden_by_org_fallback(db, orga
     db.commit()
 
     employee = _make_employee(db, organization.id, "EMP-OWN-STATE", work_state="Karnataka")
-    resolved = service._resolve_country_aware_state("IN", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("IN", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved == "Karnataka"
 
 
@@ -520,7 +767,7 @@ def test_org_jurisdiction_state_fallback_ignored_for_a_different_country(db, org
     db.commit()
 
     employee = _make_employee(db, organization.id, "EMP-US", country="US", work_state=None)
-    resolved = service._resolve_country_aware_state("US", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("US", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved is None
 
 
@@ -528,9 +775,106 @@ def test_org_jurisdiction_state_fallback_ignored_for_a_different_country(db, org
 
 def test_ca_employee_with_own_province_resolves_physical_single(db, organization):
     employee = _make_employee(db, organization.id, "EMP-CA-ON", country="CA", work_state="ON")
-    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved == "ON"
     assert service._resolve_ca_poe_with_source(employee.work_state, None) == ("ON", "PHYSICAL_SINGLE")
+
+
+# ── ZP-TAX-CA-2026-001 §3/§5 step 7: CA-XP "beyond limits" (Phase 9) ────
+# A deliberately-typed work_state, not inferred — see
+# _CA_BEYOND_LIMITS_CODE's own comment in service.py for why this needs
+# no rollout switch (it only changes audit metadata, not any dollar
+# amount; the pure-calculation surtax effect is already gated by Phase
+# 8's own switch).
+
+def test_ca_employee_with_xp_work_state_resolves_beyond_limits(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-XP", country="CA", work_state="XP")
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "XP"
+    assert reason == "BEYOND_LIMITS"
+    assert service._resolve_ca_poe_with_source(employee.work_state, None) == ("XP", "BEYOND_LIMITS")
+
+
+def test_ca_xp_wins_over_org_jurisdiction_fallback(db, organization):
+    # "XP" is checked before any fallback tier — an org's own configured
+    # jurisdiction state must never override an employee's explicit
+    # beyond-limits declaration.
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="CA", jurisdiction_state="ON"))
+    db.commit()
+    employee = _make_employee(db, organization.id, "EMP-CA-XP-2", country="CA", work_state="XP")
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "XP"
+    assert reason == "BEYOND_LIMITS"
+
+
+def test_ca_unresolved_still_returns_none_when_nothing_configured(db, organization):
+    # Confirms the fix is scoped to the literal "XP" declaration only —
+    # an employee with genuinely no data configured anywhere must still
+    # resolve to UNRESOLVED, never silently guessed as beyond-province.
+    employee = _make_employee(db, organization.id, "EMP-CA-NODATA", country="CA", work_state=None)
+    assert service._resolve_ca_poe_with_source(employee.work_state, None) == (None, "UNRESOLVED")
+
+
+def test_generate_payslips_for_run_persists_beyond_limits_poe_snapshot(db, organization, monkeypatch):
+    _stub_business_code_generation(monkeypatch)
+    employee = _make_employee(db, organization.id, "EMP-CA-XP-3", country="CA", work_state="XP")
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    assert item.poe_snapshot == {"poe_result": "XP", "poe_reason": "BEYOND_LIMITS"}
+    assert item.state_income_tax == Decimal("0")  # no province to tax
+
+
+# ── ZP-TAX-CA-2026-001 CA-D03/AC-07: POE reason persisted, not discarded ──
+
+def test_resolve_employee_calc_inputs_returns_poe_reason_and_result_for_ca(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-POE-1", country="CA", work_state="AB")
+    result = service._resolve_employee_calc_inputs(db, organization.id, employee, payroll_date=date(2026, 1, 15))
+    poe_reason, poe_result = result[-2], result[-1]
+    assert poe_reason == "PHYSICAL_SINGLE"
+    assert poe_result == "AB"
+
+
+def test_resolve_employee_calc_inputs_poe_reason_none_for_non_ca(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-IN-POE-1", country="IN", work_state="Telangana")
+    result = service._resolve_employee_calc_inputs(db, organization.id, employee, payroll_date=date(2026, 1, 15))
+    poe_reason = result[-2]
+    assert poe_reason is None
+
+
+def test_generate_payslips_for_run_persists_poe_snapshot_for_ca(db, organization, monkeypatch):
+    _stub_business_code_generation(monkeypatch)
+    employee = _make_employee(db, organization.id, "EMP-CA-POE-2", country="CA", work_state="BC")
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    assert item.poe_snapshot == {"poe_result": "BC", "poe_reason": "PHYSICAL_SINGLE"}
+
+
+def test_add_payslip_item_persists_poe_snapshot_for_ca(db, organization):
+    from app.modules.payroll.schemas import PayslipItemCreate
+    employee = _make_employee(db, organization.id, "EMP-CA-POE-3", country="CA", work_state=None)
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="CA", jurisdiction_state="NS"))
+    db.commit()
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    item = service.add_payslip_item(db, run.id, PayslipItemCreate(
+        employee_id=employee.id, basic_salary=Decimal("5000"),
+    ), organization.id)
+    assert item.poe_snapshot == {"poe_result": "NS", "poe_reason": "PAYROLL_FALLBACK"}
+
+
+def test_add_payslip_item_poe_snapshot_none_for_non_ca(db, organization):
+    from app.modules.payroll.schemas import PayslipItemCreate
+    employee = _make_employee(db, organization.id, "EMP-UK-POE-1", country="UK", work_state="England")
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    item = service.add_payslip_item(db, run.id, PayslipItemCreate(
+        employee_id=employee.id, basic_salary=Decimal("5000"),
+    ), organization.id)
+    assert item.poe_snapshot is None
 
 
 def test_ca_employee_with_no_province_falls_back_to_org_jurisdiction_state(db, organization):
@@ -538,7 +882,7 @@ def test_ca_employee_with_no_province_falls_back_to_org_jurisdiction_state(db, o
     db.commit()
 
     employee = _make_employee(db, organization.id, "EMP-CA-NOSTATE", country="CA", work_state=None)
-    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved == "QC"
 
 
@@ -548,7 +892,7 @@ def test_ca_employee_with_invalid_province_code_does_not_pass_through(db, organi
     # to no jurisdiction rather than being silently passed through to
     # state-scoped config lookup.
     employee = _make_employee(db, organization.id, "EMP-CA-BAD", country="CA", work_state="ZZ")
-    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved is None
     assert service._resolve_ca_poe_with_source("ZZ", None) == (None, "UNRESOLVED")
 
@@ -562,7 +906,7 @@ def test_ca_employee_with_remote_agreement_resolves_remote_attached(db, organiza
     employee.remote_attachment_province = "BC"
     db.commit()
 
-    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved == "BC"
     assert service._resolve_ca_poe_with_source(None, None, remote_work_agreement=True, remote_attachment_province="BC") == ("BC", "REMOTE_ATTACHED")
 
@@ -575,7 +919,7 @@ def test_ca_physical_work_state_wins_over_remote_agreement(db, organization):
     employee.remote_attachment_province = "BC"
     db.commit()
 
-    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved == "ON"
 
 
@@ -585,7 +929,7 @@ def test_ca_remote_agreement_with_invalid_province_falls_through(db, organizatio
     employee.remote_attachment_province = "ZZ"
     db.commit()
 
-    resolved = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    resolved, _reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
     assert resolved is None
 
 
@@ -1302,6 +1646,55 @@ def test_source_artifact_create_and_review_are_audited(db, organization):
     assert reviewed.new_value["reviewerId"] == actor_id
 
 
+# ── ZP-TAX-CA-2026-001 §18/AC-25: provincial TD1 / TP-1015.3-V ──────────
+# collectible via the employee form (same compliance_fields ->
+# sync_to_columns mechanism already used for td1_claim_amount), and every
+# change to a TD1/TP-1015.3-V claim amount gets a declaration-history
+# audit row (reusing record_tax_audit/TaxConfigurationAudit).
+
+def test_ca_provincial_and_qc_td1_fields_sync_onto_dedicated_columns(db, organization):
+    from app.modules.payroll.schemas import EmployeeUpdate
+
+    employee = _make_employee(db, organization.id, "CA-DECL-1", country="CA", work_state="ON")
+    update = EmployeeUpdate(compliance_fields={
+        "sin": "123456789", "province": "ON",
+        "provincial_td1_claim_amount": "15000", "qc_tp1015_claim_amount": "10000",
+    })
+    updated = service.update_employee(db, employee.id, update, organization.id)
+    assert updated.provincial_td1_claim_amount == Decimal("15000")
+    assert updated.qc_tp1015_claim_amount == Decimal("10000")
+
+
+def test_ca_td1_claim_amount_change_is_audited(db, organization):
+    from app.modules.payroll.schemas import EmployeeUpdate
+
+    employee = _make_employee(db, organization.id, "CA-DECL-2", country="CA", work_state="ON")
+    actor_id = 7
+    service.update_employee(
+        db, employee.id,
+        EmployeeUpdate(compliance_fields={"sin": "123456789", "province": "ON", "td1_claim_amount": "16452"}),
+        organization.id, actor_id=actor_id,
+    )
+    audit = _last_audit(db, "payroll_employee_declaration", employee.id)
+    assert audit is not None
+    assert audit.actor_id == actor_id
+    assert audit.old_value == {"td1_claim_amount": None}
+    assert audit.new_value == {"td1_claim_amount": "16452.00"}
+
+
+def test_ca_declaration_unchanged_value_is_not_audited(db, organization):
+    from app.modules.payroll.schemas import EmployeeUpdate
+
+    employee = _make_employee(db, organization.id, "CA-DECL-3", country="CA", work_state="ON")
+    fields = {"sin": "123456789", "province": "ON", "td1_claim_amount": "16452"}
+    service.update_employee(db, employee.id, EmployeeUpdate(compliance_fields=fields), organization.id)
+    before = _last_audit(db, "payroll_employee_declaration", employee.id)
+    # Same value again — must NOT produce a second, redundant audit row.
+    service.update_employee(db, employee.id, EmployeeUpdate(compliance_fields=fields), organization.id)
+    after = _last_audit(db, "payroll_employee_declaration", employee.id)
+    assert before.id == after.id
+
+
 # ── Country-resolution: no more silent "IN" default (fallback-removal Phase 4) ──
 # The `organization` fixture is exactly the "nothing configured anywhere"
 # case: a bare Organization row with no `country` set and no
@@ -1347,3 +1740,152 @@ def test_filing_dates_empty_not_india_when_org_unconfigured(db, organization):
     # must now return an empty list instead.
     dates = service.get_upcoming_filing_dates_for_org(db, organization.id)
     assert dates == []
+
+
+# ── ZP-TAX-CA-2026-001 §10: CPP/QPP age 18/70 mandatory window ──────────
+# Service-layer confirmation that employee.date_of_birth and
+# run.pay_date actually reach the engine through generate_payslips_for_run
+# — pure calculation-level coverage (dormancy, boundary ages) already
+# lives in test_engine_standard.py's test_age_gated_cpp_*/
+# test_calc_age_gating_* tests.
+
+def _seed_ca_cpp_rate(db):
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state=None,
+        component_key="cpp", label="cpp", employee_share="—", employer_share="—", total="—",
+        employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"),
+    ))
+    db.commit()
+
+
+def test_generate_payslips_for_run_age_gating_dormant_by_default(db, organization, monkeypatch):
+    _stub_business_code_generation(monkeypatch)
+    _seed_ca_cpp_rate(db)
+    employee = _make_employee(db, organization.id, "CA-AGE-1", country="CA")
+    employee.date_of_birth = date(2015, 1, 1)  # age 11 on the pay date below
+    db.commit()
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 1, 31))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    # Switch is OFF -> date_of_birth is never consumed, CPP computes normally.
+    assert item.social_security > Decimal("0")
+    assert item.employer_social_security > Decimal("0")
+
+
+def test_generate_payslips_for_run_age_gating_stops_cpp_for_minor_when_enabled(db, organization, monkeypatch):
+    import app.modules.payroll.engine.countries.shared as shared
+
+    _stub_business_code_generation(monkeypatch)
+    _seed_ca_cpp_rate(db)
+    employee = _make_employee(db, organization.id, "CA-AGE-2", country="CA")
+    employee.date_of_birth = date(2015, 1, 1)  # age 11 on the pay date below
+    db.commit()
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 1, 31))
+    shared._CA_AGE_GATED_CPP_ENABLED_COUNTRIES.add("CA")
+    try:
+        service.generate_payslips_for_run(db, run, organization.id)
+    finally:
+        shared._CA_AGE_GATED_CPP_ENABLED_COUNTRIES.discard("CA")
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    assert item.social_security == Decimal("0")
+    assert item.employer_social_security == Decimal("0")
+
+
+# ── ZP-TAX-CA-2026-001 §11: EI reduced-rate authorization is FEDERAL ────
+# (not provincial) — service-layer confirmation that an EmployerTaxProfile
+# stored at jurisdiction_id="CA" (bare country, no province) applies to
+# employees regardless of which province they work in, since Ontario and
+# BC employees would otherwise need it entered twice under a state-scoped
+# lookup. Pure rate-mechanics coverage lives in test_engine_standard.py's
+# test_ei_employer_rate_*/test_qpip_employer_rate_* tests.
+
+def _seed_ca_ei_rate(db, employer_rate_pct=Decimal("3.00")):
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state=None,
+        component_key="ei", label="ei", employee_share="—", employer_share="—", total="—",
+        employee_rate_pct=Decimal("1.63"), employer_rate_pct=employer_rate_pct,
+    ))
+    db.commit()
+
+
+def test_generate_payslips_for_run_ei_reduced_rate_is_country_level_not_state_scoped(db, organization, monkeypatch):
+    import app.modules.payroll.engine.countries.shared as shared
+
+    _stub_business_code_generation(monkeypatch)
+    # employer_rate_pct=3.00 is deliberately inconsistent with both the
+    # 1.4x default (2.282%) and the reduced authorization (1.00%) below —
+    # proving neither the row's own rate nor 1.4x wins once a reduced
+    # authorization exists.
+    _seed_ca_ei_rate(db, employer_rate_pct=Decimal("3.00"))
+    db.add(EmployerTaxProfile(
+        organization_id=organization.id, jurisdiction_id="CA", component_code="EI_REDUCED",
+        taxable_wage_base=Decimal("68900"), employer_rate_pct=Decimal("1.00"),
+        effective_from=date(2025, 1, 1),
+    ))
+    employee_on = _make_employee(db, organization.id, "CA-EI-ON", country="CA", work_state="ON", ctc=Decimal("60000"))
+    employee_bc = _make_employee(db, organization.id, "CA-EI-BC", country="CA", work_state="BC", ctc=Decimal("60000"))
+    db.commit()
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 1, 31))
+    shared._CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES.add("CA")
+    try:
+        service.generate_payslips_for_run(db, run, organization.id)
+    finally:
+        shared._CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES.discard("CA")
+
+    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
+    assert len(items) == 2
+    for item in items:
+        assert item.employer_esi == Decimal("50.00")  # 5000/mo * 1.00% — same reduced rate, both provinces
+
+
+# ── date_of_birth / lsvcc_investment_amount actually settable ───────────
+# Both columns existed on PayrollEmployee (and were read by the engine)
+# before EmployeeCreate/EmployeeUpdate/EmployeeResponse ever exposed
+# them — the exact same class of gap the component_key VARCHAR(20) bug
+# was, just at the schema layer instead of the DB layer: correct engine
+# logic that nothing could ever actually feed real data into. Caught
+# while wiring up Phase 8's LSVCC credit and fixed for both fields at
+# once.
+
+def test_create_employee_persists_date_of_birth_and_lsvcc_investment_amount(db, organization):
+    from app.modules.payroll.schemas import EmployeeCreate
+
+    employee = service.create_employee(db, EmployeeCreate(
+        employee_code="CA-DOB-CREATE-1", name="DOB Test", country_code="CA",
+        compliance_fields={"sin": "123456789", "province": "ON"},
+        date_of_birth=date(1990, 5, 15), lsvcc_investment_amount=Decimal("2000"),
+    ), organization.id)
+    assert employee.date_of_birth == date(1990, 5, 15)
+    assert employee.lsvcc_investment_amount == Decimal("2000")
+
+
+def test_update_employee_persists_date_of_birth_and_lsvcc_investment_amount(db, organization):
+    from app.modules.payroll.schemas import EmployeeUpdate
+
+    employee = _make_employee(db, organization.id, "CA-DOB-1", country="CA")
+    updated = service.update_employee(db, employee.id, EmployeeUpdate(
+        date_of_birth=date(1985, 3, 20), lsvcc_investment_amount=Decimal("3000"),
+    ), organization.id)
+    assert updated.date_of_birth == date(1985, 3, 20)
+    assert updated.lsvcc_investment_amount == Decimal("3000")
+
+
+def test_lsvcc_investment_amount_change_is_audited(db, organization):
+    from app.modules.payroll.schemas import EmployeeUpdate
+
+    employee = _make_employee(db, organization.id, "CA-DOB-2", country="CA")
+    actor_id = 9
+    service.update_employee(
+        db, employee.id, EmployeeUpdate(lsvcc_investment_amount=Decimal("1500")), organization.id, actor_id=actor_id,
+    )
+    audit = _last_audit(db, "payroll_employee_declaration", employee.id)
+    assert audit is not None
+    assert audit.actor_id == actor_id
+    assert audit.old_value == {"lsvcc_investment_amount": None}
+    assert audit.new_value == {"lsvcc_investment_amount": "1500.00"}
