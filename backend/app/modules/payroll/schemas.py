@@ -1197,16 +1197,27 @@ class EmployerTaxProfileUpsert(BaseModel):
     id: Optional[int] = None
     organizationId: int
     jurisdictionId: str          # "US-CA"
-    componentCode: str = "SUI"   # "SUI" | "ETT" | "WF" | "JDA"
-    taxableWageBase: Decimal
+    componentCode: str = "SUI"   # "SUI" | "ETT" | "WF" | "JDA" | "FAMLI" | "PFML" | "PAID_LEAVE"
+    # Widened to Optional: a headcount-only row (component_code FAMLI/
+    # PFML/PAID_LEAVE, ZP-TAX-US-2026-001 §5 build-out) has neither a real
+    # SUI-style wage base nor an employer-assigned rate — those programs'
+    # statutory rates live in the canonical state-program ContributionRate
+    # rows instead, same as every other state program. Every real SUI
+    # profile still supplies both, as before.
+    taxableWageBase: Optional[Decimal] = None
     rateSource: str = "STATE_DEFAULT"   # STATE_DEFAULT | NEW_EMPLOYER | EMPLOYER_NOTICE
-    employerRatePct: Decimal
+    employerRatePct: Optional[Decimal] = None
     assessmentRatePct: Optional[Decimal] = None
     effectiveFrom: date
     effectiveTo: Optional[date] = None
     agencyAccountId: Optional[str] = None
     reimbursableStatus: str = "CONTRIBUTORY"   # CONTRIBUTORY | REIMBURSING
     sourceDocumentId: Optional[int] = None
+    # Headcount-only purpose (see componentCode comment above): how many
+    # covered individuals this employer has for this jurisdiction+program
+    # as of effectiveFrom. Never inferred — a real Tax Ops entry, same
+    # "never infer" principle as employerRatePct's own provenance rule.
+    coveredEmployeeCount: Optional[int] = None
 
 
 class EmployerTaxProfileResponse(BaseModel):
@@ -1214,15 +1225,16 @@ class EmployerTaxProfileResponse(BaseModel):
     organizationId: int = Field(validation_alias="organization_id", serialization_alias="organizationId")
     jurisdictionId: str = Field(validation_alias="jurisdiction_id", serialization_alias="jurisdictionId")
     componentCode: str = Field(validation_alias="component_code", serialization_alias="componentCode")
-    taxableWageBase: Decimal = Field(validation_alias="taxable_wage_base", serialization_alias="taxableWageBase")
+    taxableWageBase: Optional[Decimal] = Field(None, validation_alias="taxable_wage_base", serialization_alias="taxableWageBase")
     rateSource: str = Field(validation_alias="rate_source", serialization_alias="rateSource")
-    employerRatePct: Decimal = Field(validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     assessmentRatePct: Optional[Decimal] = Field(None, validation_alias="assessment_rate_pct", serialization_alias="assessmentRatePct")
     effectiveFrom: date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
     effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
     agencyAccountId: Optional[str] = Field(None, validation_alias="agency_account_id", serialization_alias="agencyAccountId")
     reimbursableStatus: str = Field(validation_alias="reimbursable_status", serialization_alias="reimbursableStatus")
     sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    coveredEmployeeCount: Optional[int] = Field(None, validation_alias="covered_employee_count", serialization_alias="coveredEmployeeCount")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

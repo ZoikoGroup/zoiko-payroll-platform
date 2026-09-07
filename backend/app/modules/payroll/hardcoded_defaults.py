@@ -150,12 +150,26 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="ni_upper_threshold", label="NI Upper Earnings Limit",
              employee_share="—", employer_share="—", total="£50,270",
              flat_amount=Decimal("50270.00"), sort_order=6),
+        # Corrected from £9,100 to the real 2026-27 figure, £5,000
+        # (ZP-TAX-UK-2026-27-001 §8.1) — the canonical DB row previously
+        # disagreed with this file's own _UK_NI_SECONDARY_THRESHOLD Python
+        # constant (already 5000), so a canonical-pack-synced org resolved
+        # a different Secondary Threshold than an org running on the
+        # Python fallback. Reconciled as part of seeding real NI category
+        # band data (rule_type="NI_BAND" rows below) — the two must agree
+        # for the Category A band-vs-flat-path equivalence to hold.
         dict(component_key="ni_secondary_thresh", label="NI Secondary Threshold (Employer)",
-             employee_share="—", employer_share="—", total="£9,100",
-             flat_amount=Decimal("9100.00"), sort_order=7),
+             employee_share="—", employer_share="—", total="£5,000",
+             flat_amount=Decimal("5000.00"), sort_order=7),
         dict(component_key="ni_upper_rate", label="NI Upper Rate (Employee)",
              employee_share="2%", employer_share="—", total="2%",
              employee_rate_pct=Decimal("2.00"), sort_order=8),
+        # K-code overriding limit (ZP-TAX-UK-2026-27-001 §6.2) — was a bare
+        # inline Decimal("0.5") in uk.py until now; seeded here so it's
+        # Super-Admin-editable like every other UK figure.
+        dict(component_key="k_code_cap_pct", label="K-Code Overriding Limit",
+             employee_share="—", employer_share="—", total="50%",
+             employee_rate_pct=Decimal("50.00"), sort_order=9),
     ],
     # Representative defaults — Enterprise Policy jurisdictions. Unlike US/UK
     # above (display-only; the engine's US/UK calculators use hardcoded
@@ -412,6 +426,86 @@ _TAX_SLABS_BY_COUNTRY = {
         dict(min_amount=Decimal("12570"),   max_amount=Decimal("50270"),    rate_pct=Decimal("20"),  rate_label="20%",  tax_formula="20% of income above £12,570", sort_order=2),
         dict(min_amount=Decimal("50270"),   max_amount=Decimal("125140"),   rate_pct=Decimal("40"),  rate_label="40%",  tax_formula="£7,540 + 40% above £50,270", sort_order=3),
         dict(min_amount=Decimal("125140"),  max_amount=None,                rate_pct=Decimal("45"),  rate_label="45%",  tax_formula="£37,488 + 45% above £125,140", sort_order=4),
+        # National Insurance category bands (ZP-TAX-UK-2026-27-001 §8.3
+        # employee / §9.1 employer) — rule_type="NI_BAND", read by
+        # uk.py's _resolve_ni_bands/_calculate_ni_from_bands, only behind
+        # _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES (shared.py; off by
+        # default, so every existing employee keeps computing via the
+        # flat Category-A-shaped fallback until deliberately enabled).
+        # rate_pct is the EMPLOYEE rate, employer_rate_pct the EMPLOYER
+        # rate (models.py's own documented convention for NI_BAND rows).
+        # Breakpoints used: ST=£5,000, PT=£12,570, FUST/IZUST=£25,000,
+        # UEL/UST/AUST/VUST=£50,270 — LEL (£6,708) is deliberately never
+        # a breakpoint here: the document's own employer table never
+        # changes rate between ST and LEL for any of the 16 categories,
+        # matching _resolve_ni_bands' pre-existing docstring note.
+        # Category A — standard.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("5000"),  rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="A", sort_order=101),
+        dict(min_amount=Decimal("5000"),  max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("15"), rate_label="0%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="A", sort_order=102),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("50270"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("15"), rate_label="8%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="A", sort_order=103),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="A", sort_order=104),
+        # Category B — married women/widows reduced-rate election.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("5000"),  rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="B", sort_order=105),
+        dict(min_amount=Decimal("5000"),  max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("15"), rate_label="0%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="B", sort_order=106),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("50270"), rate_pct=Decimal("1.85"), employer_rate_pct=Decimal("15"), rate_label="1.85%/15%", tax_formula="", rule_type="NI_BAND", ni_category="B", sort_order=107),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="B", sort_order=108),
+        # Category C — at/over State Pension age (no employee NI at all).
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("5000"),  rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="nil/0%",    tax_formula="", rule_type="NI_BAND", ni_category="C", sort_order=109),
+        dict(min_amount=Decimal("5000"),  max_amount=None,             rate_pct=Decimal("0"),    employer_rate_pct=Decimal("15"), rate_label="nil/15%",   tax_formula="", rule_type="NI_BAND", ni_category="C", sort_order=110),
+        # Category D — Investment Zone deferment.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="D", sort_order=111),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("25000"), rate_pct=Decimal("2"),    employer_rate_pct=Decimal("0"),  rate_label="2%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="D", sort_order=112),
+        dict(min_amount=Decimal("25000"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="D", sort_order=113),
+        # Category E — Investment Zone reduced-rate married women/widows.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="E", sort_order=114),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("25000"), rate_pct=Decimal("1.85"), employer_rate_pct=Decimal("0"),  rate_label="1.85%/0%",  tax_formula="", rule_type="NI_BAND", ni_category="E", sort_order=115),
+        dict(min_amount=Decimal("25000"), max_amount=Decimal("50270"), rate_pct=Decimal("1.85"), employer_rate_pct=Decimal("15"), rate_label="1.85%/15%", tax_formula="", rule_type="NI_BAND", ni_category="E", sort_order=116),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="E", sort_order=117),
+        # Category F — Freeport standard.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="F", sort_order=118),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("25000"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("0"),  rate_label="8%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="F", sort_order=119),
+        dict(min_amount=Decimal("25000"), max_amount=Decimal("50270"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("15"), rate_label="8%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="F", sort_order=120),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="F", sort_order=121),
+        # Category H — apprentice under 25.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="H", sort_order=122),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("50270"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("0"),  rate_label="8%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="H", sort_order=123),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="H", sort_order=124),
+        # Category I — Freeport reduced-rate married women/widows.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="I", sort_order=125),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("25000"), rate_pct=Decimal("1.85"), employer_rate_pct=Decimal("0"),  rate_label="1.85%/0%",  tax_formula="", rule_type="NI_BAND", ni_category="I", sort_order=126),
+        dict(min_amount=Decimal("25000"), max_amount=Decimal("50270"), rate_pct=Decimal("1.85"), employer_rate_pct=Decimal("15"), rate_label="1.85%/15%", tax_formula="", rule_type="NI_BAND", ni_category="I", sort_order=127),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="I", sort_order=128),
+        # Category J — NI deferment (already paying in another job).
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("5000"),  rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="J", sort_order=129),
+        dict(min_amount=Decimal("5000"),  max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("15"), rate_label="0%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="J", sort_order=130),
+        dict(min_amount=Decimal("12570"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="J", sort_order=131),
+        # Category K — Investment Zone, State Pension age (no employee NI).
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("25000"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="nil/0%",    tax_formula="", rule_type="NI_BAND", ni_category="K", sort_order=132),
+        dict(min_amount=Decimal("25000"), max_amount=None,             rate_pct=Decimal("0"),    employer_rate_pct=Decimal("15"), rate_label="nil/15%",   tax_formula="", rule_type="NI_BAND", ni_category="K", sort_order=133),
+        # Category L — Freeport deferment.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="L", sort_order=134),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("25000"), rate_pct=Decimal("2"),    employer_rate_pct=Decimal("0"),  rate_label="2%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="L", sort_order=135),
+        dict(min_amount=Decimal("25000"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="L", sort_order=136),
+        # Category M — under 21 standard.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="M", sort_order=137),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("50270"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("0"),  rate_label="8%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="M", sort_order=138),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="M", sort_order=139),
+        # Category N — Investment Zone standard.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="N", sort_order=140),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("25000"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("0"),  rate_label="8%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="N", sort_order=141),
+        dict(min_amount=Decimal("25000"), max_amount=Decimal("50270"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("15"), rate_label="8%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="N", sort_order=142),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="N", sort_order=143),
+        # Category S — Freeport, State Pension age (no employee NI).
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("25000"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="nil/0%",    tax_formula="", rule_type="NI_BAND", ni_category="S", sort_order=144),
+        dict(min_amount=Decimal("25000"), max_amount=None,             rate_pct=Decimal("0"),    employer_rate_pct=Decimal("15"), rate_label="nil/15%",   tax_formula="", rule_type="NI_BAND", ni_category="S", sort_order=145),
+        # Category V — qualifying veteran.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="V", sort_order=146),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("50270"), rate_pct=Decimal("8"),    employer_rate_pct=Decimal("0"),  rate_label="8%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="V", sort_order=147),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="V", sort_order=148),
+        # Category Z — under 21, deferment.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("12570"), rate_pct=Decimal("0"),    employer_rate_pct=Decimal("0"),  rate_label="0%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="Z", sort_order=149),
+        dict(min_amount=Decimal("12570"), max_amount=Decimal("50270"), rate_pct=Decimal("2"),    employer_rate_pct=Decimal("0"),  rate_label="2%/0%",     tax_formula="", rule_type="NI_BAND", ni_category="Z", sort_order=150),
+        dict(min_amount=Decimal("50270"), max_amount=None,             rate_pct=Decimal("2"),    employer_rate_pct=Decimal("15"), rate_label="2%/15%",    tax_formula="", rule_type="NI_BAND", ni_category="Z", sort_order=151),
     ],
     # Enterprise Policy jurisdictions — representative/simplified brackets,
     # genuinely read by the engine (see _CONTRIBUTION_RATES_BY_COUNTRY note
@@ -512,6 +606,11 @@ _UK_NI_UPPER_THRESHOLD = Decimal("50270")
 _UK_NI_PRIMARY_RATE = Decimal("8")
 _UK_NI_UPPER_RATE = Decimal("2")
 _UK_PENSION_MIN_ENPLOYER = Decimal("3")
+# K-code overriding limit (ZP-TAX-UK-2026-27-001 §6.2: "tax deduction
+# cannot exceed 50% of pre-tax pay/pension for the pay period"). Was
+# briefly inline as a bare Decimal("0.5") in uk.py — moved here so it's
+# Super-Admin-editable like every other UK figure, not a code-only value.
+_UK_K_CODE_CAP_PCT = Decimal("50")
 # Employer NI — Secondary Threshold + standard employer rate. Per
 # ZP-TAX-UK-2026-27-001 section 8.1/9.1: ST is £5,000 annual (2026-27),
 # below the LEL (£6,708) — that gap is real, not a typo (see uk.py's
@@ -542,6 +641,16 @@ _UK_FLAT_RATE_CODES = {
     "SBR": Decimal("20"), "SD0": Decimal("21"), "SD1": Decimal("42"), "SD2": Decimal("45"), "SD3": Decimal("48"),
     "CBR": Decimal("20"), "CD0": Decimal("40"), "CD1": Decimal("45"),
 }
+# Real, independently-published Weekly/Monthly NI thresholds
+# (ZP-TAX-UK-2026-27-001 section 8.1) — used only behind
+# _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES (shared.py) via
+# resolve_direct_period_threshold. These do NOT derive from the annual
+# figures above by simple division (e.g. PT annual £12,570 ÷ 12 =
+# £1,047.50, not the real published £1,048 monthly figure) — HMRC rounds
+# each period's table independently, so both must be stored, not computed.
+_UK_NI_PRIMARY_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("242"), "Monthly": Decimal("1048")}
+_UK_NI_UPPER_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("967"), "Monthly": Decimal("4189")}
+_UK_NI_SECONDARY_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("96"), "Monthly": Decimal("417")}
 
 # ── Australia (previously engine/countries/australia.py) ────────────────
 _AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = Decimal("24276")
@@ -604,6 +713,242 @@ _CA_QUEBEC_FEDERAL_ABATEMENT_PCT = Decimal("16.5")
 _CA_BEYOND_PROVINCE_SURTAX_PCT = Decimal("48")
 _CA_LSVCC_CREDIT_RATE = Decimal("15")
 _CA_LSVCC_CREDIT_MAX = Decimal("750")
+
+
+# ═════════════════════════════════════════════════════════════════════
+# US state-level canonical seed data (ZP-TAX-US-2026-001) — consumed by
+# scripts/populate_us_state_tax_v1.py, a SEPARATE script from
+# populate_canonical_tax_v1.py: that script only ever seeds the
+# country-level (jurisdiction_state IS NULL) pack for each country and
+# upserts ContributionRate rows by component_key alone, with no
+# jurisdiction_state in its matching filter — feeding it state-scoped data
+# would either attach state rows to the wrong (country-level) pack or let
+# two different states' same-keyed rows silently overwrite each other.
+# Kept in this file anyway per this file's own rule (see module docstring):
+# every hardcoded statutory default value lives here, regardless of which
+# script/module eventually consumes it.
+# ═════════════════════════════════════════════════════════════════════
+
+# Phase 1 (ZP-TAX-US-2026-001 §4): states with confirmed no individual wage
+# income tax. Seeded as an Active JurisdictionPack with ZERO TaxSlab rows —
+# this changes no calculated number (an unconfigured state already
+# resolves state_income_tax=0 today; see us.py's own comment on
+# ctx.state_slabs) — it only makes "confirmed no tax" distinguishable from
+# "nobody has built this state yet" via an evidenced, Active pack record.
+_US_NO_INCOME_TAX_STATES = {
+    "AK": "Alaska Department of Revenue / Tax Division",
+    "FL": "Florida Department of Revenue",
+    "NV": "Nevada Department of Taxation",
+    "NH": "New Hampshire DRA",
+    "SD": "South Dakota DOR",
+    "TN": "Tennessee DOR",
+    "TX": "Texas Comptroller / TWC",
+    # WA has no wage income tax but DOES have its own statutory programs
+    # (Paid Family & Medical Leave, WA Cares Fund) — those are Phase 3
+    # scope (_US_STATE_PROGRAM_ENABLED_STATES), tracked separately from
+    # this "no income tax" pack, same reasoning as the module comment above
+    # explaining why the two rollout switches are independent.
+    "WA": "WA ESD / WA Cares Fund",
+    "WY": "Wyoming DWS / DOR",
+}
+
+# Phase 2 (ZP-TAX-US-2026-001 §3.1's Colorado example, §4, Appendix A): the
+# only two "official tables/formula" states with a COMPLETE, literal
+# formula given in that document rather than just a method classification
+# — every other "official tables" state's actual bracket values are
+# explicitly out of scope until their real published tables are supplied
+# (see the plan's "Explicitly out of scope" section). Read behind
+# _US_STATE_TAX_ENABLED_STATES (shared.py) — dormant by default.
+#
+# allowance_by_filing_status: a state-level standard-deduction-equivalent,
+# resolved via ContributionRate component_key="state_standard_deduction"
+# (us.py's calculate()), filing_status=None meaning "applies regardless of
+# filing status" — same NULL-is-the-fallback convention as the federal
+# standard_deduction rows above. Colorado's own filing-status label is
+# "MFJ_OR_QSS" (DR 1098) — mapped to this codebase's "MFJ" tag, since
+# Qualifying Surviving Spouse isn't a status USEmployeeValidation's
+# w4_filing_status vocabulary supports at all (a pre-existing gap,
+# unrelated to this build).
+_US_STATE_TAX_RATES = {
+    "CO": dict(
+        agency="Colorado DOR",
+        source_title="DR 1098 - Colorado Withholding Worksheet for Employers (2026)",
+        rate_pct=Decimal("4.40"),
+        allowance_by_filing_status={"MFJ": Decimal("11000.00"), None: Decimal("5500.00")},
+    ),
+    "KY": dict(
+        agency="Kentucky DOR",
+        source_title="2026 Kentucky Withholding Tax Formula 42A003 (TCF)",
+        rate_pct=Decimal("3.50"),
+        allowance_by_filing_status={None: Decimal("3360.00")},
+    ),
+}
+
+# Phase 3 (ZP-TAX-US-2026-001 §5): state-level statutory payroll programs
+# beyond plain income-tax withholding, for the states/programs the
+# document gives a COMPLETE, literal rate/cap for. Read behind
+# _US_STATE_PROGRAM_ENABLED_STATES (shared.py) — dormant by default; see
+# us.py's calculate() for the generic per-state-program loop that consumes
+# this. Headcount/employer-split-conditional programs (CO FAMLI, DE Paid
+# Leave, MA/ME/MN/OR Paid Leave, WA PFML) need a new employer
+# covered-headcount primitive and are explicitly a separate, later phase
+# — not included here.
+#
+# wage_cap: caps the ANNUAL TAXABLE WAGE the rate applies to (None =
+# uncapped) — several of these coincide with the SS wage base ($184,500)
+# today, but are stored as their own independent figure since the document
+# sources them independently and they could diverge in a future year.
+# annual_max: caps the resulting DOLLAR AMOUNT itself (None = uncapped) —
+# a distinct concept from wage_cap (see NY PFL, which has no wage_cap but
+# does have a $411.91 annual dollar maximum).
+_US_STATE_PROGRAMS = {
+    "CA": {
+        "sdi": dict(
+            agency="California EDD", source_title="EDD 2026 SDI contribution rate release",
+            employee_rate_pct=Decimal("1.30"), employer_rate_pct=None, wage_cap=None, annual_max=None,
+        ),
+    },
+    "CT": {
+        "paid_leave": dict(
+            agency="Connecticut Paid Leave", source_title="Connecticut Paid Leave — 2026 contributions",
+            employee_rate_pct=Decimal("0.50"), employer_rate_pct=None, wage_cap=Decimal("184500.00"), annual_max=None,
+        ),
+    },
+    "DC": {
+        "paid_leave": dict(
+            agency="DC DOES", source_title="2026 Paid Family Leave tax calculator/rates",
+            employee_rate_pct=None, employer_rate_pct=Decimal("0.75"), wage_cap=None, annual_max=None,
+        ),
+    },
+    "NY": {
+        "paid_leave": dict(
+            agency="New York Tax", source_title="NYS-50-T-NYS (1/26)",
+            employee_rate_pct=Decimal("0.432"), employer_rate_pct=None, wage_cap=None, annual_max=Decimal("411.91"),
+        ),
+    },
+    "RI": {
+        "tdi": dict(
+            agency="Rhode Island DLT", source_title="2026 UI and TDI Quick Reference",
+            employee_rate_pct=Decimal("1.10"), employer_rate_pct=None, wage_cap=Decimal("100000.00"), annual_max=Decimal("1100.00"),
+        ),
+    },
+    "WA": {
+        "wa_cares": dict(
+            agency="WA ESD / WA Cares Fund", source_title="WA Cares Fund — 2026 employee premium",
+            employee_rate_pct=Decimal("0.58"), employer_rate_pct=None, wage_cap=None, annual_max=None,
+        ),
+    },
+    "NJ": {
+        "worker_ui": dict(
+            agency="New Jersey Treasury/DOL", source_title="2026 wage and worker contribution reporting notice",
+            employee_rate_pct=Decimal("0.3825"), employer_rate_pct=None, wage_cap=Decimal("44800.00"), annual_max=None,
+        ),
+        "worker_di": dict(
+            agency="New Jersey Treasury/DOL", source_title="2026 wage and worker contribution reporting notice",
+            employee_rate_pct=Decimal("0.19"), employer_rate_pct=None, wage_cap=Decimal("171100.00"), annual_max=Decimal("325.09"),
+        ),
+        "workforce_dev": dict(
+            agency="New Jersey Treasury/DOL", source_title="2026 wage and worker contribution reporting notice",
+            employee_rate_pct=Decimal("0.0425"), employer_rate_pct=None, wage_cap=Decimal("44800.00"), annual_max=None,
+        ),
+        "fli": dict(
+            agency="New Jersey Treasury/DOL", source_title="2026 wage and worker contribution reporting notice",
+            employee_rate_pct=Decimal("0.23"), employer_rate_pct=None, wage_cap=Decimal("171100.00"), annual_max=Decimal("393.53"),
+        ),
+    },
+}
+
+# Phase 4 (ZP-TAX-US-2026-001 §7): local (county/municipal/school-district)
+# tax data — structural, not a full register. Detroit's own two rates are
+# given directly in the document's Appendix A, so those are seeded as real
+# LocalityRate rows; Indiana's dataset is created EMPTY on purpose — the
+# document requires an effective-dated locality dataset mechanism for
+# Indiana's 92 counties (not a free-text county field) but does not itself
+# reproduce the real Departmental Notice #1 county-rate table, so no county
+# rate is fabricated here. No engine change needed: get_locality_rate/
+# LocalityRate already exist and are read unconditionally by us.py (no
+# rollout switch — a locality only ever applies when an employee's own
+# work_locality is explicitly set to a matching code, so seeding real data
+# here cannot silently change any existing employee's number).
+_US_STATE_HEADCOUNT_PROGRAMS = {
+    # Phase 3C (ZP-TAX-US-2026-001 §5): headcount-conditional state
+    # programs — the EMPLOYEE rate always applies; the EMPLOYER rate only
+    # applies once EmployerTaxProfile.covered_employee_count (a real Tax
+    # Ops entry, never inferred) meets employer_headcount_min for this
+    # (org, jurisdiction, employer_component_code). Read by us.py's
+    # dedicated headcount-gated block, behind
+    # _US_STATE_PROGRAM_ENABLED_STATES (shared.py) same as every other
+    # state program.
+    #
+    # Only states where the document gives a COMPLETE numeric threshold
+    # AND a complete employee/employer split are included:
+    # - Massachusetts: gives the 25-employee threshold but explicitly says
+    #   "contribution split must be configured" — no split given.
+    # - Minnesota: gives "large" vs "qualifying small employer" rate
+    #   splits but NO numeric headcount threshold distinguishing them.
+    # - Oregon: gives the large-employer split (60/40) but no numeric
+    #   threshold defining "large", and no split at all for its
+    #   small-employer exception.
+    # All three are deferred — building them would require inventing a
+    # number the source document doesn't give.
+    "CO": {
+        "famli": dict(
+            agency="Colorado CDLE", source_title="FAMLI program",
+            employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"),
+            employer_headcount_min=10, employer_component_code="FAMLI",
+        ),
+    },
+    "ME": {
+        "paid_leave": dict(
+            agency="Maine DOL", source_title="Maine Paid Family and Medical Leave",
+            employee_rate_pct=Decimal("0.50"), employer_rate_pct=Decimal("0.50"),
+            employer_headcount_min=15, employer_component_code="PAID_LEAVE",
+        ),
+    },
+    "WA": {
+        # 1.13% total; employee share 71.43%, employer 28.57% at 50+
+        # employees. 1.13 * 71.43% = 0.8069% (employee, unconditional);
+        # 1.13 * 28.57% = 0.3228% (employer, only at 50+ — "generally no
+        # employer premium obligation" below 50, employee share still
+        # remitted regardless).
+        "pfml": dict(
+            agency="Employment Security Department (WA)", source_title="Washington programs — 2026 Paid Leave total premium",
+            employee_rate_pct=Decimal("0.8069"), employer_rate_pct=Decimal("0.3228"),
+            employer_headcount_min=50, employer_component_code="PFML",
+        ),
+    },
+}
+
+# Delaware Paid Leave (ZP-TAX-US-2026-001 §5) — a genuinely different
+# shape from the simple gated-employer-share programs above: headcount
+# SELECTS which of two employer-side coverage tiers applies (not just
+# on/off), so it's modeled and read separately in us.py rather than
+# through the generic headcount-gate loop. <=9 employees: exempt (0, not
+# modeled — absence of any configured tier IS the correct $0 outcome).
+# Employee share: the document permits the employer to pass up to 50% to
+# employees but gives no specific elected fraction, so this defaults to
+# 0% employee / 100% employer-funded — the document's own stated baseline
+# ("Employer; employee share PERMITTED"), not a fabricated split.
+_US_DE_PAID_LEAVE = dict(
+    agency="Delaware DOL", source_title="Delaware Paid Leave",
+    parental_only_rate_pct=Decimal("0.32"), parental_only_min=10,
+    full_coverage_rate_pct=Decimal("0.80"), full_coverage_min=25,
+    employer_component_code="PAID_LEAVE",
+)
+
+_US_LOCALITY_DATA = {
+    "MI": dict(
+        agency="Michigan Treasury", source_title="2026 City of Detroit Income Tax Withholding Guide",
+        rates=[
+            dict(locality_code="DETROIT", locality_type="MUNICIPAL", locality_name="Detroit",
+                 resident_rate_pct=Decimal("2.40"), nonresident_rate_pct=Decimal("1.20")),
+        ],
+    ),
+    "IN": dict(
+        agency="Indiana DOR", source_title="Departmental Notice #1 (2026)",
+        rates=[],
+    ),
+}
 
 
 # ═════════════════════════════════════════════════════════════════════

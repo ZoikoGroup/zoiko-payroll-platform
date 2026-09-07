@@ -30,6 +30,7 @@ class Rate:
     employee_rate_pct: Optional[Decimal] = None
     employer_rate_pct: Optional[Decimal] = None
     flat_amount: Optional[Decimal] = None
+    jurisdiction_state: Optional[str] = None
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Slab:
     formula_expression: Optional[str] = None
     filing_status: Optional[str] = None
     tax_regime: Optional[str] = None
+    jurisdiction_state: Optional[str] = None
 
 
 @dataclass
@@ -49,6 +51,7 @@ class EmployerTaxProfileStub:
     attributes engine/countries/us.py actually reads."""
     taxable_wage_base: Decimal = Decimal("7000")
     employer_rate_pct: Decimal = Decimal("3.4")
+    covered_employee_count: Optional[int] = None
 
 
 @dataclass
@@ -343,9 +346,12 @@ def test_us_futa_credit_reduction_configurable_via_rate_map():
 def test_us_reciprocity_off_uses_work_state_slabs():
     """No reciprocity flagged (every employee today) — state income tax
     must come from work-state slabs, exactly as before reciprocity
-    existed. Core regression guard."""
-    work_slabs = [Slab(Decimal("0"), None, Decimal("5"))]
-    resident_slabs = [Slab(Decimal("0"), None, Decimal("3"))]
+    existed. Core regression guard. Both states added to
+    _US_STATE_TAX_ENABLED_STATES (dormant/empty by default) — see that
+    switch's own comment in shared.py."""
+    work_slabs = [Slab(Decimal("0"), None, Decimal("5"), jurisdiction_state="WORK")]
+    resident_slabs = [Slab(Decimal("0"), None, Decimal("3"), jurisdiction_state="RESIDENT")]
+    shared._US_STATE_TAX_ENABLED_STATES.update({"WORK", "RESIDENT"})
     result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=work_slabs, resident_state_slabs=resident_slabs)
     # 5% work-state table, not the 3% resident one.
     assert result.state_income_tax == pytest.approx(Decimal("500.00"), abs=Decimal("0.01"))
@@ -355,14 +361,250 @@ def test_us_reciprocity_on_uses_resident_state_slabs_instead():
     """Once reciprocity is flagged as suppressing work-state withholding,
     the RESIDENT state's slabs must be taxed instead — not the work
     state's, and not both."""
-    work_slabs = [Slab(Decimal("0"), None, Decimal("5"))]
-    resident_slabs = [Slab(Decimal("0"), None, Decimal("3"))]
+    work_slabs = [Slab(Decimal("0"), None, Decimal("5"), jurisdiction_state="WORK")]
+    resident_slabs = [Slab(Decimal("0"), None, Decimal("3"), jurisdiction_state="RESIDENT")]
+    shared._US_STATE_TAX_ENABLED_STATES.update({"WORK", "RESIDENT"})
     result = calc(
         "US", 10000, US_RATES, US_SLABS, state_slabs=work_slabs, resident_state_slabs=resident_slabs,
         reciprocity_suppresses_work_state=True,
     )
     # 3% resident-state table, not the 5% work-state one.
     assert result.state_income_tax == pytest.approx(Decimal("300.00"), abs=Decimal("0.01"))
+
+
+def test_us_state_tax_ignored_for_a_state_not_yet_enabled():
+    """A state's TaxSlab rows being configured is not enough on its own —
+    only states in _US_STATE_TAX_ENABLED_STATES compute real state income
+    tax; every other state stays silently at 0, same as before any state
+    had real data at all."""
+    slabs = [Slab(Decimal("0"), None, Decimal("5"), jurisdiction_state="NOT_ENABLED")]
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=slabs)
+    assert result.state_income_tax == Decimal("0.00")
+
+
+# ── US: state-level standard deduction (Colorado/Kentucky, ZP-TAX-US-2026-001) ──
+
+def test_us_kentucky_standard_deduction_matches_document_worked_example():
+    """ZP-TAX-US-2026-001 §13's US-KY-001 golden test: $3,270/month gross,
+    Kentucky's flat 3.5% rate after a $3,360 standard deduction, expected
+    monthly withholding $104.65. ($39,240 annual - $3,360 = $35,880
+    taxable; 3.5% = $1,255.80/yr = $104.65/mo.)"""
+    ky_slabs = [Slab(Decimal("0"), None, Decimal("3.5"), jurisdiction_state="KY")]
+    ky_rate_map = {"state_standard_deduction": Rate(flat_amount=Decimal("3360"))}
+    shared._US_STATE_TAX_ENABLED_STATES.add("KY")
+    result = calc("US", Decimal("3270"), US_RATES, US_SLABS, state_slabs=ky_slabs, state_rate_map=ky_rate_map)
+    assert result.state_income_tax == pytest.approx(Decimal("104.65"), abs=Decimal("0.01"))
+
+
+def test_us_state_standard_deduction_is_filing_status_aware():
+    """Colorado's allowance differs by filing status ($11,000 MFJ vs
+    $5,500 otherwise) — ctx.state_rate_map is assumed pre-resolved to the
+    employee's own filing status (get_state_scoped_config's job in
+    service.py), so a single resolve_jurisdiction_parameter lookup here
+    already reflects it; this test simulates that pre-resolution directly."""
+    co_slabs = [Slab(Decimal("0"), None, Decimal("4.40"), jurisdiction_state="CO")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("CO")
+    mfj_rate_map = {"state_standard_deduction": Rate(flat_amount=Decimal("11000"))}
+    other_rate_map = {"state_standard_deduction": Rate(flat_amount=Decimal("5500"))}
+    mfj_result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=co_slabs, state_rate_map=mfj_rate_map, w4_filing_status="MFJ")
+    other_result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=co_slabs, state_rate_map=other_rate_map, w4_filing_status="SINGLE")
+    # MFJ's larger allowance leaves less taxable, so less state tax.
+    assert mfj_result.state_income_tax < other_result.state_income_tax
+    # $120,000 annual - $11,000 = $109,000 * 4.4% / 12 = $399.67
+    assert mfj_result.state_income_tax == pytest.approx(Decimal("399.67"), abs=Decimal("0.01"))
+    # $120,000 annual - $5,500 = $114,500 * 4.4% / 12 = $419.83
+    assert other_result.state_income_tax == pytest.approx(Decimal("419.83"), abs=Decimal("0.01"))
+
+
+def test_us_state_standard_deduction_defaults_to_zero_when_unconfigured():
+    """A state with real TaxSlab rows but no configured
+    state_standard_deduction row taxes the full gross — a capability
+    addition, not a change in default behavior for any state that hasn't
+    configured this yet (same convention as the federal standard_deduction
+    parameter)."""
+    slabs = [Slab(Decimal("0"), None, Decimal("5"), jurisdiction_state="NJ")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("NJ")
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=slabs)
+    # $120,000 * 5% / 12 = $500.00 — no deduction applied.
+    assert result.state_income_tax == pytest.approx(Decimal("500.00"), abs=Decimal("0.01"))
+
+
+# ── US: state-level statutory payroll programs beyond SDI (ZP-TAX-US-2026-001 §5) ──
+
+def test_us_state_program_ignored_when_state_not_enabled():
+    """A configured program row is not enough on its own — only states in
+    _US_STATE_PROGRAM_ENABLED_STATES compute it, same additive-per-state
+    convention as _US_STATE_TAX_ENABLED_STATES. Uses a state deliberately
+    never in the default set (unlike CT/DC/NY/RI/WA/NJ/CA, all enabled by
+    default as of the ZP-TAX-US-2026-001 build-out)."""
+    rate_map = dict(US_RATES, paid_leave=Rate(employee_rate_pct=Decimal("0.50"), jurisdiction_state="NOT_ENABLED"))
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    assert result.state_program_deductions == Decimal("0.00")
+
+
+def test_us_state_program_uncapped_flat_rate():
+    """Connecticut Paid Leave: 0.50% employee, no cap given here (wage_cap
+    omitted) — $120,000/yr * 0.50% / 12 = $50.00/mo."""
+    rate_map = dict(US_RATES, paid_leave=Rate(employee_rate_pct=Decimal("0.50"), jurisdiction_state="CT"))
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("CT")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    assert result.state_program_deductions == pytest.approx(Decimal("50.00"), abs=Decimal("0.01"))
+
+
+def test_us_state_program_employer_only_program():
+    """DC Universal Paid Leave: 0.75% EMPLOYER only — employee side must
+    stay 0, employer side gets the contribution."""
+    rate_map = dict(US_RATES, paid_leave=Rate(employer_rate_pct=Decimal("0.75"), jurisdiction_state="DC"))
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("DC")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    assert result.state_program_deductions == Decimal("0.00")
+    # $120,000/yr * 0.75% / 12 = $75.00/mo.
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("75.00"), abs=Decimal("0.01"))
+
+
+def test_us_state_program_wage_cap_limits_taxable_amount():
+    """RI TDI: 1.10% capped at a $100,000 annual wage base — an employee
+    grossing $120,000/yr only pays on the first $100,000."""
+    rate_map = dict(
+        US_RATES,
+        tdi=Rate(employee_rate_pct=Decimal("1.10"), jurisdiction_state="RI"),
+        tdi_wage_cap=Rate(flat_amount=Decimal("100000")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("RI")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    # $100,000 (capped) * 1.10% / 12 = $91.67/mo.
+    assert result.state_program_deductions == pytest.approx(Decimal("91.67"), abs=Decimal("0.01"))
+
+
+def test_us_state_program_annual_max_caps_the_dollar_amount():
+    """RI TDI also has its own $1,100 annual dollar maximum — a high
+    enough gross must be capped at $1,100/yr = $91.67/mo, not just the
+    wage-base-capped raw percentage."""
+    rate_map = dict(
+        US_RATES,
+        tdi=Rate(employee_rate_pct=Decimal("1.10"), jurisdiction_state="RI"),
+        tdi_wage_cap=Rate(flat_amount=Decimal("100000")),
+        tdi_annual_max=Rate(flat_amount=Decimal("1000")),  # deliberately below the wage-cap-derived $1,100
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("RI")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    assert result.state_program_deductions == pytest.approx(Decimal("83.33"), abs=Decimal("0.01"))
+
+
+def test_us_state_program_multiple_programs_sum_together():
+    """New Jersey's 4-program family: worker_ui + worker_di +
+    workforce_dev + fli must all sum into one state_program_deductions
+    total, each independently correct."""
+    rate_map = dict(
+        US_RATES,
+        worker_ui=Rate(employee_rate_pct=Decimal("0.3825"), jurisdiction_state="NJ"),
+        worker_di=Rate(employee_rate_pct=Decimal("0.19"), jurisdiction_state="NJ"),
+        workforce_dev=Rate(employee_rate_pct=Decimal("0.0425"), jurisdiction_state="NJ"),
+        fli=Rate(employee_rate_pct=Decimal("0.23"), jurisdiction_state="NJ"),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("NJ")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    # (0.3825 + 0.19 + 0.0425 + 0.23)% = 0.845% of $120,000/yr / 12 = $84.50/mo.
+    assert result.state_program_deductions == pytest.approx(Decimal("84.50"), abs=Decimal("0.01"))
+
+
+def test_us_state_program_sdi_key_excluded_from_generic_loop():
+    """"sdi" is deliberately excluded from the generic loop — it has its
+    own dedicated field/state_rate_map key (state_disability_insurance)
+    so it must never be double-counted into state_program_deductions too,
+    even once its state is in _US_STATE_PROGRAM_ENABLED_STATES."""
+    rate_map = dict(US_RATES, sdi=Rate(employee_rate_pct=Decimal("1.30"), jurisdiction_state="CA"))
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("CA")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    assert result.state_disability_insurance == pytest.approx(Decimal("130.00"), abs=Decimal("0.01"))
+    assert result.state_program_deductions == Decimal("0.00")
+
+
+def test_us_state_program_headcount_gate_employer_share_below_threshold():
+    """Colorado FAMLI: employee's 0.44% always applies; employer's 0.44%
+    only applies once EmployerTaxProfile.covered_employee_count >= 10. No
+    profile configured at all -> employer share stays 0, never guessed."""
+    rate_map = dict(
+        US_RATES,
+        famli=Rate(employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"), jurisdiction_state="CO"),
+        famli_employer_headcount_min=Rate(flat_amount=Decimal("10")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("CO")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    # $120,000/yr * 0.44% / 12 = $44.00/mo (employee, unconditional).
+    assert result.state_program_deductions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+    assert result.employer_state_program_contributions == Decimal("0.00")
+
+
+def test_us_state_program_headcount_gate_employer_share_at_or_above_threshold():
+    """Same Colorado FAMLI setup, but the employer has a real profile with
+    covered_employee_count >= 10 — the employer's own 0.44% now applies."""
+    rate_map = dict(
+        US_RATES,
+        famli=Rate(employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"), jurisdiction_state="CO"),
+        famli_employer_headcount_min=Rate(flat_amount=Decimal("10")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("CO")
+    profiles = {"FAMLI": EmployerTaxProfileStub(covered_employee_count=15)}
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    assert result.state_program_deductions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+
+
+def test_us_state_program_headcount_gate_below_threshold_with_a_profile():
+    """A configured profile that's genuinely below the threshold (e.g. 8
+    employees) must still withhold the employer share — the gate compares
+    the real number, not just "a profile exists"."""
+    rate_map = dict(
+        US_RATES,
+        famli=Rate(employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"), jurisdiction_state="CO"),
+        famli_employer_headcount_min=Rate(flat_amount=Decimal("10")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("CO")
+    profiles = {"FAMLI": EmployerTaxProfileStub(covered_employee_count=8)}
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    assert result.employer_state_program_contributions == Decimal("0.00")
+
+
+def test_us_de_paid_leave_two_tiers_share_one_headcount_fact_via_alias():
+    """Delaware's parental-only tier (10-24 employees) and full-coverage
+    tier (25+) are two separate rows/rates but must read the SAME real
+    headcount fact, filed under "PAID_LEAVE" (not
+    "PAID_LEAVE_PARENTAL") — the parental row's own alias in us.py handles
+    this. At 15 employees: only the parental tier (0.32%) should apply,
+    not the full tier (0.80%)."""
+    rate_map = dict(
+        US_RATES,
+        paid_leave=Rate(employer_rate_pct=Decimal("0.80"), jurisdiction_state="DE"),
+        paid_leave_employer_headcount_min=Rate(flat_amount=Decimal("25")),
+        paid_leave_parental=Rate(employer_rate_pct=Decimal("0.32"), jurisdiction_state="DE"),
+        paid_leave_parental_employer_headcount_min=Rate(flat_amount=Decimal("10")),
+        paid_leave_parental_employer_headcount_max=Rate(flat_amount=Decimal("25")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("DE")
+    profiles = {"PAID_LEAVE": EmployerTaxProfileStub(covered_employee_count=15)}
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    # Only the parental tier fires: $120,000/yr * 0.32% / 12 = $32.00/mo.
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("32.00"), abs=Decimal("0.01"))
+
+
+def test_us_de_paid_leave_full_tier_at_25_plus():
+    """At 25+ employees, the full-coverage tier applies instead — and the
+    parental tier's own max=25 (exclusive) correctly stops it from ALSO
+    firing and double-charging the employer."""
+    rate_map = dict(
+        US_RATES,
+        paid_leave=Rate(employer_rate_pct=Decimal("0.80"), jurisdiction_state="DE"),
+        paid_leave_employer_headcount_min=Rate(flat_amount=Decimal("25")),
+        paid_leave_parental=Rate(employer_rate_pct=Decimal("0.32"), jurisdiction_state="DE"),
+        paid_leave_parental_employer_headcount_min=Rate(flat_amount=Decimal("10")),
+        paid_leave_parental_employer_headcount_max=Rate(flat_amount=Decimal("25")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("DE")
+    profiles = {"PAID_LEAVE": EmployerTaxProfileStub(covered_employee_count=30)}
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    # Only the full tier fires: $120,000/yr * 0.80% / 12 = $80.00/mo.
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("80.00"), abs=Decimal("0.01"))
 
 
 def test_us_filing_status_falls_back_to_untagged_row_when_present():
@@ -481,12 +723,19 @@ def test_uk_ni_above_primary_threshold():
     assert result.ni_employee > 0
 
 
-def test_uk_personal_allowance_taper_reduces_allowance():
-    normal = calc("UK", Decimal("6000"), UK_RATES, UK_SLABS)      # £72k/yr, no taper
-    tapered = calc("UK", Decimal("10000"), UK_RATES, UK_SLABS)    # £120k/yr, tapered
-    normal_rate = normal.tds / Decimal("6000")
-    tapered_rate = tapered.tds / Decimal("10000")
-    assert tapered_rate > normal_rate
+def test_uk_higher_income_crosses_into_the_40pct_bracket():
+    # Renamed 2026-09-07: since Phase 1's PA-taper-removal fix shipped
+    # enabled by default, the Personal Allowance is no longer independently
+    # tapered at all (see test_uk_pa_taper_disabled_by_default in
+    # test_engine_jurisdiction_upgrade.py for that specific behavior) — this
+    # test's higher effective rate at £120k/yr vs £72k/yr now comes purely
+    # from crossing UK_SLABS' 40% bracket boundary (£37,700), not from any
+    # taper effect. Kept as a basic bracket-progression sanity check.
+    lower = calc("UK", Decimal("6000"), UK_RATES, UK_SLABS)   # £72k/yr, fully in the 20% band
+    higher = calc("UK", Decimal("10000"), UK_RATES, UK_SLABS)  # £120k/yr, crosses into 40%
+    lower_rate = lower.tds / Decimal("6000")
+    higher_rate = higher.tds / Decimal("10000")
+    assert higher_rate > lower_rate
 
 
 def test_uk_zero_income():
@@ -737,6 +986,8 @@ def _restore_ca_credit_method_switch():
     original_surtax = set(shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES)
     original_bc_reduction = set(shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES)
     original_in_pf_ceiling = set(shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES)
+    original_us_state_tax = set(shared._US_STATE_TAX_ENABLED_STATES)
+    original_us_state_program = set(shared._US_STATE_PROGRAM_ENABLED_STATES)
     yield
     shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.clear()
     shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.update(original_credit)
@@ -758,6 +1009,10 @@ def _restore_ca_credit_method_switch():
     shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES.update(original_bc_reduction)
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.clear()
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.update(original_in_pf_ceiling)
+    shared._US_STATE_TAX_ENABLED_STATES.clear()
+    shared._US_STATE_TAX_ENABLED_STATES.update(original_us_state_tax)
+    shared._US_STATE_PROGRAM_ENABLED_STATES.clear()
+    shared._US_STATE_PROGRAM_ENABLED_STATES.update(original_us_state_program)
 
 
 def test_lowest_bracket_rate_picks_the_lowest_starting_bracket():

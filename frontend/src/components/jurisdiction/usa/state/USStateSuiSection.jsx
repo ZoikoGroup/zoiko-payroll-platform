@@ -84,6 +84,7 @@ export default function USStateSuiSection({ stateName }) {
                 <th className="px-3 py-2.5">Component</th>
                 <th className="px-3 py-2.5">Wage Base</th>
                 <th className="px-3 py-2.5">Employer Rate</th>
+                <th className="px-3 py-2.5">Covered Employees</th>
                 <th className="px-3 py-2.5">Source</th>
                 <th className="px-3 py-2.5">Effective</th>
                 <th className="px-3 py-2.5">Agency Account</th>
@@ -94,8 +95,9 @@ export default function USStateSuiSection({ stateName }) {
               {filtered.map((p) => (
                 <tr key={p.id} className="border-b border-border-light last:border-0">
                   <td className="px-3 py-2.5">{p.componentCode}</td>
-                  <td className="px-3 py-2.5">{p.taxableWageBase}</td>
-                  <td className="px-3 py-2.5">{p.employerRatePct}%</td>
+                  <td className="px-3 py-2.5">{p.taxableWageBase ?? "—"}</td>
+                  <td className="px-3 py-2.5">{p.employerRatePct != null ? `${p.employerRatePct}%` : "—"}</td>
+                  <td className="px-3 py-2.5">{p.coveredEmployeeCount ?? "—"}</td>
                   <td className="px-3 py-2.5">{p.rateSource}</td>
                   <td className="px-3 py-2.5 text-foreground-muted">{p.effectiveFrom} → {p.effectiveTo || "open"}</td>
                   <td className="px-3 py-2.5 font-mono text-foreground-disabled">{p.agencyAccountId || "—"}</td>
@@ -136,6 +138,12 @@ export default function USStateSuiSection({ stateName }) {
   );
 }
 
+// FAMLI/PFML/PAID_LEAVE (ZP-TAX-US-2026-001 §5 build-out): headcount-only
+// profiles — same convention as SuiEmployerRatesPanel.jsx's own copy of
+// this list (kept in sync by hand since this file is a deliberate local
+// copy — see the comment below).
+const HEADCOUNT_ONLY_COMPONENTS = ["FAMLI", "PFML", "PAID_LEAVE"];
+
 // Deliberately a local copy, not an import from SuiEmployerRatesPanel.jsx —
 // that file's form modal is a private, unexported function and the file is
 // on the "must not modify" list, so exporting it wasn't an option.
@@ -147,6 +155,7 @@ function USStateSuiProfileFormModal({ organizationId, profile, defaultJurisdicti
     componentCode: profile?.componentCode || "SUI",
     taxableWageBase: profile?.taxableWageBase ?? "",
     employerRatePct: profile?.employerRatePct ?? "",
+    coveredEmployeeCount: profile?.coveredEmployeeCount ?? "",
     rateSource: profile?.rateSource || "EMPLOYER_NOTICE",
     effectiveFrom: profile?.effectiveFrom || "",
     effectiveTo: profile?.effectiveTo || "",
@@ -156,12 +165,22 @@ function USStateSuiProfileFormModal({ organizationId, profile, defaultJurisdicti
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const isHeadcountOnly = HEADCOUNT_ONLY_COMPONENTS.includes(form.componentCode);
 
   useEffect(() => { getSourceArtifacts().then(setSources).catch(() => setSources([])); }, []);
 
   async function save() {
-    if (!form.jurisdictionId.trim() || form.taxableWageBase === "" || form.employerRatePct === "" || !form.effectiveFrom) {
-      addToast?.("Jurisdiction, wage base, employer rate, and effective-from date are required.", "error");
+    if (!form.jurisdictionId.trim() || !form.effectiveFrom) {
+      addToast?.("Jurisdiction and effective-from date are required.", "error");
+      return;
+    }
+    if (isHeadcountOnly) {
+      if (form.coveredEmployeeCount === "") {
+        addToast?.("Covered Employees is required for this component.", "error");
+        return;
+      }
+    } else if (form.taxableWageBase === "" || form.employerRatePct === "") {
+      addToast?.("Wage base and employer rate are required.", "error");
       return;
     }
     setSaving(true);
@@ -169,7 +188,9 @@ function USStateSuiProfileFormModal({ organizationId, profile, defaultJurisdicti
       await upsertEmployerTaxProfile({
         id: profile?.id, organizationId: Number(organizationId),
         jurisdictionId: form.jurisdictionId, componentCode: form.componentCode,
-        taxableWageBase: form.taxableWageBase, employerRatePct: form.employerRatePct,
+        taxableWageBase: isHeadcountOnly ? null : form.taxableWageBase,
+        employerRatePct: isHeadcountOnly ? null : form.employerRatePct,
+        coveredEmployeeCount: form.coveredEmployeeCount === "" ? null : Number(form.coveredEmployeeCount),
         rateSource: form.rateSource, effectiveFrom: form.effectiveFrom,
         effectiveTo: form.effectiveTo || null, agencyAccountId: form.agencyAccountId || null,
         reimbursableStatus: form.reimbursableStatus,
@@ -194,10 +215,22 @@ function USStateSuiProfileFormModal({ organizationId, profile, defaultJurisdicti
             <option value="ETT">ETT</option>
             <option value="WF">WF</option>
             <option value="JDA">JDA</option>
+            <option value="FAMLI">FAMLI</option>
+            <option value="PFML">PFML</option>
+            <option value="PAID_LEAVE">PAID_LEAVE</option>
           </select>
         </div>
-        <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
-        <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="3.40" /></div>
+        {isHeadcountOnly ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Covered Employees</label>
+            <input type="number" min="0" className={inputClass} value={form.coveredEmployeeCount} onChange={set("coveredEmployeeCount")} placeholder="e.g. 15" />
+          </div>
+        ) : (
+          <>
+            <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
+            <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="3.40" /></div>
+          </>
+        )}
         <div><label className={labelClass}>Rate Source</label>
           <select className={inputClass} value={form.rateSource} onChange={set("rateSource")}>
             <option value="STATE_DEFAULT">State Default</option>

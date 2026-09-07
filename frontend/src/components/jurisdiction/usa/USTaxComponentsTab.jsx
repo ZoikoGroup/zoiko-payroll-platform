@@ -118,6 +118,7 @@ function FilterBar({ search, onSearch, typeFilter, onTypeFilter, appliesFilter, 
     THRESHOLD: "Threshold",
     FIXED_AMOUNT: "Fixed",
     DEDUCTION_AMOUNT: "Deduction",
+    ANNUAL_MAX: "Annual Max",
     INCOME_TAX_POINTER: "Income Tax",
   };
 

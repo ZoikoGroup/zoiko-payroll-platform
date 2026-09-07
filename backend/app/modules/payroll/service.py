@@ -972,7 +972,7 @@ def _resolve_pack_scoped_rows(db: Session, rows: list, as_of) -> list:
     return [r for r in rows if getattr(r, "jurisdiction_pack_id", None) == winning_pack_id]
 
 
-def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_of=None) -> Tuple[dict, list]:
+def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_of=None, filing_status: str = None) -> Tuple[dict, list]:
     """Region-specific rates/slabs for a country+state combination — a
     DELIBERATELY SEPARATE, simpler lookup from _resolve_effective_rate_inputs
     above: it queries canonical (organization_id IS NULL) ContributionRate/
@@ -1004,18 +1004,35 @@ def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_
     Returns ({}, []) if state is falsy or nothing is configured for it —
     every existing calculation is completely unaffected until a country
     calculator explicitly reads ctx.state_rate_map/ctx.state_slabs AND a
-    real region-scoped row has been seeded for that specific state."""
+    real region-scoped row has been seeded for that specific state.
+
+    `filing_status` (US-specific; NULL for every other caller/jurisdiction,
+    exactly like get_contribution_rates' own filing_status parameter):
+    a state-scoped parameter (e.g. Colorado's annual_allowance, tagged
+    MFJ_OR_QSS vs untagged/"OTHER") can be filing-status-specific the same
+    way a country-level one already is. Omitting it (every call site that
+    doesn't need it, e.g. sync_org_rates_from_canonical, which wants every
+    sibling row, not one collapsed winner) reproduces today's exact
+    behavior unchanged."""
     if not state:
         return {}, []
+    rate_query = db.query(ContributionRate).filter(
+        ContributionRate.organization_id.is_(None),
+        ContributionRate.jurisdiction_country == country,
+        ContributionRate.jurisdiction_state == state,
+    )
+    order_priority = []
+    if filing_status:
+        # Same convention as get_contribution_rates: filing-status-agnostic
+        # rows always apply, a row tagged for THIS filing status also
+        # applies and is ordered last (so the {key: row} dict comprehension
+        # below lets it win), rows tagged for a DIFFERENT filing status are
+        # excluded entirely.
+        rate_query = rate_query.filter(or_(ContributionRate.filing_status.is_(None), ContributionRate.filing_status == filing_status))
+        order_priority.append(ContributionRate.filing_status.isnot(None))
     rate_rows = (
-        db.query(ContributionRate)
-        .filter(
-            ContributionRate.organization_id.is_(None),
-            ContributionRate.jurisdiction_country == country,
-            ContributionRate.jurisdiction_state == state,
-        )
-        .order_by(ContributionRate.sort_order)
-        .all()
+        rate_query.order_by(*order_priority, ContributionRate.sort_order).all()
+        if order_priority else rate_query.order_by(ContributionRate.sort_order).all()
     )
     slab_rows = (
         db.query(TaxSlab)
@@ -1229,6 +1246,7 @@ def upsert_employer_tax_profile(db: Session, data: EmployerTaxProfileUpsert, act
         effective_from=data.effectiveFrom, effective_to=data.effectiveTo,
         agency_account_id=data.agencyAccountId, reimbursable_status=data.reimbursableStatus,
         source_document_id=data.sourceDocumentId,
+        covered_employee_count=data.coveredEmployeeCount,
     )
     action = "update" if data.id else "create"
     old_value = None
@@ -1334,7 +1352,9 @@ def _resolve_us_reciprocity(
     rule = resolve_reciprocity(db, f"{country}-{residence_state}", f"{country}-{work_state}", as_of=as_of)
     if rule is None or not _reciprocity_certificate_satisfied(employee, rule, as_of):
         return empty
-    resident_rate_map, resident_slabs = get_state_scoped_config(db, country, residence_state, as_of=as_of)
+    resident_rate_map, resident_slabs = get_state_scoped_config(
+        db, country, residence_state, as_of=as_of, filing_status=getattr(employee, "w4_filing_status", None),
+    )
     return dict(
         reciprocity_suppresses_work_state=True,
         resident_state_rate_map=resident_rate_map, resident_state_slabs=resident_slabs,
@@ -2457,8 +2477,10 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "state_income_tax": ("State Income Tax", "currency", True),
     "local_tax": ("Local Tax", "currency", True),
     "state_disability_insurance": ("State Disability Insurance", "currency", True),
+    "state_program_deductions": ("State Payroll Programs (e.g. Paid Leave/TDI)", "currency", True),
     "ni_employee": ("National Insurance (Employee)", "currency", True),
     "study_loan_deduction": ("Student/Postgraduate Loan Deduction", "currency", True),
+    "postgrad_loan_deduction": ("Postgraduate Loan Deduction (Concurrent)", "currency", True),
     "employee_pension": ("Workplace Pension (Employee)", "currency", True),
     "church_tax": ("Church Tax", "currency", True),
     "cpp2": ("CPP2", "currency", True),
@@ -2471,6 +2493,7 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "employer_ni": ("National Insurance (Employer)", "currency", True),
     "employer_futa": ("FUTA (Employer)", "currency", True),
     "employer_sui": ("SUI (Employer)", "currency", True),
+    "employer_state_program_contributions": ("State Payroll Programs (Employer)", "currency", True),
     "employer_cpp2": ("CPP2 (Employer)", "currency", True),
     "net_pay": ("Net Pay", "currency", True),
 }
@@ -2518,13 +2541,14 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
            "total_deductions", "employer_pf", "employer_esi", "net_pay"],
     "UK": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
-           "tds", "ni_employee", "study_loan_deduction", "employee_pension", "total_deductions",
+           "tds", "ni_employee", "study_loan_deduction", "postgrad_loan_deduction", "employee_pension", "total_deductions",
            "employer_ni", "employer_pension", "net_pay"],
     "US": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
            "federal_income_tax", "state_income_tax", "local_tax", "social_security", "medicare",
-           "state_disability_insurance", "total_deductions",
-           "employer_social_security", "employer_medicare", "employer_futa", "employer_sui", "net_pay"],
+           "state_disability_insurance", "state_program_deductions", "total_deductions",
+           "employer_social_security", "employer_medicare", "employer_futa", "employer_sui",
+           "employer_state_program_contributions", "net_pay"],
     # CPP/QPP -> social_security/employer_social_security, EI/QPIP ->
     # esi/employer_esi (the same reused PayrollResult fields India's PF/
     # ESI already populate — see engine/countries/canada.py's own
@@ -4063,17 +4087,24 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
 
         work_state = getattr(emp, "work_state", None)
         resolution_state, _poe_reason = _resolve_country_aware_state(country, emp, work_state, db=db, organization_id=organization_id)
-        if resolution_state not in _state_scoped_cache:
-            # Safe to key this cache by resolution_state alone (no date
-            # component needed): every employee in this preview batch
-            # resolves against the SAME as_of (period_end or today, used
-            # identically throughout this function, e.g. line 3939) —
-            # never a per-employee date — so there is nothing for a
+        # filing_status is part of the cache key (not resolution_state
+        # alone) because two employees sharing a state in this same preview
+        # batch can have different filing statuses once a filing-status-
+        # specific state-scoped row exists (e.g. Colorado's allowance) —
+        # same reasoning as _resolve_effective_rate_inputs' cache_key above.
+        emp_filing_status = getattr(emp, "w4_filing_status", None)
+        state_cache_key = (resolution_state, emp_filing_status)
+        if state_cache_key not in _state_scoped_cache:
+            # Safe to key this cache by (resolution_state, filing_status)
+            # alone (no date component needed): every employee in this
+            # preview batch resolves against the SAME as_of (period_end or
+            # today, used identically throughout this function, e.g. line
+            # 3939) — never a per-employee date — so there is nothing for a
             # missing date-key to accidentally collide across.
-            _state_scoped_cache[resolution_state] = get_state_scoped_config(
-                db, country, resolution_state, as_of=period_end or date.today(),
+            _state_scoped_cache[state_cache_key] = get_state_scoped_config(
+                db, country, resolution_state, as_of=period_end or date.today(), filing_status=emp_filing_status,
             )
-        state_rate_map, state_slabs = _state_scoped_cache[resolution_state]
+        state_rate_map, state_slabs = _state_scoped_cache[state_cache_key]
 
         # Canada YTD — READ ONLY (see _load_ca_ytd's own docstring): this
         # function persists no PayrollRun/PayslipItem, so it must never
@@ -4134,6 +4165,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             # preview-screen column, so it only showed up as an unexplained
             # drop in Net Pay once the run was actually generated.
             "monthlyStudyLoanDeduction": float(calc.study_loan_deduction),
+            "monthlyPostgradLoanDeduction": float(calc.postgrad_loan_deduction),
             # total_deductions includes tds; subtract it here so "Contributions"
             # and "Taxes" are non-overlapping components that add up to the
             # actual total deduction, matching how the UI displays them side
@@ -4862,6 +4894,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "medicare": result.medicare,
         "ni_employee": result.ni_employee,
         "study_loan_deduction": result.study_loan_deduction,
+        "postgrad_loan_deduction": result.postgrad_loan_deduction,
         "employee_pension": result.employee_pension,
         "church_tax": result.church_tax,
         "cpp2": result.cpp2,
@@ -4874,6 +4907,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "state_income_tax": result.state_income_tax,
         "local_tax": result.local_tax,
         "state_disability_insurance": result.state_disability_insurance,
+        "state_program_deductions": result.state_program_deductions,
         "total_deductions": result.total_deductions,
         "employer_pf": result.employer_pf,
         "employer_esi": result.employer_esi,
@@ -4883,6 +4917,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "employer_ni": result.employer_ni,
         "employer_futa": result.employer_futa,
         "employer_sui": result.employer_sui,
+        "employer_state_program_contributions": result.employer_state_program_contributions,
         "employer_cpp2": result.employer_cpp2,
         "employer_cpp_base": result.employer_cpp_base,
         "employer_cpp_first_additional": result.employer_cpp_first_additional,
@@ -5014,7 +5049,8 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
     run.total_taxes = sum((i.tds for i in items), Decimal("0"))
     run.total_employer_contribution = sum(
         (i.employer_pf + i.employer_esi + i.employer_social_security + i.employer_medicare + i.employer_pension
-         + i.employer_ni + i.employer_futa + i.employer_sui + i.employer_cpp2 + i.employer_eht
+         + i.employer_ni + i.employer_futa + i.employer_sui + i.employer_state_program_contributions
+         + i.employer_cpp2 + i.employer_eht
          + i.employer_bc_eht + i.employer_mb_he_levy + i.employer_nl_hapset
          + i.employer_qc_hsf + i.employer_qc_labour_standards for i in items),
         Decimal("0"),
@@ -5109,7 +5145,7 @@ def _resolve_employee_calc_inputs(
             db, organization_id, country, payroll_date, org_opted_in, state=resolution_state, tax_regime=tax_regime,
             filing_status=filing_status,
         )
-        state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state, as_of=payroll_date)
+        state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state, as_of=payroll_date, filing_status=filing_status)
         # US SUI/etc. and CA workers'-comp/similar employer-specific
         # notices both resolve through the same tenant-specific-rate
         # mechanism (jurisdiction_id stays None for every other country,
@@ -6377,7 +6413,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # region-scoped employee could silently use national-only figures
     # while a real run for the same employee correctly used their
     # region's config.
-    state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state, as_of=run.pay_date)
+    state_rate_map, state_slabs = get_state_scoped_config(
+        db, country, resolution_state, as_of=run.pay_date, filing_status=getattr(employee, "w4_filing_status", None),
+    )
     jurisdiction_id = f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state) else None
     employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=run.pay_date)
     # EI's reduced-employer-rate authorization — see the matching comment
@@ -6481,6 +6519,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         state_income_tax=calc.state_income_tax,
         local_tax=calc.local_tax,
         state_disability_insurance=calc.state_disability_insurance,
+        state_program_deductions=calc.state_program_deductions,
         total_deductions=calc.total_deductions,
         employer_pf=calc.employer_pf,
         employer_esi=calc.employer_esi,
@@ -6488,6 +6527,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         employer_medicare=calc.employer_medicare,
         employer_pension=calc.employer_pension,
         employer_sui=calc.employer_sui,
+        employer_state_program_contributions=calc.employer_state_program_contributions,
         employer_cpp2=calc.employer_cpp2,
         employer_cpp_base=calc.employer_cpp_base,
         employer_cpp_first_additional=calc.employer_cpp_first_additional,
@@ -6771,6 +6811,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "stateIncomeTax": item.state_income_tax or z,
         "localTax": item.local_tax or z,
         "stateDisabilityInsurance": item.state_disability_insurance or z,
+        "stateProgramDeductions": item.state_program_deductions or z,
         "pf": item.pf or z,
         "esi": item.esi or z,
         "professionalTax": item.professional_tax or z,
@@ -6788,6 +6829,7 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         # calculated, but was never added to this dict, so it never reached
         # any payslip API response despite being a real, persisted column.
         "studyLoanDeduction": item.study_loan_deduction or z,
+        "postgradLoanDeduction": item.postgrad_loan_deduction or z,
         "employerPf": item.employer_pf or z,
         "employerEsi": item.employer_esi or z,
         "employerSs": item.employer_social_security or z,
@@ -7141,6 +7183,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         # on every UK payslip PDF (see _serialize_payslip's own fix note).
         ("Workplace Pension", "employeePension"),
         ("Student Loan Deduction", "studyLoanDeduction"),
+        ("Postgraduate Loan Deduction", "postgradLoanDeduction"),
     ]:
         v = float(data.get(key, 0) or 0)
         if v > 0:

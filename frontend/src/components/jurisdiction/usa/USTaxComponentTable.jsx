@@ -107,6 +107,7 @@ function TypeBadge({ uiType }) {
     [UI_TYPES.THRESHOLD]: "Threshold",
     [UI_TYPES.FIXED_AMOUNT]: "Fixed",
     [UI_TYPES.DEDUCTION_AMOUNT]: "Deduction",
+    [UI_TYPES.ANNUAL_MAX]: "Annual Max",
     [UI_TYPES.INCOME_TAX_POINTER]: "Income Tax",
   }[uiType] || "—";
   return (

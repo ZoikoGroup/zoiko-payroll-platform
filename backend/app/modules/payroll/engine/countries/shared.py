@@ -266,6 +266,124 @@ _CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = set()
 # IN — not yet enabled.
 _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES: set[str] = set()
 
+# Per-country rollout switch for removing the UK engine's independent
+# Personal Allowance taper (ZP-TAX-UK-2026-27-001 §5.1 PAYE implementation
+# rule: "Zoiko Payroll must not independently recompute an employee's
+# tapered Personal Allowance from payroll earnings. HMRC supplies the tax
+# code that operationalizes allowances..."). While OFF, uk.py keeps
+# re-tapering the allowance above the £100k threshold from payroll-
+# observed income — the OLD, superseded behavior, kept reachable only by
+# explicitly discarding "UK" from this set (e.g. a test proving the old
+# path still works if manually reverted). Once ON, the allowance is used
+# exactly as parsed from the tax code, with no independent recompute at
+# all.
+#
+# UK — enabled 2026-09-07 (Phase 1 of the phased rollout; zero live UK
+# employees existed in the database at enable time, so this had no
+# immediate real-payslip effect — see uk_2026_27_gap_closure memory).
+_UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for capping a K-code employee's PAYE
+# deduction at 50% of THIS PERIOD'S pre-tax pay (ZP-TAX-UK-2026-27-001
+# §6.2: "tax deduction cannot exceed 50% of pre-tax pay/pension for the
+# pay period"). Applied to the PERIOD figure (ctx.gross), not the annual
+# one — the whole point of this cap is protecting a single low/irregular
+# pay period from a K-code's added notional income, which an annual-level
+# cap would only catch under perfectly uniform pay all year. While OFF
+# (reachable only by explicitly discarding "UK"), a K-code's tax is
+# uncapped — the old, superseded behavior.
+#
+# UK — enabled 2026-09-07 (Phase 2 of the phased rollout; zero live UK
+# employees existed in the database at enable time).
+_UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for National Insurance category-banded rates
+# (ZP-TAX-UK-2026-27-001 §8.3/§9.1 — all 16 category letters, each with
+# its own employee/employer rate bands). uk.py's _resolve_ni_bands/
+# _calculate_ni_from_bands mechanism already exists (same shape as
+# India's Telangana PT_FLAT bands) — this switch gates it specifically
+# because ni_category is ALREADY a live, employee-configurable field.
+# While OFF (reachable only by explicitly discarding "UK"), every
+# category computes via the flat Category-A-shaped fallback regardless
+# of what's actually declared — the old, superseded behavior.
+#
+# UK — enabled 2026-09-07 (Phase 3 of the phased rollout). The canonical
+# ni_secondary_thresh row was reconciled to the real £5,000 (was wrongly
+# £9,100) and a set of incomplete, orphaned pre-existing NI_BAND rows for
+# categories A/B was found and deleted BEFORE enabling this — see
+# uk_2026_27_gap_closure memory. Zero live UK employees existed in the
+# database at enable time.
+_UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for computing the flat-fallback NI path
+# directly against THIS PERIOD'S gross and a real Weekly/Monthly
+# threshold, instead of annualizing gross then dividing the result back
+# down (ZP-TAX-UK-2026-27-001 §8.1: "For ordinary employees, Class 1 NIC
+# is based on the earnings period rather than cumulative annual
+# earnings... must not cause ordinary payroll to annualize NIC"). The
+# annualize-then-divide model is only numerically equivalent to true
+# period-based NI under perfectly uniform pay across the year — wrong for
+# irregular/bonus periods. Scoped to Weekly and Monthly only (the two
+# frequencies the document publishes real, independently-rounded
+# threshold figures for — its weekly threshold doesn't even multiply out
+# to its own annual figure, confirming these aren't safely derivable from
+# each other); Fortnightly/FourWeekly/anything else keeps today's
+# annualize-then-divide fallback. While OFF, every frequency uses today's
+# exact existing behavior.
+#
+# UK — enabled 2026-09-07 (Phase 4 of the phased rollout; zero live UK
+# employees existed in the database at enable time). While OFF
+# (reachable only by explicitly discarding "UK"), every frequency uses
+# the old, annualize-then-divide behavior.
+_UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for rounding Student Loan/Postgraduate Loan
+# deductions DOWN to the nearest whole pound (ZP-TAX-UK-2026-27-001
+# §10.2: "Round the deduction down to the nearest whole pound as required
+# by HMRC loan tables/manual method"). While OFF (reachable only by
+# explicitly discarding "UK"), uk.py rounds to the nearest penny
+# (_round2) — the old, superseded behavior.
+#
+# UK — enabled 2026-09-07 (Phase 5 of the phased rollout; zero live UK
+# employees existed in the database at enable time).
+_UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-STATE (not per-country, unlike every switch above — the US isn't one
+# jurisdiction) rollout switch for a state's real income-tax withholding
+# (ZP-TAX-US-2026-001 §4). While a state is absent from this set, us.py
+# ignores any TaxSlab rows configured for it and state_income_tax computes
+# as 0 for that state — the same silent-zero behavior every US state has
+# had until explicitly added here, so this is additive per-state, never a
+# retroactive change to a state not yet in the set. Add a state only once
+# its real TaxSlab/allowance data has been seeded AND (per this codebase's
+# standing convention) either zero employees exist with that work_state
+# yet, or an explicit go-ahead has been given to change a real number for
+# employees who do.
+#
+# CO/KY — enabled 2026-09-07 (build-out per ZP-TAX-US-2026-001): zero live
+# US employees existed in the database at enable time, so this was purely
+# additive with no real-payslip effect.
+_US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY"}
+
+# Per-state rollout switch for a state's own statutory payroll programs
+# (SDI/PFML/Paid Leave/TDI/etc., ZP-TAX-US-2026-001 §5) beyond plain income
+# tax withholding. While a state is absent from this set, us.py ignores any
+# state-scoped program rows configured for it. Same additive-per-state
+# reasoning as _US_STATE_TAX_ENABLED_STATES above — these are independent
+# switches because a state can have real income-tax data ready before its
+# special-program data is, or vice versa (California, for example, has no
+# state income tax withholding table in this build but does have SDI).
+#
+# CA/CT/DC/NY/RI/WA/NJ — enabled 2026-09-07 (build-out per
+# ZP-TAX-US-2026-001 §5): zero live US employees existed in the database
+# at enable time, so this was purely additive with no real-payslip effect.
+# CO/DE/ME added the same day (Phase 3C, headcount-conditional programs —
+# see hardcoded_defaults.py's _US_STATE_HEADCOUNT_PROGRAMS/_US_DE_PAID_LEAVE),
+# same zero-live-employees reasoning. Massachusetts/Minnesota/Oregon are
+# deliberately NOT added — the source document doesn't give a complete
+# numeric threshold and/or employee/employer split for those three.
+_US_STATE_PROGRAM_ENABLED_STATES: set[str] = {"CA", "CT", "DC", "NY", "RI", "WA", "NJ", "CO", "DE", "ME"}
+
 # ── Pay frequency (generic — any country's calculator may use this) ────────
 # PayrollContext.pay_frequency defaults to "Monthly", so
 # PERIODS_PER_YEAR["Monthly"] == MONTHS_PER_YEAR by construction — every
@@ -291,6 +409,22 @@ def resolve_period_threshold(annual_threshold: Decimal, pay_frequency: str | Non
     country calculator already does inline, factored out so it isn't
     duplicated once frequency-awareness spreads beyond UK."""
     return annual_threshold / resolve_periods_per_year(pay_frequency)
+
+
+def resolve_direct_period_threshold(period_thresholds_by_frequency: dict, annual_threshold: Decimal, pay_frequency: str | None) -> Decimal:
+    """For a statutory threshold whose authority publishes REAL, genuinely
+    independent per-period figures (e.g. UK NI's own Weekly/Monthly
+    thresholds — HMRC rounds each period's table separately, so the
+    weekly figure doesn't multiply out to the annual one) — looks up the
+    real published figure for `pay_frequency` when present in
+    `period_thresholds_by_frequency`, falling back to
+    resolve_period_threshold's derived annual/periods_per_year figure for
+    any frequency the authority hasn't published a direct table for
+    (today's exact existing behavior for those)."""
+    frequency = pay_frequency or "Monthly"
+    if frequency in period_thresholds_by_frequency:
+        return period_thresholds_by_frequency[frequency]
+    return resolve_period_threshold(annual_threshold, pay_frequency)
 
 
 # ── Government-mandated scalar parameters (Global Payroll Tax Engine) ──────
