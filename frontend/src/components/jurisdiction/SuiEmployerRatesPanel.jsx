@@ -87,6 +87,7 @@ export default function SuiEmployerRatesPanel({ country = "US" }) {
                 <th className="pb-2 pr-3">Component</th>
                 <th className="pb-2 pr-3">Wage Base</th>
                 <th className="pb-2 pr-3">Employer Rate</th>
+                <th className="pb-2 pr-3">Covered Employees</th>
                 <th className="pb-2 pr-3">Source</th>
                 <th className="pb-2 pr-3">Effective</th>
                 <th className="pb-2 pr-3">Agency Account</th>
@@ -98,8 +99,9 @@ export default function SuiEmployerRatesPanel({ country = "US" }) {
                 <tr key={p.id} className="border-b border-border-light last:border-0">
                   <td className="py-2 pr-3 font-medium text-foreground">{p.jurisdictionId}</td>
                   <td className="py-2 pr-3">{p.componentCode}</td>
-                  <td className="py-2 pr-3">{p.taxableWageBase}</td>
-                  <td className="py-2 pr-3">{p.employerRatePct}%</td>
+                  <td className="py-2 pr-3">{p.taxableWageBase ?? "—"}</td>
+                  <td className="py-2 pr-3">{p.employerRatePct != null ? `${p.employerRatePct}%` : "—"}</td>
+                  <td className="py-2 pr-3">{p.coveredEmployeeCount ?? "—"}</td>
                   <td className="py-2 pr-3">{p.rateSource}</td>
                   <td className="py-2 pr-3 text-foreground-muted">{p.effectiveFrom} → {p.effectiveTo || "open"}</td>
                   <td className="py-2 pr-3 font-mono text-foreground-disabled">{p.agencyAccountId || "—"}</td>
@@ -145,9 +147,20 @@ export default function SuiEmployerRatesPanel({ country = "US" }) {
 }
 
 const COMPONENT_OPTIONS_BY_COUNTRY = {
-  US: ["SUI", "ETT", "WF", "JDA"],
+  // FAMLI/PFML/PAID_LEAVE (ZP-TAX-US-2026-001 §5 build-out): headcount-only
+  // profiles — no wage base/rate, just this employer's own covered
+  // headcount for a state program whose employer share is
+  // headcount-conditional (see the Covered Employees field below).
+  US: ["SUI", "ETT", "WF", "JDA", "FAMLI", "PFML", "PAID_LEAVE"],
   CA: ["WCB"],
 };
+
+// A row for one of these components is headcount-only — it never carries
+// a real wage base/employer rate (that data lives in the canonical
+// state-program ContributionRate rows instead), so the form shows the
+// Covered Employees field INSTEAD of Wage Base/Employer Rate, and those
+// two aren't required for it.
+const HEADCOUNT_ONLY_COMPONENTS = ["FAMLI", "PFML", "PAID_LEAVE"];
 
 function SuiProfileFormModal({ organizationId, profile, country = "US", onClose, onSaved }) {
   const { addToast } = useToast() || {};
@@ -158,6 +171,7 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
     componentCode: profile?.componentCode || componentOptions[0],
     taxableWageBase: profile?.taxableWageBase ?? "",
     employerRatePct: profile?.employerRatePct ?? "",
+    coveredEmployeeCount: profile?.coveredEmployeeCount ?? "",
     rateSource: profile?.rateSource || "EMPLOYER_NOTICE",
     effectiveFrom: profile?.effectiveFrom || "",
     effectiveTo: profile?.effectiveTo || "",
@@ -167,14 +181,24 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const isHeadcountOnly = HEADCOUNT_ONLY_COMPONENTS.includes(form.componentCode);
 
   useEffect(() => {
     getSourceArtifacts().then(setSources).catch(() => setSources([]));
   }, []);
 
   async function save() {
-    if (!form.jurisdictionId.trim() || form.taxableWageBase === "" || form.employerRatePct === "" || !form.effectiveFrom) {
-      addToast?.("Jurisdiction, wage base, employer rate, and effective-from date are required.", "error");
+    if (!form.jurisdictionId.trim() || !form.effectiveFrom) {
+      addToast?.("Jurisdiction and effective-from date are required.", "error");
+      return;
+    }
+    if (isHeadcountOnly) {
+      if (form.coveredEmployeeCount === "") {
+        addToast?.("Covered Employees is required for this component.", "error");
+        return;
+      }
+    } else if (form.taxableWageBase === "" || form.employerRatePct === "") {
+      addToast?.("Wage base and employer rate are required.", "error");
       return;
     }
     setSaving(true);
@@ -182,7 +206,9 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
       await upsertEmployerTaxProfile({
         id: profile?.id, organizationId: Number(organizationId),
         jurisdictionId: form.jurisdictionId, componentCode: form.componentCode,
-        taxableWageBase: form.taxableWageBase, employerRatePct: form.employerRatePct,
+        taxableWageBase: isHeadcountOnly ? null : form.taxableWageBase,
+        employerRatePct: isHeadcountOnly ? null : form.employerRatePct,
+        coveredEmployeeCount: form.coveredEmployeeCount === "" ? null : Number(form.coveredEmployeeCount),
         rateSource: form.rateSource, effectiveFrom: form.effectiveFrom,
         effectiveTo: form.effectiveTo || null, agencyAccountId: form.agencyAccountId || null,
         reimbursableStatus: form.reimbursableStatus,
@@ -206,8 +232,18 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
             {componentOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
-        <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="3.40" /></div>
+        {isHeadcountOnly ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Covered Employees</label>
+            <input type="number" min="0" className={inputClass} value={form.coveredEmployeeCount} onChange={set("coveredEmployeeCount")} placeholder="e.g. 15" />
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own headcount for this program — determines whether the employer share applies, per the statutory threshold configured in Tax Components.</p>
+          </div>
+        ) : (
+          <>
+            <div><label className={labelClass}>Taxable Wage Base</label><input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="7000" /></div>
+            <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="3.40" /></div>
+          </>
+        )}
         <div><label className={labelClass}>Rate Source</label>
           <select className={inputClass} value={form.rateSource} onChange={set("rateSource")}>
             <option value="STATE_DEFAULT">State Default</option>

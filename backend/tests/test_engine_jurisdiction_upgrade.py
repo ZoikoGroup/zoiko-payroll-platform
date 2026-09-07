@@ -38,6 +38,8 @@ class Slab:
     rule_type: str = "MARGINAL_RATE"
     formula_expression: Optional[str] = None
     flat_amount: Optional[Decimal] = None
+    filing_status: Optional[str] = None
+    jurisdiction_state: Optional[str] = None
 
 
 def calc(country, gross, rate_map=None, slabs=None, basic=None, **extra):
@@ -223,9 +225,14 @@ def test_us_no_state_slabs_means_no_state_tax():
 
 
 def test_us_state_income_tax_adds_to_federal():
+    from app.modules.payroll.engine.countries import shared as shared_module
     federal_only = calc("US", 8000, US_RATES, US_SLABS)
-    state_slabs = [Slab(Decimal("0"), None, Decimal("9.3"))]
-    with_state = calc("US", 8000, US_RATES, US_SLABS, work_state="California", state_slabs=state_slabs)
+    state_slabs = [Slab(Decimal("0"), None, Decimal("9.3"), jurisdiction_state="CA")]
+    shared_module._US_STATE_TAX_ENABLED_STATES.add("CA")
+    try:
+        with_state = calc("US", 8000, US_RATES, US_SLABS, work_state="California", state_slabs=state_slabs)
+    finally:
+        shared_module._US_STATE_TAX_ENABLED_STATES.discard("CA")
     assert with_state.tds > federal_only.tds
 
 
@@ -282,6 +289,48 @@ def test_uk_postgrad_loan_threshold_configurable():
     configured_rates = {**UK_RATES, "pg_loan_thresh": Rate(flat_amount=Decimal("5000"))}
     configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
     assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+def test_uk_plan5_plus_postgrad_matches_document_worked_example():
+    # ZP-TAX-UK-2026-27-001 §10.2's own reference test vectors: Plan 5
+    # (£82) + Postgraduate (£75) = £157, as two separate components — the
+    # round-down-to-pound rule (§10.2) is now the shipped default.
+    result = calc(
+        "UK", 3000, UK_RATES, UK_SLABS,
+        study_loan_plan="UK_PLAN5", study_loan_balance=Decimal("20000"),
+        has_postgrad_loan=True,
+    )
+    assert result.study_loan_deduction == Decimal("82")
+    assert result.postgrad_loan_deduction == Decimal("75")
+    assert result.study_loan_deduction + result.postgrad_loan_deduction == Decimal("157")
+
+
+def test_uk_standalone_postgrad_plan_unaffected_by_unset_flag():
+    # A standalone Postgraduate-only employee (study_loan_plan=="UK_POSTGRAD")
+    # with has_postgrad_loan left at its default (False) must produce
+    # exactly today's single deduction, with the new field at 0.
+    result = calc("UK", 3000, UK_RATES, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
+    assert result.study_loan_deduction == Decimal("75.00")
+    assert result.postgrad_loan_deduction == Decimal("0")
+
+
+def test_uk_postgrad_flag_does_not_double_deduct_for_standalone_postgrad_plan():
+    # Guard: even if has_postgrad_loan were somehow set True alongside
+    # study_loan_plan=="UK_POSTGRAD" (should be rejected earlier at
+    # employee_validation.py), the engine itself must never double-apply
+    # the Postgraduate deduction.
+    result = calc(
+        "UK", 3000, UK_RATES, UK_SLABS,
+        study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"),
+        has_postgrad_loan=True,
+    )
+    assert result.postgrad_loan_deduction == Decimal("0")
+    assert result.study_loan_deduction == Decimal("75.00")
+
+
+def test_uk_postgrad_loan_zero_when_flag_not_set():
+    result = calc("UK", 3000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN5", study_loan_balance=Decimal("20000"))
+    assert result.postgrad_loan_deduction == Decimal("0")
 
 
 def test_uk_scotland_uses_its_own_bands():
@@ -582,6 +631,158 @@ def test_uk_nt_code_means_zero_annual_tax():
     assert result.tds == Decimal("0")
 
 
+# ── ZP-TAX-UK-2026-27-001 correctness fixes (all dormant by default) ───
+
+def test_uk_pa_taper_still_reachable_if_explicitly_reverted():
+    # Phase 1 shipped 2026-09-07: _UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES
+    # now defaults to {"UK"} (see shared.py). The OLD, superseded independent-
+    # taper behavior remains reachable only by explicitly discarding "UK"
+    # from the set — proving the fix is a genuine toggle, not a one-way
+    # rewrite with dead code left behind.
+    from app.modules.payroll.engine.countries import shared as shared_module
+    from app.modules.payroll.engine.countries.uk import _calculate_annual_tax_uk
+    shared_module._UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES.discard("UK")
+    try:
+        annual_gross = Decimal("120000")
+        tax = _calculate_annual_tax_uk(annual_gross, UK_SLABS, UK_RATES)
+        taper = (annual_gross - Decimal("100000")) / Decimal("2")
+        taxable = annual_gross - (Decimal("12570") - taper)
+        expected = Decimal("37700") * Decimal("0.20") + (taxable - Decimal("37700")) * Decimal("0.40")
+        assert tax == expected
+    finally:
+        shared_module._UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES.add("UK")
+
+
+def test_uk_pa_taper_disabled_by_default():
+    # ZP-TAX-UK-2026-27-001 §5.1: HMRC bakes any real taper into the code
+    # itself — the full parsed allowance now survives regardless of income,
+    # with no independent recompute at all, as the shipped default.
+    from app.modules.payroll.engine.countries.uk import _calculate_annual_tax_uk
+    annual_gross = Decimal("120000")
+    tax = _calculate_annual_tax_uk(annual_gross, UK_SLABS, UK_RATES)
+    taxable = annual_gross - Decimal("12570")
+    expected = Decimal("37700") * Decimal("0.20") + (taxable - Decimal("37700")) * Decimal("0.40")
+    assert tax == expected
+
+
+def test_uk_pa_taper_setting_never_affects_a_k_code():
+    # A K-code's negative allowance has nothing to taper either way — the
+    # setting must be a genuine no-op for it, in both directions.
+    from app.modules.payroll.engine.countries import shared as shared_module
+    from app.modules.payroll.engine.countries.uk import _calculate_annual_tax_uk
+    annual_gross = Decimal("120000")
+    enabled_result = _calculate_annual_tax_uk(annual_gross, UK_SLABS, UK_RATES, tax_code="K475")
+    shared_module._UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES.discard("UK")
+    try:
+        disabled_result = _calculate_annual_tax_uk(annual_gross, UK_SLABS, UK_RATES, tax_code="K475")
+    finally:
+        shared_module._UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES.add("UK")
+    assert enabled_result == disabled_result
+
+
+def test_uk_k_code_uncapped_if_explicitly_reverted():
+    # Phase 2 shipped 2026-09-07: _UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES now
+    # defaults to {"UK"}. The old, superseded uncapped behavior remains
+    # reachable only by explicitly discarding "UK" from the set.
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES.discard("UK")
+    try:
+        result = calc("UK", 1000, UK_RATES, UK_SLABS, tax_code="K2000")
+        assert result.tds == Decimal("533.33")
+    finally:
+        shared_module._UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES.add("UK")
+
+
+def test_uk_k_code_50pct_cap_applies_by_default():
+    # ZP-TAX-UK-2026-27-001 §6.2: capped at 50% of THIS PERIOD'S pre-tax pay.
+    result = calc("UK", 1000, UK_RATES, UK_SLABS, tax_code="K2000")
+    assert result.tds == Decimal("500.00")
+
+
+def test_uk_k_code_cap_pct_configurable():
+    # Was a bare inline Decimal("0.5") until moved to hardcoded_defaults.py's
+    # k_code_cap_pct — a Super Admin-configured row must actually change the
+    # cap, not just the unconfigured default.
+    configured_rates = {**UK_RATES, "k_code_cap_pct": Rate(employee_rate_pct=Decimal("30"))}
+    result = calc("UK", 1000, UK_RATES, UK_SLABS, tax_code="K2000")
+    configured_result = calc("UK", 1000, configured_rates, UK_SLABS, tax_code="K2000")
+    assert result.tds == Decimal("500.00")       # default 50% cap
+    assert configured_result.tds == Decimal("300.00")  # configured 30% cap
+
+
+def test_uk_k_code_cap_is_noop_when_comfortably_under_50pct():
+    # A cap, not a recompute — must not change an already-under-50% figure,
+    # in either direction.
+    from app.modules.payroll.engine.countries import shared as shared_module
+    enabled_result = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="K100")
+    shared_module._UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES.discard("UK")
+    try:
+        disabled_result = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="K100")
+    finally:
+        shared_module._UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES.add("UK")
+    assert enabled_result.tds == disabled_result.tds
+
+
+def test_uk_ni_direct_period_calc_diverges_from_annualize_then_divide():
+    # ZP-TAX-UK-2026-27-001 §8.1's real Monthly PT/UEL/ST (£1,048/£4,189/
+    # £417) don't derive from the annual figures by division (£12,570/12
+    # = £1,047.50, not £1,048) — so even under perfectly uniform monthly
+    # pay, annualize-then-divide and true per-period calculation diverge.
+    # _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES defaults to {"UK"} since
+    # Phase 4 (2026-09-07) — the direct-period result is the shipped default.
+    from app.modules.payroll.engine.countries import shared as shared_module
+    enabled_result = calc("UK", 1048, UK_RATES, UK_SLABS, pay_frequency="Monthly")
+    shared_module._UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES.discard("UK")
+    try:
+        disabled_result = calc("UK", 1048, UK_RATES, UK_SLABS, pay_frequency="Monthly")
+    finally:
+        shared_module._UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES.add("UK")
+    assert disabled_result.ni_employee == Decimal("0.04")
+    assert enabled_result.ni_employee == Decimal("0.00")
+    assert disabled_result.employer_ni == Decimal("94.70")
+    assert enabled_result.employer_ni == Decimal("94.65")
+
+
+def test_uk_ni_fortnightly_unaffected_by_direct_period_setting():
+    # The document doesn't publish a Fortnightly table — that frequency
+    # must keep today's annualize-then-divide fallback either way.
+    from app.modules.payroll.engine.countries import shared as shared_module
+    enabled_result = calc("UK", 2096, UK_RATES, UK_SLABS, pay_frequency="Fortnightly")
+    shared_module._UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES.discard("UK")
+    try:
+        disabled_result = calc("UK", 2096, UK_RATES, UK_SLABS, pay_frequency="Fortnightly")
+    finally:
+        shared_module._UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES.add("UK")
+    assert enabled_result.ni_employee == disabled_result.ni_employee
+    assert enabled_result.employer_ni == disabled_result.employer_ni
+
+
+def test_uk_round_down_pound_helper_matches_hmrc_rule():
+    from app.modules.payroll.engine.countries.uk import _round_down_pound
+    assert _round_down_pound(Decimal("68.34")) == Decimal("68")
+    assert _round_down_pound(Decimal("68.00")) == Decimal("68")
+    assert _round_down_pound(Decimal("68.99")) == Decimal("68")
+
+
+def test_uk_student_loan_penny_rounding_if_explicitly_reverted():
+    # Phase 5 shipped 2026-09-07: _UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES
+    # now defaults to {"UK"}. The old, superseded penny-rounding behavior
+    # remains reachable only by explicitly discarding "UK".
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES.discard("UK")
+    try:
+        result = calc("UK", 3001, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN1", study_loan_balance=Decimal("1000"))
+        assert result.study_loan_deduction == Decimal("68.34")
+    finally:
+        shared_module._UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES.add("UK")
+
+
+def test_uk_student_loan_rounds_down_to_pound_by_default():
+    # ZP-TAX-UK-2026-27-001 §10.2: round down to the nearest whole pound.
+    result = calc("UK", 3001, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN1", study_loan_balance=Decimal("1000"))
+    assert result.study_loan_deduction == Decimal("68")
+
+
 # ── UK production refactor: NI category bands (regression guard) ───────
 
 _NI_CAT_A_BANDS = [
@@ -603,8 +804,15 @@ def test_ni_category_a_bands_match_flat_calculation_exactly():
     # specifically, it must reproduce today's flat ContributionRate-based
     # NI figures exactly, since the band boundaries are the union of the
     # employee (PT/UEL) and employer (ST) thresholds.
-    flat_result = calc("UK", 5000, UK_RATES, UK_SLABS)
-    banded_result = calc("UK", 5000, UK_RATES, UK_SLABS + _NI_CAT_A_BANDS, ni_category="A")
+    # _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES defaults to {"UK"} since
+    # Phase 3 (2026-09-07) — no toggling needed, this is the shipped default.
+    # Uses Fortnightly explicitly: Phase 4's direct-period NI calc (also
+    # enabled by default) only touches Weekly/Monthly on the FLAT path,
+    # leaving the banded path's own frequency-awareness a disclosed
+    # follow-up — so Monthly would now show a small, expected divergence
+    # between the two paths that isn't what this test exists to check.
+    flat_result = calc("UK", 5000, UK_RATES, UK_SLABS, pay_frequency="Fortnightly")
+    banded_result = calc("UK", 5000, UK_RATES, UK_SLABS + _NI_CAT_A_BANDS, ni_category="A", pay_frequency="Fortnightly")
     assert banded_result.ni_employee == flat_result.ni_employee
     assert banded_result.employer_ni == flat_result.employer_ni
 
@@ -613,6 +821,19 @@ def test_ni_bands_ignored_without_a_category_set():
     with_bands_no_category = calc("UK", 5000, UK_RATES, UK_SLABS + _NI_CAT_A_BANDS)
     flat_result = calc("UK", 5000, UK_RATES, UK_SLABS)
     assert with_bands_no_category.ni_employee == flat_result.ni_employee
+
+
+def test_resolve_ni_bands_returns_empty_if_explicitly_reverted():
+    # Phase 3 shipped 2026-09-07: _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES now
+    # defaults to {"UK"}. The old, superseded "always flat, ignore real
+    # bands" behavior remains reachable only by explicitly discarding "UK".
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES.discard("UK")
+    try:
+        bands = _resolve_ni_bands(_NI_CAT_A_BANDS, "A")
+        assert bands == []
+    finally:
+        shared_module._UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES.add("UK")
 
 
 def test_resolve_ni_bands_filters_by_category_and_sorts():

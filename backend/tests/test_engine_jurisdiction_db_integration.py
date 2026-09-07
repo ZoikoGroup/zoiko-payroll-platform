@@ -1194,7 +1194,11 @@ def test_uk_scotland_consistent_across_preview_generation_and_manual_payslip(db,
     assert generated.tds == manual.tds
     # Genuinely Scotland's 40% rate, not the national 20% one — proves the
     # fix changed real behavior, not just "all three happen to agree."
-    assert generated.tds == Decimal("20000.00")
+    # £600,000/yr taxable at £600,000-£12,570=£587,430 × 40% ÷ 12 = £19,581 —
+    # no longer £20,000: since the Phase 1 PA-taper-removal fix (2026-09-07),
+    # the full £12,570 allowance survives at this income instead of being
+    # independently zeroed out by the (now-removed) taper computation.
+    assert generated.tds == Decimal("19581.00")
 
 
 # ── Section 10: canonical-pack immutability guard (US blueprint Phase 0) ──
@@ -1447,8 +1451,14 @@ def test_reciprocity_flows_through_real_payslip_generation(db, organization, mon
     emp.reciprocity_certificate_expiry = date(2026, 12, 31)
     db.commit()
 
-    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
-    service.generate_payslips_for_run(db, run, organization.id)
+    from app.modules.payroll.engine.countries import shared as shared_module
+    shared_module._US_STATE_TAX_ENABLED_STATES.update({"NJ", "PA"})
+    try:
+        run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+        service.generate_payslips_for_run(db, run, organization.id)
+    finally:
+        shared_module._US_STATE_TAX_ENABLED_STATES.discard("NJ")
+        shared_module._US_STATE_TAX_ENABLED_STATES.discard("PA")
 
     item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
     # PA's 3% of $60,000/yr / 12 = $150.00 — NOT NJ's 8% ($400.00).

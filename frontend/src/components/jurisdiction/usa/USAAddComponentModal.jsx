@@ -29,6 +29,7 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
   const [step, setStep] = useState(1);
   const [search, setSearch] = useState("");
   const [entry, setEntry] = useState(null); // chosen catalog entry (componentKey via classify)
+  const [pendingMulti, setPendingMulti] = useState(null); // catalog entry with 2+ existing rows to disambiguate (e.g. Colorado's MFJ vs Any-filing-status Standard Deduction)
   const [form, setForm] = useState({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -64,7 +65,20 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
   function choose(entryItem) {
     if (entryItem.navigatesTo) { onNavigateIncomeTax?.(); return; }
     const rows = (rates || []).filter((r) => r.componentKey === entryItem.componentKey);
-    if (rows.length > 0) { onEditExisting(rows[0]); return; }
+    // A component that varies by filing status (e.g. Standard Deduction)
+    // can have SEVERAL rows under the same componentKey — Colorado's own
+    // Standard Deduction has an MFJ row AND an "any other filing status"
+    // row. Silently jumping to rows[0] made every row past the first
+    // permanently unreachable from this flow (only reachable by opening
+    // the Tax Components table directly and finding the exact row) — show
+    // a pick-one-or-add-another step instead, same as the sibling picker
+    // (USAComponentPickerModal) already does for the older flow.
+    if (rows.length > 1) { setPendingMulti({ entry: entryItem, rows }); return; }
+    if (rows.length === 1) { onEditExisting(rows[0]); return; }
+    startAddNew(entryItem);
+  }
+
+  function startAddNew(entryItem) {
     setEntry(entryItem);
     setForm({
       componentKey: entryItem.componentKey,
@@ -73,6 +87,7 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
       employeeSharePct: "", employerSharePct: "", flatAmount: "", filingStatus: "",
       sortOrder: 0, reason: "",
     });
+    setPendingMulti(null);
     setStep(2);
   }
 
@@ -157,7 +172,37 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
         </>
       }
     >
-      {step === 1 && (
+      {step === 1 && pendingMulti && (
+        <div>
+          <p className="mb-3 text-xs text-foreground-muted">
+            {pendingMulti.rows.length} existing configurations for <span className="font-medium text-foreground">{pendingMulti.entry.displayName}</span> (e.g. by filing status) — pick one to edit, or add another.
+          </p>
+          <div className="space-y-1.5">
+            {pendingMulti.rows.map((r) => (
+              <button
+                key={r.id} onClick={() => onEditExisting(r)}
+                className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2.5 text-left text-sm hover:border-primary hover:bg-primary/5"
+              >
+                <span className="font-medium text-foreground">{r.filingStatus || "Any filing status"}</span>
+                <span className="text-xs text-foreground-muted">{r.flatAmount ?? (r.employeeRatePct != null ? `${r.employeeRatePct}%` : r.employerRatePct != null ? `${r.employerRatePct}%` : "—")}</span>
+              </button>
+            ))}
+            <button
+              onClick={() => startAddNew(pendingMulti.entry)}
+              className="w-full rounded-lg border border-dashed border-border px-3 py-2.5 text-left text-sm font-medium text-primary hover:bg-primary/5"
+            >
+              + Add another {pendingMulti.entry.displayName} configuration
+            </button>
+            <button
+              onClick={() => setPendingMulti(null)}
+              className="w-full rounded-lg px-3 py-2 text-left text-xs text-foreground-muted hover:text-foreground"
+            >
+              ← Back to component list
+            </button>
+          </div>
+        </div>
+      )}
+      {step === 1 && !pendingMulti && (
         <div>
           <div className="relative mb-4">
             <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-disabled" />

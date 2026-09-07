@@ -129,6 +129,7 @@ def build_context_from_employee(
         ni_category=getattr(employee, "ni_category", None),
         study_loan_plan=getattr(employee, "study_loan_plan", None),
         study_loan_balance=getattr(employee, "study_loan_balance", None),
+        has_postgrad_loan=bool(getattr(employee, "has_postgrad_loan", False)),
         church_tax_liable=bool(getattr(employee, "church_tax_liable", False)),
         tax_regime=getattr(employee, "tax_regime", None),
         pay_frequency=getattr(employee, "pay_frequency", None) or "Monthly",

@@ -25,6 +25,12 @@ export const UI_TYPES = {
   THRESHOLD: "THRESHOLD",
   FIXED_AMOUNT: "FIXED_AMOUNT",
   DEDUCTION_AMOUNT: "DEDUCTION_AMOUNT",
+  // A state-program's own annual DOLLAR cap on the resulting contribution
+  // itself (e.g. NY PFL's $411.91/yr max, RI TDI's $1,100/yr max) — a
+  // distinct concept from WAGE_BASE (which caps the WAGE the rate applies
+  // to, not the resulting amount). See ZP-TAX-US-2026-001 §5 build-out:
+  // us.py's "<key>_annual_max" companion-row convention.
+  ANNUAL_MAX: "ANNUAL_MAX",
   INCOME_TAX_POINTER: "INCOME_TAX_POINTER",
 };
 
@@ -62,6 +68,23 @@ const STATIC_MAP = {
   futa_wage_base: { uiType: UI_TYPES.WAGE_BASE },
   standard_deduction: { uiType: UI_TYPES.DEDUCTION_AMOUNT },
   "federal-income-tax": { uiType: UI_TYPES.INCOME_TAX_POINTER },
+
+  // State-level statutory payroll programs (ZP-TAX-US-2026-001 §5) —
+  // explicit entries so the Edit form shows the right field(s) with the
+  // right label, instead of falling through to the generic heuristic
+  // below (which mislabels an employer-only row like DC's Paid Leave as
+  // "Employee Rate %" — the heuristic has no way to know a single-rate
+  // row is CONCEPTUALLY employer-side just because only employerRatePct
+  // happens to be populated on this particular state's row).
+  paid_leave: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  sdi: { uiType: UI_TYPES.PERCENTAGE },
+  tdi: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "tdi_wage_cap" },
+  wa_cares: { uiType: UI_TYPES.PERCENTAGE },
+  worker_ui: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "worker_ui_wage_cap" },
+  worker_di: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "worker_di_wage_cap" },
+  workforce_dev: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "workforce_dev_wage_cap" },
+  fli: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "fli_wage_cap" },
+  state_standard_deduction: { uiType: UI_TYPES.DEDUCTION_AMOUNT },
 };
 
 // Business-language catalog for the "+ Add Component" picker — the admin
@@ -107,6 +130,8 @@ export function describeUiType(uiType, overrides = {}) {
       return { flatAmount: true, flatAmountLabel: "Annual Wage Base" };
     case UI_TYPES.THRESHOLD:
       return { flatAmount: true, flatAmountLabel: "Threshold Amount" };
+    case UI_TYPES.ANNUAL_MAX:
+      return { flatAmount: true, flatAmountLabel: "Annual Dollar Maximum" };
     case UI_TYPES.DEDUCTION_AMOUNT:
       return { flatAmount: true, flatAmountLabel: "Deduction Amount", filingStatus: true };
     case UI_TYPES.FIXED_AMOUNT:
@@ -137,6 +162,12 @@ export function classifyContributionRate(rate) {
     const haystack = `${rate?.componentKey || ""} ${rate?.label || ""}`.toLowerCase();
     if (hasEmployee && hasEmployer) uiType = UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE;
     else if (hasEmployee || hasEmployer) uiType = UI_TYPES.PERCENTAGE;
+    // "<key>_wage_cap"/"<key>_annual_max" (ZP-TAX-US-2026-001 §5's
+    // state-program companion-row convention, us.py's calculate()) —
+    // matched on the componentKey SUFFIX so any future program's cap/max
+    // row classifies correctly without needing its own STATIC_MAP entry.
+    else if (hasFlat && /_wage_cap$/.test(rate?.componentKey || "")) uiType = UI_TYPES.WAGE_BASE;
+    else if (hasFlat && /_annual_max$/.test(rate?.componentKey || "")) uiType = UI_TYPES.ANNUAL_MAX;
     else if (hasFlat && /wage.?base/.test(haystack)) uiType = UI_TYPES.WAGE_BASE;
     else if (hasFlat && /thresh/.test(haystack)) uiType = UI_TYPES.THRESHOLD;
     else if (hasFlat && /deduct/.test(haystack)) uiType = UI_TYPES.DEDUCTION_AMOUNT;

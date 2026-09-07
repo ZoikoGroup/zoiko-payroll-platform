@@ -69,9 +69,11 @@ class EnterpriseStrategy(PayrollStrategy):
             + deductions.get("medicare", Decimal("0"))
             + deductions.get("ni_employee", Decimal("0"))
             + deductions.get("study_loan_deduction", Decimal("0"))
+            + deductions.get("postgrad_loan_deduction", Decimal("0"))
             + deductions.get("church_tax", Decimal("0"))
             + deductions.get("cpp2", Decimal("0"))
             + deductions.get("state_disability_insurance", Decimal("0"))
+            + deductions.get("state_program_deductions", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -97,6 +99,7 @@ class EnterpriseStrategy(PayrollStrategy):
             medicare=deductions.get("medicare", Decimal("0")),
             ni_employee=deductions.get("ni_employee", Decimal("0")),
             study_loan_deduction=deductions.get("study_loan_deduction", Decimal("0")),
+            postgrad_loan_deduction=deductions.get("postgrad_loan_deduction", Decimal("0")),
             church_tax=deductions.get("church_tax", Decimal("0")),
             cpp2=deductions.get("cpp2", Decimal("0")),
             employer_social_security=deductions.get("employer_social_security", Decimal("0")),
@@ -105,6 +108,7 @@ class EnterpriseStrategy(PayrollStrategy):
             employer_ni=deductions.get("employer_ni", Decimal("0")),
             employer_futa=deductions.get("employer_futa", Decimal("0")),
             employer_sui=deductions.get("employer_sui", Decimal("0")),
+            employer_state_program_contributions=deductions.get("employer_state_program_contributions", Decimal("0")),
             employer_cpp2=deductions.get("employer_cpp2", Decimal("0")),
             employer_eht=deductions.get("employer_eht", Decimal("0")),
             on_eht_ytd_remuneration_after=deductions.get("on_eht_ytd_remuneration_after"),
@@ -133,6 +137,7 @@ class EnterpriseStrategy(PayrollStrategy):
             state_income_tax=deductions.get("state_income_tax", Decimal("0")),
             local_tax=deductions.get("local_tax", Decimal("0")),
             state_disability_insurance=deductions.get("state_disability_insurance", Decimal("0")),
+            state_program_deductions=deductions.get("state_program_deductions", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
         )

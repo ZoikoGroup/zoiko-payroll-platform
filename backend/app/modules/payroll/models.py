@@ -261,6 +261,15 @@ class PayrollEmployee(Base):
     # generic pair reused by both rather than two parallel field sets.
     study_loan_plan    = Column(String(20), nullable=True)
     study_loan_balance = Column(Numeric(12, 2), nullable=True)
+    # UK only: a Postgraduate Loan repaid CONCURRENTLY with an
+    # undergraduate plan (ZP-TAX-UK-2026-27-001 §10.2's own worked
+    # example: Plan 5 + Postgraduate = two separate deduction lines).
+    # Distinct from study_loan_plan=="UK_POSTGRAD" (a standalone
+    # Postgraduate-only employee, already fully handled by the existing
+    # single-field mechanism) — uk.py's calculate() must never apply both
+    # at once for the same employee. Defaults False so no existing
+    # employee's calculation changes.
+    has_postgrad_loan  = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Germany: whether this employee is liable for Kirchensteuer (church
     # tax) — an opt-in surcharge on income tax. Defaults False so no
@@ -486,12 +495,33 @@ class PayslipItem(Base):
     # its own line, distinct from state_income_tax, since it's a separate
     # statutory deduction category, not part of income-tax withholding.
     state_disability_insurance = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: every OTHER state-level statutory payroll program beyond SDI
+    # (Paid Family Leave/Paid Leave/TDI/Universal Paid Leave/WA Cares/
+    # NJ's worker UI+DI+workforce-dev+FLI/etc., ZP-TAX-US-2026-001 §5) —
+    # one combined employee-side total, computed from however many
+    # programs are configured for the employee's state (us.py's own
+    # loop). Deliberately ONE field for now rather than one column per
+    # program, same "field reuse over new columns, graduate later if a
+    # real need for per-component tracking arises" convention this
+    # engine already uses for `tds` (see service.py's own comment on it)
+    # — each program's own name/rate/amount is still individually
+    # auditable via the calculation trace, just not as a separate
+    # payslip line yet.
+    state_program_deductions = Column(Numeric(12, 2), default=0, server_default="0")
     # UK-specific
     ni_employee       = Column(Numeric(12, 2), default=0)
     # UK/Australia: government study-loan repayment (Student/Postgraduate
     # Loan in the UK, HELP/HECS in Australia) — one shared line, same
     # reasoning as PayrollEmployee.study_loan_plan/study_loan_balance.
     study_loan_deduction = Column(Numeric(12, 2), default=0, server_default="0")
+    # UK only: a CONCURRENT Postgraduate Loan deduction, separate from
+    # study_loan_deduction above whenever an employee has BOTH an
+    # undergraduate plan and PayrollEmployee.has_postgrad_loan set —
+    # matches ZP-TAX-UK-2026-27-001 §10.2's own worked example (two
+    # separate deduction lines, not one combined figure). Always 0 for a
+    # standalone study_loan_plan=="UK_POSTGRAD" employee (that case stays
+    # fully represented by study_loan_deduction alone).
+    postgrad_loan_deduction = Column(Numeric(12, 2), default=0, server_default="0")
     # UK: employee-side Workplace Pension deduction — distinct from
     # employer_pension below. Zero unless an employee pension rate has
     # been explicitly configured (see engine/countries/uk.py).
@@ -528,6 +558,10 @@ class PayslipItem(Base):
     # from EmployerTaxProfile (agency-assigned rate), NOT from a generic
     # ContributionRate override. Zero until an org has a configured profile.
     employer_sui       = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: employer-side counterpart to state_program_deductions above (e.g.
+    # DC's Universal Paid Leave is entirely employer-funded). Same
+    # one-combined-field convention.
+    employer_state_program_contributions = Column(Numeric(12, 2), default=0, server_default="0")
     # Canada: employer-side CPP2/QPP2 — previously entirely unmodeled (only
     # the employee-side cpp2 column above existed); the employer's own
     # second-tier contribution is legally distinct and must be tracked
@@ -1694,14 +1728,37 @@ class EmployerTaxProfile(Base):
     id                    = Column(Integer, primary_key=True, index=True)
     organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     jurisdiction_id        = Column(String(10), nullable=False)   # "US-CA", "US-NJ", "US-DC"
-    component_code         = Column(String(20), nullable=False)   # "SUI" | "ETT" | "WF" | "JDA"
-    taxable_wage_base       = Column(Numeric(12, 2), nullable=False)
+    # "SUI" | "ETT" | "WF" | "JDA" | "FAMLI" | "PFML" | "PAID_LEAVE" (the
+    # last three: a headcount-only row for a statutory-rate program whose
+    # EMPLOYER share is conditional on this employer's own covered
+    # headcount, ZP-TAX-US-2026-001 §5 — e.g. Colorado FAMLI's 10-employee
+    # threshold. taxable_wage_base/employer_rate_pct are widened to
+    # nullable below specifically so a row can exist for this purpose
+    # ALONE, without inventing a meaningless SUI-style rate/wage-base just
+    # to satisfy a NOT NULL constraint.
+    component_code         = Column(String(20), nullable=False)
+    # Widened from NOT NULL: a headcount-only row (see component_code
+    # comment above) has neither a real wage base nor an employer-assigned
+    # rate — those are looked up from the canonical state-program
+    # ContributionRate rows instead (same as every other state program).
+    # Every existing SUI-style row keeps its real value; nothing changes
+    # for those.
+    taxable_wage_base       = Column(Numeric(12, 2), nullable=True)
     # STATE_DEFAULT | NEW_EMPLOYER | EMPLOYER_NOTICE — provenance, per the
     # standard's §6.1: never infer an experience rate from prior payroll
     # deductions, only from an agency-issued notice or the state default.
     rate_source             = Column(String(20), nullable=False, default="STATE_DEFAULT", server_default="STATE_DEFAULT")
-    employer_rate_pct       = Column(Numeric(6, 4), nullable=False)
+    employer_rate_pct       = Column(Numeric(6, 4), nullable=True)
     assessment_rate_pct     = Column(Numeric(6, 4), nullable=True)
+    # Headcount-only purpose (see component_code comment above): how many
+    # covered individuals this employer has for THIS jurisdiction+program,
+    # as of effective_from — the one tenant-specific fact several 2026
+    # state programs need (CO FAMLI's 10-employee threshold, Maine PFML's
+    # 15, Washington PFML's 50) that no other table captures. Never
+    # inferred from headcount/payroll history — a real Tax Ops entry,
+    # same "never infer" principle as employer_rate_pct's own provenance
+    # rule above. NULL for every existing SUI-style row.
+    covered_employee_count  = Column(Integer, nullable=True)
     effective_from          = Column(Date, nullable=False)
     effective_to            = Column(Date, nullable=True)
     agency_account_id       = Column(String(100), nullable=True)   # tenant-specific; treat as sensitive

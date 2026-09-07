@@ -96,6 +96,13 @@ class PayrollContext:
     ni_category: str = None         # UK NI category letter, e.g. "A"
     study_loan_plan: str = None     # e.g. "UK_PLAN2", "UK_POSTGRAD", "AU_HELP" — shared UK/AU mechanism
     study_loan_balance: Decimal = None
+    # UK only: a Postgraduate Loan repaid CONCURRENTLY with study_loan_plan
+    # above (ZP-TAX-UK-2026-27-001 §10.2 — Plan + Postgraduate as two
+    # separate deduction lines). False for every employee today, and
+    # deliberately never combined with study_loan_plan=="UK_POSTGRAD"
+    # (that standalone case is already fully handled by study_loan_plan
+    # alone) — see engine/countries/uk.py's calculate() for the guard.
+    has_postgrad_loan: bool = False
     church_tax_liable: bool = False  # Germany Kirchensteuer opt-in
     tax_regime: str = None          # India's "Old"/"New" — None means "not set," same as every employee today
     # Generic across every country — "Monthly"/"Weekly"/"Fortnightly"/
@@ -242,6 +249,9 @@ class PayrollResult:
     # country calculator explicitly sets it — no existing country's
     # output changes just because these fields now exist.
     study_loan_deduction: Decimal = Decimal("0")
+    # UK only: the concurrent Postgraduate Loan line — see PayrollContext.
+    # has_postgrad_loan above. Always 0 unless that flag is explicitly set.
+    postgrad_loan_deduction: Decimal = Decimal("0")
     church_tax: Decimal = Decimal("0")
     cpp2: Decimal = Decimal("0")
     # Canada: CPP/QPP first-layer BASE (4.95%) vs. FIRST-ADDITIONAL
@@ -296,6 +306,9 @@ class PayrollResult:
     # EmployerTaxProfile). Zero until an org has a configured profile —
     # every other country's output is unaffected.
     employer_sui: Decimal = Decimal("0")
+    # US: employer-side counterpart to state_program_deductions below (e.g.
+    # DC's Universal Paid Leave is entirely employer-funded).
+    employer_state_program_contributions: Decimal = Decimal("0")
     # Canada: Ontario Employer Health Tax — banded on the ORG's aggregate
     # Ontario remuneration, not this employee's own pay
     # (ZP-TAX-CA-2026-001 §15/§16). Zero until the org-level accumulator
@@ -333,6 +346,12 @@ class PayrollResult:
     # part of the informational federal/state/local income-tax breakdown
     # above — it's summed into total_deductions like PF/ESI/professional_tax.
     state_disability_insurance: Decimal = Decimal("0")
+    # US: every OTHER state-level statutory payroll program beyond SDI
+    # (Paid Leave/TDI/Universal Paid Leave/WA Cares/NJ's 4 programs/etc.,
+    # ZP-TAX-US-2026-001 §5) — one combined employee-side total; see
+    # us.py's calculate() and PayslipItem.state_program_deductions'
+    # comment for the "one field now, split later" reasoning.
+    state_program_deductions: Decimal = Decimal("0")
 
     # Totals
     total_deductions: Decimal = Decimal("0")
