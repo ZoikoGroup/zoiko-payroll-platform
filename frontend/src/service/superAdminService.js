@@ -101,6 +101,13 @@ export const upsertEmployerTaxProfile = (payload) =>
 export const deleteEmployerTaxProfile = (id) =>
   apiFetch(`/api/super-admin/compliance/employer-tax-profiles/${id}`, { method: "DELETE" });
 
+// Small organization picker for the Germany Employer Levies (Accident
+// Insurance) tab — EmployerTaxProfile is org-scoped (unlike every other
+// Germany registry, all global), so its Super Admin UI needs to let the
+// operator pick which employer they're configuring (Phase 8AJ).
+export const listOrganizationsForPicker = () =>
+  apiFetch("/api/organizations", { params: { limit: 200 } }).then((data) => data.organizations || []);
+
 // ── US: Cross-State Reciprocity ───────────────────────────────────────────
 
 export const getReciprocityRules = () =>
@@ -136,6 +143,182 @@ export const createSourceArtifact = (payload) =>
 
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
+// ── Germany statutory registries (Phase 8O) ─────────────────────────────
+// Every function below is a thin wrapper over a pre-existing Super-Admin-
+// only backend endpoint (Phases 3/4/5/6/8G-1) — this phase adds the
+// frontend client, not new backend surface, except getChurchTaxMatrix
+// (a genuinely new, read-only endpoint — see service.get_church_tax_matrix's
+// own docstring for why it has no create/approve/status counterpart).
+
+// PAP algorithm assets
+export const listPapAssets = (taxYear) =>
+  apiFetch("/api/super-admin/compliance/germany/pap-assets", { params: taxYear ? { taxYear } : {} });
+export const getPapAsset = (id) => apiFetch(`/api/super-admin/compliance/germany/pap-assets/${id}`);
+export const approvePapAsset = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-assets/${id}/approve`, { method: "PUT" });
+export const setPapAssetStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-assets/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// PAP asset ingestion is multipart (raw file + form fields) — apiFetch
+// always JSON-encodes its body, so this bypasses it with a raw fetch,
+// same auth/refresh-token convention as api/client.js's own rawFetch.
+export async function ingestPapAsset({ taxYear, papVersion, effectiveFrom, effectiveTo, sourceAgency, sourceTitle, sourceUrl, sourcePublicationDate, file }) {
+  const form = new FormData();
+  form.append("taxYear", taxYear);
+  form.append("papVersion", papVersion);
+  form.append("effectiveFrom", effectiveFrom);
+  if (effectiveTo) form.append("effectiveTo", effectiveTo);
+  form.append("sourceAgency", sourceAgency);
+  form.append("sourceTitle", sourceTitle);
+  if (sourceUrl) form.append("sourceUrl", sourceUrl);
+  if (sourcePublicationDate) form.append("sourcePublicationDate", sourcePublicationDate);
+  form.append("file", file);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/germany/pap-assets`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+// PAP release governance
+export const listPapReleases = (taxYear) =>
+  apiFetch("/api/super-admin/compliance/germany/pap-releases", { params: taxYear ? { taxYear } : {} });
+export const getPapRelease = (id) => apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}`);
+export const getPapReleaseGateStatus = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/gate-status`);
+export const createPapRelease = (papAssetId) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-assets/${papAssetId}/release`, { method: "POST" });
+export const recordPapReleaseSourceIdentity = (id, notes) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/source-identity`, { method: "PUT", body: { notes } });
+export const recordPapReleaseSourceHash = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/source-hash`, { method: "PUT" });
+export const recordPapReleaseSourceFinality = (id, body) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/source-finality`, { method: "PUT", body });
+export const recordPapReleaseLicensing = (id, body) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/licensing`, { method: "PUT", body });
+export const recordPapReleaseGoldenVectors = (id, body) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/golden-vectors`, { method: "PUT", body });
+export const recordPapReleaseSecurityCertification = (id, notes) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/security-certification`, { method: "PUT", body: { notes } });
+export const markPapReleaseReady = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/ready`, { method: "PUT" });
+export const approvePapRelease = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/approve`, { method: "PUT" });
+export const rejectPapRelease = (id, reason) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/reject`, { method: "PUT", body: { reason } });
+export const activatePapRelease = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/activate`, { method: "POST" });
+export const requestPapRollback = (id, reason, targetReleaseId) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/rollback/request`, { method: "POST", body: { reason, targetReleaseId } });
+export const rejectPapRollback = (id, reason) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/rollback/reject`, { method: "POST", body: { reason } });
+export const approvePapRollback = (id, reason, targetReleaseId) =>
+  apiFetch(`/api/super-admin/compliance/germany/pap-releases/${id}/rollback/approve`, { method: "POST", body: { reason, targetReleaseId } });
+
+// Health funds
+export const listHealthFunds = (healthFundId) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds", { params: healthFundId ? { healthFundId } : {} });
+export const createHealthFund = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds", { method: "POST", body: payload });
+export const approveHealthFund = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/${id}/approve`, { method: "PUT" });
+export const setHealthFundStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Germany accident-insurance profiles (Phase 8AJ, 2nd pass) — maker-checker
+// workspace, organization-scoped (unlike health funds above, which are
+// global). Publishing one materializes it into the existing
+// EmployerTaxProfile mechanism the engine actually reads — see
+// models.GermanyAccidentInsuranceProfile's own docstring.
+export const listGermanyAccidentInsuranceProfiles = (organizationId) =>
+  apiFetch("/api/super-admin/compliance/germany/accident-insurance-profiles", { params: organizationId ? { organizationId } : {} });
+export const createGermanyAccidentInsuranceProfile = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/accident-insurance-profiles", { method: "POST", body: payload });
+export const approveGermanyAccidentInsuranceProfile = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/accident-insurance-profiles/${id}/approve`, { method: "PUT" });
+export const setGermanyAccidentInsuranceProfileStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/accident-insurance-profiles/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// U1 tariffs (sickness reimbursement) — child records of health funds
+export const listU1Tariffs = (healthFundId) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds/u1-tariffs", { params: healthFundId ? { healthFundId } : {} });
+export const createU1Tariff = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/health-funds/u1-tariffs", { method: "POST", body: payload });
+export const approveU1Tariff = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/u1-tariffs/${id}/approve`, { method: "PUT" });
+export const setU1TariffStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/health-funds/u1-tariffs/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Contribution ceilings
+export const listContributionCeilings = (branch) =>
+  apiFetch("/api/super-admin/compliance/germany/contribution-ceilings", { params: branch ? { branch } : {} });
+export const createContributionCeiling = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/contribution-ceilings", { method: "POST", body: payload });
+export const approveContributionCeiling = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/contribution-ceilings/${id}/approve`, { method: "PUT" });
+export const setContributionCeilingStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/contribution-ceilings/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// PV configurations
+export const listPvConfigurations = (childCategory, isSaxony) =>
+  apiFetch("/api/super-admin/compliance/germany/pv-configurations", {
+    params: { ...(childCategory ? { childCategory } : {}), ...(isSaxony !== undefined && isSaxony !== "" ? { isSaxony } : {}) },
+  });
+export const createPvConfiguration = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/pv-configurations", { method: "POST", body: payload });
+export const approvePvConfiguration = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/pv-configurations/${id}/approve`, { method: "PUT" });
+export const setPvConfigurationStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/pv-configurations/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Church tax (16-Land matrix, read-only)
+export const getChurchTaxMatrix = () => apiFetch("/api/super-admin/compliance/germany/church-tax");
+
+// Church-tax exceptions (Phase 8AM) — sub-Land denomination/location
+// overrides with the same maker-checker + source-evidence lifecycle as
+// health funds. NOTE: the approve endpoint is POST here (not PUT).
+export const listGermanyChurchTaxExceptions = (landCode) =>
+  apiFetch("/api/super-admin/compliance/germany/church-tax-exceptions", { params: landCode ? { landCode } : {} });
+export const createGermanyChurchTaxException = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/church-tax-exceptions", { method: "POST", body: payload });
+export const approveGermanyChurchTaxException = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/church-tax-exceptions/${id}/approve`, { method: "POST" });
+export const setGermanyChurchTaxExceptionStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/church-tax-exceptions/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Earning/deduction taxability (Phase 8T, spec §15 four-dimension model)
+export const listEarningTaxabilityRules = (earningType) =>
+  apiFetch("/api/super-admin/compliance/germany/earning-taxability-rules", { params: earningType ? { earningType } : {} });
+export const createEarningTaxabilityRule = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/earning-taxability-rules", { method: "POST", body: payload });
+export const approveEarningTaxabilityRule = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/earning-taxability-rules/${id}/approve`, { method: "PUT" });
+export const setEarningTaxabilityRuleStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/earning-taxability-rules/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+// Germany overtime/shift-premium statutory registries (Phase 8AD)
+export const listOvertimePremiumCategories = (categoryCode) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-premium-categories", { params: categoryCode ? { categoryCode } : {} });
+export const createOvertimePremiumCategory = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-premium-categories", { method: "POST", body: payload });
+export const approveOvertimePremiumCategory = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-premium-categories/${id}/approve`, { method: "PUT" });
+export const setOvertimePremiumCategoryStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-premium-categories/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
+export const listOvertimeGrundlohnCaps = (dimension) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-grundlohn-caps", { params: dimension ? { dimension } : {} });
+export const createOvertimeGrundlohnCap = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/overtime-grundlohn-caps", { method: "POST", body: payload });
+export const approveOvertimeGrundlohnCap = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-grundlohn-caps/${id}/approve`, { method: "PUT" });
+export const setOvertimeGrundlohnCapStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/overtime-grundlohn-caps/${id}/status`, { method: "PUT", params: { status: statusValue } });
 
 // ── Finance ──────────────────────────────────────────────────────────────
 

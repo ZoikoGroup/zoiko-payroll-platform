@@ -197,6 +197,8 @@ class StandardStrategy(PayrollStrategy):
             state_income_tax=deductions.get("state_income_tax", Decimal("0")),
             local_tax=deductions.get("local_tax", Decimal("0")),
             state_disability_insurance=deductions.get("state_disability_insurance", Decimal("0")),
+            germany_statutory_profile_id=deductions.get("_germany_statutory_profile_id"),
+            germany_calculation_snapshot=deductions.get("_germany_calculation_snapshot"),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
         )

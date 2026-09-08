@@ -7,6 +7,16 @@ Tables:
   - PayrollEmployee           → payroll's own employee master data (multi-tenant, org-scoped;
                                  intentionally NOT linked to app.modules.employee.Employee,
                                  which is the separate HR/auth login record)
+  - EmployeeStatutoryProfile   → effective-dated history of one employee's jurisdiction-specific
+                                 statutory facts (tax class, church tax, care-insurance status, ...) —
+                                 distinct from PayrollEmployee's own mutable, non-dated fields
+  - PapAlgorithmAsset          → versioned, source-hashed, immutable-once-published container for the
+                                 German BMF PAP wage-tax algorithm — container/evidence only, no
+                                 execution logic (see engine/countries/germany.py, unchanged)
+  - GermanyHealthFund          → effective-dated Krankenkasse (health fund) Zusatzbeitrag rate registry —
+                                 configuration only, no GKV contribution is calculated anywhere from it
+  - GermanyContributionCeiling → effective-dated, branch-aware (GKV/PV vs RV/ALV) contribution ceiling
+                                 registry — configuration only, no contribution is calculated from it
   - PayrollRun                → a single payroll processing run (e.g. "Jun 1-15, 2026")
   - PayslipItem               → individual salary components per employee per run
   - ContributionRate           → statutory contribution rates (PF/ESI/PT/TDS) shown in Compliance
@@ -225,6 +235,349 @@ class PayrollEmployee(Base):
         return f"<PayrollEmployee id={self.id} code={self.employee_code} status={self.status}>"
 
 
+# ── Employee Statutory Profile (effective-dated) ────────────────────────
+# PayrollEmployee's own jurisdiction-related columns above (tax_regime,
+# tax_code, w4_filing_status, church_tax_liable, ...) are plain mutable
+# fields with no history — fine for a value that's read "as of right now,"
+# wrong for anything a payroll engine must resolve "as of the payroll date
+# being calculated" (e.g. a German employee's tax class changing mid-year
+# must not retroactively change an already-run March payslip). This table
+# is that second axis of versioning: one row per (employee, effective
+# period), never updated in place — a change is always a new row, closing
+# the previous one's effective_to. Deliberately NOT reusing JurisdictionPack
+# (that table describes a JURISDICTION's rules; this describes ONE
+# EMPLOYEE's own statutory facts within a jurisdiction) and deliberately
+# NOT storing anything the payroll engine calculates (tax owed, contribution
+# amounts, ...) — see PHASE_2_EMPLOYEE_STATUTORY_PROFILE.md §7.
+#
+# Columns are grouped generic-first, then per-jurisdiction (currently only
+# Germany, prefixed `de_` — same additive-nullable-column convention
+# PayrollEmployee already uses for tax_code/ni_category (UK) and
+# w4_filing_status (US): a field only a Germany-aware caller ever reads,
+# NULL and inert for every other country's employees).
+class EmployeeStatutoryProfile(Base):
+    """One effective-dated version of an employee's statutory facts.
+
+    Resolution: given (employee_id, payroll_date), the applicable row is
+    the one whose [effective_from, effective_to] window contains
+    payroll_date (effective_to IS NULL meaning "still current") — see
+    service.resolve_employee_statutory_profile(). Overlap between two rows
+    for the same employee is rejected at write time (service layer, same
+    pattern JurisdictionPack's Active-pack overlap guard already uses —
+    see service._validate_statutory_profile_period), not enforced via a
+    DB-level exclusion constraint, for consistency with how this module
+    already handles this class of problem and because the SQLite dev
+    fallback (see database.py) has no equivalent to Postgres EXCLUDE/GIST
+    constraints. The one thing enforced at the DB level (see __table_args__
+    below) is that at most one row per employee may be open-ended
+    (effective_to IS NULL) at a time — the cheap, common-case guard against
+    an accidental duplicate "current" row.
+    """
+    __tablename__ = "payroll_employee_statutory_profiles"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Which jurisdiction's rules this row's attributes are interpreted
+    # under — same 2-letter convention as PayrollEmployee.country_code.
+    # Not necessarily identical to the employee's CURRENT country_code:
+    # a historical row keeps the jurisdiction that was actually in force
+    # for that period, even if the employee later transferred countries.
+    country_code    = Column(String(2), nullable=False)
+
+    effective_from  = Column(Date, nullable=False)
+    effective_to    = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Why this version was recorded (e.g. "ELStAM change list 2026-07",
+    # "Employee reported new child") — mirrors TaxConfigurationAudit.reason's
+    # role, kept on the row itself (not only the audit log) since it's part
+    # of the statutory record's own evidence, not just a change-log entry.
+    reason          = Column(Text, nullable=True)
+
+    # ── Germany (DE) statutory attributes ────────────────────────────────
+    # Every field below maps to a named Germany 2026 spec requirement
+    # (ZP-TAX-DE-2026-001) — see PHASE_2_EMPLOYEE_STATUTORY_PROFILE.md §5
+    # for the field-by-field citation. NULL for every non-German employee
+    # and for a German employee before this data has been captured; no
+    # calculation reads these yet (Lohnsteuer/PAP/GKV/PV/RV/ALV/Minijob/
+    # Midijob remain out of scope for this phase).
+    de_tax_class                     = Column(String(4), nullable=True)   # STKL: I|II|III|IV|V|VI (spec §6)
+    de_factor                        = Column(Numeric(6, 4), nullable=True)  # AF/F, class IV only (spec §5, §6)
+    de_church_tax_liable             = Column(Boolean, nullable=True)     # spec §8
+    de_church_tax_land               = Column(String(6), nullable=True)   # e.g. "DE-BY" (spec §3, §8)
+    # Phase 8AM — required to correctly apply a documented sub-Land
+    # church-tax exception (spec §8's own "preserve documented
+    # denomination/location exceptions such as the Roman Catholic
+    # treatment in Bad Wimpfen" instruction, which names BOTH a
+    # denomination and a location as the deciding factors — neither of
+    # which the pre-existing de_church_tax_liable/de_church_tax_land
+    # fields alone can represent). Both nullable/free-text: NULL means
+    # "not recorded" for every row created before this phase (identical
+    # to how de_main_employment was introduced), never an assumption.
+    # ROMAN_CATHOLIC|EVANGELICAL|OTHER — no enumerated value set is
+    # defined in the supplied documentation beyond the one denomination
+    # the Bad Wimpfen exception itself names, so this is free text, not
+    # an invented exhaustive enum.
+    de_church_tax_denomination       = Column(String(30), nullable=True)
+    # The postal code of the employee's church-tax-relevant residence —
+    # the exact, deterministic key the verified Bad Wimpfen exception
+    # (PLZ 74206) is keyed by. Deliberately a NEW, church-tax-specific
+    # field rather than reusing PayrollEmployee.work_locality (a
+    # generic, unvalidated free-text field used for other purposes,
+    # e.g. locality-based US tax resolution — conflating the two would
+    # risk an unrelated locality entry accidentally matching or missing
+    # a church-tax exception).
+    de_church_tax_municipality_postal_code = Column(String(10), nullable=True)
+    de_child_count                   = Column(Integer, nullable=True)     # qualifying children, PVA (spec §10)
+    de_childless                     = Column(Boolean, nullable=True)     # PVZ care-insurance surcharge flag (spec §10)
+    de_saxony                        = Column(Boolean, nullable=True)     # PVS (spec §10)
+    de_health_insurance_status       = Column(String(10), nullable=True)  # PUBLIC|PRIVATE, PKV marker (spec §5)
+    # Membership identifier only — NOT a rate. The Krankenkasse's own
+    # supplementary rate belongs to the (not-yet-built, see Phase 1 §20)
+    # Health Fund Registry; this column just records which fund the
+    # employee belongs to during this period. A plain string for now
+    # (no registry table exists yet to foreign-key against) — see
+    # PHASE_2_EMPLOYEE_STATUTORY_PROFILE.md §14 "Remaining Gaps".
+    de_health_fund_code              = Column(String(50), nullable=True)
+    # Phase 8W — employer's selected U1 tariff identifier at this employee's
+    # health fund (e.g. "U1_50", "U1_70", "U1_80"). Resolved against the
+    # GermanyHealthFundU1Tariff child table for the employee's fund + pay
+    # period. NULL = no U1 tariff selected (calculation engine treats as
+    # NOT_CONFIGURED, same as the pre-Phase-8W u1_rate_pct=None behavior).
+    # This is an EMPLOYER-level selection recorded per-employee for
+    # resolution convenience — the same tariff applies to all employees at
+    # the same employer+fund combination.
+    de_u1_tariff_id                 = Column(String(50), nullable=True)
+    de_pension_insurance_exempt      = Column(Boolean, nullable=True)     # KRV marker (spec §5)
+    de_unemployment_insurance_exempt = Column(Boolean, nullable=True)     # ALV precaution marker (spec §5)
+    # REGULAR|MINIJOB|MIDIJOB — selects the calculation path a future
+    # Germany engine phase would dispatch on (spec §12, §13, DE-D07).
+    de_employment_classification     = Column(String(10), nullable=True)
+    de_elstam_source                 = Column(String(20), nullable=True)  # ELSTAM|FALLBACK_CERTIFICATE (spec §6)
+    de_elstam_fallback_reason        = Column(Text, nullable=True)        # required evidence when source=FALLBACK_CERTIFICATE (spec §6)
+    # True only when this employee is employed "zu ihrer Berufsausbildung"
+    # (an Ausbildungsvertrag, Praktikum zur Berufsausbildung, or duales
+    # Studium) — §20 Abs. 2a Satz 9 SGB IV explicitly excludes this group
+    # from the Übergangsbereich (Midijob) regardless of earnings,
+    # confirmed by BSG ruling 15.07.2009 (Phase 8L). NOT a general
+    # "part-time"/"low-pay" flag — its only statutory effect is this one
+    # exclusion (see validate_classification_against_vocational_training
+    # in germany_pap/core.py).
+    de_vocational_trainee            = Column(Boolean, nullable=True)
+
+    # ── Phase 8N: ELStAM / employee-withholding-state completion ────────
+    # Every field below maps to a named PAP input the spec's §5 table
+    # lists but Phase 7 left hardcoded to 0 (see PapInputContract's own
+    # field_sources() docstring, now updated) — added only once a real,
+    # nullable, backward-compatible column exists to source them from.
+    # NULL means "not captured" (identical to the pre-8N behavior of
+    # always feeding the PAP a zero for these), never a fabricated value.
+
+    # ZKF OVERRIDE — spec §5/§6. Phase 8K disclosed that de_child_count
+    # doubles as both the PV child-category source AND the PAP ZKF source
+    # for the ordinary case (a plain integer count, no split-custody
+    # half-allowance) — a correct simplification for that case, NOT a
+    # universal equivalence. This column is the escape hatch for the
+    # documented edge case Phase 8K left out of scope: a genuinely
+    # split-custody employee's ZKF (which can be a half-integer, e.g. 0.5
+    # per child) is recorded HERE, distinct from de_child_count (which
+    # keeps driving the PV branch, per §10, untouched). NULL (the default,
+    # identical to every existing row) means "ZKF is not a special case —
+    # keep deriving it from de_child_count exactly as before."
+    de_zkf_override                  = Column(Numeric(4, 2), nullable=True)
+
+    # ELStAM allowance / add-back amounts — spec §5's JFREIB/LZZFREIB/
+    # JHINZU/LZZHINZU PAP inputs, §6's "Allowance / add-back" ELStAM
+    # attribute row. Stored as euros (matching every other monetary column
+    # on this table), converted to cents only at the PAP-input boundary
+    # (build_pap_input), mirroring how gross_monthly is handled. Spec
+    # states no derivation relationship between the annual (J-) and
+    # period (LZZ-) figures — both are independently ELStAM-supplied, so
+    # neither is computed from the other here.
+    de_jfreib                        = Column(Numeric(10, 2), nullable=True)   # JFREIB — annual allowance
+    de_lzzfreib                      = Column(Numeric(10, 2), nullable=True)   # LZZFREIB — period allowance
+    de_jhinzu                        = Column(Numeric(10, 2), nullable=True)   # JHINZU — annual add-back
+    de_lzzhinzu                      = Column(Numeric(10, 2), nullable=True)   # LZZHINZU — period add-back
+
+    # 2026 ELStAM private health/care insurance values — spec §6 "2026
+    # ELStAM CHANGE": "From January 1, 2026 the ELStAM dataset includes
+    # private health and private mandatory long-term-care contribution
+    # information." PKPV/PKPVAGZ are monthly amounts (spec §5's own PAP
+    # input table: "monthly value" for both). Never used to derive a GKV/PV
+    # contribution — these are PAP-side tax allowances for an employee's
+    # own private premium, not a statutory GKV/PV deduction this engine
+    # computes (see calculate_gkv's PRIVATE-status docstring for the
+    # analogous, already-established distinction).
+    de_pkpv                          = Column(Numeric(10, 2), nullable=True)   # PKPV — private basic health/care premium (monthly)
+    de_pkpvagz                       = Column(Numeric(10, 2), nullable=True)   # PKPVAGZ — tax-free employer subsidy (monthly)
+
+    # Main vs secondary employment — spec §6: "Enrollment request must
+    # identify first/main or additional employment." True = main/first
+    # employment; False = secondary/additional (tax class VI territory,
+    # per §6's own tax-class table); NULL = not recorded (identical to
+    # every existing row's prior behavior — this attribute did not exist
+    # before, so no assumption is retrofitted onto historical rows). Not a
+    # PAP input field itself (the PAP input contract has no dedicated
+    # "main/secondary" field — that relationship is already fully encoded
+    # via tax class, confirmed Phase 8K) — this column exists for the
+    # ELStAM enrollment/employment-relationship record-keeping and audit
+    # trail the spec requires, and for the advisory tax-class-VI
+    # consistency check in germany_pap/core.py.
+    de_main_employment                = Column(Boolean, nullable=True)
+
+    # ELStAM structured-import provenance — spec §7 (this phase's import
+    # boundary). Meaningful only when de_elstam_source == "ELSTAM"; NULL
+    # for every row entered before this phase and for FALLBACK_CERTIFICATE
+    # rows (which cite de_elstam_fallback_reason instead). Distinct from
+    # GermanyElstamImportAttempt's own id (below) — that table logs every
+    # ATTEMPT, including rejected ones that never reach this table at all;
+    # these two columns are just this row's own denormalized provenance,
+    # for a quick read without a join.
+    de_elstam_schema_version          = Column(String(30), nullable=True)
+    de_elstam_import_reference        = Column(String(100), nullable=True)
+
+    # ── Phase 8AB: Overtime/shift-premium Grundlohn source (spec-adjacent —
+    # §3b EStG / §1 SvEV, Phase 8Z; ARCHITECTURE_D, Phase 8AA) ────────────
+    # The approved product decision (Phase 8AB): Zoiko uses an EXPLICIT,
+    # per-employee, effective-dated hourly Grundlohn — never derived. This
+    # column is deliberately the ONLY thing this phase adds: no overtime
+    # work-record table, no premium-category registry, no calculation. NULL
+    # (the default, identical to every other Germany field's "not yet
+    # captured" convention on this table) means the employee's Grundlohn is
+    # simply not on file yet — a future overtime-calculation phase (8AC+)
+    # must treat that as NOT_CONFIGURED, never silently derive one from
+    # ctc/basic/hra/pay_frequency/standard hours or any other formula (the
+    # Phase 8AA report's own explicit prohibition — no /160, /173, /30, no
+    # 8-hours/day assumption). Numeric(10,2) matches every other monetary
+    # column on this table (de_jfreib et al.) — no new precision convention
+    # invented. This column is NOT yet read by any calculation code
+    # anywhere (confirmed by this phase's own regression tests) — it only
+    # establishes the source of truth for a later phase to consume.
+    de_grundlohn_hourly               = Column(Numeric(10, 2), nullable=True)
+
+    __table_args__ = (
+        Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
+        Index("ix_statutory_profile_org", "organization_id"),
+        Index(
+            "uq_statutory_profile_one_open_per_employee",
+            "employee_id",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<EmployeeStatutoryProfile id={self.id} employee_id={self.employee_id} "
+            f"country={self.country_code} from={self.effective_from} to={self.effective_to}>"
+        )
+
+
+# ── Germany: ELStAM change-list batch (Phase 8N, spec §6 "Change lists") ──
+# Records that a monthly ELStAM change list was RECEIVED for this
+# organization — metadata only. Does NOT poll ELSTER (no live connector
+# exists anywhere in this codebase — see engine/germany_pap/elstam.py) and
+# does NOT auto-apply attribute changes to any employee (this phase's own
+# explicit "do not fabricate change-list payloads" instruction) — an
+# individual employee's actual attribute change is recorded separately via
+# GermanyElstamImportAttempt (below), which may optionally cite this
+# batch's id once someone has manually validated and entered the real
+# content of the change list.
+class GermanyElstamChangeListBatch(Base):
+    """One received ELStAM change-list batch record."""
+    __tablename__ = "payroll_germany_elstam_change_list_batches"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    batch_reference    = Column(String(100), nullable=False)
+    # How this batch entered the system — spec gives no enumerated set, so
+    # free text (matching GermanyHealthFund.member_applicability's own
+    # "concept named, no vocabulary given" treatment), defaulting to the
+    # only value this phase's own architecture actually produces.
+    source             = Column(String(50), nullable=False, default="MANUAL_UPLOAD", server_default="MANUAL_UPLOAD")
+    received_at        = Column(DateTime(timezone=True), nullable=False)
+    effective_date      = Column(Date, nullable=False)
+    # "Employee/authorization scope" (spec §8) — free text, same reasoning
+    # as `source` above; no employee-list fan-out is modeled (would risk
+    # fabricating which employees/attributes actually changed).
+    scope_description   = Column(Text, nullable=True)
+
+    # RECEIVED | VALIDATED | APPLIED | REJECTED — spec §8's own named
+    # states ("processing status", "validation result").
+    processing_status  = Column(String(20), nullable=False, default="RECEIVED", server_default="RECEIVED")
+    validation_result   = Column(JSON, nullable=True)
+
+    created_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return (
+            f"<GermanyElstamChangeListBatch id={self.id} ref={self.batch_reference!r} "
+            f"status={self.processing_status}>"
+        )
+
+
+# ── Germany: ELStAM structured-import audit log (Phase 8N, spec §7) ──────
+# Audits EVERY attempt to import a structured ELStAM payload for one
+# employee — successful (APPLIED) or rejected (REJECTED). Necessary
+# because a rejected attempt, by construction, never creates an
+# EmployeeStatutoryProfile row at all (validation runs before insert) — so
+# without this table, a rejected import would leave no trace whatsoever,
+# and the spec's own "validation errors"/"audit event" requirements (§7)
+# would be unmet. `payload` is always caller-supplied structured data,
+# shaped like EmployeeStatutoryProfileCreate — nothing in this table (or
+# anywhere this phase touches) calls ELSTER/BZSt.
+class GermanyElstamImportAttempt(Base):
+    """One attempt (successful or rejected) to import a structured ELStAM
+    payload for one employee."""
+    __tablename__ = "payroll_germany_elstam_import_attempts"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    schema_version      = Column(String(30), nullable=False)
+    import_reference     = Column(String(100), nullable=True)
+    change_list_batch_id = Column(
+        Integer, ForeignKey("payroll_germany_elstam_change_list_batches.id"), nullable=True, index=True,
+    )
+
+    # The submitted payload, verbatim (JSON) — never a raw Steuer-ID (this
+    # table only ever receives the same field set EmployeeStatutoryProfileCreate
+    # already accepts, which has no Steuer-ID column to begin with).
+    payload             = Column(JSON, nullable=False)
+
+    # APPLIED | REJECTED — deliberately binary (unlike the change-list
+    # batch's 4-state lifecycle above): an import attempt either produced a
+    # new EmployeeStatutoryProfile version or it did not; there is no
+    # intermediate DRAFT/REVIEW state for a single-employee import.
+    validation_status              = Column(String(20), nullable=False)
+    validation_errors               = Column(JSON, nullable=True)
+    applied_statutory_profile_id    = Column(
+        Integer, ForeignKey("payroll_employee_statutory_profiles.id"), nullable=True,
+    )
+
+    imported_at     = Column(DateTime(timezone=True), server_default=func.now())
+    created_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        Index("ix_elstam_import_attempt_employee", "employee_id", "imported_at"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyElstamImportAttempt id={self.id} employee_id={self.employee_id} "
+            f"status={self.validation_status}>"
+        )
+
+
 # ── Payroll Run ────────────────────────────────────────────────────────
 
 class PayrollRun(Base):
@@ -340,6 +693,26 @@ class PayslipItem(Base):
     tax_policy_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
     tax_policy_version  = Column(String(20), nullable=True)
     tax_rule_snapshot   = Column(JSON, nullable=True)
+
+    # Germany (Phase 7, ZP-TAX-DE-2026-001) — the analogous freeze for the
+    # Germany statutory calculation path, which does not go through
+    # JurisdictionPack/tax_rule_snapshot above (Germany has no Active
+    # canonical pack — see docs/PHASE_5_..._REPORT.md §3). `employee_statutory_profile_id`
+    # points at the exact EmployeeStatutoryProfile version (Phase 2) that
+    # was in effect when this payslip was generated — a future edit/new
+    # version of that profile MUST NOT change this payslip's figures, the
+    # same immutability guarantee tax_policy_pack_id already gives every
+    # other country. `germany_calculation_snapshot` is the actual resolved
+    # values (PAP version/hash, health-fund rate, ceiling ids, PV
+    # configuration id, per-branch RV/ALV/GKV/PV amounts, calculation
+    # status/trace) — not just a set of foreign keys, so the payslip
+    # remains reproducible even if every one of those rows is later
+    # superseded. NULL for every non-German payslip and for every German
+    # payslip generated before this column existed (none exist yet — see
+    # Phase 7 report §18, the registries were empty in every environment
+    # this phase touched).
+    employee_statutory_profile_id = Column(Integer, ForeignKey("payroll_employee_statutory_profiles.id"), nullable=True, index=True)
+    germany_calculation_snapshot  = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -522,6 +895,457 @@ class PayrollAttendanceRecord(Base):
 
     def __repr__(self):
         return f"<PayrollAttendanceRecord id={self.id} emp={self.employee_id} date={self.date} status={self.status}>"
+
+
+# ── Germany: Overtime/Shift-Premium Work Record (Phase 8AC) ──────────────
+# The "work performed" FACT layer of Phase 8AA's ARCHITECTURE_D hybrid
+# design (docs/PHASE_8AA_..._DATA_MODEL.md §11) — deliberately narrow: it
+# records ONLY what was actually worked (date/time/hours), never a
+# calculated premium, tax, or social-insurance amount. The four-dimension
+# statutory OUTPUT (GermanyOvertimePremiumComponent) and the statutory RATE
+# registries (GermanyOvertimePremiumCategory/GermanyOvertimeGrundlohnCap)
+# are explicitly NOT built by this phase — see the Phase 8AC report for the
+# full rationale. This table is never read by engine/countries/germany.py
+# or any other calculation code; ctx.overtime remains untouched for
+# Germany.
+#
+# `source_attendance_id` is a nullable, NON-OWNING reference to
+# PayrollAttendanceRecord — attendance stays the system of record for "was
+# the employee present," this table becomes the system of record for "was
+# any of that time a qualifying overtime/premium window." No field is
+# duplicated from attendance (this table derives its own
+# start_datetime/end_datetime rather than copying check_in/check_out).
+#
+# `entry_source` distinguishes ATTENDANCE_DERIVED from MANUAL rows.
+# Phase 8AA/8AB both explicitly left the PRECEDENCE between the two
+# unresolved as a genuine PRODUCT_DECISION — this model deliberately does
+# NOT enforce or infer a winner when both exist for the same employee/date;
+# it only guarantees at most one work record per attendance day (the
+# `source_attendance_id` uniqueness below), never silently deduplicating or
+# preferring one entry_source over another.
+class GermanyOvertimeWorkRecord(Base):
+    """One raw fact: an employee worked from start_datetime to
+    end_datetime on work_date. Carries no premium/tax/SI fields — those
+    belong to a future calculation phase's own output table."""
+    __tablename__ = "payroll_germany_overtime_work_records"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    # Nullable, non-owning — NULL means this record was entered manually
+    # with no corresponding attendance day (entry_source == "MANUAL" in
+    # that case, though the two are validated together at the service
+    # layer, not via a DB constraint).
+    source_attendance_id = Column(Integer, ForeignKey("payroll_attendance_records.id"), nullable=True)
+
+    work_date             = Column(Date, nullable=False, index=True)
+    # Real DateTime (not separate date+time strings) so an overnight shift
+    # crossing midnight (e.g. 22:00-02:00) is unambiguous — end_datetime
+    # simply falls on the calendar day after work_date. No timezone/DST
+    # classification logic exists yet (Phase 8AA §14 — deferred to the
+    # future qualifying-time-window engine, not this phase).
+    start_datetime        = Column(DateTime(timezone=True), nullable=False)
+    end_datetime           = Column(DateTime(timezone=True), nullable=False)
+    hours                  = Column(Numeric(5, 2), nullable=False)
+
+    # ATTENDANCE_DERIVED | MANUAL — see the class-level docstring above.
+    entry_source           = Column(String(20), nullable=False)
+    # PENDING | APPROVED | REJECTED — an HR/manager sign-off that the hours
+    # were legitimately worked. Deliberately a SEPARATE concept from
+    # PolicyOvertimeRule (the pre-existing per-org approval-WORKFLOW gate,
+    # untouched by this phase) and from any future statutory classification
+    # — Phase 8AA §25's own explicit separation of "HR approval" from
+    # "statutory taxability."
+    hr_approval_status     = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+
+    # Phase 8AQ — NULL (no ambiguity) | "AMBIGUOUS_OVERLAP". Set
+    # automatically (never chosen by the operator) whenever this record's
+    # [start_datetime, end_datetime) interval overlaps another NON-
+    # REJECTED work record for the SAME employee, regardless of either
+    # record's entry_source (manual vs attendance-derived, or two of the
+    # same source — the ambiguity is about physical time overlap, not
+    # about which source "should" win, a precedence question this
+    # project has repeatedly and deliberately declined to invent — see
+    # Phase 8AA §15/§32.2). A record in this state fails closed at
+    # classification (service.classify_and_list_germany_overtime_time_segments)
+    # — it can never reach wage-tax/SI calculation or payslip attachment
+    # while ambiguous. Recomputed (never hand-edited) by
+    # service._recompute_germany_overtime_overlap_status whenever a
+    # record is created or an approval status changes (rejecting one
+    # side of an overlap can resolve it for the other).
+    overlap_status          = Column(String(30), nullable=True)
+
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_germany_overtime_work_record_org_emp_date", "organization_id", "employee_id", "work_date"),
+        # At most one work record per attendance day — the duplicate-
+        # prevention guard Phase 8AA §14 requires. Does NOT prevent two
+        # MANUAL (source_attendance_id IS NULL) records for the same
+        # employee/date — deliberately, since deduplicating those requires
+        # the precedence decision this phase does not make.
+        UniqueConstraint("source_attendance_id", name="uq_germany_overtime_work_record_source_attendance"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimeWorkRecord id={self.id} employee_id={self.employee_id} "
+            f"work_date={self.work_date} entry_source={self.entry_source}>"
+        )
+
+
+# ── Germany: Overtime Time-Window Classification (Phase 8AE) ────────────
+# CLASSIFICATION result only — see engine/germany_overtime_classifier.py.
+# Every segment is a statutory/calendar FACT (which §3b EStG category a
+# slice of physical worked time qualifies for), never a monetary amount.
+# No premium_amount/grundlohn_used/tax_free_amount/si_*_amount column
+# exists here, deliberately — those belong to a future
+# GermanyOvertimePremiumComponent (explicitly NOT built this phase).
+class GermanyOvertimeTimeSegment(Base):
+    """One non-overlapping (per category) physical time slice of a
+    GermanyOvertimeWorkRecord, classified against one §3b EStG premium
+    category. A single physical time range can produce MORE THAN ONE
+    segment row when multiple categories genuinely apply concurrently
+    (e.g. Sunday night — one SUNDAY segment and one NIGHT_STANDARD segment,
+    both spanning the identical [segment_start, segment_end) — this is
+    legal concurrence, not double-counted work: see the classifier
+    module's own docstring for the exact non-overlap invariant this
+    implies (no two segments of the SAME category may overlap; segments
+    of DIFFERENT categories may legitimately share the same time range)."""
+    __tablename__ = "payroll_germany_overtime_time_segments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    work_record_id        = Column(Integer, ForeignKey("payroll_germany_overtime_work_records.id"), nullable=False, index=True)
+
+    segment_start          = Column(DateTime(timezone=True), nullable=False)
+    segment_end             = Column(DateTime(timezone=True), nullable=False)
+    hours                   = Column(Numeric(6, 4), nullable=False)
+
+    # NIGHT_STANDARD | NIGHT_EXTENDED | SUNDAY | HOLIDAY_STANDARD |
+    # HOLIDAY_SPECIAL — the exact Phase 8AD vocabulary, no 6th invented.
+    # Always set — this is a statutory/calendar determination independent
+    # of whether a GermanyOvertimePremiumCategory row happens to be
+    # PUBLISHED yet (see classification_status below).
+    premium_category        = Column(String(30), nullable=False, index=True)
+
+    # CONFIGURED | NOT_CONFIGURED — whether a PUBLISHED
+    # GermanyOvertimePremiumCategory row existed for this category as of
+    # segment_start's local date when this segment was classified. Never
+    # silently upgraded to CONFIGURED by a later publication — see
+    # category_rule_id below, which freezes the exact row used (or NULL).
+    classification_status    = Column(String(20), nullable=False)
+
+    # The exact PUBLISHED GermanyOvertimePremiumCategory row resolved for
+    # this segment (frozen — NULL when classification_status is
+    # NOT_CONFIGURED). This is the provenance answer to "why was this
+    # period classified as NIGHT_STANDARD" — never re-resolved from
+    # today's registry state.
+    category_rule_id        = Column(Integer, ForeignKey("payroll_germany_overtime_premium_categories.id"), nullable=True)
+
+    # The German local (Europe/Berlin) calendar date this segment falls
+    # on — distinct from GermanyOvertimeWorkRecord.work_date (which is
+    # operator-entered and may not reflect the correct local date for a
+    # segment produced after a midnight crossing).
+    work_date_local          = Column(Date, nullable=False, index=True)
+
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_overtime_time_segment_work_record", "work_record_id"),
+        Index("ix_overtime_time_segment_category_date", "premium_category", "work_date_local"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimeTimeSegment id={self.id} work_record_id={self.work_record_id} "
+            f"category={self.premium_category!r} status={self.classification_status} "
+            f"start={self.segment_start} end={self.segment_end}>"
+        )
+
+
+# ── Germany: Overtime WAGE-TAX Calculation Result (Phase 8AF) ───────────
+# One row per PHYSICAL time range (grouping the 1 or 2 GermanyOvertimeTimeSegment
+# rows that share that identical [segment_start, segment_end) — see
+# engine/germany_overtime_wage_tax.py's own module docstring for the full
+# §3b EStG / R 3b LStR verification and the exact concurrence rule this
+# implements). WAGE TAX ONLY — no social-insurance field exists anywhere
+# on this table; §1 SvEV / the SOCIAL_INSURANCE Grundlohn cap are never
+# read by the code that populates it. Not a GermanyOvertimePremiumComponent
+# (explicitly deferred to Phase 8AH) and not a payslip line — this is a
+# calculation-preview/domain result, not a finalized payroll amount.
+class GermanyOvertimeWageTaxResult(Base):
+    __tablename__ = "payroll_germany_overtime_wage_tax_results"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    work_record_id        = Column(Integer, ForeignKey("payroll_germany_overtime_work_records.id"), nullable=False, index=True)
+
+    segment_start          = Column(DateTime(timezone=True), nullable=False)
+    segment_end             = Column(DateTime(timezone=True), nullable=False)
+    work_date_local          = Column(Date, nullable=False, index=True)
+    qualifying_hours          = Column(Numeric(6, 4), nullable=False)
+
+    # Frozen inputs — never re-derived from today's EmployeeStatutoryProfile
+    # or registry state once written (historical reproducibility).
+    actual_grundlohn_hourly   = Column(Numeric(10, 2), nullable=True)   # NULL when calculation_status != CALCULATED
+    tax_grundlohn_hourly      = Column(Numeric(10, 2), nullable=True)   # actual, capped at the resolved WAGE_TAX ceiling
+    grundlohn_cap_rule_id     = Column(Integer, ForeignKey("payroll_germany_overtime_grundlohn_caps.id"), nullable=True)
+
+    # Primary category (always set when CALCULATED) and, ONLY for the one
+    # verified concurrence case (night + Sunday/holiday, R 3b Abs. 3 Satz 2
+    # LStH — see module docstring), the second, concurrently-applicable
+    # category whose rate was added to the primary's. NULL for every other
+    # combination — those fail closed (STATUTORY_RULE_UNRESOLVED) instead.
+    primary_category_code     = Column(String(30), nullable=True)
+    primary_category_rule_id  = Column(Integer, ForeignKey("payroll_germany_overtime_premium_categories.id"), nullable=True)
+    concurrent_category_code   = Column(String(30), nullable=True)
+    concurrent_category_rule_id = Column(Integer, ForeignKey("payroll_germany_overtime_premium_categories.id"), nullable=True)
+    combined_tax_free_pct       = Column(Numeric(6, 2), nullable=True)  # single rate, or the verified R 3b sum
+
+    # Outputs. gross_qualifying_premium_amount is the STATUTORY-RATE
+    # premium computed at the employee's ACTUAL (uncapped) Grundlohn — see
+    # the module docstring's explicit disclosure of why this is an
+    # engineering interpretation, not a directly-quoted statutory formula,
+    # since no actual-premium-PAID amount exists anywhere in this codebase.
+    gross_qualifying_premium_amount = Column(Numeric(12, 2), nullable=True)
+    tax_free_premium_amount          = Column(Numeric(12, 2), nullable=True)
+    taxable_premium_amount           = Column(Numeric(12, 2), nullable=True)
+
+    # CALCULATED | NOT_CONFIGURED | STATUTORY_RULE_UNRESOLVED | INSUFFICIENT_DATA
+    calculation_status        = Column(String(30), nullable=False)
+    calculation_note           = Column(Text, nullable=True)
+
+    created_by_id               = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                   = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_overtime_wage_tax_result_work_record", "work_record_id"),
+        Index("ix_overtime_wage_tax_result_org_date", "organization_id", "work_date_local"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimeWageTaxResult id={self.id} work_record_id={self.work_record_id} "
+            f"status={self.calculation_status} tax_free={self.tax_free_premium_amount}>"
+        )
+
+
+# ── Germany: Overtime SOCIAL-INSURANCE Calculation Result (Phase 8AG) ───
+# One row per PHYSICAL time range — same grouping/shape as
+# GermanyOvertimeWageTaxResult (Phase 8AF), but COMPLETELY INDEPENDENT: no
+# code path shares a row or a cap between the two. See
+# engine/germany_overtime_social_insurance.py's own module docstring for
+# the full §1 SvEV verification. SOCIAL INSURANCE ONLY — no wage-tax field
+# exists on this table; the WAGE_TAX Grundlohn cap is never read by the
+# code that populates it. Applies uniformly to GKV/PV/RV/ALV (verified
+# this phase — §1 Abs. 2 SvEV explicitly carves out ONLY Unfallversicherung/
+# Seefahrt as different, confirming by contrast that GKV/PV/RV/ALV are NOT
+# differentiated from one another); Unfallversicherung itself is out of
+# this table's scope (handled, unrelated, by the existing EmployerTaxProfile
+# mechanism). Not a GermanyOvertimePremiumComponent (Phase 8AH) and not a
+# payslip line.
+class GermanyOvertimeSocialInsuranceResult(Base):
+    __tablename__ = "payroll_germany_overtime_social_insurance_results"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    work_record_id        = Column(Integer, ForeignKey("payroll_germany_overtime_work_records.id"), nullable=False, index=True)
+
+    segment_start          = Column(DateTime(timezone=True), nullable=False)
+    segment_end             = Column(DateTime(timezone=True), nullable=False)
+    work_date_local          = Column(Date, nullable=False, index=True)
+    qualifying_hours          = Column(Numeric(6, 4), nullable=False)
+
+    # Frozen inputs — independently resolved from Phase 8AF's wage-tax
+    # path (no shared row, no shared cap row).
+    actual_grundlohn_hourly   = Column(Numeric(10, 2), nullable=True)
+    si_grundlohn_hourly        = Column(Numeric(10, 2), nullable=True)   # actual, capped at the resolved SOCIAL_INSURANCE ceiling
+    si_cap_rule_id              = Column(Integer, ForeignKey("payroll_germany_overtime_grundlohn_caps.id"), nullable=True)
+
+    primary_category_code     = Column(String(30), nullable=True)
+    primary_category_rule_id  = Column(Integer, ForeignKey("payroll_germany_overtime_premium_categories.id"), nullable=True)
+    concurrent_category_code   = Column(String(30), nullable=True)
+    concurrent_category_rule_id = Column(Integer, ForeignKey("payroll_germany_overtime_premium_categories.id"), nullable=True)
+    combined_premium_pct        = Column(Numeric(6, 2), nullable=True)
+
+    # Applies uniformly to these branches (verified §1 Abs. 2 SvEV
+    # contrast — see module docstring); a documented, explicit marker
+    # rather than 4 redundant near-duplicate status columns, since no
+    # source establishes any difference AMONG these four.
+    applicable_si_branches       = Column(String(30), nullable=True, default="GKV_PV_RV_ALV")
+
+    gross_qualifying_premium_amount = Column(Numeric(12, 2), nullable=True)
+    si_free_premium_amount           = Column(Numeric(12, 2), nullable=True)
+    si_contributory_premium_amount   = Column(Numeric(12, 2), nullable=True)
+
+    # CALCULATED | NOT_CONFIGURED | STATUTORY_RULE_UNRESOLVED | INSUFFICIENT_DATA
+    calculation_status        = Column(String(30), nullable=False)
+    calculation_note           = Column(Text, nullable=True)
+
+    created_by_id               = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at                   = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_overtime_si_result_work_record", "work_record_id"),
+        Index("ix_overtime_si_result_org_date", "organization_id", "work_date_local"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimeSocialInsuranceResult id={self.id} work_record_id={self.work_record_id} "
+            f"status={self.calculation_status} si_free={self.si_free_premium_amount}>"
+        )
+
+
+# ── Germany: Overtime Premium Component (Phase 8AH) ─────────────────────
+# "What the calculation produced" (Phase 8AA/8AH's own design-principle
+# separation — see this phase's report §6): one row per PHYSICAL time
+# range, COMBINING the already-independently-verified
+# GermanyOvertimeWageTaxResult (Phase 8AF) and GermanyOvertimeSocialInsuranceResult
+# (Phase 8AG) rows for that same range into a single presentable,
+# four-dimension output unit. Never recomputes either calculation; only
+# joins the two existing results by (work_record_id, segment_start,
+# segment_end) and reconciles their independently-derived gross amounts
+# (which must agree, since both read the same underlying facts — see
+# germany_overtime_social_insurance.py's own docstring — a genuine
+# disagreement is a defect, not a value judgement, hence AMOUNT_MISMATCH
+# fails closed rather than picking one arbitrarily).
+#
+# Attachment to a real payslip line (payslip_allowance_item_id) is an
+# EXPLICIT, separate operator action (see
+# service.attach_germany_overtime_premium_component_to_payslip) — never
+# automatic during payroll-run generation. This is a deliberate scope
+# boundary, not an oversight: automatic inclusion would require resolving
+# two product decisions this project has repeatedly, explicitly left open
+# (GermanyOvertimeWorkRecord manual-vs-attendance-derived source
+# precedence — Phase 8AC; and whether inclusion should be automatic vs.
+# opt-in at all), and a component may only be attached once
+# hr_approval_status=APPROVED on its work record — the natural,
+# already-existing use of that field's own stated purpose (Phase 8AC:
+# "an HR/manager sign-off that the hours were legitimately worked"), not
+# a newly-invented business rule. See Phase 8AH's report for the full
+# reasoning.
+class GermanyOvertimePremiumComponent(Base):
+    __tablename__ = "payroll_germany_overtime_premium_components"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    work_record_id        = Column(Integer, ForeignKey("payroll_germany_overtime_work_records.id"), nullable=False, index=True)
+
+    segment_start   = Column(DateTime(timezone=True), nullable=False)
+    segment_end     = Column(DateTime(timezone=True), nullable=False)
+    work_date_local = Column(Date, nullable=False, index=True)
+    qualifying_hours = Column(Numeric(6, 4), nullable=False)
+
+    # Pointers to the two independent calculation results this component
+    # combines — either may be NULL (see combination_status below); never
+    # a third, separately-computed value.
+    wage_tax_result_id          = Column(Integer, ForeignKey("payroll_germany_overtime_wage_tax_results.id"), nullable=True)
+    social_insurance_result_id  = Column(Integer, ForeignKey("payroll_germany_overtime_social_insurance_results.id"), nullable=True)
+
+    # COMPLETE (both CALCULATED, gross amounts reconciled) |
+    # PARTIAL_WAGE_TAX_ONLY | PARTIAL_SOCIAL_INSURANCE_ONLY |
+    # AMOUNT_MISMATCH (both CALCULATED but gross amounts disagree beyond
+    # rounding — fails closed, never silently picks one) | NONE (neither
+    # dimension CALCULATED yet).
+    combination_status = Column(String(30), nullable=False)
+    calculation_note    = Column(Text, nullable=True)
+
+    # Four-dimension output — NEVER collapsed into one "taxable" field
+    # (Phase 8AH §8). gross_premium_amount is only populated for COMPLETE/
+    # PARTIAL_* (never for AMOUNT_MISMATCH or NONE — no guessing).
+    gross_premium_amount   = Column(Numeric(12, 2), nullable=True)
+    wage_tax_free_amount   = Column(Numeric(12, 2), nullable=True)
+    wage_taxable_amount    = Column(Numeric(12, 2), nullable=True)
+    si_exempt_amount       = Column(Numeric(12, 2), nullable=True)
+    si_contributory_amount = Column(Numeric(12, 2), nullable=True)
+
+    # Phase 8AQ — explicit tri-state, the authoritative "is this
+    # component's amount currently on a payslip" signal. NEVER_ATTACHED
+    # is the only state build_germany_overtime_premium_components() may
+    # delete-and-recreate on rebuild (Phase 8AH §22, extended Phase 8AQ):
+    # both ATTACHED and DETACHED are historical facts — a component that
+    # was ever attached is frozen forever, exactly like one still
+    # attached, so a detach can never be silently erased by a later
+    # rebuild. payslip_allowance_item_id/attached_at/attached_by_id are
+    # therefore an append-only "most recent attach" record — Phase 8AQ's
+    # detach action does NOT null them out (that would make a detached
+    # row indistinguishable from a never-attached, rebuildable one); only
+    # attachment_status/detached_at/detached_by_id change on detach.
+    attachment_status = Column(String(20), nullable=False, default="NEVER_ATTACHED", server_default="NEVER_ATTACHED")
+    payslip_allowance_item_id = Column(Integer, ForeignKey("payslip_allowance_items.id"), nullable=True)
+    attached_at               = Column(DateTime(timezone=True), nullable=True)
+    attached_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    detached_at               = Column(DateTime(timezone=True), nullable=True)
+    detached_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Phase 8AR — Germany overtime NET-PAY INTEGRATION. Forensic finding:
+    # attach previously never touched PayslipItem.gross_pay/pf/esi/net_pay
+    # at all — only a separate PayslipAllowanceItem line. RV/ALV/GKV/PV
+    # (mapped onto PayslipItem.pf/esi, spec's own field reuse — see
+    # engine/countries/germany.py's own `return dict(employee_pf=employee_rv,
+    # employee_esi=employee_alv+employee_gkv+employee_pv, ...)`) are
+    # statutorily independent of the BMF PAP wage-tax engine and are
+    # therefore SAFELY, correctly computable today; wage tax (and
+    # therefore a fully correct net_pay) is NOT, because PAP remains
+    # unconditionally BLOCKED_EXTERNAL (proven live this phase) — seeing
+    # this financial-integration status is how an operator/API caller
+    # tells the two apart, never by guessing from silence.
+    # NOT_INTEGRATED (default; never attached) |
+    # PARTIAL_WAGE_TAX_PENDING_PAP (gross + SI deltas applied; wage-tax
+    #   delta uncomputable while PAP is BLOCKED_EXTERNAL) |
+    # REVERSED (attached then detached — deltas nulled, PayslipItem
+    #   returned to pre-attach state).
+    financial_integration_status = Column(String(40), nullable=False, default="NOT_INTEGRATED", server_default="NOT_INTEGRATED")
+    # The EXACT deltas actually applied to the PayslipItem at attach time —
+    # stored (never recomputed from current registries) so detach reverses
+    # precisely what was applied, immune to any registry change in between
+    # (Phase 8AQ's own effective-dating/immutability discipline, applied
+    # here to a financial delta instead of a statutory registry row).
+    # applied_pf_delta  = RV (Rentenversicherung) employee contribution
+    #                     delta → PayslipItem.pf.
+    # applied_esi_delta = ALV + GKV employee contribution delta
+    #                     → PayslipItem.esi (PV excluded — config-dependent).
+    # Wage-tax delta has no dedicated column (it is 0 while PAP is
+    # BLOCKED_EXTERNAL); it is represented by financial_integration_status
+    # plus the germany_calculation_snapshot/audit trace.
+    applied_gross_delta = Column(Numeric(12, 2), nullable=True)
+    applied_pf_delta    = Column(Numeric(12, 2), nullable=True)
+    applied_esi_delta   = Column(Numeric(12, 2), nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # One component per physical time range per work record — the
+        # natural uniqueness boundary (Phase 8AH §21), matching Phase
+        # 8AE/8AF/8AG's own per-physical-range grouping.
+        # One component per physical time range per work record — the
+        # natural uniqueness boundary (Phase 8AH §21), matching Phase
+        # 8AE/8AF/8AG's own per-physical-range grouping. Note:
+        # payslip_allowance_item_id is deliberately NOT unique — several
+        # components (e.g. two different overtime days in the same
+        # payroll period) may legitimately roll up into the SAME payslip
+        # line (see service.attach_germany_overtime_premium_component_to_payslip's
+        # own docstring); double-attachment of a SINGLE component is
+        # prevented by that function's own payslip_allowance_item_id-is-
+        # already-set check, not by a DB constraint on the target.
+        UniqueConstraint(
+            "work_record_id", "segment_start", "segment_end",
+            name="uq_overtime_premium_component_work_record_range",
+        ),
+        Index("ix_overtime_premium_component_work_record", "work_record_id"),
+        Index("ix_overtime_premium_component_org_date", "organization_id", "work_date_local"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimePremiumComponent id={self.id} work_record_id={self.work_record_id} "
+            f"status={self.combination_status} gross={self.gross_premium_amount}>"
+        )
 
 
 # ── Company Holiday Calendar ─────────────────────────────────────────────
@@ -1472,6 +2296,984 @@ class SourceArtifact(Base):
         return f"<SourceArtifact id={self.id} agency={self.agency} title={self.title!r}>"
 
 
+# ── Germany: BMF PAP Algorithm Asset (ZP-TAX-DE-2026-001 §5, §17, §18) ────
+# The versioned, source-hashed, immutable-once-published container for the
+# official BMF "Programmablaufplan" (PAP) — the machine-readable wage-tax
+# calculation authority Germany's spec requires production withholding to
+# be based on (DE-D01: "Do not derive payroll tax solely from annual §32a
+# bands"). This phase builds ONLY the container/lifecycle/evidence
+# foundation — no PAP execution logic exists anywhere in this codebase as
+# of this table's creation; germany.py's calculator is unchanged and does
+# not read from this table.
+#
+# Deliberately its own table, NOT a JurisdictionPack row and NOT a
+# TaxSlab.rule_type="FORMULA" row — see
+# docs/PHASE_3_GERMANY_PAP_ALGORITHM_ASSET.md §11/§12 for why: a PAP asset
+# represents a versioned ALGORITHM (many inputs, branching, explicit
+# rounding rules), not a rate/slab table (JurisdictionPack/ContributionRate/
+# TaxSlab's actual shape) and not a single-variable arithmetic expression
+# (TaxSlab.FORMULA's actual, deliberately narrow, capability — Phase 1
+# confirmed by direct code inspection that it cannot represent PAP's 18-input
+# contract, and this table must not be used to route around that limit).
+#
+# No jurisdiction_state column: the spec is explicit that "the wage-tax
+# algorithm remains federal" (§3, "SUBNATIONAL MODEL") — Land-level
+# variation (church tax, PV/Saxony) belongs to OTHER entities, never to the
+# PAP asset itself.
+class PapAlgorithmAsset(Base):
+    """One effective-dated, source-hashed version of the German BMF PAP.
+
+    Status vocabulary is Germany-specific (DRAFT/REVIEW/APPROVED/PUBLISHED/
+    SUPERSEDED), taken directly from the spec's own Super Admin wireframe
+    (§18 "Germany Overview" and §11's Health-Fund Registry row use this
+    exact five-state vocabulary) — NOT JurisdictionPack's vocabulary
+    (Draft|In Review|QA|Approved|Active|Deprecated|Retired), which belongs
+    to a different, already-shipped entity. The underlying LIFECYCLE
+    BEHAVIOR (edit-lock once published, maker-checker before publication,
+    "new version" instead of in-place correction, only one currently-
+    published version per scope) is reused from JurisdictionPack's proven
+    pattern — see service.py's PAP functions, which mirror
+    _require_editable_pack/set_jurisdiction_pack_status's logic under new
+    names for this vocabulary.
+    """
+    __tablename__ = "payroll_germany_pap_assets"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+
+    jurisdiction_country   = Column(String(10), nullable=False, default="DE", server_default="DE")
+    tax_year                = Column(String(20), nullable=False)   # e.g. "2026" (spec DE-D02)
+    # e.g. "2026-11-12-final" — the spec's OWN canonical-config example
+    # (§17). Never defaulted/seeded by application code: this phase does
+    # not invent or ship a real PAP version value (see Phase 3 report §4).
+    pap_version              = Column(String(100), nullable=False)
+
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)
+
+    status                   = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence chain: the official document this asset was ingested from
+    # (reuses SourceArtifact, not a parallel evidence table — see Phase 3
+    # report §2). object storage path to the raw ingested bytes, mirroring
+    # ComplianceDocument's existing upload pattern (router.py's
+    # upload_compliance_document), and the SHA-256 of those exact bytes,
+    # computed server-side at ingestion (service.py never accepts a
+    # caller-supplied hash for this table — see Phase 3 report §5/§7).
+    source_document_id       = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    source_content_path      = Column(String(500), nullable=True)
+    source_content_sha256    = Column(String(64), nullable=True)
+
+    # "Build/Asset Identity" (see this table's own design diagram) — the
+    # spec's "normalized/transpiled implementation version" (§5 item 1).
+    # Always NULL in this phase: no transpiler/executor exists yet. Reserved
+    # for the future phase that actually compiles the PAP into runnable
+    # logic; NOT to be confused with pap_version (the BMF's own version
+    # label) or source_content_sha256 (the raw document's hash).
+    build_identifier          = Column(String(100), nullable=True)
+
+    created_by_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Version chain — never overwritten, mirrors JurisdictionPack.previous_version_id.
+    previous_version_id       = Column(Integer, ForeignKey("payroll_germany_pap_assets.id"), nullable=True)
+
+    created_at                = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        # Duplicate-identity protection (Phase 3 report §9): the same
+        # (country, tax_year, pap_version) triple can exist only once.
+        UniqueConstraint(
+            "jurisdiction_country", "tax_year", "pap_version",
+            name="uq_pap_asset_country_year_version",
+        ),
+        Index("ix_pap_asset_country_year_status", "jurisdiction_country", "tax_year", "status"),
+        # DB-level backstop (defense in depth alongside the service-layer
+        # check in create/publish) for "only one PUBLISHED asset per
+        # (country, tax_year) at a time" — same partial-unique-index
+        # technique as EmployeeStatutoryProfile's one-open-row guard.
+        Index(
+            "uq_pap_asset_one_published_per_year",
+            "jurisdiction_country", "tax_year",
+            unique=True,
+            postgresql_where=text("status = 'PUBLISHED'"),
+            sqlite_where=text("status = 'PUBLISHED'"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<PapAlgorithmAsset id={self.id} country={self.jurisdiction_country} "
+            f"tax_year={self.tax_year} version={self.pap_version!r} status={self.status}>"
+        )
+
+
+# ── Germany: BMF PAP Production Release Governance (Phase 8G-1) ──────────
+# Deliberately a SEPARATE table from PapAlgorithmAsset, not new columns/
+# states bolted onto it. "This statutory document is a correct, approved,
+# published asset" (PapAlgorithmAsset's own DRAFT/REVIEW/APPROVED/
+# PUBLISHED/SUPERSEDED lifecycle, frozen since Phase 3) and "this asset is
+# authorized to actually run in Zoiko's production Germany payroll" are
+# different questions, decided by different evidence (source finality,
+# commercial/licensing authorization, golden-vector certification bound to
+# this exact hash, security certification, a distinct release approval,
+# and a distinct activation authorization) and, in the licensing/finality
+# case, by people outside engineering entirely. Conflating them would let
+# "PUBLISHED" alone imply "safe to activate," which is exactly what Phase
+# 8D/8F's standing production gates forbid. One release row exists per
+# PapAlgorithmAsset (1:1) and is created only when someone deliberately
+# starts a release attempt for that asset — never automatically.
+#
+# Every gate/evidence field below defaults to the unsatisfied/false/OPEN/
+# PENDING state. Nothing in this schema, and no seed/migration data, ever
+# sets one of these to a "satisfied" value — that only happens through an
+# explicit, actor-attributed service-layer action, and real licensing/
+# finality evidence must originate outside engineering (see
+# docs/PHASE_8G_1_GERMANY_PAP_RELEASE_GOVERNANCE_IMPLEMENTATION_REPORT.md).
+#
+# Reaching status=="ACTIVE" on this table does NOT change, and cannot
+# change, resolve_pap_executor()'s behavior — germany_pap/core.py is not
+# imported by this module and is not modified by Phase 8G-1. Wiring this
+# gate into resolve_pap_executor() is an explicit, separate, future-phase
+# decision, not taken here.
+
+class GermanyPapRelease(Base):
+    """Production release/activation governance record for one
+    PapAlgorithmAsset. See module-level comment above for why this is a
+    separate table from PapAlgorithmAsset's own statutory lifecycle."""
+    __tablename__ = "payroll_germany_pap_releases"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    pap_asset_id  = Column(Integer, ForeignKey("payroll_germany_pap_assets.id"), nullable=False, unique=True)
+
+    # Denormalized from the bound PapAlgorithmAsset at create_pap_release
+    # time (Phase 8H) — never independently settable, never updated after
+    # creation (an asset's country/tax_year are themselves immutable post-
+    # ingestion). Exists ONLY so the database itself — not just a service-
+    # layer SELECT-then-UPDATE check — can enforce "at most one ACTIVE
+    # release per (country, tax_year)" via the partial unique index below.
+    # Phase 8G-2 found the service-layer-only check shares PapAlgorithmAsset's
+    # own long-standing PUBLISHED-conflict pattern (a real, if narrow,
+    # TOCTOU gap under true concurrent transactions); this column plus the
+    # index closes that gap with an actual database constraint.
+    jurisdiction_country  = Column(String(10), nullable=True)
+    tax_year               = Column(String(20), nullable=True)
+
+    # Bound at release-record creation time from the asset's OWN
+    # source_content_sha256 (never caller-supplied). Re-checked against the
+    # asset's LIVE value at every gate evaluation (service.py) — if they
+    # ever diverge, the hash gate fails closed; the stored value is never
+    # silently re-bound to whatever the asset currently says.
+    bound_source_content_sha256 = Column(String(64), nullable=True)
+
+    status = Column(String(30), nullable=False, default="NOT_READY", server_default="NOT_READY")
+    # NOT_READY | READY_FOR_RELEASE | RELEASE_APPROVED | ACTIVATION_BLOCKED
+    # | ACTIVE | ROLLBACK_REQUESTED | ROLLBACK_APPROVED | ROLLED_BACK
+
+    # ── Source identity / hash evidence ──
+    source_identity_verified         = Column(Boolean, nullable=False, default=False, server_default="0")
+    source_identity_verified_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source_identity_verified_at      = Column(DateTime(timezone=True), nullable=True)
+    source_identity_notes            = Column(Text, nullable=True)
+
+    source_hash_verified             = Column(Boolean, nullable=False, default=False, server_default="0")
+    source_hash_verified_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source_hash_verified_at          = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Source-finality evidence (independent of the code-level
+    # PAP_SOURCE_FINALITY constant in germany_pap/adapter.py, which this
+    # table never reads or writes) ──
+    source_finality_status           = Column(String(20), nullable=False, default="OPEN", server_default="OPEN")
+    # OPEN | VERIFIED | SUPERSEDED | REJECTED
+    source_finality_authority        = Column(String(200), nullable=True)
+    source_finality_reference        = Column(String(200), nullable=True)
+    source_finality_verified_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    source_finality_verified_at      = Column(DateTime(timezone=True), nullable=True)
+    source_finality_notes            = Column(Text, nullable=True)
+
+    # ── Licensing / commercial-use authorization evidence ──
+    licensing_status                 = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    # PENDING | AUTHORIZED | DENIED
+    licensing_authority              = Column(String(200), nullable=True)
+    licensing_reference              = Column(String(200), nullable=True)
+    licensing_authorization_date     = Column(Date, nullable=True)
+    licensing_effective_date         = Column(Date, nullable=True)
+    licensing_expiry_date            = Column(Date, nullable=True)
+    licensing_evidence_location      = Column(String(500), nullable=True)
+    licensing_evidence_hash          = Column(String(64), nullable=True)
+    licensing_notes                  = Column(Text, nullable=True)
+    licensing_recorded_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # ── Golden-vector certification, bound to this exact source hash —
+    # certifying version A's bytes must never be accepted as proof for
+    # version B's (service.py rejects a mismatch at write time). ──
+    golden_vectors_passed            = Column(Boolean, nullable=False, default=False, server_default="0")
+    golden_vectors_source_sha256     = Column(String(64), nullable=True)
+    golden_vectors_verified_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    golden_vectors_verified_at       = Column(DateTime(timezone=True), nullable=True)
+    golden_vectors_notes             = Column(Text, nullable=True)
+
+    # ── Security certification ──
+    security_certified               = Column(Boolean, nullable=False, default=False, server_default="0")
+    security_certified_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    security_certified_at            = Column(DateTime(timezone=True), nullable=True)
+    security_notes                   = Column(Text, nullable=True)
+
+    # ── Release preparation / approval (maker-checker #1) ──
+    prepared_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    prepared_at       = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at       = Column(DateTime(timezone=True), nullable=True)
+    rejected_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rejected_at       = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason  = Column(Text, nullable=True)
+
+    # ── Activation (maker-checker #2 — distinct from release approval) ──
+    activated_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    activated_at      = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Rollback (Phase 8H: maker-checker #3, distinct from activation) —
+    # never deletes/rewrites; see service.request_pap_rollback /
+    # approve_pap_rollback / reject_pap_rollback. rollback_requested_by_id
+    # must differ from rollback_approved_by_id, enforced in service.py,
+    # the same minimum-viable pattern as every other maker-checker gate
+    # in this file. ──
+    rollback_requested_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rollback_requested_at      = Column(DateTime(timezone=True), nullable=True)
+    rollback_approved_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rollback_approved_at        = Column(DateTime(timezone=True), nullable=True)
+    rolled_back_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rolled_back_at       = Column(DateTime(timezone=True), nullable=True)
+    rollback_reason      = Column(Text, nullable=True)
+    previous_release_id  = Column(Integer, ForeignKey("payroll_germany_pap_releases.id"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_pap_release_status", "status"),
+        # DB-level backstop (Phase 8H) for "at most one ACTIVE release per
+        # (country, tax_year)" — the exact same partial-unique-index
+        # technique as PapAlgorithmAsset's uq_pap_asset_one_published_per_year,
+        # with BOTH postgresql_where and sqlite_where from the start (Phase
+        # 8E-2's F2 finding: a migration that only carries postgresql_where
+        # silently becomes a full unique index under SQLite — this index is
+        # authored correctly the first time).
+        Index(
+            "uq_pap_release_one_active_per_scope",
+            "jurisdiction_country", "tax_year",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+            sqlite_where=text("status = 'ACTIVE'"),
+        ),
+    )
+
+    def __repr__(self):
+        return f"<GermanyPapRelease id={self.id} pap_asset_id={self.pap_asset_id} status={self.status}>"
+
+
+# ── Germany: Krankenkasse (Health Fund) Registry (ZP-TAX-DE-2026-001 §11) ─
+# Configuration/registry foundation ONLY — no GKV contribution is
+# calculated anywhere in this codebase as a result of this table (see
+# docs/PHASE_4_GERMANY_HEALTH_FUND_REGISTRY_REPORT.md §3). Global Germany
+# statutory configuration (no organization_id) — the same "describes a
+# jurisdiction, not an org" model as JurisdictionPack/PapAlgorithmAsset,
+# per this table's own spec section describing it as statutory config, not
+# tenant data.
+#
+# Shape decision (see Phase 4 report §5 for the full reasoning): this is
+# NOT modeled after LocalityDataset (a big *batch* import of many unrelated
+# locality codes as one versioned unit) despite that being the precedent
+# named when this table was requested — nothing in the spec suggests
+# Krankenkassen are ingested as one giant batch, and §11's own field list
+# (health_fund_id, fund_name, supplementary_rate_pct, effective dates,
+# status) describes ONE FUND's OWN rate timeline. That shape — a stable
+# identity with an effective-dated version history — is EmployeeStatutory-
+# Profile's (Phase 2) shape, not LocalityDataset's or PapAlgorithmAsset's:
+# multiple historical/current/future PUBLISHED rows for the SAME
+# health_fund_id must all remain independently resolvable by date (spec
+# §22: "payroll must resolve exactly one applicable rate per contribution
+# period" — a genuine retro/historical-lookup requirement, not just "the
+# current rate"), unlike PapAlgorithmAsset's deliberate choice (Phase 3) to
+# make only the single currently-PUBLISHED version resolvable. Overlap
+# prevention therefore reuses EmployeeStatutoryProfile's general
+# range-overlap check (Phase 2 pattern), not PapAlgorithmAsset's
+# single-active-slot-with-manual-supersession pattern — while the
+# maker-checker / publish gate itself still reuses PapAlgorithmAsset's
+# exact "distinct approver required" logic, since that principle is
+# identity-shape-independent.
+class GermanyHealthFund(Base):
+    """One effective-dated version of one Krankenkasse's Zusatzbeitrag
+    (supplementary contribution) rate and registry metadata.
+
+    `supplementary_rate_pct` is the FULL applicable rate — spec §11 is
+    explicit ("not employee half") and §5's PAP-input table (KVZ) states
+    "PAP handles employee/employer split" — so this table deliberately has
+    no employee/employer split columns, unlike ContributionRate's
+    convention; splitting is the future PAP executor's job, not this
+    registry's.
+    """
+    __tablename__ = "payroll_germany_health_funds"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+
+    # Stable across this fund's own version history — NOT unique alone
+    # (multiple effective-dated rows share it by design); see __table_args__.
+    health_fund_id           = Column(String(50), nullable=False, index=True)
+    fund_name                = Column(String(200), nullable=False)
+
+    # Full Zusatzbeitrag rate (spec §11 "not employee half"). Required:
+    # this registry's entire purpose is holding this value — there is no
+    # meaningful DRAFT row without one.
+    supplementary_rate_pct   = Column(Numeric(6, 4), nullable=False)
+    # True only for the statutory national-average reference case (spec's
+    # own "AVERAGE RATE WARNING": 2.9% is a designated-case figure, never a
+    # silent universal default). Application code must never branch on
+    # "no fund resolved, use 2.9%" — see Phase 4 report §3/§22 Q5.
+    is_average_rate          = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # Phase 8U — U1 (sickness reimbursement) / U2 (maternity) levy rates,
+    # spec §14/DE-D06: "U1 and U2 are generally health-fund/tariff
+    # specific" — each Krankenkasse sets its own U1/U2 percentages for its
+    # own insured employers' payroll, the SAME "fund publishes its own
+    # rate" shape as supplementary_rate_pct above (not a national/average
+    # rate). Both nullable: a fund's own U1/U2 rates are frequently not
+    # yet known/published even when its Zusatzbeitrag is — NULL here means
+    # exactly that ("not yet configured for this fund"), never 0%; the
+    # calculation layer (germany_pap) must treat NULL as NOT_CONFIGURED,
+    # never as "this fund charges nothing."
+    u1_rate_pct               = Column(Numeric(6, 4), nullable=True)
+    u2_rate_pct               = Column(Numeric(6, 4), nullable=True)
+
+    effective_from            = Column(Date, nullable=False)
+    effective_to              = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — this EXACT
+    # vocabulary is spec §11's own status row for this registry
+    # (deliberately NOT PapAlgorithmAsset's DRAFT/REVIEW/APPROVED/
+    # PUBLISHED/SUPERSEDED — "VERIFIED" replaces "REVIEW" here because the
+    # supplied documentation says so for this specific table, not because
+    # of any general platform convention).
+    status                    = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # "Employee coverage/membership relation" (spec §11) — the supplied
+    # documentation names this concept but defines no enumerated value
+    # set, so this is free text, not an invented enum (see Phase 4 report
+    # §4 — NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION beyond the
+    # concept's existence).
+    member_applicability      = Column(String(200), nullable=True)
+    # "Effective-date and retro rules for fund changes" (spec §11) — same
+    # free-text treatment and same limitation as member_applicability.
+    payroll_recalc_policy     = Column(String(200), nullable=True)
+
+    # Evidence: reuses SourceArtifact — no separate checksum/hash column
+    # exists on this table at all. Unlike PapAlgorithmAsset (which hashes
+    # an actual ingested document's bytes), a health-fund rate has no
+    # "content" of its own to hash — its integrity comes entirely from
+    # citing an existing, independently-created SourceArtifact row (via
+    # the existing /compliance/source-artifacts endpoint), never from a
+    # caller-supplied value on THIS table. See Phase 4 report §6/§9.
+    authority_source_id       = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Version chain — never overwritten. Distinct from "another row with a
+    # non-overlapping later effective_from," which needs no chain pointer
+    # at all (both are simply independently resolvable); this is only set
+    # when a row is an explicit correction of another (see SUPERSEDED
+    # usage in the Phase 4 report §10).
+    previous_version_id       = Column(Integer, ForeignKey("payroll_germany_health_funds.id"), nullable=True)
+
+    created_at                = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_health_fund_id_period", "health_fund_id", "effective_from"),
+        # Same partial-unique-index technique as EmployeeStatutoryProfile's
+        # one-open-row guard — at most one open-ended (still current) row
+        # per fund at a time. Full overlap prevention across ALL rows
+        # (open or closed) for a fund is enforced at the service layer
+        # (mirroring EmployeeStatutoryProfile's approach), since a general
+        # range-overlap DB constraint isn't available consistently across
+        # this project's Postgres/SQLite dev-fallback targets.
+        Index(
+            "uq_health_fund_one_open_period",
+            "health_fund_id",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyHealthFund id={self.id} fund={self.health_fund_id!r} "
+            f"rate={self.supplementary_rate_pct} status={self.status}>"
+        )
+
+
+# ── Germany: U1 Tariff (Sickness Reimbursement) (ZP-TAX-DE-2026-001 §14) ──
+# Phase 8W. U1 is employer-elected per tariff — each Krankenkasse publishes
+# multiple U1 tariff options (different reimbursement percentages and
+# corresponding levy rates). The employer selects one tariff for their
+# employees at that fund. This child table of GermanyHealthFund stores the
+# AVAILABLE tariffs; the employer's SELECTED tariff is recorded on
+# EmployeeStatutoryProfile.de_u1_tariff_id.
+#
+# Pre-Phase 8W behavior: GermanyHealthFund.u1_rate_pct held a single
+# nullable rate — NULL meant "not yet configured" and the calculation engine
+# treated it as NOT_CONFIGURED. That column is retained for backward
+# compatibility but is DEPRECATED in production resolution — the engine now
+# resolves from this child table via EmployeeStatutoryProfile.de_u1_tariff_id.
+#
+# Each row represents one tariff option for one fund in one effective period:
+#   (health_fund_id, tariff_identifier, effective_from)
+#
+# Overlap prevention: two rows for the same fund+tariff must not have
+# overlapping effective periods. Different tariffs for the same fund do NOT
+# conflict (they represent independent options the employer may choose from).
+#
+# Lifecycle: DRAFT -> VERIFIED -> APPROVED -> PUBLISHED -> SUPERSEDED,
+# identical to GermanyHealthFund and every other Germany registry. Same
+# maker-checker enforcement: distinct approver + linked source required
+# before PUBLISHED.
+class GermanyHealthFundU1Tariff(Base):
+    """One effective-dated version of one U1 (sickness reimbursement) tariff
+    offered by one Krankenkasse.
+
+    Each Krankenkasse publishes multiple U1 tariff options — the employer
+    selects which tariff applies to their employees at that fund. The tariff
+    determines both the employer's reimbursement percentage (what the fund
+    reimburses for sick pay) and the corresponding levy rate (what the
+    employer pays into the U1 fund as a percentage of gross wages).
+
+    `reimbursement_pct` is the percentage of sick-pay costs reimbursed by
+    the fund (e.g. 50, 70, 80 for TK). `levy_rate_pct` is the
+    corresponding percentage of gross wages the employer pays as a U1 levy
+    (e.g. 1.3, 2.1, 3.2 for TK). Both are stored as independently
+    ingested statutory values — the levy rate is NOT derived from the
+    reimbursement percentage; it is a separate published figure per fund.
+
+    `tariff_identifier` is a stable code for this tariff within the fund's
+    own version history (e.g. "U1_50", "U1_70", "U1_80"). Not unique alone
+    (multiple effective-dated rows share it); see __table_args__."""
+    __tablename__ = "payroll_germany_health_fund_u1_tariffs"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+
+    # FK to GermanyHealthFund — identifies which Krankenkasse this tariff
+    # belongs to. Uses the stable health_fund_id code (e.g. "TK"), NOT the
+    # auto-increment PK, matching GermanyHealthFund's own identity convention.
+    health_fund_id           = Column(String(50), nullable=False, index=True)
+
+    # Stable tariff code within this fund (e.g. "U1_50", "U1_70", "U1_80").
+    # Combined with health_fund_id and effective_from to form the effective
+    # identity.
+    tariff_identifier        = Column(String(50), nullable=False, index=True)
+
+    # Human-readable tariff name (e.g. "50% Erstattungssatz")
+    tariff_name              = Column(String(200), nullable=True)
+
+    # Reimbursement percentage — the percentage of sick-pay costs the fund
+    # reimburses to the employer (spec §14).
+    reimbursement_pct        = Column(Numeric(6, 4), nullable=False)
+
+    # U1 levy rate — the percentage of gross wages the employer pays into
+    # the U1 fund (spec §14). This is the rate used in the calculation
+    # engine's U1 computation.
+    levy_rate_pct            = Column(Numeric(6, 4), nullable=False)
+
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — identical
+    # vocabulary to GermanyHealthFund (spec §11).
+    status                   = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence: reuses SourceArtifact — same pattern as every other Germany
+    # registry. The source must specifically establish this tariff's rates,
+    # not merely cite the fund generally.
+    authority_source_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id      = Column(Integer, ForeignKey("payroll_germany_health_fund_u1_tariffs.id"), nullable=True)
+
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_u1_tariff_fund_tariff_period", "health_fund_id", "tariff_identifier", "effective_from"),
+        # At most one open-ended row per (health_fund_id, tariff_identifier)
+        # pair. Full overlap prevention across ALL rows for the same pair is
+        # enforced at the service layer (same reasoning as GermanyHealthFund /
+        # EmployeeStatutoryProfile).
+        Index(
+            "uq_u1_tariff_one_open_period",
+            "health_fund_id", "tariff_identifier",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyHealthFundU1Tariff id={self.id} fund={self.health_fund_id!r} "
+            f"tariff={self.tariff_identifier!r} levy={self.levy_rate_pct} status={self.status}>"
+        )
+
+
+# ── Germany: Contribution Ceiling Configuration (ZP-TAX-DE-2026-001 §9) ──
+# Configuration/registry foundation ONLY — no GKV/PV/RV/ALV contribution is
+# calculated anywhere in this codebase as a result of this table (see
+# docs/PHASE_5_GERMANY_CONTRIBUTION_CEILING_CONFIGURATION_REPORT.md §15/§24).
+#
+# Exists because Phase 1 found, and Phase 4 re-confirmed, that
+# engine/countries/germany.py reads exactly ONE shared "contribution_ceiling"
+# ContributionRate row (component_key="contribution_ceiling") and applies it
+# to BOTH its "pension" and "social-insurance" buckets — but spec §9 gives
+# TWO independent ceilings: RV/ALV (€8,450/month, €101,400/year) and
+# GKV/PV (€5,812.50/month, €69,750/year). This table is the correct,
+# branch-aware replacement DATA MODEL for a future calculation phase to
+# consume — germany.py's existing single-ceiling read is UNCHANGED and
+# does NOT read from this table (deliberately — see the report's
+# "Compatibility" section for why the old component_key is left alone
+# rather than migrated in this phase).
+#
+# Deliberately its own table, NOT a new ContributionRate.component_key
+# value and NOT a modification to that model — a ContributionRate row is
+# one flat/percentage value per jurisdiction with no branch-applicability
+# concept of its own; retrofitting branch-awareness onto that shared,
+# multi-country model would risk every other country's contribution rows,
+# for zero benefit (no other country's ceiling concept needs a "branch"
+# dimension). A small, dedicated, additive table is lower-risk and keeps
+# Germany's real requirement (two named branches, each independently
+# resolvable and historically reproducible) explicit rather than implicit
+# in a generic key-value row.
+#
+# Shape/lifecycle decision: matches GermanyHealthFund (Phase 4), not
+# PapAlgorithmAsset (Phase 3) — a contribution branch's ceiling changes
+# year over year (or mid-year), and every such period must remain
+# independently resolvable for historical/retro payroll (the same
+# reasoning Phase 4 documented for health-fund rates), so overlap
+# prevention is a full range check across a branch's own version history,
+# not a single-active-slot-with-manual-supersession model. Status
+# vocabulary is GermanyHealthFund's own spec-given vocabulary
+# (DRAFT/VERIFIED/APPROVED/PUBLISHED/SUPERSEDED, spec §11) reused here as
+# the closest spec-given vocabulary for this same general "Social
+# Insurance rates and ceilings" configuration area (spec §18) — the spec
+# gives no separate, distinct vocabulary for contribution ceilings
+# specifically (NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION beyond
+# the general Social Insurance area), so reusing the nearest analogous
+# spec-given vocabulary was judged more faithful than either inventing a
+# third one or defaulting to PapAlgorithmAsset's "REVIEW"-based vocabulary
+# for an unrelated document-asset concept.
+class GermanyContributionCeiling(Base):
+    """One effective-dated version of one contribution branch's monthly +
+    annual contribution assessment ceiling.
+
+    `branch` is one of exactly two values (spec §9 groups four programs
+    into two shared-ceiling pairs — "GKV_PV" and "RV_ALV" — no finer
+    subdivision is specified anywhere in the supplied documentation, so
+    none is modeled). `monthly_ceiling`/`annual_ceiling` are BOTH stored
+    as independently-ingested statutory values, never derived from one
+    another — spec §9 supplies both explicitly for each branch, and
+    deriving one from the other would risk silent drift from the actual
+    published figures in a year where the relationship isn't a clean x12
+    (2026's own figures happen to be exact multiples: 5,812.50 x 12 =
+    69,750.00 and 8,450 x 12 = 101,400 — verified by the boundary tests in
+    this phase — but nothing in the architecture assumes this holds for
+    every future year)."""
+    __tablename__ = "payroll_germany_contribution_ceilings"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+
+    # "GKV_PV" | "RV_ALV" — validated in the service layer (see
+    # _GERMANY_CONTRIBUTION_BRANCHES), not a DB CHECK constraint, matching
+    # this codebase's existing convention for status/enum-like string
+    # columns (e.g. JurisdictionPack.status, TaxSlab.rule_type).
+    branch                = Column(String(20), nullable=False, index=True)
+
+    monthly_ceiling        = Column(Numeric(12, 2), nullable=False)
+    annual_ceiling         = Column(Numeric(12, 2), nullable=False)
+
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — see this
+    # table's own header comment for why this (GermanyHealthFund's)
+    # vocabulary was reused rather than PapAlgorithmAsset's.
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence: reuses SourceArtifact exactly as GermanyHealthFund does —
+    # no separate checksum field on this table either (a ceiling figure,
+    # like a fund rate, has no "content" of its own to hash; see the
+    # Phase 5 report §11 for why this table inherits the same, disclosed
+    # limitation as Phase 4's create_source_artifact dependency).
+    authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Version chain — reserved for an explicit correction of an
+    # erroneously published row (see SUPERSEDED usage in the Phase 5
+    # report), not for ordinary year-to-year ceiling changes, which are
+    # simply additional independent rows — same convention as
+    # GermanyHealthFund.previous_version_id.
+    previous_version_id    = Column(Integer, ForeignKey("payroll_germany_contribution_ceilings.id"), nullable=True)
+
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_contribution_ceiling_branch_period", "branch", "effective_from"),
+        # Same partial-unique-index technique as GermanyHealthFund's/
+        # EmployeeStatutoryProfile's one-open-row guard — at most one
+        # open-ended (still current) row per branch at a time. Full
+        # overlap prevention across ALL rows (open or closed) for a
+        # branch is enforced at the service layer, same reasoning as
+        # those two tables.
+        Index(
+            "uq_contribution_ceiling_one_open_period",
+            "branch",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyContributionCeiling id={self.id} branch={self.branch!r} "
+            f"monthly={self.monthly_ceiling} annual={self.annual_ceiling} status={self.status}>"
+        )
+
+
+# ── Germany: PV (Long-Term Care Insurance) Child/Saxony Configuration ────
+# ZP-TAX-DE-2026-001 §10 — Configuration/registry foundation ONLY. No PV
+# contribution is calculated anywhere in this codebase as a result of this
+# table. The supplied Germany documentation specifies that PV rates are:
+#   - child-sensitive (different for childless vs 1..5+ qualifying children)
+#   - have different employee/employer allocation in Saxony
+#   - subject to the GKV/PV contribution ceiling (Phase 5)
+#   - effective-dated statutory configuration
+#
+# Each row represents one independent PV configuration track identified by:
+#   (child_category, is_saxony, effective period)
+#
+# Overlap prevention: two rows with the same (child_category, is_saxony)
+# must not have overlapping effective periods. Independent child-category
+# tracks and independent Saxony/non-Saxony tracks do NOT conflict.
+#
+# Deliberately its own table, NOT a modification to ContributionRate or
+# GermanyContributionCeiling — those models have no child-category dimension
+# and adding one would risk every other country's contribution rows. A small,
+# dedicated, additive table is lower-risk and keeps Germany's real
+# requirement (six child categories × two Saxony variants = twelve
+# independent rate configurations, each independently resolvable by date)
+# explicit rather than implicit.
+#
+# Shape/lifecycle decision: matches GermanyContributionCeiling (Phase 5) and
+# GermanyHealthFund (Phase 4). Same reasoning applies: every PV rate version
+# — past, current, or future — must remain independently resolvable for
+# historical/retro payroll. Status vocabulary is spec §11's own
+# DRAFT/VERIFIED/APPROVED/PUBLISHED/SUPERSEDED, reused here.
+#
+# Ceiling relationship: this table stores RATES ONLY. The contribution
+# ceiling (GKV_PV branch, Phase 5 GermanyContributionCeiling) is resolved
+# SEPARATELY by a future calculation engine. No ceiling value is duplicated
+# here. See Phase 6 report §14 for the intended future integration.
+class GermanyPvConfiguration(Base):
+    """One effective-dated version of one child-category × Saxony PV rate
+    configuration.
+
+    `child_category` is one of exactly six values specified by the supplied
+    Germany documentation: CHILDLESS, 1, 2, 3, 4, 5_PLUS. CHILDLESS is
+    explicit (not child_count=0) because the childless rate is materially
+    different (higher total rate, different employee/employer allocation).
+
+    All five rate columns are stored independently as explicitly supplied
+    statutory values — none is derived from another. This preserves
+    statutory evidence rather than assuming arithmetic derivation is always
+    safe (the employer rate is identical across all categories in the 2026
+    documentation, but this is not architecturally assumed)."""
+    __tablename__ = "payroll_germany_pv_configurations"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+
+    # Child category — validated in service layer against
+    # _GERMANY_PV_CHILD_CATEGORIES, not a DB CHECK constraint, matching
+    # this codebase's convention for enum-like string columns.
+    child_category        = Column(String(20), nullable=False, index=True)
+
+    # Saxony applicability — True for Saxony-specific allocation,
+    # False for standard (all other German states).
+    is_saxony             = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # Statutory PV rates — all independently preserved (see docstring).
+    # Numeric(6,4) matches GermanyHealthFund.supplementary_rate_pct's
+    # precision, sufficient for percentage values up to 99.9999%.
+    total_rate_pct                    = Column(Numeric(6, 4), nullable=False)
+    standard_employee_rate_pct        = Column(Numeric(6, 4), nullable=False)
+    employer_rate_pct                 = Column(Numeric(6, 4), nullable=False)
+    saxony_employee_rate_pct          = Column(Numeric(6, 4), nullable=False)
+    saxony_employer_rate_pct          = Column(Numeric(6, 4), nullable=False)
+
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — spec §11's
+    # vocabulary, reused identically to GermanyHealthFund/GermanyContributionCeiling.
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence: reuses SourceArtifact — same pattern as GermanyHealthFund
+    # and GermanyContributionCeiling.
+    authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Version chain — reserved for an explicit correction of an
+    # erroneously published row (see SUPERSEDED usage in the Phase 6
+    # report), not for ordinary year-to-year rate changes, which are
+    # simply additional independent rows.
+    previous_version_id    = Column(Integer, ForeignKey("payroll_germany_pv_configurations.id"), nullable=True)
+
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_pv_config_child_saxony_period", "child_category", "is_saxony", "effective_from"),
+        # At most one open-ended (still current) row per
+        # (child_category, is_saxony) pair. Full overlap prevention
+        # across ALL rows for the same pair is enforced at the service
+        # layer (same reasoning as GermanyHealthFund /
+        # GermanyContributionCeiling / EmployeeStatutoryProfile).
+        Index(
+            "uq_pv_config_one_open_period",
+            "child_category", "is_saxony",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyPvConfiguration id={self.id} child={self.child_category!r} "
+            f"saxony={self.is_saxony} total={self.total_rate_pct} status={self.status}>"
+        )
+
+
+# ── Germany: Earning/Deduction Taxability (ZP-TAX-DE-2026-001 §15) ──────
+# Phase 8T. Every Germany earning/deduction type must independently
+# declare FOUR dimensions — spec's own "FOUR-DIMENSION TAXABILITY" callout:
+# "wage-tax treatment, health/care contribution treatment, pension/
+# unemployment treatment, and reporting classification. 'Taxable yes/no'
+# is insufficient for German payroll." This is NOT the existing
+# TaxabilityRule model (models.py, US-oriented, a single is_taxable
+# boolean per (earning_type, tax_component) pair, confirmed unused
+# anywhere in this codebase) — that model's shape cannot represent four
+# independent, Germany-specific dimensions on one row, and retrofitting it
+# would risk every other country's use of that name. A small, dedicated,
+# additive table mirrors this module's own established pattern
+# (GermanyHealthFund/GermanyContributionCeiling/GermanyPvConfiguration all
+# made the identical "own table, not a retrofit" choice for the same
+# reason).
+#
+# `earning_type` values are the exact 9 rows from spec §15's own taxability
+# matrix table (REGULAR_SALARY, OVERTIME_SHIFT_PREMIUM, BONUS_ANNUAL_BONUS,
+# PENSION_VERSORGUNGSBEZUG, EQUITY_BENEFIT_19A, EXPENSE_REIMBURSEMENT,
+# OCCUPATIONAL_PENSION_CONTRIBUTION, GARNISHMENT_ATTACHMENT,
+# EMPLOYEE_VOLUNTARY_DEDUCTION) — validated in the service layer against
+# _GERMANY_EARNING_TYPES, not a DB CHECK constraint, matching this
+# codebase's convention for enum-like string columns. No 10th type is
+# invented; if Zoiko later needs an earning type the spec doesn't name,
+# that is out of this table's scope until the spec is amended.
+class GermanyEarningTaxabilityRule(Base):
+    """One effective-dated version of one earning/deduction type's
+    four-dimension Germany taxability classification.
+
+    `wage_tax_treatment`, `gkv_pv_treatment`, and `rv_alv_treatment` are
+    each one of a small, spec-derived vocabulary (see
+    _GERMANY_WAGE_TAX_TREATMENTS / _GERMANY_SI_TREATMENTS in service.py) —
+    genuinely independent columns, never collapsed into one taxable/
+    non-taxable flag (spec's own explicit prohibition). `reporting_
+    classification` is free text: spec names "reporting classification"
+    as the fourth dimension but gives no enumerated value set for it
+    anywhere (only a free-text "Notes / router" column in the same
+    table) — inventing an enum the spec doesn't supply would misrepresent
+    an unspecified classification as a settled one."""
+    __tablename__ = "payroll_germany_earning_taxability_rules"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+
+    earning_type             = Column(String(50), nullable=False, index=True)
+
+    wage_tax_treatment        = Column(String(30), nullable=False)
+    gkv_pv_treatment           = Column(String(40), nullable=False)
+    rv_alv_treatment           = Column(String(40), nullable=False)
+    reporting_classification  = Column(Text, nullable=True)
+
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — spec §11's
+    # vocabulary, reused identically to every other Germany registry.
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence: reuses SourceArtifact — same pattern as every other
+    # Germany registry (Source Lock enforced at the service layer before
+    # PUBLISHED, exactly like set_health_fund_status/set_contribution_
+    # ceiling_status/set_pv_configuration_status).
+    authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id    = Column(Integer, ForeignKey("payroll_germany_earning_taxability_rules.id"), nullable=True)
+
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_earning_taxability_type_period", "earning_type", "effective_from"),
+        # At most one open-ended (still current) row per earning_type.
+        # Full overlap prevention across ALL rows for the same type is
+        # enforced at the service layer (same reasoning as every other
+        # Germany registry in this module).
+        Index(
+            "uq_earning_taxability_one_open_period",
+            "earning_type",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyEarningTaxabilityRule id={self.id} earning_type={self.earning_type!r} "
+            f"status={self.status}>"
+        )
+
+
+# ── Germany: Overtime/Shift-Premium Statutory Registries (Phase 8AD) ─────
+# The two GLOBAL statutory registries from Phase 8AA's ARCHITECTURE_D design
+# (docs/PHASE_8AA_..._DATA_MODEL.md §11) — configuration ONLY. Neither table
+# is tenant-scoped (no organization_id, exactly like GermanyContributionCeiling/
+# GermanyPvConfiguration), neither holds employee data, a calculated amount,
+# an overtime work record, or an executable formula. Shape mirrors
+# GermanyContributionCeiling exactly (same lifecycle, same overlap/open-row
+# guard, same SourceArtifact linkage) — deliberately NOT a new pattern.
+# Consumption by the Germany calculation engine is explicitly OUT OF SCOPE
+# for this phase (Phase 8AE/8AF/8AG) — engine/countries/germany.py does not
+# reference either table.
+
+class GermanyOvertimePremiumCategory(Base):
+    """One effective-dated version of one statutory overtime/shift-premium
+    category's wage-tax-free percentage (§3b EStG). Exactly the 5 categories
+    Phase 8Z's fetched §3b EStG text distinguishes — no 6th invented."""
+    __tablename__ = "payroll_germany_overtime_premium_categories"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+
+    # NIGHT_STANDARD | NIGHT_EXTENDED | SUNDAY | HOLIDAY_STANDARD |
+    # HOLIDAY_SPECIAL — validated in the service layer (see
+    # _GERMANY_OVERTIME_PREMIUM_CATEGORIES), not a DB CHECK constraint,
+    # matching this codebase's existing convention for enum-like columns.
+    category_code         = Column(String(30), nullable=False, index=True)
+
+    wage_tax_free_pct      = Column(Numeric(6, 2), nullable=False)
+
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id    = Column(Integer, ForeignKey("payroll_germany_overtime_premium_categories.id"), nullable=True)
+
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_overtime_premium_category_period", "category_code", "effective_from"),
+        Index(
+            "uq_overtime_premium_category_one_open_period",
+            "category_code",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimePremiumCategory id={self.id} category_code={self.category_code!r} "
+            f"wage_tax_free_pct={self.wage_tax_free_pct} status={self.status}>"
+        )
+
+
+class GermanyOvertimeGrundlohnCap(Base):
+    """One effective-dated version of one dimension's statutory hourly
+    Grundlohn cap (§3b EStG's €50/hour wage-tax cap; §1 Abs. 1 Satz 1 Nr. 1
+    SvEV's €25/hour social-insurance cap). A SEPARATE table from
+    GermanyOvertimePremiumCategory — these caps apply uniformly across ALL
+    5 premium categories, not per-category (see the Phase 8AA report's own
+    rejection of overloading GermanyContributionCeiling for this — same
+    accidental shape, genuinely different statutory concept). NEVER an
+    employee's actual hourly rate — see EmployeeStatutoryProfile.de_grundlohn_hourly
+    (Phase 8AB) for that, a wholly separate column this table must never be
+    confused with or fed into directly."""
+    __tablename__ = "payroll_germany_overtime_grundlohn_caps"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+
+    # WAGE_TAX | SOCIAL_INSURANCE — validated in the service layer (see
+    # _GERMANY_OVERTIME_GRUNDLOHN_DIMENSIONS).
+    dimension              = Column(String(20), nullable=False, index=True)
+
+    hourly_cap_amount      = Column(Numeric(10, 2), nullable=False)
+
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id    = Column(Integer, ForeignKey("payroll_germany_overtime_grundlohn_caps.id"), nullable=True)
+
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_overtime_grundlohn_cap_period", "dimension", "effective_from"),
+        Index(
+            "uq_overtime_grundlohn_cap_one_open_period",
+            "dimension",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyOvertimeGrundlohnCap id={self.id} dimension={self.dimension!r} "
+            f"hourly_cap_amount={self.hourly_cap_amount} status={self.status}>"
+        )
+
+
 class LocalityDataset(Base):
     """A signed, versioned import of official local-tax jurisdiction codes
     (county/municipal/school-district/PSD) for one state — the standard's
@@ -1564,6 +3366,193 @@ class EmployerTaxProfile(Base):
 
     def __repr__(self):
         return f"<EmployerTaxProfile org={self.organization_id} jur={self.jurisdiction_id} comp={self.component_code}>"
+
+
+class GermanyAccidentInsuranceProfile(Base):
+    """Phase 8AJ (2nd pass) — the maker-checker-gated DRAFT/VERIFIED/
+    APPROVED/PUBLISHED workflow for one organization's German statutory
+    accident insurance (Unfallversicherung), mirroring
+    GermanyHealthFund/GermanyContributionCeiling's exact lifecycle
+    vocabulary and version-chain shape.
+
+    Deliberately a SEPARATE table from EmployerTaxProfile, not a
+    retrofit of it: EmployerTaxProfile is a shared, cross-jurisdiction
+    mechanism (built for, and still used unmodified by, US SUI) with no
+    lifecycle at all — adding one only for this table's Germany usage
+    would inconsistently split its one existing consumer from a second,
+    differently-behaved one. Instead, THIS table is the Super-Admin
+    maker-checker workspace; publishing a row here (see
+    service.set_germany_accident_insurance_profile_status) materializes
+    the published values into a real EmployerTaxProfile row — the SAME
+    row the Germany engine (engine/countries/germany.py) already reads
+    via ctx.employer_tax_profiles["DE_ACCIDENT_INSURANCE"], unchanged.
+    No engine code was modified to add this maker-checker layer.
+
+    Organization-scoped (unlike every OTHER Germany registry, all
+    global) because accident insurance is carrier/employer-specific by
+    statutory design (DE-D06) — there is no national rate to publish
+    once for every employer.
+    """
+    __tablename__ = "payroll_germany_accident_insurance_profiles"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Berufsgenossenschaft / carrier identity — free text, since no
+    # enumerated national list of carriers is defined in the supplied
+    # documentation (not invented).
+    carrier_name            = Column(String(200), nullable=False)
+    # Employer's own membership/reference number with that carrier
+    # (Mitgliedsnummer) — sensitive, tenant-specific, same treatment as
+    # EmployerTaxProfile.agency_account_id.
+    agency_account_id       = Column(String(100), nullable=True)
+    # Gefahrtarifstelle / risk classification, when disclosed on the
+    # employer's own notice — free text, no invented risk-class enum.
+    risk_class_description  = Column(String(200), nullable=True)
+
+    employer_rate_pct       = Column(Numeric(6, 4), nullable=False)
+    effective_from          = Column(Date, nullable=False)
+    effective_to            = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — identical
+    # vocabulary to GermanyHealthFund/GermanyContributionCeiling.
+    status                  = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence: the employer's OWN annual notice (Beitragsbescheid),
+    # recorded as a SourceArtifact like every other registry's evidence —
+    # required before PUBLISH (see service layer), never optional for a
+    # published row.
+    authority_source_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id     = Column(Integer, ForeignKey("payroll_germany_accident_insurance_profiles.id"), nullable=True)
+
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_accident_insurance_profile_org_period", "organization_id", "effective_from"),
+        # At most one open-ended (still current) row per organization at
+        # a time — same partial-unique-index technique as
+        # GermanyHealthFund's uq_health_fund_one_open_period.
+        Index(
+            "uq_accident_insurance_profile_one_open_period",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyAccidentInsuranceProfile org={self.organization_id} carrier={self.carrier_name} "
+            f"status={self.status}>"
+        )
+
+
+class GermanyChurchTaxException(Base):
+    """Phase 8AM — a documented, SUB-LAND church-tax exception, additive
+    on top of germany_pap.core.CHURCH_TAX_LAND_RATES (the ordinary,
+    unchanged, Land-level general rate table).
+
+    The supplied specification (ZP-TAX-DE-2026-001 §8) names exactly one
+    concrete example — "preserve documented denomination/location
+    exceptions such as the Roman Catholic treatment in Bad Wimpfen" —
+    without giving a machine-readable rule (no rate, no scope, no
+    schema). Fresh primary-source research this phase established the
+    actual legal mechanism: Bad Wimpfen (Baden-Württemberg, postal code
+    74206) falls within the Diocese of Mainz's church jurisdiction — an
+    enclave of that Rhineland-Palatinate-headquartered diocese inside
+    Baden-Württemberg, a consequence of 19th-century territorial
+    history — and the Diocese applies ITS OWN 9% Kirchensteuer-Hebesatz
+    (matching Rhineland-Palatinate's general rate) even to this BW
+    enclave, instead of Baden-Württemberg's own general 8%. Confirmed
+    current for 2026 (FinMin Baden-Württemberg Erlass v. 22.5.2026,
+    FM3 - S 2442 - 3/38 — reputable professional-tax-publisher
+    corroboration of the official circular's own operative text, Tier 2
+    evidence per this project's own source hierarchy; NOT a direct
+    fetch of the circular/Bundessteuerblatt itself, which is not freely
+    accessible — see docs/PHASE_8AM_..._REPORT.md for the full
+    evidence chain and this disclosed evidence-tier limitation),
+    continuously re-confirmed by the SAME Land in annual circulars since
+    the exception's 2016 origin (FinMin. Baden-Württemberg vom
+    19.2.2016, BStBl. 2016 I S. 235).
+
+    Deliberately a SEPARATE, additive table rather than a rewrite of
+    CHURCH_TAX_LAND_RATES: the 16 general Land rates are already
+    correctly Tier-1-sourced (the supplied Zoiko document itself) and
+    read by a framework-agnostic, DB-free calculation module
+    (germany_pap/core.py) — converting that whole mechanism into a
+    database-backed registry would be a disproportionate, high-regression
+    -risk rewrite for the sake of one documented exception. Instead, an
+    exception row (when PUBLISHED and matching) OVERRIDES the general
+    Land rate for the specific (Land, denomination, postal code)
+    combination it names; every employee who does NOT match a PUBLISHED
+    exception continues to resolve the ordinary, unchanged Land rate —
+    proven by this phase's own regression tests.
+    """
+    __tablename__ = "payroll_germany_church_tax_exceptions"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+
+    # Which Land's general rate this exception overrides — same
+    # "DE-<ISO 3166-2>" convention as de_church_tax_land /
+    # CHURCH_TAX_LAND_RATES's own keys.
+    land_code                 = Column(String(6), nullable=False, index=True)
+    # ROMAN_CATHOLIC|EVANGELICAL|OTHER — free text, matching
+    # EmployeeStatutoryProfile.de_church_tax_denomination's own
+    # documented reasoning (no invented exhaustive enum).
+    denomination               = Column(String(30), nullable=False)
+    # The deterministic geographic key — Bad Wimpfen's own postal code
+    # (74206) for the one exception currently evidenced; a future
+    # exception (if ever evidenced) would record its own postal code
+    # here, never inferred.
+    municipality_postal_code   = Column(String(10), nullable=False)
+    # Human-readable description of the exception's legal/administrative
+    # basis, for audit/UI display — e.g. "Bad Wimpfen — Diocese of Mainz
+    # enclave in Baden-Württemberg".
+    scope_description           = Column(String(300), nullable=True)
+
+    exception_rate_pct         = Column(Numeric(5, 2), nullable=False)
+    effective_from              = Column(Date, nullable=False)
+    effective_to                = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — identical
+    # vocabulary to GermanyHealthFund/GermanyAccidentInsuranceProfile.
+    status                      = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    authority_source_id         = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id           = Column(Integer, ForeignKey("payroll_germany_church_tax_exceptions.id"), nullable=True)
+
+    created_at                    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_church_tax_exception_scope", "land_code", "denomination", "municipality_postal_code"),
+        # At most one open-ended (still current) row per exact
+        # (Land, denomination, postal code) combination at a time — same
+        # partial-unique-index technique as every other Germany registry.
+        Index(
+            "uq_church_tax_exception_one_open_period",
+            "land_code", "denomination", "municipality_postal_code",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyChurchTaxException land={self.land_code} denomination={self.denomination} "
+            f"plz={self.municipality_postal_code} rate={self.exception_rate_pct} status={self.status}>"
+        )
 
 
 class TaxabilityRule(Base):

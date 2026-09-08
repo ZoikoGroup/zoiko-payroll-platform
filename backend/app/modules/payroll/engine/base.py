@@ -113,6 +113,62 @@ class PayrollContext:
     w4_filing_status: str = None
     w4_form_vintage: str = None
 
+    # Germany (Phase 7) — pre-resolved statutory configuration rows,
+    # threaded through exactly like rate_map/slabs above so
+    # engine/countries/germany.py stays a pure function of its context
+    # (no DB access from the engine layer, matching every other
+    # country's calculator). None/absent for every non-German employee —
+    # existing calculations for every other country are unaffected.
+    # Resolved per-employee, per-payroll-date by service.py (see
+    # service._resolve_germany_calc_inputs) since these are
+    # employee-specific (unlike rate_map/slabs, which can be cached
+    # across employees sharing a jurisdiction).
+    germany_statutory_profile: object = None    # EmployeeStatutoryProfile | None
+    germany_pap_asset: object = None            # PapAlgorithmAsset | None (PUBLISHED, resolved by payroll date)
+    germany_health_fund: object = None          # GermanyHealthFund | None (PUBLISHED, resolved by employee's fund code + date)
+    # Phase 8W — the employer's selected U1 tariff, resolved from
+    # EmployeeStatutoryProfile.de_u1_tariff_id against the fund's available
+    # GermanyHealthFundU1Tariff records. The calculation engine now reads
+    # U1 levy rates from this object's levy_rate_pct field, NOT from the
+    # deprecated GermanyHealthFund.u1_rate_pct column.
+    germany_u1_tariff: object = None            # GermanyHealthFundU1Tariff | None
+    germany_ceiling_gkv_pv: object = None       # GermanyContributionCeiling | None (branch="GKV_PV")
+    germany_ceiling_rv_alv: object = None       # GermanyContributionCeiling | None (branch="RV_ALV")
+    germany_pv_configuration: object = None     # GermanyPvConfiguration | None
+    # Phase 8AM — a documented sub-Land church-tax exception (e.g. Bad
+    # Wimpfen's Roman Catholic 9% rate within Baden-Württemberg's general
+    # 8%), resolved by (Land, denomination, municipality postal code) +
+    # payroll date against the PUBLISHED GermanyChurchTaxException
+    # registry. None (the overwhelming common case) means "no documented
+    # exception applies — use the ordinary Land rate" exactly as before
+    # this phase; this field NEVER causes the ordinary Land-rate path to
+    # change behavior when absent.
+    germany_church_tax_exception: object = None  # GermanyChurchTaxException | None
+    # Identity/date fields, for the calculation trace only (never used to
+    # query the DB from within the engine layer).
+    germany_employee_id: int = None
+    germany_organization_id: int = None
+    germany_payroll_date: object = None
+    # Phase 8T — the "Bonus / annual bonus" portion of this period's gross
+    # (spec §15's own "Other remuneration route" row), sourced from
+    # PayrollAttendanceRecord.bonus specifically (never rewards/other_
+    # compensation, which the spec does not classify as SONSTB-routed).
+    # Zero for every non-German employee and for every German employee
+    # this period had no bonus recorded (service._sum_attendance_bonus_only).
+    # Still part of `gross` above (the employee is still paid it, and it
+    # remains RV/ALV/GKV/PV-contributory per spec's own table) — this field
+    # only tells the Germany PAP-input boundary how much of gross to route
+    # via SONSTB instead of RE4, never changes net pay by itself.
+    germany_sonstb: object = None               # Decimal | None (None treated as 0)
+    # Phase 8X — the resolved four-dimension earning taxability
+    # (spec §15) for each earning type actually present in this run,
+    # keyed by earning_type -> GermanyEarningTaxabilityRule | None.
+    # Only REGULAR_SALARY (steady RE4 wage) and BONUS_ANNUAL_BONUS
+    # (SONSTB-routed bonus) are real inputs in the current engine, so only
+    # those two are resolved. Absent/published-None means NOT_CONFIGURED —
+    # the engine surfaces it in the trace and never invents a classification.
+    germany_earning_taxability: dict = None     # {earning_type: rule-or-None}
+
 
 @dataclass
 class PayrollResult:
@@ -192,6 +248,16 @@ class PayrollResult:
     # Totals
     total_deductions: Decimal = Decimal("0")
     net_pay: Decimal = Decimal("0")
+
+    # Germany (Phase 7) — statutory calculation provenance, carried through
+    # so service.py can freeze it onto the finalized PayslipItem
+    # (employee_statutory_profile_id / germany_calculation_snapshot).
+    # None for every non-German calculation and for any German calculation
+    # that doesn't reach this point (see engine/countries/germany.py —
+    # currently it never does, since PAP execution is unconditionally
+    # blocked; written correctly for when that changes).
+    germany_statutory_profile_id: int = None
+    germany_calculation_snapshot: dict = None
 
 
 class PayrollStrategy(ABC):

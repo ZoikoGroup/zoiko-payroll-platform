@@ -130,6 +130,23 @@ const RATES_BY_COUNTRY = {
       { id: "employer-pension", label: "Workplace Pension (Employer)", employee: "—", employer: "3% minimum", total: "3%" },
     ],
   },
+  // Explicit DE entry so a Germany org never inherits India's PF/ESI/PT
+  // rows via the DEFAULT_COUNTRY fallback below. Only the flat, non-
+  // conditional statutory rates already certified in the backend engine
+  // (backend/app/modules/payroll/hardcoded_defaults.py — RV/ALV/GKV general
+  // rate, backend/.../engine/germany_pap/core.py — church tax per Land) are
+  // shown here. PV and the GKV supplementary rate are genuinely registry-
+  // driven (vary by Land/Saxony/dependents/fund) — honestly labeled as
+  // varying rather than flattened into one invented number (Phase 8E-2 F1).
+  DE: {
+    rows: [
+      { id: "rv", label: "Pension Insurance (Rentenversicherung)", employee: "9.30%", employer: "9.30%", total: "18.60%" },
+      { id: "alv", label: "Unemployment Insurance (Arbeitslosenversicherung)", employee: "1.30%", employer: "1.30%", total: "2.60%" },
+      { id: "gkv", label: "Health Insurance (Krankenversicherung, general rate)", employee: "7.30% + ½ fund supplement", employer: "7.30% + ½ fund supplement", total: "14.60% + fund supplement (registry-driven)" },
+      { id: "pv", label: "Long-Term Care Insurance (Pflegeversicherung)", employee: "Varies — Saxony & dependents", employer: "Varies — Saxony & dependents", total: "Registry-driven — see Germany calculation preview" },
+      { id: "church-tax", label: "Church Tax (Kirchensteuer)", employee: "8% (Bavaria, Baden-Württemberg) or 9% (other Länder) of income tax, if liable", employer: "—", total: "8–9% of income tax, if liable" },
+    ],
+  },
 };
 
 export function getComplianceRates(country) {
@@ -165,6 +182,24 @@ const SLABS_BY_COUNTRY = {
       { id: "uk-2", min: "£12,571", max: "£50,270", rate: "20%", tax: "20% over £12,570" },
       { id: "uk-3", min: "£50,271", max: "£125,140", rate: "40%", tax: "£7,540 + 40% over £50,270" },
       { id: "uk-4", min: "£125,141", max: "Above", rate: "45%", tax: "£37,488 + 45% over £125,140" },
+    ],
+  },
+  // Explicit DE entry (Phase 8E-2 F1) so Germany never inherits India's
+  // slab table via the DEFAULT_COUNTRY fallback below. Unlike IN/US/UK,
+  // German wage tax (Lohnsteuer) is not a published bracket table in this
+  // system — it is computed by the BMF Programmablaufplan (PAP) formula,
+  // and PAP execution is intentionally blocked (PAP_SOURCE_FINALITY=OPEN;
+  // see docs/PHASE_8D_GERMANY_PAP_PRODUCTION_GATE_ASSESSMENT_REPORT.md).
+  // No bracket values are invented here.
+  DE: {
+    slabs: [
+      {
+        id: "de-1",
+        min: "—",
+        max: "—",
+        rate: "Not specified",
+        tax: "NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION — Lohnsteuer is computed via the BMF Programmablaufplan (PAP) formula, not published brackets; PAP execution is intentionally not yet active.",
+      },
     ],
   },
 };
@@ -316,6 +351,236 @@ export const createEmployee = async (payload) => {
 export const updateEmployee = async (id, payload) => {
   try {
     return await api.put(`/api/payroll/employees/${id}`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany statutory profile / ELStAM boundary (Phase 8N) ──────────────
+// Never calls ELSTER/BZSt — these are plain CRUD/import calls against
+// Zoiko's own backend, exactly like every other function in this file.
+
+export const getEmployeeStatutoryProfile = async (employeeId, asOf) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile`, {
+      params: asOf ? { as_of: asOf } : {},
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getEmployeeStatutoryProfileHistory = async (employeeId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/statutory-profile/history`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createEmployeeStatutoryProfile = async (employeeId, payload) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/statutory-profile`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const importEmployeeElstamPayload = async (employeeId, payload) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/elstam-import`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getEmployeeElstamImportAttempts = async (employeeId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/elstam-imports`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany ELStAM change-list batches (Phase 8O Super Admin surface) ───
+// Metadata-only records (no live ELSTER polling, no auto-apply) — see
+// backend service.create_elstam_change_list_batch's own docstring.
+
+export const createElstamChangeListBatch = async (payload) => {
+  try {
+    return await api.post("/api/payroll/germany/elstam-change-list-batches", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listElstamChangeListBatches = async () => {
+  try {
+    return await api.get("/api/payroll/germany/elstam-change-list-batches");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getElstamChangeListBatch = async (id) => {
+  try {
+    return await api.get(`/api/payroll/germany/elstam-change-list-batches/${id}`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const updateElstamChangeListBatchStatus = async (id, payload) => {
+  try {
+    return await api.patch(`/api/payroll/germany/elstam-change-list-batches/${id}/status`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany overtime/shift-premium (Phase 8AC-8AH backend; Phase 8AI
+// frontend) ──────────────────────────────────────────────────────────
+// Fact capture → statutory classification → wage-tax/SI calculation →
+// premium component → explicit payslip attachment. Never calls PAP/
+// ELStAM/ELSTER — plain CRUD/calculation-preview calls against Zoiko's
+// own backend, exactly like every other function in this file.
+
+export const listGermanyOvertimeWorkRecords = async (employeeId, { dateFrom, dateTo } = {}) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, {
+      params: { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createGermanyOvertimeWorkRecord = async (employeeId, payload) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const setGermanyOvertimeWorkRecordApproval = async (employeeId, recordId, hrApprovalStatus) => {
+  try {
+    return await api.post(
+      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/approval`,
+      { hrApprovalStatus },
+    );
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const classifyGermanyOvertimeWorkRecord = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimeClassification = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/classification`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const calculateGermanyOvertimeWageTax = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimeWageTaxResult = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/wage-tax-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const calculateGermanyOvertimeSocialInsurance = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimeSocialInsuranceResult = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/social-insurance-calculation`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const buildGermanyOvertimePremiumComponents = async (employeeId, recordId) => {
+  try {
+    return await api.post(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getGermanyOvertimePremiumComponents = async (employeeId, recordId) => {
+  try {
+    return await api.get(`/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const attachGermanyOvertimePremiumComponentToPayslip = async (employeeId, recordId, componentId, payslipItemId) => {
+  try {
+    return await api.post(
+      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/attach-to-payslip`,
+      { payslipItemId },
+    );
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8AQ — explicit detach. Reverses attach; never deletes the
+// component or its attach history (see GermanyOvertimePanel.jsx).
+export const detachGermanyOvertimePremiumComponentFromPayslip = async (employeeId, recordId, componentId) => {
+  try {
+    return await api.post(
+      `/api/payroll/employees/${employeeId}/germany-overtime-work-records/${recordId}/premium-components/${componentId}/detach-from-payslip`,
+    );
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8AO — batch attach. Still explicit/operator-initiated (see
+// GermanyOvertimePanel.jsx's own docstring) — the caller supplies exact
+// (componentId, payslipItemId) pairs; every pair is re-validated
+// server-side regardless of what this UI believes about eligibility.
+export const listGermanyOvertimePremiumComponentsForBatchAttach = async ({ employeeId, workDateFrom, workDateTo, attachmentState } = {}) => {
+  try {
+    return await api.get("/api/payroll/germany-overtime-premium-components/eligible-for-batch-attach", {
+      params: {
+        employeeId: employeeId || undefined, workDateFrom: workDateFrom || undefined,
+        workDateTo: workDateTo || undefined, attachmentState: attachmentState || undefined,
+      },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const batchAttachGermanyOvertimePremiumComponentsToPayslips = async (items) => {
+  try {
+    return await api.post("/api/payroll/germany-overtime-premium-components/batch-attach", { items });
   } catch (err) {
     throw err;
   }

@@ -131,6 +131,390 @@ class EmployeeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+# ── Employee Statutory Profile (effective-dated) ─────────────────────────
+# See models.EmployeeStatutoryProfile's own docstring. Only a create/append
+# schema exists — this table is never updated in place, so there is no
+# EmployeeStatutoryProfileUpdate.
+
+class EmployeeStatutoryProfileCreate(BaseModel):
+    country_code:    Optional[str] = Field(None, validation_alias="countryCode")
+    effective_from:  date = Field(validation_alias="effectiveFrom")
+    effective_to:    Optional[date] = Field(None, validation_alias="effectiveTo")
+    reason:          Optional[str] = None
+
+    de_tax_class:                     Optional[str] = Field(None, validation_alias="deTaxClass")
+    de_factor:                        Optional[Decimal] = Field(None, validation_alias="deFactor")
+    de_church_tax_liable:             Optional[bool] = Field(None, validation_alias="deChurchTaxLiable")
+    de_church_tax_land:               Optional[str] = Field(None, validation_alias="deChurchTaxLand")
+    de_child_count:                   Optional[int] = Field(None, validation_alias="deChildCount")
+    de_childless:                     Optional[bool] = Field(None, validation_alias="deChildless")
+    de_saxony:                        Optional[bool] = Field(None, validation_alias="deSaxony")
+    de_health_insurance_status:       Optional[str] = Field(None, validation_alias="deHealthInsuranceStatus")
+    de_health_fund_code:              Optional[str] = Field(None, validation_alias="deHealthFundCode")
+    de_u1_tariff_id:                  Optional[str] = Field(None, validation_alias="deU1TariffId")
+    de_pension_insurance_exempt:      Optional[bool] = Field(None, validation_alias="dePensionInsuranceExempt")
+    de_unemployment_insurance_exempt: Optional[bool] = Field(None, validation_alias="deUnemploymentInsuranceExempt")
+    de_employment_classification:     Optional[str] = Field(None, validation_alias="deEmploymentClassification")
+    de_elstam_source:                 Optional[str] = Field(None, validation_alias="deElstamSource")
+    de_elstam_fallback_reason:        Optional[str] = Field(None, validation_alias="deElstamFallbackReason")
+    de_vocational_trainee:            Optional[bool] = Field(None, validation_alias="deVocationalTrainee")
+
+    # Phase 8N — ELStAM / employee-withholding-state completion.
+    de_zkf_override:                  Optional[Decimal] = Field(None, validation_alias="deZkfOverride")
+    de_jfreib:                        Optional[Decimal] = Field(None, validation_alias="deJfreib")
+    de_lzzfreib:                      Optional[Decimal] = Field(None, validation_alias="deLzzfreib")
+    de_jhinzu:                        Optional[Decimal] = Field(None, validation_alias="deJhinzu")
+    de_lzzhinzu:                      Optional[Decimal] = Field(None, validation_alias="deLzzhinzu")
+    de_pkpv:                          Optional[Decimal] = Field(None, validation_alias="dePkpv")
+    de_pkpvagz:                       Optional[Decimal] = Field(None, validation_alias="dePkpvagz")
+    de_main_employment:               Optional[bool] = Field(None, validation_alias="deMainEmployment")
+    de_elstam_schema_version:          Optional[str] = Field(None, validation_alias="deElstamSchemaVersion")
+    de_elstam_import_reference:       Optional[str] = Field(None, validation_alias="deElstamImportReference")
+
+    # Phase 8AB — explicit, per-employee, effective-dated overtime/premium
+    # Grundlohn source (never derived — see models.py's own field docstring).
+    de_grundlohn_hourly:               Optional[Decimal] = Field(None, validation_alias="deGrundlohnHourly")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class EmployeeStatutoryProfileResponse(BaseModel):
+    id:              int
+    employeeId:      int = Field(validation_alias="employee_id", serialization_alias="employeeId")
+    countryCode:     str = Field(validation_alias="country_code", serialization_alias="countryCode")
+    effectiveFrom:   date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:     Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    createdAt:       Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    createdById:     Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    reason:          Optional[str] = None
+
+    deTaxClass:                     Optional[str] = Field(None, validation_alias="de_tax_class", serialization_alias="deTaxClass")
+    deFactor:                       Optional[Decimal] = Field(None, validation_alias="de_factor", serialization_alias="deFactor")
+    deChurchTaxLiable:              Optional[bool] = Field(None, validation_alias="de_church_tax_liable", serialization_alias="deChurchTaxLiable")
+    deChurchTaxLand:                Optional[str] = Field(None, validation_alias="de_church_tax_land", serialization_alias="deChurchTaxLand")
+    deChildCount:                   Optional[int] = Field(None, validation_alias="de_child_count", serialization_alias="deChildCount")
+    deChildless:                    Optional[bool] = Field(None, validation_alias="de_childless", serialization_alias="deChildless")
+    deSaxony:                       Optional[bool] = Field(None, validation_alias="de_saxony", serialization_alias="deSaxony")
+    deHealthInsuranceStatus:        Optional[str] = Field(None, validation_alias="de_health_insurance_status", serialization_alias="deHealthInsuranceStatus")
+    deHealthFundCode:               Optional[str] = Field(None, validation_alias="de_health_fund_code", serialization_alias="deHealthFundCode")
+    deU1TariffId:                   Optional[str] = Field(None, validation_alias="de_u1_tariff_id", serialization_alias="deU1TariffId")
+    dePensionInsuranceExempt:       Optional[bool] = Field(None, validation_alias="de_pension_insurance_exempt", serialization_alias="dePensionInsuranceExempt")
+    deUnemploymentInsuranceExempt:  Optional[bool] = Field(None, validation_alias="de_unemployment_insurance_exempt", serialization_alias="deUnemploymentInsuranceExempt")
+    deEmploymentClassification:     Optional[str] = Field(None, validation_alias="de_employment_classification", serialization_alias="deEmploymentClassification")
+    deElstamSource:                 Optional[str] = Field(None, validation_alias="de_elstam_source", serialization_alias="deElstamSource")
+    deElstamFallbackReason:         Optional[str] = Field(None, validation_alias="de_elstam_fallback_reason", serialization_alias="deElstamFallbackReason")
+    deVocationalTrainee:            Optional[bool] = Field(None, validation_alias="de_vocational_trainee", serialization_alias="deVocationalTrainee")
+
+    # Phase 8N — ELStAM / employee-withholding-state completion.
+    deZkfOverride:                  Optional[Decimal] = Field(None, validation_alias="de_zkf_override", serialization_alias="deZkfOverride")
+    deJfreib:                       Optional[Decimal] = Field(None, validation_alias="de_jfreib", serialization_alias="deJfreib")
+    deLzzfreib:                     Optional[Decimal] = Field(None, validation_alias="de_lzzfreib", serialization_alias="deLzzfreib")
+    deJhinzu:                       Optional[Decimal] = Field(None, validation_alias="de_jhinzu", serialization_alias="deJhinzu")
+    deLzzhinzu:                     Optional[Decimal] = Field(None, validation_alias="de_lzzhinzu", serialization_alias="deLzzhinzu")
+    dePkpv:                         Optional[Decimal] = Field(None, validation_alias="de_pkpv", serialization_alias="dePkpv")
+    dePkpvagz:                      Optional[Decimal] = Field(None, validation_alias="de_pkpvagz", serialization_alias="dePkpvagz")
+    deMainEmployment:               Optional[bool] = Field(None, validation_alias="de_main_employment", serialization_alias="deMainEmployment")
+    deElstamSchemaVersion:          Optional[str] = Field(None, validation_alias="de_elstam_schema_version", serialization_alias="deElstamSchemaVersion")
+    deElstamImportReference:        Optional[str] = Field(None, validation_alias="de_elstam_import_reference", serialization_alias="deElstamImportReference")
+
+    # Phase 8AB — see EmployeeStatutoryProfileCreate's field docstring.
+    deGrundlohnHourly:              Optional[Decimal] = Field(None, validation_alias="de_grundlohn_hourly", serialization_alias="deGrundlohnHourly")
+
+    # Phase 8AK — computed, never stored (see Gate 4's own "do not store
+    # derived values as authoritative inputs" instruction). Reuses
+    # germany_pap.core.check_main_secondary_employment_consistency
+    # verbatim — the SAME advisory check the PAP execution trace already
+    # runs (germany.py's _calculate_regular_path/_calculate_midijob_path)
+    # — surfaced HERE too so Tax Ops can see it at profile save/read time,
+    # not only if/when a full PAP-blocked calculation trace is inspected.
+    # None when the combination is unremarkable; never a hard error (spec
+    # gives no hard-reject rule for this pairing).
+    mainSecondaryConsistencyWarning: Optional[str] = Field(
+        None, validation_alias="main_secondary_consistency_warning",
+        serialization_alias="mainSecondaryConsistencyWarning",
+    )
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany overtime/shift-premium work-record (Phase 8AC) — fact capture
+# only; no premium/tax/SI fields. See models.py's GermanyOvertimeWorkRecord
+# docstring for the full ARCHITECTURE_D rationale (Phase 8AA).
+
+class GermanyOvertimeWorkRecordCreate(BaseModel):
+    source_attendance_id: Optional[int] = Field(None, validation_alias="sourceAttendanceId")
+    work_date:             date = Field(validation_alias="workDate")
+    start_datetime:        datetime = Field(validation_alias="startDatetime")
+    end_datetime:          datetime = Field(validation_alias="endDatetime")
+    hours:                 Decimal = Field(validation_alias="hours")
+    entry_source:          str = Field(validation_alias="entrySource")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyOvertimeWorkRecordResponse(BaseModel):
+    id:                    int
+    employeeId:            int = Field(validation_alias="employee_id", serialization_alias="employeeId")
+    sourceAttendanceId:    Optional[int] = Field(None, validation_alias="source_attendance_id", serialization_alias="sourceAttendanceId")
+    workDate:              date = Field(validation_alias="work_date", serialization_alias="workDate")
+    startDatetime:         datetime = Field(validation_alias="start_datetime", serialization_alias="startDatetime")
+    endDatetime:           datetime = Field(validation_alias="end_datetime", serialization_alias="endDatetime")
+    hours:                 Decimal
+    entrySource:           str = Field(validation_alias="entry_source", serialization_alias="entrySource")
+    hrApprovalStatus:      str = Field(validation_alias="hr_approval_status", serialization_alias="hrApprovalStatus")
+    overlapStatus:         Optional[str] = Field(None, validation_alias="overlap_status", serialization_alias="overlapStatus")
+    createdById:           Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    createdAt:             Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyOvertimeWorkRecordApprovalUpdate(BaseModel):
+    hr_approval_status: str = Field(validation_alias="hrApprovalStatus")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+# ── Germany overtime time-window CLASSIFICATION (Phase 8AE) — read-only.
+# Statutory/calendar classification result only; no monetary field.
+
+class GermanyOvertimeTimeSegmentResponse(BaseModel):
+    id:                    int
+    workRecordId:          int = Field(validation_alias="work_record_id", serialization_alias="workRecordId")
+    segmentStart:          datetime = Field(validation_alias="segment_start", serialization_alias="segmentStart")
+    segmentEnd:            datetime = Field(validation_alias="segment_end", serialization_alias="segmentEnd")
+    hours:                 Decimal
+    premiumCategory:       str = Field(validation_alias="premium_category", serialization_alias="premiumCategory")
+    classificationStatus:  str = Field(validation_alias="classification_status", serialization_alias="classificationStatus")
+    categoryRuleId:        Optional[int] = Field(None, validation_alias="category_rule_id", serialization_alias="categoryRuleId")
+    workDateLocal:         date = Field(validation_alias="work_date_local", serialization_alias="workDateLocal")
+    createdAt:             Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany overtime WAGE-TAX calculation result (Phase 8AF) — read-only.
+# WAGE TAX ONLY; no social-insurance field. See models.py's
+# GermanyOvertimeWageTaxResult docstring.
+
+class GermanyOvertimeWageTaxResultResponse(BaseModel):
+    id:                          int
+    workRecordId:                int = Field(validation_alias="work_record_id", serialization_alias="workRecordId")
+    segmentStart:                datetime = Field(validation_alias="segment_start", serialization_alias="segmentStart")
+    segmentEnd:                  datetime = Field(validation_alias="segment_end", serialization_alias="segmentEnd")
+    workDateLocal:               date = Field(validation_alias="work_date_local", serialization_alias="workDateLocal")
+    qualifyingHours:              Decimal = Field(validation_alias="qualifying_hours", serialization_alias="qualifyingHours")
+    actualGrundlohnHourly:        Optional[Decimal] = Field(None, validation_alias="actual_grundlohn_hourly", serialization_alias="actualGrundlohnHourly")
+    taxGrundlohnHourly:           Optional[Decimal] = Field(None, validation_alias="tax_grundlohn_hourly", serialization_alias="taxGrundlohnHourly")
+    grundlohnCapRuleId:           Optional[int] = Field(None, validation_alias="grundlohn_cap_rule_id", serialization_alias="grundlohnCapRuleId")
+    primaryCategoryCode:          Optional[str] = Field(None, validation_alias="primary_category_code", serialization_alias="primaryCategoryCode")
+    primaryCategoryRuleId:        Optional[int] = Field(None, validation_alias="primary_category_rule_id", serialization_alias="primaryCategoryRuleId")
+    concurrentCategoryCode:       Optional[str] = Field(None, validation_alias="concurrent_category_code", serialization_alias="concurrentCategoryCode")
+    concurrentCategoryRuleId:     Optional[int] = Field(None, validation_alias="concurrent_category_rule_id", serialization_alias="concurrentCategoryRuleId")
+    combinedTaxFreePct:           Optional[Decimal] = Field(None, validation_alias="combined_tax_free_pct", serialization_alias="combinedTaxFreePct")
+    grossQualifyingPremiumAmount: Optional[Decimal] = Field(None, validation_alias="gross_qualifying_premium_amount", serialization_alias="grossQualifyingPremiumAmount")
+    taxFreePremiumAmount:         Optional[Decimal] = Field(None, validation_alias="tax_free_premium_amount", serialization_alias="taxFreePremiumAmount")
+    taxablePremiumAmount:         Optional[Decimal] = Field(None, validation_alias="taxable_premium_amount", serialization_alias="taxablePremiumAmount")
+    calculationStatus:            str = Field(validation_alias="calculation_status", serialization_alias="calculationStatus")
+    calculationNote:              Optional[str] = Field(None, validation_alias="calculation_note", serialization_alias="calculationNote")
+    createdAt:                    Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany overtime SOCIAL-INSURANCE calculation result (Phase 8AG) —
+# read-only. SOCIAL INSURANCE ONLY; no wage-tax field. See models.py's
+# GermanyOvertimeSocialInsuranceResult docstring.
+
+class GermanyOvertimeSocialInsuranceResultResponse(BaseModel):
+    id:                          int
+    workRecordId:                int = Field(validation_alias="work_record_id", serialization_alias="workRecordId")
+    segmentStart:                datetime = Field(validation_alias="segment_start", serialization_alias="segmentStart")
+    segmentEnd:                  datetime = Field(validation_alias="segment_end", serialization_alias="segmentEnd")
+    workDateLocal:               date = Field(validation_alias="work_date_local", serialization_alias="workDateLocal")
+    qualifyingHours:              Decimal = Field(validation_alias="qualifying_hours", serialization_alias="qualifyingHours")
+    actualGrundlohnHourly:        Optional[Decimal] = Field(None, validation_alias="actual_grundlohn_hourly", serialization_alias="actualGrundlohnHourly")
+    siGrundlohnHourly:            Optional[Decimal] = Field(None, validation_alias="si_grundlohn_hourly", serialization_alias="siGrundlohnHourly")
+    siCapRuleId:                  Optional[int] = Field(None, validation_alias="si_cap_rule_id", serialization_alias="siCapRuleId")
+    primaryCategoryCode:          Optional[str] = Field(None, validation_alias="primary_category_code", serialization_alias="primaryCategoryCode")
+    primaryCategoryRuleId:        Optional[int] = Field(None, validation_alias="primary_category_rule_id", serialization_alias="primaryCategoryRuleId")
+    concurrentCategoryCode:       Optional[str] = Field(None, validation_alias="concurrent_category_code", serialization_alias="concurrentCategoryCode")
+    concurrentCategoryRuleId:     Optional[int] = Field(None, validation_alias="concurrent_category_rule_id", serialization_alias="concurrentCategoryRuleId")
+    combinedPremiumPct:           Optional[Decimal] = Field(None, validation_alias="combined_premium_pct", serialization_alias="combinedPremiumPct")
+    applicableSiBranches:         Optional[str] = Field(None, validation_alias="applicable_si_branches", serialization_alias="applicableSiBranches")
+    grossQualifyingPremiumAmount: Optional[Decimal] = Field(None, validation_alias="gross_qualifying_premium_amount", serialization_alias="grossQualifyingPremiumAmount")
+    siFreePremiumAmount:          Optional[Decimal] = Field(None, validation_alias="si_free_premium_amount", serialization_alias="siFreePremiumAmount")
+    siContributoryPremiumAmount:  Optional[Decimal] = Field(None, validation_alias="si_contributory_premium_amount", serialization_alias="siContributoryPremiumAmount")
+    calculationStatus:            str = Field(validation_alias="calculation_status", serialization_alias="calculationStatus")
+    calculationNote:              Optional[str] = Field(None, validation_alias="calculation_note", serialization_alias="calculationNote")
+    createdAt:                    Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany overtime PREMIUM COMPONENT (Phase 8AH) ──────────────────────
+
+class GermanyOvertimePremiumComponentResponse(BaseModel):
+    id:                        int
+    workRecordId:              int = Field(validation_alias="work_record_id", serialization_alias="workRecordId")
+    segmentStart:              datetime = Field(validation_alias="segment_start", serialization_alias="segmentStart")
+    segmentEnd:                datetime = Field(validation_alias="segment_end", serialization_alias="segmentEnd")
+    workDateLocal:             date = Field(validation_alias="work_date_local", serialization_alias="workDateLocal")
+    qualifyingHours:           Decimal = Field(validation_alias="qualifying_hours", serialization_alias="qualifyingHours")
+    wageTaxResultId:           Optional[int] = Field(None, validation_alias="wage_tax_result_id", serialization_alias="wageTaxResultId")
+    socialInsuranceResultId:   Optional[int] = Field(None, validation_alias="social_insurance_result_id", serialization_alias="socialInsuranceResultId")
+    combinationStatus:         str = Field(validation_alias="combination_status", serialization_alias="combinationStatus")
+    calculationNote:           Optional[str] = Field(None, validation_alias="calculation_note", serialization_alias="calculationNote")
+    grossPremiumAmount:        Optional[Decimal] = Field(None, validation_alias="gross_premium_amount", serialization_alias="grossPremiumAmount")
+    wageTaxFreeAmount:         Optional[Decimal] = Field(None, validation_alias="wage_tax_free_amount", serialization_alias="wageTaxFreeAmount")
+    wageTaxableAmount:         Optional[Decimal] = Field(None, validation_alias="wage_taxable_amount", serialization_alias="wageTaxableAmount")
+    siExemptAmount:            Optional[Decimal] = Field(None, validation_alias="si_exempt_amount", serialization_alias="siExemptAmount")
+    siContributoryAmount:      Optional[Decimal] = Field(None, validation_alias="si_contributory_amount", serialization_alias="siContributoryAmount")
+    attachmentStatus:          str = Field("NEVER_ATTACHED", validation_alias="attachment_status", serialization_alias="attachmentStatus")
+    payslipAllowanceItemId:    Optional[int] = Field(None, validation_alias="payslip_allowance_item_id", serialization_alias="payslipAllowanceItemId")
+    attachedAt:                Optional[datetime] = Field(None, validation_alias="attached_at", serialization_alias="attachedAt")
+    attachedById:              Optional[int] = Field(None, validation_alias="attached_by_id", serialization_alias="attachedById")
+    detachedAt:                Optional[datetime] = Field(None, validation_alias="detached_at", serialization_alias="detachedAt")
+    detachedById:              Optional[int] = Field(None, validation_alias="detached_by_id", serialization_alias="detachedById")
+    financialIntegrationStatus: Optional[str] = Field(None, validation_alias="financial_integration_status", serialization_alias="financialIntegrationStatus")
+    appliedGrossDelta:         Optional[Decimal] = Field(None, validation_alias="applied_gross_delta", serialization_alias="appliedGrossDelta")
+    appliedPfDelta:            Optional[Decimal] = Field(None, validation_alias="applied_pf_delta", serialization_alias="appliedPfDelta")
+    appliedEsiDelta:           Optional[Decimal] = Field(None, validation_alias="applied_esi_delta", serialization_alias="appliedEsiDelta")
+    createdAt:                 Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyOvertimePremiumComponentAttachRequest(BaseModel):
+    payslip_item_id: int = Field(validation_alias="payslipItemId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyOvertimePremiumComponentEligibleResponse(GermanyOvertimePremiumComponentResponse):
+    """Same shape as GermanyOvertimePremiumComponentResponse, plus the
+    employee identity the batch-attach browse endpoint attaches per row
+    (service.list_germany_overtime_premium_components_for_batch_attach) —
+    never persisted, computed fresh from the same join every call."""
+    employeeId:    Optional[int] = Field(None, validation_alias="employee_id", serialization_alias="employeeId")
+    employeeName:  Optional[str] = Field(None, validation_alias="employee_name", serialization_alias="employeeName")
+
+
+# ── Germany overtime premium component BATCH attach (Phase 8AO) ──────────
+# Still an explicit, operator-initiated action (never automatic payroll-run
+# inclusion) — the caller supplies the exact pairs it wants attached; every
+# pair is independently re-validated server-side regardless of what the
+# frontend believes about eligibility. See
+# service.batch_attach_germany_overtime_premium_components_to_payslips.
+
+class GermanyOvertimePremiumComponentBatchAttachItem(BaseModel):
+    component_id:     int = Field(validation_alias="componentId")
+    payslip_item_id:  int = Field(validation_alias="payslipItemId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyOvertimePremiumComponentBatchAttachRequest(BaseModel):
+    items: List[GermanyOvertimePremiumComponentBatchAttachItem] = Field(validation_alias="items")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyOvertimePremiumComponentBatchAttachResultItem(BaseModel):
+    componentId:    int = Field(validation_alias="component_id", serialization_alias="componentId")
+    payslipItemId:  int = Field(validation_alias="payslip_item_id", serialization_alias="payslipItemId")
+    reason:         Optional[str] = Field(None, validation_alias="reason", serialization_alias="reason")
+    component:      Optional[GermanyOvertimePremiumComponentResponse] = Field(
+        None, validation_alias="component", serialization_alias="component",
+    )
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyOvertimePremiumComponentBatchAttachResponse(BaseModel):
+    attached:         List[GermanyOvertimePremiumComponentBatchAttachResultItem]
+    alreadyAttached:   List[GermanyOvertimePremiumComponentBatchAttachResultItem] = Field(validation_alias="already_attached", serialization_alias="alreadyAttached")
+    rejected:          List[GermanyOvertimePremiumComponentBatchAttachResultItem]
+    invalid:           List[GermanyOvertimePremiumComponentBatchAttachResultItem]
+    failed:            List[GermanyOvertimePremiumComponentBatchAttachResultItem]
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany ELStAM change-list / structured-import boundary (Phase 8N) ──
+
+class GermanyElstamChangeListBatchCreate(BaseModel):
+    batch_reference:   str = Field(validation_alias="batchReference")
+    source:            Optional[str] = Field("MANUAL_UPLOAD", validation_alias="source")
+    received_at:       datetime = Field(validation_alias="receivedAt")
+    effective_date:    date = Field(validation_alias="effectiveDate")
+    scope_description: Optional[str] = Field(None, validation_alias="scopeDescription")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyElstamChangeListBatchStatusUpdate(BaseModel):
+    status:            str
+    validation_result: Optional[dict] = Field(None, validation_alias="validationResult")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyElstamChangeListBatchResponse(BaseModel):
+    id:                int
+    organizationId:    int = Field(validation_alias="organization_id", serialization_alias="organizationId")
+    batchReference:    str = Field(validation_alias="batch_reference", serialization_alias="batchReference")
+    source:            str
+    receivedAt:        datetime = Field(validation_alias="received_at", serialization_alias="receivedAt")
+    effectiveDate:     date = Field(validation_alias="effective_date", serialization_alias="effectiveDate")
+    scopeDescription:  Optional[str] = Field(None, validation_alias="scope_description", serialization_alias="scopeDescription")
+    processingStatus:  str = Field(validation_alias="processing_status", serialization_alias="processingStatus")
+    validationResult:  Optional[dict] = Field(None, validation_alias="validation_result", serialization_alias="validationResult")
+    createdAt:         Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyElstamImportRequest(BaseModel):
+    """Phase 8N structured-import boundary. `payload` is caller-supplied
+    structured data shaped exactly like a normal statutory-profile write —
+    never a live ELSTER/BZSt fetch (see engine/germany_pap/elstam.py for
+    why no such connector exists)."""
+    schema_version:       str = Field(validation_alias="schemaVersion")
+    import_reference:     Optional[str] = Field(None, validation_alias="importReference")
+    change_list_batch_id: Optional[int] = Field(None, validation_alias="changeListBatchId")
+    payload:              EmployeeStatutoryProfileCreate
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyElstamImportAttemptResponse(BaseModel):
+    id:                          int
+    employeeId:                  int = Field(validation_alias="employee_id", serialization_alias="employeeId")
+    schemaVersion:               str = Field(validation_alias="schema_version", serialization_alias="schemaVersion")
+    importReference:             Optional[str] = Field(None, validation_alias="import_reference", serialization_alias="importReference")
+    changeListBatchId:           Optional[int] = Field(None, validation_alias="change_list_batch_id", serialization_alias="changeListBatchId")
+    validationStatus:            str = Field(validation_alias="validation_status", serialization_alias="validationStatus")
+    validationErrors:            Optional[dict] = Field(None, validation_alias="validation_errors", serialization_alias="validationErrors")
+    appliedStatutoryProfileId:   Optional[int] = Field(None, validation_alias="applied_statutory_profile_id", serialization_alias="appliedStatutoryProfileId")
+    importedAt:                  Optional[datetime] = Field(None, validation_alias="imported_at", serialization_alias="importedAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyCalculationPreviewRequest(BaseModel):
+    """Phase 7 QA/diagnostic endpoint request — see
+    router.germany_calculation_preview / service.preview_germany_calculation.
+    Intentionally carries no PAP version, statutory rate, or configuration
+    override field — every value the calculation uses is resolved
+    server-side from the authoritative registries, never accepted from
+    the caller (this phase's explicit security requirement)."""
+    employee_id:   int = Field(validation_alias="employeeId")
+    payroll_date:  Optional[date] = Field(None, validation_alias="payrollDate")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
 class BulkEmployeeItem(BaseModel):
     id:                Optional[int] = None  # present only for bulk-update rows; ignored by bulk-create
     name:              Optional[str] = None
@@ -1259,6 +1643,447 @@ class SourceArtifactResponse(BaseModel):
     checksumSha256: Optional[str] = Field(None, validation_alias="checksum_sha256", serialization_alias="checksumSha256")
     reviewerId: Optional[int] = Field(None, validation_alias="reviewer_id", serialization_alias="reviewerId")
     reviewerApprovedAt: Optional[datetime] = Field(None, validation_alias="reviewer_approved_at", serialization_alias="reviewerApprovedAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: BMF PAP Algorithm Asset (ZP-TAX-DE-2026-001 §5, §17, §18) ────
+# Container/evidence only — see models.PapAlgorithmAsset's own docstring.
+# No "Create" request schema: ingestion is multipart (raw content + form
+# fields), handled directly in the router like upload_compliance_document,
+# not a JSON body — see router.py.
+
+class PapAlgorithmAssetResponse(BaseModel):
+    id:                   int
+    jurisdictionCountry:  str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    taxYear:              str = Field(validation_alias="tax_year", serialization_alias="taxYear")
+    papVersion:           str = Field(validation_alias="pap_version", serialization_alias="papVersion")
+    effectiveFrom:        date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:          Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:               str
+    sourceDocumentId:     Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    sourceContentSha256:  Optional[str] = Field(None, validation_alias="source_content_sha256", serialization_alias="sourceContentSha256")
+    buildIdentifier:      Optional[str] = Field(None, validation_alias="build_identifier", serialization_alias="buildIdentifier")
+    previousVersionId:    Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:          Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    updatedById:          Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
+    approvedById:         Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:            Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: BMF PAP Production Release Governance (Phase 8G-1) ──────────
+# Read-only response model + narrow request bodies for recording external
+# evidence. Deliberately no request body accepts a bare "true" for a gate
+# dimension without the corresponding evidence fields — see service.py's
+# own docstrings for why each of these must be explicit, actor-attributed
+# evidence, never a default.
+
+class GermanyPapReleaseResponse(BaseModel):
+    id:                          int
+    papAssetId:                  int = Field(validation_alias="pap_asset_id", serialization_alias="papAssetId")
+    boundSourceContentSha256:    Optional[str] = Field(None, validation_alias="bound_source_content_sha256", serialization_alias="boundSourceContentSha256")
+    status:                      str
+
+    sourceIdentityVerified:      bool = Field(validation_alias="source_identity_verified", serialization_alias="sourceIdentityVerified")
+    sourceHashVerified:          bool = Field(validation_alias="source_hash_verified", serialization_alias="sourceHashVerified")
+    sourceFinalityStatus:        str = Field(validation_alias="source_finality_status", serialization_alias="sourceFinalityStatus")
+    licensingStatus:             str = Field(validation_alias="licensing_status", serialization_alias="licensingStatus")
+    goldenVectorsPassed:         bool = Field(validation_alias="golden_vectors_passed", serialization_alias="goldenVectorsPassed")
+    securityCertified:           bool = Field(validation_alias="security_certified", serialization_alias="securityCertified")
+
+    preparedById:                Optional[int] = Field(None, validation_alias="prepared_by_id", serialization_alias="preparedById")
+    approvedById:                Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    activatedById:                Optional[int] = Field(None, validation_alias="activated_by_id", serialization_alias="activatedById")
+    rolledBackById:               Optional[int] = Field(None, validation_alias="rolled_back_by_id", serialization_alias="rolledBackById")
+
+    createdAt:                   Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyPapReleaseGateStatusResponse(BaseModel):
+    """Read-only gate-evaluation preview — never mutates state."""
+    releaseId:              int
+    gates:                  dict
+    failedGates:            List[str]
+    isActivationEligible:   bool
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GermanyPapReleaseSourceFinalityUpdate(BaseModel):
+    status:      str
+    authority:   Optional[str] = None
+    reference:   Optional[str] = None
+    notes:       Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyPapReleaseLicensingUpdate(BaseModel):
+    status:                str
+    authority:              Optional[str] = None
+    reference:              Optional[str] = None
+    authorizationDate:      Optional[date] = Field(None, validation_alias="authorizationDate")
+    effectiveDate:          Optional[date] = Field(None, validation_alias="effectiveDate")
+    expiryDate:             Optional[date] = Field(None, validation_alias="expiryDate")
+    evidenceLocation:       Optional[str] = Field(None, validation_alias="evidenceLocation")
+    evidenceHash:           Optional[str] = Field(None, validation_alias="evidenceHash")
+    notes:                  Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyPapReleaseGoldenVectorUpdate(BaseModel):
+    sourceSha256:  str = Field(validation_alias="sourceSha256")
+    notes:          Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyPapReleaseNotesUpdate(BaseModel):
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyPapReleaseRejectRequest(BaseModel):
+    reason: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyPapReleaseRollbackRequest(BaseModel):
+    reason:             Optional[str] = None
+    targetReleaseId:    Optional[int] = Field(None, validation_alias="targetReleaseId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+# ── Germany: Krankenkasse (Health Fund) Registry (ZP-TAX-DE-2026-001 §11) ─
+# Configuration/registry only — see models.GermanyHealthFund's own
+# docstring. No "Create" JSON schema needed beyond this plain BaseModel
+# (unlike PAP ingestion, there is no file upload here — a health-fund rate
+# is a scalar value + a citation, not a document to hash).
+
+class GermanyHealthFundCreate(BaseModel):
+    health_fund_id:          str = Field(validation_alias="healthFundId")
+    fund_name:               str = Field(validation_alias="fundName")
+    supplementary_rate_pct:  Decimal = Field(validation_alias="supplementaryRatePct")
+    is_average_rate:         bool = Field(False, validation_alias="isAverageRate")
+    u1_rate_pct:             Optional[Decimal] = Field(None, validation_alias="u1RatePct")
+    u2_rate_pct:             Optional[Decimal] = Field(None, validation_alias="u2RatePct")
+    effective_from:          date = Field(validation_alias="effectiveFrom")
+    effective_to:            Optional[date] = Field(None, validation_alias="effectiveTo")
+    member_applicability:    Optional[str] = Field(None, validation_alias="memberApplicability")
+    payroll_recalc_policy:   Optional[str] = Field(None, validation_alias="payrollRecalcPolicy")
+    authority_source_id:     Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyHealthFundResponse(BaseModel):
+    id:                   int
+    healthFundId:         str = Field(validation_alias="health_fund_id", serialization_alias="healthFundId")
+    fundName:             str = Field(validation_alias="fund_name", serialization_alias="fundName")
+    supplementaryRatePct: Decimal = Field(validation_alias="supplementary_rate_pct", serialization_alias="supplementaryRatePct")
+    isAverageRate:        bool = Field(validation_alias="is_average_rate", serialization_alias="isAverageRate")
+    u1RatePct:            Optional[Decimal] = Field(None, validation_alias="u1_rate_pct", serialization_alias="u1RatePct")
+    u2RatePct:            Optional[Decimal] = Field(None, validation_alias="u2_rate_pct", serialization_alias="u2RatePct")
+    effectiveFrom:        date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:          Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:               str
+    memberApplicability:  Optional[str] = Field(None, validation_alias="member_applicability", serialization_alias="memberApplicability")
+    payrollRecalcPolicy:  Optional[str] = Field(None, validation_alias="payroll_recalc_policy", serialization_alias="payrollRecalcPolicy")
+    authoritySourceId:    Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:    Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:          Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:         Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:            Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: Accident Insurance Profile (Phase 8AJ, 2nd pass) ───────────
+# Maker-checker workspace for one organization's employer-specific
+# accident-insurance configuration — see models.GermanyAccidentInsuranceProfile's
+# own docstring for why this is a separate table from EmployerTaxProfile.
+
+class GermanyAccidentInsuranceProfileCreate(BaseModel):
+    organization_id:         int = Field(validation_alias="organizationId")
+    carrier_name:            str = Field(validation_alias="carrierName")
+    agency_account_id:       Optional[str] = Field(None, validation_alias="agencyAccountId")
+    risk_class_description:  Optional[str] = Field(None, validation_alias="riskClassDescription")
+    employer_rate_pct:       Decimal = Field(validation_alias="employerRatePct")
+    effective_from:          date = Field(validation_alias="effectiveFrom")
+    effective_to:            Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id:     Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyAccidentInsuranceProfileResponse(BaseModel):
+    id:                     int
+    organizationId:         int = Field(validation_alias="organization_id", serialization_alias="organizationId")
+    carrierName:            str = Field(validation_alias="carrier_name", serialization_alias="carrierName")
+    agencyAccountId:        Optional[str] = Field(None, validation_alias="agency_account_id", serialization_alias="agencyAccountId")
+    riskClassDescription:   Optional[str] = Field(None, validation_alias="risk_class_description", serialization_alias="riskClassDescription")
+    employerRatePct:        Decimal = Field(validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    effectiveFrom:          date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:            Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:                 str
+    authoritySourceId:      Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:      Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:            Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:           Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:              Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: Church Tax Exception (Phase 8AM) ───────────────────────────
+# Global (no organizationId) — see models.GermanyChurchTaxException's own
+# docstring for why: a documented sub-Land exception (e.g. Bad Wimpfen's
+# Diocese-of-Mainz enclave) is determined by employee residence/
+# denomination, never by employer, so this mirrors GermanyHealthFund's
+# global shape, not GermanyAccidentInsuranceProfile's org-scoped one.
+
+class GermanyChurchTaxExceptionCreate(BaseModel):
+    land_code:                 str = Field(validation_alias="landCode")
+    denomination:               str = Field(validation_alias="denomination")
+    municipality_postal_code:   str = Field(validation_alias="municipalityPostalCode")
+    scope_description:          Optional[str] = Field(None, validation_alias="scopeDescription")
+    exception_rate_pct:          Decimal = Field(validation_alias="exceptionRatePct")
+    effective_from:              date = Field(validation_alias="effectiveFrom")
+    effective_to:                Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id:         Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyChurchTaxExceptionResponse(BaseModel):
+    id:                       int
+    landCode:                 str = Field(validation_alias="land_code", serialization_alias="landCode")
+    denomination:              str = Field(validation_alias="denomination", serialization_alias="denomination")
+    municipalityPostalCode:    str = Field(validation_alias="municipality_postal_code", serialization_alias="municipalityPostalCode")
+    scopeDescription:          Optional[str] = Field(None, validation_alias="scope_description", serialization_alias="scopeDescription")
+    exceptionRatePct:          Decimal = Field(validation_alias="exception_rate_pct", serialization_alias="exceptionRatePct")
+    effectiveFrom:             date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:               Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:                    str
+    authoritySourceId:         Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:         Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:               Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:              Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:                 Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: U1 Tariff (Sickness Reimbursement) (Phase 8W) ─────────────
+# Configuration/registry only — see models.GermanyHealthFundU1Tariff's own
+# docstring. Plain JSON body (no file upload — like GermanyHealthFund, a
+# tariff's value is scalar + citation, not a document to hash).
+
+class GermanyHealthFundU1TariffCreate(BaseModel):
+    # Field names are snake_case (matching GermanyHealthFundCreate); the
+    # camelCase validation aliases are what the JSON API / frontend sends.
+    health_fund_id:          str = Field(validation_alias="healthFundId")
+    tariff_identifier:       str = Field(validation_alias="tariffIdentifier")
+    tariff_name:             Optional[str] = Field(None, validation_alias="tariffName")
+    reimbursement_pct:       Decimal = Field(validation_alias="reimbursementPct")
+    levy_rate_pct:           Decimal = Field(validation_alias="levyRatePct")
+    effective_from:          date = Field(validation_alias="effectiveFrom")
+    effective_to:            Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id:     Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyHealthFundU1TariffResponse(BaseModel):
+    id:                    int
+    healthFundId:          str = Field(validation_alias="health_fund_id", serialization_alias="healthFundId")
+    tariffIdentifier:      str = Field(validation_alias="tariff_identifier", serialization_alias="tariffIdentifier")
+    tariffName:            Optional[str] = Field(None, validation_alias="tariff_name", serialization_alias="tariffName")
+    reimbursementPct:      Decimal = Field(validation_alias="reimbursement_pct", serialization_alias="reimbursementPct")
+    levyRatePct:           Decimal = Field(validation_alias="levy_rate_pct", serialization_alias="levyRatePct")
+    effectiveFrom:         date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:           Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:                str
+    authoritySourceId:     Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:     Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:           Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:          Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:             Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: Contribution Ceiling Configuration (ZP-TAX-DE-2026-001 §9) ──
+# Configuration/registry only — see models.GermanyContributionCeiling's
+# own docstring. Plain JSON body (no file upload — like GermanyHealthFund,
+# a ceiling figure has no document content to hash).
+
+class GermanyContributionCeilingCreate(BaseModel):
+    branch:            str = Field(validation_alias="branch")
+    monthly_ceiling:   Decimal = Field(validation_alias="monthlyCeiling")
+    annual_ceiling:    Decimal = Field(validation_alias="annualCeiling")
+    effective_from:    date = Field(validation_alias="effectiveFrom")
+    effective_to:      Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyContributionCeilingResponse(BaseModel):
+    id:                  int
+    branch:              str
+    monthlyCeiling:      Decimal = Field(validation_alias="monthly_ceiling", serialization_alias="monthlyCeiling")
+    annualCeiling:       Decimal = Field(validation_alias="annual_ceiling", serialization_alias="annualCeiling")
+    effectiveFrom:       date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:              str
+    authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: PV (Long-Term Care Insurance) Child/Saxony Configuration ────
+# Configuration/registry only — see models.GermanyPvConfiguration's own
+# docstring. Plain JSON body (no file upload — like GermanyHealthFund and
+# GermanyContributionCeiling, a PV rate configuration has no document
+# content to hash).
+
+class GermanyPvConfigurationCreate(BaseModel):
+    child_category:            str = Field(validation_alias="childCategory")
+    is_saxony:                 bool = Field(validation_alias="isSaxony")
+    total_rate_pct:            Decimal = Field(validation_alias="totalRatePct")
+    standard_employee_rate_pct: Decimal = Field(validation_alias="standardEmployeeRatePct")
+    employer_rate_pct:         Decimal = Field(validation_alias="employerRatePct")
+    saxony_employee_rate_pct:  Decimal = Field(validation_alias="saxonyEmployeeRatePct")
+    saxony_employer_rate_pct:  Decimal = Field(validation_alias="saxonyEmployerRatePct")
+    effective_from:            date = Field(validation_alias="effectiveFrom")
+    effective_to:              Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id:       Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyPvConfigurationResponse(BaseModel):
+    id:                          int
+    childCategory:               str = Field(validation_alias="child_category", serialization_alias="childCategory")
+    isSaxony:                    bool = Field(validation_alias="is_saxony", serialization_alias="isSaxony")
+    totalRatePct:                Decimal = Field(validation_alias="total_rate_pct", serialization_alias="totalRatePct")
+    standardEmployeeRatePct:     Decimal = Field(validation_alias="standard_employee_rate_pct", serialization_alias="standardEmployeeRatePct")
+    employerRatePct:             Decimal = Field(validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    saxonyEmployeeRatePct:       Decimal = Field(validation_alias="saxony_employee_rate_pct", serialization_alias="saxonyEmployeeRatePct")
+    saxonyEmployerRatePct:       Decimal = Field(validation_alias="saxony_employer_rate_pct", serialization_alias="saxonyEmployerRatePct")
+    effectiveFrom:               date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:                 Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:                      str
+    authoritySourceId:           Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:           Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:                 Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:                Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:                   Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: Earning/Deduction Taxability (ZP-TAX-DE-2026-001 §15) ──────
+# Configuration/registry only — see models.GermanyEarningTaxabilityRule's
+# own docstring. Plain JSON body, same pattern as GermanyPvConfiguration.
+
+class GermanyEarningTaxabilityRuleCreate(BaseModel):
+    earning_type:              str = Field(validation_alias="earningType")
+    wage_tax_treatment:         str = Field(validation_alias="wageTaxTreatment")
+    gkv_pv_treatment:           str = Field(validation_alias="gkvPvTreatment")
+    rv_alv_treatment:           str = Field(validation_alias="rvAlvTreatment")
+    reporting_classification:  Optional[str] = Field(None, validation_alias="reportingClassification")
+    effective_from:            date = Field(validation_alias="effectiveFrom")
+    effective_to:              Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id:       Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyEarningTaxabilityRuleResponse(BaseModel):
+    id:                          int
+    earningType:                 str = Field(validation_alias="earning_type", serialization_alias="earningType")
+    wageTaxTreatment:             str = Field(validation_alias="wage_tax_treatment", serialization_alias="wageTaxTreatment")
+    gkvPvTreatment:               str = Field(validation_alias="gkv_pv_treatment", serialization_alias="gkvPvTreatment")
+    rvAlvTreatment:               str = Field(validation_alias="rv_alv_treatment", serialization_alias="rvAlvTreatment")
+    reportingClassification:      Optional[str] = Field(None, validation_alias="reporting_classification", serialization_alias="reportingClassification")
+    effectiveFrom:                date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:                  Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:                       str
+    authoritySourceId:            Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:            Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:                  Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:                 Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:                    Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: overtime/shift-premium statutory registries (Phase 8AD) ────
+# Configuration only — see models.py's GermanyOvertimePremiumCategory /
+# GermanyOvertimeGrundlohnCap docstrings for the full rationale.
+
+class GermanyOvertimePremiumCategoryCreate(BaseModel):
+    category_code:      str = Field(validation_alias="categoryCode")
+    wage_tax_free_pct:  Decimal = Field(validation_alias="wageTaxFreePct")
+    effective_from:     date = Field(validation_alias="effectiveFrom")
+    effective_to:       Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyOvertimePremiumCategoryResponse(BaseModel):
+    id:                  int
+    categoryCode:        str = Field(validation_alias="category_code", serialization_alias="categoryCode")
+    wageTaxFreePct:      Decimal = Field(validation_alias="wage_tax_free_pct", serialization_alias="wageTaxFreePct")
+    effectiveFrom:       date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:              str
+    authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyOvertimeGrundlohnCapCreate(BaseModel):
+    dimension:           str = Field(validation_alias="dimension")
+    hourly_cap_amount:   Decimal = Field(validation_alias="hourlyCapAmount")
+    effective_from:      date = Field(validation_alias="effectiveFrom")
+    effective_to:        Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyOvertimeGrundlohnCapResponse(BaseModel):
+    id:                  int
+    dimension:           str
+    hourlyCapAmount:     Decimal = Field(validation_alias="hourly_cap_amount", serialization_alias="hourlyCapAmount")
+    effectiveFrom:       date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:              str
+    authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

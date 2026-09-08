@@ -7,13 +7,16 @@ password resets, and PlatformSetting configuration.
 """
 
 import logging
+import os
+import uuid
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core import object_storage
 from app.core.dependencies import get_current_super_admin
 from app.database import get_db
 from app.modules.auth.models import User
@@ -43,6 +46,20 @@ from app.modules.payroll.schemas import (
     EmployerTaxProfileResponse, EmployerTaxProfileUpsert,
     ReciprocityRuleResponse, ReciprocityRuleUpsert,
     SourceArtifactResponse, SourceArtifactCreate,
+    PapAlgorithmAssetResponse,
+    GermanyPapReleaseResponse, GermanyPapReleaseGateStatusResponse,
+    GermanyPapReleaseSourceFinalityUpdate, GermanyPapReleaseLicensingUpdate,
+    GermanyPapReleaseGoldenVectorUpdate, GermanyPapReleaseNotesUpdate,
+    GermanyPapReleaseRejectRequest, GermanyPapReleaseRollbackRequest,
+    GermanyHealthFundResponse, GermanyHealthFundCreate, GermanyHealthFundU1TariffResponse,
+    GermanyAccidentInsuranceProfileResponse, GermanyAccidentInsuranceProfileCreate,
+    GermanyHealthFundU1TariffCreate,
+    GermanyContributionCeilingResponse, GermanyContributionCeilingCreate,
+    GermanyPvConfigurationResponse, GermanyPvConfigurationCreate,
+    GermanyEarningTaxabilityRuleResponse, GermanyEarningTaxabilityRuleCreate,
+    GermanyOvertimePremiumCategoryResponse, GermanyOvertimePremiumCategoryCreate,
+    GermanyOvertimeGrundlohnCapResponse, GermanyOvertimeGrundlohnCapCreate,
+    GermanyChurchTaxExceptionResponse, GermanyChurchTaxExceptionCreate,
     LocalityRateResponse, LocalityRateUpsert,
     ReportTemplateResponse, ReportTemplateUpsert, ReportTemplateStatusUpdate,
     ReportTemplateComponentResponse, ReportTemplateComponentUpsert,
@@ -510,6 +527,34 @@ def get_available_report_data_fields(
     return payroll_service.get_available_report_data_fields(jurisdictionCountry)
 
 
+# NOTE: the filing-calendar list route (a literal "filing-calendar" path
+# segment) is registered here, BEFORE "/report-templates/{id}" below —
+# FastAPI/Starlette matches routes in registration order, and an {id}
+# route registered first would swallow "filing-calendar" as an attempted
+# integer id, producing a 422 instead of ever reaching this handler
+# (found and fixed during the Super Admin stabilization audit). See the
+# "Statutory Filing Calendar" section further down for the rest of this
+# resource's endpoints (PUT/status), which don't collide with {id}.
+@router.get(
+    "/report-templates/filing-calendar", response_model=List[FilingCalendarResponse], response_model_by_alias=True,
+    summary="List statutory filing-calendar entries",
+)
+def list_filing_calendar_entries(
+    country: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    reportType: Optional[str] = Query(None),
+    reportingYear: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_filing_calendar(
+        db, country=country, state=state, report_type=reportType, reporting_year=reportingYear, status=status,
+    )
+
+
 @router.get(
     "/report-templates/{id}", response_model=ReportTemplateResponse, response_model_by_alias=True,
     summary="Full template detail with nested components and fields",
@@ -673,27 +718,10 @@ def delete_report_template_field(
 # ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
 # A genuinely new asset — Organizations read this to know when a report is
 # actually due (e.g. India Form 138's Q1-Q4 dates); never hardcoded
-# client-side.
-
-@router.get(
-    "/report-templates/filing-calendar", response_model=List[FilingCalendarResponse], response_model_by_alias=True,
-    summary="List statutory filing-calendar entries",
-)
-def list_filing_calendar_entries(
-    country: Optional[str] = Query(None),
-    state: Optional[str] = Query(None),
-    reportType: Optional[str] = Query(None),
-    reportingYear: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    from app.modules.payroll import service as payroll_service
-
-    return payroll_service.list_filing_calendar(
-        db, country=country, state=state, report_type=reportType, reporting_year=reportingYear, status=status,
-    )
-
+# client-side. The GET list route lives earlier in this file (before
+# "/report-templates/{id}") to avoid the route-ordering collision fixed
+# during the Super Admin stabilization audit — only the PUT routes remain
+# here.
 
 @router.put(
     "/report-templates/filing-calendar", response_model=FilingCalendarResponse, response_model_by_alias=True,
@@ -899,6 +927,90 @@ def delete_employer_tax_profile(
     return {"message": "Employer tax profile deleted."}
 
 
+# ── Germany: Accident Insurance Profile maker-checker (Phase 8AJ, 2nd pass)
+# Separate from EmployerTaxProfile above — see
+# models.GermanyAccidentInsuranceProfile's own docstring. Same
+# Super-Admin-only security tier; organization-scoped (unlike every
+# other Germany registry, all global) because accident insurance is
+# carrier/employer-specific (spec DE-D06).
+
+@router.get(
+    "/compliance/germany/accident-insurance-profiles",
+    response_model=List[GermanyAccidentInsuranceProfileResponse], response_model_by_alias=True,
+    summary="List Germany accident-insurance profiles, optionally filtered by organization",
+)
+def list_germany_accident_insurance_profiles(
+    organizationId: Optional[int] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_germany_accident_insurance_profiles(db, organization_id=organizationId)
+
+
+@router.get(
+    "/compliance/germany/accident-insurance-profiles/{id}",
+    response_model=GermanyAccidentInsuranceProfileResponse, response_model_by_alias=True,
+    summary="Get a single Germany accident-insurance profile",
+)
+def get_germany_accident_insurance_profile(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_germany_accident_insurance_profile_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/accident-insurance-profiles",
+    response_model=GermanyAccidentInsuranceProfileResponse, response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany accident-insurance profile version for one organization",
+)
+def create_germany_accident_insurance_profile(
+    payload: GermanyAccidentInsuranceProfileCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_germany_accident_insurance_profile_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/accident-insurance-profiles/{id}/approve",
+    response_model=GermanyAccidentInsuranceProfileResponse, response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this accident-insurance profile",
+)
+def approve_germany_accident_insurance_profile(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_germany_accident_insurance_profile_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/accident-insurance-profiles/{id}/status",
+    response_model=GermanyAccidentInsuranceProfileResponse, response_model_by_alias=True,
+    summary="Advance a Germany accident-insurance profile's lifecycle status",
+)
+def set_germany_accident_insurance_profile_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_germany_accident_insurance_profile_status(db, id, status_value, actor_id=current_user.id)
+
+
 # ── US: Cross-State Reciprocity ───────────────────────────────────────────
 
 @router.get(
@@ -1036,6 +1148,1120 @@ def review_source_artifact(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
+
+
+# ── Germany: BMF PAP Algorithm Asset (ZP-TAX-DE-2026-001 §5, §17, §18) ────
+# Container/evidence/lifecycle only — see models.PapAlgorithmAsset and
+# service.py's PAP functions. Every endpoint here is Super-Admin-only:
+# this is canonical Germany statutory configuration, a different security
+# domain from tenant-owned employee data (Phase 2) — no tenant payroll
+# operator role can reach any endpoint in this section.
+
+@router.get(
+    "/compliance/germany/pap-assets", response_model=List[PapAlgorithmAssetResponse], response_model_by_alias=True,
+    summary="List Germany BMF PAP algorithm assets",
+)
+def list_pap_assets(
+    tax_year: Optional[str] = Query(None, alias="taxYear"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_pap_assets(db, jurisdiction_country="DE", tax_year=tax_year)
+
+
+@router.get(
+    "/compliance/germany/pap-assets/resolve", response_model=Optional[PapAlgorithmAssetResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED PAP asset applicable on a payroll date",
+)
+def resolve_pap_asset(
+    payroll_date: date = Query(..., alias="payrollDate"),
+    tax_year: Optional[str] = Query(None, alias="taxYear"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_pap_asset(db, payroll_date, jurisdiction_country="DE", tax_year=tax_year)
+
+
+@router.get(
+    "/compliance/germany/pap-assets/{id}", response_model=PapAlgorithmAssetResponse, response_model_by_alias=True,
+    summary="Get a single Germany PAP algorithm asset",
+)
+def get_pap_asset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_pap_asset_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/pap-assets", response_model=PapAlgorithmAssetResponse, response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingest a new DRAFT Germany PAP algorithm asset (raw source content + metadata)",
+)
+async def ingest_pap_asset(
+    tax_year: str = Form(..., alias="taxYear"),
+    pap_version: str = Form(..., alias="papVersion"),
+    effective_from: date = Form(..., alias="effectiveFrom"),
+    effective_to: Optional[date] = Form(None, alias="effectiveTo"),
+    source_agency: str = Form(..., alias="sourceAgency"),
+    source_title: str = Form(..., alias="sourceTitle"),
+    source_url: Optional[str] = Form(None, alias="sourceUrl"),
+    source_publication_date: Optional[date] = Form(None, alias="sourcePublicationDate"),
+    file: UploadFile = File(..., description="The official BMF PAP source file/content"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    contents = await file.read()
+    ext = os.path.splitext(file.filename or "")[1] or ".bin"
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    stored_path = object_storage.save_upload(
+        subdir="germany_pap_assets", filename=unique_name, data=contents,
+    )
+    return payroll_service.ingest_pap_asset(
+        db, jurisdiction_country="DE", tax_year=tax_year, pap_version=pap_version,
+        effective_from=effective_from, effective_to=effective_to,
+        source_content=contents, source_agency=source_agency, source_title=source_title,
+        source_url=source_url, source_publication_date=source_publication_date,
+        source_content_path=stored_path, actor_id=current_user.id,
+    )
+
+
+@router.put(
+    "/compliance/germany/pap-assets/{id}/approve", response_model=PapAlgorithmAssetResponse,
+    response_model_by_alias=True, summary="Record that the calling Super Admin approves this PAP asset",
+)
+def approve_pap_asset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_pap_asset_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pap-assets/{id}/status", response_model=PapAlgorithmAssetResponse,
+    response_model_by_alias=True, summary="Advance a Germany PAP asset's lifecycle status",
+)
+def set_pap_asset_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_pap_asset_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: BMF PAP Production Release Governance (Phase 8G-1) ──────────
+# Internal release/activation governance, entirely separate from the PAP
+# asset lifecycle above (see models.GermanyPapRelease's own docstring).
+# Every endpoint here is Super-Admin-only, same security domain as the
+# PAP asset section — no tenant payroll operator role can reach any
+# endpoint in this section, and none of these endpoints can activate
+# Germany PAP in production: activate_pap_release only flips this
+# governance row's own status and never touches resolve_pap_executor().
+
+@router.get(
+    "/compliance/germany/pap-releases", response_model=List[GermanyPapReleaseResponse], response_model_by_alias=True,
+    summary="List Germany PAP production-release governance records",
+)
+def list_pap_releases(
+    tax_year: Optional[str] = Query(None, alias="taxYear"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_pap_releases(db, jurisdiction_country="DE", tax_year=tax_year)
+
+
+@router.get(
+    "/compliance/germany/pap-releases/{id}", response_model=GermanyPapReleaseResponse, response_model_by_alias=True,
+    summary="Get a single Germany PAP release governance record",
+)
+def get_pap_release(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_pap_release_by_id(db, id)
+
+
+@router.get(
+    "/compliance/germany/pap-releases/{id}/gate-status", response_model=GermanyPapReleaseGateStatusResponse,
+    response_model_by_alias=True, summary="Preview the compound production gate for a release (read-only)",
+)
+def get_pap_release_gate_status(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    result = payroll_service.evaluate_pap_release_gate(db, id)
+    return {
+        "releaseId": id, "gates": result.gates,
+        "failedGates": list(result.failed_gates), "isActivationEligible": result.is_activation_eligible,
+    }
+
+
+@router.post(
+    "/compliance/germany/pap-assets/{pap_asset_id}/release", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Start a production release/activation-governance attempt for a PAP asset",
+)
+def create_pap_release(
+    pap_asset_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_pap_release(db, pap_asset_id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/source-identity", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Record source-identity verification evidence",
+)
+def record_pap_release_source_identity(
+    id: int,
+    body: GermanyPapReleaseNotesUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_pap_release_source_identity(db, id, actor_id=current_user.id, notes=body.notes)
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/source-hash", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Record independent re-verification of the bound source hash",
+)
+def record_pap_release_source_hash(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_pap_release_source_hash_verification(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/source-finality", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Record source-finality evidence (independent of PAP_SOURCE_FINALITY)",
+)
+def record_pap_release_source_finality(
+    id: int,
+    body: GermanyPapReleaseSourceFinalityUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_pap_release_source_finality(
+        db, id, actor_id=current_user.id, status=body.status,
+        authority=body.authority, reference=body.reference, notes=body.notes,
+    )
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/licensing", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Record licensing/commercial-use authorization evidence",
+)
+def record_pap_release_licensing(
+    id: int,
+    body: GermanyPapReleaseLicensingUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_pap_release_licensing(
+        db, id, actor_id=current_user.id, status=body.status, authority=body.authority, reference=body.reference,
+        authorization_date=body.authorizationDate, effective_date=body.effectiveDate, expiry_date=body.expiryDate,
+        evidence_location=body.evidenceLocation, evidence_hash=body.evidenceHash, notes=body.notes,
+    )
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/golden-vectors", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Record golden-vector certification bound to this release's exact hash",
+)
+def record_pap_release_golden_vectors(
+    id: int,
+    body: GermanyPapReleaseGoldenVectorUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_pap_release_golden_vectors(
+        db, id, actor_id=current_user.id, source_sha256=body.sourceSha256, notes=body.notes,
+    )
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/security-certification", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Record security certification",
+)
+def record_pap_release_security_certification(
+    id: int,
+    body: GermanyPapReleaseNotesUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.record_pap_release_security_certification(db, id, actor_id=current_user.id, notes=body.notes)
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/ready", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Mark a release ready for an independent checker",
+)
+def mark_pap_release_ready(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.mark_pap_release_ready(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/approve", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Approve a release (maker-checker: must differ from preparer)",
+)
+def approve_pap_release(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.approve_pap_release(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pap-releases/{id}/reject", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Reject a release back to NOT_READY",
+)
+def reject_pap_release(
+    id: int,
+    body: GermanyPapReleaseRejectRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.reject_pap_release(db, id, actor_id=current_user.id, reason=body.reason)
+
+
+@router.post(
+    "/compliance/germany/pap-releases/{id}/activate", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True,
+    summary="Activate a release — requires every compound gate satisfied AND a distinct activator",
+)
+def activate_pap_release(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.activate_pap_release(db, id, actor_id=current_user.id)
+
+
+@router.post(
+    "/compliance/germany/pap-releases/{id}/rollback/request", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Request rollback of an ACTIVE release (maker-checker step 1 of 2)",
+)
+def request_pap_rollback(
+    id: int,
+    body: GermanyPapReleaseRollbackRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.request_pap_rollback(db, id, actor_id=current_user.id, reason=body.reason)
+
+
+@router.post(
+    "/compliance/germany/pap-releases/{id}/rollback/reject", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True, summary="Reject a requested rollback — the release remains ACTIVE",
+)
+def reject_pap_rollback(
+    id: int,
+    body: GermanyPapReleaseRejectRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.reject_pap_rollback(db, id, actor_id=current_user.id, reason=body.reason)
+
+
+@router.post(
+    "/compliance/germany/pap-releases/{id}/rollback/approve", response_model=GermanyPapReleaseResponse,
+    response_model_by_alias=True,
+    summary="Approve a requested rollback (maker-checker step 2 of 2, distinct from requester); optionally restore a prior activated release",
+)
+def approve_pap_rollback(
+    id: int,
+    body: GermanyPapReleaseRollbackRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    rolled_back, restored = payroll_service.approve_pap_rollback(
+        db, id, actor_id=current_user.id, target_release_id=body.targetReleaseId,
+    )
+    return rolled_back
+
+
+# ── Germany: Krankenkasse (Health Fund) Registry (ZP-TAX-DE-2026-001 §11) ─
+# Configuration/registry only — see models.GermanyHealthFund and
+# service.py's health-fund functions. Every endpoint here is Super-Admin-
+# only, same security domain as the PAP asset section above (canonical
+# Germany statutory configuration, not tenant-owned data) — no tenant
+# payroll operator role can reach any endpoint in this section.
+
+@router.get(
+    "/compliance/germany/health-funds", response_model=List[GermanyHealthFundResponse], response_model_by_alias=True,
+    summary="List Germany health-fund registry records",
+)
+def list_health_funds(
+    health_fund_id: Optional[str] = Query(None, alias="healthFundId"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_health_funds(db, health_fund_id=health_fund_id)
+
+
+@router.get(
+    "/compliance/germany/health-funds/{health_fund_id}/resolve", response_model=Optional[GermanyHealthFundResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED rate for one fund applicable on a date",
+)
+def resolve_health_fund(
+    health_fund_id: str,
+    as_of: Optional[date] = Query(None, alias="as_of"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_health_fund(db, health_fund_id, as_of=as_of)
+
+
+# ── Germany: U1 Tariff (Sickness Reimbursement) (Phase 8W) ────────────
+# Configuration/registry only — see models.GermanyHealthFundU1Tariff and
+# service.py's U1 tariff functions. Every endpoint here is Super-Admin-only,
+# same security domain as the PAP asset / health-fund sections above.
+#
+# NOTE: the list route below (a literal "u1-tariffs" path segment) MUST be
+# registered before "/compliance/germany/health-funds/{id}" further down —
+# FastAPI/Starlette matches routes in registration order, and an {id}
+# route registered first would swallow "u1-tariffs" as an attempted
+# integer id, producing a 422 instead of ever reaching this handler
+# (found and fixed during the Super Admin stabilization audit).
+
+@router.get(
+    "/compliance/germany/health-funds/u1-tariffs", response_model=List[GermanyHealthFundU1TariffResponse],
+    response_model_by_alias=True, summary="List Germany health-fund U1 tariff records",
+)
+def list_u1_tariffs(
+    health_fund_id: Optional[str] = Query(None, alias="healthFundId"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_u1_tariffs(db, health_fund_id=health_fund_id)
+
+
+@router.get(
+    "/compliance/germany/health-funds/{id}", response_model=GermanyHealthFundResponse, response_model_by_alias=True,
+    summary="Get a single Germany health-fund registry record",
+)
+def get_health_fund(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_health_fund_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/health-funds", response_model=GermanyHealthFundResponse, response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany health-fund rate version",
+)
+def create_health_fund(
+    payload: GermanyHealthFundCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_health_fund_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/health-funds/{id}/approve", response_model=GermanyHealthFundResponse,
+    response_model_by_alias=True, summary="Record that the calling Super Admin approves this health-fund record",
+)
+def approve_health_fund(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_health_fund_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/health-funds/{id}/status", response_model=GermanyHealthFundResponse,
+    response_model_by_alias=True, summary="Advance a Germany health-fund record's lifecycle status",
+)
+def set_health_fund_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_health_fund_status(db, id, status_value, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/germany/health-funds/u1-tariffs/{id}", response_model=GermanyHealthFundU1TariffResponse,
+    response_model_by_alias=True, summary="Get a single Germany health-fund U1 tariff record",
+)
+def get_u1_tariff(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_u1_tariff_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/health-funds/u1-tariffs", response_model=GermanyHealthFundU1TariffResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany health-fund U1 tariff version",
+)
+def create_u1_tariff(
+    payload: GermanyHealthFundU1TariffCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_u1_tariff_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/health-funds/u1-tariffs/{id}/approve", response_model=GermanyHealthFundU1TariffResponse,
+    response_model_by_alias=True, summary="Record that the calling Super Admin approves this U1 tariff record",
+)
+def approve_u1_tariff(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_u1_tariff_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/health-funds/u1-tariffs/{id}/status", response_model=GermanyHealthFundU1TariffResponse,
+    response_model_by_alias=True, summary="Advance a Germany U1 tariff record's lifecycle status",
+)
+def set_u1_tariff_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_u1_tariff_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: Contribution Ceiling Configuration (ZP-TAX-DE-2026-001 §9) ──
+# Configuration/registry only — see models.GermanyContributionCeiling and
+# service.py's contribution-ceiling functions. Every endpoint here is
+# Super-Admin-only, same security domain as the PAP asset / health-fund
+# sections above.
+
+@router.get(
+    "/compliance/germany/contribution-ceilings", response_model=List[GermanyContributionCeilingResponse],
+    response_model_by_alias=True, summary="List Germany contribution ceiling configuration records",
+)
+def list_contribution_ceilings(
+    branch: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_contribution_ceilings(db, branch=branch)
+
+
+@router.get(
+    "/compliance/germany/contribution-ceilings/resolve", response_model=Optional[GermanyContributionCeilingResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED ceiling for one branch applicable on a date",
+)
+def resolve_contribution_ceiling(
+    branch: str = Query(...),
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_contribution_ceiling(db, branch, as_of=as_of)
+
+
+@router.get(
+    "/compliance/germany/contribution-ceilings/{id}", response_model=GermanyContributionCeilingResponse,
+    response_model_by_alias=True, summary="Get a single Germany contribution ceiling record",
+)
+def get_contribution_ceiling(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_contribution_ceiling_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/contribution-ceilings", response_model=GermanyContributionCeilingResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany contribution ceiling version",
+)
+def create_contribution_ceiling(
+    payload: GermanyContributionCeilingCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_contribution_ceiling_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/contribution-ceilings/{id}/approve", response_model=GermanyContributionCeilingResponse,
+    response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this contribution ceiling record",
+)
+def approve_contribution_ceiling(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_contribution_ceiling_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/contribution-ceilings/{id}/status", response_model=GermanyContributionCeilingResponse,
+    response_model_by_alias=True, summary="Advance a Germany contribution ceiling record's lifecycle status",
+)
+def set_contribution_ceiling_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_contribution_ceiling_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: PV (Long-Term Care Insurance) Child/Saxony Configuration ────
+# Configuration/registry only — see models.GermanyPvConfiguration and
+# service.py's PV configuration functions. Every endpoint here is
+# Super-Admin-only, same security domain as the PAP asset / health-fund /
+# contribution-ceiling sections above.
+
+@router.get(
+    "/compliance/germany/pv-configurations", response_model=List[GermanyPvConfigurationResponse],
+    response_model_by_alias=True, summary="List Germany PV configuration records",
+)
+def list_pv_configurations(
+    child_category: Optional[str] = Query(None, alias="childCategory"),
+    is_saxony: Optional[bool] = Query(None, alias="isSaxony"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_pv_configurations(db, child_category=child_category, is_saxony=is_saxony)
+
+
+@router.get(
+    "/compliance/germany/pv-configurations/resolve", response_model=Optional[GermanyPvConfigurationResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED PV configuration for a child category and Saxony status",
+)
+def resolve_pv_configuration(
+    child_category: str = Query(..., alias="childCategory"),
+    is_saxony: bool = Query(..., alias="isSaxony"),
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_pv_configuration(db, child_category, is_saxony, as_of=as_of)
+
+
+@router.get(
+    "/compliance/germany/pv-configurations/{id}", response_model=GermanyPvConfigurationResponse,
+    response_model_by_alias=True, summary="Get a single Germany PV configuration record",
+)
+def get_pv_configuration(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_pv_configuration_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/pv-configurations", response_model=GermanyPvConfigurationResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany PV configuration version",
+)
+def create_pv_configuration(
+    payload: GermanyPvConfigurationCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_pv_configuration_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pv-configurations/{id}/approve", response_model=GermanyPvConfigurationResponse,
+    response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this PV configuration record",
+)
+def approve_pv_configuration(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_pv_configuration_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/pv-configurations/{id}/status", response_model=GermanyPvConfigurationResponse,
+    response_model_by_alias=True, summary="Advance a Germany PV configuration record's lifecycle status",
+)
+def set_pv_configuration_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_pv_configuration_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: Earning/Deduction Taxability (ZP-TAX-DE-2026-001 §15, Phase 8T) ─
+# Configuration/registry only — see models.GermanyEarningTaxabilityRule and
+# service.py's earning-taxability functions. Every endpoint here is
+# Super-Admin-only, same security domain as every other Germany registry
+# section above.
+
+@router.get(
+    "/compliance/germany/earning-taxability-rules", response_model=List[GermanyEarningTaxabilityRuleResponse],
+    response_model_by_alias=True, summary="List Germany earning/deduction taxability rules",
+)
+def list_earning_taxability_rules(
+    earning_type: Optional[str] = Query(None, alias="earningType"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_earning_taxability_rules(db, earning_type=earning_type)
+
+
+@router.get(
+    "/compliance/germany/earning-taxability-rules/resolve", response_model=Optional[GermanyEarningTaxabilityRuleResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED taxability rule for one earning type",
+)
+def resolve_earning_taxability_rule(
+    earning_type: str = Query(..., alias="earningType"),
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_earning_taxability_rule(db, earning_type, as_of=as_of)
+
+
+@router.get(
+    "/compliance/germany/earning-taxability-rules/{id}", response_model=GermanyEarningTaxabilityRuleResponse,
+    response_model_by_alias=True, summary="Get a single Germany earning taxability rule",
+)
+def get_earning_taxability_rule(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_earning_taxability_rule_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/earning-taxability-rules", response_model=GermanyEarningTaxabilityRuleResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany earning taxability rule version",
+)
+def create_earning_taxability_rule(
+    payload: GermanyEarningTaxabilityRuleCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_earning_taxability_rule(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/earning-taxability-rules/{id}/approve", response_model=GermanyEarningTaxabilityRuleResponse,
+    response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this earning taxability rule",
+)
+def approve_earning_taxability_rule(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_earning_taxability_rule_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/earning-taxability-rules/{id}/status", response_model=GermanyEarningTaxabilityRuleResponse,
+    response_model_by_alias=True, summary="Advance a Germany earning taxability rule's lifecycle status",
+)
+def set_earning_taxability_rule_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_earning_taxability_rule_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: Overtime/Shift-Premium Statutory Registries (Phase 8AD) ─────
+# Configuration/registry only — see models.GermanyOvertimePremiumCategory /
+# GermanyOvertimeGrundlohnCap and service.py's overtime-registry functions.
+# Every endpoint here is Super-Admin-only, same security domain as every
+# other Germany registry section above. GLOBAL statutory configuration —
+# no organization_id anywhere on either table; tenant payroll operators
+# have no route that can reach these functions.
+
+@router.get(
+    "/compliance/germany/overtime-premium-categories", response_model=List[GermanyOvertimePremiumCategoryResponse],
+    response_model_by_alias=True, summary="List Germany overtime premium-category configuration records",
+)
+def list_overtime_premium_categories(
+    category_code: Optional[str] = Query(None, alias="categoryCode"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_overtime_premium_categories(db, category_code=category_code)
+
+
+@router.get(
+    "/compliance/germany/overtime-premium-categories/resolve", response_model=Optional[GermanyOvertimePremiumCategoryResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED premium-category record applicable on a date",
+)
+def resolve_overtime_premium_category(
+    category_code: str = Query(..., alias="categoryCode"),
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_overtime_premium_category(db, category_code, as_of=as_of)
+
+
+@router.get(
+    "/compliance/germany/overtime-premium-categories/{id}", response_model=GermanyOvertimePremiumCategoryResponse,
+    response_model_by_alias=True, summary="Get a single Germany overtime premium-category record",
+)
+def get_overtime_premium_category(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_overtime_premium_category_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/overtime-premium-categories", response_model=GermanyOvertimePremiumCategoryResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany overtime premium-category version",
+)
+def create_overtime_premium_category(
+    payload: GermanyOvertimePremiumCategoryCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_overtime_premium_category_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/overtime-premium-categories/{id}/approve", response_model=GermanyOvertimePremiumCategoryResponse,
+    response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this overtime premium-category record",
+)
+def approve_overtime_premium_category(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_overtime_premium_category_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/overtime-premium-categories/{id}/status", response_model=GermanyOvertimePremiumCategoryResponse,
+    response_model_by_alias=True, summary="Advance a Germany overtime premium-category record's lifecycle status",
+)
+def set_overtime_premium_category_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_overtime_premium_category_status(db, id, status_value, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/germany/overtime-grundlohn-caps", response_model=List[GermanyOvertimeGrundlohnCapResponse],
+    response_model_by_alias=True, summary="List Germany overtime Grundlohn-cap configuration records",
+)
+def list_overtime_grundlohn_caps(
+    dimension: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_overtime_grundlohn_caps(db, dimension=dimension)
+
+
+@router.get(
+    "/compliance/germany/overtime-grundlohn-caps/resolve", response_model=Optional[GermanyOvertimeGrundlohnCapResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED Grundlohn cap applicable on a date",
+)
+def resolve_overtime_grundlohn_cap(
+    dimension: str = Query(...),
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_germany_overtime_grundlohn_cap(db, dimension, as_of=as_of)
+
+
+@router.get(
+    "/compliance/germany/overtime-grundlohn-caps/{id}", response_model=GermanyOvertimeGrundlohnCapResponse,
+    response_model_by_alias=True, summary="Get a single Germany overtime Grundlohn-cap record",
+)
+def get_overtime_grundlohn_cap(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_overtime_grundlohn_cap_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/overtime-grundlohn-caps", response_model=GermanyOvertimeGrundlohnCapResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany overtime Grundlohn-cap version",
+)
+def create_overtime_grundlohn_cap(
+    payload: GermanyOvertimeGrundlohnCapCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_overtime_grundlohn_cap_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/overtime-grundlohn-caps/{id}/approve", response_model=GermanyOvertimeGrundlohnCapResponse,
+    response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this overtime Grundlohn-cap record",
+)
+def approve_overtime_grundlohn_cap(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_overtime_grundlohn_cap_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/overtime-grundlohn-caps/{id}/status", response_model=GermanyOvertimeGrundlohnCapResponse,
+    response_model_by_alias=True, summary="Advance a Germany overtime Grundlohn-cap record's lifecycle status",
+)
+def set_overtime_grundlohn_cap_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_overtime_grundlohn_cap_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: Church tax (Kirchensteuer) Land matrix (Phase 8O) ───────────
+# Read-only — see service.get_church_tax_matrix's own docstring for why
+# this is NOT a DRAFT/APPROVED/PUBLISHED registry like the sections above.
+
+@router.get(
+    "/compliance/germany/church-tax", summary="Read-only Germany church-tax (Kirchensteuer) Land matrix",
+)
+def get_church_tax_matrix(
+    current_user=Depends(get_current_super_admin),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_church_tax_matrix()
+
+
+# ── Germany: Church Tax Exceptions (Phase 8AM) ─────────────────────────────
+# Full DRAFT/VERIFIED/APPROVED/PUBLISHED/SUPERSEDED lifecycle with
+# maker-checker, source evidence, and effective dating — mirrors
+# GermanyHealthFund's global (non-org-scoped) pattern.
+
+@router.get(
+    "/compliance/germany/church-tax-exceptions",
+    response_model=List[GermanyChurchTaxExceptionResponse],
+    summary="List Germany church-tax exceptions (sub-Land overrides)",
+)
+def list_germany_church_tax_exceptions(
+    land_code: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.list_germany_church_tax_exceptions(db, land_code=land_code)
+
+
+@router.post(
+    "/compliance/germany/church-tax-exceptions",
+    response_model=GermanyChurchTaxExceptionResponse,
+    summary="Create a new DRAFT church-tax exception version",
+)
+def create_germany_church_tax_exception(
+    payload: GermanyChurchTaxExceptionCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.create_germany_church_tax_exception_record(
+        db, payload, actor_id=current_user.id
+    )
+
+
+@router.post(
+    "/compliance/germany/church-tax-exceptions/{id}/approve",
+    response_model=GermanyChurchTaxExceptionResponse,
+    summary="Set approver (auto-advances VERIFIED -> APPROVED)",
+)
+def approve_germany_church_tax_exception(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.set_germany_church_tax_exception_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/church-tax-exceptions/{id}/status",
+    response_model=GermanyChurchTaxExceptionResponse,
+    summary="Advance lifecycle status (DRAFT->VERIFIED->APPROVED->PUBLISHED->SUPERSEDED)",
+)
+def set_germany_church_tax_exception_status(
+    id: int,
+    status: str = Query(..., pattern="^(DRAFT|VERIFIED|APPROVED|PUBLISHED|SUPERSEDED)$"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.set_germany_church_tax_exception_status(db, id, status, actor_id=current_user.id)
 
 
 # ── Finance ────────────────────────────────────────────────────────────────

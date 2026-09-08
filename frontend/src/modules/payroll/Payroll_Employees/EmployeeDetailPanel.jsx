@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { X, Edit, Trash2 } from "lucide-react";
+import { X, Edit, Trash2, Landmark, Clock } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
+import GermanyStatutoryProfilePanel from "./GermanyStatutoryProfilePanel";
+import GermanyOvertimePanel from "./GermanyOvertimePanel";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
 
 const DEPARTMENT_STYLES = {
@@ -55,6 +57,8 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [deleteError, setDeleteError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [showGermanyStatutory, setShowGermanyStatutory] = useState(false);
+  const [showGermanyOvertime, setShowGermanyOvertime] = useState(false);
 
   useEffect(() => {
     getCustomFields().then(setCustomFieldDefs).catch(() => {});
@@ -153,6 +157,48 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                 </dl>
               </div>
 
+              {employee.countryCode === "DE" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Germany statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowGermanyStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Tax class, ELStAM data, church tax, PV/Saxony, health insurance status and employment
+                    classification — required before Germany payroll can be calculated for this employee.
+                  </p>
+                </div>
+              )}
+
+              {employee.countryCode === "DE" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Germany overtime / shift premium
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowGermanyOvertime(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Clock size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Overtime/shift-premium work records, §3b EStG statutory classification, wage-tax and
+                    social-insurance calculation, and explicit payslip attachment.
+                  </p>
+                </div>
+              )}
+
               {customFieldEntries.length > 0 && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">Custom fields</h4>
@@ -215,6 +261,13 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
           </div>
         )}
       </div>
+
+      {showGermanyStatutory && (
+        <GermanyStatutoryProfilePanel employee={employee} onClose={() => setShowGermanyStatutory(false)} />
+      )}
+      {showGermanyOvertime && (
+        <GermanyOvertimePanel employee={employee} onClose={() => setShowGermanyOvertime(false)} />
+      )}
     </div>
   );
 }

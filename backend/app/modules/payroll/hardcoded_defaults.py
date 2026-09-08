@@ -480,7 +480,167 @@ _DE_SOLI_RATE = Decimal("5.5")
 # (before Soli), only for employees who opt in (church_tax_liable). Real
 # rate varies by federal state (8% in Bavaria/Baden-Württemberg, 9%
 # elsewhere); 9% is used as the representative default.
+# NOTE (Phase 7): this legacy constant/rate model is superseded for the
+# production Germany calculation path by
+# engine/countries/germany_pap.CHURCH_TAX_LAND_RATES (per-Land 8%/9% table,
+# ZP-TAX-DE-2026-001 §8), driven by EmployeeStatutoryProfile.de_church_tax_land
+# rather than a single flat rate. Kept here only because
+# PayrollEmployee.church_tax_liable / _calculate_legacy_simplified still
+# reference it (legacy path, not called by production `calculate()` — see
+# germany.py).
 _DE_CHURCH_TAX_RATE = Decimal("9")
+
+# ── Germany — 2026 Social-Insurance Core Rates (Phase 7) ────────────────
+# ZP-TAX-DE-2026-001 §9 "2026 Social-Insurance Core Rates and Ceilings" —
+# these are the literal published 2026 total/employee/employer splits for
+# the four independently-capped branches (RV/ALV/GKV general/PV base is
+# handled separately by the Phase 6 GermanyPvConfiguration registry, not
+# here). DB-overridable fallbacks, resolved via resolve_jurisdiction_parameter
+# exactly like every other DE constant in this file — NOT invented, and
+# distinct from GermanyContributionCeiling (Phase 5, the CAP each of these
+# rates applies against) and GermanyHealthFund (Phase 4, the fund-specific
+# supplementary rate added on top of the GKV general rate below).
+_DE_RV_EMPLOYEE_RATE = Decimal("9.30")          # Rentenversicherung, spec §9
+_DE_RV_EMPLOYER_RATE = Decimal("9.30")
+_DE_ALV_EMPLOYEE_RATE = Decimal("1.30")         # Arbeitslosenversicherung, spec §9
+_DE_ALV_EMPLOYER_RATE = Decimal("1.30")
+# "Statutory health insurance — general" row, spec §9. The "reduced" row
+# (14.00%/7.00%/7.00%, for employees without statutory sick-pay
+# entitlement) is NOT selectable from any current EmployeeStatutoryProfile
+# field — NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION as a
+# machine-readable classifier — so only the general rate is implemented;
+# see germany_pap.py's module docstring for this disclosed limitation.
+_DE_GKV_GENERAL_EMPLOYEE_RATE = Decimal("7.30")
+_DE_GKV_GENERAL_EMPLOYER_RATE = Decimal("7.30")
+
+# ── Germany — 2026 Minijob / Midijob (Phase 8I) ─────────────────────────
+# Literal values from the supplied Zoiko Germany 2026 statutory
+# documentation (this phase's own brief §4) — none invented, none
+# extrapolated. Minijob and Midijob are entirely separate mechanisms from
+# the RV/ALV/GKV/PV branch rates above: Minijob uses flat employer-paid
+# percentages + a flat employee pension top-up + a flat employer-remitted
+# tax, never the branch rates; Midijob uses a sliding-scale contribution-
+# base formula whose application to the four individually-ceilinged
+# branches is NOT fully specified (see germany_pap/core.py's
+# calculate_midijob_* docstrings and Phase 8I's own report §11/§31 for the
+# disclosed boundary — the two formulas below are implemented exactly as
+# given and are NOT, by themselves, applied to produce a contribution
+# amount in this phase).
+
+# Corridor boundaries. Minijob is valid for monthly earnings <= this
+# threshold; Midijob is valid for earnings strictly greater than it (i.e.
+# >= 603.01 at 2-decimal precision) and <= the upper threshold.
+_DE_MINIJOB_UPPER_THRESHOLD = Decimal("603.00")
+_DE_MIDIJOB_UPPER_THRESHOLD = Decimal("2000.00")
+
+# Minijob employer flat contributions (spec §4) — always employer-paid,
+# never deducted from employee net pay.
+_DE_MINIJOB_EMPLOYER_HEALTH_RATE = Decimal("13")
+_DE_MINIJOB_EMPLOYER_PENSION_RATE = Decimal("15")
+_DE_MINIJOB_U1_RATE = Decimal("0.80")
+_DE_MINIJOB_U2_RATE = Decimal("0.22")
+_DE_MINIJOB_U3_RATE = Decimal("0.15")
+
+# Minijob employee pension top-up — the ONLY Minijob component that
+# reduces employee net pay, and only when the employee has not opted out
+# (de_pension_insurance_exempt = false, reusing the same statutory-profile
+# field the ordinary RV branch already uses for its own exemption).
+_DE_MINIJOB_EMPLOYEE_PENSION_TOPUP_RATE = Decimal("3.60")
+
+# Minijob flat tax (Pauschsteuer) — per the supplied specification's own
+# three-way grouping (Employer / Employee / Tax, listed as distinct
+# categories, spec §4), this is treated as an employer-remitted flat tax,
+# consistent with the real-world Minijob-Zentrale pauschal-tax mechanism
+# (the employer, not the employee, is liable for and remits this amount) —
+# NOT deducted from employee net pay. This is a disclosed interpretation
+# of the supplied categorization, not a directly-quoted incidence rule;
+# see Phase 8I's own report for the reasoning.
+_DE_MINIJOB_FLAT_TAX_RATE = Decimal("2")
+
+# Midijob sliding-scale contribution-base formula coefficients (spec §4),
+# applied to AE = the relevant monthly earnings input. Implemented exactly
+# as given; see calculate_midijob_total_base/calculate_midijob_employee_base.
+_DE_MIDIJOB_TOTAL_BASE_MULTIPLIER = Decimal("1.1459372226")
+_DE_MIDIJOB_TOTAL_BASE_SUBTRAHEND = Decimal("291.8744452399")
+_DE_MIDIJOB_EMPLOYEE_BASE_MULTIPLIER = Decimal("1.43163922691")
+_DE_MIDIJOB_EMPLOYEE_BASE_SUBTRAHEND = Decimal("863.2784538207")
+# F-factor, recorded for trace/documentation purposes only — the two
+# formulas above already have F folded into their coefficients per the
+# supplied specification, so F is not separately applied anywhere in the
+# calculation itself.
+_DE_MIDIJOB_F_FACTOR = Decimal("0.6619")
+
+# ── Germany — Additional 2026 reference thresholds (spec §9 "Additional
+# 2026 threshold" table) — Phase 8M gap-closure audit found these were
+# never captured anywhere in this codebase (no matches for JAEG,
+# Bezugsgröße or the €13.90 minimum wage in any prior phase's code).
+#
+# JAEG (Jahresarbeitsentgeltgrenze) — the GKV compulsory-insurance
+# threshold. Distinct, per spec's own acceptance criterion #20 ("JAEG 2026
+# coverage threshold is represented separately from the contribution
+# ceiling"), from GermanyContributionCeiling's GKV_PV branch ceiling
+# (€69,750/€5,812.50 — the CAP applied to an already-PUBLIC employee's
+# contribution base) — JAEG instead governs whether GKV membership is
+# compulsory (at/below) or optional/PKV-eligible (above) in the first
+# place. Used only for the non-blocking coverage-status warning in
+# core.check_gkv_coverage_threshold() — spec §22's boundary-test list does
+# not name a JAEG boundary test the way it explicitly does for Saxony
+# ("validation must fail before payroll finalization"), so this is
+# deliberately advisory (a trace warning), not a hard reject; inventing a
+# blocking rule the spec never states would itself be a fabricated
+# statutory rule.
+_DE_JAEG_ANNUAL_THRESHOLD = Decimal("77400")
+_DE_JAEG_MONTHLY_THRESHOLD = Decimal("6450")
+
+# Bezugsgröße (social-insurance reference value) — spec §9 states only that
+# it is "used by multiple social-insurance calculations/classifications"
+# without naming which ones or how. No calculation in this codebase reads
+# it (NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION beyond the bare
+# value) — stored here only as a cited reference constant so it is at
+# least representable/traceable, never wired into a fabricated formula.
+_DE_BEZUGSGROESSE_ANNUAL = Decimal("47460")
+_DE_BEZUGSGROESSE_MONTHLY = Decimal("3955")
+
+# Statutory minimum wage — spec §1/§9 lists this under "Compliance"
+# scope, not the "Rule family" calculation scope, and no employee
+# hours-worked data model exists anywhere in this codebase to compute an
+# effective hourly rate against it (payroll here runs on period gross, not
+# timesheets) — NOT_APPLICABLE for enforcement today; kept only as a cited
+# reference value, per this phase's "do not invent a compliance engine
+# the architecture cannot support" judgment call.
+_DE_MINIMUM_WAGE_HOURLY = Decimal("13.90")
+
+# Insolvency levy (U3, Insolvenzgeldumlage) — spec §14 "Insolvency levy /
+# U3 || 0.15% statutory rate for 2026 ... || Federal statutory package"
+# — explicitly the one employer levy the spec itself separates out as a
+# flat FEDERAL rate (unlike U1/U2, which DE-D06 calls "generally
+# health-fund/tariff specific" and therefore not extendable here without
+# inventing per-employer tariff data). Phase 8I already implemented this
+# exact 0.15% rate for Minijob only (_DE_MINIJOB_U3_RATE, same value,
+# left untouched to avoid touching working code/tests); this constant is
+# the general, classification-independent rate this phase wires into
+# REGULAR and MIDIJOB too. Applied as a flat percentage of the period
+# gross with no additional ceiling — spec states only the bare rate, no
+# assessment-base cap for U3 specifically, so no cap is invented; this
+# mirrors exactly how the already-shipped Minijob U1/U2/U3 computation
+# itself applies its rates (flat % of monthly gross, no cap).
+_DE_INSOLVENCY_LEVY_RATE = Decimal("0.15")
+
+# PV (Pflegeversicherung) childless surcharge — §55 Abs. 3 Satz 1 SGB XI:
+# "Der Beitragssatz nach Absatz 1 Satz 1 und 3 erhöht sich für Mitglieder
+# ... um einen Beitragszuschlag in Höhe von 0,6 Beitragssatzpunkten."
+# Confirmed live (Phase 8L) against the official law text
+# (gesetze-im-internet.de/sgb_11/__55.html) and cross-corroborated as
+# unchanged for 2026 (in force since 2023-07-01) via GKV-Spitzenverband's
+# published 2026 Rechengrößen factsheet and multiple health-fund
+# publications (TK, DAK). §58 Abs. 1 SGB XI ("Den Beitragszuschlag für
+# Kinderlose ... tragen die Beschäftigten") confirms it is borne 100% by
+# the employee EVERYWHERE, including Saxony — Saxony's own separate
+# employee/employer split adjustment (§58 Abs. 3) governs only the BASE
+# rate's allocation and does not touch this surcharge. This constant is
+# therefore Land-independent by law, not an assumption; see
+# calculate_midijob_pv() and Phase 8L's report §5 for the full reasoning.
+_DE_PV_CHILDLESS_SURCHARGE_RATE = Decimal("0.6")
 
 # ── Canada (previously engine/countries/canada.py) ──────────────────────
 _CA_CPP_YMPE = Decimal("71300")
