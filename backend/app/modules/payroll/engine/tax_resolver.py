@@ -42,6 +42,32 @@ from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSl
 _INCOME_TAX_RULE_TYPES = {"MARGINAL_RATE", "FORMULA", "TABLE_LOOKUP", "FIXED_PLUS_MARGINAL"}
 
 
+def _normalize_regime_label(value: Optional[str]) -> Optional[str]:
+    """Collapses regime-label variants a Tax Ops data-entry pass might use
+    for the same regime ("New", "New Tax Regime", "Default / New Regime")
+    down to the engine's own canonical "New"/"Old" tokens, so a row's
+    exact wording never silently fails to match an employee's tax_regime
+    (which is always the short canonical form this module and service.py
+    compute as `effective_regime`). A live example this caught: canonical
+    India `pf`/`esi`/`esi_wage_ceiling` rows tagged "New Tax Regime" would
+    otherwise never equal the resolver's own "New" and be silently
+    excluded — PF/ESI apply to BOTH regimes identically, so these should
+    really be untagged (None), but this normalizes the mislabeling instead
+    of requiring a live-row edit (which the standing edit-immutability
+    rules would block for an Active pack anyway). Returns the value
+    unchanged for anything that doesn't recognize as either regime —
+    never guesses, so a genuinely different label still fails closed
+    exactly as before this existed (i.e. still won't match "New"/"Old")."""
+    if not value:
+        return None
+    lowered = value.strip().lower()
+    if "old" in lowered:
+        return "Old"
+    if "new" in lowered or "default" in lowered:
+        return "New"
+    return value
+
+
 def _pack_has_income_tax_slabs(db: Session, pack_id: int) -> bool:
     return (
         db.query(TaxSlab.id)
@@ -158,15 +184,35 @@ def resolve_tax_configuration(
     if effective_regime:
         regime_matches = [
             s for s in slabs
-            if s.rule_type != "MARGINAL_RATE" or s.tax_regime is None or s.tax_regime == effective_regime
+            if s.rule_type != "MARGINAL_RATE" or _normalize_regime_label(s.tax_regime) is None
+            or _normalize_regime_label(s.tax_regime) == effective_regime
         ]
         has_regime_specific_brackets = any(
-            s.rule_type == "MARGINAL_RATE" and s.tax_regime == effective_regime for s in regime_matches
+            s.rule_type == "MARGINAL_RATE" and _normalize_regime_label(s.tax_regime) == effective_regime
+            for s in regime_matches
         )
         if has_regime_specific_brackets:
-            slabs = [s for s in regime_matches if not (s.rule_type == "MARGINAL_RATE" and s.tax_regime is None)]
+            slabs = [
+                s for s in regime_matches
+                if not (s.rule_type == "MARGINAL_RATE" and _normalize_regime_label(s.tax_regime) is None)
+            ]
         else:
             slabs = regime_matches
+        # ContributionRate rows (standard_deduction, rebate_87a_limit/max,
+        # etc.) previously had NO regime filtering at all here — every row
+        # on the pack was returned unconditionally and the caller's plain
+        # {component_key: row} dict comprehension let whichever row
+        # happened to sort last silently win, for EVERY employee regardless
+        # of their actual regime. Same OR-filter as slabs above (untagged
+        # rows always apply, a regime-tagged row applies only for a
+        # matching employee, a row tagged for the OTHER regime is
+        # excluded) — no MARGINAL_RATE-style "replaces the whole table"
+        # case exists for ContributionRate, so this is the complete fix.
+        rates = [
+            r for r in rates
+            if _normalize_regime_label(r.tax_regime) is None
+            or _normalize_regime_label(r.tax_regime) == effective_regime
+        ]
     return rates, slabs, pack
 
 

@@ -266,6 +266,40 @@ _CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = set()
 # IN — not yet enabled.
 _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES: set[str] = set()
 
+# Per-country rollout switch for India's Labour Code "code_wages" object
+# (ZP-TAX-IN-2026-27-001 §8: the 50%-allowance-cap add-back that becomes
+# the wage base fed into EPF/EPS/EDLI, replacing plain Basic). While OFF,
+# those schemes keep computing on ctx.basic directly — today's exact
+# existing behavior, unchanged. Once ON, PF/EPS/EDLI's wage base becomes
+# _calculate_code_wages(ctx)'s statutory_wages instead, which is always
+# >= basic — a real payroll-affecting increase for any employee whose
+# non-basic components exceed 50% of gross, so this ships dormant.
+#
+# DISCLOSED SIMPLIFICATION: the document's code_wages object classifies
+# each EARNINGS LINE independently as included/excluded/add-back (§7's
+# earnings registry, code_wages_classification). This engine has no
+# itemized earnings breakdown to consume (ctx only carries scalar
+# gross/basic) — so this treats ctx.basic as the entirety of
+# core_included_wages and (gross - basic) as the entirety of
+# excluded_total, which is not the same as a real per-component
+# classification. Revisit once itemized earnings lines exist.
+#
+# IN — not yet enabled.
+_IN_CODE_WAGES_ENABLED_COUNTRIES: set[str] = set()
+
+# India Old Regime senior/super-senior age-based basic-exemption bands
+# (ZP-TAX-IN-2026-27-001 §4.1) — a real, correctness-affecting change for
+# any Old-regime employee who's actually a senior/super-senior resident
+# (they'd currently be taxed on the non-senior bands, which start taxing
+# ₹50,000/₹250,000 sooner than they should). Ships dormant like every
+# other correctness fix in this file: computing an employee's age
+# category at all (india.py's _resolve_old_regime_age_category) is a
+# no-op while this set is empty, regardless of whether
+# date_of_birth/tax_residency_status are populated.
+#
+# IN — not yet enabled.
+_IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES: set[str] = set()
+
 # Per-country rollout switch for removing the UK engine's independent
 # Personal Allowance taper (ZP-TAX-UK-2026-27-001 §5.1 PAYE implementation
 # rule: "Zoiko Payroll must not independently recompute an employee's

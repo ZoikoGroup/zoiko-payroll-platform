@@ -64,6 +64,7 @@ class EnterpriseStrategy(PayrollStrategy):
             + deductions.get("employee_pf", Decimal("0"))
             + deductions.get("employee_esi", Decimal("0"))
             + deductions.get("professional_tax", Decimal("0"))
+            + deductions.get("employee_lwf", Decimal("0"))
             + deductions.get("tds", Decimal("0"))
             + deductions.get("social_security", Decimal("0"))
             + deductions.get("medicare", Decimal("0"))
@@ -77,6 +78,15 @@ class EnterpriseStrategy(PayrollStrategy):
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
+
+        # India Code on Wages §8.3 (AC-18) — see StandardStrategy's own
+        # comment (engine/standard.py) for the full rationale; same
+        # compliance-flag-only contract here.
+        wage_deduction_cap_exceeded = (
+            ctx.country.upper() == "IN"
+            and ctx.gross > Decimal("0")
+            and (total_employee_deductions - attendance_deduction) > (ctx.gross * Decimal("0.5"))
+        )
 
         return PayrollResult(
             payroll_days=payroll_days,
@@ -92,12 +102,21 @@ class EnterpriseStrategy(PayrollStrategy):
             additional_compensation=ctx.additional_compensation,
             employee_pf=deductions.get("employee_pf", Decimal("0")),
             employer_pf=deductions.get("employer_pf", Decimal("0")),
+            employer_eps=deductions.get("employer_eps", Decimal("0")),
+            employer_pf_residual=deductions.get("employer_pf_residual", Decimal("0")),
+            employer_edli=deductions.get("employer_edli", Decimal("0")),
+            employer_nps=deductions.get("employer_nps", Decimal("0")),
             employee_esi=deductions.get("employee_esi", Decimal("0")),
             employer_esi=deductions.get("employer_esi", Decimal("0")),
             professional_tax=deductions.get("professional_tax", Decimal("0")),
+            employee_lwf=deductions.get("employee_lwf", Decimal("0")),
+            employer_lwf=deductions.get("employer_lwf", Decimal("0")),
             social_security=deductions.get("social_security", Decimal("0")),
             medicare=deductions.get("medicare", Decimal("0")),
             ni_employee=deductions.get("ni_employee", Decimal("0")),
+            ytd_director_ni_gross=deductions.get("ytd_director_ni_gross"),
+            ytd_director_ni_employee_paid=deductions.get("ytd_director_ni_employee_paid"),
+            ytd_director_ni_employer_paid=deductions.get("ytd_director_ni_employer_paid"),
             study_loan_deduction=deductions.get("study_loan_deduction", Decimal("0")),
             postgrad_loan_deduction=deductions.get("postgrad_loan_deduction", Decimal("0")),
             church_tax=deductions.get("church_tax", Decimal("0")),
@@ -112,6 +131,9 @@ class EnterpriseStrategy(PayrollStrategy):
             employer_cpp2=deductions.get("employer_cpp2", Decimal("0")),
             employer_eht=deductions.get("employer_eht", Decimal("0")),
             on_eht_ytd_remuneration_after=deductions.get("on_eht_ytd_remuneration_after"),
+            employer_apprenticeship_levy=deductions.get("employer_apprenticeship_levy", Decimal("0")),
+            appr_levy_ytd_pay_bill_after=deductions.get("appr_levy_ytd_pay_bill_after"),
+            employer_ni_ytd_after=deductions.get("employer_ni_ytd_after"),
             employer_bc_eht=deductions.get("employer_bc_eht", Decimal("0")),
             bc_eht_ytd_remuneration_after=deductions.get("bc_eht_ytd_remuneration_after"),
             employer_mb_he_levy=deductions.get("employer_mb_he_levy", Decimal("0")),
@@ -142,4 +164,5 @@ class EnterpriseStrategy(PayrollStrategy):
             state_program_deductions=deductions.get("state_program_deductions", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
+            wage_deduction_cap_exceeded=wage_deduction_cap_exceeded,
         )

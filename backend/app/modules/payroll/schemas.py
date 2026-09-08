@@ -644,6 +644,8 @@ class PayrollRunPreviewEmployee(BaseModel):
     monthlyPf: float
     monthlyEsi: float
     monthlyPt: float
+    monthlyEmployeeLwf: float = 0.0
+    monthlyEmployerLwf: float = 0.0
     monthlySocialSecurity: float = 0.0
     monthlyMedicare: float = 0.0
     monthlyNi: float = 0.0
@@ -657,6 +659,10 @@ class PayrollRunPreviewEmployee(BaseModel):
     monthlyContributions: float
     monthlyNet: float
     employerPf: float = 0.0
+    employerEps: float = 0.0
+    employerPfResidual: float = 0.0
+    employerEdli: float = 0.0
+    employerNps: float = 0.0
     employerEsi: float = 0.0
     employerSs: float = 0.0
     employerMedicare: float = 0.0
@@ -769,6 +775,8 @@ class PayslipItemResponse(BaseModel):
     pf:                 Decimal
     esi:                Decimal
     professionalTax:    Decimal
+    employeeLwf:        Decimal = Decimal("0")
+    employerLwf:        Decimal = Decimal("0")
     socialSecurity:     Decimal = Decimal("0")
     medicare:           Decimal = Decimal("0")
     niEmployee:         Decimal = Decimal("0")
@@ -781,6 +789,10 @@ class PayslipItemResponse(BaseModel):
     studyLoanDeduction: Decimal = Decimal("0")
     totalDeductions:    Decimal = Decimal("0")
     employerPf:         Decimal = Decimal("0")
+    employerEps:        Decimal = Decimal("0")
+    employerPfResidual: Decimal = Decimal("0")
+    employerEdli:       Decimal = Decimal("0")
+    employerNps:        Decimal = Decimal("0")
     employerEsi:        Decimal = Decimal("0")
     employerSs:         Decimal = Decimal("0")
     employerMedicare:   Decimal = Decimal("0")

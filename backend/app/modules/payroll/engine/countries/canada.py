@@ -68,10 +68,13 @@ mandatory CPP/QPP contribution window (ctx.date_of_birth/ctx.pay_date,
 gated on shared._CA_AGE_GATED_CPP_ENABLED_COUNTRIES — see
 _is_age_gated_cpp_stopped for the disclosed calendar-age simplification)
 are implemented. The province-of-employment resolver (service.py's
-_resolve_ca_poe_with_source) now covers single-establishment AND
-full-time remote-work "reasonable attachment" — multi-establishment
-time-weighting still needs real establishment records this schema
-doesn't have for any country, and remains unimplemented — see
+_resolve_ca_poe_with_source) covers single-establishment, full-time
+remote-work "reasonable attachment," AND true multi-establishment
+time-weighting (§5 steps 2-3 — resolved by whichever establishment the
+employee spends the most time at, tie-broken by whichever they most
+recently worked; see models.py's EmployeeEstablishment and service.py's
+_resolve_ca_multi_establishment_poe). An employee with fewer than two
+active EmployeeEstablishment rows is unaffected by this — see
 ZP-TAX-CA-2026-001.
 
 CORRECTNESS NOTE (found during Phase 6 review, not introduced by it):

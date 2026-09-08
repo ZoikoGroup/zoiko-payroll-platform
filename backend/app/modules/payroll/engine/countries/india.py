@@ -6,13 +6,22 @@ engine/standard.py's _calc_india — see that module's docstring for the
 backward-compatibility contract this preserves.
 """
 
+from datetime import date
 from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import (
     MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter,
-    _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES,
+    _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES, _IN_CODE_WAGES_ENABLED_COUNTRIES,
+    _IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES,
 )
+
+# Labour Codes' 50% allowance-cap rule (ZP-TAX-IN-2026-27-001 §8.1) — a
+# fixed statutory fraction the Ministry of Labour FAQ states applies
+# uniformly across all four Codes, not a jurisdiction-variable rate. Same
+# footing as MONTHS_PER_YEAR elsewhere in this engine: a plain constant,
+# not something Tax Ops configures per organization.
+_IN_CODE_WAGES_ALLOWANCE_CAP_PCT = Decimal("50")
 # Fallback constants moved to hardcoded_defaults.py (the consolidated home
 # for every hardcoded fallback value in the payroll module) — imported
 # back under their original names so nothing else needs to change.
@@ -88,7 +97,10 @@ def _apply_surcharge(annual_tax: Decimal, taxable_income: Decimal, slabs, rate_m
     return _capped_marginal_amount(annual_tax, surcharge, tax_at_threshold, excess_income)
 
 
-def _resolve_state_pt_bracket(gross: Decimal, state_slabs):
+_IN_PT_ADJUSTMENT_MONTH = 2  # February — the only real-world case this document gives (Maharashtra, §13.2)
+
+
+def _resolve_state_pt_bracket(gross: Decimal, state_slabs, gender: str | None = None, pay_date=None):
     """Professional Tax is genuinely income-bracketed by law in several
     states (e.g. Telangana: Nil up to ₹15,000/month, ₹150 up to ₹20,000,
     ₹200 above) — this matches an employee's MONTHLY gross against the
@@ -97,15 +109,80 @@ def _resolve_state_pt_bracket(gross: Decimal, state_slabs):
     engine: max_amount=None means "and above"). Returns None when the
     state has no PT_FLAT rows configured (every state except Telangana
     today) — the caller falls back to the single-flat-rate behavior that
-    already existed before this."""
+    already existed before this.
+
+    Maharashtra (§13.2) needs two further dimensions this originally
+    didn't:
+
+    1. A gender-differentiated bracket — filing_status is repurposed to
+    carry gender (MALE/FEMALE) rather than a new column, since PT has no
+    concept of "filing status" of its own; same "specific tag beats
+    generic NULL" precedence already used for filing_status elsewhere in
+    this engine (US/Canada bracket resolution). Fails closed (returns
+    None, never a guess) when every candidate tier in an income band is
+    gender-tagged and the employee's own gender either isn't recorded or
+    doesn't match any of them — this must NOT silently fall back to an
+    arbitrary tagged tier for the wrong gender just because it sorts
+    first.
+
+    2. A February-only override amount ("₹200/month; ₹300 in February")
+    — TaxSlab already has an `adjustment_amount` column built for exactly
+    this ("many states adjust February so 11×monthly + this equals the
+    statutory annual ceiling"), with existing Super Admin UI support
+    (PTSlabFormModal's "Adjustment Month Amount" field) — this reads that
+    existing column rather than inventing a parallel one."""
     tiers = sorted(
         (s for s in (state_slabs or []) if getattr(s, "rule_type", None) == "PT_FLAT"),
         key=lambda s: s.min_amount,
     )
-    for tier in tiers:
-        if gross >= tier.min_amount and (tier.max_amount is None or gross <= tier.max_amount):
-            return tier
-    return None
+    candidates = [
+        t for t in tiers
+        if gross >= t.min_amount and (t.max_amount is None or gross <= t.max_amount)
+    ]
+    if not candidates:
+        return None
+    tagged = [t for t in candidates if getattr(t, "filing_status", None)]
+    if not tagged:
+        # No tier in this band carries a gender tag at all (Telangana's
+        # exact original shape) — plain, ungated match.
+        match = candidates[0]
+    elif gender and [t for t in tagged if t.filing_status == gender]:
+        match = [t for t in tagged if t.filing_status == gender][0]
+    else:
+        generic = [t for t in candidates if not getattr(t, "filing_status", None)]
+        match = generic[0] if generic else None
+
+    if match is None:
+        return None
+    if (
+        pay_date is not None and pay_date.month == _IN_PT_ADJUSTMENT_MONTH
+        and getattr(match, "adjustment_amount", None) is not None
+    ):
+        return _PtAdjustmentAmount(match.adjustment_amount)
+    return match
+
+
+class _PtAdjustmentAmount:
+    """Thin wrapper so the caller's existing `pt_bracket.flat_amount`
+    read (calculate() below) picks up the February-adjusted figure
+    without needing to know which of the two columns won."""
+    def __init__(self, amount: Decimal):
+        self.flat_amount = amount
+
+
+def _calculate_code_wages(basic: Decimal, gross: Decimal) -> Decimal:
+    """ZP-TAX-IN-2026-27-001 §8.1's canonical Code-wages object — the
+    50%-allowance-cap add-back that becomes the wage base for EPF/EPS/
+    EDLI, not Basic directly. See _IN_CODE_WAGES_ENABLED_COUNTRIES's own
+    comment (shared.py) for the disclosed simplification this uses in
+    place of a real itemized earnings classification: `basic` stands in
+    for core_included_wages, and (gross - basic) stands in for
+    excluded_total, matching the document's own worked example shape
+    (§8.2: remuneration_base = gross)."""
+    excluded_total = max(Decimal("0"), gross - basic)
+    allowance_cap = gross * _IN_CODE_WAGES_ALLOWANCE_CAP_PCT / Decimal("100")
+    add_back = max(Decimal("0"), excluded_total - allowance_cap)
+    return basic + add_back
 
 
 def _apply_cess(tax_plus_surcharge: Decimal, rate_map: dict) -> Decimal:
@@ -113,12 +190,76 @@ def _apply_cess(tax_plus_surcharge: Decimal, rate_map: dict) -> Decimal:
     return _round2(tax_plus_surcharge * (cess_pct / Decimal("100")))
 
 
-def _calculate_annual_tax_in(annual_gross: Decimal, slabs, rate_map: dict, tax_regime: str = None) -> dict:
+_IN_SENIOR_AGE = 60
+_IN_SUPER_SENIOR_AGE = 80
+
+
+def _in_fy_end_date(pay_date: date) -> date:
+    """India's financial year runs 1 April - 31 March. Returns the 31
+    March that ENDS the FY containing pay_date (e.g. a pay_date anywhere
+    in Apr 2026-Mar 2027 returns 2027-03-31)."""
+    fy_end_year = pay_date.year + 1 if pay_date.month >= 4 else pay_date.year
+    return date(fy_end_year, 3, 31)
+
+
+def _resolve_old_regime_age_category(date_of_birth: date, tax_residency_status: str, pay_date: date) -> str | None:
+    """ZP-TAX-IN-2026-27-001 §4.1/§4.2: Old Regime's senior (60-79)/super-
+    senior (80+) basic-exemption bands apply only to RESIDENT individuals
+    — §4.2's own instruction: "Nonresident old regime: use ordinary non-
+    senior bands; senior-citizen basic exemption is resident-specific."
+    Returns "SENIOR"/"SUPER_SENIOR" (matched against TaxSlab.filing_status,
+    the same reuse-for-a-second-tag convention Maharashtra's PT gender
+    tagging already established) or None (ordinary bands) whenever the
+    dormant switch is off, tax_residency_status isn't affirmatively
+    RESIDENT, date_of_birth/pay_date aren't both available, or the
+    employee is simply under 60 — None is always the safe default,
+    matching this engine's existing behavior exactly.
+
+    Age is evaluated as of 31 March at the end of the relevant financial
+    year (India's own real convention: turning 60/80 at ANY point during
+    the FY, up to and including its last day, qualifies for the whole
+    year) — not the literal pay date, so a mid-year birthday doesn't
+    change which bands apply payslip-to-payslip."""
+    if "IN" not in _IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES:
+        return None
+    if not date_of_birth or not pay_date:
+        return None
+    if (tax_residency_status or "").strip().upper() != "RESIDENT":
+        return None
+    fy_end = _in_fy_end_date(pay_date)
+    age = fy_end.year - date_of_birth.year - ((fy_end.month, fy_end.day) < (date_of_birth.month, date_of_birth.day))
+    if age >= _IN_SUPER_SENIOR_AGE:
+        return "SUPER_SENIOR"
+    if age >= _IN_SENIOR_AGE:
+        return "SENIOR"
+    return None
+
+
+def _calculate_annual_tax_in(
+    annual_gross: Decimal, slabs, rate_map: dict, tax_regime: str = None, age_category: str = None,
+    annual_professional_tax: Decimal = Decimal("0"), annual_employer_nps: Decimal = Decimal("0"),
+) -> dict:
     is_old = (tax_regime or "").strip().lower() == "old"
     default_standard_deduction = _IN_STANDARD_DEDUCTION_OLD if is_old else _IN_STANDARD_DEDUCTION
     standard_deduction = resolve_jurisdiction_parameter(rate_map, "standard_deduction", default_standard_deduction, country="IN")
     taxable = max(Decimal("0"), annual_gross - standard_deduction)
-    tax = _calculate_annual_tax(taxable, slabs)
+    # ZP-TAX-IN-2026-27-001 §4.2 "Critical regime separation": Professional
+    # Tax reduces taxable salary under the OLD regime's own salary-deduction
+    # framework, but must NEVER reduce taxable salary under the New/default
+    # section 202 path — two independent eligibility maps, not one PT
+    # deduction blindly applied to both (AC-08). Previously this deduction
+    # didn't exist for EITHER regime at all.
+    if is_old:
+        taxable = max(Decimal("0"), taxable - annual_professional_tax)
+    else:
+        # §3.2's employer-NPS-contribution deduction is listed only under
+        # the New Regime's own salary-deductions table (the document gives
+        # no old-regime figure for it at all) — scoped here to New only,
+        # matching what's actually specified rather than the general real-
+        # world 80CCD(2) rule (which also exists under Old regime), since
+        # this document is the production source of truth for this build.
+        taxable = max(Decimal("0"), taxable - annual_employer_nps)
+    tax = _calculate_annual_tax(taxable, slabs, filing_status=age_category)
     tax = max(Decimal("0"), _apply_section_87a_rebate(tax, taxable, rate_map, tax_regime=tax_regime))
     surcharge = _apply_surcharge(tax, taxable, slabs, rate_map)
     cess = _apply_cess(tax + surcharge, rate_map)
@@ -132,18 +273,77 @@ def calculate(ctx: PayrollContext) -> dict:
     basic = ctx.basic
 
     pf_rate = rate_map.get("pf")
+    # ZP-TAX-IN-2026-27-001 §8: the Labour Code's canonical Code-wages
+    # object (50%-allowance-cap add-back) is meant to be calculated FIRST,
+    # then passed into each scheme calculator (§8.1's "Design rule") —
+    # dormant by default (_IN_CODE_WAGES_ENABLED_COUNTRIES), so this stays
+    # exactly `basic` until deliberately enabled.
+    pf_base_pre_ceiling = basic
+    if "IN" in _IN_CODE_WAGES_ENABLED_COUNTRIES:
+        pf_base_pre_ceiling = _calculate_code_wages(basic, gross)
     # ZP-TAX-IN-2026-27-001 §9.1: EPF's contribution base is capped at the
     # statutory monthly wage ceiling (₹15,000), not full uncapped Basic.
     # Dormant by default (_IN_PF_WAGE_CEILING_ENABLED_COUNTRIES) — see
     # shared.py's switch comment for why this real correctness fix still
     # ships behind a rollout gate rather than changing live withholding
     # the moment it merges.
-    pf_wage_base = basic
+    pf_wage_base = pf_base_pre_ceiling
     if "IN" in _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES:
         pf_ceiling = resolve_jurisdiction_parameter(rate_map, "pf_wage_ceiling", _IN_PF_WAGE_CEILING, country="IN")
-        pf_wage_base = min(basic, pf_ceiling)
+        pf_wage_base = min(pf_base_pre_ceiling, pf_ceiling)
     employee_pf = _round2(pf_wage_base * (pf_rate.employee_rate_pct / 100)) if pf_rate and pf_rate.employee_rate_pct else Decimal("0")
     employer_pf = _round2(pf_wage_base * (pf_rate.employer_rate_pct / 100)) if pf_rate and pf_rate.employer_rate_pct else Decimal("0")
+
+    # EPS diversion (§9.1: "8.33% diverted from employer PF share",
+    # "Subject to INR 15,000 pensionable-wage ceiling") — an EPFO-internal
+    # ROUTING of the SAME employer_pf total computed above, not an
+    # additional employer cost. Genuinely new statutory data with no
+    # hardcoded fallback (§9.3: "Compute residual, do not hard-code a
+    # split that can fail edge cases") — resolves to 0/employer_pf
+    # unchanged until Tax Ops configures "eps_rate"/"eps_wage_ceiling" via
+    # the Super Admin UI. Reported as an informational breakdown
+    # (employer_eps + employer_pf_residual = employer_pf, always) rather
+    # than a switch-gated change, since it never alters employer_pf or
+    # net pay — only how the existing total is itemized for EPFO filing.
+    eps_rate_row = rate_map.get("eps_rate")
+    employer_eps = Decimal("0")
+    if eps_rate_row and eps_rate_row.employer_rate_pct:
+        eps_ceiling_row = rate_map.get("eps_wage_ceiling")
+        eps_wage_base = pf_wage_base
+        if eps_ceiling_row and eps_ceiling_row.flat_amount:
+            eps_wage_base = min(pf_wage_base, eps_ceiling_row.flat_amount)
+        uncapped_eps = _round2(eps_wage_base * (eps_rate_row.employer_rate_pct / 100))
+        employer_eps = min(employer_pf, uncapped_eps)
+    employer_pf_residual = employer_pf - employer_eps
+
+    # EDLI (§9.1: "0.5%", "Current wage ceiling INR 15,000") — a genuinely
+    # SEPARATE employer-only statutory liability, additional to
+    # employer_pf (not diverted from it). No hardcoded fallback: resolves
+    # to 0 until Tax Ops configures "edli_rate"/"edli_wage_ceiling".
+    edli_rate_row = rate_map.get("edli_rate")
+    employer_edli = Decimal("0")
+    if edli_rate_row and edli_rate_row.employer_rate_pct:
+        edli_ceiling_row = rate_map.get("edli_wage_ceiling")
+        edli_wage_base = pf_wage_base
+        if edli_ceiling_row and edli_ceiling_row.flat_amount:
+            edli_wage_base = min(pf_wage_base, edli_ceiling_row.flat_amount)
+        employer_edli = _round2(edli_wage_base * (edli_rate_row.employer_rate_pct / 100))
+
+    # Employer NPS contribution (§3.2: "Up to statutory percentage under
+    # applicable section; 14% path available under new regime for
+    # qualifying employer contribution") — a genuinely SEPARATE employer-
+    # only cost, additional to employer_pf, computed on Basic (this
+    # engine's existing wage-base convention for every scheme-specific
+    # employer contribution above). No hardcoded fallback: resolves to 0
+    # until Tax Ops configures "nps_employer_pct". Whether it also REDUCES
+    # taxable salary (New Regime only, per this document) is decided
+    # independently in _calculate_annual_tax_in — an untagged rate applies
+    # this COST to both regimes, but only ever reduces taxable income for
+    # New, matching §3.2's own scoping regardless of how the rate is tagged.
+    nps_rate_row = rate_map.get("nps_employer_pct")
+    employer_nps = Decimal("0")
+    if nps_rate_row and nps_rate_row.employer_rate_pct:
+        employer_nps = _round2(basic * (nps_rate_row.employer_rate_pct / 100))
 
     esi_rate = rate_map.get("esi")
     esi_ceiling = resolve_jurisdiction_parameter(rate_map, "esi_wage_ceiling", ESI_MONTHLY_WAGE_CEILING, country="IN")
@@ -158,7 +358,7 @@ def calculate(ctx: PayrollContext) -> dict:
     # bracket resolves (every state except Telangana today) does this fall
     # back to the single-flat-rate ctx.state_rate_map lookup, then the
     # country-level flat "pt" rate — both exactly as before this existed.
-    pt_bracket = _resolve_state_pt_bracket(gross, ctx.state_slabs)
+    pt_bracket = _resolve_state_pt_bracket(gross, ctx.state_slabs, gender=ctx.gender, pay_date=ctx.pay_date)
     if pt_bracket is not None:
         professional_tax = pt_bracket.flat_amount or Decimal("0")
     else:
@@ -166,8 +366,31 @@ def calculate(ctx: PayrollContext) -> dict:
         pt_rate = state_pt_rate if state_pt_rate and state_pt_rate.flat_amount else rate_map.get("pt")
         professional_tax = pt_rate.flat_amount if pt_rate and pt_rate.flat_amount else Decimal("0")
 
+    # Labour Welfare Fund (§15) — a state-specific ANNUAL contribution
+    # (Karnataka: ₹50 employee/₹100 employer per year; Tamil Nadu: ₹20/
+    # ₹40), not a monthly deduction — charged only in the one payroll
+    # month Tax Ops configures as this state's deduction month, out of
+    # its own state_rate_map row. Genuinely new statutory data, no
+    # hardcoded fallback whatsoever: unconfigured state, unconfigured
+    # amount, OR unconfigured month all resolve to 0 rather than a guess
+    # at which month "annual" should mean.
+    employee_lwf = Decimal("0")
+    employer_lwf = Decimal("0")
+    lwf_month_row = (ctx.state_rate_map or {}).get("lwf_deduct_month")
+    if lwf_month_row and lwf_month_row.flat_amount is not None and ctx.pay_date is not None:
+        if int(lwf_month_row.flat_amount) == ctx.pay_date.month:
+            lwf_employee_row = (ctx.state_rate_map or {}).get("lwf_employee_amt")
+            lwf_employer_row = (ctx.state_rate_map or {}).get("lwf_employer_amt")
+            employee_lwf = lwf_employee_row.flat_amount if lwf_employee_row and lwf_employee_row.flat_amount else Decimal("0")
+            employer_lwf = lwf_employer_row.flat_amount if lwf_employer_row and lwf_employer_row.flat_amount else Decimal("0")
+
     annual_gross = gross * MONTHS_PER_YEAR
-    tax_breakdown = _calculate_annual_tax_in(annual_gross, ctx.slabs, rate_map, tax_regime=ctx.tax_regime)
+    age_category = _resolve_old_regime_age_category(ctx.date_of_birth, ctx.tax_residency_status, ctx.pay_date)
+    tax_breakdown = _calculate_annual_tax_in(
+        annual_gross, ctx.slabs, rate_map, tax_regime=ctx.tax_regime, age_category=age_category,
+        annual_professional_tax=professional_tax * MONTHS_PER_YEAR,
+        annual_employer_nps=employer_nps * MONTHS_PER_YEAR,
+    )
     annual_tax = tax_breakdown["annual_tax"]
     annual_surcharge = tax_breakdown["annual_surcharge"]
     annual_cess = tax_breakdown["annual_cess"]
@@ -181,7 +404,102 @@ def calculate(ctx: PayrollContext) -> dict:
 
     return dict(
         employee_pf=employee_pf, employer_pf=employer_pf,
+        employer_eps=employer_eps, employer_pf_residual=employer_pf_residual,
+        employer_edli=employer_edli, employer_nps=employer_nps,
         employee_esi=employee_esi, employer_esi=employer_esi,
         professional_tax=professional_tax,
+        employee_lwf=employee_lwf, employer_lwf=employer_lwf,
         tds=tds, annual_tax=annual_tax, surcharge=surcharge, cess=cess,
     )
+
+
+# ── Gratuity — an employer termination liability, NOT a payroll deduction ──
+# ZP-TAX-IN-2026-27-001 §11: "Gratuity is not a routine employee payroll
+# deduction. It is an employer statutory liability and termination/fixed-
+# term benefit calculation." Deliberately a standalone function, never
+# called from calculate() above — that function runs once per RECURRING
+# payroll cycle; gratuity is a ONE-TIME event tied to employment ending,
+# with its own inputs (dates, last-drawn wage) that don't exist in
+# PayrollContext at all.
+
+# The "15 days' wages per completed year, wages/26" formula and the
+# "6+ months of a partial year rounds up to a full year" rule are the
+# Payment of Gratuity Act's own long-established formula STRUCTURE (not a
+# jurisdiction-variable rate Tax Ops would ever configure differently) —
+# same footing as MONTHS_PER_YEAR/_IN_CODE_WAGES_ALLOWANCE_CAP_PCT above.
+# What genuinely IS statutory data requiring configuration, with no
+# hardcoded fallback (§11: "Do not hard-code an unverified ceiling"): the
+# notified maximum amount and the minimum qualifying years of service.
+_IN_GRATUITY_DAYS_PER_YEAR = Decimal("15")
+_IN_GRATUITY_WAGE_DIVISOR = Decimal("26")
+_IN_GRATUITY_PARTIAL_YEAR_ROUND_UP_MONTHS = 6
+
+
+def _completed_service_months(date_of_joining: date, date_of_leaving: date) -> int:
+    months = (date_of_leaving.year - date_of_joining.year) * 12 + (date_of_leaving.month - date_of_joining.month)
+    if date_of_leaving.day < date_of_joining.day:
+        months -= 1
+    return max(0, months)
+
+
+def calculate_gratuity(
+    date_of_joining: date,
+    date_of_leaving: date,
+    last_drawn_monthly_wage: Decimal,
+    rate_map: dict,
+    eligibility_event: str = "RESIGNATION",
+    is_fixed_term: bool = False,
+) -> dict:
+    """Returns a dict with `eligible` (bool), `reason` (str), and
+    `gratuity_amount` (Decimal, 0 when not eligible/not computable).
+    `eligibility_event` — one of RETIREMENT/RESIGNATION/TERMINATION/
+    DEATH/DISABLEMENT/FIXED_TERM_END (§11's eligibility-event list);
+    DEATH/DISABLEMENT waive the minimum-qualifying-years requirement,
+    matching the real Act's own well-established treatment of those two
+    events specifically — this is NOT a guessed number, unlike the min-
+    years threshold itself, which stays fully DB-configurable.
+
+    `is_fixed_term=True` uses PRO-RATA fractional-year service (§11:
+    "Support statutory fixed-term gratuity treatment and pro-rata
+    calculation") instead of the completed-year rounding rule, since a
+    fixed-term employee's gratuity isn't gated by the same multi-year
+    minimum service test at all.
+
+    Fails closed (§1.1: "Unsupported or unverified... must fail closed:
+    block activation instead of silently using a historical or guessed
+    rate") whenever gratuity_min_yrs isn't configured and the event isn't
+    DEATH/DISABLEMENT/FIXED_TERM_END — this function will never silently
+    assume a 5-year (or any other) threshold on your behalf.
+
+    componentKey max 20 chars (payroll_contribution_rates.component_key
+    is VARCHAR(20)) — "gratuity_min_qualifying_years"/
+    "gratuity_max_notified_amount" both exceed it, so this reads the
+    shortened "gratuity_min_yrs"/"gratuity_max_amt" instead."""
+    months = _completed_service_months(date_of_joining, date_of_leaving)
+    wage_per_day = last_drawn_monthly_wage / _IN_GRATUITY_WAGE_DIVISOR
+    per_year_amount = wage_per_day * _IN_GRATUITY_DAYS_PER_YEAR
+
+    if is_fixed_term or eligibility_event == "FIXED_TERM_END":
+        service_years = Decimal(months) / Decimal("12")
+        gratuity_amount = _round2(per_year_amount * service_years)
+    else:
+        completed_years = months // 12
+        remainder_months = months % 12
+        if remainder_months >= _IN_GRATUITY_PARTIAL_YEAR_ROUND_UP_MONTHS:
+            completed_years += 1
+
+        waives_min_service = eligibility_event in ("DEATH", "DISABLEMENT")
+        if not waives_min_service:
+            min_years_row = rate_map.get("gratuity_min_yrs")
+            if not min_years_row or min_years_row.flat_amount is None:
+                return {"eligible": False, "reason": "gratuity_min_yrs not configured", "gratuity_amount": Decimal("0")}
+            if Decimal(completed_years) < min_years_row.flat_amount:
+                return {"eligible": False, "reason": "below minimum qualifying years of service", "gratuity_amount": Decimal("0")}
+
+        gratuity_amount = _round2(per_year_amount * Decimal(completed_years))
+
+    max_row = rate_map.get("gratuity_max_amt")
+    if max_row and max_row.flat_amount is not None:
+        gratuity_amount = min(gratuity_amount, max_row.flat_amount)
+
+    return {"eligible": True, "reason": "", "gratuity_amount": gratuity_amount}

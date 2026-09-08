@@ -228,6 +228,15 @@ class PayrollContext:
     # employee/org today) means "not wired" — engine/countries/canada.py
     # MUST resolve Ontario EHT to $0 when None, never treat None as 0.
     on_eht_ytd_remuneration_before: Decimal = None
+    # UK: the org's aggregate annual statutory pay bill YTD, for the
+    # Apprenticeship Levy (ZP-TAX-UK-2026-27-001 §14) — same "None means
+    # not wired, must resolve to £0" contract as on_eht_ytd_remuneration_before
+    # above, gated on the SAME shared _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.
+    appr_levy_ytd_pay_bill_before: Decimal = None
+    # UK: the org's cumulative employer_ni total YTD, for Employment
+    # Allowance's REPORTING-level calculation (never a per-payslip
+    # figure) — same "None means not wired" contract.
+    employer_ni_ytd_before: Decimal = None
 
     # Canada: the same org-level YTD-remuneration contract as
     # on_eht_ytd_remuneration_before above, for BC EHT, Manitoba HE Levy
@@ -262,7 +271,39 @@ class PayrollContext:
     # month-boundary rule, which the source document itself doesn't
     # spell out precisely).
     date_of_birth: date = None
+    # India Maharashtra Professional Tax (ZP-TAX-IN-2026-27-001 §13.2) —
+    # the ONLY consumer today: Maharashtra's PT brackets are genuinely
+    # gender-differentiated by statute (a real legal fact, not a proxy for
+    # anything else). None for every employee until entered, same
+    # "generically useful HR fact, absent by default" convention as
+    # date_of_birth above.
+    gender: str = None
+    # India Old Regime senior/super-senior age bands (ZP-TAX-IN-2026-27-001
+    # §4.1/§4.2) — "RESIDENT" | "NON_RESIDENT" | None. Combined with
+    # date_of_birth above in india.py's _resolve_old_regime_age_category,
+    # gated on shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES. None
+    # (every employee until entered) resolves identically to NON_RESIDENT
+    # — ordinary non-senior bands, exactly today's behavior.
+    tax_residency_status: str = None
     pay_date: date = None
+    # UK Directors NIC (ZP-TAX-UK-2026-27-001 §9.2) — False/None for every
+    # employee until entered, same "no behavior change until explicitly
+    # set" convention as every other new optional field above.
+    is_director: bool = False
+    director_ni_method: str = None  # "ANNUAL" | "ALTERNATIVE"
+    # Same YTD-accumulator contract as Canada's ytd_pensionable_earnings
+    # etc. above: None (not zero) means "not wired for this calculation" —
+    # the calculation runs its dormant, current-period-annualized path;
+    # once real accumulator data is loaded, these carry the cumulative
+    # figures needed for the annual/alternative methods' true-up.
+    ytd_director_ni_gross: Decimal = None
+    ytd_director_ni_employee_paid: Decimal = None
+    ytd_director_ni_employer_paid: Decimal = None
+    # Alternative method only (§9.2's "final annual reconciliation") —
+    # caller-supplied (not auto-derived from pay_date/frequency here);
+    # False for every payslip until the caller marks this employee's
+    # final NIC period of the tax year.
+    is_final_ni_period: bool = False
 
 
 @dataclass
@@ -288,6 +329,10 @@ class PayrollResult:
     employee_pf: Decimal = Decimal("0")
     employee_esi: Decimal = Decimal("0")
     professional_tax: Decimal = Decimal("0")
+    # India Labour Welfare Fund (ZP-TAX-IN-2026-27-001 §15) — genuinely
+    # separate from professional_tax above, not a breakdown of it.
+    employee_lwf: Decimal = Decimal("0")
+    employer_lwf: Decimal = Decimal("0")
     tds: Decimal = Decimal("0")
     annual_tax: Decimal = Decimal("0")
     # India: monthly breakdown of what's already folded into `tds` above
@@ -327,6 +372,16 @@ class PayrollResult:
     ytd_cpp2_pensionable_earnings: Decimal = None
     ytd_insurable_earnings: Decimal = None
     ytd_basic_exemption_used: Decimal = None
+    # UK: cumulative Directors NIC figures AFTER this period — same
+    # None-means-"not applicable" contract as Canada's fields above.
+    # Populated whenever ctx.is_director is True, REGARDLESS of which
+    # branch computed this period's ni_employee/employer_ni (annual
+    # method, alternative method's ordinary calc, or the fully-dormant
+    # fallback) — accumulation must continue correctly no matter which
+    # path priced this period.
+    ytd_director_ni_gross: Decimal = None
+    ytd_director_ni_employee_paid: Decimal = None
+    ytd_director_ni_employer_paid: Decimal = None
 
     # Canada: the org's aggregate Ontario remuneration YTD AFTER this
     # period, for service.py to persist into OrganizationYtdAccumulator
@@ -339,6 +394,13 @@ class PayrollResult:
     mb_he_levy_ytd_remuneration_after: Decimal = None
     nl_hapset_ytd_remuneration_after: Decimal = None
     qc_hsf_ytd_remuneration_after: Decimal = None
+    # UK: the org's aggregate annual statutory pay bill YTD AFTER this
+    # period, for the Apprenticeship Levy — same after-period contract as
+    # on_eht_ytd_remuneration_after above.
+    appr_levy_ytd_pay_bill_after: Decimal = None
+    # UK: the org's cumulative employer_ni total YTD AFTER this period —
+    # same after-period contract as appr_levy_ytd_pay_bill_after above.
+    employer_ni_ytd_after: Decimal = None
 
     # Employer-side contributions
     employer_pf: Decimal = Decimal("0")
@@ -357,6 +419,19 @@ class PayrollResult:
     # contract, proportioning employer_social_security.
     employer_cpp_base: Decimal = Decimal("0")
     employer_cpp_first_additional: Decimal = Decimal("0")
+    # India: EPS diversion + residual — purely-informational breakdown of
+    # employer_pf (§9.1/§9.3), same contract as employer_cpp_base above:
+    # employer_eps + employer_pf_residual == employer_pf always, never an
+    # additional cost on top of it.
+    employer_eps: Decimal = Decimal("0")
+    employer_pf_residual: Decimal = Decimal("0")
+    # India: EDLI — a genuinely SEPARATE employer-only statutory liability
+    # (§9.1), additional to employer_pf, not a breakdown of it.
+    employer_edli: Decimal = Decimal("0")
+    # India: employer NPS contribution (§3.2) — same "genuinely separate,
+    # no hardcoded fallback" contract as employer_edli above. Also
+    # excluded from taxable salary, New Regime only — see india.py.
+    employer_nps: Decimal = Decimal("0")
     # US: State Unemployment Insurance, tenant/employer-specific (see
     # EmployerTaxProfile). Zero until an org has a configured profile —
     # every other country's output is unaffected.
@@ -370,6 +445,11 @@ class PayrollResult:
     # is wired for this calculation (on_eht_ytd_remuneration_before is
     # None otherwise) — see engine/countries/canada.py's calculate().
     employer_eht: Decimal = Decimal("0")
+    # UK: Apprenticeship Levy — same org-level-accumulator-banded contract
+    # as employer_eht above (ZP-TAX-UK-2026-27-001 §14). Zero until the
+    # org-level accumulator is wired (appr_levy_ytd_pay_bill_before is
+    # None otherwise).
+    employer_apprenticeship_levy: Decimal = Decimal("0")
     # Canada: BC EHT, Manitoba HE Levy, NL HAPSET — same org-level-
     # accumulator-banded contract as employer_eht above, each its own
     # independent zero-until-wired field (ZP-TAX-CA-2026-001 §15).
@@ -421,6 +501,20 @@ class PayrollResult:
     # blocked; written correctly for when that changes).
     germany_statutory_profile_id: int = None
     germany_calculation_snapshot: dict = None
+    # India: Code on Wages §8.3 aggregate-deduction cap ("authorized
+    # deductions during a wage period" limited to 50% of wages, AC-18) —
+    # a pure COMPLIANCE FLAG, never a recalculation: this engine must
+    # NEVER silently reduce a statutory levy to keep net pay positive, so
+    # exceeding the cap is surfaced here for a human/compliance workflow
+    # to resolve (excess-recovery-under-a-valid-rule is out of scope —
+    # this engine has no such carry-forward mechanism), not auto-fixed.
+    # False for every non-India country (this is India's own Labour Code,
+    # not a universal rule) and False whenever the cap genuinely isn't
+    # exceeded. See engine/standard.py's calculate() for the computation
+    # (total employee-side deductions EXCLUDING attendance/loss-of-pay,
+    # which isn't an "authorized deduction" in the Code's sense, against
+    # 50% of gross wages).
+    wage_deduction_cap_exceeded: bool = False
 
 
 class PayrollStrategy(ABC):
