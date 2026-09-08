@@ -65,6 +65,15 @@ const PARAM_SECTIONS = [
       // the engine yet (notApplied), so no backend change needed.
       { key: "nps_80ccd2_cap_pct", label: "NPS Employer Contribution Cap — 80CCD(2)", type: "percent", appliesToBoth: true, notApplied: true },
       { key: "gratuity_exempt_lim", label: "Gratuity Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
+      // Genuinely consumed by india.py's calculate_gratuity() (ZP-TAX-IN-
+      // 2026-27-001 §11) — NOT notApplied, unlike gratuity_exempt_lim
+      // above (a separate, still-unbuilt concept: the income-tax
+      // exemption on a gratuity PAYOUT, vs. these two, which govern the
+      // employer's own LIABILITY calculation). componentKey max 20
+      // chars — shortened from "gratuity_max_notified_amount"/
+      // "gratuity_min_qualifying_years".
+      { key: "gratuity_max_amt", label: "Gratuity Maximum Notified Amount", type: "currency", appliesToBoth: true },
+      { key: "gratuity_min_yrs", label: "Gratuity Minimum Qualifying Years", type: "number", appliesToBoth: true },
       { key: "leave_encash_exempt", label: "Leave Encashment Exemption Limit", type: "currency", appliesToBoth: true, notApplied: true },
       { key: "section_80c_limit", label: "Section 80C Limit", type: "currency", perRegime: true, oldOnly: true, notApplied: true },
     ],

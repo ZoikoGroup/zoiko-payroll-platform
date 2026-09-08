@@ -28,9 +28,14 @@ import SlabFormModal from "./SlabFormModal";
 // ContributionRate/TaxSlab API surface to a real UI, no new endpoints.
 // `country` is fixed per page (chosen by routing, not a dropdown here —
 // that's the one thing that moved out compared to the old, single
-// monolithic CompliancePage.jsx). `extraTabs`/`slabsTabOverride` are the
-// only two country-specific extension points that exist anywhere in this
-// codebase today (both India-only) — every other country passes neither.
+// monolithic CompliancePage.jsx). `extraTabs`/`slabsTabOverride`/`overviewTabOverride`
+// are the only per-country extension points that exist anywhere in this
+// codebase today (`extraTabs` and `slabsTabOverride` are India-only;
+// `overviewTabOverride` is UK-only) — every other country passes none.
+// overviewTabOverride ({ isActive(pack), render({ pack, rates, slabs }) })
+// lets one country replace the built-in Overview field grid with its own
+// summary dashboard, without affecting any other country since only the
+// UK passes this prop.
 // Resolves a slabsTabOverride field that may be a plain value (every
 // existing override) or a function of the selected pack (lets one override
 // vary its label/restricted-tabs/delete-title by pack shape — e.g. India's
@@ -51,7 +56,7 @@ const BASE_TABS = [
 
 export default function JurisdictionLayout({
   country, countryName, initialState = "", onStateChange,
-  extraTabs = [], slabsTabOverride,
+  extraTabs = [], slabsTabOverride, overviewTabOverride,
   hiddenTabs = [], slabsLabel = "Tax Slabs", countryLevelLabel = "Country-level (no state)",
   additionalStateOptions = [], slabsFilter = (s) => s,
   // USA's own page (USACompliancePage.jsx) already renders a single,
@@ -192,6 +197,7 @@ export default function JurisdictionLayout({
   }
 
   const slabsOverrideActive = Boolean(selectedPack && slabsTabOverride?.isActive(selectedPack));
+  const overviewOverrideActive = Boolean(selectedPack && overviewTabOverride?.isActive(selectedPack));
   // A slabs override can also restrict the WHOLE tab set (India's
   // state-scoped PT packs show only Overview/PT Slabs/Organizations/Audit
   // — Contribution Rates and Versions don't apply to a single-purpose PT
@@ -380,20 +386,25 @@ export default function JurisdictionLayout({
               </div>
 
               {tab === "overview" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <Field label="Regulatory Authority" value={selectedPack.regulatoryAuthority} />
-                  <Field label="Compliance Category" value={selectedPack.complianceCategory} />
-                  <Field label="Compliance Owner" value={selectedPack.complianceOwner} />
-                  <Field label="Engineering Owner" value={selectedPack.engineeringOwner} />
-                  <Field label="Tax Regime" value={selectedPack.taxRegime} />
-                  <Field label="Currency" value={selectedPack.currency} />
-                  <Field label="Next Review Date" value={selectedPack.nextReviewDate} />
-                  <Field label="Source References" value={selectedPack.sourceReferences} />
-                  <div className="sm:col-span-2">
-                    <p className="text-foreground-muted mb-1">Change Summary</p>
-                    <p className="font-medium text-foreground">{selectedPack.changeSummary || "—"}</p>
+                <>
+                  {overviewOverrideActive && (
+                    overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs })
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <Field label="Regulatory Authority" value={selectedPack.regulatoryAuthority} />
+                    <Field label="Compliance Category" value={selectedPack.complianceCategory} />
+                    <Field label="Compliance Owner" value={selectedPack.complianceOwner} />
+                    <Field label="Engineering Owner" value={selectedPack.engineeringOwner} />
+                    <Field label="Tax Regime" value={selectedPack.taxRegime} />
+                    <Field label="Currency" value={selectedPack.currency} />
+                    <Field label="Next Review Date" value={selectedPack.nextReviewDate} />
+                    <Field label="Source References" value={selectedPack.sourceReferences} />
+                    <div className="sm:col-span-2">
+                      <p className="text-foreground-muted mb-1">Change Summary</p>
+                      <p className="font-medium text-foreground">{selectedPack.changeSummary || "—"}</p>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
 
               {tab === "rates" && (

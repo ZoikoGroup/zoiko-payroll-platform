@@ -27,6 +27,7 @@ from app.modules.payroll import service
 from app.modules.payroll.models import (
     ContributionRate, TaxSlab, PayrollEmployee, PayrollRun, PayslipItem, JurisdictionPack,
     CompanyComplianceDetails, EmployerTaxProfile, LocalityDataset, LocalityRate, TaxConfigurationAudit,
+    EmployeeEstablishment,
 )
 from app.modules.payroll.schemas import (
     EmployeeCreate, EmployerTaxProfileUpsert, ReciprocityRuleUpsert, LocalityRateUpsert, SourceArtifactCreate,
@@ -299,6 +300,62 @@ def test_resolve_tax_configuration_regime_disambiguation_within_one_pack(db):
     _, old_slabs, old_pack = resolve_tax_configuration(db, "IN", tax_regime="Old", payroll_date=date(2026, 9, 1))
     assert len(old_slabs) == 2, "Old regime must resolve to exactly its own 2 brackets, not summed with New's 3"
     assert all(s.tax_regime == "Old" for s in old_slabs)
+
+
+def test_resolve_tax_configuration_contribution_rates_also_regime_filtered(db):
+    # resolve_tax_configuration used to return EVERY ContributionRate row
+    # on the pack unconditionally, with NO row-level regime filtering at
+    # all (unlike TaxSlab rows just above) — a caller building a plain
+    # {component_key: row} dict from that unfiltered list would let
+    # whichever row happened to sort last silently win for every
+    # employee, regardless of their actual regime. A real live example:
+    # standard_deduction (75,000 New / 50,000 Old) both tagged on the
+    # same pack.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "IN", pack_id="IN-RATE-REGIME-TEST")
+    new_row = _make_rate("IN", "standard_deduction", flat_amount=Decimal("75000"), tax_regime="New")
+    new_row.jurisdiction_pack_id = pack.id
+    old_row = _make_rate("IN", "standard_deduction", flat_amount=Decimal("50000"), tax_regime="Old")
+    old_row.jurisdiction_pack_id = pack.id
+    shared_row = _make_rate("IN", "cess_pct", flat_amount=Decimal("4"))
+    shared_row.jurisdiction_pack_id = pack.id
+    db.add_all([new_row, old_row, shared_row])
+    db.commit()
+
+    new_rates, _, _ = resolve_tax_configuration(db, "IN", tax_regime="New", payroll_date=date(2026, 9, 1))
+    new_by_key = {r.component_key: r for r in new_rates}
+    assert new_by_key["standard_deduction"].flat_amount == Decimal("75000")
+    assert "cess_pct" in new_by_key
+
+    old_rates, _, _ = resolve_tax_configuration(db, "IN", tax_regime="Old", payroll_date=date(2026, 9, 1))
+    old_by_key = {r.component_key: r for r in old_rates}
+    assert old_by_key["standard_deduction"].flat_amount == Decimal("50000")
+    assert "cess_pct" in old_by_key
+
+
+def test_regime_label_normalization_matches_wordier_synced_labels(db):
+    # A row synced verbatim from a canonical pack (or entered through a
+    # free-text Super Admin field) can carry a wordier label than the
+    # short "New"/"Old" this engine always resolves with — a live example
+    # found on India's canonical pf/esi rows, tagged "New Tax Regime".
+    # A plain `==` comparison would silently exclude these; the resolver
+    # must still match them via _normalize_regime_label.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "IN", pack_id="IN-LABEL-NORM-TEST")
+    pf_row = _make_rate("IN", "pf", rate_pct=Decimal("12"), tax_regime="New Tax Regime")
+    pf_row.jurisdiction_pack_id = pack.id
+    old_row = _make_rate("IN", "standard_deduction", flat_amount=Decimal("50000"), tax_regime="Old Tax Regime")
+    old_row.jurisdiction_pack_id = pack.id
+    db.add_all([pf_row, old_row])
+    db.commit()
+
+    new_rates, _, _ = resolve_tax_configuration(db, "IN", tax_regime="New", payroll_date=date(2026, 9, 1))
+    assert any(r.component_key == "pf" for r in new_rates), "'New Tax Regime' must still match 'New'"
+    assert not any(r.component_key == "standard_deduction" for r in new_rates), "Old-tagged row must not leak into New"
+
+    old_rates, _, _ = resolve_tax_configuration(db, "IN", tax_regime="Old", payroll_date=date(2026, 9, 1))
+    assert any(r.component_key == "standard_deduction" for r in old_rates), "'Old Tax Regime' must still match 'Old'"
+    assert not any(r.component_key == "pf" for r in old_rates), "New-tagged row must not leak into Old"
 
 
 def test_resolve_effective_rate_inputs_defaults_unset_india_regime_to_new(db, organization):
@@ -933,6 +990,134 @@ def test_ca_remote_agreement_with_invalid_province_falls_through(db, organizatio
     assert resolved is None
 
 
+# ── Canada true multi-establishment POE (ZP-TAX-CA-2026-001 §5 steps
+# 2-3) — an employee who physically reports to 2+ establishments
+# resolves to whichever they spend the most time at, tie-broken by
+# whichever they most recently worked. An employee with fewer than two
+# ACTIVE EmployeeEstablishment rows is completely unaffected (falls
+# through to the pre-existing single-work_state/remote/fallback chain).
+
+def test_ca_multi_establishment_resolves_to_most_time(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-1", country="CA", work_state="ON")
+    db.add_all([
+        EmployeeEstablishment(employee_id=employee.id, province="ON", time_allocation_pct=Decimal("40")),
+        EmployeeEstablishment(employee_id=employee.id, province="QC", time_allocation_pct=Decimal("60")),
+    ])
+    db.commit()
+
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "QC"
+    assert reason == "PHYSICAL_MULTI"
+
+
+def test_ca_multi_establishment_tie_broken_by_last_worked(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-2", country="CA", work_state="ON")
+    db.add_all([
+        EmployeeEstablishment(
+            employee_id=employee.id, province="ON", time_allocation_pct=Decimal("50"),
+            last_worked_date=date(2026, 1, 10),
+        ),
+        EmployeeEstablishment(
+            employee_id=employee.id, province="AB", time_allocation_pct=Decimal("50"),
+            last_worked_date=date(2026, 1, 20),
+        ),
+    ])
+    db.commit()
+
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "AB"
+    assert reason == "PHYSICAL_MULTI"
+
+
+def test_ca_multi_establishment_ignores_inactive_rows(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-3", country="CA", work_state="ON")
+    db.add_all([
+        EmployeeEstablishment(employee_id=employee.id, province="ON", time_allocation_pct=Decimal("40")),
+        EmployeeEstablishment(employee_id=employee.id, province="QC", time_allocation_pct=Decimal("60"), is_active=False),
+    ])
+    db.commit()
+
+    # Only one ACTIVE row remains — not a real "multi" case, so this
+    # falls through to the ordinary single-work_state resolution.
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "ON"
+    assert reason == "PHYSICAL_SINGLE"
+
+
+def test_ca_single_establishment_row_does_not_trigger_multi_resolution(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-4", country="CA", work_state="ON")
+    db.add(EmployeeEstablishment(employee_id=employee.id, province="QC", time_allocation_pct=Decimal("100")))
+    db.commit()
+
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "ON"
+    assert reason == "PHYSICAL_SINGLE"
+
+
+def test_ca_multi_establishment_wins_over_org_jurisdiction_fallback(db, organization):
+    # An employee with no literal work_state but 2+ active establishment
+    # rows must resolve via PHYSICAL_MULTI, not fall all the way through
+    # to the org's own configured jurisdiction state.
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="CA", jurisdiction_state="NS"))
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-5", country="CA", work_state=None)
+    db.add_all([
+        EmployeeEstablishment(employee_id=employee.id, province="AB", time_allocation_pct=Decimal("30")),
+        EmployeeEstablishment(employee_id=employee.id, province="MB", time_allocation_pct=Decimal("70")),
+    ])
+    db.commit()
+
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "MB"
+    assert reason == "PHYSICAL_MULTI"
+
+
+def test_ca_beyond_limits_still_wins_over_multi_establishment(db, organization):
+    # "XP" is a deliberate declaration and must outrank even a genuine
+    # multi-establishment record — §5 step 7 wins first per the doc's
+    # own precedence.
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-6", country="CA", work_state="XP")
+    db.add_all([
+        EmployeeEstablishment(employee_id=employee.id, province="ON", time_allocation_pct=Decimal("40")),
+        EmployeeEstablishment(employee_id=employee.id, province="QC", time_allocation_pct=Decimal("60")),
+    ])
+    db.commit()
+
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "XP"
+    assert reason == "BEYOND_LIMITS"
+
+
+def test_ca_multi_establishment_invalid_province_rows_excluded(db, organization):
+    employee = _make_employee(db, organization.id, "EMP-CA-MULTI-7", country="CA", work_state="ON")
+    db.add_all([
+        EmployeeEstablishment(employee_id=employee.id, province="ZZ", time_allocation_pct=Decimal("90")),
+        EmployeeEstablishment(employee_id=employee.id, province="QC", time_allocation_pct=Decimal("10")),
+    ])
+    db.commit()
+
+    # Only one recognized-province active row remains after excluding
+    # "ZZ" — not a real "multi" case, falls through to work_state.
+    resolved, reason = service._resolve_country_aware_state("CA", employee, employee.work_state, db=db, organization_id=organization.id)
+    assert resolved == "ON"
+    assert reason == "PHYSICAL_SINGLE"
+
+
+def test_resolve_ca_multi_establishment_poe_unit_empty_and_single():
+    assert service._resolve_ca_multi_establishment_poe(None) == (None, "UNRESOLVED")
+    assert service._resolve_ca_multi_establishment_poe([]) == (None, "UNRESOLVED")
+    assert service._resolve_ca_multi_establishment_poe(
+        [{"province": "ON", "time_allocation_pct": Decimal("100"), "is_active": True}]
+    ) == (None, "UNRESOLVED")
+
+
+def test_resolve_ca_multi_establishment_poe_unit_accepts_plain_dicts():
+    result = service._resolve_ca_multi_establishment_poe([
+        {"province": "ON", "time_allocation_pct": Decimal("20"), "is_active": True},
+        {"province": "BC", "time_allocation_pct": Decimal("80"), "is_active": True},
+    ])
+    assert result == ("BC", "PHYSICAL_MULTI")
+
+
 # ── Canada H1/H2 effective-dated package selection (ZP-TAX-CA-2026-001
 # §4 "VERSIONING TEST": "A pay date of June 30, 2026 must resolve
 # CA-2026-H1. A pay date of July 1, 2026 must resolve CA-2026-H2.") ─────
@@ -1015,6 +1200,117 @@ def test_ca_historical_payroll_replays_from_h1_after_h2_is_published(db):
     # Replaying the SAME March 2026 pay date must still resolve H1, not H2.
     _, _, replayed_pack = resolve_tax_configuration(db, "CA", state=None, payroll_date=date(2026, 3, 15))
     assert replayed_pack.pack_id == "CA-2026-H1-REPLAY"
+
+
+# ── Immutable calculation snapshot / historical replay (ZP-TAX-CA-2026-001
+# AC-32: "historical replay after a statutory update returns the same
+# result using the original snapshot") ──────────────────────────────────
+#
+# Distinct from test_ca_historical_payroll_replays_from_h1_after_h2_is_
+# published above (which proves date-based PACK selection is already
+# stable) and from test_editing_a_rate_after_generation_does_not_change_
+# the_old_payslip above (which only proves an untouched payslip's stored
+# figures don't spontaneously change). This covers the real, previously-
+# open gap: explicitly RECALCULATING an existing payslip (e.g. after
+# fixing an employee's bank details) via regenerate_employee_payslip must
+# reproduce the ORIGINAL numbers even when the SAME canonical pack's own
+# rate/slab ROWS have since been edited in place — not silently pick up
+# today's live values.
+
+def test_regenerate_replays_original_rate_after_canonical_rate_edited(db, organization, monkeypatch):
+    _stub_business_code_generation(monkeypatch)
+    pack = _make_active_tax_pack(db, "IN", pack_id="IN-REPLAY-PACK")
+    rate = _make_rate("IN", "pf", organization_id=None, rate_pct=Decimal("12"))
+    rate.employer_rate_pct = Decimal("12")
+    rate.jurisdiction_pack_id = pack.id
+    db.add(rate)
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN", active_pack_id=pack.id))
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "IN-REPLAY-1", ctc=Decimal("600000"))
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    original_pf = item.pf
+    assert original_pf > Decimal("0")
+    assert item.tax_rule_snapshot is not None
+    original_rate_entry = next(r for r in item.tax_rule_snapshot["contributionRates"] if r["componentKey"] == "pf")
+    assert Decimal(original_rate_entry["employeeRatePct"]) == Decimal("12")
+
+    # Super Admin edits the SAME canonical pack's rate row after
+    # generation — simulating a statutory update, no new pack/version.
+    rate.employee_rate_pct = Decimal("20")
+    db.commit()
+
+    service.regenerate_employee_payslip(db, run.id, employee.id, organization.id)
+    db.refresh(item)
+
+    # Recalculating must reproduce the ORIGINAL 12%-derived figure, not
+    # silently pick up the now-live 20%.
+    assert item.pf == original_pf
+    # The frozen snapshot itself must also stay untouched — still showing
+    # the rate that was ACTUALLY used, not the current live value.
+    replayed_rate_entry = next(r for r in item.tax_rule_snapshot["contributionRates"] if r["componentKey"] == "pf")
+    assert Decimal(replayed_rate_entry["employeeRatePct"]) == Decimal("12")
+
+
+def test_regenerate_still_falls_back_to_live_rates_without_a_snapshot(db, organization, monkeypatch):
+    # An org never opted into canonical tax-pack tracking (the common
+    # case) has no tax_rule_snapshot to replay from at all — recalculation
+    # must fall back to live resolution exactly as it did before this fix,
+    # not silently produce a zeroed/broken payslip.
+    _stub_business_code_generation(monkeypatch)
+    db.add(_make_rate("IN", "pf", organization_id=organization.id, rate_pct=Decimal("12")))
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "NO-SNAPSHOT-1", ctc=Decimal("600000"))
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    assert item.tax_rule_snapshot is None
+    original_pf = item.pf
+
+    service.regenerate_employee_payslip(db, run.id, employee.id, organization.id)
+    db.refresh(item)
+    assert item.pf == original_pf  # unchanged — nothing else changed either
+
+
+def test_reconstruct_rate_map_and_slabs_from_snapshot_unit():
+    snapshot = {
+        "packId": "TEST-PACK", "version": "1.0",
+        "contributionRates": [{
+            "componentKey": "pf", "label": "Provident Fund",
+            "employeeShare": "12%", "employerShare": "12%", "total": "24%",
+            "employeeRatePct": "12", "employerRatePct": "12", "flatAmount": None, "textValue": None,
+            "jurisdictionCountry": "IN", "jurisdictionState": None, "jurisdictionLocality": None,
+            "taxRegime": None, "filingStatus": None,
+        }],
+        "taxSlabs": [{
+            "minAmount": "0", "maxAmount": "300000", "ratePct": "0",
+            "rateLabel": "Nil", "taxFormula": "", "sortOrder": 0,
+            "jurisdictionCountry": "IN", "jurisdictionState": None, "jurisdictionLocality": None,
+            "taxRegime": "New", "filingStatus": None, "ruleType": "MARGINAL_RATE", "formulaExpression": None,
+            "flatAmount": None, "adjustmentAmount": None, "niCategory": None, "employerRatePct": None,
+        }],
+    }
+    rates, slabs = service._reconstruct_rate_map_and_slabs_from_snapshot(snapshot)
+    assert len(rates) == 1 and len(slabs) == 1
+    assert rates[0].component_key == "pf"
+    assert rates[0].employee_rate_pct == Decimal("12")
+    assert slabs[0].min_amount == Decimal("0")
+    assert slabs[0].max_amount == Decimal("300000")
+    assert slabs[0].tax_regime == "New"
+
+
+def test_reconstruct_rate_map_and_slabs_from_snapshot_empty_input():
+    assert service._reconstruct_rate_map_and_slabs_from_snapshot(None) == ([], [])
+    assert service._reconstruct_rate_map_and_slabs_from_snapshot({}) == ([], [])
 
 
 # ── Regime-aware resolution (Tax Parameters feature) ────────────────────
@@ -1296,6 +1592,170 @@ def test_new_pack_version_clones_previous_versions_rates(db, organization):
     cloned_slab = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == v2.id).first()
     assert cloned_rate is not None and cloned_rate.id != rate.id and cloned_rate.employee_rate_pct == Decimal("6.20")
     assert cloned_slab is not None and cloned_slab.rate_pct == Decimal("10")
+
+
+# ── Canada gap-closure Phase 4: maker-checker Publish Center integrity ──
+# Found while auditing what "Formula Asset Registry / maker-checker
+# Publish Center" (ZP-TAX-CA-2026-001's own Section 19.2, "author cannot
+# self-approve a production statutory version") actually still needed:
+# set_jurisdiction_pack_status already had a real distinct-approver gate,
+# but three real bypasses of it existed. All three are fixed together —
+# none of them change any already-calculated payslip's numbers, they only
+# tighten the Super-Admin-side publish workflow.
+
+def test_upsert_jurisdiction_pack_rejects_direct_active_on_create(db, organization):
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+    # Before this fix: creating a tax pack with status="Active" directly
+    # through the plain upsert endpoint completely bypassed
+    # set_jurisdiction_pack_status's overlap guard, inverted-date guard,
+    # and distinct-approver gate — a pack could go live with zero review.
+    with pytest.raises(BadRequestException):
+        service.upsert_jurisdiction_pack(
+            db,
+            JurisdictionPackUpsert(
+                packId="CA-BYPASS-CREATE-TEST", version="1.0", jurisdictionCountry="CA",
+                packType="tax", status="Active",
+            ),
+        )
+    assert db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == "CA-BYPASS-CREATE-TEST").first() is None
+
+
+def test_upsert_jurisdiction_pack_rejects_direct_active_on_edit(db, organization):
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+    pack = JurisdictionPack(pack_id="CA-BYPASS-EDIT-TEST", jurisdiction_country="CA", pack_type="tax", version="1.0", status="Draft")
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+
+    with pytest.raises(BadRequestException):
+        service.upsert_jurisdiction_pack(
+            db,
+            JurisdictionPackUpsert(
+                id=pack.id, packId="CA-BYPASS-EDIT-TEST", version="1.0", jurisdictionCountry="CA",
+                packType="tax", status="Active",
+            ),
+        )
+    db.refresh(pack)
+    assert pack.status == "Draft"  # unchanged
+
+
+def test_upsert_jurisdiction_pack_allows_direct_active_for_policy_pack(db, organization):
+    # The danger is specific to TAX packs (set_jurisdiction_pack_status's
+    # overlap/date/approver machinery only ever runs for pack_type=="tax")
+    # — a policy pack going Active directly via plain edit is unchanged
+    # behavior, not a bypass of anything that exists.
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+    result = service.upsert_jurisdiction_pack(
+        db,
+        JurisdictionPackUpsert(
+            packId="CA-POLICY-DIRECT-ACTIVE", version="1.0", jurisdictionCountry="CA",
+            packType="policy", status="Active",
+        ),
+    )
+    assert result.status == "Active"
+
+
+def test_approved_by_id_not_settable_via_plain_upsert(db, organization):
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+    pack = JurisdictionPack(pack_id="CA-APPROVER-BYPASS-TEST", jurisdiction_country="CA", pack_type="tax", version="1.0", status="Draft")
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+
+    # Attempting to smuggle an arbitrary approver id through the plain
+    # edit endpoint (rather than the dedicated set_jurisdiction_pack_approver
+    # action) must be silently ignored — approval can only ever be granted
+    # by someone actually invoking the dedicated Approve action themselves.
+    result = service.upsert_jurisdiction_pack(
+        db,
+        JurisdictionPackUpsert(
+            id=pack.id, packId="CA-APPROVER-BYPASS-TEST", version="1.0", jurisdictionCountry="CA",
+            packType="tax", status="Draft", approvedById=999,
+        ),
+    )
+    assert result.approved_by_id is None
+
+
+def test_editing_pack_metadata_after_approval_invalidates_it(db, organization):
+    pack = JurisdictionPack(pack_id="CA-INVALIDATE-META-TEST", jurisdiction_country="CA", pack_type="tax", version="1.0", status="Draft")
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    service.set_jurisdiction_pack_approver(db, pack.id, actor_id=42)
+    db.refresh(pack)
+    assert pack.status == "Approved" and pack.approved_by_id == 42
+
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+    service.upsert_jurisdiction_pack(
+        db,
+        JurisdictionPackUpsert(
+            id=pack.id, packId="CA-INVALIDATE-META-TEST", version="1.0", jurisdictionCountry="CA",
+            packType="tax", status="Approved", changeSummary="A later correction to the effective window.",
+        ),
+        actor_id=7,
+    )
+    db.refresh(pack)
+    assert pack.approved_by_id is None
+    assert pack.status == "Draft"  # forced back — must be re-approved before Active
+
+
+def test_editing_a_rate_after_approval_invalidates_pack_approval(db, organization):
+    from app.modules.payroll.schemas import CanonicalContributionRateUpsert
+    pack = JurisdictionPack(pack_id="CA-INVALIDATE-RATE-TEST", jurisdiction_country="CA", pack_type="tax", version="1.0", status="Draft")
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    rate = _make_rate("CA", "cpp", organization_id=None, rate_pct=Decimal("5.95"))
+    rate.jurisdiction_pack_id = pack.id
+    db.add(rate)
+    db.commit()
+    db.refresh(rate)
+
+    service.set_jurisdiction_pack_approver(db, pack.id, actor_id=42)
+    db.refresh(pack)
+    assert pack.status == "Approved"
+
+    service.upsert_canonical_contribution_rate(
+        db,
+        CanonicalContributionRateUpsert(
+            id=rate.id, jurisdictionPackId=pack.id, jurisdictionCountry="CA",
+            componentKey="cpp", label="CPP", employeeSharePct=Decimal("6.00"),
+        ),
+    )
+    db.refresh(pack)
+    assert pack.approved_by_id is None
+    assert pack.status == "Draft"
+
+
+def test_deleting_a_rate_from_an_active_pack_is_rejected(db, organization):
+    pack = _make_active_tax_pack(db, "CA", pack_id="CA-DELETE-GUARD-TEST")
+    rate = _make_rate("CA", "cpp", organization_id=None, rate_pct=Decimal("5.95"))
+    rate.jurisdiction_pack_id = pack.id
+    db.add(rate)
+    db.commit()
+    db.refresh(rate)
+
+    with pytest.raises(BadRequestException):
+        service.delete_canonical_contribution_rate(db, rate.id)
+    # Still there — an Active pack's rates must never disappear silently.
+    assert db.query(ContributionRate).filter(ContributionRate.id == rate.id).first() is not None
+
+
+def test_deleting_a_slab_from_a_draft_pack_is_allowed(db, organization):
+    pack = JurisdictionPack(pack_id="CA-DELETE-DRAFT-TEST", jurisdiction_country="CA", pack_type="tax", version="1.0", status="Draft")
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    slab = TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_pack_id=pack.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("10"), rate_label="10%", tax_formula="",
+    )
+    db.add(slab)
+    db.commit()
+    db.refresh(slab)
+
+    service.delete_canonical_tax_slab(db, slab.id)
+    assert db.query(TaxSlab).filter(TaxSlab.id == slab.id).first() is None
 
 
 # ── Section 11: US filing-status-aware ContributionRate resolution ───────

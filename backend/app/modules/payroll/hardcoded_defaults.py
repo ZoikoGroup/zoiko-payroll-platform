@@ -936,6 +936,148 @@ _US_DE_PAID_LEAVE = dict(
     employer_component_code="PAID_LEAVE",
 )
 
+_CA_PROVINCIAL_BRACKETS = {
+    # Canada provincial/territorial income tax brackets (ZP-TAX-CA-2026-001
+    # §8) — consumed by scripts/populate_ca_provincial_v1.py, NOT
+    # populate_canonical_tax_v1.py (same reason as the US state-level data:
+    # that script only ever seeds the country-level, jurisdiction_state IS
+    # NULL pack). One flat bracket set per jurisdiction: federal and these
+    # 9 have IDENTICAL H1 and H2 figures per the document itself (§9's
+    # mid-year override table lists ONLY BC/NL/PE — every other jurisdiction
+    # here is confirmed to have no real split). BC/NL/PE's genuine H1-vs-H2
+    # data lives in _CA_H1_H2_PROVINCES below instead, as two real packages
+    # — an earlier pass here used a single-annual-figure simplification for
+    # those three, based on a since-corrected belief that the pack
+    # disambiguation mechanism couldn't tell H1 and H2 apart (it does: see
+    # service.py's _resolve_pack_scoped_rows).
+    # Each tuple: (min, max_or_None, rate_pct).
+    "AB": [(0, 61200, "8"), (61200, 154259, "10"), (154259, 185111, "12"), (185111, 246813, "13"), (246813, 370220, "14"), (370220, None, "15")],
+    "MB": [(0, 47000, "10.80"), (47000, 100000, "12.75"), (100000, None, "17.40")],
+    "NB": [(0, 52333, "9.40"), (52333, 104666, "14"), (104666, 193861, "16"), (193861, None, "19.50")],
+    "NS": [(0, 30995, "8.79"), (30995, 61991, "14.95"), (61991, 97417, "16.67"), (97417, 157124, "17.50"), (157124, None, "21")],
+    "NT": [(0, 53003, "5.90"), (53003, 106009, "8.60"), (106009, 172346, "12.20"), (172346, None, "14.05")],
+    "NU": [(0, 55801, "4"), (55801, 111602, "7"), (111602, 181439, "9"), (181439, None, "11.50")],
+    "ON": [(0, 53891, "5.05"), (53891, 107785, "9.15"), (107785, 150000, "11.16"), (150000, 220000, "12.16"), (220000, None, "13.16")],
+    "SK": [(0, 54532, "10.50"), (54532, 155805, "12.50"), (155805, None, "14.50")],
+    "YT": [(0, 58523, "6.40"), (58523, 117045, "9"), (117045, 181440, "10.90"), (181440, 500000, "12.80"), (500000, None, "15")],
+}
+
+# Provincial Basic Personal Amount (§8's rightmost column), read via
+# component_key="provincial_bpa" — every province EXCEPT Manitoba (dynamic
+# formula, own parameter set below), Yukon (mirrors the federal BPAF
+# exactly via canada.py's own YT branch, no separate row needed), and
+# BC/NL (their own H1/H2-specific BPA lives in _CA_H1_H2_PROVINCES).
+_CA_PROVINCIAL_BPA = {
+    "AB": "22769", "NB": "13664", "NS": "11932",
+    "NT": "18198", "NU": "19659", "ON": "12989", "SK": "20381",
+}
+
+# Manitoba's dynamic BPA (§8 "DYNAMIC BASIC AMOUNTS"): $15,780 if
+# NI <= $200,000; linear taper to $0 at NI >= $400,000. Read via
+# canada.py's mb_bpa_max/mb_bpa_ni_thresh_lo/mb_bpa_ni_thresh_hi.
+_CA_MB_DYNAMIC_BPA = dict(max="15780", ni_thresh_lo="200000", ni_thresh_hi="400000")
+
+# BC, Newfoundland & Labrador, and Prince Edward Island (§9's mid-year
+# override table) — the ONLY 3 jurisdictions this document gives a real
+# H1-vs-H2 difference for. Built as two genuine JurisdictionPacks each
+# (effective 2026-01-01/06-30 and 2026-07-01/12-31), using Option 1's
+# real per-half prorated figures (the document's own primary method, §7)
+# rather than Option 2's single annual figure — that's the whole point of
+# having two packages instead of one.
+#
+# BC: only the LOWEST bracket rate and the basic tax reduction amount
+# change between halves — every other bracket (7.70/10.50/12.29/14.70/
+# 16.80/20.50%) and the provincial BPA ($13,216) are identical both
+# halves, so they're simply duplicated into both packages (required
+# anyway: TaxSlab disambiguation groups by rule_type, not by which row
+# changed, so a partial bracket set on one pack would silently lose the
+# unchanged brackets for that half — see populate_ca_provincial_v1.py's
+# own comment on this).
+#
+# NL: only the provincial_bpa changes; all 8 brackets are identical both
+# halves and are duplicated into both packages for the same reason.
+#
+# PE: the new >$200,000 bracket does not exist in the H1 withholding
+# asset at all (§9: "No separate >$200,000 bracket in H1") — H1 is a
+# genuinely shorter, 5-bracket table ending at 17.62% with no ceiling;
+# H2 has the full 6-bracket table with the new top bracket at its
+# Option-1 prorated 21% (not the annual 20%).
+_CA_H1_H2_PROVINCES = {
+    "BC": dict(
+        h1=dict(
+            brackets=[(0, 50363, "5.06"), (50363, 100728, "7.70"), (100728, 115648, "10.50"), (115648, 140430, "12.29"), (140430, 190405, "14.70"), (190405, 265545, "16.80"), (265545, None, "20.50")],
+            provincial_bpa="13216", bc_basic_tax_reduction="575",
+        ),
+        h2=dict(
+            brackets=[(0, 50363, "6.14"), (50363, 100728, "7.70"), (100728, 115648, "10.50"), (115648, 140430, "12.29"), (140430, 190405, "14.70"), (190405, 265545, "16.80"), (265545, None, "20.50")],
+            provincial_bpa="13216", bc_basic_tax_reduction="805",
+        ),
+    ),
+    "NL": dict(
+        h1=dict(
+            brackets=[(0, 44678, "8.70"), (44678, 89354, "14.50"), (89354, 159528, "15.80"), (159528, 223340, "17.80"), (223340, 285319, "19.80"), (285319, 570638, "20.80"), (570638, 1141275, "21.30"), (1141275, None, "21.80")],
+            provincial_bpa="11188",
+        ),
+        h2=dict(
+            brackets=[(0, 44678, "8.70"), (44678, 89354, "14.50"), (89354, 159528, "15.80"), (159528, 223340, "17.80"), (223340, 285319, "19.80"), (285319, 570638, "20.80"), (570638, 1141275, "21.30"), (1141275, None, "21.80")],
+            provincial_bpa="15000",
+        ),
+    ),
+    "PE": dict(
+        h1=dict(
+            brackets=[(0, 33928, "9.50"), (33928, 65820, "13.47"), (65820, 106890, "16.60"), (106890, 142520, "17.62"), (142520, None, "19")],
+            provincial_bpa="15000",
+        ),
+        h2=dict(
+            brackets=[(0, 33928, "9.50"), (33928, 65820, "13.47"), (65820, 106890, "16.60"), (106890, 142520, "17.62"), (142520, 200000, "19"), (200000, None, "21")],
+            provincial_bpa="15000",
+        ),
+    ),
+}
+
+# Ontario Employer Health Tax (§15/§16): $1,000,000 exemption + 9
+# remuneration-band employer rates. Each tuple: (min, max_or_None, employer_rate_pct).
+_CA_ON_EHT_EXEMPTION = "1000000"
+_CA_ON_EHT_BANDS = [
+    (0, 200000, "0.980"), (200000, 230000, "1.101"), (230000, 260000, "1.223"),
+    (260000, 290000, "1.344"), (290000, 320000, "1.465"), (320000, 350000, "1.586"),
+    (350000, 380000, "1.708"), (380000, 400000, "1.829"), (400000, None, "1.950"),
+]
+
+# BC/Manitoba/NL employer levies (§15) — the shared "exemption / notch /
+# flat-on-total" shape canada.py's _annual_notch_levy_amount implements.
+# NL HAPSET has no upper/flat tier (its own comment: "no second band") —
+# only exemption_threshold/flat_rate are seeded for it, matching the key
+# canada.py actually reads ("nl_hapset_flat_rate" — used as the notch
+# rate; a naming quirk in the existing code, not mine to rename here).
+_CA_EMPLOYER_LEVIES = {
+    "bc_eht": dict(exemption_threshold="1000000", upper_threshold="1500000", notch_rate="5.85", flat_rate="1.95"),
+    "bc_eht_charity": dict(exemption_threshold="1500000", upper_threshold="4500000", notch_rate="2.925", flat_rate="1.95"),
+    "mb_he_levy": dict(exemption_threshold="2500000", upper_threshold="5000000", notch_rate="4.3", flat_rate="2.15"),
+    "nl_hapset": dict(exemption_threshold="2000000", flat_rate="2.0"),
+}
+
+# Territorial employee payroll tax (§14): 2% each, employee-side only.
+_CA_TERRITORIAL_PAYROLL_TAX = {"NT": "2.0", "NU": "2.0"}
+
+# Quebec (§12/§13) — its own independent module per canada.py's
+# _calculate_quebec_provincial_tax/_qc_hsf_rate_for_total/
+# _calculate_qc_labour_standards. qc_labour_standards_RATE is deliberately
+# NOT included: the document explicitly withholds it ("rate maintained as
+# sourced statutory parameter") — only the $103,000 cap is given.
+_CA_QUEBEC_BRACKETS = [(0, 54345, "14"), (54345, 108680, "19"), (108680, 132245, "24"), (132245, None, "25.75")]
+_CA_QUEBEC_PARAMS = dict(
+    quebec_bpa="18952", qc_worker_deduction="1450", qc_labour_standards_cap="103000",
+    qpp=dict(employee="6.30", employer="6.30"),
+    qpip=dict(employee="0.430", employer="0.602"), qpip_mie="103000",
+    qc_hsf_threshold_low="1000000", qc_hsf_threshold_high="7800000",
+    qc_hsf_general_low_rate="1.65", qc_hsf_general_high_rate="4.26",
+    qc_hsf_general_mid_base="1.2662", qc_hsf_general_mid_slope="0.3838",
+    qc_hsf_primary_low_rate="1.25", qc_hsf_primary_high_rate="4.26",
+    qc_hsf_primary_mid_base="0.8074", qc_hsf_primary_mid_slope="0.4426",
+    qc_hsf_public_rate="4.26",
+)
+
 _US_LOCALITY_DATA = {
     "MI": dict(
         agency="Michigan Treasury", source_title="2026 City of Detroit Income Tax Withholding Guide",

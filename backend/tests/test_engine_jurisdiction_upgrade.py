@@ -17,7 +17,7 @@ from typing import Optional
 
 import pytest
 
-from app.modules.payroll.engine.base import PayrollContext
+from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
 from app.modules.payroll.engine.resolver import calculate_payroll
 
@@ -544,12 +544,111 @@ def test_india_87a_old_regime_uses_its_own_lower_limit():
     # excess income, so relief caps it at exactly ₹2,000. Under the New
     # Regime (₹12L limit, ₹75,000 standard deduction) the SAME gross would
     # be fully rebated to zero instead.
-    old_annual_gross = Decimal("502000") + Decimal("50000")   # Old Regime's own standard deduction
+    #
+    # Old Regime ALSO deducts annual Professional Tax from taxable salary
+    # (§4.2's "Critical regime separation" — IN_RATES' "pt" flat_amount of
+    # 200/month = 2,400/year), so the gross must additionally cover that
+    # to land taxable income at exactly the same ₹5,02,000 target; New
+    # Regime never deducts PT, so its gross is unaffected.
+    old_annual_gross = Decimal("502000") + Decimal("50000") + Decimal("2400")   # + Old Regime's std deduction + annual PT
     new_annual_gross = Decimal("502000") + Decimal("75000")   # New Regime's own standard deduction
     old_result = calc("IN", old_annual_gross / Decimal("12"), IN_RATES, IN_SLABS, tax_regime="Old")
     new_result = calc("IN", new_annual_gross / Decimal("12"), IN_RATES, IN_SLABS, tax_regime="New")
     assert old_result.annual_tax == Decimal("2000")
     assert new_result.annual_tax == Decimal("0")
+
+
+def test_india_old_regime_deducts_professional_tax_from_taxable_salary():
+    # ZP-TAX-IN-2026-27-001 §4.2 / AC-08 / IN-TAX-004: PT is deductible
+    # from salary income under the Old Regime's own salary-deduction
+    # framework — this deduction did not exist at all before this fix
+    # (taxable was always just gross minus standard_deduction).
+    # IN_RATES' "pt" flat_amount is 200/month = 2,400/year.
+    annual_gross = Decimal("502400") + Decimal("50000")  # std deduction only; PT comes out of taxable, not gross
+    result = calc("IN", annual_gross / Decimal("12"), IN_RATES, IN_SLABS, tax_regime="Old")
+    # Taxable before PT: 502,400. After PT (-2,400): exactly 500,000 —
+    # AT the Old Regime rebate limit, so rebate should fully cancel tax.
+    assert result.annual_tax == Decimal("0")
+
+
+def test_india_new_regime_never_deducts_professional_tax():
+    # Same critical regime separation, the other direction: New Regime's
+    # taxable salary must NOT be reduced by PT at all (§4.2, §3.2's own
+    # "Professional tax deduction: Not allowed in section 202 computation").
+    annual_gross = Decimal("1200000") + Decimal("75000")
+    result = calc("IN", annual_gross / Decimal("12"), IN_RATES, IN_SLABS, tax_regime="New")
+    # If PT (2,400) were wrongly subtracted, taxable would drop below the
+    # 1,200,000 rebate ceiling and still be zero — so instead assert taxable
+    # income is exactly at the ceiling by checking annual_tax matches the
+    # zero-TDS document example (slab tax 60,000, rebate 60,000, net 0)
+    # AND that a taxable income 1 rupee above the ceiling is NOT zero,
+    # proving PT truly wasn't subtracted.
+    assert result.annual_tax == Decimal("0")
+    just_above = calc("IN", (annual_gross + Decimal("12")) / Decimal("12"), IN_RATES, IN_SLABS, tax_regime="New")
+    assert just_above.annual_tax > Decimal("0")
+
+
+def test_india_wage_deduction_cap_flags_when_exceeded():
+    # ZP-TAX-IN-2026-27-001 §8.3 / AC-18 / IN-CAP-001: authorized
+    # deductions above 50% of wages must raise a compliance flag — the
+    # engine must NEVER silently reduce a statutory levy to make net pay
+    # positive, so this is a flag, not a recalculation. Force it with an
+    # extreme PT override well above what any real employee would see.
+    heavy_rates = dict(IN_RATES, pt=Rate(flat_amount=Decimal("100000")))
+    result = calc("IN", 30000, heavy_rates, IN_SLABS)
+    assert result.wage_deduction_cap_exceeded is True
+    # Still deducted in full — never silently reduced to fit under the cap.
+    assert result.professional_tax == Decimal("100000")
+
+
+def test_india_wage_deduction_cap_not_flagged_under_normal_deductions():
+    result = calc("IN", 30000, IN_RATES, IN_SLABS)
+    assert result.wage_deduction_cap_exceeded is False
+
+
+def test_wage_deduction_cap_never_flagged_outside_india():
+    # India's own Labour Code — must not spuriously apply to any other
+    # country, even one with the exact same (heavy) rate configuration
+    # that trips the flag for India above.
+    heavy_rates = dict(IN_RATES, pt=Rate(flat_amount=Decimal("100000")))
+    result = calc("UK", 30000, heavy_rates, IN_SLABS)
+    assert result.wage_deduction_cap_exceeded is False
+
+
+def test_india_employer_nps_zero_until_configured():
+    # §3.2's employer NPS contribution — no hardcoded fallback, resolves
+    # to 0 until Tax Ops configures "nps_employer_pct".
+    result = calc("IN", 30000, IN_RATES, IN_SLABS, basic=15000, tax_regime="New")
+    assert result.employer_nps == Decimal("0")
+
+
+def test_india_employer_nps_new_regime_computed_and_reduces_taxable_income():
+    # 14% of Basic (§3.2's "14% path... under new regime"), and this
+    # amount must ALSO reduce New Regime taxable salary. Income set well
+    # above the 1,200,000 rebate ceiling so the reduction is actually
+    # visible in annual_tax (otherwise §3.2's own rebate would fully
+    # cancel tax either way, masking the difference).
+    rates = dict(IN_RATES, nps_employer_pct=Rate(employer_rate_pct=Decimal("14.00")))
+    annual_basic = Decimal("2000000")
+    result = calc("IN", annual_basic / Decimal("12"), rates, IN_SLABS, basic=annual_basic / Decimal("12"), tax_regime="New")
+    assert result.employer_nps == _round2(annual_basic / Decimal("12") * Decimal("0.14"))
+
+    baseline = calc("IN", annual_basic / Decimal("12"), IN_RATES, IN_SLABS, basic=annual_basic / Decimal("12"), tax_regime="New")
+    assert result.annual_tax < baseline.annual_tax, "employer NPS must reduce New Regime taxable income, not just be a cost"
+
+
+def test_india_employer_nps_never_reduces_old_regime_taxable_income():
+    # §3.2 places this deduction only under the New Regime's own table —
+    # the document gives no old-regime figure for it at all, so it must
+    # never reduce Old Regime taxable salary even if the rate is
+    # untagged (applies to both regimes as a COST, per the rate's own
+    # scope, but never as an Old-regime taxable-income reduction).
+    rates = dict(IN_RATES, nps_employer_pct=Rate(employer_rate_pct=Decimal("14.00")))
+    annual_basic = Decimal("600000")
+    with_nps = calc("IN", annual_basic / Decimal("12"), rates, IN_SLABS, basic=annual_basic / Decimal("12"), tax_regime="Old")
+    without_nps = calc("IN", annual_basic / Decimal("12"), IN_RATES, IN_SLABS, basic=annual_basic / Decimal("12"), tax_regime="Old")
+    assert with_nps.employer_nps > Decimal("0"), "employer still incurs the cost under Old regime"
+    assert with_nps.annual_tax == without_nps.annual_tax, "but it must not change Old Regime taxable income"
 
 
 def test_india_87a_marginal_relief_can_be_disabled():
