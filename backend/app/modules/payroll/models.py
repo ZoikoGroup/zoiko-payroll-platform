@@ -129,6 +129,34 @@ class PayrollEmployee(Base):
     # generically useful HR fact, not a Canada-only field — NULL for
     # every employee until entered, same as date_of_joining before it.
     date_of_birth    = Column(Date, nullable=True)
+    # India Gratuity Phase 2 (ZP-TAX-IN-2026-27-001 §11) — NULL for every
+    # employee until entered; the gratuity liability calculator (india.py's
+    # calculate_gratuity) requires both this and date_of_joining to compute
+    # completed service, and stays uncomputable without either.
+    date_of_leaving  = Column(Date, nullable=True)
+    # India Maharashtra Professional Tax Phase 3 (ZP-TAX-IN-2026-27-001
+    # §13.2) — a genuine legal fact Maharashtra's PT brackets are
+    # differentiated by (real statute, not a proxy for anything else).
+    # NULL for every employee until entered, same convention as
+    # date_of_leaving above.
+    gender           = Column(String(20), nullable=True)
+    # India Old Regime senior/super-senior basic-exemption bands
+    # (ZP-TAX-IN-2026-27-001 §4.1/§4.2 — "senior-citizen basic exemption
+    # is resident-specific") — "RESIDENT" | "NON_RESIDENT" | NULL. NULL
+    # (every employee today) resolves identically to NON_RESIDENT: the
+    # document's own instruction is to use the ordinary non-senior bands
+    # whenever residency isn't affirmatively RESIDENT, never to guess.
+    # Combined with date_of_birth (already generically available above)
+    # in india.py's _resolve_old_regime_age_category, gated on
+    # shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.
+    tax_residency_status = Column(String(20), nullable=True)
+    # UK Directors NIC Phase 2 (ZP-TAX-UK-2026-27-001 §9.2 — "Do not
+    # process a director as an ordinary employee solely because the same
+    # percentage rates apply"). False/NULL for every employee until
+    # entered — no behavior changes for anyone until both are set AND
+    # engine/countries/uk.py's calculate() actually branches on them.
+    is_director        = Column(Boolean, nullable=True, default=False, server_default="false")
+    director_ni_method = Column(String(20), nullable=True)  # "ANNUAL" | "ALTERNATIVE"
     ctc              = Column(Numeric(12, 2), default=0)
     # basic/hra are ANNUAL amounts (matching the ctc convention).
     # The payroll engine divides by 12 to derive monthly values.
@@ -225,10 +253,10 @@ class PayrollEmployee(Base):
     # POE should still resolve to the employer's establishment province,
     # not wherever they happen to be sitting. NULL/False means "no remote
     # agreement on file," same as every employee today; work_state (or
-    # the org fallback) resolves POE exactly as it already does. Does NOT
-    # model multi-establishment time-weighting (§5 steps 2-3) — that
-    # needs real establishment records this schema doesn't have for any
-    # country, a materially larger feature left for a later decision.
+    # the org fallback) resolves POE exactly as it already does.
+    # Multi-establishment time-weighting (§5 steps 2-3) is now modeled
+    # separately, in the EmployeeEstablishment child table below — an
+    # employee with fewer than two active rows there is unaffected by it.
     remote_work_agreement = Column(Boolean, default=False, nullable=False, server_default="false")
     remote_attachment_province = Column(String(10), nullable=True)
     remote_agreement_effective_from = Column(Date, nullable=True)
@@ -301,6 +329,47 @@ class PayrollEmployee(Base):
 
     def __repr__(self):
         return f"<PayrollEmployee id={self.id} code={self.employee_code} status={self.status}>"
+
+
+class EmployeeEstablishment(Base):
+    """ZP-TAX-CA-2026-001 §5 steps 2-3 — true multi-establishment POE: an
+    employee who physically reports to MORE THAN ONE employer
+    establishment resolves to whichever they spend the most time at,
+    tie-broken by whichever they most recently worked. This is the
+    "materially larger feature left for a later decision" flagged in
+    PayrollEmployee.remote_work_agreement's own docstring, now built.
+
+    Deliberately modeled as a STANDING recurring time-allocation pattern
+    (e.g. "60% of working time at ON, 40% at QC"), not a per-pay-period
+    timesheet — this codebase has no attendance/timesheet system for any
+    country, and building one is a separate, materially larger
+    initiative. Same declarative-fact shape as TD1/remote_work_agreement:
+    entered once, read on every payslip until changed.
+
+    An employee with FEWER than two active rows here is completely
+    unaffected — POE resolution falls through to the existing
+    work_state/remote_attachment/payroll-fallback chain exactly as
+    before this table existed (see service.py's
+    _resolve_ca_multi_establishment_poe/_resolve_ca_poe_with_source).
+    Purely additive: no existing employee has any row here."""
+    __tablename__ = "payroll_employee_establishments"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    province             = Column(String(10), nullable=False)
+    # % of working time spent at this establishment (0-100). Only the
+    # RELATIVE ordering across one employee's own rows matters for
+    # resolution — rows for one employee need not sum to exactly 100.
+    time_allocation_pct  = Column(Numeric(5, 2), nullable=False)
+    # Tie-break input per §5 step 3's "most recently worked" — NULL is
+    # treated as never-worked (loses every tie against a real date).
+    last_worked_date     = Column(Date, nullable=True)
+    is_active            = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<EmployeeEstablishment emp={self.employee_id} province={self.province} pct={self.time_allocation_pct}>"
 
 
 # ── Payroll Run ────────────────────────────────────────────────────────
@@ -471,6 +540,13 @@ class PayslipItem(Base):
     pf                = Column(Numeric(12, 2), default=0)
     esi               = Column(Numeric(12, 2), default=0)
     professional_tax  = Column(Numeric(12, 2), default=0)
+    # India Labour Welfare Fund Phase 3b (ZP-TAX-IN-2026-27-001 §15) — a
+    # genuinely SEPARATE state-specific annual contribution, not a
+    # breakdown of anything above. Zero on every payslip until Tax Ops
+    # configures BOTH the amount and the deduction month for that state —
+    # no hardcoded fallback (see india.py's calculate()).
+    employee_lwf      = Column(Numeric(12, 2), default=0, server_default="0")
+    employer_lwf       = Column(Numeric(12, 2), default=0, server_default="0")
     tds               = Column(Numeric(12, 2), default=0)   # income tax withheld — INCLUDES surcharge/cess below, not additional to them
     # India: monthly breakdown of what's already folded into `tds` above —
     # informational only, never summed again into total_deductions.
@@ -579,6 +655,9 @@ class PayslipItem(Base):
     # switch is enabled — see engine/countries/shared.py's
     # _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.
     employer_eht       = Column(Numeric(12, 2), default=0, server_default="0")
+    # UK: Apprenticeship Levy — same org-level-accumulator-banded contract
+    # as employer_eht above (ZP-TAX-UK-2026-27-001 §14).
+    employer_apprenticeship_levy = Column(Numeric(12, 2), default=0, server_default="0")
     # Canada: BC EHT, Manitoba HE Levy, NL HAPSET — same org-level-
     # accumulator-banded contract as employer_eht above, one column per
     # levy since each is legally distinct and jurisdiction-exclusive
@@ -591,6 +670,24 @@ class PayslipItem(Base):
     # accumulator) — see engine/countries/canada.py's module docstring.
     employer_qc_hsf               = Column(Numeric(12, 2), default=0, server_default="0")
     employer_qc_labour_standards  = Column(Numeric(12, 2), default=0, server_default="0")
+    # India: EPS diversion + residual — purely-informational breakdown of
+    # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
+    # employer_pf_residual == employer_pf always, never additional to it.
+    employer_eps           = Column(Numeric(12, 2), default=0, server_default="0")
+    employer_pf_residual   = Column(Numeric(12, 2), default=0, server_default="0")
+    # India: EDLI — a genuinely SEPARATE employer-only statutory liability
+    # (§9.1), additional to employer_pf, not a breakdown of it. Zero until
+    # Tax Ops configures "edli_rate"/"edli_wage_ceiling" via the Super
+    # Admin UI — no hardcoded fallback.
+    employer_edli           = Column(Numeric(12, 2), default=0, server_default="0")
+    # India: employer NPS contribution deduction (§3.2 — "14% path
+    # available under new regime for qualifying employer contribution").
+    # A genuinely separate employer-only cost, like EDLI, computed as
+    # nps_employer_pct of Basic — no hardcoded fallback, resolves to 0
+    # until Tax Ops configures "nps_employer_pct" via the Super Admin UI.
+    # Also excluded from taxable salary under the New Regime only — see
+    # india.py's _calculate_annual_tax_in.
+    employer_nps            = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -748,8 +845,12 @@ class ContributionRate(Base):
     employer_share       = Column(String(50), nullable=False)   # → r.employer (display string)
     total                = Column(String(50), nullable=False)   # → r.total (display string)
 
-    employee_rate_pct    = Column(Numeric(6, 4), nullable=True)  # e.g. 0.1200 for 12%
-    employer_rate_pct    = Column(Numeric(6, 4), nullable=True)
+    # Widened from Numeric(6,4) to Numeric(7,4) — ZP-TAX-UK-2026-27-001's
+    # small-employer Statutory Family Pay recovery rate is 109% (employers
+    # recover MORE than they paid out), which exceeded the original
+    # column's ~99.9999% ceiling. See migration f4a5b6c7d8e9.
+    employee_rate_pct    = Column(Numeric(7, 4), nullable=True)  # e.g. 0.1200 for 12%
+    employer_rate_pct    = Column(Numeric(7, 4), nullable=True)
     flat_amount          = Column(Numeric(10, 2), nullable=True)  # for flat components like PT
     # One generic slot for a non-numeric configuration value (UK pension
     # calculation basis "QUALIFYING_EARNINGS"/"BASIC_PAY"/"PENSIONABLE_EARNINGS",

@@ -19,6 +19,8 @@ from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.standard import StandardStrategy, evaluate_tax_formula
 from app.modules.payroll.engine.countries import canada as _canada
 from app.modules.payroll.engine.countries.canada import _resolve_ca_bpaf
+from app.modules.payroll.engine.countries.india import calculate_gratuity
+from app.modules.payroll.engine.countries.uk import calculate_ssp, calculate_class_1a_1b_charge, calculate_apprenticeship_levy_period_amount, calculate_employment_allowance_net_liability, calculate_statutory_family_pay, calculate_family_pay_employer_recovery
 import app.modules.payroll.engine.countries.shared as shared
 
 
@@ -43,6 +45,13 @@ class Slab:
     filing_status: Optional[str] = None
     tax_regime: Optional[str] = None
     jurisdiction_state: Optional[str] = None
+    # For PT_FLAT rows (india.py's _resolve_state_pt_bracket) — mirrors
+    # models.TaxSlab.flat_amount, used for a flat-rupee Professional Tax
+    # tier rather than a percentage bracket.
+    flat_amount: Optional[Decimal] = None
+    # Mirrors models.TaxSlab.adjustment_amount — the one-month-override
+    # figure (e.g. Maharashtra's February amount) for this same tier.
+    adjustment_amount: Optional[Decimal] = None
 
 
 @dataclass
@@ -76,7 +85,10 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          mb_he_levy_ytd_remuneration_before=None, nl_hapset_ytd_remuneration_before=None,
          bc_eht_employer_classification=None, qc_hsf_ytd_remuneration_before=None,
          qc_hsf_employer_category=None, date_of_birth=None, pay_date=None,
-         lsvcc_investment_amount=None):
+         lsvcc_investment_amount=None, gender=None, pay_frequency=None,
+         is_director=False, director_ni_method=None, is_final_ni_period=False,
+         ytd_director_ni_gross=None, ytd_director_ni_employee_paid=None,
+         ytd_director_ni_employer_paid=None, tax_residency_status=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -98,8 +110,15 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         bc_eht_employer_classification=bc_eht_employer_classification,
         qc_hsf_ytd_remuneration_before=qc_hsf_ytd_remuneration_before,
         qc_hsf_employer_category=qc_hsf_employer_category,
-        date_of_birth=date_of_birth, pay_date=pay_date,
+        date_of_birth=date_of_birth, pay_date=pay_date, gender=gender,
+        tax_residency_status=tax_residency_status,
         lsvcc_investment_amount=lsvcc_investment_amount,
+        pay_frequency=pay_frequency,
+        is_director=is_director, director_ni_method=director_ni_method,
+        is_final_ni_period=is_final_ni_period,
+        ytd_director_ni_gross=ytd_director_ni_gross,
+        ytd_director_ni_employee_paid=ytd_director_ni_employee_paid,
+        ytd_director_ni_employer_paid=ytd_director_ni_employer_paid,
     )
     return STRATEGY.calculate(ctx)
 
@@ -197,6 +216,109 @@ def test_india_old_regime_standard_deduction_and_rebate_still_apply():
     assert result.tds == 0
 
 
+# ── India Old Regime senior/super-senior age bands (§4.1/§4.2) ──────────
+
+from app.modules.payroll.engine.countries.india import _resolve_old_regime_age_category
+
+IN_OLD_REGIME_SENIOR_MIXED_SLABS = IN_OLD_REGIME_SLABS + [
+    Slab(Decimal("0"),      Decimal("300000"),  Decimal("0"),  tax_regime="Old", filing_status="SENIOR"),
+    Slab(Decimal("300000"), Decimal("500000"),  Decimal("5"),  tax_regime="Old", filing_status="SENIOR"),
+    Slab(Decimal("500000"), Decimal("1000000"), Decimal("20"), tax_regime="Old", filing_status="SENIOR"),
+    Slab(Decimal("1000000"), None,              Decimal("30"), tax_regime="Old", filing_status="SENIOR"),
+    Slab(Decimal("0"),      Decimal("500000"),  Decimal("0"),  tax_regime="Old", filing_status="SUPER_SENIOR"),
+    Slab(Decimal("500000"), Decimal("1000000"), Decimal("20"), tax_regime="Old", filing_status="SUPER_SENIOR"),
+    Slab(Decimal("1000000"), None,              Decimal("30"), tax_regime="Old", filing_status="SUPER_SENIOR"),
+]
+
+
+def test_age_category_dormant_by_default():
+    assert "IN" not in shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES
+    result = _resolve_old_regime_age_category(date(1960, 1, 1), "RESIDENT", date(2026, 6, 1))
+    assert result is None
+
+
+def test_age_category_none_without_date_of_birth_or_pay_date():
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.add("IN")
+    try:
+        assert _resolve_old_regime_age_category(None, "RESIDENT", date(2026, 6, 1)) is None
+        assert _resolve_old_regime_age_category(date(1960, 1, 1), "RESIDENT", None) is None
+    finally:
+        shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.discard("IN")
+
+
+def test_age_category_non_resident_always_ordinary_bands():
+    # §4.2: "senior-citizen basic exemption is resident-specific" — a
+    # 70-year-old non-resident must still get None (ordinary bands).
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.add("IN")
+    try:
+        assert _resolve_old_regime_age_category(date(1956, 1, 1), "NON_RESIDENT", date(2026, 6, 1)) is None
+        assert _resolve_old_regime_age_category(date(1956, 1, 1), None, date(2026, 6, 1)) is None
+    finally:
+        shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.discard("IN")
+
+
+def test_age_category_boundaries():
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.add("IN")
+    try:
+        pay_date = date(2026, 6, 1)  # FY 2026-27, FY-end = 2027-03-31
+        # Turns 59 by FY-end -> ordinary bands.
+        assert _resolve_old_regime_age_category(date(1968, 4, 1), "RESIDENT", pay_date) is None
+        # Turns 60 by FY-end (birthday on/before 31 Mar 2027) -> SENIOR.
+        assert _resolve_old_regime_age_category(date(1967, 3, 31), "RESIDENT", pay_date) == "SENIOR"
+        # Turns 79 by FY-end -> still SENIOR.
+        assert _resolve_old_regime_age_category(date(1948, 3, 31), "RESIDENT", pay_date) == "SENIOR"
+        # Turns 80 by FY-end -> SUPER_SENIOR.
+        assert _resolve_old_regime_age_category(date(1947, 3, 31), "RESIDENT", pay_date) == "SUPER_SENIOR"
+    finally:
+        shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.discard("IN")
+
+
+def test_age_category_birthday_just_after_fy_end_does_not_yet_qualify():
+    # Turns 60 on 1 April 2027 -- one day AFTER the 2026-27 FY ends
+    # (2027-03-31) -- so this pay date's FY doesn't get SENIOR yet.
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.add("IN")
+    try:
+        result = _resolve_old_regime_age_category(date(1967, 4, 1), "RESIDENT", date(2026, 6, 1))
+        assert result is None
+    finally:
+        shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.discard("IN")
+
+
+def test_senior_resident_pays_less_than_non_senior_at_same_income():
+    # Annual gross 700,000 -> taxable 650,000 after the 50k standard
+    # deduction, comfortably above the 500,000 old-regime 87A rebate
+    # ceiling so both employees genuinely owe tax. The only difference
+    # between the slab sets is the 250k-300k slice (Nil for senior,
+    # 5% ordinary) -- senior must owe strictly less than non-senior.
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    def _make_ctx(**kwargs):
+        return _PC(
+            gross=Decimal("700000") / 12, basic=Decimal("700000") / 12, country="IN",
+            rate_map=IN_RATES, slabs=IN_OLD_REGIME_SENIOR_MIXED_SLABS, tax_regime="Old",
+            **kwargs,
+        )
+
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.add("IN")
+    try:
+        senior_ctx = _make_ctx(
+            date_of_birth=date(1961, 1, 1), tax_residency_status="RESIDENT", pay_date=date(2026, 6, 1),
+        )
+        senior_result = STRATEGY.calculate(senior_ctx)
+    finally:
+        shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.discard("IN")
+
+    ordinary_result = STRATEGY.calculate(_make_ctx())
+
+    assert ordinary_result.tds > Decimal("0")
+    assert senior_result.tds > Decimal("0")
+    assert senior_result.tds < ordinary_result.tds
+    # Annual tax gap is exactly 5% of the 50,000 slice (300k senior Nil
+    # ceiling minus 250k ordinary Nil ceiling) -- the only band that
+    # differs between the two slab sets at this income level.
+    assert (ordinary_result.annual_tax - senior_result.annual_tax) == Decimal("2500")
+
+
 def test_india_pf_wage_ceiling_dormant_by_default():
     # ₹30,000 Basic, no ceiling applied by default — PF on the full amount.
     result = calc("IN", 30000, IN_RATES, IN_SLABS, basic=30000)
@@ -221,6 +343,250 @@ def test_india_pf_wage_ceiling_does_not_affect_basic_below_ceiling():
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.add("IN")
     result = calc("IN", 10000, IN_RATES, IN_SLABS, basic=10000)
     assert result.employee_pf == Decimal("1200.00")  # 12% of 10,000 — below the ceiling, unaffected
+
+
+# ── India: Code-wages object + EPS diversion + EDLI ─────────────────────
+# ZP-TAX-IN-2026-27-001 §8/§9 — India Phase 1 of the gap-closure plan.
+
+def test_india_code_wages_dormant_by_default():
+    # Gross 100,000 / Basic 40,000 (matches the document's own §8.2
+    # worked example) — with the switch off, PF stays on Basic alone.
+    result = calc("IN", 100000, IN_RATES, IN_SLABS, basic=40000)
+    assert result.employee_pf == Decimal("4800.00")  # 12% of 40,000
+
+
+def test_india_code_wages_add_back_when_enabled():
+    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.add("IN")
+    # §8.2's own worked example: 100,000 total / 40,000 core / 60,000
+    # excluded / 50,000 cap (50% of 100,000) -> 10,000 add-back ->
+    # 50,000 statutory wages.
+    result = calc("IN", 100000, IN_RATES, IN_SLABS, basic=40000)
+    assert result.employee_pf == Decimal("6000.00")  # 12% of 50,000
+    assert result.employer_pf == Decimal("6000.00")
+
+
+def test_india_code_wages_no_add_back_when_excluded_below_cap():
+    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.add("IN")
+    # Excluded (30,000) is already below the 50,000 cap -> no add-back ->
+    # statutory wages == basic, same as the switch-off case.
+    result = calc("IN", 100000, IN_RATES, IN_SLABS, basic=70000)
+    assert result.employee_pf == Decimal("8400.00")  # 12% of 70,000, unchanged
+
+
+def test_india_eps_zero_until_configured():
+    # No "eps_rate" row configured -> employer_eps stays 0 and the full
+    # employer_pf shows as residual, no hardcoded fallback guessed.
+    result = calc("IN", 20000, IN_RATES, IN_SLABS, basic=20000)
+    assert result.employer_pf == Decimal("2400.00")
+    assert result.employer_eps == Decimal("0")
+    assert result.employer_pf_residual == Decimal("2400.00")
+
+
+def test_india_eps_diversion_when_configured():
+    rates = dict(IN_RATES, eps_rate=Rate(employer_rate_pct=Decimal("8.33")))
+    result = calc("IN", 20000, rates, IN_SLABS, basic=20000)
+    assert result.employer_pf == Decimal("2400.00")       # unchanged: 12% of 20,000
+    assert result.employer_eps == Decimal("1666.00")      # 8.33% of 20,000
+    assert result.employer_pf_residual == Decimal("734.00")  # the rest, computed not hardcoded
+    assert result.employer_eps + result.employer_pf_residual == result.employer_pf
+
+
+def test_india_eps_capped_by_its_own_wage_ceiling():
+    rates = dict(
+        IN_RATES,
+        eps_rate=Rate(employer_rate_pct=Decimal("8.33")),
+        eps_wage_ceiling=Rate(flat_amount=Decimal("15000")),
+    )
+    # Basic 30,000 (above the ₹15,000 EPS ceiling), PF ceiling switch OFF
+    # so employer_pf itself stays uncapped at 12% of 30,000.
+    result = calc("IN", 30000, rates, IN_SLABS, basic=30000)
+    assert result.employer_pf == Decimal("3600.00")
+    assert result.employer_eps == Decimal("1249.50")      # 8.33% of the capped 15,000
+    assert result.employer_pf_residual == Decimal("2350.50")
+
+
+def test_india_edli_zero_until_configured():
+    result = calc("IN", 30000, IN_RATES, IN_SLABS, basic=30000)
+    assert result.employer_edli == Decimal("0")
+
+
+def test_india_edli_when_configured():
+    rates = dict(
+        IN_RATES,
+        edli_rate=Rate(employer_rate_pct=Decimal("0.5")),
+        edli_wage_ceiling=Rate(flat_amount=Decimal("15000")),
+    )
+    # Basic 30,000, capped at EDLI's own ₹15,000 ceiling.
+    result = calc("IN", 30000, rates, IN_SLABS, basic=30000)
+    assert result.employer_edli == Decimal("75.00")  # 0.5% of the capped 15,000
+
+
+# ── India: Gratuity (a termination liability, not a payroll deduction) ──
+
+def test_gratuity_fails_closed_when_min_years_unconfigured():
+    result = calculate_gratuity(date(2018, 1, 1), date(2026, 1, 1), Decimal("26000"), {})
+    assert result["eligible"] is False
+    assert result["gratuity_amount"] == Decimal("0")
+
+
+def test_gratuity_below_minimum_qualifying_years():
+    rates = {"gratuity_min_yrs": Rate(flat_amount=Decimal("5"))}
+    # 3 years of service, minimum is 5 -> not eligible.
+    result = calculate_gratuity(date(2023, 1, 1), date(2026, 1, 1), Decimal("26000"), rates)
+    assert result["eligible"] is False
+
+
+def test_gratuity_computed_correctly_at_ordinary_resignation():
+    rates = {"gratuity_min_yrs": Rate(flat_amount=Decimal("5"))}
+    # Exactly 8 years, 4 months (remainder < 6, no round-up).
+    # 26,000/26 = 1,000/day * 15 days = 15,000/year * 8 years = 120,000.
+    result = calculate_gratuity(date(2017, 9, 1), date(2026, 1, 1), Decimal("26000"), rates)
+    assert result["eligible"] is True
+    assert result["gratuity_amount"] == Decimal("120000.00")
+
+
+def test_gratuity_partial_year_rounds_up_at_six_months():
+    rates = {"gratuity_min_yrs": Rate(flat_amount=Decimal("5"))}
+    # 7 years, exactly 6 months -> rounds up to 8 completed years.
+    result = calculate_gratuity(date(2018, 7, 1), date(2026, 1, 1), Decimal("26000"), rates)
+    assert result["gratuity_amount"] == Decimal("120000.00")  # same as the 8-year case above
+
+
+def test_gratuity_partial_year_does_not_round_up_below_six_months():
+    rates = {"gratuity_min_yrs": Rate(flat_amount=Decimal("5"))}
+    # 7 years, 5 months -> stays 7 completed years, not 8.
+    result = calculate_gratuity(date(2018, 8, 1), date(2026, 1, 1), Decimal("26000"), rates)
+    assert result["gratuity_amount"] == Decimal("105000.00")  # 15,000 * 7
+
+
+def test_gratuity_death_waives_minimum_service_even_when_unconfigured():
+    # Only 2 years of service, no gratuity_min_yrs configured
+    # at all -> still eligible, because DEATH waives the minimum-service
+    # test entirely (a real, well-established Act rule, not a guess).
+    result = calculate_gratuity(date(2024, 1, 1), date(2026, 1, 1), Decimal("26000"), {}, eligibility_event="DEATH")
+    assert result["eligible"] is True
+    assert result["gratuity_amount"] == Decimal("30000.00")  # 15,000 * 2
+
+
+def test_gratuity_fixed_term_uses_pro_rata_fractional_years():
+    # 18 months fixed-term contract -> 1.5 years pro-rata, no min-service
+    # gate and no 6-month rounding (both are for the ordinary path only).
+    result = calculate_gratuity(date(2024, 7, 1), date(2026, 1, 1), Decimal("26000"), {}, is_fixed_term=True)
+    assert result["eligible"] is True
+    assert result["gratuity_amount"] == Decimal("22500.00")  # 15,000 * 1.5
+
+
+MH_PT_FLAT = [
+    Slab(Decimal("0"), Decimal("7500"), rule_type="PT_FLAT", filing_status="MALE", flat_amount=Decimal("0")),
+    Slab(Decimal("7501"), Decimal("10000"), rule_type="PT_FLAT", filing_status="MALE", flat_amount=Decimal("175")),
+    Slab(Decimal("10001"), None, rule_type="PT_FLAT", filing_status="MALE", flat_amount=Decimal("200"), adjustment_amount=Decimal("300")),
+    Slab(Decimal("0"), Decimal("25000"), rule_type="PT_FLAT", filing_status="FEMALE", flat_amount=Decimal("0")),
+    Slab(Decimal("25001"), None, rule_type="PT_FLAT", filing_status="FEMALE", flat_amount=Decimal("200"), adjustment_amount=Decimal("300")),
+]
+
+
+def test_pt_maharashtra_male_bracket():
+    result = calc("IN", 15000, IN_RATES, IN_SLABS, state_slabs=MH_PT_FLAT, gender="MALE")
+    assert result.professional_tax == Decimal("200")
+
+
+def test_pt_maharashtra_female_bracket_different_threshold():
+    # Same 15,000 gross a Male pays ₹200 on above -> Female is still under
+    # her ₹25,000 Nil threshold entirely.
+    result = calc("IN", 15000, IN_RATES, IN_SLABS, state_slabs=MH_PT_FLAT, gender="FEMALE")
+    assert result.professional_tax == Decimal("0")
+
+
+def test_pt_maharashtra_female_above_own_threshold():
+    result = calc("IN", 30000, IN_RATES, IN_SLABS, state_slabs=MH_PT_FLAT, gender="FEMALE")
+    assert result.professional_tax == Decimal("200")
+
+
+def test_pt_maharashtra_february_override_male():
+    result = calc(
+        "IN", 15000, IN_RATES, IN_SLABS, state_slabs=MH_PT_FLAT,
+        gender="MALE", pay_date=date(2027, 2, 15),
+    )
+    assert result.professional_tax == Decimal("300")
+
+
+def test_pt_maharashtra_non_february_uses_ordinary_tier():
+    result = calc(
+        "IN", 15000, IN_RATES, IN_SLABS, state_slabs=MH_PT_FLAT,
+        gender="MALE", pay_date=date(2027, 3, 15),
+    )
+    assert result.professional_tax == Decimal("200")
+
+
+def test_pt_maharashtra_unrecorded_gender_fails_closed_not_a_guess():
+    # No gender recorded -> every candidate tier in this income band is
+    # gender-tagged and none of them can be safely assumed, so this must
+    # fall back to the state/country-level flat PT rate, NOT arbitrarily
+    # charge whichever gender's bracket happens to sort first.
+    result = calc("IN", 15000, IN_RATES, IN_SLABS, state_slabs=MH_PT_FLAT, gender=None)
+    assert result.professional_tax == Decimal("200")  # falls back to IN_RATES' flat country-level "pt" = 200
+
+
+def test_pt_telangana_still_ungated_by_gender_unaffected():
+    # Telangana's original shape (no filing_status/gender tags at all) —
+    # confirms the new gender-tagged path doesn't disturb the existing,
+    # already-shipped Telangana bracket resolution.
+    tg_slabs = [
+        Slab(Decimal("0"), Decimal("15000"), rule_type="PT_FLAT", flat_amount=Decimal("0")),
+        Slab(Decimal("15001"), Decimal("20000"), rule_type="PT_FLAT", flat_amount=Decimal("150")),
+        Slab(Decimal("20001"), None, rule_type="PT_FLAT", flat_amount=Decimal("200")),
+    ]
+    result = calc("IN", 18000, IN_RATES, IN_SLABS, state_slabs=tg_slabs)
+    assert result.professional_tax == Decimal("150")
+
+
+def test_lwf_zero_when_unconfigured():
+    result = calc("IN", 20000, IN_RATES, IN_SLABS, pay_date=date(2027, 1, 15))
+    assert result.employee_lwf == Decimal("0")
+    assert result.employer_lwf == Decimal("0")
+
+
+def test_lwf_charged_only_in_configured_month():
+    ka_lwf_rates = {
+        "lwf_deduct_month": Rate(flat_amount=Decimal("1")),  # January
+        "lwf_employee_amt": Rate(flat_amount=Decimal("50")),
+        "lwf_employer_amt": Rate(flat_amount=Decimal("100")),
+    }
+    result = calc("IN", 20000, IN_RATES, IN_SLABS, state_rate_map=ka_lwf_rates, pay_date=date(2027, 1, 15))
+    assert result.employee_lwf == Decimal("50")
+    assert result.employer_lwf == Decimal("100")
+
+
+def test_lwf_not_charged_outside_configured_month():
+    ka_lwf_rates = {
+        "lwf_deduct_month": Rate(flat_amount=Decimal("1")),  # January
+        "lwf_employee_amt": Rate(flat_amount=Decimal("50")),
+        "lwf_employer_amt": Rate(flat_amount=Decimal("100")),
+    }
+    result = calc("IN", 20000, IN_RATES, IN_SLABS, state_rate_map=ka_lwf_rates, pay_date=date(2027, 6, 15))
+    assert result.employee_lwf == Decimal("0")
+    assert result.employer_lwf == Decimal("0")
+
+
+def test_lwf_reduces_net_pay():
+    ka_lwf_rates = {
+        "lwf_deduct_month": Rate(flat_amount=Decimal("1")),
+        "lwf_employee_amt": Rate(flat_amount=Decimal("50")),
+        "lwf_employer_amt": Rate(flat_amount=Decimal("100")),
+    }
+    with_lwf = calc("IN", 20000, IN_RATES, IN_SLABS, state_rate_map=ka_lwf_rates, pay_date=date(2027, 1, 15))
+    without_lwf = calc("IN", 20000, IN_RATES, IN_SLABS, pay_date=date(2027, 1, 15))
+    assert without_lwf.net_pay - with_lwf.net_pay == Decimal("50")  # only the EMPLOYEE side reduces net pay
+
+
+def test_gratuity_capped_at_configured_max():
+    rates = {
+        "gratuity_min_yrs": Rate(flat_amount=Decimal("5")),
+        "gratuity_max_amt": Rate(flat_amount=Decimal("2000000")),
+    }
+    # A very high last-drawn wage that would otherwise exceed the notified cap.
+    result = calculate_gratuity(date(2000, 1, 1), date(2026, 1, 1), Decimal("500000"), rates)
+    assert result["gratuity_amount"] == Decimal("2000000")  # capped, not the uncapped ~7.5M
 
 
 # ── United States ────────────────────────────────────────────────────────
@@ -743,6 +1109,330 @@ def test_uk_zero_income():
     assert result.net_pay == 0
 
 
+# ── UK: Directors NIC (§9.2 — "do not process a director as an ordinary
+# employee solely because the same percentage rates apply") ─────────────
+
+def test_director_ni_falls_through_to_ordinary_when_no_ytd_tracking():
+    # is_director alone, with no real cumulative data loaded, must NOT
+    # invent a director-specific number — it runs the exact same
+    # calculation as a non-director employee.
+    director = calc("UK", 5000, UK_RATES, UK_SLABS, is_director=True)
+    ordinary = calc("UK", 5000, UK_RATES, UK_SLABS, is_director=False)
+    assert director.ni_employee == ordinary.ni_employee
+    assert director.employer_ni == ordinary.employer_ni
+
+
+def test_director_ni_annual_method_reflects_true_cumulative_position():
+    # First period of the tax year: cumulative gross to date is just this
+    # period's £5,000 — well under the £12,570 annual Primary Threshold
+    # and the £5,000 annual Secondary Threshold, so NO NI is due yet on
+    # the true annual-cumulative basis, unlike the ordinary per-period-
+    # annualized calculation (which would incorrectly show NI every
+    # single month regardless of true year-to-date position).
+    result = calc(
+        "UK", 5000, UK_RATES, UK_SLABS, is_director=True,
+        ytd_director_ni_gross=Decimal("0"),
+        ytd_director_ni_employee_paid=Decimal("0"),
+        ytd_director_ni_employer_paid=Decimal("0"),
+    )
+    assert result.ni_employee == Decimal("0")
+    assert result.employer_ni == Decimal("0")
+
+
+def test_director_ni_annual_method_true_up_against_amount_already_paid():
+    # Cumulative gross before this period: £45,000. This period: £5,000 ->
+    # cumulative £50,000. Due-to-date: employee (50,000-12,570)*8% =
+    # 2,994.40; employer (50,000-5,000)*13.8% = 6,210.00. Already paid
+    # (illustrative prior periods): employee £2,000, employer £6,000 ->
+    # this period's NI is exactly the difference, computed, not guessed.
+    result = calc(
+        "UK", 5000, UK_RATES, UK_SLABS, is_director=True,
+        ytd_director_ni_gross=Decimal("45000"),
+        ytd_director_ni_employee_paid=Decimal("2000"),
+        ytd_director_ni_employer_paid=Decimal("6000"),
+    )
+    assert result.ni_employee == Decimal("994.40")
+    assert result.employer_ni == Decimal("210.00")
+
+
+def test_director_ni_alternative_method_uses_ordinary_calc_until_final_period():
+    # ALTERNATIVE method with real YTD data present, but NOT yet the
+    # final period -> must still match the ordinary per-period
+    # calculation, same as ANY employee, deferring the true-up to the
+    # final period only.
+    alternative = calc(
+        "UK", 5000, UK_RATES, UK_SLABS, is_director=True, director_ni_method="ALTERNATIVE",
+        ytd_director_ni_gross=Decimal("45000"), is_final_ni_period=False,
+    )
+    ordinary = calc("UK", 5000, UK_RATES, UK_SLABS, is_director=False)
+    assert alternative.ni_employee == ordinary.ni_employee
+    assert alternative.employer_ni == ordinary.employer_ni
+
+
+def test_director_ni_alternative_method_true_ups_at_final_period():
+    # Same inputs as the annual-method true-up test, but via ALTERNATIVE
+    # method's final-period reconciliation instead — must produce the
+    # identical result.
+    result = calc(
+        "UK", 5000, UK_RATES, UK_SLABS, is_director=True, director_ni_method="ALTERNATIVE",
+        is_final_ni_period=True,
+        ytd_director_ni_gross=Decimal("45000"),
+        ytd_director_ni_employee_paid=Decimal("2000"),
+        ytd_director_ni_employer_paid=Decimal("6000"),
+    )
+    assert result.ni_employee == Decimal("994.40")
+    assert result.employer_ni == Decimal("210.00")
+
+
+# ── UK: Statutory Sick Pay (a per-episode payment, not a payroll deduction) ──
+
+SSP_RATES = {
+    "ssp_weekly_cap": Rate(flat_amount=Decimal("123.25")),
+    "ssp_awe_pct": Rate(employee_rate_pct=Decimal("80")),
+}
+
+
+def test_ssp_fails_closed_when_unconfigured():
+    result = calculate_ssp(date(2026, 5, 1), 5, 5, Decimal("500"), {})
+    assert result["eligible"] is False
+    assert result["ssp_amount"] == Decimal("0")
+
+
+def test_ssp_fails_closed_before_2026_reform():
+    # Illness starting before 6 April 2026 -> not computable at all (this
+    # document gives no figures for the prior LEL/waiting-day rules).
+    result = calculate_ssp(date(2026, 3, 15), 5, 5, Decimal("500"), SSP_RATES)
+    assert result["eligible"] is False
+
+
+def test_ssp_capped_at_weekly_cap_for_high_earners():
+    # AWE 1,000/week -> 80% = 800, well above the £123.25 cap -> capped.
+    result = calculate_ssp(date(2026, 5, 1), 5, 5, Decimal("1000"), SSP_RATES)
+    assert result["eligible"] is True
+    assert result["ssp_amount"] == Decimal("123.25")  # 5 qualifying days = a full week
+
+
+def test_ssp_awe_based_amount_when_lower_than_cap():
+    # AWE 100/week -> 80% = 80, below the £123.25 cap -> AWE-based amount applies.
+    result = calculate_ssp(date(2026, 5, 1), 5, 5, Decimal("100"), SSP_RATES)
+    assert result["ssp_amount"] == Decimal("80.00")
+
+
+def test_ssp_matches_document_reference_table_five_day_week():
+    # §12.1's own published reference: 5 qualifying days/week -> £24.65/day
+    # (123.25 / 5, a clean division with no rounding ambiguity).
+    result = calculate_ssp(date(2026, 5, 1), 1, 5, Decimal("1000"), SSP_RATES)
+    assert result["ssp_amount"] == Decimal("24.65")
+
+
+def test_ssp_prorates_across_partial_qualifying_days_in_period():
+    # Same 5-day week, but only 3 sick days actually fall in this pay period.
+    result = calculate_ssp(date(2026, 5, 1), 3, 5, Decimal("1000"), SSP_RATES)
+    assert result["ssp_amount"] == Decimal("73.95")  # 24.65 * 3
+
+
+# ── UK: Statutory Family Payments (SMP/SPP/SAP/ShPP/SPBP/SNCP) ──────────
+
+FAM_PAY_RATES = {
+    "fam_pay_awe_pct": Rate(employee_rate_pct=Decimal("90")),
+    "fam_pay_flat_rate": Rate(flat_amount=Decimal("194.32")),
+}
+FAM_PAY_RECOVERY_RATES = {
+    "fam_pay_recov_thresh": Rate(flat_amount=Decimal("45000")),
+    "fam_pay_recov_small": Rate(employer_rate_pct=Decimal("109")),
+    "fam_pay_recov_std": Rate(employer_rate_pct=Decimal("92")),
+}
+
+
+def test_family_pay_fails_closed_when_unconfigured():
+    result = calculate_statutory_family_pay("SMP", 1, Decimal("500"), {})
+    assert result["eligible"] is False
+    assert result["weekly_amount"] == Decimal("0")
+
+
+def test_family_pay_unknown_payment_type_fails_closed():
+    result = calculate_statutory_family_pay("SXX", 1, Decimal("500"), FAM_PAY_RATES)
+    assert result["eligible"] is False
+
+
+def test_smp_first_six_weeks_uncapped_at_ninety_pct_awe():
+    # First 6 weeks: 90% of AWE, no flat-rate comparison at all — even
+    # when 90% of AWE is well above the £194.32 standard rate.
+    result = calculate_statutory_family_pay("SMP", 3, Decimal("1000"), FAM_PAY_RATES)
+    assert result["eligible"] is True
+    assert result["weekly_amount"] == Decimal("900.00")
+
+
+def test_smp_week_seven_onward_capped_at_standard_rate():
+    result = calculate_statutory_family_pay("SMP", 7, Decimal("1000"), FAM_PAY_RATES)
+    assert result["weekly_amount"] == Decimal("194.32")
+
+
+def test_smp_week_seven_onward_uses_awe_when_lower_than_standard_rate():
+    result = calculate_statutory_family_pay("SMP", 7, Decimal("100"), FAM_PAY_RATES)
+    assert result["weekly_amount"] == Decimal("90.00")
+
+
+def test_sap_shares_smp_first_six_weeks_uncapped_shape():
+    result = calculate_statutory_family_pay("SAP", 1, Decimal("1000"), FAM_PAY_RATES)
+    assert result["weekly_amount"] == Decimal("900.00")
+
+
+def test_spp_has_no_first_six_weeks_phase_even_in_week_one():
+    # SPP (and ShPP/SPBP/SNCP) always use the standard capped rate — no
+    # uncapped early-weeks phase like SMP/SAP.
+    result = calculate_statutory_family_pay("SPP", 1, Decimal("1000"), FAM_PAY_RATES)
+    assert result["weekly_amount"] == Decimal("194.32")
+
+
+def test_shpp_spbp_sncp_all_use_standard_capped_rate():
+    for payment_type in ("SHPP", "SPBP", "SNCP"):
+        result = calculate_statutory_family_pay(payment_type, 1, Decimal("1000"), FAM_PAY_RATES)
+        assert result["weekly_amount"] == Decimal("194.32"), payment_type
+
+
+def test_family_pay_recovery_fails_closed_when_unconfigured():
+    result = calculate_family_pay_employer_recovery(Decimal("50000"), Decimal("1000"), {})
+    assert result["eligible"] is False
+    assert result["recovery_amount"] == Decimal("0")
+
+
+def test_family_pay_recovery_standard_rate_above_threshold():
+    result = calculate_family_pay_employer_recovery(Decimal("50000"), Decimal("1000"), FAM_PAY_RECOVERY_RATES)
+    assert result["eligible"] is True
+    assert result["recovery_amount"] == Decimal("920.00")  # 92%
+
+
+def test_family_pay_recovery_small_employer_rate_at_or_below_threshold():
+    result = calculate_family_pay_employer_recovery(Decimal("45000"), Decimal("1000"), FAM_PAY_RECOVERY_RATES)
+    assert result["recovery_amount"] == Decimal("1090.00")  # 109%, boundary inclusive
+
+
+def test_family_pay_recovery_small_employer_rate_well_below_threshold():
+    result = calculate_family_pay_employer_recovery(Decimal("10000"), Decimal("1000"), FAM_PAY_RECOVERY_RATES)
+    assert result["recovery_amount"] == Decimal("1090.00")  # 109%
+
+
+# ── UK: Class 1A / Class 1B — employer-only event/annual charges ────────
+
+C1A_1B_RATES = {
+    "c1a_benefits_rate": Rate(employer_rate_pct=Decimal("15")),
+    "c1a_term_rate": Rate(employer_rate_pct=Decimal("15")),
+    "c1a_term_thresh": Rate(flat_amount=Decimal("30000")),
+    "c1a_testim_rate": Rate(employer_rate_pct=Decimal("15")),
+    "c1a_testim_thresh": Rate(flat_amount=Decimal("100000")),
+    "c1b_psa_rate": Rate(employer_rate_pct=Decimal("15")),
+}
+
+
+def test_class1a_benefits_charges_full_amount_no_threshold():
+    result = calculate_class_1a_1b_charge("BENEFITS", Decimal("10000"), C1A_1B_RATES)
+    assert result["eligible"] is True
+    assert result["charge_amount"] == Decimal("1500.00")
+
+
+def test_class1a_termination_award_charges_only_excess_above_30000():
+    result = calculate_class_1a_1b_charge("TERMINATION_AWARDS", Decimal("50000"), C1A_1B_RATES)
+    assert result["charge_amount"] == Decimal("3000.00")  # 15% of (50,000 - 30,000)
+
+
+def test_class1a_termination_award_zero_below_threshold():
+    result = calculate_class_1a_1b_charge("TERMINATION_AWARDS", Decimal("20000"), C1A_1B_RATES)
+    assert result["charge_amount"] == Decimal("0")
+
+
+def test_class1a_sporting_testimonial_charges_only_excess_above_100000():
+    result = calculate_class_1a_1b_charge("SPORTING_TESTIMONIAL", Decimal("150000"), C1A_1B_RATES)
+    assert result["charge_amount"] == Decimal("7500.00")  # 15% of (150,000 - 100,000)
+
+
+def test_class1b_psa_charges_full_amount_no_threshold():
+    result = calculate_class_1a_1b_charge("PSA", Decimal("5000"), C1A_1B_RATES)
+    assert result["charge_amount"] == Decimal("750.00")
+
+
+def test_class1a_1b_fails_closed_when_rate_unconfigured():
+    result = calculate_class_1a_1b_charge("BENEFITS", Decimal("10000"), {})
+    assert result["eligible"] is False
+    assert result["charge_amount"] == Decimal("0")
+
+
+def test_class1a_1b_fails_closed_when_threshold_unconfigured():
+    rates = {"c1a_term_rate": Rate(employer_rate_pct=Decimal("15"))}  # no c1a_term_thresh
+    result = calculate_class_1a_1b_charge("TERMINATION_AWARDS", Decimal("50000"), rates)
+    assert result["eligible"] is False
+
+
+def test_class1a_1b_unknown_charge_type_fails_closed():
+    result = calculate_class_1a_1b_charge("SOMETHING_ELSE", Decimal("10000"), C1A_1B_RATES)
+    assert result["eligible"] is False
+
+
+# ── UK: Apprenticeship Levy — org-level, cumulative-telescoped ──────────
+
+LEVY_RATES = {
+    "appr_levy_rate": Rate(employer_rate_pct=Decimal("0.5")),
+    "appr_levy_allowance": Rate(flat_amount=Decimal("15000")),
+}
+
+
+def test_apprenticeship_levy_matches_document_worked_example():
+    # §14's own worked example: £4,000,000 standalone pay bill, full
+    # £15,000 allowance -> gross levy £20,000, annual net levy £5,000.
+    # Whole year charged in one go (ytd_before = 0).
+    result = calculate_apprenticeship_levy_period_amount(Decimal("4000000"), Decimal("0"), LEVY_RATES)
+    assert result == Decimal("5000.00")
+
+
+def test_apprenticeship_levy_telescopes_correctly_across_periods():
+    # First half of the year: £2,000,000 paid -> gross levy £10,000,
+    # still fully absorbed by the £15,000 allowance -> £0 net so far.
+    first_half = calculate_apprenticeship_levy_period_amount(Decimal("2000000"), Decimal("0"), LEVY_RATES)
+    assert first_half == Decimal("0")
+    # Second half: another £2,000,000 -> cumulative £4,000,000 -> the
+    # full £5,000 annual net levy is due, all absorbed in this period
+    # since none of it was charged in the first half.
+    second_half = calculate_apprenticeship_levy_period_amount(Decimal("2000000"), Decimal("2000000"), LEVY_RATES)
+    assert second_half == Decimal("5000.00")
+    assert first_half + second_half == Decimal("5000.00")  # telescopes to the correct annual total
+
+
+def test_apprenticeship_levy_fails_closed_when_unconfigured():
+    result = calculate_apprenticeship_levy_period_amount(Decimal("4000000"), Decimal("0"), {})
+    assert result is None
+
+
+# ── UK: Employment Allowance — a reporting/remittance-level offset, ─────
+# never a per-payslip figure ──────────────────────────────────────────
+
+EMPL_ALLOWANCE_RATES = {"empl_allowance_cap": Rate(flat_amount=Decimal("10500"))}
+
+
+def test_employment_allowance_not_eligible_when_not_claimed():
+    result = calculate_employment_allowance_net_liability(Decimal("20000"), False, EMPL_ALLOWANCE_RATES)
+    assert result["eligible"] is False
+    assert result["net_liability"] == Decimal("20000")  # unreduced — employer never claimed it
+
+
+def test_employment_allowance_reduces_liability_when_claimed():
+    result = calculate_employment_allowance_net_liability(Decimal("20000"), True, EMPL_ALLOWANCE_RATES)
+    assert result["eligible"] is True
+    assert result["net_liability"] == Decimal("9500.00")  # 20,000 - 10,500
+    assert result["allowance_remaining"] == Decimal("0")
+
+
+def test_employment_allowance_fully_absorbs_low_cumulative_ni():
+    result = calculate_employment_allowance_net_liability(Decimal("6000"), True, EMPL_ALLOWANCE_RATES)
+    assert result["net_liability"] == Decimal("0")
+    assert result["allowance_remaining"] == Decimal("4500.00")  # 10,500 - 6,000
+
+
+def test_employment_allowance_fails_closed_when_cap_unconfigured():
+    result = calculate_employment_allowance_net_liability(Decimal("20000"), True, {})
+    assert result["eligible"] is False
+    assert result["net_liability"] == Decimal("20000")  # unreduced, not a guessed cap
+
+
 # ── Australia / Germany / Canada ─────────────────────────────────────────
 
 def test_australia_super_and_medicare_levy():
@@ -986,6 +1676,7 @@ def _restore_ca_credit_method_switch():
     original_surtax = set(shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES)
     original_bc_reduction = set(shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES)
     original_in_pf_ceiling = set(shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES)
+    original_in_code_wages = set(shared._IN_CODE_WAGES_ENABLED_COUNTRIES)
     original_us_state_tax = set(shared._US_STATE_TAX_ENABLED_STATES)
     original_us_state_program = set(shared._US_STATE_PROGRAM_ENABLED_STATES)
     yield
@@ -1009,6 +1700,8 @@ def _restore_ca_credit_method_switch():
     shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES.update(original_bc_reduction)
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.clear()
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.update(original_in_pf_ceiling)
+    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.clear()
+    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.update(original_in_code_wages)
     shared._US_STATE_TAX_ENABLED_STATES.clear()
     shared._US_STATE_TAX_ENABLED_STATES.update(original_us_state_tax)
     shared._US_STATE_PROGRAM_ENABLED_STATES.clear()
