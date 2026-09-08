@@ -253,7 +253,19 @@ def get_jurisdiction_onboarding_block_reason(
     NOT payroll.service._normalize_country — that function silently
     defaults unrecognized/empty input to "IN", which would be actively
     dangerous at a rejection gate (an unrecognized country would silently
-    pass as if it were India)."""
+    pass as if it were India).
+
+    Phase 8BK (main<->Germany merge): Germany ("DE") is fully implemented
+    via its own dedicated, registry/PAP-driven calculator
+    (engine/countries/germany.py) rather than the canonical-JurisdictionPack
+    mechanism this gate otherwise checks — building a parallel
+    JurisdictionPack for Germany purely to satisfy this gate would create
+    a second, redundant configuration system for the same jurisdiction
+    (exactly what this project's own architecture rules elsewhere forbid).
+    resolve_tax_configuration's own docstring already establishes that an
+    absent canonical pack must "never raise... keep working exactly as
+    today" for any such jurisdiction — DE is one, so it is exempted here
+    rather than blocked."""
     from app.core.jurisdiction import get_jurisdiction_code
 
     code = get_jurisdiction_code(country)
@@ -262,6 +274,8 @@ def get_jurisdiction_onboarding_block_reason(
             f"'{country}' is not a supported payroll jurisdiction yet — "
             "please contact your administrator or select a supported country."
         )
+    if code == "DE":
+        return None
     rates, slabs, pack = resolve_tax_configuration(db, code, state=state, tax_regime=None, payroll_date=as_of)
     if pack is None or not (rates or slabs):
         return (

@@ -25,14 +25,16 @@ import os
 import os as _os
 import re
 import copy
+import hashlib
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func as sa_func, tuple_, or_, and_, case
+from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
     PayrollEmployee, EmploymentType, EmployeeStatus,
@@ -44,10 +46,18 @@ from app.modules.payroll.models import (
     PAYROLL_STATUS_ORDER,
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate,
     ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
-    StatutoryFilingCalendar, PayrollYtdAccumulator, OrganizationYtdAccumulator,
+    StatutoryFilingCalendar,     EmployeeStatutoryProfile, PapAlgorithmAsset, GermanyHealthFund,
+    GermanyContributionCeiling, GermanyPvConfiguration, GermanyPapRelease,
+    GermanyElstamChangeListBatch, GermanyElstamImportAttempt, GermanyEarningTaxabilityRule,
+    GermanyHealthFundU1Tariff, GermanyOvertimeWorkRecord,
+    GermanyOvertimePremiumCategory, GermanyOvertimeGrundlohnCap, GermanyOvertimeTimeSegment,
+    GermanyOvertimeWageTaxResult, GermanyOvertimeSocialInsuranceResult,
+    GermanyOvertimePremiumComponent, GermanyAccidentInsuranceProfile,
+    GermanyChurchTaxException, PayrollYtdAccumulator, OrganizationYtdAccumulator,
     EmployeeEstablishment,
 )
-from app.modules.payroll.employee_validation import get_employee_validation_strategy
+from app.modules.payroll.engine.germany_pap import production_gate as pap_production_gate
+from app.modules.payroll.employee_validation import get_employee_validation_strategy, _STRATEGIES
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
     EmployeeCreate, EmployeeUpdate, BulkEmployeeItem, BulkEmployeeRequest,
@@ -56,9 +66,13 @@ from app.modules.payroll.schemas import (
     JurisdictionPackUpsert, CanonicalTaxSlabUpsert, CanonicalContributionRateUpsert,
     EmployerTaxProfileUpsert, ReciprocityRuleUpsert, SourceArtifactCreate, LocalityRateUpsert,
     ReportTemplateUpsert, ReportTemplateComponentUpsert, ReportTemplateFieldUpsert,
-    FilingCalendarUpsert,
+    FilingCalendarUpsert,     EmployeeStatutoryProfileCreate, GermanyHealthFundCreate,
+    GermanyContributionCeilingCreate, GermanyPvConfigurationCreate,
+    GermanyElstamChangeListBatchCreate, GermanyElstamChangeListBatchStatusUpdate,
+    GermanyEarningTaxabilityRuleCreate, GermanyHealthFundU1TariffCreate,
+    GermanyOvertimeWorkRecordCreate,
 )
-from app.core.exceptions import NotFoundException, BadRequestException
+from app.core.exceptions import NotFoundException, BadRequestException, GermanyPapGateBlockedException
 from fastapi import HTTPException, status as http_status
 
 # Sourced from engine/standard.py — the real calculation engine — instead of
@@ -665,18 +679,39 @@ def record_tax_audit(
     jurisdiction_pack_id: Optional[int] = None, tax_version: Optional[str] = None,
     legal_reference: Optional[str] = None, old_value: Optional[dict] = None,
     new_value: Optional[dict] = None, reason: Optional[str] = None,
+    auto_commit: bool = True,
 ) -> None:
     """One canonical write path for every mutation to a Super-Admin-owned
     canonical tax/contribution/pack row. Called explicitly at each mutation
     site (matching this module's existing style of explicit service
     functions) rather than via an ORM event hook, so every audit entry is
-    traceable to the exact line that produced it."""
+    traceable to the exact line that produced it.
+
+    Phase 8AV: `auto_commit=False` lets a caller fold this audit INSERT
+    into the SAME transaction/commit as a preceding financial write,
+    instead of this function's own independent commit creating a second,
+    separate durability boundary. Found needed for real:
+    _reapply_attached_germany_overtime_deltas previously committed its
+    financial state (gross_pay/net_pay/allowance/component FK, all
+    together in ONE commit) and then called this function, whose own
+    separate `db.commit()` meant a crash between the two commits would
+    leave the financial change durably persisted with NO corresponding
+    audit row for it — a real, if narrow, auditability gap (not a
+    financial-correctness one — the money itself is never left partially
+    applied, since the financial write is genuinely one atomic commit).
+    Every OTHER of this function's 77 existing call sites keeps the
+    default (`auto_commit=True`, unchanged behavior) — this is additive,
+    not a behavior change for any caller that doesn't pass the new
+    argument."""
     db.add(TaxConfigurationAudit(
         actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id,
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=tax_version,
         legal_reference=legal_reference, old_value=old_value, new_value=new_value, reason=reason,
     ))
-    db.commit()
+    if auto_commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def list_tax_configuration_audit(
@@ -1419,7 +1454,18 @@ def upsert_employer_tax_profile(db: Session, data: EmployerTaxProfileUpsert, act
     Audited via the SAME record_tax_audit trail as canonical rates/slabs
     (jurisdiction_pack_id left None — this table has no pack) — before
     this, a Super Admin changing an employer's SUI rate left no history
-    of who changed what, unlike every canonical rate edit."""
+    of who changed what, unlike every canonical rate edit.
+
+    Phase 8AJ: rate_source="EMPLOYER_NOTICE" (a profile whose authority
+    is a specific agency/carrier notice document — e.g. a German
+    Berufsgenossenschaft Beitragsbescheid) must carry sourceDocumentId.
+    STATE_DEFAULT/NEW_EMPLOYER profiles are unaffected — those
+    legitimately have no single notice document to attach."""
+    if data.rateSource == "EMPLOYER_NOTICE" and not data.sourceDocumentId:
+        raise BadRequestException(
+            "An EMPLOYER_NOTICE-sourced profile must reference its source notice document "
+            "(sourceDocumentId) — record it as a SourceArtifact first."
+        )
     fields = dict(
         organization_id=data.organizationId, jurisdiction_id=data.jurisdictionId,
         component_code=data.componentCode, taxable_wage_base=data.taxableWageBase,
@@ -1467,6 +1513,233 @@ def delete_employer_tax_profile(db: Session, profile_id: int, actor_id: Optional
         db, actor_id=actor_id, action="delete", entity_type="employer_tax_profile", entity_id=profile_id,
         old_value=old_value, new_value=None,
     )
+
+
+# ── Germany: Accident Insurance Profile maker-checker (Phase 8AJ, 2nd pass)
+# See GermanyAccidentInsuranceProfile's own model docstring for why this
+# is a separate table from EmployerTaxProfile above. Status vocabulary
+# and transition rules are IDENTICAL to GermanyHealthFund's
+# (_HEALTH_FUND_ALLOWED_TRANSITIONS) — copied, not inherited, since the
+# two models are otherwise unrelated, matching this module's own
+# established convention of duplicating this exact small state machine
+# per registry (see also GermanyContributionCeiling/GermanyPvConfiguration).
+
+_ACCIDENT_INSURANCE_PROFILE_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_ACCIDENT_INSURANCE_PROFILE_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_ACCIDENT_INSURANCE_PROFILE_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_accident_insurance_profile(row: GermanyAccidentInsuranceProfile) -> None:
+    if row.status not in _ACCIDENT_INSURANCE_PROFILE_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Accident insurance profile #{row.id} (org {row.organization_id}) is {row.status} — no longer "
+            "editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_accident_insurance_profile_no_overlap(
+    db: Session, organization_id: int, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Same overlap-prevention shape as _validate_health_fund_no_overlap,
+    keyed by organization_id instead of health_fund_id (this registry's
+    identity — one org may have several historical versions, but never
+    two overlapping ones)."""
+    query = db.query(GermanyAccidentInsuranceProfile).filter(
+        GermanyAccidentInsuranceProfile.organization_id == organization_id,
+    )
+    if exclude_id is not None:
+        query = query.filter(GermanyAccidentInsuranceProfile.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing accident "
+                f"insurance profile #{existing.id} for this organization ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_germany_accident_insurance_profiles(
+    db: Session, organization_id: Optional[int] = None,
+) -> List[GermanyAccidentInsuranceProfile]:
+    query = db.query(GermanyAccidentInsuranceProfile)
+    if organization_id is not None:
+        query = query.filter(GermanyAccidentInsuranceProfile.organization_id == organization_id)
+    return query.order_by(GermanyAccidentInsuranceProfile.organization_id, GermanyAccidentInsuranceProfile.effective_from.desc()).all()
+
+
+def get_germany_accident_insurance_profile_by_id(db: Session, record_id: int) -> GermanyAccidentInsuranceProfile:
+    row = db.query(GermanyAccidentInsuranceProfile).filter(GermanyAccidentInsuranceProfile.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyAccidentInsuranceProfile", record_id)
+    return row
+
+
+def create_germany_accident_insurance_profile_record(
+    db: Session, data: "GermanyAccidentInsuranceProfileCreate", actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyAccidentInsuranceProfile:
+    """Append a new effective-dated DRAFT accident-insurance profile
+    version for one organization. Never updates an existing row — same
+    auto-close-previous-open-row behavior as create_health_fund_record."""
+    if not data.carrier_name or not data.carrier_name.strip():
+        raise BadRequestException("carrierName is required.")
+    if data.employer_rate_pct is None or data.employer_rate_pct < 0:
+        raise BadRequestException("employerRatePct must be a non-negative value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyAccidentInsuranceProfile)
+        .filter(
+            GermanyAccidentInsuranceProfile.organization_id == data.organization_id,
+            GermanyAccidentInsuranceProfile.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_accident_insurance_profile_no_overlap(
+        db, data.organization_id, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyAccidentInsuranceProfile(
+        organization_id=data.organization_id, carrier_name=data.carrier_name,
+        agency_account_id=data.agency_account_id, risk_class_description=data.risk_class_description,
+        employer_rate_pct=data.employer_rate_pct,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_accident_insurance_profile", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "organization_id": data.organization_id, "carrier_name": data.carrier_name,
+            "employer_rate_pct": str(data.employer_rate_pct),
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def _materialize_accident_insurance_profile_to_employer_tax_profile(
+    db: Session, row: GermanyAccidentInsuranceProfile, actor_id: Optional[int],
+) -> None:
+    """Called ONLY when a profile reaches PUBLISHED. Writes the same
+    values into the existing EmployerTaxProfile mechanism
+    (jurisdiction_id="DE", component_code="DE_ACCIDENT_INSURANCE") the
+    Germany engine already reads (engine/countries/germany.py,
+    ctx.employer_tax_profiles) — unchanged by this phase. This keeps the
+    engine's read path exactly as it was; only the WRITE path gains a
+    maker-checker gate in front of it."""
+    existing = (
+        db.query(EmployerTaxProfile)
+        .filter(
+            EmployerTaxProfile.organization_id == row.organization_id,
+            EmployerTaxProfile.jurisdiction_id == "DE",
+            EmployerTaxProfile.component_code == "DE_ACCIDENT_INSURANCE",
+        )
+        .first()
+    )
+    fields = dict(
+        organization_id=row.organization_id, jurisdiction_id="DE", component_code="DE_ACCIDENT_INSURANCE",
+        taxable_wage_base=Decimal("0"), rate_source="EMPLOYER_NOTICE",
+        employer_rate_pct=row.employer_rate_pct,
+        effective_from=row.effective_from, effective_to=row.effective_to,
+        agency_account_id=row.agency_account_id, reimbursable_status="CONTRIBUTORY",
+        source_document_id=row.authority_source_id,
+    )
+    if existing:
+        for k, v in fields.items():
+            setattr(existing, k, v)
+    else:
+        db.add(EmployerTaxProfile(**fields))
+    db.commit()
+
+
+def set_germany_accident_insurance_profile_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyAccidentInsuranceProfile:
+    """Advance an accident-insurance profile's lifecycle — identical
+    maker-checker principle to set_health_fund_status (distinct approver
+    + linked source evidence required before PUBLISHED). On a successful
+    transition TO PUBLISHED, also materializes the values into
+    EmployerTaxProfile (see helper above) so the already-existing engine
+    read path picks them up — the backend remains the sole authority for
+    when that happens, never the frontend."""
+    row = get_germany_accident_insurance_profile_by_id(db, record_id)
+    if status not in _ACCIDENT_INSURANCE_PROFILE_VALID_STATUSES:
+        raise BadRequestException(f"Unknown accident insurance profile status: {status!r}.")
+    if status not in _ACCIDENT_INSURANCE_PROFILE_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move an accident insurance profile from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This accident insurance profile needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "An accident insurance profile cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record the employer's own notice via "
+                "/compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_accident_insurance_profile",
+        entity_id=row.id, old_value={"status": old_status}, new_value={"status": status},
+    )
+    if status == "PUBLISHED":
+        _materialize_accident_insurance_profile_to_employer_tax_profile(db, row, actor_id)
+    return row
+
+
+def set_germany_accident_insurance_profile_approver(
+    db: Session, record_id: int, actor_id: Optional[int] = None,
+) -> GermanyAccidentInsuranceProfile:
+    """Sets approved_by_id — same distinct, lightweight action as
+    set_health_fund_approver. Auto-advances VERIFIED -> APPROVED only."""
+    row = get_germany_accident_insurance_profile_by_id(db, record_id)
+    _require_editable_accident_insurance_profile(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_accident_insurance_profile", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
 
 
 # ── US: cross-state reciprocity ──────────────────────────────────────────
@@ -1639,6 +1912,2763 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
         old_value={"reviewerId": None}, new_value={"reviewerId": reviewer_id},
     )
     return row
+
+
+# ── Germany: Church tax (Kirchensteuer) Land matrix (Phase 8O) ──────────
+# Read-only surfacing of germany_pap.core.CHURCH_TAX_LAND_RATES — spec §8.
+# Deliberately NOT a new DB-backed registry/lifecycle: there is no
+# effective-dated, source-evidenced church-tax table anywhere in this
+# codebase (the rates are a bare Python dict, cited to spec §8 directly in
+# code), and this phase's own instruction is "if backend support is
+# missing, display NOT IMPLEMENTED rather than pretending it is
+# supported" — inventing a DRAFT/APPROVED/PUBLISHED lifecycle for data
+# that has neither a migration nor a SourceArtifact linkage would be
+# exactly that pretense. This function exists only so the Super Admin UI
+# has a real endpoint to read the actual values from, instead of
+# hardcoding them a second time in the frontend.
+def get_church_tax_matrix() -> dict:
+    from app.modules.payroll.engine.germany_pap.core import CHURCH_TAX_LAND_RATES
+
+    return {
+        "laender": [
+            {"code": code, "ratePct": str(rate)} for code, rate in sorted(CHURCH_TAX_LAND_RATES.items())
+        ],
+        "sourceStatus": "HARDCODED_CONSTANT — no DB-backed registry/lifecycle/source-evidence linkage exists",
+        "knownGaps": [
+            "Bad Wimpfen (Baden-Württemberg) Roman Catholic denomination/location exception — "
+            "IMPLEMENTED (Phase 8AM) as a SEPARATE, additive, source-evidenced maker-checker registry "
+            "(GermanyChurchTaxException — see /compliance/germany/church-tax-exceptions), not by editing "
+            "this hardcoded per-Land matrix, which remains correct and unchanged for the ordinary case. "
+            "Fresh primary-source research located a Tier-2-corroborated (multiple independent reputable "
+            "German tax-advisory publishers directly quoting the same official circular reference numbers, "
+            "stable 2016-2026 — see docs/PHASE_8AM_..._REPORT.md) confirmation that the Diocese of Mainz's "
+            "Baden-Württemberg enclave (encompassing Bad Wimpfen, PLZ 74206) applies a 9% Roman Catholic "
+            "Kirchensteuer rate, not Baden-Württemberg's general 8%. An employee only resolves this "
+            "exception rate when a matching PUBLISHED GermanyChurchTaxException row exists for their "
+            "recorded (Land, denomination, municipality postal code) as of the payroll date — every other "
+            "employee continues to resolve the ordinary Land rate exactly as before this phase.",
+        ],
+    }
+
+
+# ── Germany: Church Tax Exception registry (Phase 8AM) ──────────────────
+# See models.GermanyChurchTaxException's own docstring for the legal
+# background (Bad Wimpfen / Diocese of Mainz) and why this is a SEPARATE,
+# additive table rather than a rewrite of CHURCH_TAX_LAND_RATES. Global
+# (no organization_id) — status vocabulary/transitions copied from
+# GermanyHealthFund's (not GermanyAccidentInsuranceProfile's org-scoped
+# one), matching this module's own established convention of duplicating
+# this exact small state machine per registry.
+
+_CHURCH_TAX_EXCEPTION_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_CHURCH_TAX_EXCEPTION_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_CHURCH_TAX_EXCEPTION_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_church_tax_exception(row: GermanyChurchTaxException) -> None:
+    if row.status not in _CHURCH_TAX_EXCEPTION_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Church tax exception #{row.id} ({row.land_code}/{row.denomination}/"
+            f"{row.municipality_postal_code}) is {row.status} — no longer editable. Record a new "
+            "effective-dated version instead."
+        )
+
+
+def _validate_church_tax_exception_no_overlap(
+    db: Session, land_code: str, denomination: str, municipality_postal_code: str,
+    effective_from: date, effective_to: Optional[date], exclude_id: Optional[int] = None,
+) -> None:
+    """Same "no two overlapping ranges for the same identity" check as
+    _validate_health_fund_no_overlap, keyed by the composite natural key
+    (land_code, denomination, municipality_postal_code) this registry
+    actually needs — a documented exception is scoped to a specific
+    denomination AND a specific municipality within a specific Land, not
+    to the Land alone."""
+    query = db.query(GermanyChurchTaxException).filter(
+        GermanyChurchTaxException.land_code == land_code,
+        GermanyChurchTaxException.denomination == denomination,
+        GermanyChurchTaxException.municipality_postal_code == municipality_postal_code,
+    )
+    if exclude_id is not None:
+        query = query.filter(GermanyChurchTaxException.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing church tax "
+                f"exception #{existing.id} for {land_code}/{denomination}/{municipality_postal_code} "
+                f"({existing.effective_from} to {existing.effective_to or 'open-ended'}). Close or adjust "
+                "that record first."
+            )
+
+
+def list_germany_church_tax_exceptions(
+    db: Session, land_code: Optional[str] = None,
+) -> List[GermanyChurchTaxException]:
+    query = db.query(GermanyChurchTaxException)
+    if land_code:
+        query = query.filter(GermanyChurchTaxException.land_code == land_code)
+    return query.order_by(
+        GermanyChurchTaxException.land_code, GermanyChurchTaxException.municipality_postal_code,
+        GermanyChurchTaxException.effective_from.desc(),
+    ).all()
+
+
+def get_germany_church_tax_exception_by_id(db: Session, record_id: int) -> GermanyChurchTaxException:
+    row = db.query(GermanyChurchTaxException).filter(GermanyChurchTaxException.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyChurchTaxException", record_id)
+    return row
+
+
+def create_germany_church_tax_exception_record(
+    db: Session, data: "GermanyChurchTaxExceptionCreate", actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyChurchTaxException:
+    """Append a new effective-dated DRAFT church-tax-exception version.
+    Never updates an existing row — same auto-close-previous-open-row
+    behavior as create_health_fund_record."""
+    if not data.land_code or not data.land_code.strip():
+        raise BadRequestException("landCode is required.")
+    if not data.denomination or not data.denomination.strip():
+        raise BadRequestException("denomination is required.")
+    if not data.municipality_postal_code or not data.municipality_postal_code.strip():
+        raise BadRequestException("municipalityPostalCode is required.")
+    if data.exception_rate_pct is None or data.exception_rate_pct < 0:
+        raise BadRequestException("exceptionRatePct must be a non-negative value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyChurchTaxException)
+        .filter(
+            GermanyChurchTaxException.land_code == data.land_code,
+            GermanyChurchTaxException.denomination == data.denomination,
+            GermanyChurchTaxException.municipality_postal_code == data.municipality_postal_code,
+            GermanyChurchTaxException.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_church_tax_exception_no_overlap(
+        db, data.land_code, data.denomination, data.municipality_postal_code,
+        data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyChurchTaxException(
+        land_code=data.land_code, denomination=data.denomination,
+        municipality_postal_code=data.municipality_postal_code,
+        scope_description=data.scope_description, exception_rate_pct=data.exception_rate_pct,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_church_tax_exception", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "land_code": data.land_code, "denomination": data.denomination,
+            "municipality_postal_code": data.municipality_postal_code,
+            "exception_rate_pct": str(data.exception_rate_pct),
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_germany_church_tax_exception_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyChurchTaxException:
+    """Advance a church-tax-exception record's lifecycle — identical
+    maker-checker principle to set_health_fund_status (distinct approver
+    + linked source evidence required before PUBLISHED)."""
+    row = get_germany_church_tax_exception_by_id(db, record_id)
+    if status not in _CHURCH_TAX_EXCEPTION_VALID_STATUSES:
+        raise BadRequestException(f"Unknown church tax exception status: {status!r}.")
+    if status not in _CHURCH_TAX_EXCEPTION_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a church tax exception from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This church tax exception needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "A church tax exception cannot be published without a linked source evidence artifact "
+                "(authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_church_tax_exception",
+        entity_id=row.id, old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_germany_church_tax_exception_approver(
+    db: Session, record_id: int, actor_id: Optional[int] = None,
+) -> GermanyChurchTaxException:
+    """Sets approved_by_id — same distinct, lightweight action as
+    set_health_fund_approver. Auto-advances VERIFIED -> APPROVED only."""
+    row = get_germany_church_tax_exception_by_id(db, record_id)
+    _require_editable_church_tax_exception(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_church_tax_exception", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_church_tax_exception(
+    db: Session, land_code: Optional[str], denomination: Optional[str],
+    municipality_postal_code: Optional[str], as_of: Optional[date] = None,
+) -> Optional[GermanyChurchTaxException]:
+    """Return the PUBLISHED exception record applicable on `as_of`
+    (defaults to today) for this exact (Land, denomination, postal code)
+    combination. Returns None (never raises, never guesses) whenever any
+    of the three inputs is missing/blank, or when no PUBLISHED exception
+    matches — the caller (engine wiring) must treat None as "no
+    documented exception applies here; use the ordinary Land rate,"
+    exactly the pre-8AM behavior. This fail-closed-to-the-ordinary-rate
+    design is deliberate: an ambiguous or incomplete employee record must
+    never accidentally receive (or accidentally be denied) a 1-point-off
+    exception rate — see docs/PHASE_8AM_..._REPORT.md §19/§24."""
+    if not land_code or not denomination or not municipality_postal_code:
+        return None
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyChurchTaxException)
+        .filter(
+            GermanyChurchTaxException.land_code == land_code,
+            GermanyChurchTaxException.denomination == denomination,
+            GermanyChurchTaxException.municipality_postal_code == municipality_postal_code,
+            GermanyChurchTaxException.status == "PUBLISHED",
+            GermanyChurchTaxException.effective_from <= as_of,
+            (GermanyChurchTaxException.effective_to.is_(None)) | (GermanyChurchTaxException.effective_to >= as_of),
+        )
+        .order_by(GermanyChurchTaxException.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: BMF PAP Algorithm Asset (ZP-TAX-DE-2026-001 §5, §17, §18) ────
+# Container/evidence/lifecycle only — see models.PapAlgorithmAsset's own
+# docstring and docs/PHASE_3_GERMANY_PAP_ALGORITHM_ASSET.md. NO PAP
+# execution logic exists here or anywhere in this codebase; germany.py is
+# unchanged and does not read from this table.
+
+_PAP_EDITABLE_STATUSES = ("DRAFT", "REVIEW", "APPROVED")
+_PAP_VALID_STATUSES = ("DRAFT", "REVIEW", "APPROVED", "PUBLISHED", "SUPERSEDED")
+# Forward-only, mirroring the spec's own described flow (§18: "Import
+# source; verify hash; ... compare previous; approve; publish; rollback
+# only by activating prior immutable version") — no "reject to Draft from
+# Published" path exists because the spec never describes editing/
+# reverting a published asset, only publishing a different (correct)
+# immutable version.
+_PAP_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"REVIEW"},
+    "REVIEW": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "REVIEW"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_pap_asset(row: PapAlgorithmAsset) -> None:
+    if row.status not in _PAP_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"PAP asset {row.pap_version} ({row.tax_year}) is {row.status} — no longer editable. "
+            "Ingest a new version instead; a published statutory algorithm asset must not be edited in place."
+        )
+
+
+def list_pap_assets(db: Session, jurisdiction_country: str = "DE", tax_year: Optional[str] = None) -> List[PapAlgorithmAsset]:
+    query = db.query(PapAlgorithmAsset).filter(PapAlgorithmAsset.jurisdiction_country == jurisdiction_country)
+    if tax_year:
+        query = query.filter(PapAlgorithmAsset.tax_year == tax_year)
+    return query.order_by(PapAlgorithmAsset.tax_year.desc(), PapAlgorithmAsset.created_at.desc()).all()
+
+
+def get_pap_asset_by_id(db: Session, asset_id: int) -> PapAlgorithmAsset:
+    row = db.query(PapAlgorithmAsset).filter(PapAlgorithmAsset.id == asset_id).first()
+    if not row:
+        raise NotFoundException("PapAlgorithmAsset", asset_id)
+    return row
+
+
+def ingest_pap_asset(
+    db: Session, *, jurisdiction_country: str, tax_year: str, pap_version: str,
+    effective_from: date, effective_to: Optional[date],
+    source_content: bytes, source_agency: str, source_title: str,
+    source_url: Optional[str] = None, source_publication_date: Optional[date] = None,
+    source_content_path: Optional[str] = None, actor_id: Optional[int] = None,
+) -> PapAlgorithmAsset:
+    """Ingest a new DRAFT PAP asset version. Computes the SHA-256 of
+    `source_content` SERVER-SIDE — this function never accepts a
+    caller-supplied checksum (unlike the existing, more permissive
+    create_source_artifact, which trusts a client-provided checksumSha256 —
+    see Phase 3 report §5 for why that existing pattern is deliberately
+    NOT reused verbatim for this higher-stakes asset). Creates a new
+    SourceArtifact evidence row alongside the asset (rather than requiring
+    one to already exist), so ingestion is a single atomic step.
+
+    Never executes, parses, or interprets `source_content` beyond hashing
+    it — this phase stores an evidence-backed algorithm asset, nothing
+    more."""
+    if effective_to is not None and effective_to < effective_from:
+        raise BadRequestException("effective_to must not be before effective_from.")
+    if not source_content:
+        raise BadRequestException("source_content must not be empty.")
+
+    computed_hash = hashlib.sha256(source_content).hexdigest()
+
+    # Duplicate/conflict protection: identical content already ingested
+    # under a DIFFERENT version identity for this jurisdiction is a
+    # suspicious relabeling — refuse rather than guess (Phase 3 report §9).
+    hash_collision = (
+        db.query(PapAlgorithmAsset)
+        .filter(
+            PapAlgorithmAsset.jurisdiction_country == jurisdiction_country,
+            PapAlgorithmAsset.source_content_sha256 == computed_hash,
+            PapAlgorithmAsset.pap_version != pap_version,
+        )
+        .first()
+    )
+    if hash_collision:
+        raise BadRequestException(
+            f"This exact source content is already ingested as PAP asset #{hash_collision.id} "
+            f"(version {hash_collision.pap_version!r}, status {hash_collision.status}). Identical content "
+            "under a different version identity is not permitted — verify the version label."
+        )
+
+    existing_identity = (
+        db.query(PapAlgorithmAsset)
+        .filter(
+            PapAlgorithmAsset.jurisdiction_country == jurisdiction_country,
+            PapAlgorithmAsset.tax_year == tax_year,
+            PapAlgorithmAsset.pap_version == pap_version,
+        )
+        .first()
+    )
+    if existing_identity:
+        raise BadRequestException(
+            f"PAP asset {pap_version!r} for {jurisdiction_country}/{tax_year} already exists (#{existing_identity.id})."
+        )
+
+    source = SourceArtifact(
+        agency=source_agency, title=source_title, source_url=source_url,
+        publication_date=source_publication_date, checksum_sha256=computed_hash,
+    )
+    db.add(source)
+    db.flush()  # assign source.id without a separate partial commit
+
+    row = PapAlgorithmAsset(
+        jurisdiction_country=jurisdiction_country, tax_year=tax_year, pap_version=pap_version,
+        effective_from=effective_from, effective_to=effective_to, status="DRAFT",
+        source_document_id=source.id, source_content_path=source_content_path,
+        source_content_sha256=computed_hash, created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="pap_algorithm_asset", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "jurisdiction_country": jurisdiction_country, "tax_year": tax_year, "pap_version": pap_version,
+            "effective_from": str(effective_from), "effective_to": str(effective_to) if effective_to else None,
+            "source_content_sha256": computed_hash,
+        },
+    )
+    return row
+
+
+def set_pap_asset_status(db: Session, asset_id: int, status: str, actor_id: Optional[int] = None) -> PapAlgorithmAsset:
+    """Advance a PAP asset's lifecycle. Mirrors
+    set_jurisdiction_pack_status's exact maker-checker gate and "only one
+    currently-published version per scope" conflict guard, under Germany's
+    own status vocabulary (see PapAlgorithmAsset's docstring for why the
+    vocabulary differs from JurisdictionPack's)."""
+    row = get_pap_asset_by_id(db, asset_id)
+    if status not in _PAP_VALID_STATUSES:
+        raise BadRequestException(f"Unknown PAP asset status: {status!r}.")
+    if status not in _PAP_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a PAP asset from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        conflict = (
+            db.query(PapAlgorithmAsset)
+            .filter(
+                PapAlgorithmAsset.id != row.id,
+                PapAlgorithmAsset.jurisdiction_country == row.jurisdiction_country,
+                PapAlgorithmAsset.tax_year == row.tax_year,
+                PapAlgorithmAsset.status == "PUBLISHED",
+            )
+            .first()
+        )
+        if conflict:
+            raise BadRequestException(
+                f"PAP asset #{conflict.id} ({conflict.pap_version}) is already PUBLISHED for "
+                f"{row.jurisdiction_country}/{row.tax_year} — supersede it before publishing a new version."
+            )
+        # Maker-checker: the same "author cannot self-approve" rule
+        # set_jurisdiction_pack_status enforces (ZP-TAX-UK-2026-27-001
+        # §19.2), applied here to Germany's own vocabulary. row.updated_by_id
+        # is read BEFORE this call's own reassignment below.
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This PAP asset needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.source_content_sha256:
+            raise BadRequestException("A PAP asset cannot be published without a recorded source content hash.")
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="pap_algorithm_asset", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_pap_asset_approver(db: Session, asset_id: int, actor_id: Optional[int] = None) -> PapAlgorithmAsset:
+    """Sets approved_by_id — the same distinct, lightweight "I, this
+    specific person, reviewed and approve this" action as
+    set_jurisdiction_pack_approver, required before set_pap_asset_status
+    will allow a move to PUBLISHED. Auto-advances REVIEW -> APPROVED (only
+    from REVIEW — a status chosen on purpose elsewhere is left alone),
+    mirroring set_jurisdiction_pack_approver's own Draft -> Approved
+    shortcut at the equivalent point in this vocabulary's chain."""
+    row = get_pap_asset_by_id(db, asset_id)
+    _require_editable_pap_asset(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "REVIEW":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_algorithm_asset", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_pap_asset(
+    db: Session, payroll_date: date, jurisdiction_country: str = "DE", tax_year: Optional[str] = None,
+) -> Optional[PapAlgorithmAsset]:
+    """Return the PUBLISHED PAP asset applicable on `payroll_date` — the
+    contract a future Germany wage-tax execution phase will call. Returns
+    None (never raises) if none is published yet for this
+    jurisdiction/date, mirroring engine.tax_resolver.resolve_tax_configuration's
+    "no canonical config yet, caller falls back" contract. Does NOT
+    execute, parse, or interpret the returned asset in any way — that is
+    out of scope for this phase and every phase before a PAP executor
+    exists.
+
+    Only status=="PUBLISHED" is resolved — a SUPERSEDED asset is not
+    returned even for a historical date within its own effective window,
+    deliberately mirroring engine.tax_resolver._find_active_tax_pack's
+    already-shipped behavior (Phase 1 confirmed this directly): long-term
+    historical reproducibility is guaranteed by the immutable per-payslip
+    snapshot, not by re-querying a superseded config row."""
+    query = db.query(PapAlgorithmAsset).filter(
+        PapAlgorithmAsset.jurisdiction_country == jurisdiction_country,
+        PapAlgorithmAsset.status == "PUBLISHED",
+        PapAlgorithmAsset.effective_from <= payroll_date,
+        (PapAlgorithmAsset.effective_to.is_(None)) | (PapAlgorithmAsset.effective_to >= payroll_date),
+    )
+    if tax_year:
+        query = query.filter(PapAlgorithmAsset.tax_year == tax_year)
+    return query.order_by(PapAlgorithmAsset.effective_from.desc()).first()
+
+
+# ── Germany: BMF PAP Production Release Governance (Phase 8G-1) ──────────
+# See models.GermanyPapRelease's own module-level docstring for why this
+# is a separate table/lifecycle from PapAlgorithmAsset's statutory one.
+# Nothing here changes resolve_pap_executor()'s behavior — germany_pap/
+# core.py is never imported by this section, and this section never
+# imports from it either, beyond the pure, DB-free
+# engine.germany_pap.production_gate module.
+
+_PAP_RELEASE_VALID_STATUSES = (
+    "NOT_READY", "READY_FOR_RELEASE", "RELEASE_APPROVED",
+    "ACTIVATION_BLOCKED", "ACTIVE", "ROLLBACK_REQUESTED", "ROLLBACK_APPROVED", "ROLLED_BACK",
+)
+_PAP_RELEASE_ALLOWED_TRANSITIONS = {
+    "NOT_READY": {"READY_FOR_RELEASE"},
+    "READY_FOR_RELEASE": {"RELEASE_APPROVED", "NOT_READY"},
+    "RELEASE_APPROVED": {"ACTIVE", "ACTIVATION_BLOCKED", "NOT_READY"},
+    "ACTIVATION_BLOCKED": {"ACTIVE", "ACTIVATION_BLOCKED"},
+    # Phase 8H: rollback is now its own maker-checker'd sub-lifecycle,
+    # never a direct ACTIVE -> ROLLED_BACK jump, and never a way back into
+    # ACTIVE except by activating a (possibly different) RELEASE_APPROVED
+    # row through the ordinary path — ROLLED_BACK remains terminal.
+    "ACTIVE": {"ROLLBACK_REQUESTED"},
+    "ROLLBACK_REQUESTED": {"ROLLBACK_APPROVED", "ACTIVE"},  # ACTIVE = rejected, rollback abandoned
+    "ROLLBACK_APPROVED": {"ROLLED_BACK"},
+    "ROLLED_BACK": set(),
+}
+_PAP_RELEASE_FINALITY_STATUSES = ("OPEN", "VERIFIED", "SUPERSEDED", "REJECTED")
+_PAP_RELEASE_LICENSING_STATUSES = ("PENDING", "AUTHORIZED", "DENIED")
+
+
+def get_pap_release_by_id(db: Session, release_id: int) -> GermanyPapRelease:
+    row = db.query(GermanyPapRelease).filter(GermanyPapRelease.id == release_id).first()
+    if not row:
+        raise NotFoundException("GermanyPapRelease", release_id)
+    return row
+
+
+def list_pap_releases(
+    db: Session, jurisdiction_country: str = "DE", tax_year: Optional[str] = None,
+) -> List[GermanyPapRelease]:
+    query = db.query(GermanyPapRelease).join(
+        PapAlgorithmAsset, GermanyPapRelease.pap_asset_id == PapAlgorithmAsset.id,
+    ).filter(PapAlgorithmAsset.jurisdiction_country == jurisdiction_country)
+    if tax_year:
+        query = query.filter(PapAlgorithmAsset.tax_year == tax_year)
+    return query.order_by(GermanyPapRelease.created_at.desc()).all()
+
+
+def create_pap_release(db: Session, pap_asset_id: int, actor_id: Optional[int] = None) -> GermanyPapRelease:
+    """Start a release/activation-governance attempt for one PAP asset.
+    Binds the asset's OWN current source_content_sha256 at creation time —
+    never caller-supplied — so a later hash drift on the asset is
+    detectable (see _pap_release_gate_snapshot). One release row per
+    asset (uq_pap_release_one_per_asset); a second attempt must reuse the
+    existing row rather than create a duplicate."""
+    asset = get_pap_asset_by_id(db, pap_asset_id)
+    existing = db.query(GermanyPapRelease).filter(GermanyPapRelease.pap_asset_id == pap_asset_id).first()
+    if existing:
+        raise BadRequestException(
+            f"A release record (#{existing.id}, status={existing.status}) already exists for PAP asset "
+            f"#{pap_asset_id} — reuse it instead of creating a duplicate."
+        )
+    row = GermanyPapRelease(
+        pap_asset_id=pap_asset_id,
+        jurisdiction_country=asset.jurisdiction_country,
+        tax_year=asset.tax_year,
+        bound_source_content_sha256=asset.source_content_sha256,
+        status="NOT_READY",
+        prepared_by_id=actor_id,
+        prepared_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"pap_asset_id": pap_asset_id, "bound_source_content_sha256": row.bound_source_content_sha256},
+    )
+    return row
+
+
+def _require_pap_release_editable(row: GermanyPapRelease) -> None:
+    if row.status in ("ACTIVE", "ROLLED_BACK"):
+        raise BadRequestException(
+            f"PAP release #{row.id} is {row.status} — evidence can no longer be edited on this record."
+        )
+
+
+def record_pap_release_source_identity(
+    db: Session, release_id: int, actor_id: Optional[int] = None, notes: Optional[str] = None,
+) -> GermanyPapRelease:
+    row = get_pap_release_by_id(db, release_id)
+    _require_pap_release_editable(row)
+    row.source_identity_verified = True
+    row.source_identity_verified_by_id = actor_id
+    row.source_identity_verified_at = datetime.utcnow()
+    row.source_identity_notes = notes
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"source_identity_verified": True}, reason="Source identity verified",
+    )
+    return row
+
+
+def record_pap_release_source_hash_verification(
+    db: Session, release_id: int, actor_id: Optional[int] = None,
+) -> GermanyPapRelease:
+    """Records that a human independently re-verified the bound hash
+    against the live source (Phase 8F's own re-download-and-compare
+    method). This does NOT re-compute a hash itself — service.py never
+    silently re-downloads BMF source during a release action, matching
+    Phase 8F/8G-1's performance rule (no dynamic source downloads during
+    payroll/governance operations). It only records the attestation and
+    (defensively) refuses if the asset's live hash has since drifted from
+    what this release is bound to."""
+    row = get_pap_release_by_id(db, release_id)
+    _require_pap_release_editable(row)
+    asset = get_pap_asset_by_id(db, row.pap_asset_id)
+    if not asset.source_content_sha256 or asset.source_content_sha256 != row.bound_source_content_sha256:
+        raise BadRequestException(
+            "The PAP asset's current source_content_sha256 no longer matches this release's bound hash — "
+            "cannot verify. Investigate the drift before proceeding; a new release record may be required."
+        )
+    row.source_hash_verified = True
+    row.source_hash_verified_by_id = actor_id
+    row.source_hash_verified_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"source_hash_verified": True, "sha256": row.bound_source_content_sha256},
+        reason="Source hash re-verified",
+    )
+    return row
+
+
+def record_pap_release_source_finality(
+    db: Session, release_id: int, actor_id: Optional[int], status: str,
+    authority: Optional[str] = None, reference: Optional[str] = None, notes: Optional[str] = None,
+) -> GermanyPapRelease:
+    """Records source-finality EVIDENCE on this release row. Deliberately
+    independent of, and never writes to, germany_pap.adapter.PAP_SOURCE_FINALITY
+    — that module-level constant is a separate, hardcoded, non-bypassable
+    code gate (Phase 8C-2) and is not touched anywhere in this phase. This
+    field only feeds this release's own gate evaluation (§9)."""
+    if status not in _PAP_RELEASE_FINALITY_STATUSES:
+        raise BadRequestException(f"Unknown source-finality status: {status!r}.")
+    row = get_pap_release_by_id(db, release_id)
+    _require_pap_release_editable(row)
+    row.source_finality_status = status
+    row.source_finality_authority = authority
+    row.source_finality_reference = reference
+    row.source_finality_verified_by_id = actor_id
+    row.source_finality_verified_at = datetime.utcnow()
+    row.source_finality_notes = notes
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"source_finality_status": status, "authority": authority, "reference": reference},
+        reason="Source finality evidence recorded",
+    )
+    return row
+
+
+def record_pap_release_licensing(
+    db: Session, release_id: int, actor_id: Optional[int], status: str,
+    authority: Optional[str] = None, reference: Optional[str] = None,
+    authorization_date: Optional[date] = None, effective_date: Optional[date] = None,
+    expiry_date: Optional[date] = None, evidence_location: Optional[str] = None,
+    evidence_hash: Optional[str] = None, notes: Optional[str] = None,
+) -> GermanyPapRelease:
+    """Records licensing/commercial-use authorization EVIDENCE. Real
+    authorization must originate outside engineering (legal counsel /
+    direct BMF consent) — this function never invents, defaults-to-true,
+    or infers a status; the caller must explicitly pass whatever the real
+    evidence supports, and "AUTHORIZED" with no reference/evidence_location
+    is accepted mechanically but is exactly the kind of unsupported claim
+    the phase brief warns against recording — Super Admin process, not
+    this function, is responsible for only calling this with real evidence."""
+    if status not in _PAP_RELEASE_LICENSING_STATUSES:
+        raise BadRequestException(f"Unknown licensing status: {status!r}.")
+    row = get_pap_release_by_id(db, release_id)
+    _require_pap_release_editable(row)
+    row.licensing_status = status
+    row.licensing_authority = authority
+    row.licensing_reference = reference
+    row.licensing_authorization_date = authorization_date
+    row.licensing_effective_date = effective_date
+    row.licensing_expiry_date = expiry_date
+    row.licensing_evidence_location = evidence_location
+    row.licensing_evidence_hash = evidence_hash
+    row.licensing_notes = notes
+    row.licensing_recorded_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"licensing_status": status, "authority": authority, "reference": reference},
+        reason="Licensing evidence recorded",
+    )
+    return row
+
+
+def record_pap_release_golden_vectors(
+    db: Session, release_id: int, actor_id: Optional[int], source_sha256: str, notes: Optional[str] = None,
+) -> GermanyPapRelease:
+    """Records that golden-vector certification passed for THIS EXACT
+    source hash. A certification run against a different hash (a
+    different PAP version's bytes) is rejected outright — certifying
+    version A must never be accepted as proof for version B (§12)."""
+    row = get_pap_release_by_id(db, release_id)
+    _require_pap_release_editable(row)
+    if not row.bound_source_content_sha256 or source_sha256 != row.bound_source_content_sha256:
+        raise BadRequestException(
+            "Golden-vector certification hash does not match this release's bound source hash — "
+            "certification for a different PAP version/source cannot be accepted here."
+        )
+    row.golden_vectors_passed = True
+    row.golden_vectors_source_sha256 = source_sha256
+    row.golden_vectors_verified_by_id = actor_id
+    row.golden_vectors_verified_at = datetime.utcnow()
+    row.golden_vectors_notes = notes
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"golden_vectors_passed": True, "source_sha256": source_sha256},
+        reason="Golden-vector certification recorded",
+    )
+    return row
+
+
+def record_pap_release_security_certification(
+    db: Session, release_id: int, actor_id: Optional[int] = None, notes: Optional[str] = None,
+) -> GermanyPapRelease:
+    row = get_pap_release_by_id(db, release_id)
+    _require_pap_release_editable(row)
+    row.security_certified = True
+    row.security_certified_by_id = actor_id
+    row.security_certified_at = datetime.utcnow()
+    row.security_notes = notes
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"security_certified": True}, reason="Security certification recorded",
+    )
+    return row
+
+
+def mark_pap_release_ready(db: Session, release_id: int, actor_id: Optional[int] = None) -> GermanyPapRelease:
+    """NOT_READY -> READY_FOR_RELEASE — "I am done preparing evidence,
+    ready for an independent checker." Mirrors PapAlgorithmAsset's own
+    DRAFT -> REVIEW step."""
+    row = get_pap_release_by_id(db, release_id)
+    if row.status != "NOT_READY":
+        raise BadRequestException(f"Cannot mark a release ready from status {row.status!r}.")
+    old_status = row.status
+    row.status = "READY_FOR_RELEASE"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": row.status},
+    )
+    return row
+
+
+def approve_pap_release(db: Session, release_id: int, actor_id: Optional[int] = None) -> GermanyPapRelease:
+    """Release approval — maker-checker #1. The approver must differ from
+    whoever prepared the release (the same "distinct actor" rule every
+    other Germany registry's publish step already enforces, e.g.
+    set_pap_asset_status). This does NOT evaluate the compound gate and
+    does NOT authorize activation — see activate_pap_release for that
+    separate, later step (§7/§16 of the phase brief: technical
+    certification, licensing, and release approval are different gates)."""
+    row = get_pap_release_by_id(db, release_id)
+    if row.status != "READY_FOR_RELEASE":
+        raise BadRequestException(f"Cannot approve a release from status {row.status!r} — must be READY_FOR_RELEASE.")
+    if actor_id is not None and actor_id == row.prepared_by_id:
+        raise BadRequestException(
+            "This release needs a distinct approver — use a different Super Admin than whoever prepared it."
+        )
+    row.approved_by_id = actor_id
+    row.approved_at = datetime.utcnow()
+    row.status = "RELEASE_APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": "READY_FOR_RELEASE"}, new_value={"status": "RELEASE_APPROVED", "approved_by_id": actor_id},
+        reason="Release approved",
+    )
+    return row
+
+
+def reject_pap_release(db: Session, release_id: int, actor_id: Optional[int], reason: Optional[str] = None) -> GermanyPapRelease:
+    row = get_pap_release_by_id(db, release_id)
+    if row.status not in ("READY_FOR_RELEASE", "RELEASE_APPROVED"):
+        raise BadRequestException(f"Cannot reject a release from status {row.status!r}.")
+    old_status = row.status
+    row.status = "NOT_READY"
+    row.rejected_by_id = actor_id
+    row.rejected_at = datetime.utcnow()
+    row.rejection_reason = reason
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": "NOT_READY"}, reason=reason or "Release rejected",
+    )
+    return row
+
+
+def _pap_release_gate_snapshot(db: Session, row: GermanyPapRelease) -> dict:
+    """Builds the input the pure engine.germany_pap.production_gate module
+    evaluates. Every derived value re-checks LIVE state (the asset's
+    current status/hash) rather than trusting anything cached on the
+    release row — fail-closed by construction, per Phase 8G-1 §6/§18."""
+    asset = db.query(PapAlgorithmAsset).filter(PapAlgorithmAsset.id == row.pap_asset_id).first()
+    hash_ok = bool(
+        row.source_hash_verified
+        and asset is not None
+        and asset.source_content_sha256
+        and row.bound_source_content_sha256
+        and asset.source_content_sha256 == row.bound_source_content_sha256
+    )
+    golden_ok = bool(
+        row.golden_vectors_passed
+        and row.golden_vectors_source_sha256
+        and row.golden_vectors_source_sha256 == row.bound_source_content_sha256
+        and hash_ok
+    )
+    release_approved_ok = bool(
+        row.approved_by_id is not None
+        and row.prepared_by_id is not None
+        and row.approved_by_id != row.prepared_by_id
+    )
+    return {
+        "source_identity_verified": bool(row.source_identity_verified),
+        "source_hash_verified": hash_ok,
+        "source_finality_verified": row.source_finality_status == "VERIFIED",
+        "licensing_authorized": row.licensing_status == "AUTHORIZED",
+        "asset_approved": bool(asset is not None and asset.status == "PUBLISHED"),
+        "golden_vectors_passed": golden_ok,
+        "security_certified": bool(row.security_certified),
+        "release_approved": release_approved_ok,
+    }
+
+
+def evaluate_pap_release_gate(db: Session, release_id: int) -> "pap_production_gate.GateEvaluationResult":
+    """Read-only: evaluates every gate dimension for this release right
+    now, without changing any state. Used both by a preview/inspection
+    endpoint and internally by activate_pap_release."""
+    row = get_pap_release_by_id(db, release_id)
+    snapshot = _pap_release_gate_snapshot(db, row)
+    return pap_production_gate.evaluate(snapshot)
+
+
+def activate_pap_release(db: Session, release_id: int, actor_id: Optional[int] = None) -> GermanyPapRelease:
+    """Activation — a DISTINCT operation from release approval (§16),
+    requiring the full compound gate (§6) to be satisfied AND a distinct
+    activator (maker-checker #2, vs whoever approved the release). Even
+    on success, this ONLY flips this governance row's own status to
+    ACTIVE — it does not call, import, or affect resolve_pap_executor()
+    in any way (see germany_pap/production_gate.py's own module
+    docstring). No production tax result can ever originate from this
+    function."""
+    row = get_pap_release_by_id(db, release_id)
+    if row.status not in ("RELEASE_APPROVED", "ACTIVATION_BLOCKED"):
+        raise BadRequestException(
+            f"Cannot activate a release from status {row.status!r} — must be RELEASE_APPROVED or ACTIVATION_BLOCKED."
+        )
+    result = evaluate_pap_release_gate(db, release_id)
+    if not result.is_activation_eligible:
+        row.status = "ACTIVATION_BLOCKED"
+        db.commit()
+        record_tax_audit(
+            db, actor_id=actor_id, action="activation_blocked", entity_type="pap_release", entity_id=row.id,
+            old_value=None, new_value={"failed_gates": list(result.failed_gates)},
+            reason="Activation attempt failed the compound production gate",
+        )
+        raise GermanyPapGateBlockedException(failed_gates=list(result.failed_gates))
+
+    if actor_id is not None and actor_id == row.approved_by_id:
+        raise BadRequestException(
+            "Activation needs a distinct actor — use a different Super Admin than whoever approved the release."
+        )
+
+    asset = get_pap_asset_by_id(db, row.pap_asset_id)
+    conflict = (
+        db.query(GermanyPapRelease)
+        .join(PapAlgorithmAsset, GermanyPapRelease.pap_asset_id == PapAlgorithmAsset.id)
+        .filter(
+            GermanyPapRelease.id != row.id,
+            GermanyPapRelease.status == "ACTIVE",
+            PapAlgorithmAsset.jurisdiction_country == asset.jurisdiction_country,
+            PapAlgorithmAsset.tax_year == asset.tax_year,
+        )
+        .first()
+    )
+    if conflict:
+        raise BadRequestException(
+            f"Release #{conflict.id} is already ACTIVE for {asset.jurisdiction_country}/{asset.tax_year} — "
+            "roll it back before activating a different release for the same scope."
+        )
+
+    row.status = "ACTIVE"
+    row.activated_by_id = actor_id
+    row.activated_at = datetime.utcnow()
+    try:
+        db.commit()
+    except IntegrityError:
+        # True DB-level concurrency backstop (Phase 8H §17-19): the
+        # service-layer conflict SELECT above is a defense-in-depth
+        # convenience (same pattern PapAlgorithmAsset's PUBLISHED-conflict
+        # check already uses), not the actual guarantee — the guarantee is
+        # uq_pap_release_one_active_per_scope (models.py), which the
+        # database itself enforces even if two concurrent transactions
+        # both passed the SELECT check before either committed. Whichever
+        # transaction commits second hits this exact branch.
+        db.rollback()
+        raise BadRequestException(
+            f"Another release was activated for {asset.jurisdiction_country}/{asset.tax_year} "
+            "concurrently with this request — refusing to create a second ACTIVE release for the same scope."
+        )
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="activated", entity_type="pap_release", entity_id=row.id,
+        old_value=None, new_value={"status": "ACTIVE", "gates": result.gates},
+        reason="All production gates satisfied; release activated",
+    )
+    return row
+
+
+def request_pap_rollback(
+    db: Session, release_id: int, actor_id: Optional[int], reason: Optional[str] = None,
+) -> GermanyPapRelease:
+    """Rollback maker-checker step 1 of 3 (Phase 8H). Anyone who can reach
+    this Super-Admin-only endpoint may REQUEST a rollback of an ACTIVE
+    release; the request alone changes nothing about which release is
+    live — only approve_pap_rollback (§ below), by a DISTINCT actor,
+    actually performs the rollback."""
+    row = get_pap_release_by_id(db, release_id)
+    if row.status != "ACTIVE":
+        raise BadRequestException(f"Only an ACTIVE release can have a rollback requested (current status: {row.status!r}).")
+    row.status = "ROLLBACK_REQUESTED"
+    row.rollback_requested_by_id = actor_id
+    row.rollback_requested_at = datetime.utcnow()
+    row.rollback_reason = reason
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="rollback_requested", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": "ACTIVE"}, new_value={"status": "ROLLBACK_REQUESTED"}, reason=reason or "Rollback requested",
+    )
+    return row
+
+
+def reject_pap_rollback(
+    db: Session, release_id: int, actor_id: Optional[int], reason: Optional[str] = None,
+) -> GermanyPapRelease:
+    """Abandons a requested rollback — the release simply remains ACTIVE.
+    No maker-checker distinctness is required to reject (rejecting is the
+    conservative, non-destructive choice; only APPROVING a rollback needs
+    a distinct actor from whoever requested it)."""
+    row = get_pap_release_by_id(db, release_id)
+    if row.status != "ROLLBACK_REQUESTED":
+        raise BadRequestException(f"Cannot reject a rollback from status {row.status!r} — must be ROLLBACK_REQUESTED.")
+    row.status = "ACTIVE"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="rollback_rejected", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": "ROLLBACK_REQUESTED"}, new_value={"status": "ACTIVE"}, reason=reason or "Rollback rejected",
+    )
+    return row
+
+
+def approve_pap_rollback(
+    db: Session, release_id: int, actor_id: Optional[int], target_release_id: Optional[int] = None,
+):
+    """Rollback maker-checker step 2/3 of 3 (Phase 8H). The approver MUST
+    differ from whoever requested the rollback (`rollback_requested_by_id`)
+    — the same minimum-viable distinct-actor rule as release approval and
+    activation. On approval, the release moves ROLLBACK_REQUESTED ->
+    ROLLBACK_APPROVED -> ROLLED_BACK in one transaction (both status
+    values are recorded via separate audit events, matching §22's
+    required event list), and never deletes/rewrites any row. Never
+    touches any PayslipItem/statutory snapshot — this table has no
+    relationship to any payslip table at all. If `target_release_id` is
+    given, that release is restored to ACTIVE — but only if it belongs to
+    the same country/tax-year scope and was itself previously activated
+    (`activated_at` set); otherwise this fails closed rather than
+    guessing at a "safe" version to restore."""
+    row = get_pap_release_by_id(db, release_id)
+    if row.status != "ROLLBACK_REQUESTED":
+        raise BadRequestException(f"Cannot approve a rollback from status {row.status!r} — must be ROLLBACK_REQUESTED.")
+    if actor_id is not None and actor_id == row.rollback_requested_by_id:
+        raise BadRequestException(
+            "Rollback approval needs a distinct actor — use a different Super Admin than whoever requested it."
+        )
+
+    row.status = "ROLLBACK_APPROVED"
+    row.rollback_approved_by_id = actor_id
+    row.rollback_approved_at = datetime.utcnow()
+    db.commit()
+    record_tax_audit(
+        db, actor_id=actor_id, action="rollback_approved", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": "ROLLBACK_REQUESTED"}, new_value={"status": "ROLLBACK_APPROVED"},
+        reason="Rollback approved by a distinct actor",
+    )
+
+    old_status = row.status
+    row.status = "ROLLED_BACK"
+    row.rolled_back_by_id = actor_id
+    row.rolled_back_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="rollback_completed", entity_type="pap_release", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": "ROLLED_BACK"}, reason=row.rollback_reason or "Rollback completed",
+    )
+
+    restored = None
+    if target_release_id is not None:
+        if target_release_id == row.id:
+            raise BadRequestException("Rollback target must differ from the release being rolled back.")
+        target = get_pap_release_by_id(db, target_release_id)
+        current_asset = get_pap_asset_by_id(db, row.pap_asset_id)
+        target_asset = get_pap_asset_by_id(db, target.pap_asset_id)
+        if (target_asset.jurisdiction_country, target_asset.tax_year) != (
+            current_asset.jurisdiction_country, current_asset.tax_year,
+        ):
+            raise BadRequestException("Rollback target must be a release of the same country/tax-year scope.")
+        if target.activated_at is None:
+            raise BadRequestException(
+                "Rollback target was never previously activated — refusing to activate an unproven release."
+            )
+        if target.status == "ACTIVE":
+            raise BadRequestException(f"Rollback target #{target.id} is already ACTIVE.")
+        target.status = "ACTIVE"
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise BadRequestException(
+                "Another release is already ACTIVE for this scope — cannot restore the rollback target concurrently."
+            )
+        db.refresh(target)
+        record_tax_audit(
+            db, actor_id=actor_id, action="rollback_restore", entity_type="pap_release", entity_id=target.id,
+            old_value=None, new_value={"status": "ACTIVE", "restored_from_release_id": row.id},
+            reason=f"Restored via rollback of release #{row.id}",
+        )
+        restored = target
+    return row, restored
+
+
+# ── Germany: Krankenkasse (Health Fund) Registry (ZP-TAX-DE-2026-001 §11) ─
+# Configuration/registry only — see models.GermanyHealthFund's own
+# docstring and docs/PHASE_4_GERMANY_HEALTH_FUND_REGISTRY_REPORT.md. NO
+# GKV contribution calculation exists here or anywhere else in this
+# codebase; germany.py is unchanged and does not read from this table, and
+# EmployeeStatutoryProfile.de_health_fund_code is NOT wired to it (see
+# Phase 4 report §3/§22 Q2 for why that connection is deferred).
+#
+# Status vocabulary — DRAFT/VERIFIED/APPROVED/PUBLISHED/SUPERSEDED — is
+# spec §11's own literal status row for THIS registry (deliberately not
+# PapAlgorithmAsset's DRAFT/REVIEW/APPROVED/PUBLISHED/SUPERSEDED — "REVIEW"
+# vs "VERIFIED" is a real, source-traced difference, not a typo).
+#
+# Overlap model deliberately differs from PapAlgorithmAsset's (see the
+# model's own docstring): every version of a fund's rate — past, current,
+# or future — must remain independently resolvable by date, so there is
+# no "only one PUBLISHED at a time" guard here. Instead, overlap
+# prevention is a general range check across ALL of a fund's rows
+# (any status), mirroring EmployeeStatutoryProfile's
+# _validate_statutory_profile_no_overlap exactly.
+
+_HEALTH_FUND_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_HEALTH_FUND_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_HEALTH_FUND_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    # PUBLISHED -> SUPERSEDED is reserved for an explicit correction of an
+    # erroneously published row — NOT the normal "a later rate now
+    # applies" case, which is simply a second, later-effective-dated
+    # PUBLISHED row coexisting with this one.
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_health_fund(row: GermanyHealthFund) -> None:
+    if row.status not in _HEALTH_FUND_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Health fund record {row.health_fund_id} ({row.effective_from}) is {row.status} — no longer "
+            "editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_health_fund_no_overlap(
+    db: Session, health_fund_id: str, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Same "no two overlapping ranges for the same identity" check as
+    EmployeeStatutoryProfile._validate_statutory_profile_no_overlap,
+    applied to health_fund_id instead of employee_id — chosen because this
+    registry's identity/history shape matches EmployeeStatutoryProfile's,
+    not PapAlgorithmAsset's (see the model's own docstring)."""
+    query = db.query(GermanyHealthFund).filter(GermanyHealthFund.health_fund_id == health_fund_id)
+    if exclude_id is not None:
+        query = query.filter(GermanyHealthFund.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing health fund "
+                f"record #{existing.id} for {health_fund_id} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_health_funds(db: Session, health_fund_id: Optional[str] = None) -> List[GermanyHealthFund]:
+    query = db.query(GermanyHealthFund)
+    if health_fund_id:
+        query = query.filter(GermanyHealthFund.health_fund_id == health_fund_id)
+    return query.order_by(GermanyHealthFund.health_fund_id, GermanyHealthFund.effective_from.desc()).all()
+
+
+def get_health_fund_by_id(db: Session, record_id: int) -> GermanyHealthFund:
+    row = db.query(GermanyHealthFund).filter(GermanyHealthFund.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyHealthFund", record_id)
+    return row
+
+
+def create_health_fund_record(
+    db: Session, data: GermanyHealthFundCreate, actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyHealthFund:
+    """Append a new effective-dated health-fund rate version. Never updates
+    an existing row. Mirrors create_employee_statutory_profile_version's
+    auto-close-previous-open-row behavior (the same "this fund's rate
+    changes on this date going forward" case), not PapAlgorithmAsset's
+    manual-supersession requirement — see this module's section header for
+    why the two registries use different overlap models."""
+    if not data.health_fund_id or not data.health_fund_id.strip():
+        raise BadRequestException("healthFundId is required.")
+    if not data.fund_name or not data.fund_name.strip():
+        raise BadRequestException("fundName is required.")
+    if data.supplementary_rate_pct is None or data.supplementary_rate_pct < 0:
+        raise BadRequestException("supplementaryRatePct must be a non-negative value.")
+    if data.u1_rate_pct is not None and data.u1_rate_pct < 0:
+        raise BadRequestException("u1RatePct must not be negative.")
+    if data.u2_rate_pct is not None and data.u2_rate_pct < 0:
+        raise BadRequestException("u2RatePct must not be negative.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyHealthFund)
+        .filter(
+            GermanyHealthFund.health_fund_id == data.health_fund_id,
+            GermanyHealthFund.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_health_fund_no_overlap(
+        db, data.health_fund_id, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyHealthFund(
+        health_fund_id=data.health_fund_id, fund_name=data.fund_name,
+        supplementary_rate_pct=data.supplementary_rate_pct, is_average_rate=data.is_average_rate,
+        u1_rate_pct=data.u1_rate_pct, u2_rate_pct=data.u2_rate_pct,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        member_applicability=data.member_applicability, payroll_recalc_policy=data.payroll_recalc_policy,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_health_fund", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "health_fund_id": data.health_fund_id, "fund_name": data.fund_name,
+            "supplementary_rate_pct": str(data.supplementary_rate_pct), "is_average_rate": data.is_average_rate,
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_health_fund_status(db: Session, record_id: int, status: str, actor_id: Optional[int] = None) -> GermanyHealthFund:
+    """Advance a health-fund record's lifecycle. Reuses PapAlgorithmAsset's
+    maker-checker principle (distinct approver required before PUBLISHED)
+    even though the two registries' overlap models differ — that
+    principle is identity-shape-independent."""
+    row = get_health_fund_by_id(db, record_id)
+    if status not in _HEALTH_FUND_VALID_STATUSES:
+        raise BadRequestException(f"Unknown health fund record status: {status!r}.")
+    if status not in _HEALTH_FUND_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a health fund record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This health fund record needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "A health fund record cannot be published without a linked source evidence artifact "
+                "(authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_health_fund", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_health_fund_approver(db: Session, record_id: int, actor_id: Optional[int] = None) -> GermanyHealthFund:
+    """Sets approved_by_id — same distinct, lightweight action as
+    set_pap_asset_approver/set_jurisdiction_pack_approver. Auto-advances
+    VERIFIED -> APPROVED only (a status chosen on purpose elsewhere is
+    left alone)."""
+    row = get_health_fund_by_id(db, record_id)
+    _require_editable_health_fund(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_health_fund", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_health_fund(db: Session, health_fund_id: str, as_of: Optional[date] = None) -> Optional[GermanyHealthFund]:
+    """Return the PUBLISHED rate record applicable on `as_of` (defaults to
+    today) for one specific fund. Returns None (never raises) if no
+    published record covers that date — the future GKV calculation phase
+    must treat that as "no configured rate for this fund/date," never as
+    license to fall back to the 2.9% statutory average (spec's own
+    "AVERAGE RATE WARNING" — see this module's section header). Unlike
+    resolve_germany_pap_asset, a SUPERSEDED record for a DIFFERENT,
+    non-overlapping period is irrelevant here by construction (overlap
+    prevention already guarantees at most one PUBLISHED row can cover any
+    given date for a given fund); SUPERSEDED only ever applies to a
+    retracted erroneous row, which correctly must not resolve."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyHealthFund)
+        .filter(
+            GermanyHealthFund.health_fund_id == health_fund_id,
+            GermanyHealthFund.status == "PUBLISHED",
+            GermanyHealthFund.effective_from <= as_of,
+            (GermanyHealthFund.effective_to.is_(None)) | (GermanyHealthFund.effective_to >= as_of),
+        )
+        .order_by(GermanyHealthFund.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: U1 Tariff (Sickness Reimbursement) (Phase 8W) ────────────
+# U1 is employer-elected per tariff — each Krankenkasse publishes multiple
+# tariff options (different reimbursement percentages and corresponding levy
+# rates). This section manages the AVAILABLE tariffs on the fund side and
+# the employer's SELECTED tariff on the employee profile side.
+#
+# Same lifecycle/overlap model as GermanyHealthFund (Phase 4): every tariff
+# version — past, current, or future — must remain independently resolvable
+# by date for historical payroll. Overlap prevention is a general range
+# check across ALL rows for the same (health_fund_id, tariff_identifier)
+# pair, not just PUBLISHED rows.
+
+_U1_TARIFF_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_U1_TARIFF_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_U1_TARIFF_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_u1_tariff(row: GermanyHealthFundU1Tariff) -> None:
+    if row.status not in _U1_TARIFF_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"U1 tariff {row.tariff_identifier} for {row.health_fund_id} ({row.effective_from}) is {row.status} — no "
+            "longer editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_u1_tariff_no_overlap(
+    db: Session, health_fund_id: str, tariff_identifier: str,
+    effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """No two overlapping ranges for the same (fund, tariff) pair."""
+    query = db.query(GermanyHealthFundU1Tariff).filter(
+        GermanyHealthFundU1Tariff.health_fund_id == health_fund_id,
+        GermanyHealthFundU1Tariff.tariff_identifier == tariff_identifier,
+    )
+    if exclude_id is not None:
+        query = query.filter(GermanyHealthFundU1Tariff.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing U1 tariff "
+                f"record #{existing.id} for {health_fund_id}/{tariff_identifier} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_u1_tariffs(
+    db: Session, health_fund_id: Optional[str] = None,
+) -> list[GermanyHealthFundU1Tariff]:
+    query = db.query(GermanyHealthFundU1Tariff)
+    if health_fund_id:
+        query = query.filter(GermanyHealthFundU1Tariff.health_fund_id == health_fund_id)
+    return query.order_by(
+        GermanyHealthFundU1Tariff.health_fund_id,
+        GermanyHealthFundU1Tariff.tariff_identifier,
+        GermanyHealthFundU1Tariff.effective_from.desc(),
+    ).all()
+
+
+def get_u1_tariff_by_id(db: Session, record_id: int) -> GermanyHealthFundU1Tariff:
+    row = db.query(GermanyHealthFundU1Tariff).filter(GermanyHealthFundU1Tariff.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyHealthFundU1Tariff", record_id)
+    return row
+
+
+def create_u1_tariff_record(
+    db: Session, data: GermanyHealthFundU1TariffCreate, actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyHealthFundU1Tariff:
+    """Append a new effective-dated U1 tariff version. Never updates an
+    existing row. Mirrors create_health_fund_record's auto-close behavior."""
+    if not data.health_fund_id or not data.health_fund_id.strip():
+        raise BadRequestException("healthFundId is required.")
+    if not data.tariff_identifier or not data.tariff_identifier.strip():
+        raise BadRequestException("tariffIdentifier is required.")
+    if data.reimbursement_pct is None or data.reimbursement_pct < 0 or data.reimbursement_pct > 100:
+        raise BadRequestException("reimbursementPct must be between 0 and 100.")
+    if data.levy_rate_pct is None or data.levy_rate_pct < 0:
+        raise BadRequestException("levyRatePct must be a non-negative value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyHealthFundU1Tariff)
+        .filter(
+            GermanyHealthFundU1Tariff.health_fund_id == data.health_fund_id,
+            GermanyHealthFundU1Tariff.tariff_identifier == data.tariff_identifier,
+            GermanyHealthFundU1Tariff.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_u1_tariff_no_overlap(
+        db, data.health_fund_id, data.tariff_identifier, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyHealthFundU1Tariff(
+        health_fund_id=data.health_fund_id, tariff_identifier=data.tariff_identifier,
+        tariff_name=data.tariff_name, reimbursement_pct=data.reimbursement_pct,
+        levy_rate_pct=data.levy_rate_pct, effective_from=data.effective_from,
+        effective_to=data.effective_to, authority_source_id=data.authority_source_id,
+        status="DRAFT", created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_u1_tariff", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "health_fund_id": data.health_fund_id, "tariff_identifier": data.tariff_identifier,
+            "reimbursement_pct": str(data.reimbursement_pct), "levy_rate_pct": str(data.levy_rate_pct),
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_u1_tariff_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyHealthFundU1Tariff:
+    """Advance a U1 tariff record's lifecycle. Same maker-checker principle
+    as set_health_fund_status."""
+    row = get_u1_tariff_by_id(db, record_id)
+    if status not in _U1_TARIFF_VALID_STATUSES:
+        raise BadRequestException(f"Unknown U1 tariff record status: {status!r}.")
+    if status not in _U1_TARIFF_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a U1 tariff record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This U1 tariff record needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "A U1 tariff record cannot be published without a linked source evidence artifact "
+                "(authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_u1_tariff", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_u1_tariff_approver(
+    db: Session, record_id: int, actor_id: Optional[int] = None,
+) -> GermanyHealthFundU1Tariff:
+    """Sets approved_by_id — same pattern as set_health_fund_approver."""
+    row = get_u1_tariff_by_id(db, record_id)
+    _require_editable_u1_tariff(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_u1_tariff", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_u1_tariff(
+    db: Session, health_fund_id: str, tariff_identifier: str,
+    as_of: Optional[date] = None,
+) -> Optional[GermanyHealthFundU1Tariff]:
+    """Return the PUBLISHED U1 tariff record applicable on `as_of` (defaults
+    to today) for one specific fund + tariff. Returns None (never raises)
+    if no published record covers that date."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyHealthFundU1Tariff)
+        .filter(
+            GermanyHealthFundU1Tariff.health_fund_id == health_fund_id,
+            GermanyHealthFundU1Tariff.tariff_identifier == tariff_identifier,
+            GermanyHealthFundU1Tariff.status == "PUBLISHED",
+            GermanyHealthFundU1Tariff.effective_from <= as_of,
+            (GermanyHealthFundU1Tariff.effective_to.is_(None)) | (GermanyHealthFundU1Tariff.effective_to >= as_of),
+        )
+        .order_by(GermanyHealthFundU1Tariff.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: Contribution Ceiling Configuration (ZP-TAX-DE-2026-001 §9) ──
+# Configuration/registry only — see models.GermanyContributionCeiling's own
+# docstring and docs/PHASE_5_GERMANY_CONTRIBUTION_CEILING_CONFIGURATION_REPORT.md.
+# Consumed by calculation: _resolve_germany_calc_inputs() resolves these rows
+# as_of the payroll date into PayrollContext.germany_ceiling_gkv_pv /
+# germany_ceiling_rv_alv, which engine/countries/germany.py passes to
+# calculate_rv/alv/gkv/pv (germany_pap/core.py) to cap the contribution bases
+# (wired in Phase 7 — an older comment here claiming the engine "does not read
+# from this table" was outdated once that wiring landed and has been corrected).
+#
+# Same lifecycle/overlap model as GermanyHealthFund (Phase 4), not
+# PapAlgorithmAsset (Phase 3): every branch's ceiling version — past,
+# current, or future — must remain independently resolvable by date, so
+# there is no "only one PUBLISHED at a time" guard; overlap prevention is
+# a general range check across ALL of a branch's rows, mirroring
+# _validate_health_fund_no_overlap exactly, scoped by `branch` instead of
+# `health_fund_id`.
+
+_GERMANY_CONTRIBUTION_BRANCHES = ("GKV_PV", "RV_ALV")
+_CONTRIBUTION_CEILING_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_CONTRIBUTION_CEILING_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_CONTRIBUTION_CEILING_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    # PUBLISHED -> SUPERSEDED is reserved for an explicit correction of an
+    # erroneously published row — NOT the normal "a new year's ceiling now
+    # applies" case, which is simply a second, later-effective-dated
+    # PUBLISHED row for the same branch coexisting with this one.
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_contribution_ceiling(row: GermanyContributionCeiling) -> None:
+    if row.status not in _CONTRIBUTION_CEILING_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Contribution ceiling record for {row.branch} ({row.effective_from}) is {row.status} — no "
+            "longer editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_contribution_ceiling_no_overlap(
+    db: Session, branch: str, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Same "no two overlapping ranges for the same identity" check as
+    _validate_health_fund_no_overlap/_validate_statutory_profile_no_overlap,
+    applied to `branch` instead of health_fund_id/employee_id."""
+    query = db.query(GermanyContributionCeiling).filter(GermanyContributionCeiling.branch == branch)
+    if exclude_id is not None:
+        query = query.filter(GermanyContributionCeiling.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing contribution "
+                f"ceiling record #{existing.id} for {branch} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_contribution_ceilings(db: Session, branch: Optional[str] = None) -> List[GermanyContributionCeiling]:
+    query = db.query(GermanyContributionCeiling)
+    if branch:
+        query = query.filter(GermanyContributionCeiling.branch == branch)
+    return query.order_by(GermanyContributionCeiling.branch, GermanyContributionCeiling.effective_from.desc()).all()
+
+
+def get_contribution_ceiling_by_id(db: Session, record_id: int) -> GermanyContributionCeiling:
+    row = db.query(GermanyContributionCeiling).filter(GermanyContributionCeiling.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyContributionCeiling", record_id)
+    return row
+
+
+def create_contribution_ceiling_record(
+    db: Session, data: GermanyContributionCeilingCreate, actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyContributionCeiling:
+    """Append a new effective-dated contribution-ceiling version for one
+    branch. Never updates an existing row. Mirrors
+    create_health_fund_record's auto-close-previous-open-row behavior."""
+    if data.branch not in _GERMANY_CONTRIBUTION_BRANCHES:
+        raise BadRequestException(f"branch must be one of {_GERMANY_CONTRIBUTION_BRANCHES}, got {data.branch!r}.")
+    if data.monthly_ceiling is None or data.monthly_ceiling <= 0:
+        raise BadRequestException("monthlyCeiling must be a positive value.")
+    if data.annual_ceiling is None or data.annual_ceiling <= 0:
+        raise BadRequestException("annualCeiling must be a positive value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyContributionCeiling)
+        .filter(
+            GermanyContributionCeiling.branch == data.branch,
+            GermanyContributionCeiling.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_contribution_ceiling_no_overlap(
+        db, data.branch, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyContributionCeiling(
+        branch=data.branch, monthly_ceiling=data.monthly_ceiling, annual_ceiling=data.annual_ceiling,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_contribution_ceiling", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "branch": data.branch, "monthly_ceiling": str(data.monthly_ceiling),
+            "annual_ceiling": str(data.annual_ceiling), "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_contribution_ceiling_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyContributionCeiling:
+    """Advance a contribution-ceiling record's lifecycle. Reuses
+    GermanyHealthFund's/PapAlgorithmAsset's maker-checker principle
+    (distinct approver required before PUBLISHED)."""
+    row = get_contribution_ceiling_by_id(db, record_id)
+    if status not in _CONTRIBUTION_CEILING_VALID_STATUSES:
+        raise BadRequestException(f"Unknown contribution ceiling status: {status!r}.")
+    if status not in _CONTRIBUTION_CEILING_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a contribution ceiling record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This contribution ceiling record needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "A contribution ceiling record cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_contribution_ceiling", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_contribution_ceiling_approver(db: Session, record_id: int, actor_id: Optional[int] = None) -> GermanyContributionCeiling:
+    """Sets approved_by_id — same distinct, lightweight action as
+    set_health_fund_approver/set_pap_asset_approver. Auto-advances
+    VERIFIED -> APPROVED only."""
+    row = get_contribution_ceiling_by_id(db, record_id)
+    _require_editable_contribution_ceiling(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_contribution_ceiling", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_contribution_ceiling(
+    db: Session, branch: str, as_of: Optional[date] = None,
+) -> Optional[GermanyContributionCeiling]:
+    """Return the PUBLISHED ceiling record applicable on `as_of` (defaults
+    to today) for one specific contribution branch ("GKV_PV" or
+    "RV_ALV"). Returns None (never raises) if no published record covers
+    that date. A future social-insurance calculation phase would call this
+    once per branch — it must never conflate the two branches' results,
+    which is exactly what this table's `branch` column exists to prevent."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyContributionCeiling)
+        .filter(
+            GermanyContributionCeiling.branch == branch,
+            GermanyContributionCeiling.status == "PUBLISHED",
+            GermanyContributionCeiling.effective_from <= as_of,
+            (GermanyContributionCeiling.effective_to.is_(None)) | (GermanyContributionCeiling.effective_to >= as_of),
+        )
+        .order_by(GermanyContributionCeiling.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: PV (Long-Term Care Insurance) Child/Saxony Configuration ────
+# Configuration/registry only — see models.GermanyPvConfiguration's own
+# docstring and docs/PHASE_6_GERMANY_PV_CHILD_SAXONY_EVIDENCE_REPORT.md.
+# Consumed by calculation: _resolve_germany_calc_inputs() resolves these rows
+# as_of the payroll date into PayrollContext.germany_pv_configuration, which
+# engine/countries/germany.py passes to calculate_pv (germany_pap/core.py) to
+# compute Pflegeversicherung using the child/Saxony-differentiated rates stored
+# here (wired in Phase 7 — an older comment here claiming the engine "does not
+# read from this table" was outdated once that wiring landed and has been
+# corrected).
+#
+# Same lifecycle/overlap model as GermanyContributionCeiling (Phase 5) and
+# GermanyHealthFund (Phase 4): every configuration version — past, current,
+# or future — must remain independently resolvable by date, so overlap
+# prevention is a general range check across ALL rows of the same
+# (child_category, is_saxony) identity.
+
+_GERMANY_PV_CHILD_CATEGORIES = ("CHILDLESS", "1", "2", "3", "4", "5_PLUS")
+_PV_CONFIGURATION_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_PV_CONFIGURATION_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_PV_CONFIGURATION_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    # PUBLISHED -> SUPERSEDED is reserved for an explicit correction of an
+    # erroneously published row — NOT the normal "a new year's rates now
+    # apply" case, which is simply a second, later-effective-dated
+    # PUBLISHED row for the same (child_category, is_saxony) coexisting.
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_pv_configuration(row: GermanyPvConfiguration) -> None:
+    if row.status not in _PV_CONFIGURATION_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"PV configuration record for {row.child_category} "
+            f"({'Saxony' if row.is_saxony else 'standard'}) ({row.effective_from}) is {row.status} — no longer "
+            "editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_pv_configuration_no_overlap(
+    db: Session, child_category: str, is_saxony: bool,
+    effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Same "no two overlapping ranges for the same identity" check as
+    _validate_health_fund_no_overlap / _validate_contribution_ceiling_no_overlap,
+    applied to (child_category, is_saxony) instead of health_fund_id / branch."""
+    query = db.query(GermanyPvConfiguration).filter(
+        GermanyPvConfiguration.child_category == child_category,
+        GermanyPvConfiguration.is_saxony == is_saxony,
+    )
+    if exclude_id is not None:
+        query = query.filter(GermanyPvConfiguration.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing PV "
+                f"configuration record #{existing.id} for {child_category} "
+                f"({'Saxony' if is_saxony else 'standard'}) ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_pv_configurations(
+    db: Session, child_category: Optional[str] = None, is_saxony: Optional[bool] = None,
+) -> List[GermanyPvConfiguration]:
+    query = db.query(GermanyPvConfiguration)
+    if child_category:
+        query = query.filter(GermanyPvConfiguration.child_category == child_category)
+    if is_saxony is not None:
+        query = query.filter(GermanyPvConfiguration.is_saxony == is_saxony)
+    return query.order_by(
+        GermanyPvConfiguration.child_category, GermanyPvConfiguration.is_saxony,
+        GermanyPvConfiguration.effective_from.desc(),
+    ).all()
+
+
+def get_pv_configuration_by_id(db: Session, record_id: int) -> GermanyPvConfiguration:
+    row = db.query(GermanyPvConfiguration).filter(GermanyPvConfiguration.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyPvConfiguration", record_id)
+    return row
+
+
+def create_pv_configuration_record(
+    db: Session, data: GermanyPvConfigurationCreate, actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyPvConfiguration:
+    """Append a new effective-dated PV configuration version. Never updates
+    an existing row. Mirrors create_contribution_ceiling_record's
+    auto-close-previous-open-row behavior."""
+    if data.child_category not in _GERMANY_PV_CHILD_CATEGORIES:
+        raise BadRequestException(
+            f"childCategory must be one of {_GERMANY_PV_CHILD_CATEGORIES}, got {data.child_category!r}."
+        )
+    if data.total_rate_pct is None or data.total_rate_pct < 0:
+        raise BadRequestException("totalRatePct must be a non-negative value.")
+    if data.standard_employee_rate_pct is None or data.standard_employee_rate_pct < 0:
+        raise BadRequestException("standardEmployeeRatePct must be a non-negative value.")
+    if data.employer_rate_pct is None or data.employer_rate_pct < 0:
+        raise BadRequestException("employerRatePct must be a non-negative value.")
+    if data.saxony_employee_rate_pct is None or data.saxony_employee_rate_pct < 0:
+        raise BadRequestException("saxonyEmployeeRatePct must be a non-negative value.")
+    if data.saxony_employer_rate_pct is None or data.saxony_employer_rate_pct < 0:
+        raise BadRequestException("saxonyEmployerRatePct must be a non-negative value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyPvConfiguration)
+        .filter(
+            GermanyPvConfiguration.child_category == data.child_category,
+            GermanyPvConfiguration.is_saxony == data.is_saxony,
+            GermanyPvConfiguration.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_pv_configuration_no_overlap(
+        db, data.child_category, data.is_saxony,
+        data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyPvConfiguration(
+        child_category=data.child_category, is_saxony=data.is_saxony,
+        total_rate_pct=data.total_rate_pct,
+        standard_employee_rate_pct=data.standard_employee_rate_pct,
+        employer_rate_pct=data.employer_rate_pct,
+        saxony_employee_rate_pct=data.saxony_employee_rate_pct,
+        saxony_employer_rate_pct=data.saxony_employer_rate_pct,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_pv_configuration", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "child_category": data.child_category, "is_saxony": data.is_saxony,
+            "total_rate_pct": str(data.total_rate_pct),
+            "standard_employee_rate_pct": str(data.standard_employee_rate_pct),
+            "employer_rate_pct": str(data.employer_rate_pct),
+            "saxony_employee_rate_pct": str(data.saxony_employee_rate_pct),
+            "saxony_employer_rate_pct": str(data.saxony_employer_rate_pct),
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_pv_configuration_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyPvConfiguration:
+    """Advance a PV configuration record's lifecycle. Reuses the
+    maker-checker principle (distinct approver required before PUBLISHED)."""
+    row = get_pv_configuration_by_id(db, record_id)
+    if status not in _PV_CONFIGURATION_VALID_STATUSES:
+        raise BadRequestException(f"Unknown PV configuration status: {status!r}.")
+    if status not in _PV_CONFIGURATION_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a PV configuration record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This PV configuration record needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "A PV configuration record cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_pv_configuration", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_pv_configuration_approver(db: Session, record_id: int, actor_id: Optional[int] = None) -> GermanyPvConfiguration:
+    """Sets approved_by_id — same distinct, lightweight action as
+    set_contribution_ceiling_approver / set_health_fund_approver. Auto-advances
+    VERIFIED -> APPROVED only."""
+    row = get_pv_configuration_by_id(db, record_id)
+    _require_editable_pv_configuration(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_pv_configuration", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_pv_configuration(
+    db: Session, child_category: str, is_saxony: bool, as_of: Optional[date] = None,
+) -> Optional[GermanyPvConfiguration]:
+    """Return the PUBLISHED PV configuration applicable on `as_of` (defaults
+    to today) for one specific (child_category, is_saxony) pair. Returns
+    None (never raises) if no published record covers that date. A future
+    PV calculation phase would call this once per employee — it must never
+    conflate different child-category or Saxony results."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyPvConfiguration)
+        .filter(
+            GermanyPvConfiguration.child_category == child_category,
+            GermanyPvConfiguration.is_saxony == is_saxony,
+            GermanyPvConfiguration.status == "PUBLISHED",
+            GermanyPvConfiguration.effective_from <= as_of,
+            (GermanyPvConfiguration.effective_to.is_(None)) | (GermanyPvConfiguration.effective_to >= as_of),
+        )
+        .order_by(GermanyPvConfiguration.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: Earning/Deduction Taxability (ZP-TAX-DE-2026-001 §15) ──────
+# Phase 8T. Four-dimension classification registry — see
+# models.GermanyEarningTaxabilityRule's own docstring for why this is a
+# new table, not a retrofit of the existing (unused, US-shaped)
+# TaxabilityRule model.
+
+# The exact 9 rows from spec §15's own taxability-matrix table — no 10th
+# type invented. New earning types require a spec amendment first.
+_GERMANY_EARNING_TYPES = (
+    "REGULAR_SALARY", "OVERTIME_SHIFT_PREMIUM", "BONUS_ANNUAL_BONUS",
+    "PENSION_VERSORGUNGSBEZUG", "EQUITY_BENEFIT_19A", "EXPENSE_REIMBURSEMENT",
+    "OCCUPATIONAL_PENSION_CONTRIBUTION", "GARNISHMENT_ATTACHMENT", "EMPLOYEE_VOLUNTARY_DEDUCTION",
+)
+
+# Wage-tax dimension — spec §15's own "Lohnsteuer" column vocabulary,
+# generalized into named states (never a bare taxable/non-taxable flag).
+_GERMANY_WAGE_TAX_TREATMENTS = (
+    "TAXABLE_REGULAR",            # ordinary RE4-routed wage tax
+    "OTHER_REMUNERATION_SONSTB",  # spec: "Other remuneration route" (bonus/annual bonus)
+    "SPECIAL_PAP_HANDLING",       # spec: "Special PAP fields" (pension/Versorgungsbezug, §19a)
+    "CONDITIONALLY_EXEMPT",       # spec: "Depends on statutory exemption conditions" / "Taxable or exempt by statutory rule"
+    "POST_TAX_NO_TAX_IMPACT",     # spec: "Post-tax statutory deduction" / "Post-net unless statutory scheme says otherwise"
+    # Phase 8Y: spec §15's Lohnsteuer column for "Occupational pension
+    # contribution" literally reads "Scheme/limit-specific" — the same
+    # phrase already used (correctly) in _GERMANY_SI_TREATMENTS below for
+    # that row's GKV/PV and RV/ALV columns. The wage-tax vocabulary had no
+    # equivalent value, which is a genuine MODEL_LIMITATION discovered
+    # while transcribing the §15 matrix literally (not a new statutory
+    # concept — the same three columns of the same spec row all read the
+    # identical phrase). Adding it here is required for the wage-tax
+    # dimension to represent this row's real, spec-stated value.
+    "SCHEME_LIMIT_SPECIFIC",      # spec: "Scheme/limit-specific" (occupational pension contribution)
+    "NOT_SPECIFIED",              # spec gives no determination for this row
+)
+
+# Social-insurance dimension — spec §15 uses the SAME descriptive
+# vocabulary for both GKV/PV and RV/ALV columns, so one shared vocabulary
+# is used for both (never invented separately per branch).
+_GERMANY_SI_TREATMENTS = (
+    "CONTRIBUTORY",                # spec: "Generally contributory"
+    "CONTRIBUTORY_SUBJECT_TO_ALLOCATION",  # spec: "Contributory subject to allocation rules" (bonus/annual bonus)
+    "MAY_DIFFER",                  # spec: "May differ" (overtime/shift premiums)
+    "OFTEN_NON_CONTRIBUTORY",      # spec: "Often non-contributory if tax-exempt conditions met"
+    "NO_CHANGE_TO_BASE",           # spec: "No change to contribution base by itself" / "No change by default"
+    "COVERAGE_SPECIFIC",           # spec: "Coverage-specific" (pension/Versorgungsbezug)
+    "CLASSIFICATION_SPECIFIC",     # spec: "Classification-specific" (§19a equity benefit)
+    "SCHEME_LIMIT_SPECIFIC",       # spec: "Scheme/limit-specific" (occupational pension contribution)
+    "NOT_SPECIFIED",
+)
+
+_EARNING_TAXABILITY_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_EARNING_TAXABILITY_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_EARNING_TAXABILITY_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_earning_taxability_rule(row: GermanyEarningTaxabilityRule) -> None:
+    if row.status not in _EARNING_TAXABILITY_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Earning taxability rule for {row.earning_type} ({row.effective_from}) is {row.status} — "
+            "no longer editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_earning_taxability_no_overlap(
+    db: Session, earning_type: str, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    query = db.query(GermanyEarningTaxabilityRule).filter(GermanyEarningTaxabilityRule.earning_type == earning_type)
+    if exclude_id is not None:
+        query = query.filter(GermanyEarningTaxabilityRule.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing earning "
+                f"taxability rule #{existing.id} for {earning_type} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_earning_taxability_rules(db: Session, earning_type: Optional[str] = None) -> List[GermanyEarningTaxabilityRule]:
+    query = db.query(GermanyEarningTaxabilityRule)
+    if earning_type:
+        query = query.filter(GermanyEarningTaxabilityRule.earning_type == earning_type)
+    return query.order_by(
+        GermanyEarningTaxabilityRule.earning_type, GermanyEarningTaxabilityRule.effective_from.desc(),
+    ).all()
+
+
+def get_earning_taxability_rule_by_id(db: Session, record_id: int) -> GermanyEarningTaxabilityRule:
+    row = db.query(GermanyEarningTaxabilityRule).filter(GermanyEarningTaxabilityRule.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyEarningTaxabilityRule", record_id)
+    return row
+
+
+def create_earning_taxability_rule(
+    db: Session, data: "GermanyEarningTaxabilityRuleCreate", actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyEarningTaxabilityRule:
+    """Append a new effective-dated earning-taxability version. Never
+    updates an existing row. Mirrors create_pv_configuration_record's
+    auto-close-previous-open-row behavior."""
+    if data.earning_type not in _GERMANY_EARNING_TYPES:
+        raise BadRequestException(f"earningType must be one of {_GERMANY_EARNING_TYPES}, got {data.earning_type!r}.")
+    if data.wage_tax_treatment not in _GERMANY_WAGE_TAX_TREATMENTS:
+        raise BadRequestException(f"wageTaxTreatment must be one of {_GERMANY_WAGE_TAX_TREATMENTS}, got {data.wage_tax_treatment!r}.")
+    if data.gkv_pv_treatment not in _GERMANY_SI_TREATMENTS:
+        raise BadRequestException(f"gkvPvTreatment must be one of {_GERMANY_SI_TREATMENTS}, got {data.gkv_pv_treatment!r}.")
+    if data.rv_alv_treatment not in _GERMANY_SI_TREATMENTS:
+        raise BadRequestException(f"rvAlvTreatment must be one of {_GERMANY_SI_TREATMENTS}, got {data.rv_alv_treatment!r}.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyEarningTaxabilityRule)
+        .filter(
+            GermanyEarningTaxabilityRule.earning_type == data.earning_type,
+            GermanyEarningTaxabilityRule.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(auto_close_previous and previous_open and previous_open.effective_from < data.effective_from)
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_earning_taxability_no_overlap(
+        db, data.earning_type, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyEarningTaxabilityRule(
+        earning_type=data.earning_type,
+        wage_tax_treatment=data.wage_tax_treatment,
+        gkv_pv_treatment=data.gkv_pv_treatment,
+        rv_alv_treatment=data.rv_alv_treatment,
+        reporting_classification=data.reporting_classification,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_earning_taxability_rule", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "earning_type": data.earning_type, "wage_tax_treatment": data.wage_tax_treatment,
+            "gkv_pv_treatment": data.gkv_pv_treatment, "rv_alv_treatment": data.rv_alv_treatment,
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_earning_taxability_rule_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyEarningTaxabilityRule:
+    """Advance an earning-taxability rule's lifecycle. Reuses the same
+    maker-checker principle as every other Germany registry."""
+    row = get_earning_taxability_rule_by_id(db, record_id)
+    if status not in _EARNING_TAXABILITY_VALID_STATUSES:
+        raise BadRequestException(f"Unknown earning taxability rule status: {status!r}.")
+    if status not in _EARNING_TAXABILITY_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move an earning taxability rule from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This earning taxability rule needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "An earning taxability rule cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_earning_taxability_rule", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_earning_taxability_rule_approver(db: Session, record_id: int, actor_id: Optional[int] = None) -> GermanyEarningTaxabilityRule:
+    """Sets approved_by_id — same distinct, lightweight action as every
+    other Germany registry's approver-setter. Auto-advances VERIFIED ->
+    APPROVED only."""
+    row = get_earning_taxability_rule_by_id(db, record_id)
+    _require_editable_earning_taxability_rule(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_earning_taxability_rule", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_earning_taxability_rule(
+    db: Session, earning_type: str, as_of: Optional[date] = None,
+) -> Optional[GermanyEarningTaxabilityRule]:
+    """Return the PUBLISHED taxability rule applicable on `as_of` (defaults
+    to today) for one earning type. Returns None (never raises) if no
+    published record covers that date — a future consumer must treat
+    that as NOT_CONFIGURED, never silently assume ordinary taxable
+    treatment (spec's own "no invented statutory result" principle)."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyEarningTaxabilityRule)
+        .filter(
+            GermanyEarningTaxabilityRule.earning_type == earning_type,
+            GermanyEarningTaxabilityRule.status == "PUBLISHED",
+            GermanyEarningTaxabilityRule.effective_from <= as_of,
+            (GermanyEarningTaxabilityRule.effective_to.is_(None)) | (GermanyEarningTaxabilityRule.effective_to >= as_of),
+        )
+        .order_by(GermanyEarningTaxabilityRule.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: overtime/shift-premium statutory registries (Phase 8AD) ────
+# GLOBAL statutory configuration only — see models.py's
+# GermanyOvertimePremiumCategory/GermanyOvertimeGrundlohnCap docstrings.
+# Mirrors GermanyContributionCeiling's lifecycle/overlap/maker-checker
+# functions exactly (same shape: one string key, effective-dated versions,
+# DRAFT->VERIFIED->APPROVED->PUBLISHED->SUPERSEDED). NOT consumed by
+# engine/countries/germany.py — that wiring is explicitly out of scope for
+# this phase (Phase 8AE/8AF/8AG).
+
+_GERMANY_OVERTIME_PREMIUM_CATEGORIES = (
+    "NIGHT_STANDARD", "NIGHT_EXTENDED", "SUNDAY", "HOLIDAY_STANDARD", "HOLIDAY_SPECIAL",
+)
+_OVERTIME_PREMIUM_CATEGORY_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_OVERTIME_PREMIUM_CATEGORY_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_OVERTIME_PREMIUM_CATEGORY_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_overtime_premium_category(row: GermanyOvertimePremiumCategory) -> None:
+    if row.status not in _OVERTIME_PREMIUM_CATEGORY_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Overtime premium category record for {row.category_code} ({row.effective_from}) is "
+            f"{row.status} — no longer editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_overtime_premium_category_no_overlap(
+    db: Session, category_code: str, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    query = db.query(GermanyOvertimePremiumCategory).filter(GermanyOvertimePremiumCategory.category_code == category_code)
+    if exclude_id is not None:
+        query = query.filter(GermanyOvertimePremiumCategory.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing overtime "
+                f"premium category record #{existing.id} for {category_code} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_overtime_premium_categories(db: Session, category_code: Optional[str] = None) -> List[GermanyOvertimePremiumCategory]:
+    query = db.query(GermanyOvertimePremiumCategory)
+    if category_code:
+        query = query.filter(GermanyOvertimePremiumCategory.category_code == category_code)
+    return query.order_by(GermanyOvertimePremiumCategory.category_code, GermanyOvertimePremiumCategory.effective_from.desc()).all()
+
+
+def get_overtime_premium_category_by_id(db: Session, record_id: int) -> GermanyOvertimePremiumCategory:
+    row = db.query(GermanyOvertimePremiumCategory).filter(GermanyOvertimePremiumCategory.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyOvertimePremiumCategory", record_id)
+    return row
+
+
+def create_overtime_premium_category_record(
+    db: Session, data: "GermanyOvertimePremiumCategoryCreate", actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyOvertimePremiumCategory:
+    """Append a new effective-dated overtime premium-category version.
+    Never updates an existing row. Mirrors create_contribution_ceiling_record's
+    auto-close-previous-open-row behavior."""
+    if data.category_code not in _GERMANY_OVERTIME_PREMIUM_CATEGORIES:
+        raise BadRequestException(
+            f"category_code must be one of {_GERMANY_OVERTIME_PREMIUM_CATEGORIES}, got {data.category_code!r}."
+        )
+    if data.wage_tax_free_pct is None or data.wage_tax_free_pct <= 0:
+        raise BadRequestException("wage_tax_free_pct must be a positive value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyOvertimePremiumCategory)
+        .filter(
+            GermanyOvertimePremiumCategory.category_code == data.category_code,
+            GermanyOvertimePremiumCategory.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(auto_close_previous and previous_open and previous_open.effective_from < data.effective_from)
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_overtime_premium_category_no_overlap(
+        db, data.category_code, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyOvertimePremiumCategory(
+        category_code=data.category_code, wage_tax_free_pct=data.wage_tax_free_pct,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_overtime_premium_category", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "category_code": data.category_code, "wage_tax_free_pct": str(data.wage_tax_free_pct),
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_overtime_premium_category_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyOvertimePremiumCategory:
+    row = get_overtime_premium_category_by_id(db, record_id)
+    if status not in _OVERTIME_PREMIUM_CATEGORY_VALID_STATUSES:
+        raise BadRequestException(f"Unknown overtime premium category status: {status!r}.")
+    if status not in _OVERTIME_PREMIUM_CATEGORY_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move an overtime premium category record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This overtime premium category record needs a distinct approver before it can be "
+                "published — use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "An overtime premium category record cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_overtime_premium_category", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_overtime_premium_category_approver(db: Session, record_id: int, actor_id: Optional[int] = None) -> GermanyOvertimePremiumCategory:
+    row = get_overtime_premium_category_by_id(db, record_id)
+    _require_editable_overtime_premium_category(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_overtime_premium_category", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_overtime_premium_category(
+    db: Session, category_code: str, as_of: Optional[date] = None,
+) -> Optional[GermanyOvertimePremiumCategory]:
+    """Return the PUBLISHED premium-category record applicable on `as_of`
+    (defaults to today). Returns None (never raises) if no published
+    record covers that date — fail closed, never a hardcoded percentage."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyOvertimePremiumCategory)
+        .filter(
+            GermanyOvertimePremiumCategory.category_code == category_code,
+            GermanyOvertimePremiumCategory.status == "PUBLISHED",
+            GermanyOvertimePremiumCategory.effective_from <= as_of,
+            (GermanyOvertimePremiumCategory.effective_to.is_(None)) | (GermanyOvertimePremiumCategory.effective_to >= as_of),
+        )
+        .order_by(GermanyOvertimePremiumCategory.effective_from.desc())
+        .first()
+    )
+
+
+_GERMANY_OVERTIME_GRUNDLOHN_DIMENSIONS = ("WAGE_TAX", "SOCIAL_INSURANCE")
+_OVERTIME_GRUNDLOHN_CAP_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_OVERTIME_GRUNDLOHN_CAP_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_OVERTIME_GRUNDLOHN_CAP_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_overtime_grundlohn_cap(row: GermanyOvertimeGrundlohnCap) -> None:
+    if row.status not in _OVERTIME_GRUNDLOHN_CAP_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Overtime Grundlohn cap record for {row.dimension} ({row.effective_from}) is {row.status} — "
+            "no longer editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_overtime_grundlohn_cap_no_overlap(
+    db: Session, dimension: str, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    query = db.query(GermanyOvertimeGrundlohnCap).filter(GermanyOvertimeGrundlohnCap.dimension == dimension)
+    if exclude_id is not None:
+        query = query.filter(GermanyOvertimeGrundlohnCap.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing overtime "
+                f"Grundlohn cap record #{existing.id} for {dimension} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_overtime_grundlohn_caps(db: Session, dimension: Optional[str] = None) -> List[GermanyOvertimeGrundlohnCap]:
+    query = db.query(GermanyOvertimeGrundlohnCap)
+    if dimension:
+        query = query.filter(GermanyOvertimeGrundlohnCap.dimension == dimension)
+    return query.order_by(GermanyOvertimeGrundlohnCap.dimension, GermanyOvertimeGrundlohnCap.effective_from.desc()).all()
+
+
+def get_overtime_grundlohn_cap_by_id(db: Session, record_id: int) -> GermanyOvertimeGrundlohnCap:
+    row = db.query(GermanyOvertimeGrundlohnCap).filter(GermanyOvertimeGrundlohnCap.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyOvertimeGrundlohnCap", record_id)
+    return row
+
+
+def create_overtime_grundlohn_cap_record(
+    db: Session, data: "GermanyOvertimeGrundlohnCapCreate", actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> GermanyOvertimeGrundlohnCap:
+    if data.dimension not in _GERMANY_OVERTIME_GRUNDLOHN_DIMENSIONS:
+        raise BadRequestException(
+            f"dimension must be one of {_GERMANY_OVERTIME_GRUNDLOHN_DIMENSIONS}, got {data.dimension!r}."
+        )
+    if data.hourly_cap_amount is None or data.hourly_cap_amount <= 0:
+        raise BadRequestException("hourly_cap_amount must be a positive value.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyOvertimeGrundlohnCap)
+        .filter(
+            GermanyOvertimeGrundlohnCap.dimension == data.dimension,
+            GermanyOvertimeGrundlohnCap.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(auto_close_previous and previous_open and previous_open.effective_from < data.effective_from)
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_overtime_grundlohn_cap_no_overlap(
+        db, data.dimension, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyOvertimeGrundlohnCap(
+        dimension=data.dimension, hourly_cap_amount=data.hourly_cap_amount,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_overtime_grundlohn_cap", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "dimension": data.dimension, "hourly_cap_amount": str(data.hourly_cap_amount),
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_overtime_grundlohn_cap_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> GermanyOvertimeGrundlohnCap:
+    row = get_overtime_grundlohn_cap_by_id(db, record_id)
+    if status not in _OVERTIME_GRUNDLOHN_CAP_VALID_STATUSES:
+        raise BadRequestException(f"Unknown overtime Grundlohn cap status: {status!r}.")
+    if status not in _OVERTIME_GRUNDLOHN_CAP_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move an overtime Grundlohn cap record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This overtime Grundlohn cap record needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "An overtime Grundlohn cap record cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_overtime_grundlohn_cap", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_overtime_grundlohn_cap_approver(db: Session, record_id: int, actor_id: Optional[int] = None) -> GermanyOvertimeGrundlohnCap:
+    row = get_overtime_grundlohn_cap_by_id(db, record_id)
+    _require_editable_overtime_grundlohn_cap(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_overtime_grundlohn_cap", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_germany_overtime_grundlohn_cap(
+    db: Session, dimension: str, as_of: Optional[date] = None,
+) -> Optional[GermanyOvertimeGrundlohnCap]:
+    """Return the PUBLISHED Grundlohn cap applicable on `as_of` (defaults
+    to today) for one dimension ("WAGE_TAX" or "SOCIAL_INSURANCE"). Returns
+    None (never raises) if no published record covers that date — fail
+    closed, never a hardcoded €50/€25 fallback."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyOvertimeGrundlohnCap)
+        .filter(
+            GermanyOvertimeGrundlohnCap.dimension == dimension,
+            GermanyOvertimeGrundlohnCap.status == "PUBLISHED",
+            GermanyOvertimeGrundlohnCap.effective_from <= as_of,
+            (GermanyOvertimeGrundlohnCap.effective_to.is_(None)) | (GermanyOvertimeGrundlohnCap.effective_to >= as_of),
+        )
+        .order_by(GermanyOvertimeGrundlohnCap.effective_from.desc())
+        .first()
+    )
+
+
+# ── Germany: per-employee calculation-input resolver (Phase 7) ─────────
+# Resolves every Germany registry a calculation might need for ONE
+# employee on ONE payroll date, in a single place, so _compute_payslip_values
+# and preview_payroll_run can never disagree about which rows applied.
+# Deliberately NOT cached across employees (unlike rate_map/slabs in
+# _resolve_employee_calc_inputs) — profile/health-fund/PV category are
+# genuinely per-employee, so caching by jurisdiction alone would silently
+# apply one employee's resolved rows to another's.
+#
+# Returns a plain dict of ORM rows (or None) — never raises. Whether a
+# missing row is fatal is a decision for engine/countries/germany.py
+# (the actual calculation), not this resolver — mirrors
+# resolve_germany_pap_asset's own "absence is not an error" contract.
+def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, payroll_date) -> dict:
+    from app.modules.payroll.engine.germany_pap.core import (
+        GermanyCalculationError, resolve_pv_child_category,
+    )
+
+    profile = resolve_employee_statutory_profile(db, employee.id, organization_id, as_of=payroll_date)
+    pap_asset = resolve_germany_pap_asset(db, payroll_date)
+    ceiling_gkv_pv = resolve_germany_contribution_ceiling(db, "GKV_PV", as_of=payroll_date)
+    ceiling_rv_alv = resolve_germany_contribution_ceiling(db, "RV_ALV", as_of=payroll_date)
+
+    health_fund = None
+    u1_tariff = None
+    pv_configuration = None
+    church_tax_exception = None
+    if profile is not None:
+        health_fund_code = getattr(profile, "de_health_fund_code", None)
+        if health_fund_code:
+            health_fund = resolve_germany_health_fund(db, health_fund_code, as_of=payroll_date)
+            # Phase 8W: resolve the employer's selected U1 tariff at this fund
+            u1_tariff_id = getattr(profile, "de_u1_tariff_id", None)
+            if u1_tariff_id:
+                u1_tariff = resolve_germany_u1_tariff(db, health_fund_code, u1_tariff_id, as_of=payroll_date)
+        if getattr(profile, "de_health_insurance_status", None) != "PRIVATE":
+            try:
+                category = resolve_pv_child_category(profile)
+                is_saxony = bool(getattr(profile, "de_saxony", False))
+                pv_configuration = resolve_germany_pv_configuration(db, category, is_saxony, as_of=payroll_date)
+            except GermanyCalculationError:
+                # Category itself can't be determined from this profile —
+                # left None here; germany.py's calculate() re-derives the
+                # category itself and raises the precise
+                # GermanyStatutoryProfileMissingError, rather than this
+                # resolver guessing or swallowing the real reason.
+                pv_configuration = None
+
+        # Phase 8AM — resolve church-tax exception (sub-Land override, e.g.
+        # Bad Wimpfen Roman Catholic 9% within Baden-Württemberg's 8%).
+        # Only resolved when all three required profile fields are present:
+        # de_church_tax_land, de_church_tax_denomination,
+        # de_church_tax_municipality_postal_code. Returns None (never
+        # raises, never guesses) if any field is missing or no PUBLISHED
+        # exception matches — the engine then falls back to the ordinary
+        # Land rate exactly as before this phase.
+        church_tax_land = getattr(profile, "de_church_tax_land", None)
+        church_tax_denomination = getattr(profile, "de_church_tax_denomination", None)
+        church_tax_municipality_postal_code = getattr(profile, "de_church_tax_municipality_postal_code", None)
+        if church_tax_land and church_tax_denomination and church_tax_municipality_postal_code:
+            church_tax_exception = resolve_germany_church_tax_exception(
+                db, church_tax_land, church_tax_denomination, church_tax_municipality_postal_code, as_of=payroll_date
+            )
+
+    # Phase 8X — resolve the four-dimension earning taxability (spec §15)
+    # for the two earning types the current engine actually receives as
+    # discrete inputs: REGULAR_SALARY (steady RE4 wage = gross net of the
+    # bonus) and BONUS_ANNUAL_BONUS (the SONSTB-routed bonus). Absent /
+    # unpublished -> None -> the engine surfaces NOT_CONFIGURED in its
+    # trace instead of assuming a classification. Resolving both here keeps
+    # the engine/frontend and the batch path agreeing on which rows applied
+    # for one employee on one payroll date.
+    earning_taxability = {
+        "REGULAR_SALARY": resolve_germany_earning_taxability_rule(db, "REGULAR_SALARY", as_of=payroll_date),
+        "BONUS_ANNUAL_BONUS": resolve_germany_earning_taxability_rule(db, "BONUS_ANNUAL_BONUS", as_of=payroll_date),
+    }
+
+    return dict(
+        statutory_profile=profile,
+        pap_asset=pap_asset,
+        health_fund=health_fund,
+        u1_tariff=u1_tariff,
+        ceiling_gkv_pv=ceiling_gkv_pv,
+        ceiling_rv_alv=ceiling_rv_alv,
+        pv_configuration=pv_configuration,
+        earning_taxability=earning_taxability,
+        church_tax_exception=church_tax_exception,
+    )
+
+
+def preview_germany_calculation(db: Session, organization_id: int, employee_id: int, payroll_date=None) -> dict:
+    """Phase 7 QA/diagnostic endpoint (spec's own §27 allowance for "a
+    protected diagnostic endpoint... genuinely useful for QA"). Read-only —
+    never writes anything, never mutates a finalized payroll, never
+    accepts a caller-supplied PAP version/statutory rate (every value is
+    server-resolved from the authoritative registries, exactly like a
+    real run would). Returns either the full resolved calculation (never
+    reachable today — see germany.py) or the block code/message/trace, so
+    Tax Operations/QA can see exactly what's missing before attempting a
+    real payroll run for this employee."""
+    from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
+    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    payroll_date = payroll_date or date.today()
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "DE":
+        raise BadRequestException(
+            f"Employee {employee_id}'s resolved country is '{country}', not 'DE' — "
+            "this diagnostic endpoint is Germany-specific."
+        )
+
+    ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
+    monthly_gross = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    rate_map, slabs, _canonical_rates, _pack = _resolve_effective_rate_inputs(
+        db, organization_id, country, payroll_date, org_opted_in,
+    )
+    resolved = _resolve_germany_calc_inputs(db, organization_id, employee, payroll_date)
+
+    ctx = build_context_from_employee(
+        employee, gross=monthly_gross, basic=monthly_gross,
+        country=country, rate_map=rate_map, slabs=slabs,
+        germany_statutory_profile=resolved["statutory_profile"],
+        germany_pap_asset=resolved["pap_asset"],
+        germany_health_fund=resolved["health_fund"],
+        germany_u1_tariff=resolved["u1_tariff"],
+        germany_earning_taxability=resolved["earning_taxability"],
+        germany_ceiling_gkv_pv=resolved["ceiling_gkv_pv"],
+        germany_ceiling_rv_alv=resolved["ceiling_rv_alv"],
+        germany_pv_configuration=resolved["pv_configuration"],
+        germany_church_tax_exception=resolved["church_tax_exception"],
+        germany_employee_id=employee.id,
+        germany_organization_id=organization_id,
+        germany_payroll_date=payroll_date,
+    )
+    try:
+        result = calculate_payroll(ctx, "standard")
+    except GermanyCalculationError as exc:
+        return {
+            "employeeId": employee_id,
+            "payrollDate": str(payroll_date),
+            "blocked": True,
+            "blockedReasonCode": exc.code,
+            "blockedReasonMessage": exc.message,
+            "trace": exc.trace.to_dict() if exc.trace else None,
+        }
+    return {
+        "employeeId": employee_id,
+        "payrollDate": str(payroll_date),
+        "blocked": False,
+        "result": {
+            "monthlyGross": float(result.gross),
+            "monthlyEmployeePf": float(result.employee_pf),
+            "monthlyEmployerPf": float(result.employer_pf),
+            "monthlyEmployeeEsi": float(result.employee_esi),
+            "monthlyEmployerEsi": float(result.employer_esi),
+            "monthlyChurchTax": float(result.church_tax),
+            "monthlyTax": float(result.tds),
+            "monthlyNet": float(result.net_pay),
+        },
+        "trace": result.germany_calculation_snapshot,
+    }
 
 
 # ── UK: centralized configuration resolver ─────────────────────────────
@@ -4231,6 +7261,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     are counted from attendance records. When omitted, no attendance
     deduction is applied."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
+    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
 
     country = _normalize_country(country)
     calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
@@ -4286,6 +7317,21 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     # same employee correctly used their region's config — exactly the
     # "preview must never disagree with a real run" gap this closes.
     _state_scoped_cache: dict = {}
+    # Per-distinct-resolved-country cache (Phase 7 fix — see this
+    # function's docstring update below). Before this fix, `rate_map`/
+    # `slabs` were resolved ONCE for the whole batch using the caller's
+    # top-level `country` argument, and every employee's ctx.country was
+    # set to that same value regardless of the employee's own
+    # `country_code` — a mixed-country batch (or any batch where the
+    # caller's `country` didn't match a given employee's actual
+    # `country_code`, e.g. a German employee previewed via a page that
+    # defaults to the org's country) silently calculated that employee
+    # under the WRONG country's rules, or never reached
+    # engine/countries/germany.py at all. Preview must never disagree
+    # with what generate_payslips_for_run would actually do for the same
+    # employee — _resolve_employee_calc_inputs already gets this right;
+    # this mirrors it here.
+    _country_rate_cache: dict = {country: (rate_map, slabs, _canonical_rates, _pack)}
 
     for emp in employees:
         ctc = Decimal(str(getattr(emp, "ctc", 0) or 0))
@@ -4335,35 +7381,65 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         # named allowances/Special), not a change to gross itself.
         gross = basic + hra + special + allowance_total + overtime + additional_compensation
 
+        # Phase 7 fix: resolve THIS employee's own country (falling back to
+        # the batch-level `country` exactly like _resolve_employee_country
+        # does for every other entry point), not the caller's top-level
+        # argument unconditionally — see _country_rate_cache's comment above.
+        emp_country = _resolve_employee_country(db, organization_id, getattr(emp, "country_code", None)) or country
+        if emp_country not in _country_rate_cache:
+            _country_rate_cache[emp_country] = _resolve_effective_rate_inputs(
+                db, organization_id, emp_country, period_end or date.today(), org_opted_in,
+            )
+        emp_rate_map, emp_slabs, _emp_canonical_rates, _emp_pack = _country_rate_cache[emp_country]
+
         work_state = getattr(emp, "work_state", None)
-        resolution_state, _poe_reason = _resolve_country_aware_state(country, emp, work_state, db=db, organization_id=organization_id)
-        # filing_status is part of the cache key (not resolution_state
-        # alone) because two employees sharing a state in this same preview
-        # batch can have different filing statuses once a filing-status-
-        # specific state-scoped row exists (e.g. Colorado's allowance) —
-        # same reasoning as _resolve_effective_rate_inputs' cache_key above.
+        # Phase 7 fix (Germany) + Canada filing-status caching (main) both
+        # apply here: resolve state/cache-key using THIS employee's own
+        # resolved country (emp_country), never the caller's batch-level
+        # `country`, and key the cache by (country, state, filing_status)
+        # so mixed-country AND mixed-filing-status batches both resolve
+        # correctly per employee.
+        resolution_state, _poe_reason = _resolve_country_aware_state(emp_country, emp, work_state, db=db, organization_id=organization_id)
         emp_filing_status = getattr(emp, "w4_filing_status", None)
-        state_cache_key = (resolution_state, emp_filing_status)
+        state_cache_key = (emp_country, resolution_state, emp_filing_status)
         if state_cache_key not in _state_scoped_cache:
-            # Safe to key this cache by (resolution_state, filing_status)
-            # alone (no date component needed): every employee in this
-            # preview batch resolves against the SAME as_of (period_end or
-            # today, used identically throughout this function, e.g. line
-            # 3939) — never a per-employee date — so there is nothing for a
-            # missing date-key to accidentally collide across.
             _state_scoped_cache[state_cache_key] = get_state_scoped_config(
-                db, country, resolution_state, as_of=period_end or date.today(), filing_status=emp_filing_status,
+                db, emp_country, resolution_state, as_of=period_end or date.today(), filing_status=emp_filing_status,
             )
         state_rate_map, state_slabs = _state_scoped_cache[state_cache_key]
+
+        germany_kwargs = {}
+        if emp_country == "DE":
+            resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
+            germany_kwargs = dict(
+                germany_statutory_profile=resolved_de["statutory_profile"],
+                germany_pap_asset=resolved_de["pap_asset"],
+                germany_health_fund=resolved_de["health_fund"],
+                germany_u1_tariff=resolved_de["u1_tariff"],
+                germany_earning_taxability=resolved_de["earning_taxability"],
+                germany_ceiling_gkv_pv=resolved_de["ceiling_gkv_pv"],
+                germany_ceiling_rv_alv=resolved_de["ceiling_rv_alv"],
+                germany_pv_configuration=resolved_de["pv_configuration"],
+                germany_church_tax_exception=resolved_de["church_tax_exception"],
+                germany_employee_id=emp.id,
+                germany_organization_id=organization_id,
+                germany_payroll_date=period_end or date.today(),
+                germany_sonstb=_sum_attendance_bonus_only(
+                    db, organization_id, emp.id, period_start, period_end,
+                    records=attendance_by_employee.get(emp.id, []),
+                ),
+            )
 
         # Canada YTD — READ ONLY (see _load_ca_ytd's own docstring): this
         # function persists no PayrollRun/PayslipItem, so it must never
         # write to PayrollYtdAccumulator, only reflect its current state.
+        # Gated on emp_country (not the batch-level `country`), same
+        # per-employee-correctness reasoning as the state resolution above.
         ytd_inputs = (
             _load_ca_ytd(db, emp.id, period_end or date.today(), work_state)
-            if country == "CA" else
+            if emp_country == "CA" else
             _load_uk_director_ytd(db, emp.id, period_end or date.today())
-            if country == "UK" else {}
+            if emp_country == "UK" else {}
         )
 
         # Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET org-level —
@@ -4372,10 +7448,12 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         # without ever incrementing it.
         org_levy_inputs = (
             _ca_org_levy_read_inputs(db, organization_id, period_end or date.today(), work_state)
-            if country == "CA" else
+            if emp_country == "CA" else
             _load_uk_org_levy_ytd(db, organization_id, period_end or date.today())
-            if country == "UK" else {}
+            if emp_country == "UK" else {}
         )
+
+        employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
 
         # Delegate to the strategy engine
         ctx = build_context_from_employee(
@@ -4383,15 +7461,31 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             special_allowance=special, overtime=overtime,
             additional_compensation=additional_compensation,
             unpaid_leave_days=unpaid_leave_days,
-            country=country, rate_map=rate_map, slabs=slabs,
+            country=emp_country, rate_map=emp_rate_map, slabs=emp_slabs,
             work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
+            **germany_kwargs,
             pay_date=period_end or date.today(),
             **ytd_inputs,
             **org_levy_inputs,
         )
-        calc = calculate_payroll(ctx, calculation_mode)
-
-        employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
+        try:
+            calc = calculate_payroll(ctx, calculation_mode)
+        except GermanyCalculationError as exc:
+            # Preview is diagnostic across a batch — one blocked German
+            # employee must not abort the whole preview (unlike a real
+            # run, see generate_payslips_for_run, which correctly DOES
+            # fail the whole request). Surface the block + trace instead.
+            results.append({
+                "employeeId": emp.id,
+                "employeeName": employee_name,
+                "department": getattr(emp, "department", None),
+                "attendanceStatus": "active" if is_active else "inactive",
+                "blocked": True,
+                "blockedReasonCode": exc.code,
+                "blockedReasonMessage": exc.message,
+                "calculationTrace": exc.trace.to_dict() if exc.trace else None,
+            })
+            continue
 
         results.append({
             "employeeId": emp.id,
@@ -4450,7 +7544,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "employerNlHapset": float(calc.employer_nl_hapset),
             "employerQcHsf": float(calc.employer_qc_hsf),
             "employerQcLabourStandards": float(calc.employer_qc_labour_standards),
-            "taxSlabRate": _get_slab_label(calc.gross * MONTHS_PER_YEAR, slabs, country, annual_tax=calc.annual_tax),
+            "taxSlabRate": _get_slab_label(calc.gross * MONTHS_PER_YEAR, emp_slabs, emp_country, annual_tax=calc.annual_tax),
         })
 
         totals["count"] += 1
@@ -4781,6 +7875,27 @@ def _sum_attendance_extras(db: Session, organization_id: int, employee_id: int,
     for r in records:
         total += Decimal(str(r.rewards or 0)) + Decimal(str(r.bonus or 0)) + Decimal(str(r.other_compensation or 0))
     return _round2(total)
+
+
+def _sum_attendance_bonus_only(db: Session, organization_id: int, employee_id: int,
+                                period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> Decimal:
+    """Phase 8T — Germany SONSTB routing (ZP-TAX-DE-2026-001 §15 "Bonus /
+    annual bonus... Other remuneration route"). Deliberately narrower than
+    _sum_attendance_extras: only the `bonus` field is a genuine statutory
+    "Bonus" per the spec's own taxability-matrix row — `rewards` and
+    `other_compensation` are NOT reclassified as SONSTB (the spec gives no
+    basis to do so), and both remain part of ordinary gross/RE4 exactly as
+    before. Same records-reuse convention as _sum_attendance_extras (pass
+    pre-fetched rows to avoid a second query when both are needed for the
+    same employee/period)."""
+    if records is None:
+        records = db.query(PayrollAttendanceRecord).filter(
+            PayrollAttendanceRecord.organization_id == organization_id,
+            PayrollAttendanceRecord.employee_id == employee_id,
+            PayrollAttendanceRecord.date >= period_start,
+            PayrollAttendanceRecord.date <= period_end,
+        ).all()
+    return _round2(sum((Decimal(str(r.bonus or 0)) for r in records), Decimal("0")))
 
 
 def _resolve_tax_snapshot(db: Session, country: str, payroll_date, state=None, tax_regime=None) -> dict:
@@ -5230,6 +8345,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     queries or writes PayrollYtdAccumulator itself. None (every non-CA
     calculation, and CA until the caller opts in) means no YTD wired."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
+    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+    from app.core.exceptions import GermanyCalculationBlockedException
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
     monthly_gross = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
@@ -5267,6 +8384,26 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
 
     # Delegate to the strategy engine
     work_state = getattr(employee, "work_state", None)
+    germany_kwargs = {}
+    if country == "DE":
+        resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
+        germany_kwargs = dict(
+            germany_statutory_profile=resolved["statutory_profile"],
+            germany_pap_asset=resolved["pap_asset"],
+            germany_health_fund=resolved["health_fund"],
+            germany_u1_tariff=resolved["u1_tariff"],
+            germany_earning_taxability=resolved["earning_taxability"],
+            germany_ceiling_gkv_pv=resolved["ceiling_gkv_pv"],
+            germany_ceiling_rv_alv=resolved["ceiling_rv_alv"],
+            germany_pv_configuration=resolved["pv_configuration"],
+            germany_church_tax_exception=resolved["church_tax_exception"],
+            germany_employee_id=employee.id,
+            germany_organization_id=run.organization_id,
+            germany_payroll_date=run.pay_date,
+            germany_sonstb=_sum_attendance_bonus_only(
+                db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records,
+            ),
+        )
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,
@@ -5276,12 +8413,18 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
         employer_tax_profiles=employer_tax_profiles,
         locality_rate=locality_rate,
+        **germany_kwargs,
         pay_date=run.pay_date,
         **(reciprocity or {}),
         **(ytd_inputs or {}),
         **(org_levy_inputs or {}),
     )
-    result = calculate_payroll(ctx, calculation_mode)
+    try:
+        result = calculate_payroll(ctx, calculation_mode)
+    except GermanyCalculationError as exc:
+        raise GermanyCalculationBlockedException(
+            exc.code, exc.message, trace=(exc.trace.to_dict() if exc.trace else None),
+        )
 
     employee_name = getattr(employee, "name", None) or f"Employee #{employee.id}"
     if resolved_pack is not None:
@@ -5366,6 +8509,13 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "unpaid_leave_days": result.unpaid_leave_days,
         "attendance_deduction": result.attendance_deduction,
         "per_day_salary": result.per_day_salary,
+        # Germany (Phase 7) — statutory calculation provenance, frozen onto
+        # the PayslipItem so a finalized German payslip can be reproduced
+        # even if the underlying registries later change (spec's
+        # reproducibility requirement). None for every non-German payslip
+        # and for any German payslip generated before this column existed.
+        "employee_statutory_profile_id": result.germany_statutory_profile_id,
+        "germany_calculation_snapshot": result.germany_calculation_snapshot,
         # Canada YTD — same immutability contract as tax_rule_snapshot
         # above, for the before/after cumulative figures this payslip
         # actually consumed per component. None unless YTD accumulation
@@ -5617,13 +8767,22 @@ def _resolve_employee_calc_inputs(
             filing_status=filing_status,
         )
         state_rate_map, state_slabs = get_state_scoped_config(db, country, resolution_state, as_of=payroll_date, filing_status=filing_status)
-        # US SUI/etc. and CA workers'-comp/similar employer-specific
-        # notices both resolve through the same tenant-specific-rate
-        # mechanism (jurisdiction_id stays None for every other country,
-        # so get_employer_tax_profiles is a no-op there): "US-<state>" or
-        # "CA-<province>" rather than by pack/regime. CA-D06/AC-24: never
-        # a global-default rate, only an employer-specific notice.
-        jurisdiction_id = f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state) else None
+        # US/CA-specific (jurisdiction_id stays None, so get_employer_tax_profiles
+        # is a no-op, for every other country): tenant-specific SUI/workers'-
+        # comp/etc. rates, resolved by (org, "US-<state>"/"CA-<province>")
+        # rather than by pack/regime. CA-D06/AC-24: never a global-default
+        # rate, only an employer-specific notice.
+        # Phase 8U: Germany accident insurance (spec §14) reuses this SAME
+        # agency-assigned-rate mechanism as US SUI — an employer's
+        # Berufsgenossenschaft-issued risk-class rate is exactly the same
+        # statutory shape (assigned by an agency, own account number, own
+        # evidence trail) EmployerTaxProfile already models; jurisdiction_id
+        # "DE" (no state) resolves it, component_code "DE_ACCIDENT_INSURANCE".
+        jurisdiction_id = (
+            f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state)
+            else "DE" if country == "DE"
+            else None
+        )
         employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=payroll_date)
         # EI's reduced-employer-rate authorization (ZP-TAX-CA-2026-001
         # §11) is a FEDERAL-level fact, not provincial — looked up under
@@ -5807,6 +8966,14 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     )
     poe_snapshot = {"poe_result": poe_result, "poe_reason": poe_reason} if country == "CA" else None
     allowance_components = _resolve_allowance_components(db, organization_id)
+    # Phase 8AS: capture the currently-ATTACHED Germany overtime premium
+    # components BEFORE the recompute below. The recompute's
+    # setattr(existing_item, "allowance_items", [...]) delete-orphans the
+    # persisted overtime allowance line, so afterwards the components can no
+    # longer be found by joining through that edge. Captured here, their
+    # stored applied_*_delta remain the source of truth for re-applying the
+    # exact financial impact after the engine pass.
+    attached_ot = _attached_germany_overtime_components_for_item(db, existing_item.id, organization_id)
 
     # ZP-TAX-CA-2026-001 AC-32 — "historical replay after a statutory
     # update returns the same result using the original snapshot." A
@@ -5896,6 +9063,35 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     for field, value in values.items():
         setattr(existing_item, field, value)
     existing_item.status = PayslipStatus.PENDING
+
+    # Phase 8AT: force the ORM to actually execute the delete-orphan removal
+    # of the old allowance_items (staged by the setattr above, not yet sent
+    # to the DB — this Session is autoflush=False) BEFORE the reapply below
+    # queries PayslipAllowanceItem. Without this flush, that query observes
+    # pre-flush DB state, finds the OLD (soon-to-be-deleted) overtime
+    # allowance row still present, and reuses/updates that same doomed row
+    # instead of creating a fresh one — the row it points the component's
+    # payslip_allowance_item_id at is then deleted anyway at the eventual
+    # commit (the delete-orphan cascade wins over the later attribute
+    # update), leaving the component's FK dangling at a deleted row and the
+    # overtime allowance line silently missing from the payslip. Proven by
+    # a real DB round-trip in test_germany_8at_financial_integrity_lifecycle.py
+    # (a subsequent detach raised NotFoundException("PayslipAllowanceItem")
+    # before this fix). Flushing here is safe for every country, not just
+    # Germany: it only makes the already-queued delete/insert physically
+    # happen earlier in the same transaction — no different data, no
+    # different outcome for a payslip with nothing attached.
+    db.flush()
+
+    # Phase 8AS: the engine recompute above used `overtime = Decimal("0")`
+    # and replaced the payslip's allowance_items/snapshot, so any Germany
+    # overtime premium component that was ATTACHED before this recalculation
+    # would otherwise be silently erased from the payslip figures while its
+    # component row stays ATTACHED. Re-apply the exact stored deltas of the
+    # pre-captured attached components to preserve net/gross/SI consistency
+    # and the reproduction snapshot (no-op when there are none).
+    _reapply_attached_germany_overtime_deltas(db, existing_item, organization_id, attached_ot, actor_id=actor_id)
+
     db.commit()
     run = _recompute_run_aggregates(db, run)
 
@@ -5953,6 +9149,1991 @@ def get_employee_by_id(db: Session, employee_id: int, organization_id: int) -> P
     if not employee:
         raise NotFoundException(f"Employee {employee_id} not found.")
     return employee
+
+
+# ── Employee Statutory Profile (effective-dated) ─────────────────────────
+# Foundation for jurisdiction-specific, point-in-time-correct employee
+# statutory facts — see models.EmployeeStatutoryProfile's docstring and
+# docs/PHASE_2_EMPLOYEE_STATUTORY_PROFILE.md. This table is a history, never
+# updated in place: the only write operation is "append a new version"
+# (create_employee_statutory_profile_version) — there is no update/delete.
+
+_STATUTORY_PROFILE_DE_TAX_CLASSES = {"I", "II", "III", "IV", "V", "VI"}
+_STATUTORY_PROFILE_DE_HEALTH_STATUSES = {"PUBLIC", "PRIVATE"}
+_STATUTORY_PROFILE_DE_EMPLOYMENT_CLASSES = {"REGULAR", "MINIJOB", "MIDIJOB"}
+_STATUTORY_PROFILE_DE_ELSTAM_SOURCES = {"ELSTAM", "FALLBACK_CERTIFICATE"}
+
+
+def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutoryProfileCreate) -> None:
+    """Field-level validation, independent of DB state. Every Germany check
+    here maps to a named spec requirement (ZP-TAX-DE-2026-001) — see
+    PHASE_2_EMPLOYEE_STATUTORY_PROFILE.md §12 for the citation."""
+    errors = []
+
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        errors.append("effective_to must not be before effective_from.")
+
+    if country_code == "DE":
+        if data.de_tax_class is not None and data.de_tax_class not in _STATUTORY_PROFILE_DE_TAX_CLASSES:
+            errors.append(f"de_tax_class must be one of {sorted(_STATUTORY_PROFILE_DE_TAX_CLASSES)}.")
+        if data.de_factor is not None:
+            # Spec §22 boundary test: "ELStAM factor with non-class-IV tax
+            # class: reject before PAP invocation."
+            if data.de_tax_class != "IV":
+                errors.append("de_factor may only be set when de_tax_class is 'IV' (factor method, spec §6).")
+            elif not (Decimal("0") < data.de_factor <= Decimal("1")):
+                errors.append("de_factor must be greater than 0 and at most 1.")
+        if data.de_child_count is not None and data.de_child_count < 0:
+            errors.append("de_child_count must not be negative.")
+        if data.de_health_insurance_status is not None and data.de_health_insurance_status not in _STATUTORY_PROFILE_DE_HEALTH_STATUSES:
+            errors.append(f"de_health_insurance_status must be one of {sorted(_STATUTORY_PROFILE_DE_HEALTH_STATUSES)}.")
+        if data.de_employment_classification is not None and data.de_employment_classification not in _STATUTORY_PROFILE_DE_EMPLOYMENT_CLASSES:
+            errors.append(f"de_employment_classification must be one of {sorted(_STATUTORY_PROFILE_DE_EMPLOYMENT_CLASSES)}.")
+        if data.de_elstam_source is not None:
+            if data.de_elstam_source not in _STATUTORY_PROFILE_DE_ELSTAM_SOURCES:
+                errors.append(f"de_elstam_source must be one of {sorted(_STATUTORY_PROFILE_DE_ELSTAM_SOURCES)}.")
+            # Spec §6 "Fallback certificate": "Store document evidence,
+            # effective dates and reason."
+            elif data.de_elstam_source == "FALLBACK_CERTIFICATE" and not data.de_elstam_fallback_reason:
+                errors.append("de_elstam_fallback_reason is required when de_elstam_source is FALLBACK_CERTIFICATE.")
+        # §20 Abs. 2a Satz 9 SGB IV (confirmed live, Phase 8L): an employee
+        # engaged for vocational training is excluded from the
+        # Übergangsbereich (Midijob) regardless of earnings — reject at
+        # write time, same as the factor/class-IV pairing above, rather
+        # than only at calculation time.
+        if data.de_vocational_trainee and data.de_employment_classification == "MIDIJOB":
+            errors.append(
+                "de_employment_classification may not be 'MIDIJOB' when de_vocational_trainee is set — "
+                "§20 Abs. 2a Satz 9 SGB IV excludes vocational trainees from the Übergangsbereich regardless of earnings."
+            )
+
+        # Phase 8N — ELStAM / employee-withholding-state completion.
+        # de_zkf_override: spec §5/§6 — a genuine ZKF can be a half-integer
+        # (split-custody discount), so this deliberately allows fractional
+        # values (unlike de_child_count's plain Integer), but never negative.
+        if data.de_zkf_override is not None and data.de_zkf_override < 0:
+            errors.append("de_zkf_override must not be negative.")
+        # JFREIB/LZZFREIB/JHINZU/LZZHINZU/PKPV/PKPVAGZ — spec §5: all are
+        # amounts, never negative (an allowance/add-back/premium/subsidy of
+        # less than zero has no statutory meaning).
+        for field_name, label in (
+            ("de_jfreib", "de_jfreib"), ("de_lzzfreib", "de_lzzfreib"),
+            ("de_jhinzu", "de_jhinzu"), ("de_lzzhinzu", "de_lzzhinzu"),
+            ("de_pkpv", "de_pkpv"), ("de_pkpvagz", "de_pkpvagz"),
+        ):
+            value = getattr(data, field_name)
+            if value is not None and value < 0:
+                errors.append(f"{label} must not be negative.")
+        # de_elstam_import_reference/de_elstam_schema_version are provenance
+        # metadata, only meaningful when de_elstam_source == "ELSTAM" (spec
+        # §7) — not required (a manually-entered ELStAM-sourced row with no
+        # structured-import provenance is still valid), but never accepted
+        # alongside FALLBACK_CERTIFICATE, which has its own distinct
+        # provenance field (de_elstam_fallback_reason).
+        if data.de_elstam_source == "FALLBACK_CERTIFICATE" and (
+            data.de_elstam_schema_version or data.de_elstam_import_reference
+        ):
+            errors.append(
+                "de_elstam_schema_version/de_elstam_import_reference may not be set when "
+                "de_elstam_source is FALLBACK_CERTIFICATE — use de_elstam_fallback_reason instead."
+            )
+
+        # Phase 8AB — overtime/premium Grundlohn source (spec-adjacent, §3b
+        # EStG / §1 SvEV; ARCHITECTURE_D, Phase 8AA). This is a genuine RATE
+        # (an hourly wage), not an allowance/add-back like de_jfreib et al.
+        # above — a €0/hour or negative wage has no statutory meaning, so
+        # this rejects both, mirroring de_factor's own "> 0" rate-validation
+        # precedent above rather than the ">= 0" allowance precedent.
+        # Missing (None) is always allowed — Phase 8AB only establishes the
+        # source; nothing yet requires it to be present.
+        if data.de_grundlohn_hourly is not None and data.de_grundlohn_hourly <= 0:
+            errors.append("de_grundlohn_hourly must be greater than 0.")
+
+    if errors:
+        raise BadRequestException("; ".join(errors))
+
+
+def _validate_statutory_profile_no_overlap(
+    db: Session, employee_id: int, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Reject a new period that overlaps any OTHER existing period for this
+    employee — the same "no two overlapping ranges" principle as
+    JurisdictionPack's Active-pack conflict guard
+    (set_jurisdiction_pack_status), applied here at every write since this
+    table has no status/lifecycle gate of its own to hang the check on."""
+    query = db.query(EmployeeStatutoryProfile).filter(EmployeeStatutoryProfile.employee_id == employee_id)
+    if exclude_id is not None:
+        query = query.filter(EmployeeStatutoryProfile.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing statutory "
+                f"profile record #{existing.id} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def _attach_main_secondary_consistency_warning(row: Optional[EmployeeStatutoryProfile]) -> Optional[EmployeeStatutoryProfile]:
+    """Phase 8AK: sets a TRANSIENT (never persisted — no such column
+    exists on the model) attribute the response schema reads via
+    from_attributes. Reuses germany_pap.core's own
+    check_main_secondary_employment_consistency verbatim — the SAME
+    advisory-only check the PAP execution trace already runs — so this
+    warning is visible to Tax Ops at profile save/read time, not only
+    buried inside a blocked PAP calculation trace. Only meaningful for
+    Germany rows; a no-op (None) for every other country."""
+    if row is not None and row.country_code == "DE":
+        from app.modules.payroll.engine.germany_pap.core import check_main_secondary_employment_consistency
+
+        row.main_secondary_consistency_warning = check_main_secondary_employment_consistency(
+            tax_class=row.de_tax_class, is_main_employment=row.de_main_employment,
+        )
+    return row
+
+
+def create_employee_statutory_profile_version(
+    db: Session, employee_id: int, organization_id: int,
+    data: EmployeeStatutoryProfileCreate, actor_id: Optional[int],
+    auto_close_previous: bool = True,
+) -> EmployeeStatutoryProfile:
+    """Append a new effective-dated statutory-profile version. Never updates
+    an existing row. When `auto_close_previous` (the default — and the only
+    mode the API exposes) and an open-ended (effective_to IS NULL) row
+    already exists with an earlier effective_from, it is closed the day
+    before this version's effective_from — the "01 Jan Tax Class I, 01 Jul
+    Tax Class III" case. A caller inserting an already-closed historical
+    correction should pass auto_close_previous=False with an explicit
+    effective_to; overlap is validated in both modes."""
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    country_code = _normalize_country(data.country_code or employee.country_code)
+    if country_code not in _STRATEGIES:
+        raise BadRequestException(f"Unsupported jurisdiction country_code: {country_code!r}.")
+
+    _validate_statutory_profile_fields(country_code, data)
+
+    previous_open = (
+        db.query(EmployeeStatutoryProfile)
+        .filter(
+            EmployeeStatutoryProfile.employee_id == employee_id,
+            EmployeeStatutoryProfile.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(auto_close_previous and previous_open and previous_open.effective_from < data.effective_from)
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_statutory_profile_no_overlap(
+        db, employee_id, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = EmployeeStatutoryProfile(
+        employee_id=employee_id, organization_id=organization_id, country_code=country_code,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        created_by_id=actor_id, reason=data.reason,
+        de_tax_class=data.de_tax_class, de_factor=data.de_factor,
+        de_church_tax_liable=data.de_church_tax_liable, de_church_tax_land=data.de_church_tax_land,
+        de_child_count=data.de_child_count, de_childless=data.de_childless, de_saxony=data.de_saxony,
+        de_health_insurance_status=data.de_health_insurance_status, de_health_fund_code=data.de_health_fund_code,
+        de_u1_tariff_id=data.de_u1_tariff_id,
+        de_pension_insurance_exempt=data.de_pension_insurance_exempt,
+        de_unemployment_insurance_exempt=data.de_unemployment_insurance_exempt,
+        de_employment_classification=data.de_employment_classification,
+        de_elstam_source=data.de_elstam_source, de_elstam_fallback_reason=data.de_elstam_fallback_reason,
+        de_vocational_trainee=data.de_vocational_trainee,
+        de_zkf_override=data.de_zkf_override,
+        de_jfreib=data.de_jfreib, de_lzzfreib=data.de_lzzfreib,
+        de_jhinzu=data.de_jhinzu, de_lzzhinzu=data.de_lzzhinzu,
+        de_pkpv=data.de_pkpv, de_pkpvagz=data.de_pkpvagz,
+        de_main_employment=data.de_main_employment,
+        de_elstam_schema_version=data.de_elstam_schema_version,
+        de_elstam_import_reference=data.de_elstam_import_reference,
+        de_grundlohn_hourly=data.de_grundlohn_hourly,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="employee_statutory_profile", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "employee_id": employee_id, "country_code": country_code,
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+        reason=data.reason,
+    )
+    return _attach_main_secondary_consistency_warning(row)
+
+
+def list_employee_statutory_profile_history(db: Session, employee_id: int, organization_id: int) -> List[EmployeeStatutoryProfile]:
+    get_employee_by_id(db, employee_id, organization_id)  # 404s + tenant-scopes
+    rows = (
+        db.query(EmployeeStatutoryProfile)
+        .filter(EmployeeStatutoryProfile.employee_id == employee_id)
+        .order_by(EmployeeStatutoryProfile.effective_from.desc())
+        .all()
+    )
+    for row in rows:
+        _attach_main_secondary_consistency_warning(row)
+    return rows
+
+
+def get_employee_statutory_profile_as_of(
+    db: Session, employee_id: int, organization_id: int, as_of: Optional[date] = None,
+) -> Optional[EmployeeStatutoryProfile]:
+    """Tenant-scoped wrapper around resolve_employee_statutory_profile for
+    the API layer — 404s if the employee itself doesn't exist/belong to
+    this org, then returns None (not 404) if the employee simply has no
+    statutory profile recorded for that date, which is a normal state, not
+    an error. Attaches the Phase 8AK advisory consistency warning here
+    (the API-facing wrapper), not inside resolve_employee_statutory_profile
+    itself, which dozens of internal calculation code paths call and
+    should not be touched for this purely cosmetic, API-response-only
+    concern."""
+    get_employee_by_id(db, employee_id, organization_id)
+    return _attach_main_secondary_consistency_warning(
+        resolve_employee_statutory_profile(db, employee_id, organization_id, as_of),
+    )
+
+
+def resolve_employee_statutory_profile(
+    db: Session, employee_id: int, organization_id: Optional[int] = None, as_of: Optional[date] = None,
+) -> Optional[EmployeeStatutoryProfile]:
+    """Return the statutory-profile version applicable on `as_of` (defaults
+    to today) — answers "what were this employee's statutory attributes on
+    the exact payroll date being calculated," the question this whole table
+    exists to answer. Returns None (never raises) if no profile has been
+    recorded yet for this employee — a jurisdiction/employee with no
+    profile behaves exactly as if this table didn't exist. Intended to be
+    called by a future Germany calculation phase per-employee, the same way
+    _resolve_effective_rate_inputs is called today for jurisdiction rates.
+    `organization_id`, if given, additionally tenant-scopes the lookup."""
+    as_of = as_of or date.today()
+    query = db.query(EmployeeStatutoryProfile).filter(
+        EmployeeStatutoryProfile.employee_id == employee_id,
+        EmployeeStatutoryProfile.effective_from <= as_of,
+        (EmployeeStatutoryProfile.effective_to.is_(None)) | (EmployeeStatutoryProfile.effective_to >= as_of),
+    )
+    if organization_id is not None:
+        query = query.filter(EmployeeStatutoryProfile.organization_id == organization_id)
+    return query.order_by(EmployeeStatutoryProfile.effective_from.desc()).first()
+
+
+# ── Germany: overtime/shift-premium work record (Phase 8AC) ─────────────
+# The "work performed" FACT layer of Phase 8AA's ARCHITECTURE_D design.
+# Pure capture — no premium/tax/SI calculation anywhere in this section.
+# ctx.overtime remains untouched; engine/countries/germany.py never calls
+# any function here (confirmed by this phase's own source-inspection test).
+
+_GERMANY_OVERTIME_ENTRY_SOURCES = {"ATTENDANCE_DERIVED", "MANUAL"}
+_GERMANY_OVERTIME_APPROVAL_STATUSES = {"PENDING", "APPROVED", "REJECTED"}
+
+
+def _validate_germany_overtime_work_record_fields(data: "GermanyOvertimeWorkRecordCreate") -> None:
+    errors = []
+    if data.entry_source not in _GERMANY_OVERTIME_ENTRY_SOURCES:
+        errors.append(f"entry_source must be one of {sorted(_GERMANY_OVERTIME_ENTRY_SOURCES)}.")
+    if data.end_datetime <= data.start_datetime:
+        errors.append("end_datetime must be after start_datetime.")
+    if data.hours is not None and data.hours <= 0:
+        errors.append("hours must be greater than 0.")
+    # entry_source <-> source_attendance_id must agree — this is the ONLY
+    # cross-field rule this phase enforces; it is NOT a precedence rule
+    # (Phase 8AA/8AB's own explicit "do not invent precedence" instruction
+    # governs which of two independently-created records, if both exist for
+    # the same employee/date, should win — this phase does not decide that).
+    if data.entry_source == "ATTENDANCE_DERIVED" and data.source_attendance_id is None:
+        errors.append("source_attendance_id is required when entry_source is ATTENDANCE_DERIVED.")
+    if data.entry_source == "MANUAL" and data.source_attendance_id is not None:
+        errors.append("source_attendance_id must not be set when entry_source is MANUAL.")
+    if errors:
+        raise BadRequestException("; ".join(errors))
+
+
+def create_germany_overtime_work_record(
+    db: Session, employee_id: int, organization_id: int,
+    data: "GermanyOvertimeWorkRecordCreate", actor_id: Optional[int],
+) -> GermanyOvertimeWorkRecord:
+    """Record one raw work-time fact. Never computes a premium, tax, or
+    SI amount — this table has no such columns (see its own model
+    docstring). Germany-scoped only (Phase 8AA §17 — not prematurely
+    globalized to other countries without evidence)."""
+    employee = get_employee_by_id(db, employee_id, organization_id)
+    if _normalize_country(employee.country_code) != "DE":
+        raise BadRequestException("Germany overtime work records may only be recorded for DE employees.")
+
+    _validate_germany_overtime_work_record_fields(data)
+
+    if data.source_attendance_id is not None:
+        attendance = (
+            db.query(PayrollAttendanceRecord)
+            .filter(
+                PayrollAttendanceRecord.id == data.source_attendance_id,
+                PayrollAttendanceRecord.employee_id == employee_id,
+                PayrollAttendanceRecord.organization_id == organization_id,
+            )
+            .first()
+        )
+        if attendance is None:
+            raise BadRequestException("source_attendance_id does not reference an attendance record for this employee.")
+        existing = (
+            db.query(GermanyOvertimeWorkRecord)
+            .filter(GermanyOvertimeWorkRecord.source_attendance_id == data.source_attendance_id)
+            .first()
+        )
+        if existing is not None:
+            raise BadRequestException(
+                f"Attendance record #{data.source_attendance_id} already has an overtime work record "
+                f"(#{existing.id}) — duplicate prevention (Phase 8AA §14)."
+            )
+
+    row = GermanyOvertimeWorkRecord(
+        organization_id=organization_id, employee_id=employee_id,
+        source_attendance_id=data.source_attendance_id, work_date=data.work_date,
+        start_datetime=data.start_datetime, end_datetime=data.end_datetime, hours=data.hours,
+        entry_source=data.entry_source, hr_approval_status="PENDING", created_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_overtime_work_record", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "employee_id": employee_id, "work_date": str(data.work_date),
+            "entry_source": data.entry_source, "hours": str(data.hours),
+        },
+    )
+
+    # Phase 8AQ — never invents which source "wins"; only detects and
+    # flags the ambiguity so it fails closed downstream. See
+    # _recompute_germany_overtime_overlap_status's own docstring.
+    _recompute_germany_overtime_overlap_status(db, employee_id, organization_id, actor_id)
+    db.refresh(row)
+    return row
+
+
+def _recompute_germany_overtime_overlap_status(
+    db: Session, employee_id: int, organization_id: int, actor_id: Optional[int],
+) -> None:
+    """Phase 8AQ, Objective B. Per this phase's own explicit instruction
+    ("DO NOT invent precedence... implement a safe technical state that
+    prevents ambiguous records from silently becoming payable"), this
+    function NEVER decides which of two overlapping work records is
+    correct — it only detects physical time overlap between NON-
+    REJECTED records for one employee and marks every record in an
+    overlapping group AMBIGUOUS_OVERLAP, regardless of entry_source
+    (manual vs attendance-derived is irrelevant to whether two records
+    physically overlap). A REJECTED record is excluded from overlap
+    consideration entirely — HR explicitly rejecting one side of an
+    overlap (via the existing set_germany_overtime_work_record_approval
+    action, not a new invented mechanism) is the only way an ambiguity
+    resolves, and it resolves purely as a side effect of removing one
+    of the two records from consideration, never by this function
+    picking a "winner."
+
+    Recomputes fresh from scratch for every non-rejected record of this
+    employee (rather than incrementally patching) — simpler to reason
+    about and correct: a work record's ambiguity depends on the full set
+    of its non-rejected siblings, which can change in either direction
+    (an overlap can newly appear on create, or resolve when a sibling is
+    rejected)."""
+    # ALL of this employee's records (including REJECTED ones) must be
+    # considered for the WRITE pass below — a just-rejected record's own
+    # overlap_status must be cleared too (it is excluded from ambiguity
+    # consideration entirely, so it cannot itself remain "ambiguous").
+    # Only NON-REJECTED records participate in the actual overlap
+    # comparison against each other.
+    all_records = (
+        db.query(GermanyOvertimeWorkRecord)
+        .filter(
+            GermanyOvertimeWorkRecord.employee_id == employee_id,
+            GermanyOvertimeWorkRecord.organization_id == organization_id,
+        )
+        .all()
+    )
+    records = [r for r in all_records if r.hr_approval_status != "REJECTED"]
+    ambiguous_ids = set()
+    for i, a in enumerate(records):
+        for b in records[i + 1:]:
+            # Standard half-open interval overlap test.
+            if a.start_datetime < b.end_datetime and b.start_datetime < a.end_datetime:
+                ambiguous_ids.add(a.id)
+                ambiguous_ids.add(b.id)
+
+    changed = False
+    for record in all_records:
+        new_status = "AMBIGUOUS_OVERLAP" if record.id in ambiguous_ids else None
+        if record.overlap_status != new_status:
+            old_status = record.overlap_status
+            record.overlap_status = new_status
+            changed = True
+            record_tax_audit(
+                db, actor_id=actor_id, action="overlap_status_recompute",
+                entity_type="germany_overtime_work_record", entity_id=record.id,
+                old_value={"overlap_status": old_status}, new_value={"overlap_status": new_status},
+            )
+    if changed:
+        db.commit()
+
+
+def list_germany_overtime_work_records(
+    db: Session, employee_id: int, organization_id: int,
+    date_from: Optional[date] = None, date_to: Optional[date] = None,
+) -> List[GermanyOvertimeWorkRecord]:
+    get_employee_by_id(db, employee_id, organization_id)  # 404s + tenant-scopes
+    query = db.query(GermanyOvertimeWorkRecord).filter(
+        GermanyOvertimeWorkRecord.employee_id == employee_id,
+        GermanyOvertimeWorkRecord.organization_id == organization_id,
+    )
+    if date_from is not None:
+        query = query.filter(GermanyOvertimeWorkRecord.work_date >= date_from)
+    if date_to is not None:
+        query = query.filter(GermanyOvertimeWorkRecord.work_date <= date_to)
+    return query.order_by(GermanyOvertimeWorkRecord.work_date.desc()).all()
+
+
+def get_germany_overtime_work_record_by_id(
+    db: Session, record_id: int, organization_id: int,
+) -> GermanyOvertimeWorkRecord:
+    row = (
+        db.query(GermanyOvertimeWorkRecord)
+        .filter(GermanyOvertimeWorkRecord.id == record_id, GermanyOvertimeWorkRecord.organization_id == organization_id)
+        .first()
+    )
+    if not row:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return row
+
+
+def set_germany_overtime_work_record_approval(
+    db: Session, record_id: int, organization_id: int, status: str, actor_id: Optional[int],
+) -> GermanyOvertimeWorkRecord:
+    """HR/manager sign-off that the recorded hours were legitimately
+    worked — explicitly NOT a statutory classification/publication
+    decision (Phase 8AA §25's own separation); no maker-checker distinct-
+    approver requirement is imposed here, since this is an ordinary
+    workflow approval, not a statutory-registry publish."""
+    row = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    if status not in _GERMANY_OVERTIME_APPROVAL_STATUSES:
+        raise BadRequestException(f"hr_approval_status must be one of {sorted(_GERMANY_OVERTIME_APPROVAL_STATUSES)}.")
+    old_status = row.hr_approval_status
+    row.hr_approval_status = status
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_overtime_work_record", entity_id=row.id,
+        old_value={"hr_approval_status": old_status}, new_value={"hr_approval_status": status},
+    )
+    # Phase 8AQ: rejecting a record removes it from overlap consideration
+    # entirely — this may resolve (never create) an ambiguity for its
+    # former siblings. Recompute regardless of which way status changed,
+    # since un-rejecting (PENDING/APPROVED after a prior REJECTED) can
+    # equally re-introduce an overlap.
+    _recompute_germany_overtime_overlap_status(db, row.employee_id, organization_id, actor_id)
+    db.refresh(row)
+    return row
+
+
+# ── Germany: overtime time-window CLASSIFICATION (Phase 8AE) ────────────
+# Statutory/calendar classification only — see
+# engine/germany_overtime_classifier.py for the full algorithm and its own
+# extensive STATUTORY FACT / ENGINEERING DESIGN / UNRESOLVED QUESTION
+# documentation. No money is calculated by anything in this section.
+
+def classify_and_list_germany_overtime_time_segments(
+    db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> List[GermanyOvertimeTimeSegment]:
+    """Tenant-scoped: 404s if the work record doesn't belong to this org.
+    Classifies (re-classifying replaces any prior segments for this work
+    record — see the classifier module's own docstring for why that is
+    safe) and returns the resulting segments.
+
+    Phase 8AQ: fails closed with PRECEDENCE_REQUIRED when
+    overlap_status == "AMBIGUOUS_OVERLAP" — this is the earliest point
+    in the pipeline (before any money is computed) that can safely
+    block an ambiguous record, matching every other "cannot proceed"
+    gate in this module (missing Grundlohn, missing category, etc.).
+    Reject the wrong sibling record via set_germany_overtime_work_record_approval
+    (status="REJECTED") to resolve the ambiguity — this function never
+    picks a winner itself."""
+    from app.modules.payroll.engine.germany_overtime_classifier import (
+        GermanyOvertimeClassificationError, classify_germany_overtime_work_record,
+    )
+
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    if work_record.overlap_status == "AMBIGUOUS_OVERLAP":
+        raise BadRequestException(
+            "PRECEDENCE_REQUIRED: this work record's time range overlaps another non-rejected "
+            "overtime work record for the same employee, and source precedence (manual vs. "
+            "attendance-derived) is not resolved. Reject the incorrect record via HR approval "
+            "before classification can proceed — the system does not choose a source automatically."
+        )
+    try:
+        return classify_germany_overtime_work_record(db, work_record, persist=True)
+    except GermanyOvertimeClassificationError as exc:
+        # Found during Phase 8AI's HTTP-contract test: this previously
+        # propagated as a raw, unhandled 500 — the same data-state issue
+        # (e.g. TIMEZONE_FOUNDATION_REQUIRED) every other fail-closed
+        # Germany blocker in this file surfaces as a clean 4xx, not a
+        # server crash.
+        raise BadRequestException(f"{exc.code}: {exc.message}")
+
+
+def list_germany_overtime_time_segments(
+    db: Session, record_id: int, organization_id: int,
+) -> List[GermanyOvertimeTimeSegment]:
+    """Tenant-scoped read of whatever classification result (if any)
+    already exists — does NOT (re)classify."""
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    return (
+        db.query(GermanyOvertimeTimeSegment)
+        .filter(GermanyOvertimeTimeSegment.work_record_id == work_record.id)
+        .order_by(GermanyOvertimeTimeSegment.segment_start)
+        .all()
+    )
+
+
+# ── Germany overtime WAGE-TAX calculation (Phase 8AF) ────────────────────
+# WAGE TAX ONLY — no social-insurance treatment anywhere in this section.
+# Tenant-scoping happens here (via get_germany_overtime_work_record_by_id)
+# BEFORE any calculation logic runs — proven by test.
+
+def calculate_and_list_germany_overtime_wage_tax(
+    db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> List[GermanyOvertimeWageTaxResult]:
+    from app.modules.payroll.engine.germany_overtime_wage_tax import (
+        GermanyOvertimeNotClassifiedError, calculate_germany_overtime_wage_tax,
+    )
+
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    try:
+        return calculate_germany_overtime_wage_tax(db, work_record, persist=True, actor_id=actor_id)
+    except GermanyOvertimeNotClassifiedError as exc:
+        # Phase 8AP fix: this sibling of classify_and_list_germany_overtime_time_segments()
+        # never got that function's own Phase 8AI fix — calling wage-tax
+        # calculation before classification previously propagated as a
+        # raw, unhandled 500 instead of a clean 4xx.
+        raise BadRequestException(f"{exc.code}: {exc.message}")
+
+
+def list_germany_overtime_wage_tax_results(
+    db: Session, record_id: int, organization_id: int,
+) -> List[GermanyOvertimeWageTaxResult]:
+    """Tenant-scoped read of whatever calculation result (if any) already
+    exists — does NOT (re)calculate."""
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    return (
+        db.query(GermanyOvertimeWageTaxResult)
+        .filter(GermanyOvertimeWageTaxResult.work_record_id == work_record.id)
+        .order_by(GermanyOvertimeWageTaxResult.segment_start)
+        .all()
+    )
+
+
+# ── Germany overtime SOCIAL-INSURANCE calculation (Phase 8AG) ───────────
+# SOCIAL INSURANCE ONLY — completely independent of the wage-tax section
+# above (no shared row, no shared cap resolution). Tenant-scoping happens
+# here (via get_germany_overtime_work_record_by_id) BEFORE any
+# calculation logic runs — proven by test.
+
+def calculate_and_list_germany_overtime_social_insurance(
+    db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> List[GermanyOvertimeSocialInsuranceResult]:
+    from app.modules.payroll.engine.germany_overtime_social_insurance import (
+        GermanyOvertimeSINotClassifiedError, calculate_germany_overtime_social_insurance,
+    )
+
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    try:
+        return calculate_germany_overtime_social_insurance(db, work_record, persist=True, actor_id=actor_id)
+    except GermanyOvertimeSINotClassifiedError as exc:
+        # Phase 8AP fix: same sibling gap as calculate_and_list_germany_overtime_wage_tax above.
+        raise BadRequestException(f"{exc.code}: {exc.message}")
+
+
+def list_germany_overtime_social_insurance_results(
+    db: Session, record_id: int, organization_id: int,
+) -> List[GermanyOvertimeSocialInsuranceResult]:
+    """Tenant-scoped read of whatever calculation result (if any) already
+    exists — does NOT (re)calculate."""
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    return (
+        db.query(GermanyOvertimeSocialInsuranceResult)
+        .filter(GermanyOvertimeSocialInsuranceResult.work_record_id == work_record.id)
+        .order_by(GermanyOvertimeSocialInsuranceResult.segment_start)
+        .all()
+    )
+
+
+# ── Germany overtime PREMIUM COMPONENT (Phase 8AH) ──────────────────────
+# Combines Phase 8AF (wage-tax) + Phase 8AG (social-insurance) results —
+# see engine/germany_overtime_premium_component.py's own module docstring
+# for the full combination/reconciliation design. Building/rebuilding a
+# component NEVER touches an already-attached one (payslip_allowance_item_id
+# IS NOT NULL) — those are frozen once attached, matching every other
+# "finalized" row's immutability guarantee in this codebase
+# (tax_rule_snapshot/germany_calculation_snapshot on PayslipItem itself).
+
+def build_germany_overtime_premium_components(
+    db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> List[GermanyOvertimePremiumComponent]:
+    from app.modules.payroll.engine.germany_overtime_premium_component import (
+        GermanyOvertimePremiumComponentNoResultsError, build_premium_component_groups,
+    )
+
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    try:
+        groups = build_premium_component_groups(db, work_record)
+    except GermanyOvertimePremiumComponentNoResultsError as exc:
+        # Phase 8AP fix: same sibling gap as the wage-tax/SI calculation
+        # functions above — calling this before either prior calculation
+        # step previously propagated as a raw, unhandled 500.
+        raise BadRequestException(f"{exc.code}: {exc.message}")
+
+    # Never delete/rebuild a component that has EVER been attached — it
+    # is frozen the moment it is first linked to a real payslip line
+    # (Phase 8AH §22). Phase 8AQ extended this: a DETACHED component is
+    # STILL frozen, not just an ATTACHED one — otherwise a rebuild after
+    # a legitimate detach would silently delete-and-recreate the very
+    # row whose detach history (detached_at/detached_by_id) this phase
+    # exists to preserve, defeating the entire "no silent deletion of
+    # payroll history" principle. Only a component that was NEVER
+    # attached (attachment_status == "NEVER_ATTACHED") is still
+    # considered a draft, safe to delete and recompute on rebuild.
+    existing = (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(GermanyOvertimePremiumComponent.work_record_id == work_record.id)
+        .all()
+    )
+    attached_ranges = {
+        (row.segment_start, row.segment_end)
+        for row in existing if row.attachment_status != "NEVER_ATTACHED"
+    }
+    rebuildable_ids = [row.id for row in existing if row.attachment_status == "NEVER_ATTACHED"]
+    if rebuildable_ids:
+        db.query(GermanyOvertimePremiumComponent).filter(
+            GermanyOvertimePremiumComponent.id.in_(rebuildable_ids),
+        ).delete()
+
+    rows = []
+    for group in groups:
+        key = (group.segment_start, group.segment_end)
+        if key in attached_ranges:
+            continue  # frozen — leave the already-attached component untouched
+        row = GermanyOvertimePremiumComponent(
+            organization_id=work_record.organization_id, work_record_id=work_record.id,
+            created_by_id=actor_id, **group.as_dict(),
+        )
+        db.add(row)
+        rows.append(row)
+    db.commit()
+    for row in rows:
+        db.refresh(row)
+
+    return (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(GermanyOvertimePremiumComponent.work_record_id == work_record.id)
+        .order_by(GermanyOvertimePremiumComponent.segment_start)
+        .all()
+    )
+
+
+def list_germany_overtime_premium_components(
+    db: Session, record_id: int, organization_id: int,
+) -> List[GermanyOvertimePremiumComponent]:
+    """Tenant-scoped read of whatever components (if any) already exist —
+    does NOT (re)build."""
+    work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
+    return (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(GermanyOvertimePremiumComponent.work_record_id == work_record.id)
+        .order_by(GermanyOvertimePremiumComponent.segment_start)
+        .all()
+    )
+
+
+def list_germany_overtime_premium_components_for_batch_attach(
+    db: Session,
+    organization_id: int,
+    employee_id: Optional[int] = None,
+    work_date_from: Optional[date] = None,
+    work_date_to: Optional[date] = None,
+    attachment_state: Optional[str] = None,
+) -> List[GermanyOvertimePremiumComponent]:
+    """Org-wide (optionally employee/date/attachment-state-filtered) browse
+    query for the Phase 8AO batch-attach operator workflow — the frontend
+    needs to see candidates ACROSS employees/work records in one screen,
+    unlike list_germany_overtime_premium_components above (which is
+    correctly scoped to one already-known work record). Read-only, never
+    mutates eligibility, and NEVER a substitute for the real server-side
+    validation _attach_one_germany_overtime_premium_component always
+    re-runs on every actual attach — this is a convenience view only.
+
+    attachment_state: "ATTACHED" | "DETACHED" | "UNATTACHED" | None (all,
+    default). Phase 8AQ: "UNATTACHED" means eligible-to-attach — i.e.
+    attachment_status "NEVER_ATTACHED" OR "DETACHED" — since a detached
+    component is exactly as attachable as one that was never attached
+    (see _attach_one_germany_overtime_premium_component's own claim
+    logic). "DETACHED" alone is also selectable, for an operator who
+    specifically wants to review what was undone.
+
+    Each returned component carries two extra, non-persisted attributes —
+    `employee_id`/`employee_name` — set below from the same join, so the
+    cross-employee batch-attach screen can render who each row belongs
+    to without a second round trip per row. These are plain Python
+    attribute assignments (never flushed/committed), read via the
+    dedicated GermanyOvertimePremiumComponentEligibleResponse schema's
+    from_attributes serialization."""
+    if employee_id is not None:
+        get_employee_by_id(db, employee_id, organization_id)  # 404s + tenant-scopes
+
+    query = (
+        db.query(GermanyOvertimePremiumComponent, GermanyOvertimeWorkRecord.employee_id, PayrollEmployee.name)
+        .join(
+            GermanyOvertimeWorkRecord,
+            GermanyOvertimePremiumComponent.work_record_id == GermanyOvertimeWorkRecord.id,
+        )
+        .join(PayrollEmployee, PayrollEmployee.id == GermanyOvertimeWorkRecord.employee_id)
+        .filter(GermanyOvertimePremiumComponent.organization_id == organization_id)
+    )
+    if employee_id is not None:
+        query = query.filter(GermanyOvertimeWorkRecord.employee_id == employee_id)
+    if work_date_from is not None:
+        query = query.filter(GermanyOvertimePremiumComponent.work_date_local >= work_date_from)
+    if work_date_to is not None:
+        query = query.filter(GermanyOvertimePremiumComponent.work_date_local <= work_date_to)
+    if attachment_state == "ATTACHED":
+        query = query.filter(GermanyOvertimePremiumComponent.attachment_status == "ATTACHED")
+    elif attachment_state == "DETACHED":
+        query = query.filter(GermanyOvertimePremiumComponent.attachment_status == "DETACHED")
+    elif attachment_state == "UNATTACHED":
+        query = query.filter(GermanyOvertimePremiumComponent.attachment_status != "ATTACHED")
+
+    rows = query.order_by(
+        GermanyOvertimeWorkRecord.employee_id, GermanyOvertimePremiumComponent.work_date_local,
+        GermanyOvertimePremiumComponent.segment_start,
+    ).all()
+
+    components = []
+    for component, emp_id, emp_name in rows:
+        component.employee_id = emp_id
+        component.employee_name = emp_name
+        components.append(component)
+    return components
+
+
+def _germany_overtime_premium_component_trace_dict(component: GermanyOvertimePremiumComponent) -> dict:
+    """JSON-safe trace for one component (Phase 8AH §15) — every value is
+    a plain str/float/int/None, never a raw ORM instance/Decimal/datetime,
+    so this can be embedded directly into PayslipItem.germany_calculation_snapshot."""
+    def _n(value):
+        return float(value) if value is not None else None
+
+    return {
+        "premiumComponentId": component.id,
+        "workRecordId": component.work_record_id,
+        "segmentStart": component.segment_start.isoformat() if component.segment_start else None,
+        "segmentEnd": component.segment_end.isoformat() if component.segment_end else None,
+        "workDateLocal": component.work_date_local.isoformat() if component.work_date_local else None,
+        "qualifyingHours": _n(component.qualifying_hours),
+        "wageTaxResultId": component.wage_tax_result_id,
+        "socialInsuranceResultId": component.social_insurance_result_id,
+        "combinationStatus": component.combination_status,
+        "grossPremiumAmount": _n(component.gross_premium_amount),
+        "wageTaxFreeAmount": _n(component.wage_tax_free_amount),
+        "wageTaxableAmount": _n(component.wage_taxable_amount),
+        "siExemptAmount": _n(component.si_exempt_amount),
+        "siContributoryAmount": _n(component.si_contributory_amount),
+        "attachmentStatus": component.attachment_status,
+        "financialIntegrationStatus": component.financial_integration_status or None,
+        "appliedGrossDelta": _n(component.applied_gross_delta),
+        "appliedPfDelta": _n(component.applied_pf_delta),
+        "appliedEsiDelta": _n(component.applied_esi_delta),
+        "attachedAt": component.attached_at.isoformat() if component.attached_at else None,
+    }
+
+
+_OVERTIME_PREMIUM_ALLOWANCE_KEY = "germany_overtime_premium"
+
+
+# ── Phase 8AR — overtime premium financial integration ───────────────────
+# Phase 8AQ's forensic finding: attach/detach only touched
+# PayslipAllowanceItem.amount and germany_calculation_snapshot —
+# PayslipItem.gross_pay, PayslipItem.total_deductions, and
+# PayslipItem.net_pay were never updated. This function computes the
+# financial deltas that attach must apply and detach must reverse.
+
+# Germany statutory SI branch rates for REGULAR employees (Phase 7 /
+# ZP-TAX-DE-2026-001 §9) — the same values the engine reads from
+# hardcoded_defaults.py for its own base-calculation. Using them here for
+# the overtime-premium SI delta avoids requiring a second engine pass and
+# keeps the integration self-contained. When a future engine phase
+# computes full SI including overtime in the base calculation, these
+# delta values will be subsumed into that pass.
+from app.modules.payroll.hardcoded_defaults import (
+    _DE_RV_EMPLOYEE_RATE, _DE_RV_EMPLOYER_RATE,
+    _DE_ALV_EMPLOYEE_RATE, _DE_ALV_EMPLOYER_RATE,
+    _DE_GKV_GENERAL_EMPLOYEE_RATE, _DE_GKV_GENERAL_EMPLOYER_RATE,
+)  # noqa: E402
+
+
+@dataclass
+class _OvertimeFinancialDelta:
+    """Computed financial impact of attaching one overtime premium
+    component to a payslip. All amounts are in EUR, rounded to 2 decimals.
+
+    wages_tax_delta: additional wage tax attributable to this premium.
+        0 when PAP is not available (the accurate computation requires
+        PAP's marginal-rate calculation — see status field). Stored on the
+        component for future engine integration.
+    employee_pf_delta: additional employee-side pension insurance (RV,
+        Rentenversicherung) contribution on the SI-contributory portion
+        of this premium — mapped onto PayslipItem.pf, matching the engine's
+        own field reuse (employee_pf = RV).
+    employee_esi_delta: additional employee-side SI contribution (ALV +
+        GKV branches) on the SI-contributory portion — mapped onto
+        PayslipItem.esi, matching the engine's own field reuse
+        (employee_esi = ALV + GKV + PV). PV is excluded because it is
+        configuration-dependent (standard/Saxony, childless surcharge).
+    employer_si_delta: additional employer-side social insurance (RV + ALV
+        + GKV contributions on the SI-contributory portion). Stored for
+        audit; not yet applied to PayslipItem because employer-side
+        contributions are informational only."""
+    gross_delta: Decimal
+    wage_tax_delta: Decimal
+    employee_pf_delta: Decimal
+    employee_esi_delta: Decimal
+    employer_si_delta: Decimal
+    status: str  # "COMPLETE" or "PARTIAL_WAGE_TAX_PENDING_PAP"
+
+
+def _compute_overtime_financial_delta(
+    component: GermanyOvertimePremiumComponent,
+) -> _OvertimeFinancialDelta:
+    """Compute the financial impact of attaching one Germany overtime
+    premium component to a payslip line.
+
+    The premium component carries five statutory dimensions (Phase 8AF/8AG):
+        gross_premium_amount   — total payable overtime premium
+        wage_tax_free_amount  — §3b EStG wage-tax-exempt portion
+        wage_taxable_amount   — §3b EStG wage-tax-liable portion
+        si_exempt_amount      — §1 SvEV SI-exempt portion
+        si_contributory_amount — §1 SvEV SI-contributory portion
+
+    This function computes:
+        1. gross_delta = gross_premium_amount (the premium increases gross pay)
+        2. SI employee-side delta split onto PayslipItem.pf (RV) and
+           PayslipItem.esi (ALV + GKV) using statutory REGULAR-employee
+           branch rates, applying each to its correct payslip field
+           (matching the engine's employee_pf=Rentenversicherung /
+           employee_esi=ALV+GKV+PV field reuse)
+        3. Wage-tax delta on wage_taxable_amount — NOT COMPUTABLE without
+           PAP (see status field); stored as 0 pending engine integration
+
+    PV (Pflegeversicherung) is deliberately excluded from employee_esi_delta
+    here: it depends on per-employee configuration (standard vs Saxony,
+    childless surcharge) not available at this layer, so contributing its
+    default would fabricate a figure. PV delta is deferred to the full
+    engine pass.
+
+    Ceiling interactions (the SI-contributory portion may push total monthly
+    earnings above a branch ceiling) are intentionally NOT handled here:
+    the base payslip's own SI already accounts for the regular salary;
+    the overtime premium's additional SI is computed on the contributory
+    portion at the general rates. A full engine pass that includes overtime
+    in the base SI calculation would handle ceilings correctly — this
+    delta-based approach is an approximation for the current architecture.
+
+    When PAP becomes available, the engine will compute a single integrated
+    wage-tax result for (regular salary + overtime premium), making this
+    separate delta unnecessary. At that point, this function becomes a
+    transitional compatibility layer."""
+    gross = Decimal(str(component.gross_premium_amount or 0))
+    si_contributory = Decimal(str(component.si_contributory_amount or 0))
+
+    # Employee-side SI split onto the two payslip SI fields, using the
+    # branch rates for REGULAR employees:
+    #   employee_pf_delta  = RV (Rentenversicherung)
+    #   employee_esi_delta = ALV (Arbeitslosenversicherung) + GKV general
+    # PV is excluded (per-employee config-dependent — see docstring).
+    employee_pf_delta = _round2(si_contributory * _DE_RV_EMPLOYEE_RATE / Decimal("100"))
+    employee_esi_delta = _round2(
+        si_contributory * (_DE_ALV_EMPLOYEE_RATE + _DE_GKV_GENERAL_EMPLOYEE_RATE) / Decimal("100")
+    )
+    employer_si = _round2(
+        si_contributory * (_DE_RV_EMPLOYER_RATE + _DE_ALV_EMPLOYER_RATE + _DE_GKV_GENERAL_EMPLOYER_RATE) / Decimal("100")
+    )
+
+    # Wage-tax delta: requires PAP's marginal-rate computation on the
+    # taxable amount. Without PAP, this is uncomputable — stored as 0
+    # with an explicit PARTIAL status.
+    wage_tax = Decimal("0")
+    status = "PARTIAL_WAGE_TAX_PENDING_PAP"
+
+    return _OvertimeFinancialDelta(
+        gross_delta=gross,
+        wage_tax_delta=wage_tax,
+        employee_pf_delta=employee_pf_delta,
+        employee_esi_delta=employee_esi_delta,
+        employer_si_delta=employer_si,
+        status=status,
+    )
+
+
+# ── Phase 8AN internal outcome classification (shared by the single-attach
+# and batch-attach entry points below) ──────────────────────────────────
+# attach_germany_overtime_premium_component_to_payslip() (single-attach)
+# never catches these — they ARE NotFoundException/BadRequestException
+# (subclasses), so its byte-identical public contract (existing tests'
+# `pytest.raises(BadRequestException)`/`pytest.raises(NotFoundException)`)
+# holds with zero wrapper logic. batch_attach_germany_overtime_premium_
+# components_to_payslips (Phase 8AO) instead does an isinstance check, most
+# specific subclass first, to classify each item into the structured
+# attached/already_attached/rejected/invalid/failed result buckets its own
+# brief requires, without duplicating any validation logic below.
+class _OvertimeAttachAlreadyAttached(BadRequestException):
+    """The component's payslip_allowance_item_id is already set — either
+    seen at the initial check, or lost a concurrent claim race (see the
+    atomic compare-and-swap in _claim_germany_overtime_premium_component
+    below)."""
+
+
+class _OvertimeAttachRejected(BadRequestException):
+    """The referenced component/payslip pairing is structurally valid,
+    but the component is not yet eligible to attach (not COMPLETE,
+    underlying work record not APPROVED) or the target payroll run is
+    already finalized (PAID/CLOSED)."""
+
+
+def _claim_germany_overtime_premium_component(
+    db: Session, component_id: int, organization_id: int, allowance_item_id: int, actor_id: Optional[int],
+) -> bool:
+    """Atomic compare-and-swap claim: flips attachment_status to
+    "ATTACHED" only if it is not ALREADY "ATTACHED" (covers both
+    "NEVER_ATTACHED" and, since Phase 8AQ, "DETACHED" — a detached
+    component is exactly as claimable as a fresh one), in one UPDATE
+    statement gated by a WHERE clause on that same column. Two
+    concurrent callers racing to attach/re-attach the SAME component can
+    never both succeed — the database serializes writes to the same
+    row, so exactly one UPDATE affects a row (returns rowcount 1) and
+    the other affects zero rows (rowcount 0), regardless of backend
+    (SQLite or Postgres). Phase 8AQ: also clears detached_at/
+    detached_by_id — those fields describe the CURRENT state's most
+    recent detach, which no longer applies once re-attached (the full
+    history of every past detach remains in the audit log, not in these
+    fields — see the model's own docstring). Returns True iff THIS call
+    won the claim."""
+    result = (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(
+            GermanyOvertimePremiumComponent.id == component_id,
+            GermanyOvertimePremiumComponent.organization_id == organization_id,
+            GermanyOvertimePremiumComponent.attachment_status != "ATTACHED",
+        )
+        .update(
+            {
+                "attachment_status": "ATTACHED",
+                "payslip_allowance_item_id": allowance_item_id,
+                "attached_at": datetime.utcnow(),
+                "attached_by_id": actor_id,
+                "detached_at": None,
+                "detached_by_id": None,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return result == 1
+
+
+def _attach_one_germany_overtime_premium_component(
+    db: Session, component_id: int, payslip_item_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> GermanyOvertimePremiumComponent:
+    """Shared validation + concurrency-safe claim + financial delta
+    integration, used by BOTH the single-attach and batch-attach entry
+    points below — one architecture, not two. Phase 8AR: this function
+    now not only credits the gross_premium_amount to the PayslipAllowanceItem
+    line but also computes and applies the financial deltas (gross_pay,
+    SI employee deductions, net_pay) to the PayslipItem. Wage-tax delta
+    is stored but set to 0 while PAP is BLOCKED_EXTERNAL — the status
+    is PARTIAL_WAGE_TAX_PENDING_PAP, visible in the API response and
+    the germany_calculation_snapshot trace, so an operator can tell the
+    payslip is correct for SI but not yet for final wage tax.
+
+    Raises the real NotFoundException/BadRequestException (or the
+    BadRequestException subclasses _OvertimeAttachAlreadyAttached /
+    _OvertimeAttachRejected above) — never an opaque internal type — so
+    the single-attach wrapper needs zero re-raising logic, and the batch
+    wrapper can still classify precisely via isinstance, most specific
+    first."""
+    component = (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(
+            GermanyOvertimePremiumComponent.id == component_id,
+            GermanyOvertimePremiumComponent.organization_id == organization_id,
+        )
+        .first()
+    )
+    if not component:
+        raise NotFoundException("GermanyOvertimePremiumComponent", component_id)
+
+    if component.attachment_status == "ATTACHED":
+        raise _OvertimeAttachAlreadyAttached("This premium component is already attached to a payslip line.")
+    if component.combination_status != "COMPLETE":
+        raise _OvertimeAttachRejected(
+            f"Only a COMPLETE premium component may be attached to a payslip (current status: "
+            f"{component.combination_status!r})."
+        )
+
+    work_record = (
+        db.query(GermanyOvertimeWorkRecord)
+        .filter(
+            GermanyOvertimeWorkRecord.id == component.work_record_id,
+            GermanyOvertimeWorkRecord.organization_id == organization_id,
+        )
+        .first()
+    )
+    if not work_record:
+        raise NotFoundException("GermanyOvertimeWorkRecord", component.work_record_id)
+    if work_record.hr_approval_status != "APPROVED":
+        raise _OvertimeAttachRejected(
+            "The underlying GermanyOvertimeWorkRecord must have hr_approval_status=APPROVED before its "
+            f"premium component may be attached to a payslip (current status: {work_record.hr_approval_status!r})."
+        )
+
+    payslip_item = (
+        db.query(PayslipItem)
+        .filter(PayslipItem.id == payslip_item_id, PayslipItem.organization_id == organization_id)
+        .first()
+    )
+    if not payslip_item:
+        raise NotFoundException("PayslipItem", payslip_item_id)
+    if payslip_item.employee_id != work_record.employee_id:
+        raise BadRequestException("This payslip does not belong to the same employee as the work record.")
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == payslip_item.payroll_run_id).first()
+    if not run:
+        raise NotFoundException("PayrollRun", payslip_item.payroll_run_id)
+    if not (run.period_start <= component.work_date_local <= run.period_end):
+        raise BadRequestException(
+            f"The component's work date ({component.work_date_local}) falls outside this payslip's "
+            f"payroll run period ({run.period_start} to {run.period_end})."
+        )
+    if run.status in (PayrollStatus.PAID, PayrollStatus.CLOSED):
+        raise _OvertimeAttachRejected(
+            f"Cannot attach a new premium component to a payslip whose payroll run is already "
+            f"{run.status} — this would silently change a finalized/paid amount."
+        )
+
+    # Get-or-create the target allowance line BEFORE claiming the
+    # component. Creating an empty (or reusing an existing) allowance
+    # line moves no money — amount is only ever changed by the atomic
+    # increment below, and only after this call has proven it own the
+    # claim. This ordering is what makes the whole operation race-safe:
+    # if the claim below loses the race, no amount is ever touched, so a
+    # lost race can never double-count a component's money onto the
+    # payslip (the exact failure mode Phase 8AO's brief calls out).
+    allowance_item = (
+        db.query(PayslipAllowanceItem)
+        .filter(
+            PayslipAllowanceItem.payslip_item_id == payslip_item.id,
+            PayslipAllowanceItem.key == _OVERTIME_PREMIUM_ALLOWANCE_KEY,
+        )
+        .first()
+    )
+    if not allowance_item:
+        allowance_item = PayslipAllowanceItem(
+            payslip_item_id=payslip_item.id, key=_OVERTIME_PREMIUM_ALLOWANCE_KEY,
+            label="Overtime/Shift Premium (Gross, DE)", amount=Decimal("0.00"),
+        )
+        db.add(allowance_item)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Lost the create race to a concurrent attach targeting the
+            # SAME payslip line (uq_payslip_allowance_item_key) — the
+            # other caller's row is now the real one; fetch it.
+            db.rollback()
+            allowance_item = (
+                db.query(PayslipAllowanceItem)
+                .filter(
+                    PayslipAllowanceItem.payslip_item_id == payslip_item.id,
+                    PayslipAllowanceItem.key == _OVERTIME_PREMIUM_ALLOWANCE_KEY,
+                )
+                .first()
+            )
+        db.refresh(allowance_item)
+
+    won_claim = _claim_germany_overtime_premium_component(
+        db, component_id, organization_id, allowance_item.id, actor_id,
+    )
+    if not won_claim:
+        # Someone else attached this exact component between our
+        # eligibility check above and this claim — re-check is
+        # deliberately not needed: any outcome other than "already
+        # attached" would mean the row changed underneath us in some
+        # other way, which the unique/claim semantics make impossible.
+        raise _OvertimeAttachAlreadyAttached(
+            "This premium component was attached by a concurrent request before this one completed."
+        )
+
+    # Won the claim — now, and only now, atomically credit the amount
+    # AND compute + apply the financial deltas to PayslipItem.
+    # Phase 8AR: the gross_premium_amount is credited to the allowance
+    # line (unchanged from Phase 8AH) AND the financial deltas (gross,
+    # SI employee/employer, wage tax if PAP available) are applied to
+    # PayslipItem.gross_pay, PayslipItem.total_deductions,
+    # PayslipItem.net_pay, and the component's own financial tracking
+    # fields. This is the core Phase 8AR fix — Phase 8AQ's finding that
+    # "attach does not update PayslipItem.gross_pay/net_pay".
+
+    # 1. Compute the financial delta for this component.
+    fin_delta = _compute_overtime_financial_delta(component)
+
+    # 2. Atomically credit the allowance line (unchanged from Phase 8AH).
+    db.query(PayslipAllowanceItem).filter(PayslipAllowanceItem.id == allowance_item.id).update(
+        {"amount": PayslipAllowanceItem.amount + Decimal(component.gross_premium_amount)},
+        synchronize_session=False,
+    )
+    db.commit()
+
+    # 3. Apply the financial deltas to PayslipItem — atomically.
+    # gross_pay increases by gross_delta; total_deductions increases by
+    # the employee-side SI deltas (pf + esi) plus the wage-tax delta;
+    # net_pay increases by the remainder (gross_delta - additional
+    # employee deductions). The UPDATE is a single statement to avoid
+    # read-modify-write races.
+    employee_deduction_delta = fin_delta.employee_pf_delta + fin_delta.employee_esi_delta + fin_delta.wage_tax_delta
+    net_delta = fin_delta.gross_delta - employee_deduction_delta
+    payslip_update = {
+        "gross_pay": PayslipItem.gross_pay + fin_delta.gross_delta,
+        "total_deductions": PayslipItem.total_deductions + employee_deduction_delta,
+        "net_pay": PayslipItem.net_pay + net_delta,
+        # Employee-side SI split onto the two payslip SI fields, matching
+        # the engine's field reuse (employee_pf=RV, employee_esi=ALV+GKV+PV).
+        # PV is excluded from the esi delta (config-dependent — see the
+        # _compute_overtime_financial_delta docstring), so the delta below
+        # adds ALV+GKV to the base esi (which already includes base PV).
+        "pf": PayslipItem.pf + fin_delta.employee_pf_delta,
+        "esi": PayslipItem.esi + fin_delta.employee_esi_delta,
+    }
+    db.query(PayslipItem).filter(PayslipItem.id == payslip_item.id).update(
+        payslip_update, synchronize_session=False,
+    )
+    db.commit()
+
+    # 4. Record the financial integration delta on the component itself
+    # for audit and future engine integration. applied_gross_delta /
+    # applied_pf_delta / applied_esi_delta hold the EXACT amounts applied
+    # so detach can reverse precisely; wage-tax delta (currently 0 while
+    # PAP is pending) is reflected in financial_integration_status and the
+    # snapshot/audit trace (no dedicated column).
+    db.query(GermanyOvertimePremiumComponent).filter(
+        GermanyOvertimePremiumComponent.id == component.id,
+    ).update(
+        {
+            "financial_integration_status": fin_delta.status,
+            "applied_gross_delta": fin_delta.gross_delta,
+            "applied_pf_delta": fin_delta.employee_pf_delta,
+            "applied_esi_delta": fin_delta.employee_esi_delta,
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+
+    db.refresh(component)
+    db.refresh(payslip_item)
+
+    snapshot = dict(payslip_item.germany_calculation_snapshot or {})
+    existing_components = list(snapshot.get("overtime_premium_components") or [])
+    trace_entry = _germany_overtime_premium_component_trace_dict(component)
+    trace_entry["financialIntegration"] = {
+        "status": fin_delta.status,
+        "grossDelta": float(fin_delta.gross_delta),
+        "wageTaxDelta": float(fin_delta.wage_tax_delta),
+        "employeePfDelta": float(fin_delta.employee_pf_delta),
+        "employeeEsiDelta": float(fin_delta.employee_esi_delta),
+        "employerSiDelta": float(fin_delta.employer_si_delta),
+    }
+    existing_components.append(trace_entry)
+    snapshot["overtime_premium_components"] = existing_components
+    payslip_item.germany_calculation_snapshot = snapshot
+    db.commit()
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="attach_to_payslip", entity_type="germany_overtime_premium_component",
+        entity_id=component.id,
+        new_value={
+            "payslip_item_id": payslip_item.id,
+            "payslip_allowance_item_id": allowance_item.id,
+            "financial_integration": {
+                "status": fin_delta.status,
+                "gross_delta": str(fin_delta.gross_delta),
+                "wage_tax_delta": str(fin_delta.wage_tax_delta),
+                "employee_pf_delta": str(fin_delta.employee_pf_delta),
+                "employee_esi_delta": str(fin_delta.employee_esi_delta),
+                "employer_si_delta": str(fin_delta.employer_si_delta),
+            },
+        },
+    )
+    db.refresh(component)
+    return component
+
+
+# ── Phase 8AQ / 8AR — detach / reversal ──────────────────────────────────
+# Forensic finding Phase 8AQ: the attach path above never touched
+# PayslipItem.gross_pay/net_pay — it ONLY ever creates/updates a
+# PayslipAllowanceItem row and the germany_calculation_snapshot JSON.
+# Phase 8AR FIX: attach now computes and applies financial deltas to
+# PayslipItem.gross_pay/total_deductions/net_pay. Detach therefore
+# reverses the stored delta values atomically (not recomputing — immune
+# to registry changes), plus the PayslipAllowanceItem credit reversal.
+
+class _OvertimeDetachNotAttached(BadRequestException):
+    """The component is not currently ATTACHED — never attached, already
+    detached, or lost a concurrent detach race (all three surface
+    identically: "not attached", never a leak of which case it was)."""
+
+
+class _OvertimeDetachRejected(BadRequestException):
+    """Structurally attached, but detaching is blocked right now — the
+    payslip's payroll run is already PAID/CLOSED (mirrors
+    _OvertimeAttachRejected's own identical guard on attach)."""
+
+
+def _detach_one_germany_overtime_premium_component(
+    db: Session, component_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> GermanyOvertimePremiumComponent:
+    """Reverses attach. Phase 8AR: reverses not only the
+    PayslipAllowanceItem credit but also the exact financial deltas
+    (gross_pay, SI deductions, net_pay) that attach applied, using the
+    STORED delta values on the component (never recomputed — immune to
+    registry changes between attach and detach). PayslipItem fields are
+    returned to their exact pre-attach state.
+
+    NEVER deletes the component, NEVER nulls
+    payslip_allowance_item_id/attached_at/attached_by_id — those remain
+    a permanent record of "this was attached here, by whom, when" (Phase
+    8AQ's own "no silent deletion of payroll history" principle). Only
+    attachment_status/detached_at/detached_by_id change, plus the
+    atomic reversal of the money this component contributed.
+
+    Concurrency-safety is symmetric to the attach path: the STATUS claim
+    (atomic compare-and-swap, gated on attachment_status == "ATTACHED")
+    happens first; the money is reversed only AFTER winning that claim
+    — so two concurrent detach attempts on the same component can never
+    both succeed, and neither can double-decrement the allowance item.
+    A component can only be detached from the SAME attach instance it
+    is currently attached under — re-attaching (which clears
+    detached_at/detached_by_id and re-sets payslip_allowance_item_id,
+    possibly to a different payslip) always precedes any further
+    detach, so this decrement is always undoing exactly the credit the
+    most recent successful attach added, never a stale one."""
+    component = (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(
+            GermanyOvertimePremiumComponent.id == component_id,
+            GermanyOvertimePremiumComponent.organization_id == organization_id,
+        )
+        .first()
+    )
+    if not component:
+        raise NotFoundException("GermanyOvertimePremiumComponent", component_id)
+
+    if component.attachment_status != "ATTACHED":
+        raise _OvertimeDetachNotAttached(
+            f"This premium component is not currently attached (status: {component.attachment_status!r})."
+        )
+
+    allowance_item = (
+        db.query(PayslipAllowanceItem)
+        .filter(PayslipAllowanceItem.id == component.payslip_allowance_item_id)
+        .first()
+    )
+    if not allowance_item:
+        raise NotFoundException("PayslipAllowanceItem", component.payslip_allowance_item_id)
+
+    payslip_item = (
+        db.query(PayslipItem)
+        .filter(PayslipItem.id == allowance_item.payslip_item_id, PayslipItem.organization_id == organization_id)
+        .first()
+    )
+    if not payslip_item:
+        raise NotFoundException("PayslipItem", allowance_item.payslip_item_id)
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == payslip_item.payroll_run_id).first()
+    if not run:
+        raise NotFoundException("PayrollRun", payslip_item.payroll_run_id)
+    if run.status in (PayrollStatus.PAID, PayrollStatus.CLOSED):
+        raise _OvertimeDetachRejected(
+            f"Cannot detach a premium component from a payslip whose payroll run is already "
+            f"{run.status} — this would silently change a finalized/paid amount."
+        )
+
+    gross_amount = component.gross_premium_amount
+
+    won_claim = (
+        db.query(GermanyOvertimePremiumComponent)
+        .filter(
+            GermanyOvertimePremiumComponent.id == component_id,
+            GermanyOvertimePremiumComponent.organization_id == organization_id,
+            GermanyOvertimePremiumComponent.attachment_status == "ATTACHED",
+        )
+        .update(
+            {
+                "attachment_status": "DETACHED",
+                "detached_at": datetime.utcnow(),
+                "detached_by_id": actor_id,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    if won_claim != 1:
+        # Lost the race — a concurrent detach (or, impossible given the
+        # guards above, some other mutation) won first.
+        raise _OvertimeDetachNotAttached(
+            "This premium component was detached by a concurrent request before this one completed."
+        )
+
+    # Won the claim — now, and only now, atomically reverse the credit
+    # AND the financial deltas. Phase 8AR: detach must reverse the exact
+    # financial impact that attach applied — Gross Pay, SI deductions,
+    # Net Pay, and the component's financial tracking fields. The
+    # applied_gross_delta/applied_pf_delta/applied_esi_delta on the
+    # component record the EXACT amounts that were applied at attach
+    # time, so detach uses THOSE values rather than recomputing (the
+    # "original source-of-truth" approach from the prompt).
+
+    # Read the stored deltas BEFORE reversing — these are the exact
+    # amounts that were applied at attach time.
+    stored_gross_delta = Decimal(str(component.applied_gross_delta or 0))
+    stored_pf_delta = Decimal(str(component.applied_pf_delta or 0))
+    stored_esi_delta = Decimal(str(component.applied_esi_delta or 0))
+    # Wage-tax delta is NOT persisted in its own column (no such column in
+    # the Phase 8AR migration) — it is 0 whenever the status is
+    # PARTIAL_WAGE_TAX_PENDING_PAP (the only attach-time status today, since
+    # PAP is BLOCKED_EXTERNAL). When a future engine pass stores a real
+    # wage-tax delta, the reversal of it will be handled by that pass. The
+    # older attached rows written by pre-8AR phases have NULL applied_*
+    # columns, so all stored deltas default to 0 and detach reverses nothing
+    # extra — exactly correct for those historical rows.
+    stored_wage_tax_delta = Decimal("0")
+
+    # 1. Reverse the allowance line credit (unchanged from Phase 8AQ).
+    db.query(PayslipAllowanceItem).filter(PayslipAllowanceItem.id == allowance_item.id).update(
+        {"amount": PayslipAllowanceItem.amount - Decimal(gross_amount)},
+        synchronize_session=False,
+    )
+    db.commit()
+
+    # 2. Reverse the financial deltas on PayslipItem — atomically.
+    net_delta = stored_gross_delta - stored_pf_delta - stored_esi_delta - stored_wage_tax_delta
+    payslip_update = {
+        "gross_pay": PayslipItem.gross_pay - stored_gross_delta,
+        "total_deductions": PayslipItem.total_deductions - stored_pf_delta - stored_esi_delta - stored_wage_tax_delta,
+        "net_pay": PayslipItem.net_pay - net_delta,
+        # Reverse the employee-side SI split onto its two payslip fields.
+        "pf": PayslipItem.pf - stored_pf_delta,
+        "esi": PayslipItem.esi - stored_esi_delta,
+    }
+    db.query(PayslipItem).filter(PayslipItem.id == payslip_item.id).update(
+        payslip_update, synchronize_session=False,
+    )
+    db.commit()
+
+    # 3. Clear the financial integration tracking on the component.
+    db.query(GermanyOvertimePremiumComponent).filter(
+        GermanyOvertimePremiumComponent.id == component.id,
+    ).update(
+        {
+            "financial_integration_status": "REVERSED",
+            "applied_gross_delta": None,
+            "applied_pf_delta": None,
+            "applied_esi_delta": None,
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+
+    db.refresh(payslip_item)
+    # A deep copy is required here (unlike the shallow dict()/list() copy
+    # the attach path above uses when merely APPENDING a new entry): we
+    # are MUTATING an entry that already exists inside the nested
+    # structure, and a shallow copy's inner dicts are still the SAME
+    # objects SQLAlchemy's change-tracking treats as the "old" value —
+    # mutating them in place makes old and new compare equal, so the
+    # UPDATE silently never happens. Found by this phase's own test.
+    snapshot = copy.deepcopy(payslip_item.germany_calculation_snapshot or {})
+    existing_components = snapshot.get("overtime_premium_components") or []
+    for entry in existing_components:
+        if entry.get("premiumComponentId") == component.id:
+            # Marked, never removed — the snapshot must keep showing this
+            # component was once attached here, exactly like the DB row.
+            entry["detachedAt"] = datetime.utcnow().isoformat()
+            # Phase 8AR: record the financial reversal in the snapshot.
+            entry["financialIntegration"] = {
+                "status": "REVERSED",
+                "grossDelta": float(stored_gross_delta),
+                "wageTaxDelta": float(stored_wage_tax_delta),
+                "pfDelta": float(stored_pf_delta),
+                "esiDelta": float(stored_esi_delta),
+            }
+    snapshot["overtime_premium_components"] = existing_components
+    payslip_item.germany_calculation_snapshot = snapshot
+    db.commit()
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="detach_from_payslip", entity_type="germany_overtime_premium_component",
+        entity_id=component.id,
+        old_value={"payslip_item_id": payslip_item.id, "payslip_allowance_item_id": allowance_item.id},
+        new_value={
+            "attachment_status": "DETACHED",
+            "financial_reversal": {
+                "gross_delta": str(stored_gross_delta),
+                "wage_tax_delta": str(stored_wage_tax_delta),
+                "pf_delta": str(stored_pf_delta),
+                "esi_delta": str(stored_esi_delta),
+            },
+        },
+    )
+    db.refresh(component)
+    return component
+
+
+# ── Phase 8AS — regression-recompute financial integrity ────────────────
+# Forensic finding Phase 8AS: regenerate_employee_payslip (and only that
+# path — full-run generation skips employees that already have a payslip)
+# recomputes a payslip by overwriting the engine's values via setattr. Two
+# silent financial breakages result when a Germany overtime premium is
+# ATTACHED at the time of recompute:
+#   1. PayslipItem.allowance_items is a `cascade="all, delete-orphan"`
+#      relationship — the setattr of a fresh in-memory allowance list
+#      delete-orphans the persisted overtime premium allowance line (the
+#      credited amount) while the component keeps attachment_status=ATTACHED
+#      and points (payslip_allowance_item_id) at a now-deleted row.
+#   2. gross_pay/total_deductions/pf/esi/net_pay and
+#      germany_calculation_snapshot are overwritten from the engine, which
+#      hardcodes `overtime = Decimal("0")` — so the exact financial deltas
+#      attach had applied are silently erased and the snapshot loses the
+#      attached-component trace, while the component's applied_*_delta
+#      columns still claim them applied.
+# Phase 8AS FIX: after a successful engine recompute, re-apply EVERY still
+# ATTACHED component's stored deltas (never recomputed — the same source of
+# truth detach uses), re-establish their shared overtime allowance line,
+# re-point each component's payslip_allowance_item_id at it, and re-merge
+# each component's trace into the (now fresh) engine snapshot. This restores
+# the RULE 9 invariant net_pay = gross_pay - total_deductions AND the
+# net_pay/snapshot/allowance consistency exactly as attach had established it.
+
+def _attached_germany_overtime_components_for_item(
+    db: Session, payslip_item_id: int, organization_id: int,
+) -> List[GermanyOvertimePremiumComponent]:
+    """All Germany overtime premium components currently ATTACHED to a given
+    payslip item. Linked through their payslip_allowance_item_id ->
+    PayslipAllowanceItem.payslip_item_id edges (multiple components may roll
+    up into the same allowance line).
+
+    IMPORTANT: this join is only reliable while the allowance edge still
+    exists. regenerate_employee_payslip therefore calls this BEFORE the
+    engine recompute (whose setattr of fresh allowance_items delete-orphans
+    the overtime line) and passes the captured components to
+    _reapply_attached_germany_overtime_deltas — so the pre-captured
+    component list (with its stored deltas) is re-applied from the component
+    rows themselves, never from the (by-then-deleted) allowance line."""
+    return (
+        db.query(GermanyOvertimePremiumComponent)
+        .join(PayslipAllowanceItem, GermanyOvertimePremiumComponent.payslip_allowance_item_id == PayslipAllowanceItem.id)
+        .filter(
+            PayslipAllowanceItem.payslip_item_id == payslip_item_id,
+            GermanyOvertimePremiumComponent.organization_id == organization_id,
+            GermanyOvertimePremiumComponent.attachment_status == "ATTACHED",
+        )
+        .all()
+    )
+
+
+class _OvertimeReapplyAllowanceItemConflict(BadRequestException):
+    """A concurrent regenerate/reapply for the SAME payslip recreated the
+    Germany overtime allowance line first (uq_payslip_allowance_item_key)
+    — see _reapply_attached_germany_overtime_deltas's own docstring for
+    the full account of why this is deliberately NOT retried."""
+
+
+def _reapply_attached_germany_overtime_deltas(
+    db: Session, payslip_item: PayslipItem, organization_id: int,
+    attached: List[GermanyOvertimePremiumComponent], actor_id: Optional[int] = None,
+) -> int:
+    """After the engine recompute in regenerate_employee_payslip has reset a
+    payslip to its base (zero-overtime) figures, re-apply the exact stored
+    financial deltas of every still-ATTACHED Germany overtime premium
+    component. `attached` MUST be the component list captured (via
+    _attached_germany_overtime_components_for_item) BEFORE the recompute,
+    because the recompute's setattr delete-orphans the allowance line the
+    join depends on. Returns the number of components re-applied (0 =>
+    no-op).
+
+    Not called by full-run generation (which never touches an existing
+    payslip) and never discovers components automatically — this only
+    preserves what an explicit operator attach already established.
+
+    Phase 8AV concurrency finding: the allowance-line get-or-create below
+    can lose a race to a CONCURRENT direct/standalone call of this same
+    function for the SAME payslip (proven by a true 2-connection SQLite
+    test — test_get_or_create_overtime_allowance_item_race_two_connections
+    isolates the underlying pattern). Two fix approaches were tried and
+    REJECTED before landing on the one below, because each introduced a
+    WORSE, real financial-integrity defect of its own — proven by the
+    same true-concurrency tests, not merely reasoned about:
+      (a) db.begin_nested() (SAVEPOINT): SQLAlchemy's Session requires a
+          full Session.rollback() after ANY flush exception, even one
+          raised inside a savepoint — and that rollback unconditionally
+          discards the OUTER transaction's own earlier pending work
+          (regenerate_employee_payslip's own engine-recompute flush), not
+          just this savepoint's own attempted insert.
+      (b) Pre-resolving the allowance item BEFORE the engine recompute
+          (so any conflict-recovery rollback would have nothing else
+          pending to lose): the delete-orphan cascade from the engine
+          recompute's own setattr ALWAYS destroys whatever row was
+          pre-resolved anyway (it is linked into
+          payslip_item.allowance_items, which the recompute reassigns),
+          so the row still needs recreating AFTER that point regardless —
+          and making that recreation a real `db.commit()` (needed for a
+          safe conflict-rollback) splits what must remain ONE atomic
+          financial transaction into two, reopening a window where a
+          second concurrent call's own read-modify-write of
+          payslip_item.gross_pay/net_pay (a PLAIN Python += on the
+          in-memory attribute, not a SQL-level atomic increment) can
+          observe the first call's ALREADY-COMMITTED delta as its own
+          "base" and add the SAME delta again —
+          test_multi_component_concurrent_regenerate_stays_coherent
+          caught this for real (167.50 persisted where 133.75 was
+          expected — a genuine double-application of one component's
+          delta).
+    Given both fixes are worse than the original defect, the safest
+    correct behavior is: do NOT retry, do NOT swallow the conflict — let
+    it fail fast and clearly (a typed, documented exception) so a losing
+    concurrent call is rejected outright rather than corrupting financial
+    state. This is a real, narrow, DISCLOSED limitation of calling this
+    function directly/standalone concurrently for the SAME payslip — NOT
+    of the actual production call path (regenerate_employee_payslip),
+    which Phase 8AU's own true 2-connection test proved does not hit this
+    window in practice (repeated runs, zero flakiness) because SQLite's
+    own file-locking serializes the WHOLE function call well before this
+    point is ever reached from two connections simultaneously. See the
+    Phase 8AV report's own Defects Found / Remaining Gaps for the full
+    account, including why PostgreSQL's finer-grained MVCC locking could
+    behave differently in ways this environment cannot test."""
+    attached = [c for c in attached if c.attachment_status == "ATTACHED"]
+    if not attached:
+        return 0
+
+    # 1. Re-establish the shared overtime allowance line (the engine recompute
+    #    delete-orphaned it). Its credited amount is the SUM of the attached
+    #    components' gross premium amounts — exactly what a fresh set of
+    #    attach calls would have produced.
+    gross_total = sum(
+        (Decimal(str(c.gross_premium_amount or 0)) for c in attached), Decimal("0"),
+    )
+    allowance_item = (
+        db.query(PayslipAllowanceItem)
+        .filter(
+            PayslipAllowanceItem.payslip_item_id == payslip_item.id,
+            PayslipAllowanceItem.key == _OVERTIME_PREMIUM_ALLOWANCE_KEY,
+        )
+        .first()
+    )
+    if not allowance_item:
+        allowance_item = PayslipAllowanceItem(
+            payslip_item_id=payslip_item.id, key=_OVERTIME_PREMIUM_ALLOWANCE_KEY,
+            label="Overtime/Shift Premium (Gross, DE)", amount=Decimal("0.00"),
+        )
+        db.add(allowance_item)
+        try:
+            db.flush()
+        except IntegrityError:
+            # Deliberately NOT retried — see this function's own docstring
+            # for why both a savepoint-based and a pre-resolution-based
+            # retry were tried and rejected as each introducing a worse
+            # defect. Fail fast and clearly instead.
+            raise _OvertimeReapplyAllowanceItemConflict(
+                "A concurrent regeneration/reapply already recreated this payslip's Germany overtime "
+                "allowance line. Retry this operation."
+            )
+    allowance_item.amount = gross_total
+    db.flush()
+
+    # 2. Re-point each attached component's allowance edge at the restored line.
+    for c in attached:
+        if c.payslip_allowance_item_id != allowance_item.id:
+            c.payslip_allowance_item_id = allowance_item.id
+
+    # 3. Apply the SUM of stored deltas to the payslip fields (same Phase 8AR
+    #    math: net = gross - pf - esi - wage_tax; wage_tax stored delta is 0
+    #    while PAP is BLOCKED_EXTERNAL). applied_*_delta are the EXACT amounts
+    #    recorded at each component's own attach time — never recomputed.
+    gross_delta = sum((Decimal(str(c.applied_gross_delta or 0)) for c in attached), Decimal("0"))
+    pf_delta = sum((Decimal(str(c.applied_pf_delta or 0)) for c in attached), Decimal("0"))
+    esi_delta = sum((Decimal(str(c.applied_esi_delta or 0)) for c in attached), Decimal("0"))
+    wage_tax_delta = Decimal("0")
+    payslip_item.gross_pay = Decimal(str(payslip_item.gross_pay or 0)) + gross_delta
+    payslip_item.pf = Decimal(str(payslip_item.pf or 0)) + pf_delta
+    payslip_item.esi = Decimal(str(payslip_item.esi or 0)) + esi_delta
+    payslip_item.total_deductions = Decimal(str(payslip_item.total_deductions or 0)) + pf_delta + esi_delta + wage_tax_delta
+    payslip_item.net_pay = Decimal(str(payslip_item.net_pay or 0)) + gross_delta - pf_delta - esi_delta - wage_tax_delta
+
+    # 4. Re-merge each attached component's trace into the fresh engine
+    #    snapshot (the recompute replaced it), recreating the financial
+    #    integration entries attach had written.
+    snapshot = dict(payslip_item.germany_calculation_snapshot or {})
+    existing_components = list(snapshot.get("overtime_premium_components") or [])
+    known_ids = {entry.get("premiumComponentId") for entry in existing_components}
+    for c in attached:
+        if c.id in known_ids:
+            continue
+        trace_entry = _germany_overtime_premium_component_trace_dict(c)
+        trace_entry["financialIntegration"] = {
+            "status": c.financial_integration_status or "PARTIAL_WAGE_TAX_PENDING_PAP",
+            "grossDelta": float(Decimal(str(c.applied_gross_delta or 0))),
+            "wageTaxDelta": float(0.0),
+            "employeePfDelta": float(Decimal(str(c.applied_pf_delta or 0))),
+            "employeeEsiDelta": float(Decimal(str(c.applied_esi_delta or 0))),
+        }
+        existing_components.append(trace_entry)
+        known_ids.add(c.id)
+    snapshot["overtime_premium_components"] = existing_components
+    payslip_item.germany_calculation_snapshot = snapshot
+
+    # Phase 8AV: the audit row is written (flushed, not committed) BEFORE
+    # the single commit below, so the financial state AND its audit record
+    # land in the SAME atomic transaction — previously this function
+    # committed the financial change first, then record_tax_audit's own
+    # independent commit wrote the audit row as a SEPARATE durability
+    # boundary, so a crash between the two could leave a real, already-
+    # persisted financial change with no audit trail for it. auto_commit
+    # is FALSE here specifically (this function's own commit below covers
+    # it) — every other of record_tax_audit's 77 call sites is unaffected
+    # (default auto_commit=True, unchanged behavior).
+    record_tax_audit(
+        db, actor_id=actor_id, action="reapply_attached_deltas_after_recompute",
+        entity_type="payslip_item", entity_id=payslip_item.id,
+        new_value={
+            "reapplied_component_count": len(attached),
+            "applied_gross_delta": str(gross_delta),
+            "applied_pf_delta": str(pf_delta),
+            "applied_esi_delta": str(esi_delta),
+            "allowance_item_id": allowance_item.id,
+        },
+        auto_commit=False,
+    )
+    db.commit()
+    return len(attached)
+
+
+def detach_germany_overtime_premium_component_from_payslip(
+    db: Session, component_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> GermanyOvertimePremiumComponent:
+    """Public, operator-initiated entry point — the exact inverse of
+    attach_germany_overtime_premium_component_to_payslip below. Same
+    call shape (component_id + organization_id + actor_id), no
+    payslip_item_id needed (the component already knows where it's
+    attached)."""
+    return _detach_one_germany_overtime_premium_component(db, component_id, organization_id, actor_id)
+
+
+def attach_germany_overtime_premium_component_to_payslip(
+    db: Session, component_id: int, payslip_item_id: int, organization_id: int, actor_id: Optional[int] = None,
+) -> GermanyOvertimePremiumComponent:
+    """Explicit, operator-initiated action — the ONLY way a
+    GermanyOvertimePremiumComponent's amount ever reaches a real payslip
+    line. Never called automatically during payroll-run generation (Phase
+    8AH's own disclosed scope boundary — see engine module docstring and
+    docs/PHASE_8AH_..._REPORT.md §12 for why: automatic inclusion would
+    require resolving the still-open manual-vs-attendance precedence and
+    auto-inclusion-policy product decisions this project has repeatedly
+    left open, most recently in Phase 8AC/8AF/8AG).
+
+    Multiple components MAY roll up into the SAME PayslipAllowanceItem
+    (one payslip can have more than one qualifying overtime day within
+    its period) — each attach adds this component's own amount to that
+    line's total exactly once, now via an atomic compare-and-swap claim
+    (Phase 8AN) rather than a read-then-write application check, so a
+    concurrent duplicate attach of the SAME component can never succeed
+    twice or double-count its amount (see
+    _attach_one_germany_overtime_premium_component's own docstring).
+
+    Byte-identical public contract to every prior phase: raises
+    NotFoundException for a missing/cross-tenant reference,
+    BadRequestException for every ineligibility/already-attached/
+    finalized-run case — this function is now a thin wrapper over the
+    shared helper also used by batch_attach_germany_overtime_premium_
+    components_to_payslips (Phase 8AO)."""
+    return _attach_one_germany_overtime_premium_component(
+        db, component_id, payslip_item_id, organization_id, actor_id,
+    )
+
+
+def batch_attach_germany_overtime_premium_components_to_payslips(
+    db: Session,
+    items: List[Tuple[int, int]],
+    organization_id: int,
+    actor_id: Optional[int] = None,
+) -> Dict[str, list]:
+    """Operator-initiated BATCH attach (Phase 8AO) — still explicit, still
+    never automatic: the caller supplies an exact list of
+    (component_id, payslip_item_id) pairs it wants attached (e.g. selected
+    by a payroll operator reviewing eligible components in the UI), and
+    every pair is independently re-validated server-side by the exact
+    same rules as the single-attach path — this endpoint trusts nothing
+    the frontend claims about eligibility.
+
+    Returns a structured result with five buckets, per Phase 8AO §3:
+    - attached: succeeded this call.
+    - already_attached: the component was already attached (either
+      before this call started, or lost a concurrent claim race to
+      another request — both surface identically here, since from this
+      caller's point of view the outcome is the same: not attached BY
+      this call, but attached).
+    - rejected: structurally valid pairing, but not yet eligible
+      (component not COMPLETE, work record not APPROVED, or the target
+      payroll run is already PAID/CLOSED).
+    - invalid: a bad reference — missing/cross-tenant/cross-employee
+      component or payslip, wrong payroll period, or a duplicate
+      component_id appearing more than once within this SAME batch
+      request (only the first occurrence is attempted; every repeat is
+      invalid, never silently attempted twice within one call).
+    - failed: an unexpected error while processing this one item. Each
+      item is committed independently (this is NOT one all-or-nothing
+      transaction across the whole batch) — one item's unexpected
+      failure never blocks or rolls back any other item already
+      attached in the same call. A DB error rolls back only that item's
+      own uncommitted work before continuing to the next.
+
+    Every item in every bucket carries componentId/payslipItemId plus a
+    safe (non-internal) reason string; attached/already_attached also
+    carry the resulting component payload."""
+    attached: list = []
+    already_attached: list = []
+    rejected: list = []
+    invalid: list = []
+    failed: list = []
+    seen_component_ids: set = set()
+
+    for component_id, payslip_item_id in items:
+        if component_id in seen_component_ids:
+            invalid.append({
+                "component_id": component_id, "payslip_item_id": payslip_item_id,
+                "reason": "Duplicate component_id within this batch request; only its first occurrence was attempted.",
+            })
+            continue
+        seen_component_ids.add(component_id)
+
+        try:
+            component = _attach_one_germany_overtime_premium_component(
+                db, component_id, payslip_item_id, organization_id, actor_id,
+            )
+            attached.append({
+                "component_id": component_id, "payslip_item_id": payslip_item_id,
+                "reason": None, "component": component,
+            })
+        except _OvertimeAttachAlreadyAttached as exc:
+            db.rollback()
+            already_attached.append({
+                "component_id": component_id, "payslip_item_id": payslip_item_id, "reason": str(exc),
+            })
+        except _OvertimeAttachRejected as exc:
+            db.rollback()
+            rejected.append({
+                "component_id": component_id, "payslip_item_id": payslip_item_id, "reason": str(exc),
+            })
+        except (NotFoundException, BadRequestException) as exc:
+            db.rollback()
+            invalid.append({
+                "component_id": component_id, "payslip_item_id": payslip_item_id, "reason": str(exc.message),
+            })
+        except Exception:
+            db.rollback()
+            failed.append({
+                "component_id": component_id, "payslip_item_id": payslip_item_id,
+                "reason": "An unexpected error occurred while attaching this component; it was not attached.",
+            })
+
+    # No separate batch-level audit row here: each successful attach
+    # already writes its own record_tax_audit entry inside
+    # _attach_one_germany_overtime_premium_component (entity_id = the
+    # real component id) — a batch-level row would need a NULL
+    # entity_id, which the audit table's schema deliberately disallows
+    # (every audit row must point at one real entity). The structured
+    # result below is itself the batch-level record for the caller.
+
+    return {
+        "attached": attached, "already_attached": already_attached,
+        "rejected": rejected, "invalid": invalid, "failed": failed,
+    }
+
+
+# ── Germany ELStAM change-list / structured-import boundary (Phase 8N) ──
+# Spec §6 "Change lists" / §7 (this phase's own Step 7/8). Neither function
+# below calls ELSTER/BZSt or fabricates ELStAM content — both operate
+# exclusively on caller-supplied structured data, exactly like every other
+# write path in this module. See engine/germany_pap/elstam.py for the
+# still-unimplemented (by design) LIVE connector boundary; this is the
+# separate IMPORT/audit boundary for data someone has already obtained and
+# validated by hand.
+
+_ELSTAM_CHANGE_LIST_BATCH_VALID_STATUSES = {"RECEIVED", "VALIDATED", "APPLIED", "REJECTED"}
+_ELSTAM_CHANGE_LIST_BATCH_ALLOWED_TRANSITIONS = {
+    "RECEIVED": {"VALIDATED", "REJECTED"},
+    "VALIDATED": {"APPLIED", "REJECTED"},
+    "APPLIED": set(),
+    "REJECTED": set(),
+}
+
+
+def create_elstam_change_list_batch(
+    db: Session, organization_id: int, data: "GermanyElstamChangeListBatchCreate", actor_id: Optional[int] = None,
+) -> GermanyElstamChangeListBatch:
+    """Record that a monthly ELStAM change list was RECEIVED — metadata
+    only (spec §6). Never fans out into per-employee attribute changes;
+    those are recorded individually via import_elstam_structured_payload(),
+    optionally citing this batch's id."""
+    row = GermanyElstamChangeListBatch(
+        organization_id=organization_id,
+        batch_reference=data.batch_reference, source=data.source or "MANUAL_UPLOAD",
+        received_at=data.received_at, effective_date=data.effective_date,
+        scope_description=data.scope_description,
+        processing_status="RECEIVED", created_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_elstam_change_list_batch", entity_id=row.id,
+        old_value=None, new_value={"batch_reference": row.batch_reference, "effective_date": str(row.effective_date)},
+    )
+    return row
+
+
+def list_elstam_change_list_batches(db: Session, organization_id: int) -> List[GermanyElstamChangeListBatch]:
+    return (
+        db.query(GermanyElstamChangeListBatch)
+        .filter(GermanyElstamChangeListBatch.organization_id == organization_id)
+        .order_by(GermanyElstamChangeListBatch.received_at.desc())
+        .all()
+    )
+
+
+def get_elstam_change_list_batch(db: Session, batch_id: int, organization_id: int) -> GermanyElstamChangeListBatch:
+    row = (
+        db.query(GermanyElstamChangeListBatch)
+        .filter(GermanyElstamChangeListBatch.id == batch_id, GermanyElstamChangeListBatch.organization_id == organization_id)
+        .first()
+    )
+    if row is None:
+        raise NotFoundException(f"ELStAM change-list batch {batch_id} not found.")
+    return row
+
+
+def set_elstam_change_list_batch_status(
+    db: Session, batch_id: int, organization_id: int, data: "GermanyElstamChangeListBatchStatusUpdate",
+    actor_id: Optional[int] = None,
+) -> GermanyElstamChangeListBatch:
+    """Advance a change-list batch's processing lifecycle. Never applies
+    any attribute change itself — VALIDATED/APPLIED only record that a
+    human has done that work elsewhere (via individual
+    import_elstam_structured_payload calls); this function has no
+    fan-out/bulk-apply behavior, matching spec's "do not fabricate
+    change-list payloads" instruction."""
+    row = get_elstam_change_list_batch(db, batch_id, organization_id)
+    status = data.status
+    if status not in _ELSTAM_CHANGE_LIST_BATCH_VALID_STATUSES:
+        raise BadRequestException(f"Unknown ELStAM change-list batch status: {status!r}.")
+    if status not in _ELSTAM_CHANGE_LIST_BATCH_ALLOWED_TRANSITIONS.get(row.processing_status, set()):
+        raise BadRequestException(f"Cannot move an ELStAM change-list batch from {row.processing_status} to {status}.")
+
+    old_status = row.processing_status
+    row.processing_status = status
+    if data.validation_result is not None:
+        row.validation_result = data.validation_result
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_elstam_change_list_batch", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def import_elstam_structured_payload(
+    db: Session, employee_id: int, organization_id: int, *,
+    schema_version: str, import_reference: Optional[str], change_list_batch_id: Optional[int],
+    payload: EmployeeStatutoryProfileCreate, actor_id: Optional[int],
+) -> GermanyElstamImportAttempt:
+    """Phase 8N structured ELStAM import boundary (spec §7). `payload` is
+    caller-supplied structured data (never a live ELSTER/BZSt fetch) —
+    validated and written exactly like a normal statutory-profile write
+    (create_employee_statutory_profile_version, reused as-is, not
+    duplicated). The only new behavior is auditing the ATTEMPT itself:
+
+    - on success: a GermanyElstamImportAttempt row is recorded APPLIED,
+      pointing at the new EmployeeStatutoryProfile version.
+    - on failure (BadRequestException — unsupported country, invalid
+      field, overlapping period, etc.): a GermanyElstamImportAttempt row is
+      recorded REJECTED with the validation error BEFORE re-raising — the
+      one persisted trace of a rejected import, since a rejected write
+      never reaches EmployeeStatutoryProfile at all. Never invents a
+      passing result."""
+    payload_dict = payload.model_dump(mode="json", by_alias=False)
+    try:
+        profile = create_employee_statutory_profile_version(db, employee_id, organization_id, payload, actor_id)
+    except BadRequestException as exc:
+        attempt = GermanyElstamImportAttempt(
+            employee_id=employee_id, organization_id=organization_id,
+            schema_version=schema_version, import_reference=import_reference,
+            change_list_batch_id=change_list_batch_id, payload=payload_dict,
+            validation_status="REJECTED", validation_errors={"message": str(exc)},
+            created_by_id=actor_id,
+        )
+        db.add(attempt)
+        db.commit()
+        db.refresh(attempt)
+        raise
+
+    attempt = GermanyElstamImportAttempt(
+        employee_id=employee_id, organization_id=organization_id,
+        schema_version=schema_version, import_reference=import_reference,
+        change_list_batch_id=change_list_batch_id, payload=payload_dict,
+        validation_status="APPLIED", applied_statutory_profile_id=profile.id,
+        created_by_id=actor_id,
+    )
+    db.add(attempt)
+    db.commit()
+    db.refresh(attempt)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_elstam_import_attempt", entity_id=attempt.id,
+        old_value=None, new_value={"employee_id": employee_id, "applied_statutory_profile_id": profile.id},
+    )
+    return attempt
+
+
+def list_elstam_import_attempts_for_employee(
+    db: Session, employee_id: int, organization_id: int,
+) -> List[GermanyElstamImportAttempt]:
+    get_employee_by_id(db, employee_id, organization_id)  # 404s + tenant-scopes
+    return (
+        db.query(GermanyElstamImportAttempt)
+        .filter(GermanyElstamImportAttempt.employee_id == employee_id, GermanyElstamImportAttempt.organization_id == organization_id)
+        .order_by(GermanyElstamImportAttempt.imported_at.desc())
+        .all()
+    )
 
 
 from app.modules.payroll.hardcoded_defaults import _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT  # noqa: E402
@@ -6885,6 +12066,24 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
     run = db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).first()
     if run and run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only payslips in Draft runs can be deleted.")
+    # Phase 8AS: fail-closed — refuse to delete a payslip that has Germany
+    # overtime premium components still ATTACHED. Deleting would silently
+    # erase money the operator explicitly attached (the credited allowance
+    # line and the applied gross/SI/net deltas) while the component rows
+    # remain ATTACHED pointing at now-deleted rows. The operator must detach
+    # premium components first (detach reverses the money and flips them to
+    # DETACHED), then delete the payslip — mirroring the same "never silently
+    # destroy an attached financial fact" discipline every attach/detach
+    # guard in this module enforces.
+    attached_ot = _attached_germany_overtime_components_for_item(db, item.id, organization_id)
+    if attached_ot:
+        raise HTTPException(
+            http_status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete this payslip: it has Germany overtime premium components "
+                "still attached. Detach them first (this reverses their money), then delete."
+            ),
+        )
     db.delete(item)
     db.commit()
 
@@ -6928,7 +12127,17 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     state_rate_map, state_slabs = get_state_scoped_config(
         db, country, resolution_state, as_of=run.pay_date, filing_status=getattr(employee, "w4_filing_status", None),
     )
-    jurisdiction_id = f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state) else None
+    # Phase 8U: Germany accident insurance (spec §14) reuses this SAME
+    # agency-assigned-rate mechanism as US SUI — an employer's
+    # Berufsgenossenschaft-issued risk-class rate is exactly the same
+    # statutory shape (assigned by an agency, own account number, own
+    # evidence trail) EmployerTaxProfile already models; jurisdiction_id
+    # "DE" (no state) resolves it, component_code "DE_ACCIDENT_INSURANCE".
+    jurisdiction_id = (
+        f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state)
+        else "DE" if country == "DE"
+        else None
+    )
     employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=run.pay_date)
     # EI's reduced-employer-rate authorization — see the matching comment
     # in _resolve_employee_calc_inputs.
@@ -6945,6 +12154,30 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
 
     calculation_mode = getattr(run, "calculation_mode", None) or _resolve_calculation_mode(db, organization_id)
     gross = data.basic_salary + (data.hra or 0) + (data.special_allowance or 0) + (data.overtime or 0)
+
+    # Germany (Phase 8E): a manually-added payslip for a Germany employee must
+    # consume the SAME effective-dated statutory inputs and fail-closed
+    # behavior as a generated run — the same _resolve_germany_calc_inputs the
+    # batch path (_compute_payslip_values) uses for DE. Without this, a manual
+    # DE payslip would bypass statutory-profile/health-fund/ceiling/PV wiring
+    # and could not be reproducibly snapshotted.
+    germany_kwargs = {}
+    if country == "DE":
+        resolved_de = _resolve_germany_calc_inputs(db, organization_id, employee, run.pay_date)
+        germany_kwargs = dict(
+            germany_statutory_profile=resolved_de["statutory_profile"],
+            germany_pap_asset=resolved_de["pap_asset"],
+            germany_health_fund=resolved_de["health_fund"],
+            germany_u1_tariff=resolved_de["u1_tariff"],
+            germany_earning_taxability=resolved_de["earning_taxability"],
+            germany_ceiling_gkv_pv=resolved_de["ceiling_gkv_pv"],
+            germany_ceiling_rv_alv=resolved_de["ceiling_rv_alv"],
+            germany_pv_configuration=resolved_de["pv_configuration"],
+            germany_church_tax_exception=resolved_de["church_tax_exception"],
+            germany_employee_id=employee.id,
+            germany_organization_id=organization_id,
+            germany_payroll_date=run.pay_date,
+        )
 
     # Canada YTD — READ before calculating (see _load_ca_ytd's docstring);
     # this path DOES persist a real PayslipItem below, so it also WRITEs
@@ -6971,6 +12204,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
 
     # Delegate to the strategy engine (no attendance data for manual payslips)
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
+    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+    from app.core.exceptions import GermanyCalculationBlockedException
     ctx = build_context_from_employee(
         employee, gross=gross, basic=data.basic_salary,
         hra=data.hra or Decimal("0"), special_allowance=data.special_allowance or Decimal("0"),
@@ -6982,10 +12217,18 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         locality_rate=locality_rate,
         pay_date=run.pay_date,
         **reciprocity,
+        **germany_kwargs,
         **ytd_inputs,
         **org_levy_inputs,
     )
-    calc = calculate_payroll(ctx, calculation_mode)
+    try:
+        calc = calculate_payroll(ctx, calculation_mode)
+    except GermanyCalculationError as exc:
+        # Same structured 400 the batch path returns — never fabricate a
+        # Germany payslip when wage-tax execution is unavailable (§25).
+        raise GermanyCalculationBlockedException(
+            exc.code, exc.message, trace=(exc.trace.to_dict() if exc.trace else None),
+        )
 
     employee_name = getattr(employee, "name", None) or ""
     if pack is not None:
@@ -7067,6 +12310,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         per_day_salary=calc.per_day_salary,
         payable_days=Decimal(calc.payable_days),
         total_working_days=Decimal(calc.payroll_days),
+        # Germany (Phase 7/8E) — frozen statutory provenance, same as the
+        # batch path; None for every non-German manual payslip.
+        employee_statutory_profile_id=calc.germany_statutory_profile_id,
+        germany_calculation_snapshot=calc.germany_calculation_snapshot,
         status=PayslipStatus.PENDING,
         notes=data.notes,
         ytd_snapshot=(

@@ -26,6 +26,7 @@ import {
   INStatutoryPage, USAStatutoryPage, UKStatutoryPage,
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
 } from "./pages/JurisdictionStatutory";
+import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
 import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage } from "./pages/ReportTemplates";
 import FinancePage from "./pages/FinancePage";
@@ -120,6 +121,7 @@ export default function App() {
         <Route path="/super-admin/compliance/canada" element={<SuperAdminShell><CACompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/canada/:jurisdiction" element={<SuperAdminShell><CACompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/germany" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/germany/registries" element={<SuperAdminShell><GermanyStatutoryRegistriesPage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/germany/:jurisdiction" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
         <Route
           path="/super-admin/statutory-rates"

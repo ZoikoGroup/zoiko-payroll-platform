@@ -12,6 +12,7 @@ explicitly edits it.
 
 from typing import Optional
 from datetime import date, datetime, timezone
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.exceptions import NotFoundException, BadRequestException
@@ -355,7 +356,29 @@ def get_active_policy(db: Session, organization_id: int) -> PayrollPolicy:
 
     Called by generate_payslips_for_run() before every run (Step 3) — if this
     is the first time an org touches policy, it transparently gets a default
-    policy that reproduces today's exact behavior.
+    policy that reproduces today's exact behavior. Also reached from
+    regenerate_employee_payslip via _resolve_calculation_mode.
+
+    Phase 8AU: the SELECT-then-INSERT above is a defense-in-depth
+    convenience only, not the actual guarantee against a genuine two-
+    connection race for the SAME organization's first-ever policy access
+    (e.g. two concurrent payroll operations both finding "no default
+    policy yet"). The real guarantee is PayrollPolicy's own
+    uq_one_default_per_org unique constraint (models.py) — found for real
+    via a true DB-level concurrency test of regenerate_employee_payslip
+    (tests/test_germany_8au_regenerate_concurrency.py), where the SECOND
+    transaction to commit its own freshly-seeded policy hit an unhandled
+    IntegrityError. Same retry-by-refetch shape as
+    app/modules/payroll/service.py's
+    _attach_one_germany_overtime_premium_component allowance-item
+    get-or-create: whichever transaction loses the INSERT race simply
+    refetches and returns the WINNER's row — there is exactly one correct
+    default policy per organization regardless of which caller created it,
+    so the loser failing outright would be a spurious, unrelated error for
+    a caller that did nothing wrong. This is a genuinely shared (not
+    Germany-specific) code path — every country's first payroll run/
+    regeneration for a brand-new organization goes through it — fixed here
+    rather than only in a Germany-specific call site.
     """
     policy = (
         _policy_query(db)
@@ -363,7 +386,20 @@ def get_active_policy(db: Session, organization_id: int) -> PayrollPolicy:
         .first()
     )
     if not policy:
-        policy = _seed_default_policy(db, organization_id)
+        try:
+            policy = _seed_default_policy(db, organization_id)
+        except IntegrityError:
+            db.rollback()
+            policy = (
+                _policy_query(db)
+                .filter(PayrollPolicy.organization_id == organization_id, PayrollPolicy.is_default == True)  # noqa: E712
+                .first()
+            )
+            if not policy:
+                # Lost the race to something OTHER than a same-shape default
+                # policy insert (unexpected) — re-raise rather than silently
+                # returning None, since every caller assumes a real policy.
+                raise
     # In-memory only (not a mapped column) — lets PayrollPolicyResponse
     # surface which fields the org's compliance pack has locked, without
     # a second round trip from the frontend.

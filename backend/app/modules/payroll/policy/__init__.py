@@ -5,4 +5,9 @@ from app.modules.payroll.policy.models import (
     PolicyOvertimeRule as PayrollPolicyOvertimeRule,
     PolicyIntegration as PayrollPolicyIntegration,
 )
-from app.modules.payroll.policy.router import policy_router
+
+def __getattr__(name):
+    if name == "policy_router":
+        from app.modules.payroll.policy.router import policy_router
+        return policy_router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

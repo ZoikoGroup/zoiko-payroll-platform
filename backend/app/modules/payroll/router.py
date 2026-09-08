@@ -15,6 +15,9 @@ app mounts this router with an "/api" prefix at the top level, e.g.:
     POST   /payroll/employees                     → Create employee
     PUT    /payroll/employees/{id}                → Update employee
     DELETE /payroll/employees/{id}                 → Delete employee (blocked if payslip history exists)
+    GET    /payroll/employees/{id}/statutory-profile          → Resolve statutory profile as of a date (default: today)
+    GET    /payroll/employees/{id}/statutory-profile/history  → List every effective-dated version
+    POST   /payroll/employees/{id}/statutory-profile          → Record a new effective-dated version
 
   Payroll Runs
     POST   /payroll/runs                         → Create a run (auto-generates payslips)
@@ -60,7 +63,7 @@ from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
     require_active_subscription,
 )
-from app.core.exceptions import ForbiddenException
+from app.core.exceptions import ForbiddenException, NotFoundException
 from app.modules.payroll import service
 from app.modules.payroll.policy import policy_router
 from app.modules.payroll.enterprise import enterprise_router
@@ -79,6 +82,16 @@ from app.modules.payroll.schemas import (
     SuccessResponse,
     EmployeeCreate, EmployeeUpdate, EmployeeResponse,
     BulkEmployeeRequest, BulkUpsertResponse, BulkUpdateResponse, BulkDeleteRequest,
+    EmployeeStatutoryProfileCreate, EmployeeStatutoryProfileResponse,
+    GermanyOvertimeWorkRecordCreate, GermanyOvertimeWorkRecordResponse, GermanyOvertimeWorkRecordApprovalUpdate,
+    GermanyOvertimeTimeSegmentResponse, GermanyOvertimeWageTaxResultResponse,
+    GermanyOvertimeSocialInsuranceResultResponse,
+    GermanyOvertimePremiumComponentResponse, GermanyOvertimePremiumComponentAttachRequest,
+    GermanyOvertimePremiumComponentEligibleResponse,
+    GermanyOvertimePremiumComponentBatchAttachRequest, GermanyOvertimePremiumComponentBatchAttachResponse,
+    GermanyCalculationPreviewRequest,
+    GermanyElstamChangeListBatchCreate, GermanyElstamChangeListBatchStatusUpdate,
+    GermanyElstamChangeListBatchResponse, GermanyElstamImportRequest, GermanyElstamImportAttemptResponse,
     AttendanceRecordCreate, BulkAttendanceRequest, AttendanceRecordResponse,
     AttendanceSummaryResponse, BulkAttendanceResponse,
     LeaveAllocationCreate, BulkLeaveRequest, LeaveAllocationResponse,
@@ -225,6 +238,494 @@ def delete_employee(
 ):
     service.delete_employee(db, employee_id, current_user.organization_id)
     return {"message": "Employee deleted."}
+
+
+# ── Employee Statutory Profile (effective-dated) ────────────────────────
+# Foundation-only in this phase: no Germany calculation reads these yet.
+# Same RBAC tier as employee CRUD above (payroll operator) — this is
+# tenant-owned employee data, a different security domain from Super
+# Admin's jurisdiction-wide statutory configuration (JurisdictionPack).
+
+@payroll_router.get(
+    "/employees/{employee_id}/statutory-profile", response_model=Optional[EmployeeStatutoryProfileResponse],
+    response_model_by_alias=True, summary="Get an employee's statutory profile as of a date (defaults to today)",
+)
+def get_employee_statutory_profile(
+    employee_id: int,
+    as_of: Optional[date] = Query(None, description="Resolve the profile applicable on this date; defaults to today."),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_employee_statutory_profile_as_of(db, employee_id, current_user.organization_id, as_of)
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/statutory-profile/history", response_model=List[EmployeeStatutoryProfileResponse],
+    response_model_by_alias=True, summary="List every effective-dated statutory profile version for an employee",
+)
+def get_employee_statutory_profile_history(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_employee_statutory_profile_history(db, employee_id, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/employees/{employee_id}/statutory-profile", response_model=EmployeeStatutoryProfileResponse,
+    response_model_by_alias=True, summary="Record a new effective-dated statutory profile version for an employee",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_employee_statutory_profile(
+    employee_id: int,
+    data: EmployeeStatutoryProfileCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_employee_statutory_profile_version(
+        db, employee_id, current_user.organization_id, data, current_user.id,
+    )
+
+
+# ── Germany overtime/shift-premium work records (Phase 8AC) ─────────────
+# Fact capture only — no premium/tax/SI calculation. Same tenant-owned
+# security tier as the statutory-profile endpoints above.
+
+@payroll_router.get(
+    "/employees/{employee_id}/germany-overtime-work-records",
+    response_model=List[GermanyOvertimeWorkRecordResponse], response_model_by_alias=True,
+    summary="List an employee's Germany overtime/shift-premium work records",
+)
+def list_germany_overtime_work_records(
+    employee_id: int,
+    date_from: Optional[date] = Query(None, alias="dateFrom"),
+    date_to: Optional[date] = Query(None, alias="dateTo"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_germany_overtime_work_records(
+        db, employee_id, current_user.organization_id, date_from=date_from, date_to=date_to,
+    )
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}",
+    response_model=GermanyOvertimeWorkRecordResponse, response_model_by_alias=True,
+    summary="Get a single Germany overtime/shift-premium work record",
+)
+def get_germany_overtime_work_record(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return row
+
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records",
+    response_model=GermanyOvertimeWorkRecordResponse, response_model_by_alias=True,
+    summary="Record a Germany overtime/shift-premium work-time fact (attendance-derived or manual)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_germany_overtime_work_record(
+    employee_id: int,
+    data: GermanyOvertimeWorkRecordCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_germany_overtime_work_record(
+        db, employee_id, current_user.organization_id, data, current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/approval",
+    response_model=GermanyOvertimeWorkRecordResponse, response_model_by_alias=True,
+    summary="Set the HR approval status of a Germany overtime/shift-premium work record",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def set_germany_overtime_work_record_approval(
+    employee_id: int,
+    record_id: int,
+    data: GermanyOvertimeWorkRecordApprovalUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.set_germany_overtime_work_record_approval(
+        db, record_id, current_user.organization_id, data.hr_approval_status, current_user.id,
+    )
+
+
+# ── Germany overtime time-window CLASSIFICATION (Phase 8AE) ─────────────
+# Statutory/calendar classification only — never named "calculate"/
+# "preview-calculation"/"premium-preview", since this phase computes no
+# money. Same tenant-owned security tier as the work-record endpoints
+# above.
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/classification",
+    response_model=List[GermanyOvertimeTimeSegmentResponse], response_model_by_alias=True,
+    summary="Classify a Germany overtime work record's §3b EStG time-window categories (no money calculated)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def classify_germany_overtime_work_record(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.classify_and_list_germany_overtime_time_segments(
+        db, record_id, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/classification",
+    response_model=List[GermanyOvertimeTimeSegmentResponse], response_model_by_alias=True,
+    summary="Read a Germany overtime work record's existing classification result, if any",
+)
+def get_germany_overtime_work_record_classification(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.list_germany_overtime_time_segments(db, record_id, current_user.organization_id)
+
+
+# ── Germany overtime WAGE-TAX calculation (Phase 8AF) ────────────────────
+# WAGE TAX ONLY — no social-insurance treatment. Same tenant-owned
+# security tier as the classification endpoints above.
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/wage-tax-calculation",
+    response_model=List[GermanyOvertimeWageTaxResultResponse], response_model_by_alias=True,
+    summary="Calculate a Germany overtime work record's §3b EStG WAGE-TAX tax-free/taxable split (no social insurance)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_germany_overtime_wage_tax(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.calculate_and_list_germany_overtime_wage_tax(
+        db, record_id, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/wage-tax-calculation",
+    response_model=List[GermanyOvertimeWageTaxResultResponse], response_model_by_alias=True,
+    summary="Read a Germany overtime work record's existing wage-tax calculation result, if any",
+)
+def get_germany_overtime_wage_tax_result(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.list_germany_overtime_wage_tax_results(db, record_id, current_user.organization_id)
+
+
+# ── Germany overtime SOCIAL-INSURANCE calculation (Phase 8AG) ───────────
+# SOCIAL INSURANCE ONLY — independent of the wage-tax endpoints above.
+# Same tenant-owned security tier.
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/social-insurance-calculation",
+    response_model=List[GermanyOvertimeSocialInsuranceResultResponse], response_model_by_alias=True,
+    summary="Calculate a Germany overtime work record's §1 SvEV SOCIAL-INSURANCE-free/contributory split (no wage tax)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_germany_overtime_social_insurance(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.calculate_and_list_germany_overtime_social_insurance(
+        db, record_id, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/social-insurance-calculation",
+    response_model=List[GermanyOvertimeSocialInsuranceResultResponse], response_model_by_alias=True,
+    summary="Read a Germany overtime work record's existing social-insurance calculation result, if any",
+)
+def get_germany_overtime_social_insurance_result(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.list_germany_overtime_social_insurance_results(db, record_id, current_user.organization_id)
+
+
+# ── Germany overtime PREMIUM COMPONENT (Phase 8AH) ──────────────────────
+# Combines the wage-tax and social-insurance results above into a single
+# presentable output unit. Attach is a SEPARATE, explicit action — never
+# performed automatically by build/list. Same tenant-owned security tier.
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components",
+    response_model=List[GermanyOvertimePremiumComponentResponse], response_model_by_alias=True,
+    summary="Build/rebuild a Germany overtime work record's premium components (combines wage-tax + social-insurance results)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def build_germany_overtime_premium_components(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.build_germany_overtime_premium_components(
+        db, record_id, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components",
+    response_model=List[GermanyOvertimePremiumComponentResponse], response_model_by_alias=True,
+    summary="Read a Germany overtime work record's existing premium components, if any",
+)
+def get_germany_overtime_premium_components(
+    employee_id: int,
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.list_germany_overtime_premium_components(db, record_id, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components/{component_id}/attach-to-payslip",
+    response_model=GermanyOvertimePremiumComponentResponse, response_model_by_alias=True,
+    summary="Explicitly attach one COMPLETE, HR-approved premium component to a real payslip line",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def attach_germany_overtime_premium_component_to_payslip(
+    employee_id: int,
+    record_id: int,
+    component_id: int,
+    payload: GermanyOvertimePremiumComponentAttachRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.attach_germany_overtime_premium_component_to_payslip(
+        db, component_id, payload.payslip_item_id, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components/{component_id}/detach-from-payslip",
+    response_model=GermanyOvertimePremiumComponentResponse, response_model_by_alias=True,
+    summary="Explicitly detach a previously-attached premium component from its payslip line (reverses attach; never deletes history)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def detach_germany_overtime_premium_component_from_payslip(
+    employee_id: int,
+    record_id: int,
+    component_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    row = service.get_germany_overtime_work_record_by_id(db, record_id, current_user.organization_id)
+    if row.employee_id != employee_id:
+        raise NotFoundException("GermanyOvertimeWorkRecord", record_id)
+    return service.detach_germany_overtime_premium_component_from_payslip(
+        db, component_id, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+# ── Batch attach (Phase 8AO) ──────────────────────────────────────────────
+# Deliberately top-level (not nested under one employee/work-record), since
+# a batch naturally spans multiple employees/work records within one
+# organization — organization scope comes ONLY from current_user (never
+# accepted from the client), exactly like every endpoint above.
+
+@payroll_router.get(
+    "/germany-overtime-premium-components/eligible-for-batch-attach",
+    response_model=List[GermanyOvertimePremiumComponentEligibleResponse], response_model_by_alias=True,
+    summary="Browse Germany overtime premium components across employees, for the batch-attach operator workflow",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_germany_overtime_premium_components_for_batch_attach(
+    employeeId: Optional[int] = Query(None),
+    workDateFrom: Optional[date] = Query(None),
+    workDateTo: Optional[date] = Query(None),
+    attachmentState: Optional[str] = Query(None, description='"ATTACHED" | "UNATTACHED" (omit for both)'),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_germany_overtime_premium_components_for_batch_attach(
+        db, current_user.organization_id, employee_id=employeeId,
+        work_date_from=workDateFrom, work_date_to=workDateTo, attachment_state=attachmentState,
+    )
+
+
+@payroll_router.post(
+    "/germany-overtime-premium-components/batch-attach",
+    response_model=GermanyOvertimePremiumComponentBatchAttachResponse, response_model_by_alias=True,
+    summary="Explicitly attach a caller-selected batch of COMPLETE, HR-approved premium components to real payslip lines",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def batch_attach_germany_overtime_premium_components_to_payslips(
+    payload: GermanyOvertimePremiumComponentBatchAttachRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    items = [(item.component_id, item.payslip_item_id) for item in payload.items]
+    return service.batch_attach_germany_overtime_premium_components_to_payslips(
+        db, items, current_user.organization_id, actor_id=current_user.id,
+    )
+
+
+# ── Germany ELStAM change-list / structured-import boundary (Phase 8N) ──
+# Same tenant-owned security tier as the statutory-profile endpoints above
+# (this is employee/employer data, not Super Admin's global statutory
+# configuration). Neither endpoint calls ELSTER/BZSt — both operate on
+# caller-supplied structured data only; see engine/germany_pap/elstam.py
+# for the separate, still-unimplemented-by-design LIVE connector boundary.
+
+@payroll_router.post(
+    "/employees/{employee_id}/elstam-import", response_model=GermanyElstamImportAttemptResponse,
+    response_model_by_alias=True,
+    summary="Import a structured ELStAM payload for one employee (never a live ELSTER/BZSt call)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def import_employee_elstam_payload(
+    employee_id: int,
+    data: GermanyElstamImportRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.import_elstam_structured_payload(
+        db, employee_id, current_user.organization_id,
+        schema_version=data.schema_version, import_reference=data.import_reference,
+        change_list_batch_id=data.change_list_batch_id, payload=data.payload, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/employees/{employee_id}/elstam-imports", response_model=List[GermanyElstamImportAttemptResponse],
+    response_model_by_alias=True, summary="List every ELStAM import attempt (applied or rejected) for an employee",
+)
+def get_employee_elstam_import_attempts(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_elstam_import_attempts_for_employee(db, employee_id, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/germany/elstam-change-list-batches", response_model=GermanyElstamChangeListBatchResponse,
+    response_model_by_alias=True, summary="Record that a monthly ELStAM change-list batch was received",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_elstam_change_list_batch(
+    data: GermanyElstamChangeListBatchCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_elstam_change_list_batch(db, current_user.organization_id, data, current_user.id)
+
+
+@payroll_router.get(
+    "/germany/elstam-change-list-batches", response_model=List[GermanyElstamChangeListBatchResponse],
+    response_model_by_alias=True, summary="List ELStAM change-list batches received for this organization",
+)
+def list_elstam_change_list_batches(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_elstam_change_list_batches(db, current_user.organization_id)
+
+
+@payroll_router.get(
+    "/germany/elstam-change-list-batches/{batch_id}", response_model=GermanyElstamChangeListBatchResponse,
+    response_model_by_alias=True, summary="Get one ELStAM change-list batch",
+)
+def get_elstam_change_list_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_elstam_change_list_batch(db, batch_id, current_user.organization_id)
+
+
+@payroll_router.patch(
+    "/germany/elstam-change-list-batches/{batch_id}/status", response_model=GermanyElstamChangeListBatchResponse,
+    response_model_by_alias=True, summary="Advance an ELStAM change-list batch's processing status",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def update_elstam_change_list_batch_status(
+    batch_id: int,
+    data: GermanyElstamChangeListBatchStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.set_elstam_change_list_batch_status(db, batch_id, current_user.organization_id, data, current_user.id)
+
+
+@payroll_router.post(
+    "/germany/calculation-preview", summary="Phase 7 QA diagnostic: preview a Germany employee's calculation "
+    "against currently-published registries, without writing anything",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def germany_calculation_preview(
+    data: GermanyCalculationPreviewRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Read-only. Never mutates a payroll run/payslip, never accepts a
+    caller-supplied PAP version/statutory rate — every value used is
+    resolved server-side from the same registries a real payroll run
+    would use (see service.preview_germany_calculation). Returns either
+    the resolved calculation (unreachable until a real PAP asset is
+    ingested and a PapExecutor is implemented — see
+    engine/countries/germany_pap.py) or the specific block reason +
+    diagnostic trace, so Tax Operations/QA can see exactly what statutory
+    source is missing."""
+    return service.preview_germany_calculation(
+        db, current_user.organization_id, data.employee_id, data.payroll_date,
+    )
 
 
 # ── Payroll Runs ─────────────────────────────────────────────────────
