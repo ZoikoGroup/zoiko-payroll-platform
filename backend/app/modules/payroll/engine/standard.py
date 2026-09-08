@@ -151,10 +151,12 @@ class StandardStrategy(PayrollStrategy):
             + deductions.get("medicare", Decimal("0"))
             + deductions.get("ni_employee", Decimal("0"))
             + deductions.get("study_loan_deduction", Decimal("0"))
+            + deductions.get("postgrad_loan_deduction", Decimal("0"))
             + deductions.get("employee_pension", Decimal("0"))
             + deductions.get("church_tax", Decimal("0"))
             + deductions.get("cpp2", Decimal("0"))
             + deductions.get("state_disability_insurance", Decimal("0"))
+            + deductions.get("state_program_deductions", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -180,6 +182,7 @@ class StandardStrategy(PayrollStrategy):
             medicare=deductions.get("medicare", Decimal("0")),
             ni_employee=deductions.get("ni_employee", Decimal("0")),
             study_loan_deduction=deductions.get("study_loan_deduction", Decimal("0")),
+            postgrad_loan_deduction=deductions.get("postgrad_loan_deduction", Decimal("0")),
             employee_pension=deductions.get("employee_pension", Decimal("0")),
             church_tax=deductions.get("church_tax", Decimal("0")),
             cpp2=deductions.get("cpp2", Decimal("0")),
@@ -189,6 +192,27 @@ class StandardStrategy(PayrollStrategy):
             employer_ni=deductions.get("employer_ni", Decimal("0")),
             employer_futa=deductions.get("employer_futa", Decimal("0")),
             employer_sui=deductions.get("employer_sui", Decimal("0")),
+            employer_state_program_contributions=deductions.get("employer_state_program_contributions", Decimal("0")),
+            employer_cpp2=deductions.get("employer_cpp2", Decimal("0")),
+            employer_eht=deductions.get("employer_eht", Decimal("0")),
+            on_eht_ytd_remuneration_after=deductions.get("on_eht_ytd_remuneration_after"),
+            employer_bc_eht=deductions.get("employer_bc_eht", Decimal("0")),
+            bc_eht_ytd_remuneration_after=deductions.get("bc_eht_ytd_remuneration_after"),
+            employer_mb_he_levy=deductions.get("employer_mb_he_levy", Decimal("0")),
+            mb_he_levy_ytd_remuneration_after=deductions.get("mb_he_levy_ytd_remuneration_after"),
+            employer_nl_hapset=deductions.get("employer_nl_hapset", Decimal("0")),
+            nl_hapset_ytd_remuneration_after=deductions.get("nl_hapset_ytd_remuneration_after"),
+            employer_qc_hsf=deductions.get("employer_qc_hsf", Decimal("0")),
+            qc_hsf_ytd_remuneration_after=deductions.get("qc_hsf_ytd_remuneration_after"),
+            employer_qc_labour_standards=deductions.get("employer_qc_labour_standards", Decimal("0")),
+            cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
+            cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
+            employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),
+            employer_cpp_first_additional=deductions.get("employer_cpp_first_additional", Decimal("0")),
+            ytd_pensionable_earnings=deductions.get("ytd_pensionable_earnings"),
+            ytd_cpp2_pensionable_earnings=deductions.get("ytd_cpp2_pensionable_earnings"),
+            ytd_insurable_earnings=deductions.get("ytd_insurable_earnings"),
+            ytd_basic_exemption_used=deductions.get("ytd_basic_exemption_used"),
             tds=deductions.get("tds", Decimal("0")),
             annual_tax=deductions.get("annual_tax", Decimal("0")),
             surcharge=deductions.get("surcharge", Decimal("0")),
@@ -199,6 +223,7 @@ class StandardStrategy(PayrollStrategy):
             state_disability_insurance=deductions.get("state_disability_insurance", Decimal("0")),
             germany_statutory_profile_id=deductions.get("_germany_statutory_profile_id"),
             germany_calculation_snapshot=deductions.get("_germany_calculation_snapshot"),
+            state_program_deductions=deductions.get("state_program_deductions", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,
         )

@@ -456,7 +456,20 @@ function NICategoryForm({ pack, initialData, onClose, onSaved, addToast }) {
 // for a componentType this modal doesn't know how to classify yet
 // (matters for "reusability for future jurisdictions": an unmapped India/
 // US/AU/DE/CA component still gets a working form instead of no form at all).
-function GenericFallbackForm({ pack, initialData, onClose, onSaved, addToast }) {
+// componentKeyOptions (optional): [{ key, label, shape }], shape one of
+// "rate_pair" (Employee % + Employer %), "rate_single" (Employee % only —
+// every single-sided rate this engine reads, e.g. cpp2_rate/
+// lowest_fed_rate/territorial payroll tax, is employee-side), or "flat"
+// (Flat Amount only). When supplied, Component Key becomes a dropdown
+// scoped to exactly the keys the calling tab's engine consumer actually
+// reads, and only the fields relevant to the selected key's shape are
+// shown — closes the "every field for every row" gap the generic form
+// used to have. Omitting the prop keeps the original free-text-key,
+// show-everything behavior exactly as it was (no caller relies on that
+// today — only Canada's tabs reach this form — but it's a safe, honest
+// default rather than a breaking change to the shared component).
+function GenericFallbackForm({ pack, initialData, onClose, onSaved, addToast, componentKeyOptions }) {
+  const hasOptions = Array.isArray(componentKeyOptions) && componentKeyOptions.length > 0;
   const [componentKey, setComponentKey] = useState(initialData?.componentKey || "");
   const [label, setLabel] = useState(initialData?.label || "");
   const [employeeSharePct, setEmployeeSharePct] = useState(initialData?.employeeRatePct ?? "");
@@ -465,6 +478,26 @@ function GenericFallbackForm({ pack, initialData, onClose, onSaved, addToast }) 
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const selectedOption = hasOptions ? componentKeyOptions.find((o) => o.key === componentKey) : null;
+  // No match yet (nothing picked) or no options supplied at all: show
+  // every field, same as the form's original behavior, so nothing is
+  // ever hidden without the metadata to justify it.
+  const shape = selectedOption?.shape || (hasOptions ? null : "rate_pair_and_flat");
+  const showEmployeePct = shape === "rate_pair" || shape === "rate_single" || shape === "rate_pair_and_flat";
+  const showEmployerPct = shape === "rate_pair" || shape === "rate_pair_and_flat";
+  const showFlatAmount = shape === "flat" || shape === "rate_pair_and_flat";
+
+  function onKeyChange(e) {
+    const nextKey = e.target.value;
+    setComponentKey(nextKey);
+    // Only auto-fill the label for a brand-new row — never overwrite a
+    // label someone's already editing, and never touch it in edit mode.
+    if (!initialData) {
+      const opt = componentKeyOptions.find((o) => o.key === nextKey);
+      if (opt) setLabel(opt.label);
+    }
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -472,9 +505,9 @@ function GenericFallbackForm({ pack, initialData, onClose, onSaved, addToast }) 
         id: initialData?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
         jurisdictionState: pack.jurisdictionState || null, taxRegime: pack.taxRegime || null,
         componentKey, label,
-        employeeSharePct: employeeSharePct === "" ? null : employeeSharePct,
-        employerSharePct: employerSharePct === "" ? null : employerSharePct,
-        flatAmount: flatAmount === "" ? null : flatAmount,
+        employeeSharePct: showEmployeePct && employeeSharePct !== "" ? employeeSharePct : null,
+        employerSharePct: showEmployerPct && employerSharePct !== "" ? employerSharePct : null,
+        flatAmount: showFlatAmount && flatAmount !== "" ? flatAmount : null,
         sortOrder: initialData?.sortOrder ?? 0, reason: reason || null,
       });
       addToast?.("Saved.", "success");
@@ -489,17 +522,33 @@ function GenericFallbackForm({ pack, initialData, onClose, onSaved, addToast }) 
   return (
     <>
       <div className="grid grid-cols-2 gap-3">
-        <div><label className={labelClass}>Component Key</label><input className={inputClass} value={componentKey} onChange={(e) => setComponentKey(e.target.value)} /></div>
+        <div>
+          <label className={labelClass}>Component</label>
+          {hasOptions ? (
+            <select className={inputClass} value={componentKey} onChange={onKeyChange} disabled={Boolean(initialData)}>
+              <option value="">Select…</option>
+              {componentKeyOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          ) : (
+            <input className={inputClass} value={componentKey} onChange={(e) => setComponentKey(e.target.value)} />
+          )}
+        </div>
         <div><label className={labelClass}>Label</label><input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} /></div>
-        <div><label className={labelClass}>Employee %</label><input className={inputClass} value={employeeSharePct} onChange={(e) => setEmployeeSharePct(e.target.value)} /></div>
-        <div><label className={labelClass}>Employer %</label><input className={inputClass} value={employerSharePct} onChange={(e) => setEmployerSharePct(e.target.value)} /></div>
-        <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={flatAmount} onChange={(e) => setFlatAmount(e.target.value)} /></div>
+        {showEmployeePct && (
+          <div><label className={labelClass}>Employee %</label><input className={inputClass} value={employeeSharePct} onChange={(e) => setEmployeeSharePct(e.target.value)} /></div>
+        )}
+        {showEmployerPct && (
+          <div><label className={labelClass}>Employer %</label><input className={inputClass} value={employerSharePct} onChange={(e) => setEmployerSharePct(e.target.value)} /></div>
+        )}
+        {showFlatAmount && (
+          <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={flatAmount} onChange={(e) => setFlatAmount(e.target.value)} /></div>
+        )}
         <EffectivePeriodNote pack={pack} />
         <ReasonField value={reason} onChange={(e) => setReason(e.target.value)} />
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
-        <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+        <button onClick={save} disabled={saving || (hasOptions && !componentKey)} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
       </div>
     </>
   );

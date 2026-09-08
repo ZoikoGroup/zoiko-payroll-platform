@@ -404,6 +404,17 @@ def create_organization(
         validate_tax_identifiers_or_raise,
     )
     from app.modules.organizations.models import Organization
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+    # Same gate as public self-registration (auth/service.py's
+    # register_enterprise) — reused, not duplicated, so Super Admin can't
+    # bypass the "no active compliance pack" rejection just by using this
+    # endpoint instead. Checked before any tax-ID validation for the same
+    # reason: an unsupported country should surface this message, not a
+    # confusing tax-ID schema error.
+    block_reason = get_jurisdiction_onboarding_block_reason(db, data.country)
+    if block_reason:
+        raise BadRequestException(block_reason)
 
     tax_identifiers = validate_tax_identifiers_or_raise(data.country, data.tax_identifiers) \
         if data.tax_identifiers else None
@@ -513,6 +524,10 @@ def delete_organization(
     # the subquery selects nothing (orphans on FK-disabled SQLite, FK
     # violation on Postgres).
     from sqlalchemy import text
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(db.get_bind())
+    existing_tables = set(inspector.get_table_names())
 
     _org_direct = [
         "payroll_email_settings",
@@ -548,6 +563,8 @@ def delete_organization(
     # parent-table row is deleted; payroll_policies is removed in the
     # second, explicit pass below.
     for table, fk_column, parent in _org_via_parent:
+        if table not in existing_tables:
+            continue
         db.execute(
             text(
                 f'DELETE FROM "{table}" WHERE "{fk_column}" IN '
@@ -556,18 +573,22 @@ def delete_organization(
             {"org_id": organization_id},
         )
     for table in _org_direct:
+        if table not in existing_tables:
+            continue
         db.execute(
             text(f'DELETE FROM "{table}" WHERE organization_id = :org_id'),
             {"org_id": organization_id},
         )
-    db.execute(
-        text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :org_id'),
-        {"org_id": organization_id},
-    )
-    db.execute(
-        text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
-        {"org_id": organization_id},
-    )
+    if "payroll_inbound_messages" in existing_tables:
+        db.execute(
+            text('DELETE FROM "payroll_inbound_messages" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+    if "payroll_policies" in existing_tables:
+        db.execute(
+            text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
 
     # Login users + their action tokens (users has ondelete CASCADE from org).
     db.execute(

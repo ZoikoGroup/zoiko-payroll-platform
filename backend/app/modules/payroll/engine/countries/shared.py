@@ -15,6 +15,375 @@ from decimal import Decimal
 MONTHS_PER_YEAR = Decimal("12")
 _logger = logging.getLogger("zoiko")
 
+
+class MissingComplianceConfigurationError(Exception):
+    """A federal/national-scope statutory parameter has no configured row
+    (canonical or org-scoped) for a country that has opted into required-
+    configuration validation (see _VALIDATION_ENABLED_COUNTRIES below).
+
+    Plain Exception, not a FastAPI HTTPException — this module is
+    deliberately framework/ORM-free (see this file's own docstring) so it
+    stays import-safe from anywhere. The service/router layer is
+    responsible for catching this and turning it into a proper 4xx
+    response (see app.core.exceptions' handler, registered in main.py)."""
+    def __init__(self, key: str, country: str, organization_id: int = None):
+        self.key = key
+        self.country = country
+        self.organization_id = organization_id
+        super().__init__(
+            f"No statutory configuration found for '{key}' ({country}) — "
+            f"configure it under Super Admin > Compliance before running payroll for this jurisdiction."
+        )
+
+
+# Per-jurisdiction rollout switch for the fail-fast behavior above — a
+# plain in-code set, not a DB-backed flag, deliberately: this module has
+# no DB access by design, and this is a rollout switch a developer flips
+# per phase, not something an admin should toggle at runtime.
+#
+# Fallback Removal Fix Plan, Phase 6 rollout log:
+#   IN — attempted 2026-09-03, REVERTED same day. Canonical data was
+#        confirmed complete (component_key rebate_87a_mrelief/
+#        surcharge_mrelief backfilled that day, linked to Active pack
+#        IN-PAYROLL-FY2026-27 id=2) — but enabling it broke 35 existing
+#        tests immediately, because canonical completeness does NOT imply
+#        an EXISTING org's own already-synced ContributionRate rows are
+#        complete: sync_org_rates_from_canonical only runs on an org's
+#        FIRST use of a jurisdiction, never re-runs when canonical data
+#        gains a new key later. The one real India org in the live DB
+#        synced its rows before this backfill existed, so it almost
+#        certainly lacks rebate_87a_mrelief/surcharge_mrelief today —
+#        enabling validation would have broken its very next payroll run.
+#        A real fix needs a re-sync mechanism (or a one-time backfill of
+#        EVERY existing org's own rows, not just canonical) before this
+#        can be safely re-attempted — not done here; flagged for a
+#        separate, explicit decision.
+#   US — same unresolved risk applies (never actually attempted).
+#   UK — also blocked by its tax pack still being Draft (see history above
+#        this rewrite) — _find_active_tax_pack only matches status=="Active".
+_VALIDATION_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for real YTD-accumulator-based caps (Canada
+# CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
+# year-to-date accumulators," not the current-period-annualized estimate
+# engine/countries/canada.py uses today). Same deliberate plain-set
+# convention as _VALIDATION_ENABLED_COUNTRIES above: a developer-flipped
+# rollout gate, not a runtime admin toggle. service.py's _load_ca_ytd only
+# queries/returns YTD data when the country is in this set; canada.py's own
+# `ctx.ytd_pensionable_earnings is not None` check is the second,
+# independent dormancy gate at the calculation layer — both must be true
+# for YTD-based caps to actually apply.
+#
+# CA — not yet enabled. No backfill of existing PayslipItems is possible
+#      (their figures were computed with the isolated-period bug, not just
+#      missing metadata), so flipping this mid-tax-year for an org with
+#      existing 2026 CA payslips would create a partial-year gap (prior
+#      periods' pensionable/insurable earnings excluded from the room
+#      calculation for the rest of the year). Flip only at a tax-year
+#      boundary (Jan 1) for orgs with existing CA payslips; a CA org
+#      onboarding fresh can be enabled immediately.
+# US — Social Security wage base / FUTA wage base / Additional Medicare
+#      threshold share the identical current-period-annualized bug (see
+#      engine/countries/us.py) and are designed to reuse this exact
+#      mechanism — not enabled here, tracked as a separate follow-up.
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
+# accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
+# Levy, NL HAPSET, Quebec HSF — all banded on an org's total annual
+# payroll across every employee, not any single employee's own pay).
+# Same deliberate plain-set convention as _YTD_ACCUMULATOR_ENABLED_
+# COUNTRIES above. service.py's _load_ca_org_levy_ytd/
+# _upsert_ca_org_levy_ytd only read/write when the country is in this
+# set — currently empty, and unreachable from any live calculation path
+# regardless, since no employer levy calculation exists yet to call them
+# (this accumulator is built and tested standalone first — see
+# OrganizationYtdAccumulator's own docstring).
+_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for the CRA-correct CREDIT method of
+# applying "amounts" (federal BPAF, provincial BPA, Quebec BPA — and any
+# future TD1-declared claim amount) to income tax. ZP-TAX-CA-2026-001 §7:
+# "T3 = (R × A) − K", where K bakes in `lowest_rate × the claim amount` —
+# i.e. CRA treats these as NON-REFUNDABLE CREDITS converted at the
+# lowest bracket rate and subtracted from tax payable, not as a
+# deduction from taxable income applied before bracket-summing.
+#
+# engine/countries/canada.py's existing method (still the default while
+# this set is empty) computes `bracket_sum(annual_gross − bpa)` instead —
+# mathematically identical to the credit method ONLY when income stays
+# within the lowest bracket; once income crosses into a higher bracket,
+# the deduction method effectively shields the claim amount at whatever
+# bracket the TOP of income falls in rather than the fixed lowest rate,
+# understating tax for every such employee (found during the
+# ZP-TAX-CA-2026-001 gap-closure Phase 6 review, not introduced by it —
+# this switch exists so the correct method can be verified and rolled
+# out deliberately rather than silently changing every existing
+# Canadian payslip's federal/provincial/Quebec tax the moment it ships).
+#
+# CA — not yet enabled. Flipping this WILL change the actual withheld
+#      tax amount on every future Canadian payslip once flipped; this is
+#      a real payroll/compliance decision, not a pure engineering one —
+#      needs an explicit go-ahead, ideally at a period boundary so it
+#      doesn't retroactively disagree with already-generated payslips.
+_CA_CREDIT_METHOD_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for Manitoba's and Yukon's own DYNAMIC
+# income-tapered Basic Personal Amount formulas (§8's "Dynamic basic
+# amounts" note), replacing the generic flat "provincial_bpa" row every
+# other non-Quebec province reads. Same deliberate dormancy reasoning as
+# _CA_CREDIT_METHOD_ENABLED_COUNTRIES above: an org that has ALREADY
+# configured a flat provincial_bpa row for MB or YT (e.g. from earlier
+# statutory data entry) would see its provincial tax silently change the
+# moment this ships, if it weren't gated — this switch exists so that
+# never happens without a deliberate decision.
+#
+# CA — not yet enabled.
+_CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for CPP/QPP's mandatory age-18/age-70
+# contribution window (§10's "Age 18"/"Age 70" controls). No
+# PayrollEmployee has ever had a date_of_birth column before this, so
+# ctx.date_of_birth is None for every existing employee regardless of
+# this switch — but once that column is populated, this switch also
+# gates whether it's actually CONSUMED, so an org can backfill dates of
+# birth without any CPP/QPP behavior changing until it deliberately
+# flips this. See canada.py's _is_age_gated_cpp_stopped for the
+# disclosed calendar-age-comparison simplification (the source document
+# names the controls but doesn't spell out CRA's exact month-boundary
+# administrative rule).
+#
+# CA — not yet enabled.
+_CA_AGE_GATED_CPP_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for CPP/QPP first-layer BASE (4.95%) vs.
+# FIRST-ADDITIONAL (1.00%) traceability (AC-11: "CPP first-layer base
+# and first additional components are separately traceable while
+# respecting the combined statutory deduction"). Deliberately PURELY
+# INFORMATIONAL: the combined "cpp"/"qpp" ContributionRate row remains
+# the sole source of truth for the actual social_security/
+# employer_social_security deduction, unconditionally, regardless of
+# this switch — canada.py only uses "cpp_base"/"cpp_first_additional"
+# (or "qpp_base"/"qpp_first_additional" for Quebec) rows to PROPORTION
+# that already-computed amount into two breakdown fields, never to
+# recompute it independently. This means flipping this switch can never
+# make CPP itself disappear or change, even if those two new rows are
+# never configured or are configured inconsistently with the combined
+# row — the breakdown just stays $0/$0 until they exist.
+#
+# CA — not yet enabled.
+_CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for the federal K2/K3 credits — CRA's
+# per-pay-period credit for CPP/QPP and EI/QPIP premiums ACTUALLY
+# WITHHELD that period, converted at the lowest bracket rate (§7:
+# "T3 = (R×A) − K − K1 − K2 − K3 − K4"). Only meaningful within
+# _CA_CREDIT_METHOD_ENABLED_COUNTRIES's R×A formula (never applied under
+# the legacy deduction-based path) — but kept as its OWN separate switch
+# because it is a genuinely NEW credit that has never existed in this
+# engine at all, unlike the BPA-as-credit fix that switch gates (a
+# correction of an existing calculation). Every employee who has any
+# CPP/QPP or EI/QPIP withheld will see LOWER federal tax once this is
+# enabled — a materially different kind of change an org should be able
+# to decide on independently of the BPA correctness fix. This is also
+# what correctly handles a mid-year province transfer (§10's "Province
+# transfer" control) without any special-case code: the credit is based
+# on whatever was actually withheld this period, regardless of plan.
+#
+# CA — not yet enabled.
+_CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for the EI/QPIP employer 1.4x-default
+# premium mechanism (§11: "Default employer EI is 1.4 × employee
+# premium... a valid reduced employer rate is an employer-specific
+# authorization and must be stored as an effective-dated tenant overlay
+# with source evidence; do not replace the statutory default globally").
+# While OFF, the employer rate is read from whatever employer_rate_pct
+# is independently configured on the SAME "ei"/"qpip" ContributionRate
+# row as the employee rate (today's behavior) — an org that has already
+# entered its own employer_rate_pct there must not see it silently
+# replaced the moment this ships. Once ON, the employer rate instead
+# DEFAULTS to exactly 1.4x the (dynamically resolved) employee rate,
+# unless a reduced-rate EmployerTaxProfile authorization exists
+# (component_code "EI_REDUCED", looked up at the country level since EI
+# is federal, not provincial — see service.py's _resolve_employee_calc_
+# inputs/add_payslip_item).
+#
+# CA — not yet enabled.
+_CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for the labour-sponsored funds tax credit
+# (LCF, §6: "Labour-sponsored fund credit rate / max: 15% / $750 — use
+# LCF formula rules and cap; not a generic deduction"). A genuinely NEW
+# federal credit — this engine never computed it at all before. While
+# OFF, ctx.lsvcc_investment_amount is ignored entirely even if an org
+# has entered employee LSVCC declarations, so backfilling that data
+# ahead of time changes nothing until this is deliberately flipped.
+#
+# CA — not yet enabled.
+_CA_LSVCC_CREDIT_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for the beyond-province/outside-Canada
+# federal surtax (§6: "Beyond-province/outside-Canada surtax factor: 48%
+# of T3 — special federal formula only; never display as a standard
+# marginal bracket"). Applies when an employee's work_state is literally
+# "XP" (ZP-TAX-CA-2026-001 §3's CA-XP jurisdiction code — "in Canada
+# beyond limits of a province/territory"); this is a manually-assignable
+# work_state value today (nothing currently auto-detects it — the
+# establishment-record-based POE inference for CA-XP is Phase 9's
+# unimplemented scope, tracked separately, see service.py's
+# _resolve_ca_poe_with_source comment), so gating this behind its own
+# switch matters even though no employee could have "XP" configured
+# through any AUTOMATED path yet — an org could always have typed it in
+# directly.
+#
+# CA — not yet enabled.
+_CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for BC's "basic tax reduction" (§9's
+# mid-year override table: annual $690 / H1 $575 / H2 $805). Genuinely
+# NEW — this engine never computed it at all before, and it comes with
+# a DISCLOSED, deliberate simplification: the real reduction phases out
+# with income, but the source document gives only the dollar amount,
+# never the phase-out formula, so this applies the full amount to every
+# BC taxpayer regardless of income (see canada.py's
+# _calculate_provincial_tax_ca for the exact comment and the separate,
+# pre-existing H1/H2-resolution gap this also surfaced).
+#
+# CA — not yet enabled.
+_CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for India's statutory EPF wage ceiling
+# (ZP-TAX-IN-2026-27-001 §9.1: "Current mandatory wage ceiling INR
+# 15,000"). While OFF, EPF is computed on the employee's full, uncapped
+# Basic — today's exact existing behavior for every org, unchanged. Once
+# ON, the contribution base becomes min(basic, ceiling) instead — a real
+# correctness fix (EPF is currently over-withheld for any employee with
+# Basic above ₹15,000), but still a genuine payroll-affecting change to
+# every such employee's next payslip, so it ships dormant like every
+# other fix in this file rather than silently changing live withholding.
+#
+# IN — not yet enabled.
+_IN_PF_WAGE_CEILING_ENABLED_COUNTRIES: set[str] = set()
+
+# Per-country rollout switch for removing the UK engine's independent
+# Personal Allowance taper (ZP-TAX-UK-2026-27-001 §5.1 PAYE implementation
+# rule: "Zoiko Payroll must not independently recompute an employee's
+# tapered Personal Allowance from payroll earnings. HMRC supplies the tax
+# code that operationalizes allowances..."). While OFF, uk.py keeps
+# re-tapering the allowance above the £100k threshold from payroll-
+# observed income — the OLD, superseded behavior, kept reachable only by
+# explicitly discarding "UK" from this set (e.g. a test proving the old
+# path still works if manually reverted). Once ON, the allowance is used
+# exactly as parsed from the tax code, with no independent recompute at
+# all.
+#
+# UK — enabled 2026-09-07 (Phase 1 of the phased rollout; zero live UK
+# employees existed in the database at enable time, so this had no
+# immediate real-payslip effect — see uk_2026_27_gap_closure memory).
+_UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for capping a K-code employee's PAYE
+# deduction at 50% of THIS PERIOD'S pre-tax pay (ZP-TAX-UK-2026-27-001
+# §6.2: "tax deduction cannot exceed 50% of pre-tax pay/pension for the
+# pay period"). Applied to the PERIOD figure (ctx.gross), not the annual
+# one — the whole point of this cap is protecting a single low/irregular
+# pay period from a K-code's added notional income, which an annual-level
+# cap would only catch under perfectly uniform pay all year. While OFF
+# (reachable only by explicitly discarding "UK"), a K-code's tax is
+# uncapped — the old, superseded behavior.
+#
+# UK — enabled 2026-09-07 (Phase 2 of the phased rollout; zero live UK
+# employees existed in the database at enable time).
+_UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for National Insurance category-banded rates
+# (ZP-TAX-UK-2026-27-001 §8.3/§9.1 — all 16 category letters, each with
+# its own employee/employer rate bands). uk.py's _resolve_ni_bands/
+# _calculate_ni_from_bands mechanism already exists (same shape as
+# India's Telangana PT_FLAT bands) — this switch gates it specifically
+# because ni_category is ALREADY a live, employee-configurable field.
+# While OFF (reachable only by explicitly discarding "UK"), every
+# category computes via the flat Category-A-shaped fallback regardless
+# of what's actually declared — the old, superseded behavior.
+#
+# UK — enabled 2026-09-07 (Phase 3 of the phased rollout). The canonical
+# ni_secondary_thresh row was reconciled to the real £5,000 (was wrongly
+# £9,100) and a set of incomplete, orphaned pre-existing NI_BAND rows for
+# categories A/B was found and deleted BEFORE enabling this — see
+# uk_2026_27_gap_closure memory. Zero live UK employees existed in the
+# database at enable time.
+_UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for computing the flat-fallback NI path
+# directly against THIS PERIOD'S gross and a real Weekly/Monthly
+# threshold, instead of annualizing gross then dividing the result back
+# down (ZP-TAX-UK-2026-27-001 §8.1: "For ordinary employees, Class 1 NIC
+# is based on the earnings period rather than cumulative annual
+# earnings... must not cause ordinary payroll to annualize NIC"). The
+# annualize-then-divide model is only numerically equivalent to true
+# period-based NI under perfectly uniform pay across the year — wrong for
+# irregular/bonus periods. Scoped to Weekly and Monthly only (the two
+# frequencies the document publishes real, independently-rounded
+# threshold figures for — its weekly threshold doesn't even multiply out
+# to its own annual figure, confirming these aren't safely derivable from
+# each other); Fortnightly/FourWeekly/anything else keeps today's
+# annualize-then-divide fallback. While OFF, every frequency uses today's
+# exact existing behavior.
+#
+# UK — enabled 2026-09-07 (Phase 4 of the phased rollout; zero live UK
+# employees existed in the database at enable time). While OFF
+# (reachable only by explicitly discarding "UK"), every frequency uses
+# the old, annualize-then-divide behavior.
+_UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-country rollout switch for rounding Student Loan/Postgraduate Loan
+# deductions DOWN to the nearest whole pound (ZP-TAX-UK-2026-27-001
+# §10.2: "Round the deduction down to the nearest whole pound as required
+# by HMRC loan tables/manual method"). While OFF (reachable only by
+# explicitly discarding "UK"), uk.py rounds to the nearest penny
+# (_round2) — the old, superseded behavior.
+#
+# UK — enabled 2026-09-07 (Phase 5 of the phased rollout; zero live UK
+# employees existed in the database at enable time).
+_UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES: set[str] = {"UK"}
+
+# Per-STATE (not per-country, unlike every switch above — the US isn't one
+# jurisdiction) rollout switch for a state's real income-tax withholding
+# (ZP-TAX-US-2026-001 §4). While a state is absent from this set, us.py
+# ignores any TaxSlab rows configured for it and state_income_tax computes
+# as 0 for that state — the same silent-zero behavior every US state has
+# had until explicitly added here, so this is additive per-state, never a
+# retroactive change to a state not yet in the set. Add a state only once
+# its real TaxSlab/allowance data has been seeded AND (per this codebase's
+# standing convention) either zero employees exist with that work_state
+# yet, or an explicit go-ahead has been given to change a real number for
+# employees who do.
+#
+# CO/KY — enabled 2026-09-07 (build-out per ZP-TAX-US-2026-001): zero live
+# US employees existed in the database at enable time, so this was purely
+# additive with no real-payslip effect.
+_US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY"}
+
+# Per-state rollout switch for a state's own statutory payroll programs
+# (SDI/PFML/Paid Leave/TDI/etc., ZP-TAX-US-2026-001 §5) beyond plain income
+# tax withholding. While a state is absent from this set, us.py ignores any
+# state-scoped program rows configured for it. Same additive-per-state
+# reasoning as _US_STATE_TAX_ENABLED_STATES above — these are independent
+# switches because a state can have real income-tax data ready before its
+# special-program data is, or vice versa (California, for example, has no
+# state income tax withholding table in this build but does have SDI).
+#
+# CA/CT/DC/NY/RI/WA/NJ — enabled 2026-09-07 (build-out per
+# ZP-TAX-US-2026-001 §5): zero live US employees existed in the database
+# at enable time, so this was purely additive with no real-payslip effect.
+# CO/DE/ME added the same day (Phase 3C, headcount-conditional programs —
+# see hardcoded_defaults.py's _US_STATE_HEADCOUNT_PROGRAMS/_US_DE_PAID_LEAVE),
+# same zero-live-employees reasoning. Massachusetts/Minnesota/Oregon are
+# deliberately NOT added — the source document doesn't give a complete
+# numeric threshold and/or employee/employer split for those three.
+_US_STATE_PROGRAM_ENABLED_STATES: set[str] = {"CA", "CT", "DC", "NY", "RI", "WA", "NJ", "CO", "DE", "ME"}
+
 # ── Pay frequency (generic — any country's calculator may use this) ────────
 # PayrollContext.pay_frequency defaults to "Monthly", so
 # PERIODS_PER_YEAR["Monthly"] == MONTHS_PER_YEAR by construction — every
@@ -40,6 +409,22 @@ def resolve_period_threshold(annual_threshold: Decimal, pay_frequency: str | Non
     country calculator already does inline, factored out so it isn't
     duplicated once frequency-awareness spreads beyond UK."""
     return annual_threshold / resolve_periods_per_year(pay_frequency)
+
+
+def resolve_direct_period_threshold(period_thresholds_by_frequency: dict, annual_threshold: Decimal, pay_frequency: str | None) -> Decimal:
+    """For a statutory threshold whose authority publishes REAL, genuinely
+    independent per-period figures (e.g. UK NI's own Weekly/Monthly
+    thresholds — HMRC rounds each period's table separately, so the
+    weekly figure doesn't multiply out to the annual one) — looks up the
+    real published figure for `pay_frequency` when present in
+    `period_thresholds_by_frequency`, falling back to
+    resolve_period_threshold's derived annual/periods_per_year figure for
+    any frequency the authority hasn't published a direct table for
+    (today's exact existing behavior for those)."""
+    frequency = pay_frequency or "Monthly"
+    if frequency in period_thresholds_by_frequency:
+        return period_thresholds_by_frequency[frequency]
+    return resolve_period_threshold(annual_threshold, pay_frequency)
 
 
 # ── Government-mandated scalar parameters (Global Payroll Tax Engine) ──────
@@ -141,6 +526,8 @@ def resolve_jurisdiction_parameter(
         configured = row is not None and row.flat_amount is not None
 
     if not configured:
+        if country in _VALIDATION_ENABLED_COUNTRIES:
+            raise MissingComplianceConfigurationError(key, country, organization_id)
         _logger.warning(
             "[jurisdiction-param-fallback] key=%s country=%s organization_id=%s "
             "no configured row found — using hardcoded default %s",
@@ -227,8 +614,13 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
     # via get_state_scoped_config) are excluded for the same reason — if one
     # ever ends up in this list by mistake (see tax_resolver.py's
     # _pack_has_income_tax_slabs guard, the primary fix), it must not be
-    # silently summed as a 0%-rate income bracket.
-    bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT")]
+    # silently summed as a 0%-rate income bracket. ON_EHT_BAND rows
+    # (Ontario Employer Health Tax's rate table — ONE flat rate for the
+    # whole org-aggregate remuneration total, not a marginal bracket sum)
+    # are excluded for the identical reason — see
+    # engine/countries/canada.py's _on_eht_rate_for_total, which reads
+    # them directly instead.
+    bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT", "ON_EHT_BAND")]
 
     filing_status_tagged = [s for s in bracket_slabs if getattr(s, "filing_status", None) is not None]
     if filing_status_tagged:

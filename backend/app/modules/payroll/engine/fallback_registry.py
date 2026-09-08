@@ -94,6 +94,15 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "CA", "module": "canada", "attr": "_CA_BASIC_PERSONAL_AMOUNT", "label": "Federal Basic Personal Amount", "resolverKey": "basic_personal_amt"},
     {"country": "CA", "module": "canada", "attr": "_CA_CPP2_YAMPE", "label": "CPP2 Year's Additional Maximum Pensionable Earnings", "resolverKey": "cpp2_yampe"},
     {"country": "CA", "module": "canada", "attr": "_CA_CPP2_RATE", "label": "CPP2 Second-Tier Contribution Rate", "resolverKey": "cpp2_rate"},
+    {"country": "CA", "module": "canada", "attr": "_CA_BPAF_MIN", "label": "Federal Basic Personal Amount — Minimum (tapered)", "resolverKey": "bpaf_min"},
+    {"country": "CA", "module": "canada", "attr": "_CA_BPAF_NI_THRESHOLD_LOW", "label": "BPAF Taper — Net Income Threshold (Low)", "resolverKey": "bpaf_ni_thresh_lo"},
+    {"country": "CA", "module": "canada", "attr": "_CA_BPAF_NI_THRESHOLD_HIGH", "label": "BPAF Taper — Net Income Threshold (High)", "resolverKey": "bpaf_ni_thresh_hi"},
+    {"country": "CA", "module": "canada", "attr": "_CA_CEA", "label": "Canada Employment Amount (credit)", "resolverKey": "cea"},
+    {"country": "CA", "module": "canada", "attr": "_CA_LOWEST_FEDERAL_RATE", "label": "Lowest Federal Rate (credit conversion)", "resolverKey": "lowest_fed_rate"},
+    {"country": "CA", "module": "canada", "attr": "_CA_QUEBEC_FEDERAL_ABATEMENT_PCT", "label": "Quebec Federal Abatement", "resolverKey": "qc_fed_abatement", "note": "Configured but not yet applied — awaits the Quebec/POE calculation branch."},
+    {"country": "CA", "module": "canada", "attr": "_CA_BEYOND_PROVINCE_SURTAX_PCT", "label": "Beyond-Province Surtax Factor (% of T3)", "resolverKey": "beyond_prov_surtax", "note": "Configured but not yet applied — awaits the CA-XP/POE calculation branch."},
+    {"country": "CA", "module": "canada", "attr": "_CA_LSVCC_CREDIT_RATE", "label": "Labour-Sponsored Fund Credit Rate", "resolverKey": "lsvcc_credit_rate", "note": "Configured but not yet applied — no employee LSVCC-investment declaration is captured yet."},
+    {"country": "CA", "module": "canada", "attr": "_CA_LSVCC_CREDIT_MAX", "label": "Labour-Sponsored Fund Credit Max", "resolverKey": "lsvcc_credit_max", "note": "Configured but not yet applied — no employee LSVCC-investment declaration is captured yet."},
 
     # ── Germany ──────────────────────────────────────────────────────────
     {"country": "DE", "module": "germany", "attr": "_DE_GRUNDFREIBETRAG", "label": "Basic Tax-Free Allowance (Grundfreibetrag)", "resolverKey": "grundfreibetrag"},
@@ -108,6 +117,47 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYEE_RATE", "label": "Health Insurance (GKV) General Rate — Employee", "resolverKey": "gkv_general_employee_rate", "side": "employee"},
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYER_RATE", "label": "Health Insurance (GKV) General Rate — Employer", "resolverKey": "gkv_general_employer_rate", "side": "employer"},
 ]
+
+
+def get_required_parameter_keys(country: str) -> list[dict]:
+    """The generic, per-jurisdiction list of resolver keys the engine
+    actually reads via resolve_jurisdiction_parameter for this country —
+    derived live from _ENGINE_CONSTANT_REGISTRY (the same metadata that
+    already powers the Super Admin 'Engine Fallback Defaults' viewer
+    above), not a second, hand-maintained catalog. Adding a required
+    parameter for a country means adding one registry row, same as it
+    already does today for that viewer.
+
+    Compound `resolverKey` values (e.g. UK's student loan plans — one
+    registry row covering 5 distinct keys) are split into individual
+    entries. Entries whose resolverKey isn't actually resolver-backed
+    (marked "N/A..." — a pure code constant with no DB counterpart at
+    all) are excluded, since a readiness check has nothing to verify for
+    them. Deduplicates by (key, side) — India's Old/New Regime variants of
+    the same parameter collapse to one required entry, since at runtime
+    there is only ever one "standard_deduction" key being resolved,
+    regardless of which regime's hardcoded default backs it."""
+    seen = set()
+    required = []
+    for entry in _ENGINE_CONSTANT_REGISTRY:
+        if entry["country"] != country:
+            continue
+        resolver_key = entry["resolverKey"]
+        if resolver_key.startswith("N/A"):
+            continue
+        side = entry.get("side")
+        for key in (k.strip() for k in resolver_key.split("/")):
+            dedupe_key = (key, side)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            required.append({
+                "key": key,
+                "side": side,
+                "label": entry["label"],
+                "constantName": entry["attr"],
+            })
+    return required
 
 
 def _jsonable(value):

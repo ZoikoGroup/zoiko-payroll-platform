@@ -8,7 +8,10 @@ of engine/standard.py's _calc_us.
 from decimal import Decimal
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
-from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
+from app.modules.payroll.engine.countries.shared import (
+    MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter,
+    _US_STATE_TAX_ENABLED_STATES, _US_STATE_PROGRAM_ENABLED_STATES,
+)
 # Fallback constants moved to hardcoded_defaults.py — imported back under
 # their original names so nothing else needs to change. See that file for
 # the provenance comments on each (filing-status thresholds, FUTA credit
@@ -83,15 +86,22 @@ def calculate(ctx: PayrollContext) -> dict:
     if sui_profile is not None:
         # Real SUI is being paid for this employer/state (a configured,
         # evidence-backed profile exists) — the standard federal credit
-        # applies. futa_credit_reduction_pct (state-scoped, Super-Admin-
-        # configurable) is how much of the 5.4% credit a credit-reduction
-        # state has taken away this tax year — 0 (full credit, ~0.6%
-        # effective rate) unless Super Admin has explicitly configured
-        # otherwise. No list of "which states are credit-reduced" is
-        # hardcoded anywhere — that changes yearly and must come from
+        # applies. futa_credit_red_pct (state-scoped, Super-Admin-
+        # configurable — named "_red_" rather than the natural
+        # "_reduction_" so it fits payroll_contribution_rates.component_key's
+        # VARCHAR(20) limit; same reason AU's super_max_contrib and
+        # Canada's basic_personal_amt were shortened. The un-shortened
+        # name was never actually storable in the DB, silently breaking
+        # this exact "Super-Admin-configurable" claim since it was
+        # written — found and fixed as part of the Fallback Removal Fix
+        # Plan's P6 readiness check) is how much of the 5.4% credit a
+        # credit-reduction state has taken away this tax year — 0 (full
+        # credit, ~0.6% effective rate) unless Super Admin has explicitly
+        # configured otherwise. No list of "which states are credit-reduced"
+        # is hardcoded anywhere — that changes yearly and must come from
         # Tax Operations, not a guess baked into application code.
         futa_credit_pct = resolve_jurisdiction_parameter(rate_map, "futa_credit_pct", _US_FUTA_CREDIT_PCT, country="US")
-        futa_credit_reduction_pct = resolve_jurisdiction_parameter(rate_map, "futa_credit_reduction_pct", Decimal("0"), country="US")
+        futa_credit_reduction_pct = resolve_jurisdiction_parameter(rate_map, "futa_credit_red_pct", Decimal("0"), country="US")
         effective_futa_rate = max(Decimal("0"), futa_rate - futa_credit_pct + futa_credit_reduction_pct)
     else:
         effective_futa_rate = futa_rate
@@ -118,13 +128,32 @@ def calculate(ctx: PayrollContext) -> dict:
         state_slabs = ctx.resident_state_slabs or []
     else:
         state_slabs = ctx.state_slabs or []
-    # NOTE: state brackets are not yet filing-status-filtered — every state
-    # income tax table configured today is filing-status-agnostic, so this
-    # is a no-op in practice (see _calculate_annual_tax's early-exit when no
-    # slab in the list carries a filing_status), but is explicitly NOT
-    # threaded here yet pending real state bracket data that varies by
-    # filing status (a follow-up, not silently unhandled).
-    annual_state_tax = _calculate_annual_tax(annual_gross, state_slabs) if state_slabs else Decimal("0")
+    # Only states explicitly added to _US_STATE_TAX_ENABLED_STATES compute
+    # real state income tax — every other state's TaxSlab rows (configured
+    # or not) are inert here, same additive-per-state convention as every
+    # other country's rollout switch in shared.py. Filtering by the slab
+    # row's OWN jurisdiction_state (rather than ctx.work_state) means this
+    # is correct for both the plain work-state path and the reciprocity
+    # resident-state path above, without needing a separate ctx field for
+    # "which state actually supplied these slabs".
+    state_slabs = [s for s in state_slabs if getattr(s, "jurisdiction_state", None) in _US_STATE_TAX_ENABLED_STATES]
+    if state_slabs:
+        # State-level standard deduction/allowance (e.g. Colorado's
+        # $11,000 MFJ_OR_QSS / $5,500 other, ZP-TAX-US-2026-001 §10.1) —
+        # defaults to 0 (no-op: full annual_gross is taxed) for any state
+        # that hasn't configured one, exactly like today's behavior before
+        # this parameter existed. Filing-status selection happens the same
+        # way federal's standard_deduction already does, one level down:
+        # ctx.state_rate_map is resolved with the employee's filing_status
+        # already applied (get_state_scoped_config), so this single lookup
+        # is filing-status-correct with no extra logic here.
+        state_standard_deduction = resolve_jurisdiction_parameter(
+            ctx.state_rate_map, "state_standard_deduction", Decimal("0"), country="US",
+        )
+        state_taxable = max(Decimal("0"), annual_gross - state_standard_deduction)
+        annual_state_tax = _calculate_annual_tax(state_taxable, state_slabs, filing_status=ctx.w4_filing_status)
+    else:
+        annual_state_tax = Decimal("0")
     state_income_tax = _round2(annual_state_tax / MONTHS_PER_YEAR)
 
     # Local (county/municipal/school-district) tax: ctx.locality_rate is
@@ -169,6 +198,68 @@ def calculate(ctx: PayrollContext) -> dict:
         if sdi_rate and sdi_rate.employee_rate_pct else Decimal("0")
     )
 
+    # Every OTHER state-level statutory payroll program beyond SDI above
+    # (Paid Leave/TDI/Universal Paid Leave/WA Cares/NJ's worker UI+DI+
+    # workforce-dev+FLI/CO FAMLI/DE Paid Leave/ME PFML/WA PFML/etc.,
+    # ZP-TAX-US-2026-001 §5) — gated per-state by
+    # _US_STATE_PROGRAM_ENABLED_STATES (dormant by default), same
+    # additive-per-state convention as _US_STATE_TAX_ENABLED_STATES above.
+    # Multiple programs can coexist for one state (each its own
+    # component_key in ctx.state_rate_map); optional companion rows:
+    #   "<key>_wage_cap"       caps the taxable WAGE the rate applies to
+    #   "<key>_annual_max"     caps the resulting DOLLAR amount itself
+    #   "<key>_employer_headcount_min"/"_max"
+    #       gates ONLY the employer side (never the employee side — Phase
+    #       3C's CO FAMLI/ME PFML/WA PFML/DE Paid Leave all have the
+    #       employee rate apply unconditionally, only the employer's
+    #       share depends on this employer's own covered headcount) to
+    #       [min, max) — either bound optional. The employer's actual
+    #       headcount comes from EmployerTaxProfile.covered_employee_count
+    #       for jurisdiction=ctx.work_state, component_code=this key
+    #       uppercased (aliased for Delaware's two tiers, which share one
+    #       real headcount fact under "PAID_LEAVE" despite being two
+    #       separate rows/rates) — absent a configured profile, the
+    #       headcount is unknown and the employer share is never guessed
+    #       (stays 0), same "never infer" principle EmployerTaxProfile's
+    #       own docstring already establishes for SUI.
+    # Absent means uncapped/unconditional, same convention as
+    # ss_wage_base/futa_wage_base. "sdi" itself is excluded (its own
+    # dedicated field above, unaffected by this switch).
+    _headcount_group_aliases = {"paid_leave_parental": "paid_leave"}
+    state_program_deductions = Decimal("0")
+    employer_state_program_contributions = Decimal("0")
+    for key, row in (ctx.state_rate_map or {}).items():
+        if key == "sdi" or key.endswith("_wage_cap") or key.endswith("_annual_max") \
+                or key.endswith("_employer_headcount_min") or key.endswith("_employer_headcount_max"):
+            continue
+        if getattr(row, "jurisdiction_state", None) not in _US_STATE_PROGRAM_ENABLED_STATES:
+            continue
+        wage_cap_row = (ctx.state_rate_map or {}).get(f"{key}_wage_cap")
+        wage_cap = wage_cap_row.flat_amount if wage_cap_row is not None else None
+        annual_max_row = (ctx.state_rate_map or {}).get(f"{key}_annual_max")
+        annual_max = annual_max_row.flat_amount if annual_max_row is not None else None
+        taxable = min(annual_gross, wage_cap) if wage_cap is not None else annual_gross
+        if row.employee_rate_pct:
+            amount = _round2((taxable * row.employee_rate_pct / Decimal("100")) / MONTHS_PER_YEAR)
+            if annual_max is not None:
+                amount = min(amount, _round2(annual_max / MONTHS_PER_YEAR))
+            state_program_deductions += amount
+        if row.employer_rate_pct:
+            headcount_min_row = (ctx.state_rate_map or {}).get(f"{key}_employer_headcount_min")
+            headcount_max_row = (ctx.state_rate_map or {}).get(f"{key}_employer_headcount_max")
+            employer_applies = True
+            if headcount_min_row is not None or headcount_max_row is not None:
+                headcount_code = _headcount_group_aliases.get(key, key).upper()
+                profile = (ctx.employer_tax_profiles or {}).get(headcount_code)
+                headcount = profile.covered_employee_count if profile is not None else None
+                employer_applies = (
+                    headcount is not None
+                    and (headcount_min_row is None or headcount >= headcount_min_row.flat_amount)
+                    and (headcount_max_row is None or headcount < headcount_max_row.flat_amount)
+                )
+            if employer_applies:
+                employer_state_program_contributions += _round2((taxable * row.employer_rate_pct / Decimal("100")) / MONTHS_PER_YEAR)
+
     filing_status = ctx.w4_filing_status
     annual_tax = _calculate_annual_tax_us(annual_gross, ctx.slabs, rate_map, filing_status=filing_status)
     federal_income_tax = _round2(annual_tax / MONTHS_PER_YEAR)
@@ -186,5 +277,7 @@ def calculate(ctx: PayrollContext) -> dict:
         employer_futa=employer_futa, employer_sui=employer_sui,
         federal_income_tax=federal_income_tax, state_income_tax=state_income_tax, local_tax=local_tax,
         state_disability_insurance=state_disability_insurance,
+        state_program_deductions=state_program_deductions,
+        employer_state_program_contributions=employer_state_program_contributions,
         tds=tds, annual_tax=annual_tax,
     )

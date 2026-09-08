@@ -84,8 +84,8 @@ def add_jurisdiction(db: Session, organization_id: int, country_code: str, actor
 
     # Auto-seed contribution rates / tax slabs so the admin sees real
     # engine-consulted defaults immediately rather than an empty table.
-    get_contribution_rates(db, organization_id, country_code)
-    get_tax_slabs(db, organization_id, country_code)
+    get_contribution_rates(db, organization_id, country=country_code)
+    get_tax_slabs(db, organization_id, country=country_code)
     # Same for holidays — seeded per onboarded jurisdiction (not just
     # whichever one is currently "active" on CompanyComplianceDetails), so
     # each country's calendar shows real defaults as soon as it's added.
@@ -202,7 +202,7 @@ def get_contribution_rates_numeric(db: Session, organization_id: int, country_co
     """Same rows get_contribution_rates() returns (auto-seeds if empty),
     but callers here need the numeric fields, not the display-string-only
     ContributionRateResponse used by the read-only Compliance tables."""
-    return get_contribution_rates(db, organization_id, country_code)
+    return get_contribution_rates(db, organization_id, country=country_code)
 
 
 def upsert_contribution_rate(

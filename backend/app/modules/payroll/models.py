@@ -133,6 +133,12 @@ class PayrollEmployee(Base):
     work_locality    = Column(String(100), nullable=True)
 
     date_of_joining  = Column(Date, nullable=True)
+    # Canada-specific consumer today (CPP/QPP's age 18/70 mandatory
+    # contribution window, ZP-TAX-CA-2026-001 §10 — see
+    # engine/countries/canada.py's _is_age_gated_cpp_stopped), but a
+    # generically useful HR fact, not a Canada-only field — NULL for
+    # every employee until entered, same as date_of_joining before it.
+    date_of_birth    = Column(Date, nullable=True)
     ctc              = Column(Numeric(12, 2), default=0)
     # basic/hra are ANNUAL amounts (matching the ctc convention).
     # The payroll engine divides by 12 to derive monthly values.
@@ -174,6 +180,69 @@ class PayrollEmployee(Base):
     w4_filing_status = Column(String(20), nullable=True)
     w4_form_vintage  = Column(String(10), nullable=True)
 
+    # Canada-specific: TD1 federal total claim amount. NULL for every
+    # non-CA employee, and for CA employees until explicitly set — the
+    # engine falls back to the standard income-tapered BPAF (Phase 2)
+    # when unset, matching ZP-TAX-CA-2026-001 §6's "Federal TD1 default:
+    # Dynamic BPAF. If no TD1 is on file, follow T4127 default logic."
+    # Distinct from the pre-existing compliance_fields["td1_claim_amount"]
+    # JSON entry (already collected via the employee form/
+    # CAEmployeeValidation) which the engine never consumed until now —
+    # same class of dead-plumbing gap already closed for US w4_filing_status
+    # and UK tax_code (see employee_validation.py's FIELD_COLUMN_MAP).
+    td1_claim_amount = Column(Numeric(12, 2), nullable=True)
+    # Canada-specific: provincial/territorial TD1 claim amount — an
+    # employee's own filed override of their province's dynamic
+    # provincial_bpa, mirroring how td1_claim_amount above already
+    # overrides the federal BPAF (ZP-TAX-CA-2026-001 §18: "Provincial/
+    # territorial TD1... claim amount/code"). NULL (every employee today)
+    # means "no provincial TD1 on file" — falls back to the province's
+    # own provincial_bpa exactly as before this column existed. Never
+    # applies to a Quebec employee (Quebec has its own TP-1015.3-V claim
+    # below, a legally distinct declaration, not this same field reused).
+    provincial_td1_claim_amount = Column(Numeric(12, 2), nullable=True)
+    # Quebec-specific: TP-1015.3-V personal tax credit amount — Quebec's
+    # own employee declaration, legally distinct from federal TD1 per
+    # ZP-TAX-CA-2026-001 §18 ("maintain separately from federal TD1").
+    # NULL means "no TP-1015.3-V on file" — falls back to the canonical
+    # quebec_bpa exactly as before this column existed.
+    qc_tp1015_claim_amount = Column(Numeric(12, 2), nullable=True)
+
+    # Canada-specific: TD1X employee-requested additional per-pay-period
+    # withholding — additive on top of the statutory calculation, never
+    # overwriting it (ZP-TAX-CA-2026-001 §18). NULL means "none requested."
+    td1_additional_tax = Column(Numeric(12, 2), nullable=True)
+    # Canada-specific: labour-sponsored funds tax credit (LCF, §6) —
+    # the employee's declared LSVCC share purchase amount for the year;
+    # the federal credit itself is min(this * 15%, $750), computed in
+    # engine/countries/canada.py, gated on shared._CA_LSVCC_CREDIT_
+    # ENABLED_COUNTRIES. NULL means "no LSVCC purchase declared."
+    lsvcc_investment_amount = Column(Numeric(12, 2), nullable=True)
+    # Canada-specific: CPT30 CPP/QPP election — "ACTIVE" (default
+    # behavior, contribute normally) or "STOPPED" (eligible age-65-69
+    # retirement-pension recipient has filed to stop CPP/QPP withholding).
+    # NULL/"ACTIVE" changes nothing from today's behavior. Age-based
+    # automatic start (18) / stop (70) is now ALSO modeled, separately,
+    # via date_of_birth (see engine/countries/canada.py's
+    # _is_age_gated_cpp_stopped) — this column still only ever reflects
+    # an explicit employee election, never an inferred one.
+    cpp_qpp_election_status = Column(String(20), nullable=True)
+    cpp_election_effective_date = Column(Date, nullable=True)
+
+    # Canada-specific: full-time remote-work "reasonable attachment" to an
+    # employer establishment in a specific province, per
+    # ZP-TAX-CA-2026-001 §5 step 4 — an employee working from home whose
+    # POE should still resolve to the employer's establishment province,
+    # not wherever they happen to be sitting. NULL/False means "no remote
+    # agreement on file," same as every employee today; work_state (or
+    # the org fallback) resolves POE exactly as it already does. Does NOT
+    # model multi-establishment time-weighting (§5 steps 2-3) — that
+    # needs real establishment records this schema doesn't have for any
+    # country, a materially larger feature left for a later decision.
+    remote_work_agreement = Column(Boolean, default=False, nullable=False, server_default="false")
+    remote_attachment_province = Column(String(10), nullable=True)
+    remote_agreement_effective_from = Column(Date, nullable=True)
+
     # US-specific (but named generically in case another jurisdiction ever
     # needs the same resident/work split): the state the employee is a tax
     # RESIDENT of, as distinct from work_state above (where they physically
@@ -202,6 +271,15 @@ class PayrollEmployee(Base):
     # generic pair reused by both rather than two parallel field sets.
     study_loan_plan    = Column(String(20), nullable=True)
     study_loan_balance = Column(Numeric(12, 2), nullable=True)
+    # UK only: a Postgraduate Loan repaid CONCURRENTLY with an
+    # undergraduate plan (ZP-TAX-UK-2026-27-001 §10.2's own worked
+    # example: Plan 5 + Postgraduate = two separate deduction lines).
+    # Distinct from study_loan_plan=="UK_POSTGRAD" (a standalone
+    # Postgraduate-only employee, already fully handled by the existing
+    # single-field mechanism) — uk.py's calculate() must never apply both
+    # at once for the same employee. Defaults False so no existing
+    # employee's calculation changes.
+    has_postgrad_loan  = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Germany: whether this employee is liable for Kirchensteuer (church
     # tax) — an opt-in surcharge on income tax. Defaults False so no
@@ -693,6 +771,24 @@ class PayslipItem(Base):
     tax_policy_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
     tax_policy_version  = Column(String(20), nullable=True)
     tax_rule_snapshot   = Column(JSON, nullable=True)
+    # Same immutability contract as tax_rule_snapshot above, for YTD-based
+    # caps (Canada CPP/CPP2/EI today) instead of rate/slab values: freezes
+    # the before/after cumulative figures this payslip actually consumed
+    # per component, e.g. {"cpp": {"ytd_before": "71100.00", "ytd_after":
+    # "79100.00"}, "cpp2": {...}, "ei": {...}, "cpp_basic_exemption": {...}}.
+    # NULL for every payslip generated before this column existed, and for
+    # every country/employee where YTD accumulation isn't wired/enabled —
+    # see engine/countries/shared.py's _YTD_ACCUMULATOR_ENABLED_COUNTRIES.
+    ytd_snapshot        = Column(JSON, nullable=True)
+    # Canada: the province-of-employment result AND the machine-readable
+    # reason code that produced it (ZP-TAX-CA-2026-001 CA-D03/AC-07 —
+    # "persist resolver inputs... reason code"), e.g. {"poe_result": "ON",
+    # "poe_reason": "PHYSICAL_SINGLE"}. Previously computed by
+    # _resolve_ca_poe_with_source and immediately discarded (see
+    # _resolve_country_aware_state) — never persisted anywhere. NULL for
+    # every non-CA payslip and for CA payslips generated before this
+    # column existed.
+    poe_snapshot        = Column(JSON, nullable=True)
 
     # Germany (Phase 7, ZP-TAX-DE-2026-001) — the analogous freeze for the
     # Germany statutory calculation path, which does not go through
@@ -772,12 +868,33 @@ class PayslipItem(Base):
     # its own line, distinct from state_income_tax, since it's a separate
     # statutory deduction category, not part of income-tax withholding.
     state_disability_insurance = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: every OTHER state-level statutory payroll program beyond SDI
+    # (Paid Family Leave/Paid Leave/TDI/Universal Paid Leave/WA Cares/
+    # NJ's worker UI+DI+workforce-dev+FLI/etc., ZP-TAX-US-2026-001 §5) —
+    # one combined employee-side total, computed from however many
+    # programs are configured for the employee's state (us.py's own
+    # loop). Deliberately ONE field for now rather than one column per
+    # program, same "field reuse over new columns, graduate later if a
+    # real need for per-component tracking arises" convention this
+    # engine already uses for `tds` (see service.py's own comment on it)
+    # — each program's own name/rate/amount is still individually
+    # auditable via the calculation trace, just not as a separate
+    # payslip line yet.
+    state_program_deductions = Column(Numeric(12, 2), default=0, server_default="0")
     # UK-specific
     ni_employee       = Column(Numeric(12, 2), default=0)
     # UK/Australia: government study-loan repayment (Student/Postgraduate
     # Loan in the UK, HELP/HECS in Australia) — one shared line, same
     # reasoning as PayrollEmployee.study_loan_plan/study_loan_balance.
     study_loan_deduction = Column(Numeric(12, 2), default=0, server_default="0")
+    # UK only: a CONCURRENT Postgraduate Loan deduction, separate from
+    # study_loan_deduction above whenever an employee has BOTH an
+    # undergraduate plan and PayrollEmployee.has_postgrad_loan set —
+    # matches ZP-TAX-UK-2026-27-001 §10.2's own worked example (two
+    # separate deduction lines, not one combined figure). Always 0 for a
+    # standalone study_loan_plan=="UK_POSTGRAD" employee (that case stays
+    # fully represented by study_loan_deduction alone).
+    postgrad_loan_deduction = Column(Numeric(12, 2), default=0, server_default="0")
     # UK: employee-side Workplace Pension deduction — distinct from
     # employer_pension below. Zero unless an employee pension rate has
     # been explicitly configured (see engine/countries/uk.py).
@@ -789,6 +906,13 @@ class PayslipItem(Base):
     # line rather than folded into social_security, matching how every
     # other country already breaks out multiple named statutory lines.
     cpp2              = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: CPP/QPP first-layer BASE (4.95%) vs. FIRST-ADDITIONAL
+    # (1.00%) breakdown (AC-11) — informational only, like cpp2 above;
+    # NOT summed into total_deductions (already folded into
+    # social_security). Zero until _CA_CPP_COMPONENT_SPLIT_ENABLED_
+    # COUNTRIES is flipped AND cpp_base/cpp_first_additional rows exist.
+    cpp_base_amount              = Column(Numeric(12, 2), default=0, server_default="0")
+    cpp_first_additional_amount  = Column(Numeric(12, 2), default=0, server_default="0")
     total_deductions  = Column(Numeric(12, 2), default=0)   # all employee deductions, INCLUDING tds — see engine/*.py
 
     # Employer-side contributions (informational, not deducted from employee).
@@ -807,6 +931,39 @@ class PayslipItem(Base):
     # from EmployerTaxProfile (agency-assigned rate), NOT from a generic
     # ContributionRate override. Zero until an org has a configured profile.
     employer_sui       = Column(Numeric(12, 2), default=0, server_default="0")
+    # US: employer-side counterpart to state_program_deductions above (e.g.
+    # DC's Universal Paid Leave is entirely employer-funded). Same
+    # one-combined-field convention.
+    employer_state_program_contributions = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: employer-side CPP2/QPP2 — previously entirely unmodeled (only
+    # the employee-side cpp2 column above existed); the employer's own
+    # second-tier contribution is legally distinct and must be tracked
+    # separately, same reasoning as employer_social_security vs.
+    # social_security above.
+    employer_cpp2      = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: employer-side counterpart to cpp_base_amount/
+    # cpp_first_additional_amount above — same informational contract.
+    employer_cpp_base             = Column(Numeric(12, 2), default=0, server_default="0")
+    employer_cpp_first_additional = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: Ontario Employer Health Tax — banded on the ORG's aggregate
+    # Ontario remuneration across every employee, not this employee's own
+    # pay (ZP-TAX-CA-2026-001 §15/§16). Zero for every non-Ontario payslip
+    # and for every payslip until the org-level accumulator rollout
+    # switch is enabled — see engine/countries/shared.py's
+    # _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.
+    employer_eht       = Column(Numeric(12, 2), default=0, server_default="0")
+    # Canada: BC EHT, Manitoba HE Levy, NL HAPSET — same org-level-
+    # accumulator-banded contract as employer_eht above, one column per
+    # levy since each is legally distinct and jurisdiction-exclusive
+    # (an employee has at most one of ON/BC/MB/NL work_state).
+    employer_bc_eht     = Column(Numeric(12, 2), default=0, server_default="0")
+    employer_mb_he_levy = Column(Numeric(12, 2), default=0, server_default="0")
+    employer_nl_hapset  = Column(Numeric(12, 2), default=0, server_default="0")
+    # Quebec: Health Services Fund (org-level-accumulator-banded sliding
+    # rate) and labour standards contribution (per-employee capped, no
+    # accumulator) — see engine/countries/canada.py's module docstring.
+    employer_qc_hsf               = Column(Numeric(12, 2), default=0, server_default="0")
+    employer_qc_labour_standards  = Column(Numeric(12, 2), default=0, server_default="0")
 
     net_pay           = Column(Numeric(12, 2), default=0)
 
@@ -1403,7 +1560,13 @@ class ContributionRate(Base):
     id               = Column(Integer, primary_key=True, index=True)
     organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
 
-    component_key        = Column(String(20), nullable=False)   # "pf" | "esi" | "pt" | "tds"
+    # Widened from String(20) to String(50) — several Canada employer-levy
+    # component keys (e.g. "bc_eht_charity_exemption_threshold", 34 chars)
+    # exceeded the original limit, discovered when live data entry via the
+    # Super Admin API failed with a DB-level StringDataRightTruncation
+    # error. The shorter keys below ("pf" | "esi" | "pt" | "tds" | "cpp" |
+    # ...) still fit comfortably.
+    component_key        = Column(String(50), nullable=False)
     label                = Column(String(100), nullable=False)  # → r.label
     employee_share       = Column(String(50), nullable=False)   # → r.employee (display string)
     employer_share       = Column(String(50), nullable=False)   # → r.employer (display string)
@@ -1504,7 +1667,14 @@ class TaxSlab(Base):
 
     min_amount           = Column(Numeric(14, 2), nullable=False)
     max_amount           = Column(Numeric(14, 2), nullable=True)   # null = "and above"
-    rate_pct             = Column(Numeric(5, 2), nullable=False)   # e.g. 5.00 for 5%
+    # Widened from Numeric(5,2) to Numeric(6,4) — matching
+    # ContributionRate.employee_rate_pct/employer_rate_pct's precision.
+    # Found live: Ontario EHT's real 2026 band rates (e.g. 1.101%,
+    # 1.223%, 1.465%) need 3 decimal places and were silently truncated
+    # to 2 (1.10%, 1.22%, 1.47%) by the old Numeric(5,2) column — the
+    # API accepted the PUT with no error, so this went unnoticed until
+    # the response was read back and compared against the source values.
+    rate_pct             = Column(Numeric(6, 4), nullable=False)   # e.g. 5.0000 for 5%
     # Was String(20) — sized for short values like "5%"/"Nil". Widened for
     # NI_BAND rows, whose label is a real descriptive name (e.g. "Main Rate
     # Band (PT to UEL)") rather than a short percentage — see migration
@@ -1549,7 +1719,8 @@ class TaxSlab(Base):
     # range, exactly like every other bracket row. Null for every other
     # rule_type.
     ni_category           = Column(String(2), nullable=True)
-    employer_rate_pct     = Column(Numeric(5, 2), nullable=True)
+    # Widened alongside rate_pct above, same reasoning/precedent.
+    employer_rate_pct     = Column(Numeric(6, 4), nullable=True)
     # Which canonical tax pack version this row was authored under/synced from.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
@@ -1589,6 +1760,20 @@ class CompanyComplianceDetails(Base):
     # {"gstin": "...", "pan": "...", "cin": "..."}. Backfilled once from the
     # org row and then editable/overridable via the Compliance Details tab.
     tax_identifiers       = Column(JSON, nullable=True)
+
+    # BC Employer Health Tax ordinary vs. registered-charity/nonprofit
+    # classification (ZP-TAX-CA-2026-001 §15/AC-20) — "CHARITY_NONPROFIT"
+    # selects BC's charity thresholds/rates in engine/countries/canada.py;
+    # NULL/anything else is treated as ordinary. No Compliance Details UI
+    # sets this field yet — a disclosed, known gap; every org defaults to
+    # ordinary until either a UI is built or it's set directly.
+    bc_eht_employer_classification = Column(String(20), nullable=True)
+
+    # Quebec HSF employer category — GENERAL | PRIMARY_MANUFACTURING |
+    # PUBLIC_SECTOR (ZP-TAX-CA-2026-001 §13) — same disclosed "no UI yet"
+    # gap as bc_eht_employer_classification above; NULL is treated as
+    # GENERAL, the most common case.
+    qc_hsf_employer_category = Column(String(30), nullable=True)
 
     # Which JurisdictionPack this org is currently using, if any. Nullable —
     # orgs created before this table existed, or orgs in a jurisdiction
@@ -3345,14 +3530,37 @@ class EmployerTaxProfile(Base):
     id                    = Column(Integer, primary_key=True, index=True)
     organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     jurisdiction_id        = Column(String(10), nullable=False)   # "US-CA", "US-NJ", "US-DC"
-    component_code         = Column(String(20), nullable=False)   # "SUI" | "ETT" | "WF" | "JDA"
-    taxable_wage_base       = Column(Numeric(12, 2), nullable=False)
+    # "SUI" | "ETT" | "WF" | "JDA" | "FAMLI" | "PFML" | "PAID_LEAVE" (the
+    # last three: a headcount-only row for a statutory-rate program whose
+    # EMPLOYER share is conditional on this employer's own covered
+    # headcount, ZP-TAX-US-2026-001 §5 — e.g. Colorado FAMLI's 10-employee
+    # threshold. taxable_wage_base/employer_rate_pct are widened to
+    # nullable below specifically so a row can exist for this purpose
+    # ALONE, without inventing a meaningless SUI-style rate/wage-base just
+    # to satisfy a NOT NULL constraint.
+    component_code         = Column(String(20), nullable=False)
+    # Widened from NOT NULL: a headcount-only row (see component_code
+    # comment above) has neither a real wage base nor an employer-assigned
+    # rate — those are looked up from the canonical state-program
+    # ContributionRate rows instead (same as every other state program).
+    # Every existing SUI-style row keeps its real value; nothing changes
+    # for those.
+    taxable_wage_base       = Column(Numeric(12, 2), nullable=True)
     # STATE_DEFAULT | NEW_EMPLOYER | EMPLOYER_NOTICE — provenance, per the
     # standard's §6.1: never infer an experience rate from prior payroll
     # deductions, only from an agency-issued notice or the state default.
     rate_source             = Column(String(20), nullable=False, default="STATE_DEFAULT", server_default="STATE_DEFAULT")
-    employer_rate_pct       = Column(Numeric(6, 4), nullable=False)
+    employer_rate_pct       = Column(Numeric(6, 4), nullable=True)
     assessment_rate_pct     = Column(Numeric(6, 4), nullable=True)
+    # Headcount-only purpose (see component_code comment above): how many
+    # covered individuals this employer has for THIS jurisdiction+program,
+    # as of effective_from — the one tenant-specific fact several 2026
+    # state programs need (CO FAMLI's 10-employee threshold, Maine PFML's
+    # 15, Washington PFML's 50) that no other table captures. Never
+    # inferred from headcount/payroll history — a real Tax Ops entry,
+    # same "never infer" principle as employer_rate_pct's own provenance
+    # rule above. NULL for every existing SUI-style row.
+    covered_employee_count  = Column(Integer, nullable=True)
     effective_from          = Column(Date, nullable=False)
     effective_to            = Column(Date, nullable=True)
     agency_account_id       = Column(String(100), nullable=True)   # tenant-specific; treat as sensitive
@@ -3663,5 +3871,47 @@ class PayrollYtdAccumulator(Base):
     def __repr__(self):
         return f"<PayrollYtdAccumulator emp={self.employee_id} year={self.tax_year} comp={self.tax_component}>"
 
+
+class OrganizationYtdAccumulator(Base):
+    """Running year-to-date AGGREGATE remuneration across every employee
+    in an organization, per tax component — the org-level counterpart to
+    PayrollYtdAccumulator above, same shape, keyed by organization instead
+    of employee. Required for employer payroll levies that band on an
+    org's total annual payroll rather than any single employee's pay
+    (Ontario/BC EHT, Manitoba HE Levy, NL HAPSET, Quebec HSF —
+    ZP-TAX-CA-2026-001 §15/§13) — no such aggregate existed anywhere in
+    this schema before (EmployerTaxProfile is a static agency-issued rate
+    notice, not a ledger; PayrollRun.total_gross resets every pay period).
+
+    Written only by real payslip generation (never by preview, never by
+    regenerate_employee_payslip — see service.py's
+    _load_ca_org_levy_ytd/_upsert_ca_org_levy_ytd_accumulator for the
+    exact same read-only-on-correction discipline
+    PayrollYtdAccumulator's per-employee callers already follow), one row
+    per (organization, tax_year, component). Safe under sequential,
+    single-transaction per-employee db.flush() within one run-generation
+    call exactly as proven for the per-employee accumulator — see
+    generate_payslips_for_run's own docstring/comments. Would need
+    row-level locking (SELECT ... FOR UPDATE) if payslip generation were
+    ever parallelized across sessions; it isn't today.
+
+    Empty for every org until a levy's own rollout switch is enabled —
+    until then, calculation behavior is exactly what it is today (no
+    Ontario/BC EHT, Manitoba HE Levy, or NL HAPSET is implemented yet)."""
+    __tablename__ = "organization_ytd_accumulators"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    tax_year                  = Column(String(10), nullable=False)   # "CA-CY-2026"
+    tax_component             = Column(String(30), nullable=False)   # "on_eht" | "bc_eht" | "mb_he_levy" | "nl_hapset" | "qc_hsf" | ...
+    ytd_taxable_wages         = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    ytd_tax_withheld          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    last_updated_payslip_id   = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "tax_year", "tax_component", name="uq_org_ytd_accumulator_org_year_component"),
+    )
+
     def __repr__(self):
-        return f"<PayrollUpdateFormSubmission send={self.send_id} status={self.status}>"
+        return f"<OrganizationYtdAccumulator org={self.organization_id} year={self.tax_year} comp={self.tax_component}>"

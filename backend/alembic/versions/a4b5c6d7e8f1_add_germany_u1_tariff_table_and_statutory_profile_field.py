@@ -1,10 +1,20 @@
 """add germany u1 tariff table and statutory profile field
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: a4b5c6d7e8f1
 Revises: 9d2f4b6c8e1a
 Create Date: 2026-09-04 00:00:00.000000
 
 Phase 8W (docs/PHASE_8W_GERMANY_U1_TARIFF_MODEL_EXTENSION_REPORT.md).
+
+Phase 8BK note: renamed from the original revision ID `a1b2c3d4e5f6` to
+`a4b5c6d7e8f1` during the main<->nikhil merge, purely to resolve an
+accidental Alembic revision-ID collision with an unrelated `main`-branch
+migration (`add_payslip_items_employer_cpp2_column`) that independently
+generated the same 12-hex identifier. This migration's content, table,
+column, and down_revision are otherwise byte-for-byte unchanged. Verified
+safe to rename via extensive read-only remote-database forensics
+(Phases 8BC-8BF): this revision, and everything after it in the Germany
+migration chain, has never been applied to any environment.
 
 Additive only: new table payroll_germany_health_fund_u1_tariffs for
 employer-elected U1 tariff configuration per Krankenkasse, and a new
@@ -20,7 +30,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
+revision: str = 'a4b5c6d7e8f1'
 down_revision: Union[str, Sequence[str], None] = '9d2f4b6c8e1a'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

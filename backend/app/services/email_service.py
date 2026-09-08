@@ -113,8 +113,14 @@ def _get_smtp_settings(db=None) -> dict:
         finally:
             if own_session:
                 db.close()
-    except Exception as e:
-        logger.warning(f"[email] Could not load SMTP settings from DB, using defaults: {e}")
+    except Exception:
+        # A genuinely unexpected failure (DB connectivity, a coding bug) —
+        # NOT "no override configured" (that's the mapping.get(...) defaults
+        # above, which never raises). Logged at error level with a full
+        # traceback so a real outage here doesn't quietly blend into normal
+        # "using defaults" noise. Still degrades gracefully — a failed SMTP
+        # override lookup shouldn't crash whatever's trying to send an email.
+        logger.exception("[email] Could not load SMTP settings from DB, using env defaults")
         return defaults
 
 
@@ -168,8 +174,14 @@ def _get_org_branding(organization_id=None, db=None) -> dict:
         finally:
             if own_session:
                 db.close()
-    except Exception as e:
-        logger.warning(f"[email] Could not load branding for organization_id={organization_id}: {e}")
+    except Exception:
+        # The expected "org not found" case is already handled explicitly
+        # above (returns early, never reaches here) — anything landing in
+        # this except is a genuinely unexpected failure, logged loudly
+        # rather than as a quiet warning indistinguishable from routine
+        # missing-branding cases. Still returns generic branding rather
+        # than crashing whatever email is being rendered.
+        logger.exception(f"[email] Could not load branding for organization_id={organization_id}")
         return dict(_BRANDING_DEFAULTS)
 
 
@@ -537,8 +549,12 @@ def send_super_admin_org_created_notification_email(
                 User.is_active == True,
             ).all()
             recipients = [u.email for u in super_admins if u.email]
-        except Exception as exc:
-            logger.warning(f"[email] Failed querying Super Admins for notification: {exc}")
+        except Exception:
+            # Genuinely unexpected (DB issue, a coding bug) — not "no Super
+            # Admins exist yet" (an empty query result, handled below without
+            # raising). Logged loudly so a real failure here isn't silently
+            # indistinguishable from that routine case.
+            logger.exception("[email] Failed querying Super Admins for notification")
 
     # Fallback to configured support email or SMTP from email if no Super Admins found
     if not recipients:

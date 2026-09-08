@@ -95,7 +95,20 @@ class EmployeeValidationStrategy:
             cleaned[key] = raw
         if errors:
             raise BadRequestException("; ".join(errors))
+        cls._validate_combination(cleaned)
         return cleaned
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        """Cross-field checks that can't be expressed as a single
+        FIELD_SPEC entry (two fields individually valid but incompatible
+        together). No-op by default; a subclass overrides only where it
+        genuinely needs one. Best-effort: only sees fields present in
+        THIS validation call — the engine-layer calculation is the
+        authoritative guard against an incompatible combination that
+        reaches the database via separate updates (see e.g. uk.py's
+        calculate() for the Postgraduate Loan double-count guard)."""
+        pass
 
     @classmethod
     def get_duplicate_identifier(cls, compliance: dict):
@@ -261,6 +274,13 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
         },
         "student_loan_plan": {"choices": ["None", "Plan 1", "Plan 2", "Plan 4", "Plan 5", "Postgraduate"]},
         "auto_enrolment_pension": {"choices": ["true", "false", "True", "False"]},
+        # ZP-TAX-UK-2026-27-001 §10.2: a Postgraduate Loan repaid
+        # CONCURRENTLY with an undergraduate plan (two separate deduction
+        # lines) — distinct from student_loan_plan == "Postgraduate"
+        # (a standalone Postgraduate-only employee, already fully handled
+        # by that single field). See _validate_combination below for the
+        # guard against setting both at once.
+        "has_postgrad_loan": {"choices": ["true", "false", "True", "False"]},
         "sort_code": {
             "required": True, "strip_chars": "- ",
             "pattern": re.compile(r"^\d{6}$"),
@@ -289,6 +309,7 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
         "ni_category": "ni_category",
         "student_loan_plan": "study_loan_plan",
         "study_loan_balance": "study_loan_balance",
+        "has_postgrad_loan": "has_postgrad_loan",
     }
     FIELD_VALUE_MAP = {
         "student_loan_plan": {
@@ -296,7 +317,24 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
             "Postgraduate": "UK_POSTGRAD", "None": None,
         },
         "study_loan_balance": lambda v: Decimal(v) if v else None,
+        "has_postgrad_loan": lambda v: str(v).strip().lower() == "true",
     }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        # A standalone Postgraduate-only employee (student_loan_plan ==
+        # "Postgraduate") is already fully handled by that one field —
+        # also setting has_postgrad_loan would double-deduct the same
+        # loan. Only catches the case where both are submitted together
+        # in this same request; see the base class docstring for why the
+        # engine-layer guard (uk.py's calculate()) is the authoritative one.
+        if cleaned.get("student_loan_plan") == "Postgraduate" and cleaned.get("has_postgrad_loan", "").lower() == "true":
+            raise BadRequestException(
+                "has_postgrad_loan cannot be enabled when student_loan_plan is already 'Postgraduate' — "
+                "that employee's Postgraduate Loan is already fully represented by student_loan_plan alone. "
+                "Set student_loan_plan to an undergraduate plan (or 'None') before enabling the concurrent "
+                "Postgraduate Loan flag."
+            )
 
 
 class AUEmployeeValidation(EmployeeValidationStrategy):
@@ -332,6 +370,12 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
             "error": "SIN must be 9 digits (e.g. 123-456-789).",
         },
         "td1_claim_amount": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "TD1 claim amount must be a number."},
+        # ZP-TAX-CA-2026-001 §18: provincial/territorial TD1 and Quebec's
+        # own TP-1015.3-V are legally distinct declarations from federal
+        # TD1 — same "was collectible nowhere, engine reads it, now wired
+        # end to end" gap this promotion already closed for td1_claim_amount.
+        "provincial_td1_claim_amount": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "Provincial TD1 claim amount must be a number."},
+        "qc_tp1015_claim_amount": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "TP-1015.3-V claim amount must be a number."},
         "province": {
             "required": True, "upper": True,
             "choices": ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"],
@@ -344,8 +388,61 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{3}$"),
             "error": "Financial institution number must be 3 digits.",
         },
+        "td1_additional_tax": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "TD1X additional tax must be a number."},
+        "cpp_qpp_election_status": {"upper": True, "choices": ["ACTIVE", "STOPPED"]},
+        "cpp_election_effective_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "CPP/QPP election effective date must be YYYY-MM-DD.",
+        },
+        "remote_work_agreement": {
+            "pattern": re.compile(r"^(?i:true|false)$"),
+            "error": "Remote work agreement must be true or false.",
+        },
+        "remote_attachment_province": {
+            "upper": True,
+            "choices": ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"],
+        },
+        "remote_agreement_effective_from": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Remote agreement effective date must be YYYY-MM-DD.",
+        },
     }
     duplicate_field = "sin"
+    # Same class of dead-plumbing gap already closed for US
+    # (state_tax_jurisdiction) and UK (paye_tax_code/ni_category/etc.)
+    # above: "province" and "td1_claim_amount" were previously stored
+    # ONLY in compliance_fields JSON — PayrollEmployee.work_state (the
+    # column every country's state/province-scoped config resolver
+    # actually reads) and the new td1_claim_amount column (the federal
+    # BPA override engine/countries/canada.py now reads) never received
+    # a value, so a CA employee's declared province and TD1 claim amount
+    # were silently invisible to jurisdiction resolution and tax
+    # calculation respectively, even though both have always been
+    # collectible via the employee form. td1_additional_tax/
+    # cpp_qpp_election_status/remote_work_agreement and their supporting
+    # fields are NEW as of this promotion — never previously collectible
+    # at all, backend or frontend.
+    FIELD_COLUMN_MAP = {
+        "province": "work_state",
+        "td1_claim_amount": "td1_claim_amount",
+        "provincial_td1_claim_amount": "provincial_td1_claim_amount",
+        "qc_tp1015_claim_amount": "qc_tp1015_claim_amount",
+        "td1_additional_tax": "td1_additional_tax",
+        "cpp_qpp_election_status": "cpp_qpp_election_status",
+        "cpp_election_effective_date": "cpp_election_effective_date",
+        "remote_work_agreement": "remote_work_agreement",
+        "remote_attachment_province": "remote_attachment_province",
+        "remote_agreement_effective_from": "remote_agreement_effective_from",
+    }
+    FIELD_VALUE_MAP = {
+        "td1_claim_amount": lambda v: Decimal(v) if v else None,
+        "provincial_td1_claim_amount": lambda v: Decimal(v) if v else None,
+        "qc_tp1015_claim_amount": lambda v: Decimal(v) if v else None,
+        "td1_additional_tax": lambda v: Decimal(v) if v else None,
+        "cpp_election_effective_date": lambda v: date.fromisoformat(v) if v else None,
+        "remote_work_agreement": lambda v: str(v).strip().lower() == "true",
+        "remote_agreement_effective_from": lambda v: date.fromisoformat(v) if v else None,
+    }
 
 
 class DEEmployeeValidation(EmployeeValidationStrategy):

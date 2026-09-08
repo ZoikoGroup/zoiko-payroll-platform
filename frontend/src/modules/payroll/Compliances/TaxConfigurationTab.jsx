@@ -150,10 +150,14 @@ const COUNTRY_TAX_CONFIG = {
         key: "provincial", label: "Provincial / Territorial Tax", stateAware: true,
         items: [
           {
+            // Real bracket-calculated provincial/territorial tax (Phase 4
+            // of the Canada engine build) is now consumed by the payroll
+            // engine — this was a hardcoded matches:()=>false placeholder
+            // before that existed. Same real-rule-type filter IN/UK use.
             key: "provincial-income-tax", label: "Provincial / Territorial Income Tax", source: "slabs",
-            matches: () => false,
-            filter: (rows) => rows,
-            noStatePlaceholder: "Provincial/territorial tax isn't broken out separately from Federal Income Tax in the current data — see Federal Tax.",
+            matches: (state) => Boolean(state),
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
+            noStatePlaceholder: "Set an organization state under Company Details to see provincial/territorial tax.",
           },
         ],
       },

@@ -61,6 +61,10 @@ class EmployeeCreate(BaseModel):
     employment_type:  str = Field("Full-time", validation_alias="employmentType")
     status:           str = "Active"
     date_of_joining:  Optional[date] = Field(None, validation_alias="dateOfJoining")
+    # Generic HR fact (not Canada-only), currently consumed by CPP/QPP's
+    # age 18/70 mandatory contribution window (ZP-TAX-CA-2026-001 §10 —
+    # see engine/countries/canada.py's _is_age_gated_cpp_stopped).
+    date_of_birth:    Optional[date] = Field(None, validation_alias="dateOfBirth")
     ctc:              Optional[Decimal] = Decimal("0")
     basic:            CoercedDecimal = Field(None, validation_alias="basic")
     hra:              CoercedDecimal = Field(None, validation_alias="hra")
@@ -70,6 +74,9 @@ class EmployeeCreate(BaseModel):
     uan:              Optional[str] = None
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
     country_code:     Optional[str] = Field(None, validation_alias="countryCode")
+    # Canada-specific: labour-sponsored funds tax credit declaration
+    # (ZP-TAX-CA-2026-001 §6 — see canada.py's _calculate_lsvcc_credit).
+    lsvcc_investment_amount: Optional[Decimal] = Field(None, validation_alias="lsvccInvestmentAmount")
     compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -85,6 +92,7 @@ class EmployeeUpdate(BaseModel):
     employment_type:  Optional[str] = Field(None, validation_alias="employmentType")
     status:           Optional[str] = None
     date_of_joining:  Optional[date] = Field(None, validation_alias="dateOfJoining")
+    date_of_birth:    Optional[date] = Field(None, validation_alias="dateOfBirth")
     ctc:              Optional[Decimal] = None
     basic:            CoercedDecimal = Field(None, validation_alias="basic")
     hra:              CoercedDecimal = Field(None, validation_alias="hra")
@@ -94,6 +102,7 @@ class EmployeeUpdate(BaseModel):
     uan:              Optional[str] = None
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
     country_code:     Optional[str] = Field(None, validation_alias="countryCode")
+    lsvcc_investment_amount: Optional[Decimal] = Field(None, validation_alias="lsvccInvestmentAmount")
     compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -111,6 +120,7 @@ class EmployeeResponse(BaseModel):
     employmentType:  str = Field(validation_alias="employment_type", serialization_alias="employmentType")
     status:          str
     dateOfJoining:   Optional[date] = Field(None, validation_alias="date_of_joining", serialization_alias="dateOfJoining")
+    dateOfBirth:     Optional[date] = Field(None, validation_alias="date_of_birth", serialization_alias="dateOfBirth")
     ctc:             Optional[Decimal] = Decimal("0")
     basic:           Optional[Decimal] = Field(None, validation_alias="basic", serialization_alias="basic")
     hra:             Optional[Decimal] = Field(None, validation_alias="hra", serialization_alias="hra")
@@ -125,6 +135,7 @@ class EmployeeResponse(BaseModel):
     uan:             Optional[str] = None
     ifsc:            Optional[str] = Field(None, serialization_alias="ifscCode")
     countryCode:     Optional[str] = Field(None, validation_alias="country_code", serialization_alias="countryCode")
+    lsvccInvestmentAmount: Optional[Decimal] = Field(None, validation_alias="lsvcc_investment_amount", serialization_alias="lsvccInvestmentAmount")
     complianceFields: Optional[dict] = Field(None, validation_alias="compliance_fields", serialization_alias="complianceFields")
     customFields:    Optional[dict] = Field(None, validation_alias="custom_fields", serialization_alias="customFields")
 
@@ -978,6 +989,16 @@ class CompanyDetails(BaseModel):
     taxIdentifiers:       Optional[dict] = Field(None, validation_alias="tax_identifiers", serialization_alias="taxIdentifiers")
     configuredAt:         Optional[datetime] = Field(None, validation_alias="configured_at", serialization_alias="configuredAt")
     isConfigured:         bool = Field(False, validation_alias="is_configured", serialization_alias="isConfigured")
+    # ZP-TAX-CA-2026-001 §15/AC-20 — "CHARITY_NONPROFIT" or None/anything
+    # else (ordinary). Only meaningful for CA/BC orgs; harmless elsewhere.
+    bcEhtEmployerClassification: Optional[str] = Field(
+        None, validation_alias="bc_eht_employer_classification", serialization_alias="bcEhtEmployerClassification",
+    )
+    # ZP-TAX-CA-2026-001 §13 — GENERAL | PRIMARY_MANUFACTURING |
+    # PUBLIC_SECTOR. Only meaningful for CA/QC orgs; harmless elsewhere.
+    qcHsfEmployerCategory: Optional[str] = Field(
+        None, validation_alias="qc_hsf_employer_category", serialization_alias="qcHsfEmployerCategory",
+    )
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -998,6 +1019,8 @@ class CompanyDetailsUpdate(BaseModel):
     settlementBank: Optional[str] = None
     settlementAcc: Optional[str] = None
     taxIdentifiers: Optional[dict] = None
+    bcEhtEmployerClassification: Optional[str] = None
+    qcHsfEmployerCategory: Optional[str] = None
 
 
 class ComplianceDataResponse(BaseModel):
@@ -1558,16 +1581,27 @@ class EmployerTaxProfileUpsert(BaseModel):
     id: Optional[int] = None
     organizationId: int
     jurisdictionId: str          # "US-CA"
-    componentCode: str = "SUI"   # "SUI" | "ETT" | "WF" | "JDA"
-    taxableWageBase: Decimal
+    componentCode: str = "SUI"   # "SUI" | "ETT" | "WF" | "JDA" | "FAMLI" | "PFML" | "PAID_LEAVE"
+    # Widened to Optional: a headcount-only row (component_code FAMLI/
+    # PFML/PAID_LEAVE, ZP-TAX-US-2026-001 §5 build-out) has neither a real
+    # SUI-style wage base nor an employer-assigned rate — those programs'
+    # statutory rates live in the canonical state-program ContributionRate
+    # rows instead, same as every other state program. Every real SUI
+    # profile still supplies both, as before.
+    taxableWageBase: Optional[Decimal] = None
     rateSource: str = "STATE_DEFAULT"   # STATE_DEFAULT | NEW_EMPLOYER | EMPLOYER_NOTICE
-    employerRatePct: Decimal
+    employerRatePct: Optional[Decimal] = None
     assessmentRatePct: Optional[Decimal] = None
     effectiveFrom: date
     effectiveTo: Optional[date] = None
     agencyAccountId: Optional[str] = None
     reimbursableStatus: str = "CONTRIBUTORY"   # CONTRIBUTORY | REIMBURSING
     sourceDocumentId: Optional[int] = None
+    # Headcount-only purpose (see componentCode comment above): how many
+    # covered individuals this employer has for this jurisdiction+program
+    # as of effectiveFrom. Never inferred — a real Tax Ops entry, same
+    # "never infer" principle as employerRatePct's own provenance rule.
+    coveredEmployeeCount: Optional[int] = None
 
 
 class EmployerTaxProfileResponse(BaseModel):
@@ -1575,15 +1609,16 @@ class EmployerTaxProfileResponse(BaseModel):
     organizationId: int = Field(validation_alias="organization_id", serialization_alias="organizationId")
     jurisdictionId: str = Field(validation_alias="jurisdiction_id", serialization_alias="jurisdictionId")
     componentCode: str = Field(validation_alias="component_code", serialization_alias="componentCode")
-    taxableWageBase: Decimal = Field(validation_alias="taxable_wage_base", serialization_alias="taxableWageBase")
+    taxableWageBase: Optional[Decimal] = Field(None, validation_alias="taxable_wage_base", serialization_alias="taxableWageBase")
     rateSource: str = Field(validation_alias="rate_source", serialization_alias="rateSource")
-    employerRatePct: Decimal = Field(validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
+    employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     assessmentRatePct: Optional[Decimal] = Field(None, validation_alias="assessment_rate_pct", serialization_alias="assessmentRatePct")
     effectiveFrom: date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
     effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
     agencyAccountId: Optional[str] = Field(None, validation_alias="agency_account_id", serialization_alias="agencyAccountId")
     reimbursableStatus: str = Field(validation_alias="reimbursable_status", serialization_alias="reimbursableStatus")
     sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    coveredEmployeeCount: Optional[int] = Field(None, validation_alias="covered_employee_count", serialization_alias="coveredEmployeeCount")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

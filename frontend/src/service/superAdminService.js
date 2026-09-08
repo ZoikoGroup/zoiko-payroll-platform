@@ -50,8 +50,10 @@ export const assignCompliancePolicy = (id, organizationIds) =>
     body: { organizationIds },
   });
 
-export const hardDeleteCompliancePolicy = (id) =>
-  apiFetch(`/api/super-admin/compliance/policies/${id}`, { method: "DELETE" });
+// Hard-delete intentionally removed — production compliance packs should
+// never be permanently destroyable via the UI. Use
+// setCompliancePolicyStatus(id, "Retired") for normal lifecycle
+// retirement instead (see JurisdictionLayout.jsx's status dropdown).
 
 // Every organization's ACTUAL, currently-configured compliance setup (as
 // opposed to the abstract policy templates above) — used by the Compliance

@@ -80,4 +80,63 @@ export const STATE_COMPONENT_CATALOG = [
     description: "Long-term care payroll contribution (e.g. Washington WA Cares Fund).",
     uiTypeHint: UI_TYPES.PERCENTAGE,
   },
+  // ZP-TAX-US-2026-001 §5 build-out — state-level statutory payroll
+  // programs beyond the original SDI/PFL/WA Cares set above. "paid_leave"
+  // is deliberately its OWN entry, distinct from "pfl": several states
+  // (CT/DC/NY) run their own program under this generic name rather than
+  // literally being called "PFL", and the underlying engine component_key
+  // already seeded live is "paid_leave", not "pfl" — this entry matches
+  // what's actually in the database, not a renamed alias.
+  {
+    componentKey: "paid_leave", displayName: "Paid Leave",
+    category: "familyDisability",
+    description: "State paid family/medical leave program (e.g. Connecticut Paid Leave, DC Universal Paid Leave, New York Paid Family Leave) — employee, employer, or both, depending on the state.",
+    uiTypeHint: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE,
+  },
+  {
+    componentKey: "tdi", displayName: "Temporary Disability Insurance (TDI)",
+    category: "familyDisability",
+    description: "Employee-paid short-term disability contribution (e.g. Rhode Island TDI/TCI).",
+    uiTypeHint: UI_TYPES.PERCENTAGE,
+  },
+  {
+    componentKey: "worker_ui", displayName: "Worker Unemployment Insurance",
+    category: "unemploymentInsurance",
+    description: "Employee-side worker contribution to state UI (e.g. New Jersey Worker UI).",
+    uiTypeHint: UI_TYPES.PERCENTAGE,
+  },
+  {
+    componentKey: "worker_di", displayName: "Worker Disability Insurance",
+    category: "familyDisability",
+    description: "Employee-paid state disability insurance contribution, distinct from SDI's own component (e.g. New Jersey Worker Disability Insurance).",
+    uiTypeHint: UI_TYPES.PERCENTAGE,
+  },
+  {
+    componentKey: "workforce_dev", displayName: "Workforce Development / Supplemental Workforce Fund",
+    category: "unemploymentInsurance",
+    description: "Employee-paid workforce training/development assessment (e.g. New Jersey Workforce Development Fund).",
+    uiTypeHint: UI_TYPES.PERCENTAGE,
+  },
+  {
+    componentKey: "fli", displayName: "Family Leave Insurance (FLI)",
+    category: "familyDisability",
+    description: "Employee-paid family leave insurance contribution (e.g. New Jersey Family Leave Insurance).",
+    uiTypeHint: UI_TYPES.PERCENTAGE,
+  },
+  {
+    componentKey: "state_standard_deduction", displayName: "State Standard Deduction",
+    category: "incomeTax",
+    description: "Filing-status-based standard deduction/allowance subtracted before applying this state's own income-tax rate (e.g. Colorado, Kentucky).",
+    uiTypeHint: UI_TYPES.DEDUCTION_AMOUNT,
+  },
+  // "<componentKey>_wage_cap" / "<componentKey>_annual_max" — the optional
+  // companion rows any program above can carry (ZP-TAX-US-2026-001 §5: a
+  // wage-base cap on the taxable amount, and/or a dollar cap on the
+  // resulting contribution itself) are deliberately NOT their own
+  // top-level catalog entries — they only ever make sense attached to a
+  // program that already exists, so they're added via "Other / Custom
+  // Component" typing the exact suffixed key (e.g. "tdi_wage_cap").
+  // usaComponentConfig.js's classifyContributionRate recognizes both
+  // suffixes generically once created, so they still display/edit
+  // correctly (right label, right field) with no catalog entry needed.
 ];

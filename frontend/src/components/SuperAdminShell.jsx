@@ -465,7 +465,17 @@ export default function SuperAdminShell({ children }) {
           />
         </aside>
 
-        <div className={`transition-[padding] duration-200 ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
+        {/* Below the lg breakpoint the sidebar is a fixed overlay (see
+            <aside> above) — before this fix, this wrapper only ever
+            reserved space for it via the lg:pl-* classes, so opening the
+            mobile menu on a sub-lg viewport drew the sidebar straight over
+            the page title/description/filters instead of pushing them
+            aside. `sidebarOpen ? "pl-72" : ""` reserves the same width the
+            open sidebar actually uses (`w-72` on the <aside>, unconditional
+            below lg) whenever it's open; the lg:pl-* classes remain
+            unconditional at lg and above, where the sidebar is always
+            visible regardless of `sidebarOpen`. */}
+        <div className={`transition-[padding] duration-200 ${sidebarOpen ? "pl-72" : ""} ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
           <Header onOpenSidebar={() => setSidebarOpen(true)} onToggleCollapse={toggleCollapse} collapsed={collapsed} />
           <main className="w-full p-4 sm:p-6 lg:p-8">{children}</main>
         </div>
