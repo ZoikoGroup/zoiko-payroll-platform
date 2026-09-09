@@ -92,6 +92,8 @@ from app.modules.payroll.schemas import (
     GermanyCalculationPreviewRequest,
     GermanyElstamChangeListBatchCreate, GermanyElstamChangeListBatchStatusUpdate,
     GermanyElstamChangeListBatchResponse, GermanyElstamImportRequest, GermanyElstamImportAttemptResponse,
+    GermanyElsterCertificateConfigSet, GermanyElsterTransmissionCreate,
+    GermanyElsterCertificateConfigResponse, GermanyElsterTransmissionResponse,
     AttendanceRecordCreate, BulkAttendanceRequest, AttendanceRecordResponse,
     AttendanceSummaryResponse, BulkAttendanceResponse,
     LeaveAllocationCreate, BulkLeaveRequest, LeaveAllocationResponse,
@@ -726,6 +728,113 @@ def germany_calculation_preview(
     return service.preview_germany_calculation(
         db, current_user.organization_id, data.employee_id, data.payroll_date,
     )
+
+
+@payroll_router.get(
+    "/germany/statutory-configuration-readiness",
+    summary="Phase 8BF: whether Germany's GLOBAL statutory registries "
+    "(health funds, contribution ceilings, PV configuration) are published "
+    "and effective today — read-only, org-independent",
+)
+def germany_statutory_configuration_readiness(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Read-only, never seeds/creates a registry row. Answers a narrower,
+    earlier question than germany_calculation_preview above: "is Germany
+    payroll configuration even possible today, for ANY employee?" — so the
+    UI can warn during Germany employee creation instead of only failing
+    closed at actual payroll-run time (the previously disclosed onboarding
+    gap — see service.get_germany_statutory_configuration_readiness's own
+    docstring). These four registries are global (no organization_id
+    column), so the result is the same for every caller regardless of
+    `current_user.organization_id` — auth is required only because this
+    endpoint is reached from inside the authenticated app, not because the
+    answer is tenant-specific."""
+    return service.get_germany_statutory_configuration_readiness(db)
+
+
+# ── Germany ELSTER transmission boundary (Phase 8BF) ────────────────────
+# See engine/germany_elster.py's own module docstring: no real ELSTER
+# connector exists or is authorized. Every endpoint below prepares/
+# validates/records a transmission attempt that deterministically lands on
+# BLOCKED_EXTERNAL — none of them contact ELSTER/BZSt.
+
+@payroll_router.get(
+    "/germany/elster-certificate-config", response_model=Optional[GermanyElsterCertificateConfigResponse],
+    response_model_by_alias=True, summary="Whether an ELSTER certificate reference is configured for this organization",
+)
+def get_germany_elster_certificate_config(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_elster_certificate_config(db, current_user.organization_id)
+
+
+@payroll_router.put(
+    "/germany/elster-certificate-config", response_model=GermanyElsterCertificateConfigResponse,
+    response_model_by_alias=True, summary="Record an ELSTER certificate reference (never the certificate/key itself)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def put_germany_elster_certificate_config(
+    data: GermanyElsterCertificateConfigSet,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.set_elster_certificate_config(
+        db, current_user.organization_id, data.certificate_reference, data.reference_description, current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/germany/elster-transmissions", response_model=GermanyElsterTransmissionResponse,
+    response_model_by_alias=True, summary="Record a DRAFT ELSTER transmission attempt",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_germany_elster_transmission(
+    data: GermanyElsterTransmissionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_elster_transmission(db, current_user.organization_id, data, current_user.id)
+
+
+@payroll_router.get(
+    "/germany/elster-transmissions", response_model=List[GermanyElsterTransmissionResponse],
+    response_model_by_alias=True, summary="List this organization's ELSTER transmission attempts",
+)
+def list_germany_elster_transmissions(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_elster_transmissions(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/germany/elster-transmissions/{transmission_id}/validate", response_model=GermanyElsterTransmissionResponse,
+    response_model_by_alias=True, summary="Structurally validate a DRAFT ELSTER transmission",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def validate_germany_elster_transmission(
+    transmission_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.validate_elster_transmission(db, transmission_id, current_user.organization_id, current_user.id)
+
+
+@payroll_router.post(
+    "/germany/elster-transmissions/{transmission_id}/transmit", response_model=GermanyElsterTransmissionResponse,
+    response_model_by_alias=True,
+    summary="Attempt transmission — today ALWAYS records BLOCKED_EXTERNAL (no real ELSTER connector exists)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transmit_germany_elster_transmission(
+    transmission_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.attempt_transmit_elster_transmission(db, transmission_id, current_user.organization_id, current_user.id)
 
 
 # ── Payroll Runs ─────────────────────────────────────────────────────

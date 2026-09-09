@@ -24,6 +24,9 @@ import {
 } from "../../service/superAdminService";
 import {
   createElstamChangeListBatch, listElstamChangeListBatches, updateElstamChangeListBatchStatus,
+  getGermanyElsterCertificateConfig, setGermanyElsterCertificateConfig,
+  createGermanyElsterTransmission, listGermanyElsterTransmissions,
+  validateGermanyElsterTransmission, transmitGermanyElsterTransmission,
 } from "../../service/payrollService";
 import { describeLoadError } from "../../service/errorClassification";
 
@@ -38,6 +41,7 @@ export const TABS = [
   { key: "employer-levies", label: "Employer Levies (Accident Insurance)" },
   { key: "church-tax", label: "Church Tax" },
   { key: "elstam-batches", label: "ELStAM Change-List Batches" },
+  { key: "elster", label: "ELSTER" },
   { key: "source-evidence", label: "Source Evidence" },
   { key: "audit", label: "Audit / History" },
 ];
@@ -110,7 +114,21 @@ function ErrorBanner({ message }) {
     );
   }
   const text = typeof message === "object" ? message.message : message;
-  return <div className="mb-3 rounded-[10px] bg-error/10 px-3 py-2 text-[12px] text-error border border-error/20">{text}</div>;
+  const errorCode = typeof message === "object" ? message.errorCode : null;
+  const trace = typeof message === "object" ? message.trace : null;
+  return (
+    <div className="mb-3 rounded-[10px] bg-error/10 px-3 py-2 text-[12px] text-error border border-error/20">
+      <span>{text}</span>
+      {errorCode && (
+        <span className="ml-2 font-mono text-[11px] opacity-70">[{errorCode}]</span>
+      )}
+      {trace && trace.failedGates && (
+        <div className="mt-1 text-[11px] opacity-60">
+          Blocked gates: {trace.failedGates.join(", ")}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function useLoader(fn, deps) {
@@ -296,14 +314,29 @@ export function PapTab() {
 
 // ── Generic effective-dated registry tab (Health Fund / Ceiling / PV) ────
 
+// Phase 8BF — the exact DRAFT -> VERIFIED -> APPROVED -> PUBLISHED ->
+// SUPERSEDED lifecycle every registry LifecycleRegistryTab renders shares
+// (verified against every registry's own *_ALLOWED_TRANSITIONS map in
+// service.py — all eight are byte-identical). FORWARD/BACKWARD below are
+// used ONLY to disable/label buttons the backend would reject anyway
+// (never to invent a new transition) — "Send back" calls the exact same
+// setStatus(row.id, <status>) the Verify/Publish buttons already use, just
+// with the backward target, so it needs no new backend endpoint.
+const LIFECYCLE_BACKWARD_TARGET = { VERIFIED: "DRAFT", APPROVED: "VERIFIED" };
+const LIFECYCLE_EDITABLE_STATUSES = new Set(["DRAFT", "VERIFIED", "APPROVED"]);
+
 function LifecycleRegistryTab({
-  title, list, create, approve, setStatus, columns, formFields, defaultForm,
+  title, list, create, approve, setStatus, columns, formFields, defaultForm, entityType,
 }) {
   const [rows, error, loading, reload] = useLoader(list, []);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(defaultForm);
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [historyRowId, setHistoryRowId] = useState(null);
+  const [historyEntries, setHistoryEntries] = useState(null);
+  const [historyError, setHistoryError] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   async function handleCreate(e) {
     e.preventDefault();
@@ -328,6 +361,31 @@ function LifecycleRegistryTab({
       reload();
     } catch (err) {
       setActionError(err.message || "Action failed.");
+    }
+  }
+
+  // Per-record history, using the SAME cross-cutting audit endpoint the
+  // page's own "Audit / History" tab already uses (getTaxConfigurationAudit)
+  // — filtered here to entityType (server-side) and then to this one row's
+  // id (client-side, since the endpoint has no entityId filter of its own).
+  // No new backend endpoint — this is exactly the endpoint AuditTab calls.
+  async function toggleHistory(row) {
+    if (historyRowId === row.id) {
+      setHistoryRowId(null);
+      return;
+    }
+    setHistoryRowId(row.id);
+    setHistoryEntries(null);
+    setHistoryError("");
+    if (!entityType) return;
+    setHistoryLoading(true);
+    try {
+      const all = await getTaxConfigurationAudit({ entityType });
+      setHistoryEntries((all || []).filter((e) => e.entityId === row.id));
+    } catch (err) {
+      setHistoryError(err.message || "Could not load history.");
+    } finally {
+      setHistoryLoading(false);
     }
   }
 
@@ -367,26 +425,90 @@ function LifecycleRegistryTab({
           <table className="w-full text-[12px]">
             <thead><tr>{columns.map((c) => <Th key={c.key}>{c.label}</Th>)}<Th>Status</Th><Th>Source</Th><Th>Actions</Th></tr></thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="border-t border-border">
+              {rows.map((row) => {
+                const notEditable = !LIFECYCLE_EDITABLE_STATUSES.has(row.status);
+                const canVerify = row.status === "DRAFT";
+                const canPublish = row.status === "APPROVED";
+                const backwardTarget = LIFECYCLE_BACKWARD_TARGET[row.status];
+                return (
+                <React.Fragment key={row.id}>
+                <tr className="border-t border-border">
                   {columns.map((c) => <Td key={c.key}>{c.render ? c.render(row) : row[c.key]}</Td>)}
                   <Td><StatusPill value={row.status} /></Td>
                   <Td>{row.authoritySourceId ? `#${row.authoritySourceId}` : <span className="text-warning">missing</span>}</Td>
                   <Td>
-                    <div className="flex gap-1.5">
-                      <button className={btnSecondary} onClick={() => runAction(() => approve(row.id))}>Approve</button>
-                      <button className={btnSecondary} onClick={() => runAction(() => setStatus(row.id, "VERIFIED"))}>Verify</button>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        className={btnSecondary}
+                        disabled={notEditable}
+                        title={notEditable ? `Not editable — ${row.status}. Record a new effective-dated version instead.` : "Record a distinct approver on this record"}
+                        onClick={() => runAction(() => approve(row.id))}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className={btnSecondary}
+                        disabled={!canVerify}
+                        title={canVerify ? "Mark verified" : `Only a DRAFT record can be verified (currently ${row.status})`}
+                        onClick={() => runAction(() => setStatus(row.id, "VERIFIED"))}
+                      >
+                        Verify
+                      </button>
                       <button
                         className={btnPrimary}
-                        title={!row.authoritySourceId ? "Blocked — no linked source evidence artifact" : "Publish"}
+                        disabled={!canPublish || !row.authoritySourceId}
+                        title={
+                          !canPublish
+                            ? `Only an APPROVED record can be published (currently ${row.status})`
+                            : !row.authoritySourceId
+                            ? "Blocked — no linked source evidence artifact"
+                            : "Publish"
+                        }
                         onClick={() => runAction(() => setStatus(row.id, "PUBLISHED"))}
                       >
                         Publish
                       </button>
+                      {backwardTarget && (
+                        <button
+                          className={btnSecondary}
+                          title={`Send this record back to ${backwardTarget} — reverses its own last status advance, using the same backend action Verify/Publish use`}
+                          onClick={() => runAction(() => setStatus(row.id, backwardTarget))}
+                        >
+                          Send back to {backwardTarget}
+                        </button>
+                      )}
+                      <button className={btnSecondary} onClick={() => toggleHistory(row)}>
+                        {historyRowId === row.id ? "Hide history" : "History"}
+                      </button>
                     </div>
                   </Td>
                 </tr>
-              ))}
+                {historyRowId === row.id && (
+                  <tr className="border-t border-border bg-surface-muted">
+                    <Td className="!py-3" colSpan={columns.length + 3}>
+                      {historyLoading && <p className="text-[11px] text-foreground-muted">Loading history…</p>}
+                      <ErrorBanner message={historyError} />
+                      {historyEntries && historyEntries.length === 0 && (
+                        <p className="text-[11px] text-foreground-muted">No audit entries recorded for this record.</p>
+                      )}
+                      {historyEntries && historyEntries.length > 0 && (
+                        <ul className="space-y-1">
+                          {historyEntries.map((entry) => (
+                            <li key={entry.id} className="text-[11px] text-foreground">
+                              <span className="font-semibold">{entry.action}</span>
+                              {" — "}
+                              {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "unknown time"}
+                              {entry.actorId ? ` (actor #${entry.actorId})` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </Td>
+                  </tr>
+                )}
+                </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -399,6 +521,7 @@ function U1TariffsTab() {
   return (
     <LifecycleRegistryTab
       title="U1 tariffs (employer-elected sickness reimbursement)"
+      entityType="germany_u1_tariff"
       list={() => listU1Tariffs()}
       create={(f) => createU1Tariff({
         healthFundId: f.healthFundId, tariffIdentifier: f.tariffIdentifier, tariffName: f.tariffName || undefined,
@@ -453,6 +576,7 @@ export function HealthFundsTab() {
       </Card>
       <LifecycleRegistryTab
       title="Krankenkasse (health fund) supplementary-rate registry"
+      entityType="germany_health_fund"
       list={() => listHealthFunds()}
       create={(f) => createHealthFund({
         healthFundId: f.healthFundId, fundName: f.fundName, supplementaryRatePct: f.supplementaryRatePct,
@@ -493,6 +617,7 @@ export function ContributionCeilingsTab() {
   return (
     <LifecycleRegistryTab
       title="Contribution ceilings (RV/ALV and GKV/PV branches)"
+      entityType="germany_contribution_ceiling"
       list={() => listContributionCeilings()}
       create={(f) => createContributionCeiling({
         branch: f.branch, monthlyCeiling: f.monthlyCeiling, annualCeiling: f.annualCeiling,
@@ -522,6 +647,7 @@ export function PvConfigTab() {
   return (
     <LifecycleRegistryTab
       title="PV (long-term care) child/Saxony rate configuration"
+      entityType="germany_pv_configuration"
       list={() => listPvConfigurations()}
       create={(f) => createPvConfiguration({
         childCategory: f.childCategory, isSaxony: f.isSaxony === "true" || f.isSaxony === true,
@@ -586,6 +712,7 @@ export function EarningTaxabilityTab() {
       </Card>
       <LifecycleRegistryTab
         title="Earning/deduction taxability rules"
+        entityType="germany_earning_taxability_rule"
         list={() => listEarningTaxabilityRules()}
         create={(f) => createEarningTaxabilityRule({
           earningType: f.earningType, wageTaxTreatment: f.wageTaxTreatment,
@@ -640,6 +767,7 @@ export function OvertimePremiumCategoriesTab() {
       </Card>
       <LifecycleRegistryTab
         title="Overtime premium categories"
+        entityType="germany_overtime_premium_category"
         list={() => listOvertimePremiumCategories()}
         create={(f) => createOvertimePremiumCategory({
           categoryCode: f.categoryCode, wageTaxFreePct: f.wageTaxFreePct,
@@ -678,6 +806,7 @@ export function OvertimeGrundlohnCapsTab() {
       </Card>
       <LifecycleRegistryTab
         title="Overtime Grundlohn caps"
+        entityType="germany_overtime_grundlohn_cap"
         list={() => listOvertimeGrundlohnCaps()}
         create={(f) => createOvertimeGrundlohnCap({
           dimension: f.dimension, hourlyCapAmount: f.hourlyCapAmount,
@@ -749,6 +878,7 @@ function ChurchTaxExceptionsTab() {
   return (
     <LifecycleRegistryTab
       title="Church-tax exceptions (sub-Land rate overrides, e.g. Bad Wimpfen RC 9%)"
+      entityType="germany_church_tax_exception"
       list={() => listGermanyChurchTaxExceptions()}
       create={(f) => createGermanyChurchTaxException({
         landCode: f.landCode, denomination: f.denomination, municipalityPostalCode: f.municipalityPostalCode,
@@ -861,6 +991,178 @@ export function ElstamBatchesTab() {
         </table>
       )}
     </Card>
+  );
+}
+
+// ── ELSTER transmission boundary ──────────────────────────────────────────
+// Operations surface for the Phase 8BF ELSTER boundary. Transmission stays
+// BLOCKED_EXTERNAL by design (no BZSt registration, no certificate, no ERiC
+// integration) — the backend never fabricates a Transferticket, and
+// recording a certificate reference here is metadata only and does NOT
+// unblock transmission. See engine/germany_elster.py's docstring.
+
+const ELSTER_TRANSMISSION_TYPES = [
+  "Lohnsteuer-Anmeldung", "Beitrags-Nachweis", "U1/U2-Erstattung", "Sonstige",
+];
+
+export function ElsterTab() {
+  const [config, configError, configLoading, reloadConfig] = useLoader(() => getGermanyElsterCertificateConfig(), []);
+  const [transmissions, transError, transLoading, reloadTrans] = useLoader(() => listGermanyElsterTransmissions(), []);
+  const [showConfig, setShowConfig] = useState(false);
+  const [configForm, setConfigForm] = useState({ certificateReference: "", referenceDescription: "" });
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ transmissionType: ELSTER_TRANSMISSION_TYPES[0], periodStart: "2026-01-01", periodEnd: "2026-01-31", payloadSummary: "" });
+  const [actionError, setActionError] = useState("");
+
+  async function handleSaveConfig(e) {
+    e.preventDefault();
+    setActionError("");
+    try {
+      await setGermanyElsterCertificateConfig({
+        certificateReference: configForm.certificateReference,
+        referenceDescription: configForm.referenceDescription || null,
+      });
+      setShowConfig(false);
+      reloadConfig();
+    } catch (err) {
+      setActionError(describeLoadError(err));
+    }
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    setActionError("");
+    let payloadSummary = {};
+    if (createForm.payloadSummary) {
+      try { payloadSummary = JSON.parse(createForm.payloadSummary); }
+      catch { setActionError(describeLoadError({ message: "Payload summary must be valid JSON." })); return; }
+    }
+    try {
+      await createGermanyElsterTransmission({
+        transmissionType: createForm.transmissionType,
+        periodStart: createForm.periodStart,
+        periodEnd: createForm.periodEnd,
+        payloadSummary,
+      });
+      setShowCreate(false);
+      reloadTrans();
+    } catch (err) {
+      setActionError(describeLoadError(err));
+    }
+  }
+
+  async function doValidate(id) {
+    setActionError("");
+    try {
+      await validateGermanyElsterTransmission(id);
+      reloadTrans();
+    } catch (err) {
+      setActionError(describeLoadError(err));
+    }
+  }
+
+  async function doTransmit(id) {
+    setActionError("");
+    try {
+      await transmitGermanyElsterTransmission(id);
+      reloadTrans();
+    } catch (err) {
+      setActionError(describeLoadError(err));
+    }
+  }
+
+  const lastBlocked = transmissions && [...transmissions].reverse().find((t) => t.status === "BLOCKED_EXTERNAL" && t.blockedReason);
+
+  return (
+    <>
+      <Card
+        title="ELSTER transmission boundary"
+        action={<button className={btnSecondary} onClick={() => setShowConfig((v) => !v)}><Plus size={12} className="inline -mt-0.5 mr-1" /> Record certificate reference</button>}
+      >
+        <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
+          Zoiko holds no ELSTER organizational certificate and no BZSt employer registration, so live submission is{" "}
+          <span className="font-bold">BLOCKED_EXTERNAL</span> by design — the backend never transmits and never
+          fabricates a Transferticket. Recording a certificate reference is metadata only and does NOT unblock
+          transmission (see engine/germany_elster.py).
+        </div>
+        {showConfig && (
+          <form onSubmit={handleSaveConfig} className="mb-4 grid grid-cols-2 gap-2 rounded-[10px] border border-border p-3">
+            <input className={inputCls} placeholder="Certificate reference (e.g. key-vault path) — never raw bytes" required value={configForm.certificateReference} onChange={(e) => setConfigForm((f) => ({ ...f, certificateReference: e.target.value }))} />
+            <input className={inputCls} placeholder="Description (optional)" value={configForm.referenceDescription} onChange={(e) => setConfigForm((f) => ({ ...f, referenceDescription: e.target.value }))} />
+            <button type="submit" className={`${btnPrimary} col-span-2`}>Save reference</button>
+          </form>
+        )}
+        {configLoading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
+        <ErrorBanner message={configError} />
+        {!configLoading && (
+          <div className="text-[12px]">
+            {!config
+              ? <p className="text-foreground-muted">No certificate reference recorded for this organization.</p>
+              : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <StatusPill value={config.isConfigured ? "ACTIVE" : "INACTIVE"} />
+                  <span className="font-mono text-[11px]">{config.certificateReference}</span>
+                  {config.referenceDescription && <span className="text-foreground-muted">{config.referenceDescription}</span>}
+                  {config.configuredAt && <span className="text-[11px] text-foreground-muted">recorded {new Date(config.configuredAt).toLocaleString()}</span>}
+                </div>
+              )}
+          </div>
+        )}
+      </Card>
+
+      <Card
+        title="Transmission records"
+        action={<button className={btnSecondary} onClick={() => setShowCreate((v) => !v)}><Plus size={12} className="inline -mt-0.5 mr-1" /> Prepare transmission record</button>}
+      >
+        <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
+          Records only — validation is structural (non-empty type, sane period), and "Transmit" runs against the
+          fail-closed boundary: it records <span className="font-bold">BLOCKED_EXTERNAL</span> with the reason, never a
+          fake acknowledgement. Retry is safe and idempotent.
+        </div>
+        {showCreate && (
+          <form onSubmit={handleCreate} className="mb-4 grid grid-cols-2 gap-2 rounded-[10px] border border-border p-3">
+            <select className={inputCls} value={createForm.transmissionType} onChange={(e) => setCreateForm((f) => ({ ...f, transmissionType: e.target.value }))}>
+              {ELSTER_TRANSMISSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input className={inputCls} placeholder="Payload summary (JSON, optional)" value={createForm.payloadSummary} onChange={(e) => setCreateForm((f) => ({ ...f, payloadSummary: e.target.value }))} />
+            <label className="flex flex-col gap-1 text-[11px] text-foreground-muted">Period start<input type="date" className={inputCls} required value={createForm.periodStart} onChange={(e) => setCreateForm((f) => ({ ...f, periodStart: e.target.value }))} /></label>
+            <label className="flex flex-col gap-1 text-[11px] text-foreground-muted">Period end<input type="date" className={inputCls} required value={createForm.periodEnd} onChange={(e) => setCreateForm((f) => ({ ...f, periodEnd: e.target.value }))} /></label>
+            <button type="submit" className={`${btnPrimary} col-span-2`}>Prepare record (DRAFT)</button>
+          </form>
+        )}
+        {transLoading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
+        <ErrorBanner message={transError} />
+        <ErrorBanner message={actionError} />
+        {!transLoading && transmissions && transmissions.length === 0 && <p className="text-[12px] text-foreground-muted">No transmission records yet.</p>}
+        {!transLoading && transmissions && transmissions.length > 0 && (
+          <table className="w-full text-[12px]">
+            <thead><tr><Th>Type</Th><Th>Period</Th><Th>Status</Th><Th>Actions</Th></tr></thead>
+            <tbody>
+              {transmissions.map((t) => (
+                <tr key={t.id} className="border-t border-border">
+                  <Td>{t.transmissionType}</Td>
+                  <Td>{t.periodStart} → {t.periodEnd}</Td>
+                  <Td><StatusPill value={t.status} /></Td>
+                  <Td>
+                    <div className="flex gap-1.5">
+                      {t.status === "DRAFT" && <button className={btnSecondary} onClick={() => doValidate(t.id)}>Validate</button>}
+                      {t.status === "VALIDATED" && <button className={btnPrimary} onClick={() => doTransmit(t.id)}>Transmit</button>}
+                      {t.status === "BLOCKED_EXTERNAL" && <button className={btnSecondary} onClick={() => doTransmit(t.id)}>Retry</button>}
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {lastBlocked && (
+          <div className="mt-3 rounded-[10px] bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
+            <span className="font-bold">Last blocked reason: </span>
+            {lastBlocked.blockedReason}
+          </div>
+        )}
+      </Card>
+    </>
   );
 }
 
@@ -1089,6 +1391,7 @@ export function EmployerLeviesTab() {
         <LifecycleRegistryTab
           key={selectedOrgId}
           title={`Accident-insurance profiles for this employer (org #${selectedOrgId})`}
+          entityType="germany_accident_insurance_profile"
           list={() => listGermanyAccidentInsuranceProfiles(selectedOrgId)}
           create={(f) => createGermanyAccidentInsuranceProfile({
             organizationId: Number(selectedOrgId), carrierName: f.carrierName,
@@ -1138,8 +1441,9 @@ export default function GermanyStatutoryRegistriesPage() {
         <h1 className="text-[18px] font-bold text-foreground">Germany statutory registries</h1>
         <p className="mt-1 text-[13px] text-foreground-muted">
           Operational management for the Germany 2026 statutory configuration Zoiko's payroll engine reads from —
-          PAP, health funds, contribution ceilings, PV configuration, church tax, ELStAM change-list batches and
-          source evidence. Every action here calls a real backend operation; nothing is simulated.
+          PAP, health funds, contribution ceilings, PV configuration, church tax, ELStAM change-list batches, the
+          ELSTER transmission boundary and source evidence. Every action here calls a real backend operation; nothing
+          is simulated.
         </p>
       </div>
 
@@ -1167,6 +1471,7 @@ export default function GermanyStatutoryRegistriesPage() {
       {tab === "employer-levies" && <EmployerLeviesTab />}
       {tab === "church-tax" && <ChurchTaxTab />}
       {tab === "elstam-batches" && <ElstamBatchesTab />}
+      {tab === "elster" && <ElsterTab />}
       {tab === "source-evidence" && <SourceEvidenceTab />}
       {tab === "audit" && <AuditTab />}
     </div>

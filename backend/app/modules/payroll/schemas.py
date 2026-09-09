@@ -157,6 +157,16 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     de_factor:                        Optional[Decimal] = Field(None, validation_alias="deFactor")
     de_church_tax_liable:             Optional[bool] = Field(None, validation_alias="deChurchTaxLiable")
     de_church_tax_land:               Optional[str] = Field(None, validation_alias="deChurchTaxLand")
+    # Master audit — genuine gap closure: these two columns have existed on
+    # the model and been READ by resolve_germany_church_tax_exception's own
+    # caller (service.py's _resolve_germany_calc_inputs) since the Bad
+    # Wimpfen exception mechanism was built, but were never exposed on
+    # EITHER this schema or the Response schema below — meaning no caller,
+    # UI or API, could ever set them. Any published church-tax exception
+    # (Land + denomination + postal code) was therefore unreachable by
+    # every employee, regardless of registry completeness.
+    de_church_tax_denomination:       Optional[str] = Field(None, validation_alias="deChurchTaxDenomination")
+    de_church_tax_municipality_postal_code: Optional[str] = Field(None, validation_alias="deChurchTaxMunicipalityPostalCode")
     de_child_count:                   Optional[int] = Field(None, validation_alias="deChildCount")
     de_childless:                     Optional[bool] = Field(None, validation_alias="deChildless")
     de_saxony:                        Optional[bool] = Field(None, validation_alias="deSaxony")
@@ -203,6 +213,8 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     deFactor:                       Optional[Decimal] = Field(None, validation_alias="de_factor", serialization_alias="deFactor")
     deChurchTaxLiable:              Optional[bool] = Field(None, validation_alias="de_church_tax_liable", serialization_alias="deChurchTaxLiable")
     deChurchTaxLand:                Optional[str] = Field(None, validation_alias="de_church_tax_land", serialization_alias="deChurchTaxLand")
+    deChurchTaxDenomination:        Optional[str] = Field(None, validation_alias="de_church_tax_denomination", serialization_alias="deChurchTaxDenomination")
+    deChurchTaxMunicipalityPostalCode: Optional[str] = Field(None, validation_alias="de_church_tax_municipality_postal_code", serialization_alias="deChurchTaxMunicipalityPostalCode")
     deChildCount:                   Optional[int] = Field(None, validation_alias="de_child_count", serialization_alias="deChildCount")
     deChildless:                    Optional[bool] = Field(None, validation_alias="de_childless", serialization_alias="deChildless")
     deSaxony:                       Optional[bool] = Field(None, validation_alias="de_saxony", serialization_alias="deSaxony")
@@ -469,6 +481,50 @@ class GermanyElstamChangeListBatchStatusUpdate(BaseModel):
     validation_result: Optional[dict] = Field(None, validation_alias="validationResult")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+# ── Phase 8BF — ELSTER transmission boundary schemas ──────────────────────
+
+class GermanyElsterCertificateConfigSet(BaseModel):
+    certificate_reference:  str = Field(validation_alias="certificateReference")
+    reference_description:  Optional[str] = Field(None, validation_alias="referenceDescription")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyElsterTransmissionCreate(BaseModel):
+    transmission_type: str = Field(validation_alias="transmissionType")
+    period_start:       date = Field(validation_alias="periodStart")
+    period_end:         date = Field(validation_alias="periodEnd")
+    payload_summary:    Optional[dict] = Field(None, validation_alias="payloadSummary")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyElsterCertificateConfigResponse(BaseModel):
+    id:                     int
+    organizationId:         int = Field(validation_alias="organization_id")
+    isConfigured:           bool = Field(validation_alias="is_configured")
+    certificateReference:   Optional[str] = Field(None, validation_alias="certificate_reference")
+    referenceDescription:   Optional[str] = Field(None, validation_alias="reference_description")
+    configuredAt:           Optional[datetime] = Field(None, validation_alias="configured_at")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class GermanyElsterTransmissionResponse(BaseModel):
+    id:                int
+    organizationId:    int = Field(validation_alias="organization_id")
+    transmissionType:  str = Field(validation_alias="transmission_type")
+    periodStart:       date = Field(validation_alias="period_start")
+    periodEnd:         date = Field(validation_alias="period_end")
+    payloadSummary:    Optional[dict] = Field(None, validation_alias="payload_summary")
+    status:            str
+    validationErrors:  Optional[list] = Field(None, validation_alias="validation_errors")
+    blockedReason:     Optional[str] = Field(None, validation_alias="blocked_reason")
+    createdAt:         Optional[datetime] = Field(None, validation_alias="created_at")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class GermanyElstamChangeListBatchResponse(BaseModel):

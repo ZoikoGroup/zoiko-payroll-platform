@@ -49,6 +49,7 @@ from app.modules.payroll.models import (
     StatutoryFilingCalendar,     EmployeeStatutoryProfile, PapAlgorithmAsset, GermanyHealthFund,
     GermanyContributionCeiling, GermanyPvConfiguration, GermanyPapRelease,
     GermanyElstamChangeListBatch, GermanyElstamImportAttempt, GermanyEarningTaxabilityRule,
+    GermanyElsterCertificateConfig, GermanyElsterTransmission,
     GermanyHealthFundU1Tariff, GermanyOvertimeWorkRecord,
     GermanyOvertimePremiumCategory, GermanyOvertimeGrundlohnCap, GermanyOvertimeTimeSegment,
     GermanyOvertimeWageTaxResult, GermanyOvertimeSocialInsuranceResult,
@@ -4507,6 +4508,61 @@ def resolve_germany_overtime_grundlohn_cap(
 
 
 # ── Germany: per-employee calculation-input resolver (Phase 7) ─────────
+# Phase 8BF — disclosed onboarding gap closure. A Germany employee could
+# previously be created (and payroll attempted) with zero visibility into
+# whether the GLOBAL statutory registries (health funds, both contribution
+# -ceiling branches, PV configuration) had ever been published at all —
+# the first sign of an incomplete configuration was a fail-closed
+# GermanyCalculationBlockedException at actual payroll-run time. This is
+# organization-independent (these four registries are global, not
+# per-org — confirmed by this project's own prior forensic audit) and
+# deliberately does NOT check per-employee state (statutory profile,
+# health-fund code, PAP asset) — that is what preview_germany_calculation
+# already covers once an employee exists. This function answers a
+# narrower, earlier question: "is Germany payroll configuration even
+# possible today, for ANY employee?" Read-only; never creates, seeds, or
+# infers a registry row — an incomplete answer here is reported, never
+# silently completed.
+def get_germany_statutory_configuration_readiness(db: Session, as_of=None) -> dict:
+    as_of = as_of or date.today()
+
+    def _has_published(rows, effective_check=True):
+        for row in rows:
+            if row.status != "PUBLISHED":
+                continue
+            if not effective_check:
+                return True
+            effective_to = getattr(row, "effective_to", None)
+            if row.effective_from <= as_of and (effective_to is None or as_of <= effective_to):
+                return True
+        return False
+
+    health_fund_ready = _has_published(list_health_funds(db))
+    ceiling_rv_alv_ready = _has_published(list_contribution_ceilings(db, branch="RV_ALV"))
+    ceiling_gkv_pv_ready = _has_published(list_contribution_ceilings(db, branch="GKV_PV"))
+    pv_configuration_ready = _has_published(list_pv_configurations(db))
+
+    missing = []
+    if not health_fund_ready:
+        missing.append("No PUBLISHED health fund (Krankenkasse) record is effective as of this date.")
+    if not ceiling_rv_alv_ready:
+        missing.append("No PUBLISHED RV/ALV contribution ceiling is effective as of this date.")
+    if not ceiling_gkv_pv_ready:
+        missing.append("No PUBLISHED GKV/PV contribution ceiling is effective as of this date.")
+    if not pv_configuration_ready:
+        missing.append("No PUBLISHED PV (long-term care) configuration is effective as of this date.")
+
+    return {
+        "asOf": str(as_of),
+        "ready": not missing,
+        "healthFundReady": health_fund_ready,
+        "ceilingRvAlvReady": ceiling_rv_alv_ready,
+        "ceilingGkvPvReady": ceiling_gkv_pv_ready,
+        "pvConfigurationReady": pv_configuration_ready,
+        "missing": missing,
+    }
+
+
 # Resolves every Germany registry a calculation might need for ONE
 # employee on ONE payroll date, in a single place, so _compute_payslip_values
 # and preview_payroll_run can never disagree about which rows applied.
@@ -9337,6 +9393,8 @@ def create_employee_statutory_profile_version(
         created_by_id=actor_id, reason=data.reason,
         de_tax_class=data.de_tax_class, de_factor=data.de_factor,
         de_church_tax_liable=data.de_church_tax_liable, de_church_tax_land=data.de_church_tax_land,
+        de_church_tax_denomination=data.de_church_tax_denomination,
+        de_church_tax_municipality_postal_code=data.de_church_tax_municipality_postal_code,
         de_child_count=data.de_child_count, de_childless=data.de_childless, de_saxony=data.de_saxony,
         de_health_insurance_status=data.de_health_insurance_status, de_health_fund_code=data.de_health_fund_code,
         de_u1_tariff_id=data.de_u1_tariff_id,
@@ -10294,6 +10352,23 @@ def _attach_one_germany_overtime_premium_component(
     # PayslipItem.net_pay, and the component's own financial tracking
     # fields. This is the core Phase 8AR fix — Phase 8AQ's finding that
     # "attach does not update PayslipItem.gross_pay/net_pay".
+    #
+    # Phase 8BE: steps 1-4 below (allowance credit, PayslipItem update,
+    # component financial-tracking update, and the snapshot append) are
+    # now ONE atomic transaction (a single db.commit() at the end),
+    # deliberately separate from the claim's own commit above. The claim
+    # commits first and alone because ITS atomicity is what makes a lost
+    # race safe (a loser never touches money — see the comment above);
+    # once a caller has won the claim, though, a crash between two of
+    # these four money-affecting steps used to leave the component
+    # permanently stuck ATTACHED with only some of its financial effects
+    # applied and no way to safely retry (a retry would immediately raise
+    # _OvertimeAttachAlreadyAttached, since the claim already succeeded).
+    # Combining them into one transaction means either all four land
+    # together or none do — the only remaining partial state is "claimed,
+    # nothing else applied yet", which is safely distinguishable (the
+    # component's financial_integration_status/applied_*_delta fields
+    # stay at their pre-attach defaults) rather than silently half-correct.
 
     # 1. Compute the financial delta for this component.
     fin_delta = _compute_overtime_financial_delta(component)
@@ -10303,7 +10378,6 @@ def _attach_one_germany_overtime_premium_component(
         {"amount": PayslipAllowanceItem.amount + Decimal(component.gross_premium_amount)},
         synchronize_session=False,
     )
-    db.commit()
 
     # 3. Apply the financial deltas to PayslipItem — atomically.
     # gross_pay increases by gross_delta; total_deductions increases by
@@ -10328,7 +10402,6 @@ def _attach_one_germany_overtime_premium_component(
     db.query(PayslipItem).filter(PayslipItem.id == payslip_item.id).update(
         payslip_update, synchronize_session=False,
     )
-    db.commit()
 
     # 4. Record the financial integration delta on the component itself
     # for audit and future engine integration. applied_gross_delta /
@@ -10347,7 +10420,6 @@ def _attach_one_germany_overtime_premium_component(
         },
         synchronize_session=False,
     )
-    db.commit()
 
     db.refresh(component)
     db.refresh(payslip_item)
@@ -10512,6 +10584,17 @@ def _detach_one_germany_overtime_premium_component(
     # component record the EXACT amounts that were applied at attach
     # time, so detach uses THOSE values rather than recomputing (the
     # "original source-of-truth" approach from the prompt).
+    #
+    # Phase 8BE: steps 1-3 below are now ONE atomic transaction (a single
+    # db.commit() at the end, alongside the snapshot update below),
+    # mirroring the attach-path fix above and for the identical reason —
+    # the STATUS claim already committed above is what makes a lost race
+    # safe; once won, a crash between reversing the allowance credit,
+    # reversing the PayslipItem deltas, and clearing the component's
+    # tracking fields used to be able to leave the payslip in a torn state
+    # with no safe retry (a retry would immediately raise
+    # _OvertimeDetachNotAttached, since the claim already flipped the
+    # status to DETACHED).
 
     # Read the stored deltas BEFORE reversing — these are the exact
     # amounts that were applied at attach time.
@@ -10533,7 +10616,6 @@ def _detach_one_germany_overtime_premium_component(
         {"amount": PayslipAllowanceItem.amount - Decimal(gross_amount)},
         synchronize_session=False,
     )
-    db.commit()
 
     # 2. Reverse the financial deltas on PayslipItem — atomically.
     net_delta = stored_gross_delta - stored_pf_delta - stored_esi_delta - stored_wage_tax_delta
@@ -10548,7 +10630,6 @@ def _detach_one_germany_overtime_premium_component(
     db.query(PayslipItem).filter(PayslipItem.id == payslip_item.id).update(
         payslip_update, synchronize_session=False,
     )
-    db.commit()
 
     # 3. Clear the financial integration tracking on the component.
     db.query(GermanyOvertimePremiumComponent).filter(
@@ -10562,7 +10643,6 @@ def _detach_one_germany_overtime_premium_component(
         },
         synchronize_session=False,
     )
-    db.commit()
 
     db.refresh(payslip_item)
     # A deep copy is required here (unlike the shallow dict()/list() copy
@@ -11004,7 +11084,16 @@ def create_elstam_change_list_batch(
     """Record that a monthly ELStAM change list was RECEIVED — metadata
     only (spec §6). Never fans out into per-employee attribute changes;
     those are recorded individually via import_elstam_structured_payload(),
-    optionally citing this batch's id."""
+    optionally citing this batch's id.
+
+    Phase 8BE: idempotency guard. Resubmitting the same batch_reference
+    for the same organization used to silently create a second, duplicate
+    row (no dedup check existed on this path at all). The model's
+    uq_germany_elstam_change_list_batch_org_ref constraint now makes that
+    an IntegrityError, translated here into a clear, actionable
+    BadRequestException — never a raw 500 — so a caller retrying a batch
+    upload after a network timeout gets an unambiguous "already recorded"
+    answer instead of a duplicate row."""
     row = GermanyElstamChangeListBatch(
         organization_id=organization_id,
         batch_reference=data.batch_reference, source=data.source or "MANUAL_UPLOAD",
@@ -11013,7 +11102,15 @@ def create_elstam_change_list_batch(
         processing_status="RECEIVED", created_by_id=actor_id,
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BadRequestException(
+            f"An ELStAM change-list batch with reference {data.batch_reference!r} has already been "
+            "recorded for this organization. If this is a genuine resubmission, use a distinct "
+            "batch_reference."
+        )
     db.refresh(row)
     record_tax_audit(
         db, actor_id=actor_id, action="create", entity_type="germany_elstam_change_list_batch", entity_id=row.id,
@@ -11134,6 +11231,162 @@ def list_elstam_import_attempts_for_employee(
         .order_by(GermanyElstamImportAttempt.imported_at.desc())
         .all()
     )
+
+
+# ── Germany ELSTER transmission boundary (Phase 8BF) ─────────────────────
+# See engine/germany_elster.py's own module docstring for the full
+# fail-closed design. Nothing below ever calls a real ELSTER endpoint —
+# these functions only prepare, validate, and record the deterministic
+# BLOCKED_EXTERNAL outcome of attempting to resolve a transmitter. No
+# certificate material is ever stored, read, or required to reach
+# BLOCKED_EXTERNAL (see resolve_elster_transmitter's own docstring for why
+# a "configured" certificate reference does not change this).
+
+def get_elster_certificate_config(db: Session, organization_id: int) -> Optional[GermanyElsterCertificateConfig]:
+    """Read-only. None means no config row has ever been created for this
+    organization — callers should treat that identically to
+    is_configured=False, never as an error."""
+    return (
+        db.query(GermanyElsterCertificateConfig)
+        .filter(GermanyElsterCertificateConfig.organization_id == organization_id)
+        .first()
+    )
+
+
+def set_elster_certificate_config(
+    db: Session, organization_id: int, certificate_reference: str,
+    reference_description: Optional[str], actor_id: Optional[int],
+) -> GermanyElsterCertificateConfig:
+    """Records ONLY a reference string (e.g. a key-vault path) — never
+    accepts or stores certificate/key bytes. See model docstring."""
+    if not certificate_reference or not certificate_reference.strip():
+        raise BadRequestException("certificate_reference is required and must be a non-empty external reference.")
+    row = get_elster_certificate_config(db, organization_id)
+    old_value = {"isConfigured": row.is_configured} if row else None
+    if row is None:
+        row = GermanyElsterCertificateConfig(organization_id=organization_id)
+        db.add(row)
+    row.certificate_reference = certificate_reference.strip()
+    row.reference_description = reference_description
+    row.is_configured = True
+    row.configured_by_id = actor_id
+    row.configured_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_elster_certificate_config", entity_id=row.id,
+        old_value=old_value, new_value={"isConfigured": True},
+    )
+    return row
+
+
+_ELSTER_TRANSMISSION_VALID_STATUSES = {
+    "DRAFT", "VALIDATED", "BLOCKED_EXTERNAL", "QUEUED", "TRANSMITTED", "ACKNOWLEDGED", "REJECTED",
+}
+
+
+def create_elster_transmission(
+    db: Session, organization_id: int, data: "GermanyElsterTransmissionCreate", actor_id: Optional[int] = None,
+) -> GermanyElsterTransmission:
+    if data.period_end < data.period_start:
+        raise BadRequestException("period_end must not be before period_start.")
+    row = GermanyElsterTransmission(
+        organization_id=organization_id, transmission_type=data.transmission_type,
+        period_start=data.period_start, period_end=data.period_end,
+        payload_summary=data.payload_summary or {}, status="DRAFT", created_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_elster_transmission", entity_id=row.id,
+        old_value=None,
+        new_value={"transmissionType": row.transmission_type, "periodStart": str(row.period_start), "periodEnd": str(row.period_end)},
+    )
+    return row
+
+
+def list_elster_transmissions(db: Session, organization_id: int) -> List[GermanyElsterTransmission]:
+    return (
+        db.query(GermanyElsterTransmission)
+        .filter(GermanyElsterTransmission.organization_id == organization_id)
+        .order_by(GermanyElsterTransmission.period_start.desc())
+        .all()
+    )
+
+
+def get_elster_transmission_by_id(db: Session, transmission_id: int, organization_id: int) -> GermanyElsterTransmission:
+    row = (
+        db.query(GermanyElsterTransmission)
+        .filter(GermanyElsterTransmission.id == transmission_id, GermanyElsterTransmission.organization_id == organization_id)
+        .first()
+    )
+    if not row:
+        raise NotFoundException("GermanyElsterTransmission", transmission_id)
+    return row
+
+
+def validate_elster_transmission(db: Session, transmission_id: int, organization_id: int, actor_id: Optional[int] = None) -> GermanyElsterTransmission:
+    """Structural validation ONLY (non-empty type, sane period, non-empty
+    payload_summary) — never invents or checks a real ELSTER Datensatz
+    schema (no such schema is specified anywhere in this codebase's
+    documentation; see the Phase 8BF DEÜV/ELSTER gap-analysis notes)."""
+    row = get_elster_transmission_by_id(db, transmission_id, organization_id)
+    if row.status != "DRAFT":
+        raise BadRequestException(f"Only a DRAFT transmission can be validated (currently {row.status}).")
+    errors = []
+    if not row.transmission_type or not row.transmission_type.strip():
+        errors.append("transmission_type must not be empty.")
+    if row.period_end < row.period_start:
+        errors.append("period_end must not be before period_start.")
+    row.validation_errors = errors or None
+    row.status = "REJECTED" if errors else "VALIDATED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_elster_transmission", entity_id=row.id,
+        old_value={"status": "DRAFT"}, new_value={"status": row.status, "validationErrors": errors},
+    )
+    return row
+
+
+def attempt_transmit_elster_transmission(db: Session, transmission_id: int, organization_id: int, actor_id: Optional[int] = None) -> GermanyElsterTransmission:
+    """Attempts to resolve and use a real ElsterTransmitter. Today this
+    ALWAYS lands on BLOCKED_EXTERNAL (see engine/germany_elster.py) —
+    returned as a normal, successfully-recorded result (not an HTTP
+    error), since being blocked on a missing external certificate is an
+    expected, auditable state, not a caller mistake. Idempotent/retry-safe:
+    calling this again on an already-BLOCKED_EXTERNAL row simply re-attempts
+    and re-records the same deterministic outcome."""
+    from app.modules.payroll.engine.germany_elster import (
+        ElsterTransmissionRequest, GermanyElsterUnavailableError, resolve_elster_transmitter,
+    )
+
+    row = get_elster_transmission_by_id(db, transmission_id, organization_id)
+    if row.status not in ("VALIDATED", "BLOCKED_EXTERNAL"):
+        raise BadRequestException(
+            f"Only a VALIDATED (or previously BLOCKED_EXTERNAL, for retry) transmission can be "
+            f"transmitted (currently {row.status})."
+        )
+    cert_config = get_elster_certificate_config(db, organization_id)
+    transmitter = resolve_elster_transmitter(cert_config)
+    request = ElsterTransmissionRequest(
+        organization_id=organization_id, transmission_type=row.transmission_type,
+        period_start=row.period_start, period_end=row.period_end, payload_summary=row.payload_summary or {},
+    )
+    old_status = row.status
+    try:
+        transmitter.transmit(request)
+    except GermanyElsterUnavailableError as exc:
+        row.status = "BLOCKED_EXTERNAL"
+        row.blocked_reason = exc.message
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_elster_transmission", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": row.status, "blockedReason": row.blocked_reason},
+    )
+    return row
 
 
 from app.modules.payroll.hardcoded_defaults import _DEFAULT_BASIC_PCT, _DEFAULT_HRA_PCT  # noqa: E402
@@ -12961,6 +13214,14 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         v = float(data.get(key, 0) or 0)
         if v > 0:
             deduction_items.append((lbl, v))
+    # Germany: Kirchensteuer (church tax) is a statutory deduction from the
+    # employee's pay when de_church_tax_liable is set — persisted in
+    # PayslipItem.church_tax and populated by the engine. Only shown when
+    # the value is actually nonzero.
+    if country == "DE":
+        church_tax_val = float(data.get("church_tax", 0) or 0)
+        if church_tax_val > 0:
+            deduction_items.append(("Kirchensteuer", church_tax_val))
     other_labels = {
         "CA": {"socialSecurity": "Canada Pension Plan (CPP)"},
         "AU": {"medicare": "Medicare Levy"},

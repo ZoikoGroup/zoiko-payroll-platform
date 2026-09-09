@@ -623,6 +623,22 @@ class GermanyElstamChangeListBatch(Base):
     created_at          = Column(DateTime(timezone=True), server_default=func.now())
     updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
 
+    __table_args__ = (
+        # Phase 8BE — idempotency guard. Before this, resubmitting the same
+        # batch_reference for the same organization silently created a
+        # second row (no dedup check existed anywhere on this path); the
+        # DB-level constraint makes a duplicate resubmission fail loudly
+        # and immediately, and create_elstam_change_list_batch() (service.py)
+        # turns that IntegrityError into a clear BadRequestException instead
+        # of a raw 500. Scoped per-organization (not global) since two
+        # different organizations may legitimately receive a change list
+        # using the same reference scheme from their own payroll provider.
+        UniqueConstraint(
+            "organization_id", "batch_reference",
+            name="uq_germany_elstam_change_list_batch_org_ref",
+        ),
+    )
+
     def __repr__(self):
         return (
             f"<GermanyElstamChangeListBatch id={self.id} ref={self.batch_reference!r} "
@@ -681,6 +697,94 @@ class GermanyElstamImportAttempt(Base):
         return (
             f"<GermanyElstamImportAttempt id={self.id} employee_id={self.employee_id} "
             f"status={self.validation_status}>"
+        )
+
+
+# ── Germany: ELSTER certificate configuration (Phase 8BF) ────────────────
+# Per-organization record of WHETHER a real ELSTER organizational
+# certificate has been configured — NEVER the certificate/private key
+# material itself. `certificate_reference` is a pointer into an external
+# secret store (the organization's own key-management system / HSM /
+# vault path) — this table's entire purpose is to answer "has a human
+# configured a real certificate reference yet", never to hold the secret.
+# Storing an actual private key or PIN in this (or any) application
+# database row would be a real security defect; this design avoids that
+# category of defect entirely by construction, mirroring how
+# PapAlgorithmAsset never stores the BMF's actual XML bytes in a way that
+# could be mistaken for a secret and how ELStAM's own boundary
+# (engine/germany_pap/elstam.py) never accepts a live BZSt credential.
+class GermanyElsterCertificateConfig(Base):
+    """Whether this organization has a configured ELSTER organizational
+    certificate reference. is_configured is the ONLY field
+    resolve_elster_transmitter() (engine/germany_elster.py) ever reads —
+    and even when True, no transmitter implementation exists yet (see that
+    module's own docstring), so configuring a reference here does not by
+    itself unblock transmission."""
+    __tablename__ = "payroll_germany_elster_certificate_configs"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+
+    is_configured        = Column(Boolean, nullable=False, default=False, server_default="false")
+    certificate_reference = Column(String(200), nullable=True)
+    reference_description  = Column(Text, nullable=True)
+
+    configured_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    configured_at    = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<GermanyElsterCertificateConfig organization_id={self.organization_id} configured={self.is_configured}>"
+
+
+# ── Germany: ELSTER transmission record (Phase 8BF) ───────────────────────
+# One attempt to prepare/transmit a Lohnsteuer-Anmeldung-shaped filing via
+# ELSTER. The state machine below is INTENTIONALLY bounded to the states
+# this codebase can actually reach today (DRAFT -> VALIDATED ->
+# BLOCKED_EXTERNAL) — REJECTED/ACKNOWLEDGED exist in the vocabulary for a
+# future phase that implements a real transmitter, but no code path in
+# this phase ever sets them; setting them without a real ELSTER response
+# would be exactly the kind of fabricated external result this project's
+# governing rules forbid. `payload_summary` deliberately holds only
+# non-sensitive structural metadata (period, transmission type, a
+# reference id) — never the actual filing content — since this table's
+# purpose is transmission-attempt audit, not a second copy of statutory
+# data that already lives on the payslip/payroll-run records it derives
+# from.
+class GermanyElsterTransmission(Base):
+    __tablename__ = "payroll_germany_elster_transmissions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # e.g. "LOHNSTEUER_ANMELDUNG" — free text, spec gives no enumerated set
+    # for this phase (same "concept named, no vocabulary given" treatment
+    # as GermanyElstamChangeListBatch.source).
+    transmission_type = Column(String(50), nullable=False)
+    period_start      = Column(Date, nullable=False)
+    period_end        = Column(Date, nullable=False)
+    payload_summary   = Column(JSON, nullable=True)
+
+    # DRAFT | VALIDATED | BLOCKED_EXTERNAL | QUEUED | TRANSMITTED |
+    # ACKNOWLEDGED | REJECTED — see class docstring: only the first three
+    # are ever reached by this phase's code.
+    status            = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    validation_errors = Column(JSON, nullable=True)
+    blocked_reason    = Column(Text, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_germany_elster_transmission_org_period", "organization_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyElsterTransmission id={self.id} organization_id={self.organization_id} "
+            f"type={self.transmission_type!r} status={self.status}>"
         )
 
 
@@ -3128,6 +3232,17 @@ class GermanyHealthFundU1Tariff(Base):
 # does NOT read from this table (deliberately — see the report's
 # "Compatibility" section for why the old component_key is left alone
 # rather than migrated in this phase).
+#
+# SUPERSEDED (Phase 7, re-confirmed Phase 8BE): the "germany.py does NOT
+# read from this table" sentence above was accurate at Phase 5 but is
+# now stale — Phase 7 wired both branches in for real. germany.py resolves
+# and traces RV_ALV and GKV_PV ceilings independently from THIS table
+# (see germany.py's ceiling resolution around the RV/ALV and GKV/PV
+# calculation calls, and service.py's resolve_germany_contribution_ceiling
+# branch parameter) — the "single shared ContributionRate ceiling" read
+# this paragraph describes is the pre-Phase-7 state, not current
+# behavior. Left here rather than rewritten so the phase history stays
+# legible; do not cite this paragraph alone as current production status.
 #
 # Deliberately its own table, NOT a new ContributionRate.component_key
 # value and NOT a modification to that model — a ContributionRate row is

@@ -67,6 +67,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
   const deductionRows = [
     ...getIncomeTaxLines(payslip).map(([label, amount]) => ({ label, amount })),
+    ...(labels.churchTax ? [{ label: labels.churchTax, amount: payslip.churchTax || 0 }] : []),
     { label: labels.pf, amount: payslip.pf },
     { label: labels.esi, amount: payslip.esi },
     { label: "Professional Tax", amount: payslip.professionalTax },
