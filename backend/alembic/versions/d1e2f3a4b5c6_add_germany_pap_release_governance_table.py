@@ -38,12 +38,12 @@ def upgrade() -> None:
         sa.Column('bound_source_content_sha256', sa.String(length=64), nullable=True),
         sa.Column('status', sa.String(length=30), nullable=False, server_default='NOT_READY'),
 
-        sa.Column('source_identity_verified', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('source_identity_verified', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('source_identity_verified_by_id', sa.Integer(), nullable=True),
         sa.Column('source_identity_verified_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('source_identity_notes', sa.Text(), nullable=True),
 
-        sa.Column('source_hash_verified', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('source_hash_verified', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('source_hash_verified_by_id', sa.Integer(), nullable=True),
         sa.Column('source_hash_verified_at', sa.DateTime(timezone=True), nullable=True),
 
@@ -65,13 +65,13 @@ def upgrade() -> None:
         sa.Column('licensing_notes', sa.Text(), nullable=True),
         sa.Column('licensing_recorded_by_id', sa.Integer(), nullable=True),
 
-        sa.Column('golden_vectors_passed', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('golden_vectors_passed', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('golden_vectors_source_sha256', sa.String(length=64), nullable=True),
         sa.Column('golden_vectors_verified_by_id', sa.Integer(), nullable=True),
         sa.Column('golden_vectors_verified_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('golden_vectors_notes', sa.Text(), nullable=True),
 
-        sa.Column('security_certified', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('security_certified', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('security_certified_by_id', sa.Integer(), nullable=True),
         sa.Column('security_certified_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('security_notes', sa.Text(), nullable=True),
