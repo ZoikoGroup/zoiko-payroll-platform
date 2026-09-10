@@ -73,6 +73,36 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="pf_wage_ceiling", label="EPF Wage Ceiling (Monthly)",
              employee_share="—", employer_share="—", total="₹15,000",
              flat_amount=Decimal("15000.00"), sort_order=9),
+        # Karnataka Labour Welfare Fund (§15.1, source IN-KA-LWF) —
+        # state-scoped scalar keys read via ctx.state_rate_map (india.py's
+        # calculate()), same annual-not-monthly mechanism as every other
+        # LWF row. Remittance window "1 January - 15 January" gives a real
+        # collection month (January = 1), unlike Chennai's PT above, so
+        # lwf_deduct_month is safely configurable here.
+        dict(component_key="lwf_employee_amt", label="Karnataka LWF — Employee (Annual)",
+             employee_share="₹50/year", employer_share="—", total="₹50",
+             flat_amount=Decimal("50.00"), jurisdiction_state="Karnataka", sort_order=10),
+        dict(component_key="lwf_employer_amt", label="Karnataka LWF — Employer (Annual)",
+             employee_share="—", employer_share="₹100/year", total="₹100",
+             flat_amount=Decimal("100.00"), jurisdiction_state="Karnataka", sort_order=11),
+        dict(component_key="lwf_deduct_month", label="Karnataka LWF — Deduction Month",
+             employee_share="—", employer_share="—", total="January",
+             flat_amount=Decimal("1"), jurisdiction_state="Karnataka", sort_order=12),
+        # Tamil Nadu Labour Welfare Fund (§15.2, source IN-TN-LWF) —
+        # employee/employer amounts only; the document's own ₹20
+        # State-Government third share has no payroll ledger line in this
+        # engine (it's a state top-up, not an employee deduction or
+        # employer liability) and is deliberately not modeled.
+        # lwf_deduct_month DELIBERATELY NOT SEEDED: unlike Karnataka's
+        # explicit "1 January - 15 January" window, this pack gives no
+        # collection month for Tamil Nadu — leaving it unconfigured means
+        # LWF resolves ₹0 every month (fail-closed), not a guessed month.
+        dict(component_key="lwf_employee_amt", label="Tamil Nadu LWF — Employee (Annual)",
+             employee_share="₹20/year", employer_share="—", total="₹20",
+             flat_amount=Decimal("20.00"), jurisdiction_state="Tamil Nadu", sort_order=13),
+        dict(component_key="lwf_employer_amt", label="Tamil Nadu LWF — Employer (Annual)",
+             employee_share="—", employer_share="₹40/year", total="₹40",
+             flat_amount=Decimal("40.00"), jurisdiction_state="Tamil Nadu", sort_order=14),
     ],
     "US": [
         dict(component_key="social-security", label="Social Security",
@@ -170,6 +200,163 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="k_code_cap_pct", label="K-Code Overriding Limit",
              employee_share="—", employer_share="—", total="50%",
              employee_rate_pct=Decimal("50.00"), sort_order=9),
+        # 2026-09-09 gap-closure Phase 1: three figures found reading a
+        # bare Python literal with NO rate_map/ContributionRate row at
+        # all (unlike every other UK figure) — flat-rate tax-code
+        # percentages, the Weekly/Monthly direct-period NI thresholds,
+        # and the Student/Postgraduate Loan repayment rates. Seeded here
+        # at their current correct 2026-27 values so a Super Admin sees
+        # (and can override) them from day one, same treatment as
+        # k_code_cap_pct above.
+        dict(component_key="flat_br_pct", label="Tax Code BR — Flat Rate",
+             employee_share="20%", employer_share="—", total="20%",
+             employee_rate_pct=Decimal("20.00"), sort_order=10),
+        dict(component_key="flat_d0_pct", label="Tax Code D0 — Flat Rate",
+             employee_share="40%", employer_share="—", total="40%",
+             employee_rate_pct=Decimal("40.00"), sort_order=11),
+        dict(component_key="flat_d1_pct", label="Tax Code D1 — Flat Rate",
+             employee_share="45%", employer_share="—", total="45%",
+             employee_rate_pct=Decimal("45.00"), sort_order=12),
+        dict(component_key="flat_sbr_pct", label="Tax Code SBR — Flat Rate (Scotland)",
+             employee_share="20%", employer_share="—", total="20%",
+             employee_rate_pct=Decimal("20.00"), sort_order=13),
+        dict(component_key="flat_sd0_pct", label="Tax Code SD0 — Flat Rate (Scotland)",
+             employee_share="21%", employer_share="—", total="21%",
+             employee_rate_pct=Decimal("21.00"), sort_order=14),
+        dict(component_key="flat_sd1_pct", label="Tax Code SD1 — Flat Rate (Scotland)",
+             employee_share="42%", employer_share="—", total="42%",
+             employee_rate_pct=Decimal("42.00"), sort_order=15),
+        dict(component_key="flat_sd2_pct", label="Tax Code SD2 — Flat Rate (Scotland)",
+             employee_share="45%", employer_share="—", total="45%",
+             employee_rate_pct=Decimal("45.00"), sort_order=16),
+        dict(component_key="flat_sd3_pct", label="Tax Code SD3 — Flat Rate (Scotland)",
+             employee_share="48%", employer_share="—", total="48%",
+             employee_rate_pct=Decimal("48.00"), sort_order=17),
+        dict(component_key="flat_cbr_pct", label="Tax Code CBR — Flat Rate (Wales)",
+             employee_share="20%", employer_share="—", total="20%",
+             employee_rate_pct=Decimal("20.00"), sort_order=18),
+        dict(component_key="flat_cd0_pct", label="Tax Code CD0 — Flat Rate (Wales)",
+             employee_share="40%", employer_share="—", total="40%",
+             employee_rate_pct=Decimal("40.00"), sort_order=19),
+        dict(component_key="flat_cd1_pct", label="Tax Code CD1 — Flat Rate (Wales)",
+             employee_share="45%", employer_share="—", total="45%",
+             employee_rate_pct=Decimal("45.00"), sort_order=20),
+        dict(component_key="ni_pt_thresh_wk", label="NI Primary Threshold (Weekly)",
+             employee_share="—", employer_share="—", total="£242",
+             flat_amount=Decimal("242.00"), sort_order=21),
+        dict(component_key="ni_pt_thresh_mo", label="NI Primary Threshold (Monthly)",
+             employee_share="—", employer_share="—", total="£1,048",
+             flat_amount=Decimal("1048.00"), sort_order=22),
+        dict(component_key="ni_uel_thresh_wk", label="NI Upper Earnings Limit (Weekly)",
+             employee_share="—", employer_share="—", total="£967",
+             flat_amount=Decimal("967.00"), sort_order=23),
+        dict(component_key="ni_uel_thresh_mo", label="NI Upper Earnings Limit (Monthly)",
+             employee_share="—", employer_share="—", total="£4,189",
+             flat_amount=Decimal("4189.00"), sort_order=24),
+        dict(component_key="ni_st_thresh_wk", label="NI Secondary Threshold (Weekly)",
+             employee_share="—", employer_share="—", total="£96",
+             flat_amount=Decimal("96.00"), sort_order=25),
+        dict(component_key="ni_st_thresh_mo", label="NI Secondary Threshold (Monthly)",
+             employee_share="—", employer_share="—", total="£417",
+             flat_amount=Decimal("417.00"), sort_order=26),
+        dict(component_key="sl_plan1_rate", label="Student Loan Plan 1 Rate",
+             employee_share="9%", employer_share="—", total="9%",
+             employee_rate_pct=Decimal("9.00"), sort_order=27),
+        dict(component_key="sl_plan2_rate", label="Student Loan Plan 2 Rate",
+             employee_share="9%", employer_share="—", total="9%",
+             employee_rate_pct=Decimal("9.00"), sort_order=28),
+        dict(component_key="sl_plan4_rate", label="Student Loan Plan 4 Rate",
+             employee_share="9%", employer_share="—", total="9%",
+             employee_rate_pct=Decimal("9.00"), sort_order=29),
+        dict(component_key="sl_plan5_rate", label="Student Loan Plan 5 Rate",
+             employee_share="9%", employer_share="—", total="9%",
+             employee_rate_pct=Decimal("9.00"), sort_order=30),
+        dict(component_key="pg_loan_rate", label="Postgraduate Loan Rate",
+             employee_share="6%", employer_share="—", total="6%",
+             employee_rate_pct=Decimal("6.00"), sort_order=31),
+        # 2026-09-09 gap-closure Part 4 (§16) — mileage allowance payments
+        # (employee-owned vehicles) and company-car advisory fuel rates.
+        # Deliberately NO Python hardcoded-default fallback for any of
+        # these 16 keys, same "genuinely new statutory data, fails closed
+        # until configured" discipline as the Statutory Pay/Employer
+        # Charges keys from the first plan — only these seed rows exist;
+        # uk.py's calculate_mileage_reimbursement/resolve_advisory_fuel_
+        # rate read rate_map.get(key) directly with no fallback constant.
+        dict(component_key="mileage_car_first_10k", label="Mileage — Car (first 10,000 miles, tax)",
+             employee_share="—", employer_share="—", total="55p/mile",
+             flat_amount=Decimal("0.55"), sort_order=32),
+        dict(component_key="mileage_car_after_10k", label="Mileage — Car (after 10,000 miles, tax)",
+             employee_share="—", employer_share="—", total="25p/mile",
+             flat_amount=Decimal("0.25"), sort_order=33),
+        dict(component_key="mileage_car_ni", label="Mileage — Car (NI-approved, all miles)",
+             employee_share="—", employer_share="—", total="55p/mile",
+             flat_amount=Decimal("0.55"), sort_order=34),
+        dict(component_key="mileage_motorcycle", label="Mileage — Motorcycle (tax & NI)",
+             employee_share="—", employer_share="—", total="24p/mile",
+             flat_amount=Decimal("0.24"), sort_order=35),
+        dict(component_key="mileage_cycle", label="Mileage — Cycle (tax & NI)",
+             employee_share="—", employer_share="—", total="20p/mile",
+             flat_amount=Decimal("0.20"), sort_order=36),
+        dict(component_key="afr_petrol_le1400", label="Advisory Fuel Rate — Petrol ≤1400cc",
+             employee_share="—", employer_share="—", total="14p/mile",
+             flat_amount=Decimal("0.14"), sort_order=37),
+        dict(component_key="afr_petrol_1401_2000", label="Advisory Fuel Rate — Petrol 1401–2000cc",
+             employee_share="—", employer_share="—", total="17p/mile",
+             flat_amount=Decimal("0.17"), sort_order=38),
+        dict(component_key="afr_petrol_gt2000", label="Advisory Fuel Rate — Petrol >2000cc",
+             employee_share="—", employer_share="—", total="26p/mile",
+             flat_amount=Decimal("0.26"), sort_order=39),
+        dict(component_key="afr_lpg_le1400", label="Advisory Fuel Rate — LPG ≤1400cc",
+             employee_share="—", employer_share="—", total="11p/mile",
+             flat_amount=Decimal("0.11"), sort_order=40),
+        dict(component_key="afr_lpg_1401_2000", label="Advisory Fuel Rate — LPG 1401–2000cc",
+             employee_share="—", employer_share="—", total="13p/mile",
+             flat_amount=Decimal("0.13"), sort_order=41),
+        dict(component_key="afr_lpg_gt2000", label="Advisory Fuel Rate — LPG >2000cc",
+             employee_share="—", employer_share="—", total="21p/mile",
+             flat_amount=Decimal("0.21"), sort_order=42),
+        dict(component_key="afr_diesel_le1600", label="Advisory Fuel Rate — Diesel ≤1600cc",
+             employee_share="—", employer_share="—", total="15p/mile",
+             flat_amount=Decimal("0.15"), sort_order=43),
+        dict(component_key="afr_diesel_1601_2000", label="Advisory Fuel Rate — Diesel 1601–2000cc",
+             employee_share="—", employer_share="—", total="17p/mile",
+             flat_amount=Decimal("0.17"), sort_order=44),
+        dict(component_key="afr_diesel_gt2000", label="Advisory Fuel Rate — Diesel >2000cc",
+             employee_share="—", employer_share="—", total="23p/mile",
+             flat_amount=Decimal("0.23"), sort_order=45),
+        dict(component_key="afr_electric_home", label="Advisory Fuel Rate — Electric (home charger)",
+             employee_share="—", employer_share="—", total="7p/mile",
+             flat_amount=Decimal("0.07"), sort_order=46),
+        dict(component_key="afr_electric_public", label="Advisory Fuel Rate — Electric (public charger)",
+             employee_share="—", employer_share="—", total="15p/mile",
+             flat_amount=Decimal("0.15"), sort_order=47),
+        # 2026-09-09 gap-closure Part 5 (§15) — National Minimum Wage
+        # compliance rate table, effective 1 April 2026 (Part 1A's
+        # row-level effective dating is what lets this coexist with the
+        # tax-year pack's own 6 April window — §15's own instruction:
+        # "NMW rates effective 1 April 2026 are not incorrectly tied to
+        # PAYE tax-year start 6 April," AC-25). No hardcoded Python
+        # fallback — same "genuinely new statutory data, fails closed"
+        # discipline as Part 4's mileage/AFR keys. Under-18/apprentice-
+        # under-19/apprentice-19-plus-first-year all happen to be £8.00
+        # this year but are kept as 3 separate keys — same "don't assume
+        # a coincidence is permanent" principle as the document's own
+        # "Preserve the C prefix" instruction for Welsh PAYE (§5.4).
+        dict(component_key="nmw_age_21_plus", label="NMW — Age 21+ (National Living Wage)",
+             employee_share="—", employer_share="—", total="£12.71/hour",
+             flat_amount=Decimal("12.71"), sort_order=48),
+        dict(component_key="nmw_age_18_20", label="NMW — Age 18 to 20",
+             employee_share="—", employer_share="—", total="£10.85/hour",
+             flat_amount=Decimal("10.85"), sort_order=49),
+        dict(component_key="nmw_under_18", label="NMW — Under 18",
+             employee_share="—", employer_share="—", total="£8.00/hour",
+             flat_amount=Decimal("8.00"), sort_order=50),
+        dict(component_key="nmw_apprentice_under_19", label="NMW — Apprentice under 19",
+             employee_share="—", employer_share="—", total="£8.00/hour",
+             flat_amount=Decimal("8.00"), sort_order=51),
+        dict(component_key="nmw_apprentice_19plus_yr1", label="NMW — Apprentice 19+ (first year)",
+             employee_share="—", employer_share="—", total="£8.00/hour",
+             flat_amount=Decimal("8.00"), sort_order=52),
     ],
     # Representative defaults — Enterprise Policy jurisdictions. Unlike US/UK
     # above (display-only; the engine's US/UK calculators use hardcoded
@@ -359,6 +546,62 @@ _TAX_SLABS_BY_COUNTRY = {
         dict(min_amount=Decimal("0"),      max_amount=Decimal("15000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),   jurisdiction_state="Telangana", sort_order=31),
         dict(min_amount=Decimal("15001"),  max_amount=Decimal("20000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("150.00"), jurisdiction_state="Telangana", sort_order=32),
         dict(min_amount=Decimal("20001"),  max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("200.00"), jurisdiction_state="Telangana", sort_order=33),
+        # Karnataka Professional Tax (§13.1) — source IN-KA-PT-SCHED, seed
+        # rule schedule; Karnataka Act No. 22 of 2026 (IN-KA-PT-2026-ACT,
+        # effective 1 Apr 2026) amends return mechanics only, not this
+        # employee rate, per the document's own note.
+        dict(min_amount=Decimal("0"),      max_amount=Decimal("24999"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),   jurisdiction_state="Karnataka", sort_order=34),
+        dict(min_amount=Decimal("25000"),  max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("200.00"), jurisdiction_state="Karnataka", sort_order=35),
+        # Maharashtra Professional Tax (§13.2, source IN-MH-PT) — gender-
+        # differentiated (filing_status carries gender, MALE/FEMALE, per
+        # _resolve_state_pt_bracket's own reuse convention) with a
+        # February adjustment (adjustment_amount) so 11×₹200 + ₹300 = the
+        # statutory ₹2,500 annual ceiling for both bands' top tier.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("7500"),  rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),   jurisdiction_state="Maharashtra", filing_status="MALE", sort_order=36),
+        dict(min_amount=Decimal("7501"),  max_amount=Decimal("10000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("175.00"), jurisdiction_state="Maharashtra", filing_status="MALE", sort_order=37),
+        dict(min_amount=Decimal("10001"), max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("200.00"), adjustment_amount=Decimal("300.00"), jurisdiction_state="Maharashtra", filing_status="MALE", sort_order=38),
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("25000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),   jurisdiction_state="Maharashtra", filing_status="FEMALE", sort_order=39),
+        dict(min_amount=Decimal("25001"), max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("200.00"), adjustment_amount=Decimal("300.00"), jurisdiction_state="Maharashtra", filing_status="FEMALE", sort_order=40),
+        # Odisha Professional Tax (§14.2, source IN-OD-PT) — full bracket
+        # ladder as published; "Source-age control" note in the document
+        # applies (verify no later notification supersedes this before
+        # each annual publish), same as every other seeded state here.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("5000"),  rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),   jurisdiction_state="Odisha", sort_order=41),
+        dict(min_amount=Decimal("5001"),  max_amount=Decimal("6000"),  rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("30.00"),  jurisdiction_state="Odisha", sort_order=42),
+        dict(min_amount=Decimal("6001"),  max_amount=Decimal("8000"),  rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("50.00"),  jurisdiction_state="Odisha", sort_order=43),
+        dict(min_amount=Decimal("8001"),  max_amount=Decimal("10000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("75.00"),  jurisdiction_state="Odisha", sort_order=44),
+        dict(min_amount=Decimal("10001"), max_amount=Decimal("15000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("100.00"), jurisdiction_state="Odisha", sort_order=45),
+        dict(min_amount=Decimal("15001"), max_amount=Decimal("20000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("150.00"), jurisdiction_state="Odisha", sort_order=46),
+        dict(min_amount=Decimal("20001"), max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("200.00"), jurisdiction_state="Odisha", sort_order=47),
+        # Greater Chennai Corporation local Professional Tax (§14.1,
+        # source IN-CHN-PT) — LOCAL authority level under Tamil Nadu, not
+        # a statewide Tamil Nadu schedule (the document's own explicit
+        # instruction: "Do not create a single statewide Chennai
+        # schedule"). assessment_basis="HALF_YEAR_INCOME" — matched
+        # against an average HALF-YEARLY income, not monthly gross (see
+        # india.py's _pt_assessment_income). Half-yearly schedule
+        # effective from II/2024-25 for the lower/middle bands.
+        #
+        # DELIBERATELY NOT SEEDED: a "pt_half_year_deduct_month_1/_2"
+        # collection-month row — the document gives no specific due
+        # date/remittance month for Chennai's own collection cycle (only
+        # the schedule's effective FY), and §1.1 forbids guessing a due
+        # date the source doesn't give. Until Tax Ops configures those
+        # two keys from a certified source, this bracket resolves a real
+        # amount but _pt_half_year_deduction_active always returns False,
+        # so professional_tax stays ₹0 every month — fail-closed, not a
+        # silent guess, exactly like an unconfigured LWF deduction month.
+        dict(min_amount=Decimal("0"),     max_amount=Decimal("21000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("0.00"),    jurisdiction_state="Tamil Nadu", jurisdiction_locality="Chennai", assessment_basis="HALF_YEAR_INCOME", sort_order=48),
+        dict(min_amount=Decimal("21001"), max_amount=Decimal("30000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("180.00"),  jurisdiction_state="Tamil Nadu", jurisdiction_locality="Chennai", assessment_basis="HALF_YEAR_INCOME", sort_order=49),
+        dict(min_amount=Decimal("30001"), max_amount=Decimal("45000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("425.00"),  jurisdiction_state="Tamil Nadu", jurisdiction_locality="Chennai", assessment_basis="HALF_YEAR_INCOME", sort_order=50),
+        dict(min_amount=Decimal("45001"), max_amount=Decimal("60000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("930.00"),  jurisdiction_state="Tamil Nadu", jurisdiction_locality="Chennai", assessment_basis="HALF_YEAR_INCOME", sort_order=51),
+        dict(min_amount=Decimal("60001"), max_amount=Decimal("75000"), rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("1025.00"), jurisdiction_state="Tamil Nadu", jurisdiction_locality="Chennai", assessment_basis="HALF_YEAR_INCOME", sort_order=52),
+        dict(min_amount=Decimal("75001"), max_amount=None,             rate_pct=Decimal("0"), rate_label="PT", tax_formula="", rule_type="PT_FLAT", flat_amount=Decimal("1250.00"), jurisdiction_state="Tamil Nadu", jurisdiction_locality="Chennai", assessment_basis="HALF_YEAR_INCOME", sort_order=53),
+        # NOT seeded: Gujarat (§13.4, source IN-GJ-PT) — the document's own
+        # instruction is "activate only after current rate-schedule
+        # artifact is attached to the production ruleset," which has not
+        # happened. Tracked as SOURCE_REQUIRED in
+        # StateLocalProgramReadiness instead of a guessed/premature row.
     ],
     "US": [
         # Tax Year 2026, IRS Pub 15-T Worksheet 1A annualized schedules
@@ -621,10 +864,21 @@ _UK_NI_EMPLOYER_RATE = Decimal("15")
 # Real 2025/26 Qualifying Earnings band for Workplace Pension auto-enrolment.
 _UK_PENSION_QE_LOWER = Decimal("6240")
 _UK_PENSION_QE_UPPER = Decimal("50270")
+# Automatic-enrolment earnings trigger (ZP-TAX-UK-2026-27-001 §13.1) — the
+# annual earnings level above which an age-22-to-SPA employee must be
+# auto-enrolled. Distinct from _UK_PENSION_QE_LOWER above: an employee
+# earning between this figure and the lower qualifying-earnings threshold
+# is a non-eligible jobholder (can opt in), not an eligible one.
+_UK_PENSION_AE_TRIGGER = Decimal("10000")
 # Student/Postgraduate Loan — real UK mechanism. Plan 5 covers post-2023
 # starters (in effect from April 2026). Any other/unset study_loan_plan
 # value deducts 0, same as having no loan at all. 2026-27 thresholds per
-# ZP-TAX-UK-2026-27-001 section 10.1.
+# ZP-TAX-UK-2026-27-001 section 10.1. Both figures in each tuple are
+# FALLBACK defaults only — the threshold was already Super-Admin-
+# configurable via uk.py's _UK_STUDENT_LOAN_PARAM_KEYS; as of 2026-09-09
+# gap-closure Phase 1 the repayment RATE is too, via the new
+# _UK_STUDENT_LOAN_RATE_PARAM_KEYS (seed rows above) — it was previously
+# the one figure in this tuple with no override path at all.
 _UK_STUDENT_LOAN_PLANS = {
     "UK_PLAN1": (Decimal("26900"), Decimal("9")),
     "UK_PLAN2": (Decimal("29385"), Decimal("9")),
@@ -636,6 +890,11 @@ _UK_STUDENT_LOAN_PLANS = {
 # 6.3) — flat percentage on all pay, no Personal Allowance. The S/C prefix
 # selects which regional rate a BR/D-family code actually means (Scottish
 # SD0-3 have no rUK equivalent letter, Welsh C-codes mirror rUK 2026-27).
+# This dict is the FALLBACK default only — 2026-09-09 gap-closure Phase 1
+# made each code's % Super-Admin-configurable via
+# uk.py's _UK_FLAT_RATE_CODE_PARAM_KEYS + resolve_jurisdiction_parameter
+# (seed rows above), since a code's meaning is genuinely statutory data
+# HMRC republishes, not a code-only constant.
 _UK_FLAT_RATE_CODES = {
     "BR": Decimal("20"), "D0": Decimal("40"), "D1": Decimal("45"),
     "SBR": Decimal("20"), "SD0": Decimal("21"), "SD1": Decimal("42"), "SD2": Decimal("45"), "SD3": Decimal("48"),
@@ -648,9 +907,20 @@ _UK_FLAT_RATE_CODES = {
 # figures above by simple division (e.g. PT annual £12,570 ÷ 12 =
 # £1,047.50, not the real published £1,048 monthly figure) — HMRC rounds
 # each period's table independently, so both must be stored, not computed.
+# FALLBACK default only as of 2026-09-09 gap-closure Phase 1 —
+# resolve_direct_period_threshold now checks a rate_map row first (see
+# uk.py's _UK_NI_*_THRESH_PARAM_KEYS, seed rows above) before using these.
 _UK_NI_PRIMARY_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("242"), "Monthly": Decimal("1048")}
 _UK_NI_UPPER_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("967"), "Monthly": Decimal("4189")}
 _UK_NI_SECONDARY_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("96"), "Monthly": Decimal("417")}
+# NI category derivation (ZP-TAX-UK-2026-27-001 §8.2/§9.1/§9.3 gap-closure
+# Part 2, 2026-09-09) — the current real State Pension age. A genuine
+# simplification: the real UK State Pension age is a phased schedule that
+# varies by birth cohort (and historically by gender), not one flat
+# number — this engine uses a single configurable age rather than
+# modeling that full schedule, same class of disclosed simplification as
+# Australia's HELP/HECS single-band approximation elsewhere in this file.
+_UK_STATE_PENSION_AGE = Decimal("66")
 
 # ── Australia (previously engine/countries/australia.py) ────────────────
 _AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = Decimal("24276")

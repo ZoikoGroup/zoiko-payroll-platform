@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { X, Edit, Trash2 } from "lucide-react";
+import { X, Edit, Trash2, Calculator, Scale, ShieldCheck } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
+import UKStatutoryPayCalculatorModal from "./UKStatutoryPayCalculatorModal";
+import UKCourtOrdersModal from "./UKCourtOrdersModal";
+import UKNiReliefFactsModal from "./UKNiReliefFactsModal";
+import IndiaStatutoryFormsModal from "./IndiaStatutoryFormsModal";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
 
 const DEPARTMENT_STYLES = {
@@ -55,6 +59,10 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [deleteError, setDeleteError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [showStatutoryPayCalculator, setShowStatutoryPayCalculator] = useState(false);
+  const [showCourtOrders, setShowCourtOrders] = useState(false);
+  const [showNiReliefFacts, setShowNiReliefFacts] = useState(false);
+  const [showIndiaStatutoryForms, setShowIndiaStatutoryForms] = useState(false);
 
   useEffect(() => {
     getCustomFields().then(setCustomFieldDefs).catch(() => {});
@@ -130,6 +138,7 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                 <dl className="divide-y divide-border">
                   <DetailRow label="Email" value={employee.email} />
                   <DetailRow label="Phone" value={employee.phone} />
+                  <DetailRow label="Date of birth" value={employee.dateOfBirth} />
                   <DetailRow label="Designation" value={employee.designation} />
                   <DetailRow label="Employment type" value={employee.employmentType} />
                   <DetailRow label="Status" value={employee.status} />
@@ -151,6 +160,48 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                   <DetailRow label="Bank account" value={employee.bankAccountNumber} />
                   <DetailRow label="PAN" value={employee.panNumber} />
                 </dl>
+                {employee.countryCode === "UK" && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowStatutoryPayCalculator(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Statutory Pay Calculator (SSP / Family Pay)
+                    </button>
+                    <button
+                      onClick={() => setShowCourtOrders(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Scale size={14} />
+                      Court-Ordered Deductions
+                    </button>
+                    <button
+                      onClick={() => setShowNiReliefFacts(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <ShieldCheck size={14} />
+                      NI Category Relief Facts
+                    </button>
+                  </div>
+                )}
+                {/* countryCode defaults to IN across most of this app's
+                    existing orgs (never explicitly set) — same reasoning
+                    as _resolve_employee_country's own org-default fallback
+                    on the backend, so this is intentionally permissive
+                    rather than an exact "=== IN" match like the UK block
+                    above. */}
+                {(!employee.countryCode || employee.countryCode === "IN") && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowIndiaStatutoryForms(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Gratuity &amp; Statutory Forms (122/123/124)
+                    </button>
+                  </div>
+                )}
               </div>
 
               {customFieldEntries.length > 0 && (
@@ -215,6 +266,19 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
           </div>
         )}
       </div>
+
+      {showStatutoryPayCalculator && (
+        <UKStatutoryPayCalculatorModal employee={employee} onClose={() => setShowStatutoryPayCalculator(false)} />
+      )}
+      {showCourtOrders && (
+        <UKCourtOrdersModal employee={employee} onClose={() => setShowCourtOrders(false)} />
+      )}
+      {showNiReliefFacts && (
+        <UKNiReliefFactsModal employee={employee} onClose={() => setShowNiReliefFacts(false)} />
+      )}
+      {showIndiaStatutoryForms && (
+        <IndiaStatutoryFormsModal employee={employee} onClose={() => setShowIndiaStatutoryForms(false)} />
+      )}
     </div>
   );
 }

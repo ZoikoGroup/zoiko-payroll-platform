@@ -78,6 +78,13 @@ class EmployeeCreate(BaseModel):
     # (ZP-TAX-CA-2026-001 §6 — see canada.py's _calculate_lsvcc_credit).
     lsvcc_investment_amount: Optional[Decimal] = Field(None, validation_alias="lsvccInvestmentAmount")
     compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
+    # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09).
+    address_line1:    Optional[str] = Field(None, validation_alias="addressLine1")
+    address_line2:    Optional[str] = Field(None, validation_alias="addressLine2")
+    address_town:     Optional[str] = Field(None, validation_alias="addressTown")
+    address_county:   Optional[str] = Field(None, validation_alias="addressCounty")
+    address_postcode: Optional[str] = Field(None, validation_alias="addressPostcode")
+    starter_declaration: Optional[str] = Field(None, validation_alias="starterDeclaration")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -104,6 +111,12 @@ class EmployeeUpdate(BaseModel):
     country_code:     Optional[str] = Field(None, validation_alias="countryCode")
     lsvcc_investment_amount: Optional[Decimal] = Field(None, validation_alias="lsvccInvestmentAmount")
     compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
+    address_line1:    Optional[str] = Field(None, validation_alias="addressLine1")
+    address_line2:    Optional[str] = Field(None, validation_alias="addressLine2")
+    address_town:     Optional[str] = Field(None, validation_alias="addressTown")
+    address_county:   Optional[str] = Field(None, validation_alias="addressCounty")
+    address_postcode: Optional[str] = Field(None, validation_alias="addressPostcode")
+    starter_declaration: Optional[str] = Field(None, validation_alias="starterDeclaration")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -138,6 +151,12 @@ class EmployeeResponse(BaseModel):
     lsvccInvestmentAmount: Optional[Decimal] = Field(None, validation_alias="lsvcc_investment_amount", serialization_alias="lsvccInvestmentAmount")
     complianceFields: Optional[dict] = Field(None, validation_alias="compliance_fields", serialization_alias="complianceFields")
     customFields:    Optional[dict] = Field(None, validation_alias="custom_fields", serialization_alias="customFields")
+    addressLine1:    Optional[str] = Field(None, validation_alias="address_line1", serialization_alias="addressLine1")
+    addressLine2:    Optional[str] = Field(None, validation_alias="address_line2", serialization_alias="addressLine2")
+    addressTown:     Optional[str] = Field(None, validation_alias="address_town", serialization_alias="addressTown")
+    addressCounty:   Optional[str] = Field(None, validation_alias="address_county", serialization_alias="addressCounty")
+    addressPostcode: Optional[str] = Field(None, validation_alias="address_postcode", serialization_alias="addressPostcode")
+    starterDeclaration: Optional[str] = Field(None, validation_alias="starter_declaration", serialization_alias="starterDeclaration")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -272,6 +291,11 @@ class PayrollRunPreviewEmployee(BaseModel):
     # same "computed but invisible" bug as the persisted-payslip schema.
     monthlyEmployeePension: float = 0.0
     monthlyStudyLoanDeduction: float = 0.0
+    # UK: Postgraduate Loan (concurrent with an undergraduate plan) and
+    # Apprenticeship Levy — same "computed by service.py, never declared
+    # here so response_model filtering silently stripped it" gap as
+    # monthlyStudyLoanDeduction above, found 2026-09-09 gap-closure Phase 3.
+    monthlyPostgradLoanDeduction: float = 0.0
     monthlyContributions: float
     monthlyNet: float
     employerPf: float = 0.0
@@ -285,6 +309,10 @@ class PayrollRunPreviewEmployee(BaseModel):
     employerPension: float = 0.0
     employeePension: float = 0.0
     employerNi: float = 0.0
+    employerApprenticeshipLevy: float = 0.0
+    autoEnrolmentStatus: Optional[str] = None
+    taxWeek: Optional[int] = None
+    taxMonth: Optional[int] = None
     taxSlabRate: str = "—"
     payableDays: Optional[float] = None
     totalWorkingDays: Optional[float] = None
@@ -403,6 +431,10 @@ class PayslipItemResponse(BaseModel):
     # stripped them from every payslip API response before this fix.
     employeePension:    Decimal = Decimal("0")
     studyLoanDeduction: Decimal = Decimal("0")
+    # UK: Postgraduate Loan (concurrent with an undergraduate plan) — same
+    # "computed and persisted, never declared here" gap as
+    # studyLoanDeduction above, found 2026-09-09 gap-closure Phase 3.
+    postgradLoanDeduction: Decimal = Decimal("0")
     totalDeductions:    Decimal = Decimal("0")
     employerPf:         Decimal = Decimal("0")
     employerEps:        Decimal = Decimal("0")
@@ -416,6 +448,20 @@ class PayslipItemResponse(BaseModel):
     # UK: employer-side National Insurance — same "computed, persisted,
     # never serialized" gap as studyLoanDeduction above.
     employerNi:         Decimal = Decimal("0")
+    # UK: Apprenticeship Levy — same gap, found 2026-09-09 gap-closure
+    # Phase 3 alongside the fix that made this value actually get
+    # persisted at all (see _compute_payslip_values).
+    employerApprenticeshipLevy: Decimal = Decimal("0")
+    # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
+    # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
+    # amount; informational only, never affects employeePension/
+    # employerPension above.
+    autoEnrolmentStatus: Optional[str] = None
+    # UK: HMRC tax week (1-53) / tax month (1-12) (ZP-TAX-UK-2026-27-001
+    # §7.2/§18.1 gap-closure Part 6) — pure calendar metadata for RTI
+    # reporting, never affects any calculation.
+    taxWeek: Optional[int] = None
+    taxMonth: Optional[int] = None
     netPay:             Decimal
     bankName:           Optional[str] = None
     bankAccount:        Optional[str] = None
@@ -426,6 +472,235 @@ class PayslipItemResponse(BaseModel):
     status:             PayslipStatus
     notes:              Optional[str] = None
 
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── UK Statutory Pay Calculator (ZP-TAX-UK-2026-27-001 §11/§12 gap-────────
+# closure Phase 5, 2026-09-09) — an on-demand preview, not a payslip
+# mutation, so this deliberately has no "*Create"/persisted-row response
+# shape like PayslipItemCreate/PayslipItemResponse above.
+class UKStatutoryPayRequest(BaseModel):
+    employee_id: int
+    # "SSP" or one of SMP/SPP/SAP/SHPP/SPBP/SNCP.
+    payment_type: str
+    event_start_date: date
+    week_number: int = 1
+    qualifying_days_in_period: Optional[int] = None
+    qualifying_days_per_week: Optional[int] = None
+    average_weekly_earnings: Optional[Decimal] = None
+    include_employer_recovery: bool = False
+    prior_year_total_class1_nic: Optional[Decimal] = None
+
+
+class UKStatutoryPayEmployerRecovery(BaseModel):
+    eligible: bool
+    reason: str
+    recoveryAmount: Decimal = Field(Decimal("0"), validation_alias="recovery_amount", serialization_alias="recoveryAmount")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UKStatutoryPayResponse(BaseModel):
+    eligible: bool
+    reason: str
+    amount: Decimal = Decimal("0")
+    averageWeeklyEarnings: Decimal = Field(Decimal("0"), validation_alias="average_weekly_earnings", serialization_alias="averageWeeklyEarnings")
+    averageWeeklyEarningsSource: str = Field("supplied", validation_alias="average_weekly_earnings_source", serialization_alias="averageWeeklyEarningsSource")
+    employerRecovery: Optional[UKStatutoryPayEmployerRecovery] = Field(None, validation_alias="employer_recovery", serialization_alias="employerRecovery")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── UK Employer Annual Charges — Employment Allowance + Class 1A/1B ──────
+# (ZP-TAX-UK-2026-27-001 §9.3/§14 gap-closure Phase 6, 2026-09-09).
+# Whole-tax-year, run-independent employer liabilities — see
+# service.py's get_uk_employer_charges_summary/calculate_uk_employment_
+# allowance/calculate_uk_class_1a_1b_charge.
+class UKEmployerChargesSummaryResponse(BaseModel):
+    taxYear: str = Field(..., validation_alias="tax_year", serialization_alias="taxYear")
+    cumulativeEmployerNi: Decimal = Field(Decimal("0"), validation_alias="cumulative_employer_ni", serialization_alias="cumulativeEmployerNi")
+    cumulativeApprenticeshipLevyPayBill: Decimal = Field(Decimal("0"), validation_alias="cumulative_apprenticeship_levy_pay_bill", serialization_alias="cumulativeApprenticeshipLevyPayBill")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UKEmploymentAllowanceRequest(BaseModel):
+    employer_has_claimed: bool
+
+
+class UKEmploymentAllowanceResponse(BaseModel):
+    eligible: bool
+    reason: str
+    netLiability: Decimal = Field(Decimal("0"), validation_alias="net_liability", serialization_alias="netLiability")
+    allowanceRemaining: Decimal = Field(Decimal("0"), validation_alias="allowance_remaining", serialization_alias="allowanceRemaining")
+    cumulativeEmployerNi: Decimal = Field(Decimal("0"), validation_alias="cumulative_employer_ni", serialization_alias="cumulativeEmployerNi")
+    taxYear: str = Field("", validation_alias="tax_year", serialization_alias="taxYear")
+    # Connected-employer allocation (ZP-TAX-UK-2026-27-001 §14 gap-closure
+    # Part 7B, 2026-09-09) — None/equal-to-cumulativeEmployerNi when this
+    # org isn't in a connected group (the default, unchanged behavior).
+    connectedGroupCode: Optional[str] = Field(None, validation_alias="connected_group_code", serialization_alias="connectedGroupCode")
+    groupCumulativeEmployerNi: Decimal = Field(Decimal("0"), validation_alias="group_cumulative_employer_ni", serialization_alias="groupCumulativeEmployerNi")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UKClass1A1BRequest(BaseModel):
+    # One of BENEFITS / TERMINATION_AWARDS / SPORTING_TESTIMONIAL / PSA.
+    charge_type: str
+    amount: Decimal
+
+
+class UKClass1A1BResponse(BaseModel):
+    eligible: bool
+    reason: str
+    chargeAmount: Decimal = Field(Decimal("0"), validation_alias="charge_amount", serialization_alias="chargeAmount")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── UK NI Category relief-eligibility facts (ZP-TAX-UK-2026-27-001 ───────
+# §9.1/§9.3 gap-closure Part 2, 2026-09-09) — evidence stored SEPARATELY
+# from the NI category letter itself, per §9.3's own instruction.
+class UKNiReliefFactCreate(BaseModel):
+    # FREEPORT | INVESTMENT_ZONE | VETERAN | APPRENTICE
+    relief_type: str
+    reference: Optional[str] = None
+    effective_from: date
+    effective_to: Optional[date] = None
+
+
+class UKNiReliefFactResponse(BaseModel):
+    id: int
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    reliefType: str = Field(..., validation_alias="relief_type", serialization_alias="reliefType")
+    reference: Optional[str] = None
+    effectiveFrom: date = Field(..., validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── UK Mileage Allowance Payments & Advisory Fuel Rates (§16) ───────────
+# gap-closure Part 4, 2026-09-09 — on-demand expense-reimbursement
+# calculators, same shape as UKStatutoryPayRequest/Response above.
+class UKMileageReimbursementRequest(BaseModel):
+    employee_id: int
+    vehicle_type: str  # CAR | MOTORCYCLE | CYCLE
+    business_miles: Decimal
+    claim_date: date
+    ytd_business_miles_before: Optional[Decimal] = None
+
+
+class UKMileageReimbursementResponse(BaseModel):
+    eligible: bool
+    reason: str
+    taxFreeAmount: Decimal = Field(Decimal("0"), validation_alias="tax_free_amount", serialization_alias="taxFreeAmount")
+    niFreeAmount: Decimal = Field(Decimal("0"), validation_alias="ni_free_amount", serialization_alias="niFreeAmount")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UKAdvisoryFuelRateRequest(BaseModel):
+    fuel_type: str  # PETROL | LPG | DIESEL | ELECTRIC
+    engine_band: str  # LE_1400 | 1401_2000 | GT_2000 | LE_1600 | 1601_2000 | HOME | PUBLIC
+    as_of: Optional[date] = None
+
+
+class UKAdvisoryFuelRateResponse(BaseModel):
+    eligible: bool
+    reason: str
+    ratePerMile: Decimal = Field(Decimal("0"), validation_alias="rate_per_mile", serialization_alias="ratePerMile")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── UK National Minimum Wage compliance validation (§15) ────────────────
+# gap-closure Part 5, 2026-09-09 — a pay-compliance check, not a payroll
+# tax. `nmw_countable_pay` is the caller's own already-reduced figure
+# (§15's own warning about deductions/accommodation offset complexity).
+class UKNmwComplianceRequest(BaseModel):
+    employee_id: int
+    period_start: date
+    period_end: date
+    nmw_countable_pay: Decimal
+
+
+class UKNmwComplianceResponse(BaseModel):
+    eligible: bool
+    reason: str
+    applicableRate: Decimal = Field(Decimal("0"), validation_alias="applicable_rate", serialization_alias="applicableRate")
+    effectiveHourlyRate: Decimal = Field(Decimal("0"), validation_alias="effective_hourly_rate", serialization_alias="effectiveHourlyRate")
+    compliant: bool = False
+    shortfallAmount: Decimal = Field(Decimal("0"), validation_alias="shortfall_amount", serialization_alias="shortfallAmount")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── UK Court-Ordered Deductions (§17 gap-closure Part 8, 2026-09-09) ────
+# England & Wales AEOs / Scottish arrestments / Northern Ireland orders.
+class UKCourtOrderCreate(BaseModel):
+    jurisdiction: str  # ENGLAND_WALES | SCOTLAND | NORTHERN_IRELAND
+    order_type: str
+    start_date: date
+    court_reference: Optional[str] = None
+    issue_date: Optional[date] = None
+    end_date: Optional[date] = None
+    priority: Optional[int] = None
+    fixed_deduction_rate_pct: Optional[Decimal] = None
+    fixed_deduction_amount: Optional[Decimal] = None
+    protected_earnings_amount: Optional[Decimal] = None
+    total_amount_to_collect: Optional[Decimal] = None
+
+
+class UKCourtOrderStatusUpdate(BaseModel):
+    status: str  # active | completed | cancelled
+
+
+class UKCourtOrderResponse(BaseModel):
+    id: int
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    jurisdiction: str
+    orderType: str = Field(..., validation_alias="order_type", serialization_alias="orderType")
+    courtReference: Optional[str] = Field(None, validation_alias="court_reference", serialization_alias="courtReference")
+    issueDate: Optional[date] = Field(None, validation_alias="issue_date", serialization_alias="issueDate")
+    startDate: date = Field(..., validation_alias="start_date", serialization_alias="startDate")
+    endDate: Optional[date] = Field(None, validation_alias="end_date", serialization_alias="endDate")
+    priority: Optional[int] = None
+    fixedDeductionRatePct: Optional[Decimal] = Field(None, validation_alias="fixed_deduction_rate_pct", serialization_alias="fixedDeductionRatePct")
+    fixedDeductionAmount: Optional[Decimal] = Field(None, validation_alias="fixed_deduction_amount", serialization_alias="fixedDeductionAmount")
+    protectedEarningsAmount: Optional[Decimal] = Field(None, validation_alias="protected_earnings_amount", serialization_alias="protectedEarningsAmount")
+    totalAmountToCollect: Optional[Decimal] = Field(None, validation_alias="total_amount_to_collect", serialization_alias="totalAmountToCollect")
+    totalAmountCollected: Decimal = Field(Decimal("0"), validation_alias="total_amount_collected", serialization_alias="totalAmountCollected")
+    status: str
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class UKCourtOrderCalculateRequest(BaseModel):
+    employee_id: int
+    attachable_earnings: Decimal
+    pay_frequency: str
+    as_of: Optional[date] = None
+
+
+class UKCourtOrderDeductionEntry(BaseModel):
+    orderId: Optional[int] = Field(None, validation_alias="order_id", serialization_alias="orderId")
+    eligible: bool
+    reason: str
+    deductionAmount: Decimal = Field(Decimal("0"), validation_alias="deduction_amount", serialization_alias="deductionAmount")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UKCourtOrderCalculateResponse(BaseModel):
+    totalDeduction: Decimal = Field(Decimal("0"), validation_alias="total_deduction", serialization_alias="totalDeduction")
+    orders: List[UKCourtOrderDeductionEntry] = Field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── India: Gratuity (ZP-TAX-IN-2026-27-001 §11) ─────────────────────────
+
+class GratuityCalculateRequest(BaseModel):
+    employee_id: int
+    eligibility_event: str = "RESIGNATION"  # RETIREMENT | RESIGNATION | TERMINATION | DEATH | DISABLEMENT | FIXED_TERM_END
+    is_fixed_term: bool = False
+    date_of_leaving: Optional[date] = None
+    last_drawn_monthly_wage: Optional[Decimal] = None
+
+
+class GratuityCalculateResponse(BaseModel):
+    eligible: bool
+    reason: str
+    gratuityAmount: Decimal = Field(Decimal("0"), validation_alias="gratuity_amount", serialization_alias="gratuityAmount")
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -512,6 +787,13 @@ class PayrollLeaveRequestResponse(BaseModel):
     updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
     linkedAttendanceDates: Optional[List[date]] = Field(None, serialization_alias="linkedAttendanceDates")
     isAutoCreated:      Optional[bool] = Field(False, serialization_alias="isAutoCreated")
+    # UK statutory leave wiring (ZP-TAX-UK-2026-27-001 §11 gap-closure
+    # Part 7A, 2026-09-09) — populated only for a statutory leave_type
+    # once approved with the switch on; NULL otherwise.
+    statutoryPayType:      Optional[str] = Field(None, serialization_alias="statutoryPayType")
+    statutoryAweSnapshot:  Optional[Decimal] = Field(None, serialization_alias="statutoryAweSnapshot")
+    statutoryPayTotalAmount: Optional[Decimal] = Field(None, serialization_alias="statutoryPayTotalAmount")
+    statutoryPayNote:      Optional[str] = Field(None, serialization_alias="statutoryPayNote")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -627,6 +909,12 @@ class CompanyDetails(BaseModel):
     qcHsfEmployerCategory: Optional[str] = Field(
         None, validation_alias="qc_hsf_employer_category", serialization_alias="qcHsfEmployerCategory",
     )
+    # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09) —
+    # only meaningful for UK orgs; harmless elsewhere.
+    payeReference: Optional[str] = Field(None, validation_alias="paye_reference", serialization_alias="payeReference")
+    accountsOfficeReference: Optional[str] = Field(
+        None, validation_alias="accounts_office_reference", serialization_alias="accountsOfficeReference",
+    )
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -649,6 +937,8 @@ class CompanyDetailsUpdate(BaseModel):
     taxIdentifiers: Optional[dict] = None
     bcEhtEmployerClassification: Optional[str] = None
     qcHsfEmployerCategory: Optional[str] = None
+    payeReference: Optional[str] = None
+    accountsOfficeReference: Optional[str] = None
 
 
 class ComplianceDataResponse(BaseModel):
@@ -813,6 +1103,87 @@ class JurisdictionPackResponse(BaseModel):
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Super Admin UI completion (§19 gap-closure Part 11, 2026-09-09) ─────
+# Automated Impact Preview, Emergency Hotfix Mode, RTI & Forms summary,
+# Test Certification.
+
+class PackImpactOrganizationEntry(BaseModel):
+    id: int
+    organizationName: str
+    organizationCode: str
+    optedIntoCanonicalTracking: bool
+    activeEmployeeCount: int
+    unfinalizedRunCount: int
+
+
+class JurisdictionPackImpactPreviewResponse(BaseModel):
+    packRowId: int
+    packId: str
+    packVersion: str
+    packType: str
+    organizations: List[PackImpactOrganizationEntry]
+    totalOrganizationsEligible: int
+    totalOrganizationsGenuinelyAffected: int
+    totalActiveEmployeesAffected: int
+    totalUnfinalizedRunsAffected: int
+
+
+class PackHotfixActivateRequest(BaseModel):
+    incident_id: str
+    justification: str
+
+
+class PackHotfixReviewRequest(BaseModel):
+    review_notes: str
+
+
+class PackHotfixActivationResponse(BaseModel):
+    id: int
+    jurisdictionPackId: int = Field(..., validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")
+    incidentId:        str = Field(..., validation_alias="incident_id", serialization_alias="incidentId")
+    justification:      str
+    activatedById:      Optional[int] = Field(None, validation_alias="activated_by_id", serialization_alias="activatedById")
+    activatedAt:        Optional[datetime] = Field(None, validation_alias="activated_at", serialization_alias="activatedAt")
+    reviewed:           bool
+    reviewedById:       Optional[int] = Field(None, validation_alias="reviewed_by_id", serialization_alias="reviewedById")
+    reviewedAt:         Optional[datetime] = Field(None, validation_alias="reviewed_at", serialization_alias="reviewedAt")
+    reviewNotes:        Optional[str] = Field(None, validation_alias="review_notes", serialization_alias="reviewNotes")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class RtiSubmissionEntry(BaseModel):
+    id: int
+    status: str
+    hmrcCorrelationId: Optional[str] = None
+    submittedAt: Optional[datetime] = None
+
+
+class RtiFormsSummaryEntry(BaseModel):
+    generatedReportId: int
+    organizationId: int
+    reportType: str
+    templateVersion: str
+    reportingYear: str
+    reportingPeriod: Optional[str] = None
+    status: str
+    generatedAt: Optional[datetime] = None
+    reconciliationStatus: Optional[str] = None
+    submissions: List[RtiSubmissionEntry] = []
+
+
+class TestCertificationRunResponse(BaseModel):
+    id: int
+    runAt: Optional[datetime] = Field(None, validation_alias="run_at", serialization_alias="runAt")
+    triggeredById: Optional[int] = Field(None, validation_alias="triggered_by_id", serialization_alias="triggeredById")
+    realCaseCount: int = Field(0, validation_alias="real_case_count", serialization_alias="realCaseCount")
+    totalCases: int = Field(0, validation_alias="total_cases", serialization_alias="totalCases")
+    passedCases: int = Field(0, validation_alias="passed_cases", serialization_alias="passedCases")
+    failedCases: int = Field(0, validation_alias="failed_cases", serialization_alias="failedCases")
+    status: str
+    failureDetails: Optional[list] = Field(None, validation_alias="failure_details", serialization_alias="failureDetails")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
@@ -1049,7 +1420,12 @@ class GeneratedReportResponse(BaseModel):
     templateVersion:      str = Field(validation_alias="template_version", serialization_alias="templateVersion")
     reportType:           str = Field(validation_alias="report_type", serialization_alias="reportType")
     documentScope:        str = Field("AGGREGATE", validation_alias="document_scope", serialization_alias="documentScope")
-    payrollRunId:          int = Field(validation_alias="payroll_run_id", serialization_alias="payrollRunId")
+    # Nullable since ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9
+    # (2026-09-09) — a P45/P60/EPS report isn't tied to any PayrollRun
+    # (see GeneratedReport.payroll_run_id's own model comment).
+    payrollRunId:          Optional[int] = Field(None, validation_alias="payroll_run_id", serialization_alias="payrollRunId")
+    employeeId:            Optional[int] = Field(None, validation_alias="employee_id", serialization_alias="employeeId")
+    scopeKey:              Optional[str] = Field(None, validation_alias="scope_key", serialization_alias="scopeKey")
     jurisdictionCountry:  str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     jurisdictionState:    Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
     reportingYear:        str = Field(validation_alias="reporting_year", serialization_alias="reportingYear")
@@ -1068,6 +1444,65 @@ class GeneratedReportResponse(BaseModel):
 
 class VoidGeneratedReportRequest(BaseModel):
     reason: str
+
+
+# ── UK RTI: P45/P60 + EPS generation, submission tracking ────────────────
+# (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09).
+
+class UKEmployeeReportGenerateRequest(BaseModel):
+    report_template_id: int
+    employee_id: int
+    as_of_date: date  # leaving date for a P45, tax-year-end date for a P60
+
+
+class UKEpsGenerateRequest(BaseModel):
+    report_template_id: int
+    tax_year: str
+    period_key: str
+    employer_has_claimed_allowance: bool = False
+    no_employees_paid: bool = False
+    final_submission: bool = False
+    # The employer's own declared SMP/SPP/SAP/ShPP/SPBP/SNCP recovery
+    # total for this period (§11.1) — computed via the Statutory Pay
+    # Calculator (Part 5/7), then supplied here as a filing declaration.
+    total_statutory_pay_recovered: Optional[Decimal] = None
+    as_of: Optional[date] = None
+
+
+class IndiaForm138GenerateRequest(BaseModel):
+    report_template_id: int
+    reporting_year: str  # e.g. "2026-27" — India's FY
+    period_key: str      # "Q1" | "Q2" | "Q3" | "Q4"
+
+
+class IndiaForm123GenerateRequest(BaseModel):
+    report_template_id: int
+    employee_id: int
+    tax_year: str  # e.g. "2026-27"
+
+
+class RtiSubmissionCreate(BaseModel):
+    generated_report_id: int
+
+
+class RtiSubmissionStatusUpdate(BaseModel):
+    status: str  # DRAFT | READY | SUBMITTED | ACKNOWLEDGED | REJECTED
+    hmrc_correlation_id: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+
+class RtiSubmissionResponse(BaseModel):
+    id: int
+    organizationId:       int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    generatedReportId:    int = Field(..., validation_alias="generated_report_id", serialization_alias="generatedReportId")
+    submissionType:       str = Field(..., validation_alias="submission_type", serialization_alias="submissionType")
+    status:               str
+    hmrcCorrelationId:    Optional[str] = Field(None, validation_alias="hmrc_correlation_id", serialization_alias="hmrcCorrelationId")
+    submittedAt:          Optional[datetime] = Field(None, validation_alias="submitted_at", serialization_alias="submittedAt")
+    acknowledgedAt:       Optional[datetime] = Field(None, validation_alias="acknowledged_at", serialization_alias="acknowledgedAt")
+    rejectionReason:      Optional[str] = Field(None, validation_alias="rejection_reason", serialization_alias="rejectionReason")
+    createdAt:            Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # ── Canonical Tax Rates (Super Admin-owned; organization_id IS NULL) ─────
@@ -1094,6 +1529,11 @@ class CanonicalTaxSlabUpsert(BaseModel):
     # optional override for whichever month absorbs annual-cap rounding.
     flatAmount: Optional[Decimal] = None
     adjustmentAmount: Optional[Decimal] = None
+    # PT_FLAT only (ZP-TAX-IN-2026-27-001 §12.1): which income figure this
+    # bracket is measured against — NULL/"MONTHLY_WAGE" (every existing PT
+    # state) unchanged; "HALF_YEAR_INCOME" for a local authority assessed
+    # half-yearly (e.g. Chennai, §14.1).
+    assessmentBasis: Optional[str] = None
     # NI_BAND only (UK National Insurance category bands): which HMRC
     # category letter this band belongs to, and the employer-side rate
     # for the band — ratePct above is always the EMPLOYEE rate. Both
@@ -1142,6 +1582,7 @@ class CanonicalTaxSlabResponse(BaseModel):
     formulaExpression: Optional[str] = Field(None, validation_alias="formula_expression", serialization_alias="formulaExpression")
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     adjustmentAmount: Optional[Decimal] = Field(None, validation_alias="adjustment_amount", serialization_alias="adjustmentAmount")
+    assessmentBasis: Optional[str] = Field(None, validation_alias="assessment_basis", serialization_alias="assessmentBasis")
     niCategory: Optional[str] = Field(None, validation_alias="ni_category", serialization_alias="niCategory")
     employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     filingStatus: Optional[str] = Field(None, validation_alias="filing_status", serialization_alias="filingStatus")
@@ -1307,6 +1748,125 @@ class SourceArtifactResponse(BaseModel):
     reviewerId: Optional[int] = Field(None, validation_alias="reviewer_id", serialization_alias="reviewerId")
     reviewerApprovedAt: Optional[datetime] = Field(None, validation_alias="reviewer_approved_at", serialization_alias="reviewerApprovedAt")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Taxability rules (India Code Wages classification, §7/§8) ──────────
+
+class TaxabilityRuleUpsert(BaseModel):
+    jurisdictionCountry: str = "IN"
+    jurisdictionState: Optional[str] = None
+    taxComponent: str = "code_wages"
+    earningType: str  # "basic" | "hra" | "special_allowance" | "overtime" | "additional_compensation" | "named_allowances"
+    isTaxable: bool
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
+
+
+class TaxabilityRuleResponse(BaseModel):
+    id: int
+    jurisdictionCountry: str = Field(..., validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    taxComponent: str = Field(..., validation_alias="tax_component", serialization_alias="taxComponent")
+    earningType: str = Field(..., validation_alias="earning_type", serialization_alias="earningType")
+    isTaxable: bool = Field(..., validation_alias="is_taxable", serialization_alias="isTaxable")
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── India: state/local statutory readiness registry (§16) ──────────────
+
+class StateLocalProgramReadinessUpsert(BaseModel):
+    jurisdictionCountry: str = "IN"
+    jurisdictionState: str
+    jurisdictionLocality: Optional[str] = None
+    program: str  # STATE_PT | LOCAL_PT | LWF | OTHER_STATE_PAYROLL
+    legalStatus: str = "SOURCE_REQUIRED"  # APPLICABLE | NOT_APPLICABLE | SOURCE_REQUIRED
+    localAuthorityRequired: bool = False
+    registrationRequired: bool = False
+    sourceDocumentId: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class StateLocalProgramReadinessResponse(BaseModel):
+    id: int
+    jurisdictionCountry: str = Field(..., validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState: str = Field(..., validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    jurisdictionLocality: Optional[str] = Field(None, validation_alias="jurisdiction_locality", serialization_alias="jurisdictionLocality")
+    program: str
+    legalStatus: str = Field(..., validation_alias="legal_status", serialization_alias="legalStatus")
+    localAuthorityRequired: bool = Field(False, validation_alias="local_authority_required", serialization_alias="localAuthorityRequired")
+    registrationRequired: bool = Field(False, validation_alias="registration_required", serialization_alias="registrationRequired")
+    sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── India: Forms 122/123/124 (§6.2) ─────────────────────────────────────
+
+class SalaryTdsDeclarationCreate(BaseModel):
+    employee_id: int
+    tax_year: str
+    prior_employer_salary: Decimal = Decimal("0")
+    prior_employer_tds_deducted: Decimal = Decimal("0")
+    other_income: Decimal = Decimal("0")
+    house_property_loss: Decimal = Decimal("0")
+
+
+class SalaryTdsDeclarationResponse(BaseModel):
+    id: int
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    taxYear: str = Field(..., validation_alias="tax_year", serialization_alias="taxYear")
+    priorEmployerSalary: Decimal = Field(Decimal("0"), validation_alias="prior_employer_salary", serialization_alias="priorEmployerSalary")
+    priorEmployerTdsDeducted: Decimal = Field(Decimal("0"), validation_alias="prior_employer_tds_deducted", serialization_alias="priorEmployerTdsDeducted")
+    otherIncome: Decimal = Field(Decimal("0"), validation_alias="other_income", serialization_alias="otherIncome")
+    housePropertyLoss: Decimal = Field(Decimal("0"), validation_alias="house_property_loss", serialization_alias="housePropertyLoss")
+    status: str
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SalaryTdsClaimCreate(BaseModel):
+    employee_id: int
+    tax_year: str
+    claim_type: str
+    claimed_amount: Decimal
+    evidence_reference: Optional[str] = None
+
+
+class SalaryTdsClaimResponse(BaseModel):
+    id: int
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    taxYear: str = Field(..., validation_alias="tax_year", serialization_alias="taxYear")
+    claimType: str = Field(..., validation_alias="claim_type", serialization_alias="claimType")
+    claimedAmount: Decimal = Field(..., validation_alias="claimed_amount", serialization_alias="claimedAmount")
+    evidenceReference: Optional[str] = Field(None, validation_alias="evidence_reference", serialization_alias="evidenceReference")
+    status: str
+    rejectionReason: Optional[str] = Field(None, validation_alias="rejection_reason", serialization_alias="rejectionReason")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class SalaryTdsClaimRejectRequest(BaseModel):
+    reason: str
+
+
+class EmployeeBenefitValuationCreate(BaseModel):
+    employee_id: int
+    tax_year: str
+    benefit_type: str
+    taxable_value: Decimal
+    description: Optional[str] = None
+
+
+class EmployeeBenefitValuationResponse(BaseModel):
+    id: int
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    taxYear: str = Field(..., validation_alias="tax_year", serialization_alias="taxYear")
+    benefitType: str = Field(..., validation_alias="benefit_type", serialization_alias="benefitType")
+    taxableValue: Decimal = Field(..., validation_alias="taxable_value", serialization_alias="taxableValue")
+    description: Optional[str] = None
+    status: str
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 

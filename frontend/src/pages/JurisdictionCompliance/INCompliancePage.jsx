@@ -7,6 +7,8 @@ import { inputClass, labelClass } from "../../components/jurisdiction/constants"
 import RateFormModal from "../../components/jurisdiction/RateFormModal";
 import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
 import INTaxComponentsTab from "../../components/jurisdiction/india/INTaxComponentsTab";
+import INStateLocalReadinessTab from "../../components/jurisdiction/india/INStateLocalReadinessTab";
+import INCodeWagesTab from "../../components/jurisdiction/india/INCodeWagesTab";
 import { sanitizeNumeric } from "../../components/jurisdiction/india/inComponentConfig";
 
 // India — everything country-specific for this jurisdiction lives in this
@@ -346,8 +348,11 @@ function PTSlabsTab({ slabs, onAdd, onEdit, onDelete }) {
               <tr>
                 <th className="px-3 py-2">Gross Income From (₹)</th>
                 <th className="px-3 py-2">Gross Income To (₹)</th>
-                <th className="px-3 py-2">Monthly PT Amount (₹)</th>
+                <th className="px-3 py-2">Amount (₹)</th>
                 <th className="px-3 py-2">Adjustment Month Amount (₹)</th>
+                <th className="px-3 py-2">Gender</th>
+                <th className="px-3 py-2">Basis</th>
+                <th className="px-3 py-2">Local Authority</th>
                 <th className="px-3 py-2 w-16"></th>
               </tr>
             </thead>
@@ -358,6 +363,9 @@ function PTSlabsTab({ slabs, onAdd, onEdit, onDelete }) {
                   <td className="px-3 py-2 text-foreground-secondary">{s.maxAmount ?? "Above"}</td>
                   <td className="px-3 py-2 font-medium text-foreground">₹{s.flatAmount ?? "0"}</td>
                   <td className="px-3 py-2 text-foreground-secondary">{s.adjustmentAmount != null ? `₹${s.adjustmentAmount}` : "—"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.filingStatus === "MALE" ? "Men" : s.filingStatus === "FEMALE" ? "Women" : "—"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.assessmentBasis === "HALF_YEAR_INCOME" ? "Half-yearly" : "Monthly"}</td>
+                  <td className="px-3 py-2 text-foreground-secondary">{s.jurisdictionLocality || "—"}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1">
                       <button onClick={() => onEdit(s)} className="rounded p-1 text-foreground-disabled hover:text-primary hover:bg-surface-muted"><Pencil size={12} /></button>
@@ -380,6 +388,14 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
   const [maxAmount, setMaxAmount] = useState(slab?.maxAmount != null ? String(slab.maxAmount) : "");
   const [flatAmount, setFlatAmount] = useState(slab?.flatAmount != null ? String(slab.flatAmount) : "");
   const [adjustmentAmount, setAdjustmentAmount] = useState(slab?.adjustmentAmount != null ? String(slab.adjustmentAmount) : "");
+  // Gender-differentiated brackets (§13.2, Maharashtra) and local-
+  // authority half-yearly PT (§14.1, Chennai) both had NO form fields
+  // here at all before this — found while extending this modal for
+  // assessment_basis. filingStatus repurposes the same generic column
+  // india.py's _resolve_state_pt_bracket already reads for gender.
+  const [filingStatus, setFilingStatus] = useState(slab?.filingStatus || "");
+  const [assessmentBasis, setAssessmentBasis] = useState(slab?.assessmentBasis || "MONTHLY_WAGE");
+  const [jurisdictionLocality, setJurisdictionLocality] = useState(slab?.jurisdictionLocality || "");
   const [saving, setSaving] = useState(false);
 
   const flatNum = Number(sanitizeNumeric(flatAmount)) || 0;
@@ -418,7 +434,13 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
       return;
     }
 
-    const others = (existingSlabs || []).filter((s) => s.id !== slab?.id);
+    // Scoped to the SAME filingStatus (gender tag) + jurisdictionLocality —
+    // a Men/Women pair (or a state-wide vs. Chennai-local pair) legitimately
+    // covers the same income ranges as an independent bracket set, not an
+    // overlap.
+    const others = (existingSlabs || []).filter(
+      (s) => s.id !== slab?.id && (s.filingStatus || "") === filingStatus && (s.jurisdictionLocality || "") === jurisdictionLocality,
+    );
     for (const other of others) {
       const otherMin = Number(other.minAmount);
       const otherMax = other.maxAmount == null ? Infinity : Number(other.maxAmount);
@@ -438,6 +460,9 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
       await upsertCanonicalTaxSlab({
         id: slab?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
         jurisdictionState: pack.jurisdictionState || null, taxRegime: null,
+        jurisdictionLocality: jurisdictionLocality || null,
+        filingStatus: filingStatus || null,
+        assessmentBasis: assessmentBasis === "MONTHLY_WAGE" ? null : assessmentBasis,
         minAmount: cleanMin, maxAmount: isAbove ? null : cleanMax,
         ratePct: 0, rateLabel: `₹${cleanFlat}`, taxFormula: "", ruleType: "PT_FLAT",
         flatAmount: cleanFlat, adjustmentAmount: cleanAdj === "" ? null : cleanAdj,
@@ -474,6 +499,30 @@ function PTSlabFormModal({ pack, slab, existingSlabs, onClose, onSaved, addToast
         <div>
           <label className={labelClass}>Adjustment Month Amount (₹) <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional)</span></label>
           <input className={inputClass} value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} placeholder="e.g. 300 for Feb" />
+        </div>
+        <div>
+          <label className={labelClass}>Gender <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional — Maharashtra §13.2)</span></label>
+          <select className={inputClass} value={filingStatus} onChange={(e) => setFilingStatus(e.target.value)}>
+            <option value="">Applies to everyone</option>
+            <option value="MALE">Men</option>
+            <option value="FEMALE">Women</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelClass}>Assessment Basis</label>
+          <select className={inputClass} value={assessmentBasis} onChange={(e) => setAssessmentBasis(e.target.value)}>
+            <option value="MONTHLY_WAGE">Monthly wage (every existing state)</option>
+            <option value="HALF_YEAR_INCOME">Half-yearly income (local authority, e.g. Chennai)</option>
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className={labelClass}>Local Authority <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional — leave blank for a statewide bracket)</span></label>
+          <input className={inputClass} value={jurisdictionLocality} onChange={(e) => setJurisdictionLocality(e.target.value)} placeholder="e.g. Chennai" />
+          {assessmentBasis === "HALF_YEAR_INCOME" && (
+            <p className="mt-1.5 text-[11px] text-warning">
+              Half-yearly PT also needs its own collection month(s) configured — see "Half-Year PT — Collection Month 1/2" under Contribution Components. Without them, this bracket resolves ₹0 every month.
+            </p>
+          )}
         </div>
       </div>
       {flatAmount !== "" && (
@@ -725,6 +774,24 @@ const indiaComplianceConfig = {
       render: ({ pack, rates, slabs, addToast, onReload, onPublish }) => (
         <ParametersTab pack={pack} rates={rates} slabs={slabs} addToast={addToast} onReload={onReload} onPublish={onPublish} />
       ),
+    },
+    // Not pack-scoped data (a country/state-wide registry, not tied to one
+    // pack version) — shown regardless of which pack is currently
+    // selected, same reasoning as Audit/Versions already being visible for
+    // every pack.
+    {
+      key: "readiness",
+      label: "State & Local Readiness",
+      icon: Percent,
+      isVisible: () => true,
+      render: () => <INStateLocalReadinessTab />,
+    },
+    {
+      key: "codeWages",
+      label: "Code Wages",
+      icon: Percent,
+      isVisible: (pack) => !pack.jurisdictionState,
+      render: () => <INCodeWagesTab />,
     },
   ],
   hiddenTabs: ["rates"],

@@ -55,6 +55,16 @@ function getBaseFields(country) {
       ],
     });
   }
+  // ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9 (2026-09-09) — every
+  // FPS/EPS filing needs both identifiers on the employer. Same "no UI
+  // yet" gap the CA fields above already closed for BC EHT/QC HSF, now
+  // closed the same way for UK RTI.
+  if (country === "UK") {
+    fields.push(
+      { label: "PAYE Reference", field: "payeReference", type: "text" },
+      { label: "Accounts Office Reference", field: "accountsOfficeReference", type: "text" },
+    );
+  }
   return fields;
 }
 

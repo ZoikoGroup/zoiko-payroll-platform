@@ -459,8 +459,12 @@ function NICategoryForm({ pack, initialData, onClose, onSaved, addToast }) {
 // componentKeyOptions (optional): [{ key, label, shape }], shape one of
 // "rate_pair" (Employee % + Employer %), "rate_single" (Employee % only —
 // every single-sided rate this engine reads, e.g. cpp2_rate/
-// lowest_fed_rate/territorial payroll tax, is employee-side), or "flat"
-// (Flat Amount only). When supplied, Component Key becomes a dropdown
+// lowest_fed_rate/territorial payroll tax, is employee-side),
+// "rate_single_employer" (Employer % only — for a genuinely employer-only
+// single-sided rate like the UK Apprenticeship Levy or Class 1A/1B
+// charges, added 2026-09-09 gap-closure Phase 2: forcing these through
+// "rate_pair" would show a confusing, always-blank Employee % field), or
+// "flat" (Flat Amount only). When supplied, Component Key becomes a dropdown
 // scoped to exactly the keys the calling tab's engine consumer actually
 // reads, and only the fields relevant to the selected key's shape are
 // shown — closes the "every field for every row" gap the generic form
@@ -484,7 +488,7 @@ function GenericFallbackForm({ pack, initialData, onClose, onSaved, addToast, co
   // ever hidden without the metadata to justify it.
   const shape = selectedOption?.shape || (hasOptions ? null : "rate_pair_and_flat");
   const showEmployeePct = shape === "rate_pair" || shape === "rate_single" || shape === "rate_pair_and_flat";
-  const showEmployerPct = shape === "rate_pair" || shape === "rate_pair_and_flat";
+  const showEmployerPct = shape === "rate_pair" || shape === "rate_pair_and_flat" || shape === "rate_single_employer";
   const showFlatAmount = shape === "flat" || shape === "rate_pair_and_flat";
 
   function onKeyChange(e) {

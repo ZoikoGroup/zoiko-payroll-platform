@@ -22,23 +22,24 @@ from datetime import date
 
 import pytest
 
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
 from app.modules.payroll.models import (
     ContributionRate, TaxSlab, PayrollEmployee, PayrollRun, PayslipItem, JurisdictionPack,
     CompanyComplianceDetails, EmployerTaxProfile, LocalityDataset, LocalityRate, TaxConfigurationAudit,
-    EmployeeEstablishment,
+    EmployeeEstablishment, SourceArtifact, PayrollAttendanceRecord, TaxabilityRule,
 )
 from app.modules.payroll.schemas import (
     EmployeeCreate, EmployerTaxProfileUpsert, ReciprocityRuleUpsert, LocalityRateUpsert, SourceArtifactCreate,
 )
 
 
-def _make_rate(country, component_key, organization_id=None, state=None, flat_amount=None, rate_pct=None, tax_regime=None):
+def _make_rate(country, component_key, organization_id=None, state=None, flat_amount=None, rate_pct=None, tax_regime=None, locality=None):
     return ContributionRate(
         organization_id=organization_id,
         jurisdiction_country=country,
         jurisdiction_state=state,
+        jurisdiction_locality=locality,
         tax_regime=tax_regime,
         component_key=component_key,
         label=component_key,
@@ -59,9 +60,10 @@ def _make_employee(db, org_id, code, country="IN", work_state=None, ctc=Decimal(
     return emp
 
 
-def _make_pt_bracket(country, state, min_amount, max_amount, flat_amount):
+def _make_pt_bracket(country, state, min_amount, max_amount, flat_amount, locality=None, assessment_basis=None):
     return TaxSlab(
         organization_id=None, jurisdiction_country=country, jurisdiction_state=state,
+        jurisdiction_locality=locality, assessment_basis=assessment_basis,
         min_amount=min_amount, max_amount=max_amount, rate_pct=Decimal("0"), rate_label="PT",
         tax_formula="", rule_type="PT_FLAT", flat_amount=flat_amount,
     )
@@ -196,6 +198,166 @@ def test_state_scoped_config_ignores_org_scoped_rows(db, organization):
 
     rates, _ = service.get_state_scoped_config(db, "IN", "Maharashtra")
     assert rates == {}
+
+
+# ── State-scoped resolver: local-authority PT (§12/§14.1, Phase C) ──────
+# Greater Chennai Corporation's own local schedule under Tamil Nadu —
+# get_state_scoped_config's `locality` param, added 2026-09-10.
+
+def test_state_scoped_config_locality_specific_row_wins_for_matching_locality(db, organization):
+    db.add(_make_pt_bracket("IN", "Tamil Nadu", Decimal("0"), None, Decimal("1250"), locality="Chennai", assessment_basis="HALF_YEAR_INCOME"))
+    db.commit()
+
+    chennai_rates, chennai_slabs = service.get_state_scoped_config(db, "IN", "Tamil Nadu", locality="Chennai")
+    assert len(chennai_slabs) == 1
+    assert chennai_slabs[0].flat_amount == Decimal("1250")
+    assert chennai_slabs[0].assessment_basis == "HALF_YEAR_INCOME"
+
+
+def test_state_scoped_config_locality_row_does_not_leak_to_a_different_locality(db, organization):
+    db.add(_make_pt_bracket("IN", "Tamil Nadu", Decimal("0"), None, Decimal("1250"), locality="Chennai"))
+    db.commit()
+
+    # Do not create a single statewide Chennai schedule (§14.1's own
+    # instruction) — an employee elsewhere in Tamil Nadu (or with no
+    # locality at all) must resolve NOTHING, not Chennai's rate.
+    coimbatore_rates, coimbatore_slabs = service.get_state_scoped_config(db, "IN", "Tamil Nadu", locality="Coimbatore")
+    assert coimbatore_slabs == []
+    no_locality_rates, no_locality_slabs = service.get_state_scoped_config(db, "IN", "Tamil Nadu")
+    assert no_locality_slabs == []
+
+
+def test_state_scoped_config_locality_specific_wins_over_statewide_row(db, organization):
+    # If a state-wide PT_FLAT row ALSO existed for the same state, an
+    # employee's own locality-matching row wins entirely (not merged) —
+    # never both summed together.
+    db.add(_make_pt_bracket("IN", "Tamil Nadu", Decimal("0"), None, Decimal("200")))            # state-wide
+    db.add(_make_pt_bracket("IN", "Tamil Nadu", Decimal("0"), None, Decimal("1250"), locality="Chennai"))  # local
+    db.commit()
+
+    chennai_rates, chennai_slabs = service.get_state_scoped_config(db, "IN", "Tamil Nadu", locality="Chennai")
+    assert len(chennai_slabs) == 1
+    assert chennai_slabs[0].flat_amount == Decimal("1250")
+
+    # A non-Chennai employee in the same state still gets the state-wide row.
+    other_rates, other_slabs = service.get_state_scoped_config(db, "IN", "Tamil Nadu", locality="Madurai")
+    assert len(other_slabs) == 1
+    assert other_slabs[0].flat_amount == Decimal("200")
+
+
+# ── State/local statutory readiness registry (§16, Phase C) ─────────────
+
+def test_readiness_upsert_creates_new_row(db, organization):
+    row = service.upsert_state_local_program_readiness(
+        db, "IN", "Karnataka", "STATE_PT", "APPLICABLE", registration_required=True,
+    )
+    assert row.id is not None
+    assert row.legal_status == "APPLICABLE"
+    assert row.jurisdiction_locality is None
+
+
+def test_readiness_upsert_updates_existing_row_instead_of_duplicating(db, organization):
+    service.upsert_state_local_program_readiness(db, "IN", "Gujarat", "STATE_PT", "SOURCE_REQUIRED")
+    updated = service.upsert_state_local_program_readiness(
+        db, "IN", "Gujarat", "STATE_PT", "APPLICABLE", notes="artifact attached",
+    )
+    rows = service.list_state_local_program_readiness(db, country="IN", state="Gujarat")
+    assert len(rows) == 1  # updated in place, not duplicated
+    assert rows[0].legal_status == "APPLICABLE"
+    assert rows[0].notes == "artifact attached"
+
+
+def test_readiness_locality_scoped_row_distinct_from_state_row(db, organization):
+    service.upsert_state_local_program_readiness(db, "IN", "Tamil Nadu", "LWF", "APPLICABLE")
+    service.upsert_state_local_program_readiness(
+        db, "IN", "Tamil Nadu", "LOCAL_PT", "APPLICABLE", locality="Chennai", local_authority_required=True,
+    )
+    rows = service.list_state_local_program_readiness(db, country="IN", state="Tamil Nadu")
+    assert len(rows) == 2
+    programs = {r.program: r for r in rows}
+    assert programs["LWF"].jurisdiction_locality is None
+    assert programs["LOCAL_PT"].jurisdiction_locality == "Chennai"
+    assert programs["LOCAL_PT"].local_authority_required is True
+
+
+def test_readiness_list_filters_by_state(db, organization):
+    service.upsert_state_local_program_readiness(db, "IN", "Karnataka", "STATE_PT", "APPLICABLE")
+    service.upsert_state_local_program_readiness(db, "IN", "Odisha", "STATE_PT", "APPLICABLE")
+    ka_rows = service.list_state_local_program_readiness(db, country="IN", state="Karnataka")
+    assert len(ka_rows) == 1
+    assert ka_rows[0].jurisdiction_state == "Karnataka"
+
+
+# ── TaxabilityRule CRUD (previously had none — only the read-only ───────
+# get_code_wages_classification resolver existed) ────────────────────────
+
+def test_taxability_rule_upsert_creates_and_updates_in_place(db, organization):
+    row = service.upsert_taxability_rule(db, "IN", "code_wages", "additional_compensation", True)
+    assert row.id is not None
+    assert row.is_taxable is True
+
+    updated = service.upsert_taxability_rule(db, "IN", "code_wages", "additional_compensation", False)
+    rows = service.list_taxability_rules(db, country="IN", tax_component="code_wages")
+    assert len(rows) == 1  # updated in place, not duplicated
+    assert updated.is_taxable is False
+
+
+def test_taxability_rule_delete(db, organization):
+    row = service.upsert_taxability_rule(db, "IN", "code_wages", "hra", False)
+    service.delete_taxability_rule(db, row.id)
+    assert service.list_taxability_rules(db, country="IN", tax_component="code_wages") == []
+
+
+def test_taxability_rule_delete_missing_raises_not_found(db, organization):
+    with pytest.raises(NotFoundException):
+        service.delete_taxability_rule(db, 999999)
+
+
+# ── Code Wages classification resolver (ZP-TAX-IN-2026-27-001 §7/§8, Phase B) ──
+# get_code_wages_classification backs india.py's _calculate_code_wages —
+# see engine/countries/india.py and the "India: Code-wages per-component
+# classification" section of service.py for what these rows mean.
+
+def _make_taxability_rule(
+    country, earning_type, is_taxable, organization_id=None, tax_component="code_wages",
+    effective_from=None, effective_to=None,
+):
+    return TaxabilityRule(
+        jurisdiction_country=country, earning_type=earning_type, tax_component=tax_component,
+        is_taxable=is_taxable, organization_id=organization_id,
+        effective_from=effective_from, effective_to=effective_to,
+    )
+
+
+def test_code_wages_classification_empty_when_unconfigured(db, organization):
+    # No rows at all -> india.py's own default (basic=included, everything
+    # else excluded) applies, unchanged from before Phase B.
+    assert service.get_code_wages_classification(db, "IN", organization.id) == {}
+
+
+def test_code_wages_classification_reads_canonical_row(db, organization):
+    db.add(_make_taxability_rule("IN", "additional_compensation", True))
+    db.commit()
+    assert service.get_code_wages_classification(db, "IN", organization.id) == {"additional_compensation": True}
+
+
+def test_code_wages_classification_org_specific_wins_over_canonical(db, organization):
+    db.add(_make_taxability_rule("IN", "hra", False))  # canonical default
+    db.add(_make_taxability_rule("IN", "hra", True, organization_id=organization.id))  # this org's override
+    db.commit()
+
+    assert service.get_code_wages_classification(db, "IN", organization.id) == {"hra": True}
+    # A DIFFERENT org (no override of its own) still sees only the
+    # canonical row — one org's override must never leak into another's.
+    assert service.get_code_wages_classification(db, "IN", organization.id + 999) == {"hra": False}
+
+
+def test_code_wages_classification_respects_effective_dates(db, organization):
+    db.add(_make_taxability_rule("IN", "overtime", True, effective_from=date(2027, 1, 1)))
+    db.commit()
+
+    assert service.get_code_wages_classification(db, "IN", organization.id, as_of=date(2026, 6, 1)) == {}
+    assert service.get_code_wages_classification(db, "IN", organization.id, as_of=date(2027, 2, 1)) == {"overtime": True}
 
 
 def _make_slab(country, min_amount, max_amount, rate_pct, rule_type="MARGINAL_RATE", tax_regime=None, sort_order=0):
@@ -356,6 +518,109 @@ def test_regime_label_normalization_matches_wordier_synced_labels(db):
     old_rates, _, _ = resolve_tax_configuration(db, "IN", tax_regime="Old", payroll_date=date(2026, 9, 1))
     assert any(r.component_key == "standard_deduction" for r in old_rates), "'Old Tax Regime' must still match 'Old'"
     assert not any(r.component_key == "pf" for r in old_rates), "New-tagged row must not leak into Old"
+
+
+# ── Row-level effective dating (ZP-TAX-UK-2026-27-001 §3.2 gap-closure ──
+# Part 1A, 2026-09-09) — a ContributionRate/TaxSlab row's OWN
+# effective_from/effective_to, independent of the pack's own window.
+# Canonical-pack path only (resolve_tax_configuration); the legacy
+# get_contribution_rates/get_tax_slabs path has no date parameter at all
+# and is untouched by this feature.
+
+def test_row_with_no_effective_dates_resolves_regardless_of_payroll_date(db):
+    # Every existing row (both fields NULL) must be completely unaffected
+    # — this is the regression-safety case for the whole feature.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "UK", pack_id="UK-EFFDATE-REGRESSION")
+    row = _make_rate("UK", "personal_allowance", flat_amount=Decimal("12570"))
+    row.jurisdiction_pack_id = pack.id
+    db.add(row)
+    db.commit()
+
+    for as_of in (date(2020, 1, 1), date(2026, 4, 6), date(2099, 12, 31)):
+        rates, _, _ = resolve_tax_configuration(db, "UK", payroll_date=as_of)
+        assert any(r.component_key == "personal_allowance" for r in rates)
+
+
+def test_row_level_effective_from_excludes_row_before_its_own_start_date(db):
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "UK", pack_id="UK-EFFDATE-FROM")
+    row = _make_rate("UK", "advisory_fuel_petrol_1400", flat_amount=Decimal("0.14"))
+    row.jurisdiction_pack_id = pack.id
+    row.effective_from = date(2026, 6, 1)
+    db.add(row)
+    db.commit()
+
+    before, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 5, 31))
+    assert not any(r.component_key == "advisory_fuel_petrol_1400" for r in before)
+
+    on_start, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 6, 1))
+    assert any(r.component_key == "advisory_fuel_petrol_1400" for r in on_start)
+
+    after, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 7, 1))
+    assert any(r.component_key == "advisory_fuel_petrol_1400" for r in after)
+
+
+def test_row_level_effective_to_excludes_row_after_its_own_end_date(db):
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "UK", pack_id="UK-EFFDATE-TO")
+    row = _make_rate("UK", "advisory_fuel_petrol_1400", flat_amount=Decimal("0.13"))
+    row.jurisdiction_pack_id = pack.id
+    row.effective_to = date(2026, 8, 31)
+    db.add(row)
+    db.commit()
+
+    on_end, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 8, 31))
+    assert any(r.component_key == "advisory_fuel_petrol_1400" for r in on_end)
+
+    after, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 9, 1))
+    assert not any(r.component_key == "advisory_fuel_petrol_1400" for r in after)
+
+
+def test_two_non_overlapping_versions_of_same_key_resolve_by_effective_window(db):
+    # The real §3.2 scenario: Advisory Fuel Rates change quarterly inside
+    # one tax-year pack. Two rows sharing a component_key with
+    # non-overlapping windows must each resolve correctly on their own
+    # side of the boundary — the "publish a new effective-dated version,
+    # never overwrite" doctrine (§1.2), expressed at the row level.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "UK", pack_id="UK-EFFDATE-SUPERSEDE")
+    old_rate = _make_rate("UK", "advisory_fuel_petrol_1400", flat_amount=Decimal("0.13"))
+    old_rate.jurisdiction_pack_id = pack.id
+    old_rate.effective_to = date(2026, 5, 31)
+    new_rate = _make_rate("UK", "advisory_fuel_petrol_1400", flat_amount=Decimal("0.14"))
+    new_rate.jurisdiction_pack_id = pack.id
+    new_rate.effective_from = date(2026, 6, 1)
+    db.add_all([old_rate, new_rate])
+    db.commit()
+
+    may_rates, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 5, 15))
+    may_row = next(r for r in may_rates if r.component_key == "advisory_fuel_petrol_1400")
+    assert may_row.flat_amount == Decimal("0.13")
+
+    june_rates, _, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 6, 15))
+    june_row = next(r for r in june_rates if r.component_key == "advisory_fuel_petrol_1400")
+    assert june_row.flat_amount == Decimal("0.14")
+
+
+def test_row_level_effective_dating_also_applies_to_tax_slabs(db):
+    # Same mechanism, TaxSlab side — proves parity, not just ContributionRate.
+    # resolve_tax_configuration returns (rates, slabs, pack) — this test's
+    # pack carries a TaxSlab row only, so the SLABS list (index 1) is what
+    # to assert on, not the (always-empty-here) rates list.
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    pack = _make_active_tax_pack(db, "UK", pack_id="UK-EFFDATE-SLAB")
+    slab = _make_slab("UK", Decimal("0"), Decimal("37700"), Decimal("20"))
+    slab.jurisdiction_pack_id = pack.id
+    slab.effective_from = date(2026, 6, 1)
+    db.add(slab)
+    db.commit()
+
+    _, before_slabs, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 5, 1))
+    assert len(before_slabs) == 0
+
+    _, after_slabs, _ = resolve_tax_configuration(db, "UK", payroll_date=date(2026, 6, 1))
+    assert len(after_slabs) == 1
 
 
 def test_resolve_effective_rate_inputs_defaults_unset_india_regime_to_new(db, organization):
@@ -1255,6 +1520,55 @@ def test_regenerate_replays_original_rate_after_canonical_rate_edited(db, organi
     # the rate that was ACTUALLY used, not the current live value.
     replayed_rate_entry = next(r for r in item.tax_rule_snapshot["contributionRates"] if r["componentKey"] == "pf")
     assert Decimal(replayed_rate_entry["employeeRatePct"]) == Decimal("12")
+
+
+# ── Per-rule evidence + payslip rule-ID traceability (ZP-TAX-UK-2026-27- ─
+# 001 §4.2/§20/AC-29 gap-closure Part 1B, 2026-09-09) ────────────────────
+
+def test_rate_source_document_id_is_captured_in_payslip_snapshot(db, organization, monkeypatch):
+    # A payslip's tax_rule_snapshot must be able to answer "which specific
+    # rate ROW" (not just which pack) produced this number, and "which
+    # official source" backs that row — previously neither the row's own
+    # id nor its source_document_id were captured anywhere.
+    _stub_business_code_generation(monkeypatch)
+    source = SourceArtifact(agency="EPFO", title="EPF Scheme 1952 — current rate notification")
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+
+    pack = _make_active_tax_pack(db, "IN", pack_id="IN-EVIDENCE-PACK")
+    rate = _make_rate("IN", "pf", organization_id=None, rate_pct=Decimal("12"))
+    rate.employer_rate_pct = Decimal("12")
+    rate.jurisdiction_pack_id = pack.id
+    rate.source_document_id = source.id
+    db.add(rate)
+    db.add(CompanyComplianceDetails(organization_id=organization.id, jurisdiction_country="IN", active_pack_id=pack.id))
+    db.commit()
+    db.refresh(rate)
+
+    employee = _make_employee(db, organization.id, "IN-EVIDENCE-1", ctc=Decimal("600000"))
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    pf_entry = next(r for r in item.tax_rule_snapshot["contributionRates"] if r["componentKey"] == "pf")
+    assert pf_entry["id"] == rate.id
+    assert pf_entry["sourceDocumentId"] == source.id
+
+
+def test_rate_and_slab_source_document_id_default_to_none(db):
+    # Every existing row (created before this column existed) must be
+    # completely unaffected — the regression-safety case for Part 1B.
+    rate = _make_rate("IN", "pt", organization_id=None, flat_amount=Decimal("200"))
+    slab = _make_slab("IN", Decimal("0"), Decimal("400000"), Decimal("0"))
+    db.add_all([rate, slab])
+    db.commit()
+    db.refresh(rate)
+    db.refresh(slab)
+    assert rate.source_document_id is None
+    assert slab.source_document_id is None
 
 
 def test_regenerate_still_falls_back_to_live_rates_without_a_snapshot(db, organization, monkeypatch):
@@ -2359,3 +2673,242 @@ def test_lsvcc_investment_amount_change_is_audited(db, organization):
     assert audit.actor_id == actor_id
     assert audit.old_value == {"lsvcc_investment_amount": None}
     assert audit.new_value == {"lsvcc_investment_amount": "1500.00"}
+
+
+# ── UK NI category relief-eligibility facts (ZP-TAX-UK-2026-27-001 ──────
+# §9.1/§9.3 gap-closure Part 2, 2026-09-09) ──────────────────────────────
+
+def _make_uk_employee_with_dob(db, org_id, code, dob):
+    emp = PayrollEmployee(
+        organization_id=org_id, employee_code=code, name=f"Employee {code}",
+        country_code="UK", ctc=Decimal("60000"), date_of_birth=dob,
+    )
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+    return emp
+
+
+def test_create_uk_ni_relief_fact_persists_and_lists(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NIREL-1", date_cls(1990, 1, 1))
+    fact = service.create_uk_ni_relief_fact(
+        db, organization.id, emp.id, "FREEPORT", "Teesside Freeport Site A",
+        date_cls(2026, 1, 1), None,
+    )
+    assert fact.id is not None
+    facts = service.list_uk_ni_relief_facts(db, organization.id, emp.id)
+    assert len(facts) == 1
+    assert facts[0].relief_type == "FREEPORT"
+    assert facts[0].reference == "Teesside Freeport Site A"
+
+
+def test_create_uk_ni_relief_fact_rejects_unknown_type(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NIREL-2", date_cls(1990, 1, 1))
+    with pytest.raises(BadRequestException):
+        service.create_uk_ni_relief_fact(db, organization.id, emp.id, "NOT_REAL", None, date_cls(2026, 1, 1), None)
+
+
+def test_create_uk_ni_relief_fact_rejects_unknown_employee(db, organization):
+    from datetime import date as date_cls
+    with pytest.raises(NotFoundException):
+        service.create_uk_ni_relief_fact(db, organization.id, 999999, "VETERAN", None, date_cls(2026, 1, 1), None)
+
+
+def test_delete_uk_ni_relief_fact_removes_it(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NIREL-3", date_cls(1990, 1, 1))
+    fact = service.create_uk_ni_relief_fact(db, organization.id, emp.id, "APPRENTICE", None, date_cls(2026, 1, 1), None)
+    service.delete_uk_ni_relief_fact(db, organization.id, emp.id, fact.id)
+    assert service.list_uk_ni_relief_facts(db, organization.id, emp.id) == []
+
+
+def test_delete_uk_ni_relief_fact_not_found_for_wrong_employee(db, organization):
+    from datetime import date as date_cls
+    emp1 = _make_uk_employee_with_dob(db, organization.id, "NIREL-4A", date_cls(1990, 1, 1))
+    emp2 = _make_uk_employee_with_dob(db, organization.id, "NIREL-4B", date_cls(1990, 1, 1))
+    fact = service.create_uk_ni_relief_fact(db, organization.id, emp1.id, "VETERAN", None, date_cls(2026, 1, 1), None)
+    with pytest.raises(NotFoundException):
+        service.delete_uk_ni_relief_fact(db, organization.id, emp2.id, fact.id)
+
+
+def test_resolve_uk_ni_category_override_none_when_explicitly_disabled(db, organization):
+    """UK — enabled by default since 2026-09-10 (see shared.py). An org/
+    deployment that deliberately discards "UK" from this switch must still
+    fall back to the manual ni_category, exactly as the old dormant-by-
+    default behavior did — this replaces that prior test."""
+    from datetime import date as date_cls
+    import app.modules.payroll.engine.countries.shared as shared_module
+    emp = _make_uk_employee_with_dob(db, organization.id, "NIREL-5", date_cls(1990, 1, 1))
+    service.create_uk_ni_relief_fact(db, organization.id, emp.id, "FREEPORT", None, date_cls(2026, 1, 1), None)
+    was_enabled = "UK" in shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES
+    shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES.discard("UK")
+    try:
+        result = service._resolve_uk_ni_category_override(db, emp, date_cls(2026, 6, 1), {})
+    finally:
+        if was_enabled:
+            shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES.add("UK")
+    assert result is None
+
+
+def test_resolve_uk_ni_category_override_derives_when_enabled(db, organization):
+    from datetime import date as date_cls
+    import app.modules.payroll.engine.countries.shared as shared_module
+    emp = _make_uk_employee_with_dob(db, organization.id, "NIREL-6", date_cls(1990, 1, 1))
+    service.create_uk_ni_relief_fact(db, organization.id, emp.id, "FREEPORT", None, date_cls(2026, 1, 1), None)
+    was_enabled = "UK" in shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES
+    shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES.add("UK")
+    try:
+        result = service._resolve_uk_ni_category_override(db, emp, date_cls(2026, 6, 1), {})
+    finally:
+        if not was_enabled:
+            shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES.discard("UK")
+    assert result == "F"
+
+
+def test_resolve_uk_ni_category_override_none_without_any_facts(db, organization):
+    from datetime import date as date_cls
+    import app.modules.payroll.engine.countries.shared as shared_module
+    emp = _make_uk_employee_with_dob(db, organization.id, "NIREL-7", date_cls(1990, 1, 1))
+    was_enabled = "UK" in shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES
+    shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES.add("UK")
+    try:
+        result = service._resolve_uk_ni_category_override(db, emp, date_cls(2026, 6, 1), {})
+    finally:
+        if not was_enabled:
+            shared_module._UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES.discard("UK")
+    assert result is None
+
+
+# ── UK Mileage Allowance & Advisory Fuel Rate service-layer wiring ──────
+# (ZP-TAX-UK-2026-27-001 §16 gap-closure Part 4, 2026-09-09) ────────────
+
+def test_calculate_uk_mileage_reimbursement_via_service(db, organization):
+    from datetime import date as date_cls
+    emp = _make_employee(db, organization.id, "MILEAGE-1", country="UK")
+    result = service.calculate_uk_mileage_reimbursement(
+        db, organization.id, emp.id, "MOTORCYCLE", Decimal("100"), date_cls(2026, 6, 1),
+    )
+    assert result["eligible"] is True
+    assert result["tax_free_amount"] == Decimal("24.00")
+
+
+def test_calculate_uk_mileage_reimbursement_rejects_non_uk_employee(db, organization):
+    from datetime import date as date_cls
+    emp = _make_employee(db, organization.id, "MILEAGE-2", country="IN")
+    with pytest.raises(BadRequestException):
+        service.calculate_uk_mileage_reimbursement(
+            db, organization.id, emp.id, "CAR", Decimal("100"), date_cls(2026, 6, 1),
+        )
+
+
+def test_calculate_uk_mileage_reimbursement_unknown_employee_raises(db, organization):
+    from datetime import date as date_cls
+    with pytest.raises(NotFoundException):
+        service.calculate_uk_mileage_reimbursement(
+            db, organization.id, 999999, "CAR", Decimal("100"), date_cls(2026, 6, 1),
+        )
+
+
+def test_resolve_uk_advisory_fuel_rate_via_service_auto_seeds_from_defaults(db, organization):
+    # A fresh org's first-ever UK contribution-rate read auto-seeds from
+    # _CONTRIBUTION_RATES_BY_COUNTRY["UK"] (get_contribution_rates' own
+    # existing first-use behavior) — this org has never touched UK rates
+    # before, so this call seeds (and then reads) the real default AFR
+    # rows, not a fail-closed result.
+    result = service.resolve_uk_advisory_fuel_rate(db, organization.id, "PETROL", "LE_1400")
+    assert result["eligible"] is True
+    assert result["rate_per_mile"] == Decimal("0.14")
+
+
+def test_resolve_uk_advisory_fuel_rate_fails_closed_for_unknown_combination(db, organization):
+    # Diesel's own band ("LE_1600"), requested with PETROL as the fuel
+    # type — no such key exists even after auto-seeding.
+    result = service.resolve_uk_advisory_fuel_rate(db, organization.id, "PETROL", "LE_1600")
+    assert result["eligible"] is False
+
+
+# ── UK National Minimum Wage compliance validation (ZP-TAX-UK-2026-27- ──
+# 001 §15 gap-closure Part 5, 2026-09-09) ────────────────────────────────
+
+def _make_attendance(db, org_id, emp_id, day, hours):
+    rec = PayrollAttendanceRecord(
+        organization_id=org_id, employee_id=emp_id, date=day, hours=str(hours), status="present",
+    )
+    db.add(rec)
+    return rec
+
+
+def test_sum_uk_attendance_hours_within_period(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NMW-HOURS-1", date_cls(1990, 1, 1))
+    _make_attendance(db, organization.id, emp.id, date_cls(2026, 6, 1), "8")
+    _make_attendance(db, organization.id, emp.id, date_cls(2026, 6, 2), "7.5")
+    # Outside the period — must not be counted.
+    _make_attendance(db, organization.id, emp.id, date_cls(2026, 7, 1), "8")
+    db.commit()
+
+    total = service._sum_uk_attendance_hours(db, emp.id, date_cls(2026, 6, 1), date_cls(2026, 6, 30))
+    assert total == Decimal("15.5")
+
+
+def test_sum_uk_attendance_hours_skips_unparseable_values(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NMW-HOURS-2", date_cls(1990, 1, 1))
+    _make_attendance(db, organization.id, emp.id, date_cls(2026, 6, 1), "8")
+    rec = PayrollAttendanceRecord(organization_id=organization.id, employee_id=emp.id, date=date_cls(2026, 6, 2), hours=None, status="present")
+    db.add(rec)
+    db.commit()
+
+    total = service._sum_uk_attendance_hours(db, emp.id, date_cls(2026, 6, 1), date_cls(2026, 6, 30))
+    assert total == Decimal("8")
+
+
+def test_validate_uk_nmw_compliance_compliant_end_to_end(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NMW-E2E-1", date_cls(1995, 1, 1))
+    _make_attendance(db, organization.id, emp.id, date_cls(2026, 6, 1), "160")
+    db.commit()
+    # Fresh org auto-seeds real NMW defaults on first UK read (same
+    # behavior confirmed for mileage/AFR in Part 4) — age 31 on 2026-06-30
+    # -> 21+ rate £12.71/hour.
+    result = service.validate_uk_nmw_compliance(
+        db, organization.id, emp.id, date_cls(2026, 6, 1), date_cls(2026, 6, 30), Decimal("12.71") * 160,
+    )
+    assert result["eligible"] is True
+    assert result["compliant"] is True
+
+
+def test_validate_uk_nmw_compliance_uses_apprentice_relief_fact(db, organization):
+    from datetime import date as date_cls
+    emp = _make_uk_employee_with_dob(db, organization.id, "NMW-E2E-2", date_cls(2003, 1, 1))  # 23 on 2026-06-30
+    service.create_uk_ni_relief_fact(db, organization.id, emp.id, "APPRENTICE", None, date_cls(2026, 1, 1), None)
+    _make_attendance(db, organization.id, emp.id, date_cls(2026, 6, 1), "160")
+    db.commit()
+    # 23-year-old apprentice, apprenticeship started 2026-01-01 (within
+    # 365 days of the period end) -> apprentice-19-plus-first-year rate
+    # (£8.00), NOT the 21+ rate (£12.71) they'd otherwise get.
+    result = service.validate_uk_nmw_compliance(
+        db, organization.id, emp.id, date_cls(2026, 6, 1), date_cls(2026, 6, 30), Decimal("8.00") * 160,
+    )
+    assert result["eligible"] is True
+    assert result["applicable_rate"] == Decimal("8.00")
+    assert result["compliant"] is True
+
+
+def test_validate_uk_nmw_compliance_rejects_non_uk_employee(db, organization):
+    from datetime import date as date_cls
+    emp = _make_employee(db, organization.id, "NMW-BAD-1", country="IN")
+    with pytest.raises(BadRequestException):
+        service.validate_uk_nmw_compliance(
+            db, organization.id, emp.id, date_cls(2026, 6, 1), date_cls(2026, 6, 30), Decimal("1000"),
+        )
+
+
+def test_validate_uk_nmw_compliance_unknown_employee_raises(db, organization):
+    from datetime import date as date_cls
+    with pytest.raises(NotFoundException):
+        service.validate_uk_nmw_compliance(
+            db, organization.id, 999999, date_cls(2026, 6, 1), date_cls(2026, 6, 30), Decimal("1000"),
+        )

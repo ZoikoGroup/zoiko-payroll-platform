@@ -17,6 +17,9 @@ import SettingsPage from "./pages/SettingsPage";
 import PolicyConfigPage from "./pages/PolicyConfigPage";
 import CompliancePage from "./pages/CompliancePage";
 import EngineFallbackDefaultsPage from "./pages/EngineFallbackDefaultsPage";
+import RtiFormsPage from "./pages/RtiFormsPage";
+import TestCertificationPage from "./pages/TestCertificationPage";
+import HotfixActivationsPage from "./pages/HotfixActivationsPage";
 import {
   INCompliancePage, USACompliancePage, UKCompliancePage,
   AUCompliancePage, CACompliancePage, DECompliancePage,
@@ -102,6 +105,30 @@ export default function App() {
           element={
             <SuperAdminShell>
               <EngineFallbackDefaultsPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/compliance/rti-forms"
+          element={
+            <SuperAdminShell>
+              <RtiFormsPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/compliance/test-certification"
+          element={
+            <SuperAdminShell>
+              <TestCertificationPage />
+            </SuperAdminShell>
+          }
+        />
+        <Route
+          path="/super-admin/compliance/hotfix-activations"
+          element={
+            <SuperAdminShell>
+              <HotfixActivationsPage />
             </SuperAdminShell>
           }
         />

@@ -49,6 +49,26 @@ class PayrollContext:
     country: str = "IN"
     rate_map: dict = field(default_factory=dict)   # component_key → ContributionRate
     slabs: list = field(default_factory=list)       # list[TaxSlab], country/national-level
+    # India Code Wages (ZP-TAX-IN-2026-27-001 §7/§8) per-earning-type
+    # classification — earning_type → is_taxable bool, where True means
+    # "core included wages" and False means "excluded, subject to the
+    # 50%-cap add-back test" (see india.py's _calculate_code_wages).
+    # Resolved by service.py's get_code_wages_classification (a plain
+    # dict, same convention as rate_map/slabs — this module stays
+    # DB/ORM-free). Empty dict (every jurisdiction/org today) means
+    # india.py falls back to its own hardcoded basic-vs-everything-else
+    # default, unchanged from before this field existed.
+    code_wages_rules: dict = field(default_factory=dict)
+
+    # India Forms 122/123/124 (§6.1/§6.2, gap-closure Phase E) — resolved
+    # by service.py's get_india_salary_tds_inputs from the employee's own
+    # Approved/Issued form rows. All default to 0, meaning india.py's
+    # salary TDS projection is byte-for-byte unaffected until these forms
+    # are actually used for a given employee.
+    other_income_for_tds: Decimal = Decimal("0")     # Form 122: net(prior-employer salary + other income - house-property loss)
+    tds_already_deducted: Decimal = Decimal("0")     # Form 122: prior-employer TDS credited against this year's liability
+    annual_claims_total: Decimal = Decimal("0")      # Form 124: sum of Approved Chapter VIII claims (Old regime only)
+    annual_perquisites_total: Decimal = Decimal("0")  # Form 123: sum of Issued perquisite valuations (both regimes)
 
     # Region (state/province/devolved-nation) — the employee's own
     # PayrollEmployee.work_state, threaded through so a country
@@ -395,6 +415,17 @@ class PayrollResult:
     # org-level accumulator is wired (appr_levy_ytd_pay_bill_before is
     # None otherwise).
     employer_apprenticeship_levy: Decimal = Decimal("0")
+    # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13 gap-
+    # closure Part 3) — "ELIGIBLE_JOBHOLDER"/"NON_ELIGIBLE_JOBHOLDER"/
+    # "ENTITLED_WORKER", or None (dormant switch, or date_of_birth
+    # unavailable). Purely informational — never changes employee_pension/
+    # employer_pension above.
+    auto_enrolment_status: str | None = None
+    # UK: HMRC tax week (1-53) / tax month (1-12) this payslip falls in
+    # (ZP-TAX-UK-2026-27-001 §18.1 gap-closure Part 6) — pure calendar
+    # metadata, computed unconditionally whenever pay_date is known.
+    tax_week: int | None = None
+    tax_month: int | None = None
     # Canada: BC EHT, Manitoba HE Levy, NL HAPSET — same org-level-
     # accumulator-banded contract as employer_eht above, each its own
     # independent zero-until-wired field (ZP-TAX-CA-2026-001 §15).

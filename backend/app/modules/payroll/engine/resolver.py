@@ -76,6 +76,11 @@ def build_context_from_employee(
     country: str = "IN",
     rate_map: dict | None = None,
     slabs: list | None = None,
+    code_wages_rules: dict | None = None,
+    other_income_for_tds: Decimal = Decimal("0"),
+    tds_already_deducted: Decimal = Decimal("0"),
+    annual_claims_total: Decimal = Decimal("0"),
+    annual_perquisites_total: Decimal = Decimal("0"),
     payroll_days: int = PAYROLL_DAYS,
     work_state: str | None = None,
     state_rate_map: dict | None = None,
@@ -103,6 +108,7 @@ def build_context_from_employee(
     ytd_director_ni_employee_paid: Decimal | None = None,
     ytd_director_ni_employer_paid: Decimal | None = None,
     is_final_ni_period: bool = False,
+    ni_category_override: str | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -123,6 +129,11 @@ def build_context_from_employee(
         country=country,
         rate_map=rate_map or {},
         slabs=slabs or [],
+        code_wages_rules=code_wages_rules or {},
+        other_income_for_tds=other_income_for_tds,
+        tds_already_deducted=tds_already_deducted,
+        annual_claims_total=annual_claims_total,
+        annual_perquisites_total=annual_perquisites_total,
         work_state=work_state,
         state_rate_map=state_rate_map or {},
         state_slabs=state_slabs or [],
@@ -132,7 +143,14 @@ def build_context_from_employee(
         resident_state_slabs=resident_state_slabs or [],
         locality_rate=locality_rate,
         tax_code=getattr(employee, "tax_code", None),
-        ni_category=getattr(employee, "ni_category", None),
+        # ZP-TAX-UK-2026-27-001 §9.1/§9.3 gap-closure Part 2 (2026-09-09):
+        # a derived category (from real Freeport/Investment Zone/veteran/
+        # apprentice facts — see uk.py's derive_ni_category, called by
+        # service.py's callers of this function) takes precedence over
+        # the manually-set field when the caller supplies one; None
+        # (every caller today, and every caller for any non-UK employee)
+        # preserves the exact existing behavior.
+        ni_category=ni_category_override or getattr(employee, "ni_category", None),
         study_loan_plan=getattr(employee, "study_loan_plan", None),
         study_loan_balance=getattr(employee, "study_loan_balance", None),
         has_postgrad_loan=bool(getattr(employee, "has_postgrad_loan", False)),

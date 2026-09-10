@@ -75,6 +75,9 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     { label: "NI Employee", amount: payslip.niEmployee || 0 },
     { label: "Workplace Pension", amount: payslip.employeePension || 0 },
     { label: "Student Loan Deduction", amount: payslip.studyLoanDeduction || 0 },
+    // UK: was reaching the API response (once the schema fix landed) but
+    // still had no row here — found 2026-09-09 gap-closure Phase 3.
+    { label: "Postgraduate Loan Deduction", amount: payslip.postgradLoanDeduction || 0 },
   ].filter((r) => Number(r.amount) > 0);
 
   // Employer-side contributions (PF/ESI/Social Security/Medicare/Pension/NI)

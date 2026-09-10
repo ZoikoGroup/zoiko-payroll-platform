@@ -52,6 +52,11 @@ class Slab:
     # Mirrors models.TaxSlab.adjustment_amount — the one-month-override
     # figure (e.g. Maharashtra's February amount) for this same tier.
     adjustment_amount: Optional[Decimal] = None
+    # Mirrors models.TaxSlab.assessment_basis — NULL/"MONTHLY_WAGE" (every
+    # existing PT_FLAT tier) matches monthly gross unchanged;
+    # "HALF_YEAR_INCOME" (Chennai's local schedule) matches an average
+    # half-yearly income instead.
+    assessment_basis: Optional[str] = None
 
 
 @dataclass
@@ -231,10 +236,12 @@ IN_OLD_REGIME_SENIOR_MIXED_SLABS = IN_OLD_REGIME_SLABS + [
 ]
 
 
-def test_age_category_dormant_by_default():
-    assert "IN" not in shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES
+def test_age_category_enabled_by_default():
+    # Enabled 2026-09-10 (gap-analysis follow-up) — a resident aged 60+
+    # now resolves a real age category out of the box, no add() needed.
+    assert "IN" in shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES
     result = _resolve_old_regime_age_category(date(1960, 1, 1), "RESIDENT", date(2026, 6, 1))
-    assert result is None
+    assert result == "SENIOR"
 
 
 def test_age_category_none_without_date_of_birth_or_pay_date():
@@ -319,10 +326,12 @@ def test_senior_resident_pays_less_than_non_senior_at_same_income():
     assert (ordinary_result.annual_tax - senior_result.annual_tax) == Decimal("2500")
 
 
-def test_india_pf_wage_ceiling_dormant_by_default():
-    # ₹30,000 Basic, no ceiling applied by default — PF on the full amount.
+def test_india_pf_wage_ceiling_enabled_by_default():
+    # Enabled 2026-09-10 — ₹30,000 Basic now capped at the statutory
+    # ₹15,000 ceiling out of the box, no add() needed.
+    assert "IN" in shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES
     result = calc("IN", 30000, IN_RATES, IN_SLABS, basic=30000)
-    assert result.employee_pf == Decimal("3600.00")  # 12% of 30,000 uncapped
+    assert result.employee_pf == Decimal("1800.00")  # 12% of the ₹15,000 ceiling, not 30,000
 
 
 def test_india_pf_wage_ceiling_applies_when_enabled():
@@ -348,15 +357,25 @@ def test_india_pf_wage_ceiling_does_not_affect_basic_below_ceiling():
 # ── India: Code-wages object + EPS diversion + EDLI ─────────────────────
 # ZP-TAX-IN-2026-27-001 §8/§9 — India Phase 1 of the gap-closure plan.
 
-def test_india_code_wages_dormant_by_default():
-    # Gross 100,000 / Basic 40,000 (matches the document's own §8.2
-    # worked example) — with the switch off, PF stays on Basic alone.
+def test_india_code_wages_disabled_reverts_to_plain_basic():
+    # With the switch explicitly OFF, PF stays on Basic alone — the
+    # pre-Phase-A/B behavior, still reachable by discarding "IN".
+    # PF wage ceiling isolated OFF too so this test proves the
+    # code-wages switch specifically, not an interaction between the two
+    # separately-toggleable India switches.
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")
+    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.discard("IN")
     result = calc("IN", 100000, IN_RATES, IN_SLABS, basic=40000)
     assert result.employee_pf == Decimal("4800.00")  # 12% of 40,000
 
 
-def test_india_code_wages_add_back_when_enabled():
-    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.add("IN")
+def test_india_code_wages_add_back_enabled_by_default():
+    # Enabled 2026-09-10 — Gross 100,000 / Basic 40,000 (matches the
+    # document's own §8.2 worked example) now adds back out of the box,
+    # no add() needed. PF wage ceiling isolated OFF so this test proves
+    # the code-wages switch specifically.
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")
+    assert "IN" in shared._IN_CODE_WAGES_ENABLED_COUNTRIES
     # §8.2's own worked example: 100,000 total / 40,000 core / 60,000
     # excluded / 50,000 cap (50% of 100,000) -> 10,000 add-back ->
     # 50,000 statutory wages.
@@ -366,16 +385,44 @@ def test_india_code_wages_add_back_when_enabled():
 
 
 def test_india_code_wages_no_add_back_when_excluded_below_cap():
-    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.add("IN")
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")  # isolate from the (now default-on) PF ceiling
     # Excluded (30,000) is already below the 50,000 cap -> no add-back ->
     # statutory wages == basic, same as the switch-off case.
     result = calc("IN", 100000, IN_RATES, IN_SLABS, basic=70000)
     assert result.employee_pf == Decimal("8400.00")  # 12% of 70,000, unchanged
 
 
+def test_india_code_wages_classification_override_reclassifies_a_component():
+    # Phase B (2026-09-10): real per-component classification, not just
+    # basic-vs-everything-else. Basic 40,000 / HRA 20,000 / Additional
+    # Compensation 40,000 (gross 100,000), default classification would
+    # treat HRA + Additional Compensation as excluded (60,000 total,
+    # 10,000 add-back over the 50,000 cap -> 50,000 statutory wages,
+    # same shape as test_india_code_wages_add_back_when_enabled above).
+    # An explicit code_wages_rules override reclassifying
+    # additional_compensation as core-included instead changes the
+    # outcome: core = 40,000 + 40,000 = 80,000; excluded = HRA's 20,000
+    # only, below the 50,000 cap -> no add-back -> statutory wages 80,000.
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")
+    shared._IN_CODE_WAGES_ENABLED_COUNTRIES.add("IN")
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    ctx = _PC(
+        gross=Decimal("100000"), basic=Decimal("40000"), hra=Decimal("20000"),
+        additional_compensation=Decimal("40000"), country="IN",
+        rate_map=IN_RATES, slabs=IN_SLABS,
+        code_wages_rules={"additional_compensation": True},
+    )
+    result = STRATEGY.calculate(ctx)
+    assert result.employee_pf == Decimal("9600.00")   # 12% of 80,000
+    assert result.employer_pf == Decimal("9600.00")
+
+
 def test_india_eps_zero_until_configured():
     # No "eps_rate" row configured -> employer_eps stays 0 and the full
-    # employer_pf shows as residual, no hardcoded fallback guessed.
+    # employer_pf shows as residual, no hardcoded fallback guessed. PF
+    # wage ceiling isolated OFF so this test proves EPS specifically.
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")
     result = calc("IN", 20000, IN_RATES, IN_SLABS, basic=20000)
     assert result.employer_pf == Decimal("2400.00")
     assert result.employer_eps == Decimal("0")
@@ -383,6 +430,7 @@ def test_india_eps_zero_until_configured():
 
 
 def test_india_eps_diversion_when_configured():
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")  # isolate from the (now default-on) PF ceiling
     rates = dict(IN_RATES, eps_rate=Rate(employer_rate_pct=Decimal("8.33")))
     result = calc("IN", 20000, rates, IN_SLABS, basic=20000)
     assert result.employer_pf == Decimal("2400.00")       # unchanged: 12% of 20,000
@@ -392,13 +440,15 @@ def test_india_eps_diversion_when_configured():
 
 
 def test_india_eps_capped_by_its_own_wage_ceiling():
+    # PF ceiling switch explicitly OFF (isolated) so employer_pf itself
+    # stays uncapped at 12% of 30,000 — this test proves EPS's OWN
+    # ceiling is independent of the separately-toggleable PF ceiling.
+    shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.discard("IN")
     rates = dict(
         IN_RATES,
         eps_rate=Rate(employer_rate_pct=Decimal("8.33")),
         eps_wage_ceiling=Rate(flat_amount=Decimal("15000")),
     )
-    # Basic 30,000 (above the ₹15,000 EPS ceiling), PF ceiling switch OFF
-    # so employer_pf itself stays uncapped at 12% of 30,000.
     result = calc("IN", 30000, rates, IN_SLABS, basic=30000)
     assert result.employer_pf == Decimal("3600.00")
     assert result.employer_eps == Decimal("1249.50")      # 8.33% of the capped 15,000
@@ -540,6 +590,100 @@ def test_pt_telangana_still_ungated_by_gender_unaffected():
     assert result.professional_tax == Decimal("150")
 
 
+# ── India: real state PT data (ZP-TAX-IN-2026-27-001 §13/§14, Phase C) ──
+# Golden-test IDs match the document's own §21 suite (IN-PT-KA-001,
+# IN-PT-MH-001, IN-PT-CHN-001) — same real published figures now seeded
+# in hardcoded_defaults.py's _TAX_SLABS_BY_COUNTRY["IN"], reproduced here
+# as standalone Slab fixtures (decoupled from the seed dict, matching
+# this file's existing IN_SLABS/MH_PT_FLAT convention) so these tests
+# don't depend on that dict's exact shape/order.
+
+KA_PT_FLAT = [
+    Slab(Decimal("0"), Decimal("24999"), rule_type="PT_FLAT", flat_amount=Decimal("0")),
+    Slab(Decimal("25000"), None, rule_type="PT_FLAT", flat_amount=Decimal("200")),
+]
+
+ODISHA_PT_FLAT = [
+    Slab(Decimal("0"), Decimal("5000"), rule_type="PT_FLAT", flat_amount=Decimal("0")),
+    Slab(Decimal("5001"), Decimal("6000"), rule_type="PT_FLAT", flat_amount=Decimal("30")),
+    Slab(Decimal("6001"), Decimal("8000"), rule_type="PT_FLAT", flat_amount=Decimal("50")),
+    Slab(Decimal("8001"), Decimal("10000"), rule_type="PT_FLAT", flat_amount=Decimal("75")),
+    Slab(Decimal("10001"), Decimal("15000"), rule_type="PT_FLAT", flat_amount=Decimal("100")),
+    Slab(Decimal("15001"), Decimal("20000"), rule_type="PT_FLAT", flat_amount=Decimal("150")),
+    Slab(Decimal("20001"), None, rule_type="PT_FLAT", flat_amount=Decimal("200")),
+]
+
+CHENNAI_PT_FLAT = [
+    Slab(Decimal("0"), Decimal("21000"), rule_type="PT_FLAT", flat_amount=Decimal("0"), assessment_basis="HALF_YEAR_INCOME"),
+    Slab(Decimal("21001"), Decimal("30000"), rule_type="PT_FLAT", flat_amount=Decimal("180"), assessment_basis="HALF_YEAR_INCOME"),
+    Slab(Decimal("30001"), Decimal("45000"), rule_type="PT_FLAT", flat_amount=Decimal("425"), assessment_basis="HALF_YEAR_INCOME"),
+    Slab(Decimal("45001"), Decimal("60000"), rule_type="PT_FLAT", flat_amount=Decimal("930"), assessment_basis="HALF_YEAR_INCOME"),
+    Slab(Decimal("60001"), Decimal("75000"), rule_type="PT_FLAT", flat_amount=Decimal("1025"), assessment_basis="HALF_YEAR_INCOME"),
+    Slab(Decimal("75001"), None, rule_type="PT_FLAT", flat_amount=Decimal("1250"), assessment_basis="HALF_YEAR_INCOME"),
+]
+
+
+def test_pt_karnataka_below_threshold_is_nil():
+    result = calc("IN", 24999, IN_RATES, IN_SLABS, state_slabs=KA_PT_FLAT)
+    assert result.professional_tax == Decimal("0")
+
+
+def test_pt_karnataka_at_and_above_threshold():
+    # IN-PT-KA-001: Karnataka employee salary ₹30,000 monthly -> PT ₹200.
+    result = calc("IN", 30000, IN_RATES, IN_SLABS, state_slabs=KA_PT_FLAT)
+    assert result.professional_tax == Decimal("200")
+    boundary_result = calc("IN", 25000, IN_RATES, IN_SLABS, state_slabs=KA_PT_FLAT)
+    assert boundary_result.professional_tax == Decimal("200")
+
+
+def test_pt_odisha_bracket_ladder_boundaries():
+    cases = [
+        (5000, "0"), (5001, "30"), (6000, "30"), (6001, "50"),
+        (10000, "75"), (10001, "100"), (20000, "150"), (20001, "200"), (50000, "200"),
+    ]
+    for gross, expected in cases:
+        result = calc("IN", gross, IN_RATES, IN_SLABS, state_slabs=ODISHA_PT_FLAT)
+        assert result.professional_tax == Decimal(expected), f"gross={gross}"
+
+
+def test_pt_chennai_half_year_without_configured_deduct_month_stays_zero():
+    # No pt_half_year_deduct_month_1/_2 configured (as documented — the
+    # source doesn't give Chennai's due date) -> fails closed to ₹0 even
+    # for a high-earning employee, every month.
+    result = calc(
+        "IN", 20000, IN_RATES, IN_SLABS, state_slabs=CHENNAI_PT_FLAT,
+        pay_date=date(2027, 1, 15),
+    )
+    assert result.professional_tax == Decimal("0")
+
+
+def test_pt_chennai_half_year_charges_only_in_configured_month():
+    # IN-PT-CHN-001: half-yearly average income above ₹75,001 -> local PT
+    # ₹1,250 for the half-year. Monthly gross ₹20,000 -> half-yearly
+    # income ₹120,000 (this engine's own disclosed 6x-current-period
+    # approximation), comfortably in the top band.
+    chn_rates = {"pt_half_year_deduct_month_1": Rate(flat_amount=Decimal("4"))}  # April, hypothetically configured
+    in_month = calc(
+        "IN", 20000, IN_RATES, IN_SLABS, state_slabs=CHENNAI_PT_FLAT, state_rate_map=chn_rates,
+        pay_date=date(2027, 4, 10),
+    )
+    assert in_month.professional_tax == Decimal("1250")
+    outside_month = calc(
+        "IN", 20000, IN_RATES, IN_SLABS, state_slabs=CHENNAI_PT_FLAT, state_rate_map=chn_rates,
+        pay_date=date(2027, 5, 10),
+    )
+    assert outside_month.professional_tax == Decimal("0")
+
+
+def test_pt_chennai_half_year_below_threshold_is_nil_even_in_configured_month():
+    chn_rates = {"pt_half_year_deduct_month_1": Rate(flat_amount=Decimal("4"))}
+    result = calc(
+        "IN", 3000, IN_RATES, IN_SLABS, state_slabs=CHENNAI_PT_FLAT, state_rate_map=chn_rates,
+        pay_date=date(2027, 4, 10),
+    )  # half-yearly income 18,000 -> Nil band
+    assert result.professional_tax == Decimal("0")
+
+
 def test_lwf_zero_when_unconfigured():
     result = calc("IN", 20000, IN_RATES, IN_SLABS, pay_date=date(2027, 1, 15))
     assert result.employee_lwf == Decimal("0")
@@ -577,6 +721,77 @@ def test_lwf_reduces_net_pay():
     with_lwf = calc("IN", 20000, IN_RATES, IN_SLABS, state_rate_map=ka_lwf_rates, pay_date=date(2027, 1, 15))
     without_lwf = calc("IN", 20000, IN_RATES, IN_SLABS, pay_date=date(2027, 1, 15))
     assert without_lwf.net_pay - with_lwf.net_pay == Decimal("50")  # only the EMPLOYEE side reduces net pay
+
+
+# ── India: Forms 122/123/124 consumption (§6.1/§6.2, gap-closure Phase E) ──
+# service.py's get_india_salary_tds_inputs resolves these from real
+# Approved/Issued form rows; these tests exercise the engine-side
+# consumption directly via PayrollContext, matching this file's existing
+# direct-construction convention for fields calc() doesn't expose.
+
+def test_other_income_for_tds_increases_annual_tax():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+    without = STRATEGY.calculate(_PC(gross=Decimal("200000"), basic=Decimal("200000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS))
+    with_other_income = STRATEGY.calculate(_PC(
+        gross=Decimal("200000"), basic=Decimal("200000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS,
+        other_income_for_tds=Decimal("100000"),
+    ))
+    # Both firmly in the >800,000 10% band before and after -> exactly 10% of the added income.
+    assert with_other_income.annual_tax - without.annual_tax == Decimal("10000")
+
+
+def test_tds_already_deducted_credits_net_liability_not_the_breakdown():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+    base = STRATEGY.calculate(_PC(gross=Decimal("200000"), basic=Decimal("200000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS))
+    credited = STRATEGY.calculate(_PC(
+        gross=Decimal("200000"), basic=Decimal("200000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS,
+        tds_already_deducted=Decimal("12000"),
+    ))
+    assert credited.annual_tax == base.annual_tax  # breakdown fields unaffected, only the net monthly figure
+    assert base.tds - credited.tds == Decimal("1000")  # 12,000 credit / 12 months
+
+
+def test_claims_total_reduces_old_regime_taxable_income_only():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+    without_claim = STRATEGY.calculate(_PC(
+        gross=Decimal("150000"), basic=Decimal("150000"), country="IN",
+        rate_map=IN_RATES, slabs=IN_OLD_REGIME_SLABS, tax_regime="Old",
+    ))
+    with_claim = STRATEGY.calculate(_PC(
+        gross=Decimal("150000"), basic=Decimal("150000"), country="IN",
+        rate_map=IN_RATES, slabs=IN_OLD_REGIME_SLABS, tax_regime="Old",
+        annual_claims_total=Decimal("200000"),
+    ))
+    assert without_claim.annual_tax - with_claim.annual_tax == Decimal("60000")  # 200,000 * 30% top band
+
+    # Same claim under New regime -> zero effect (AC-08-style regime separation).
+    new_without = STRATEGY.calculate(_PC(gross=Decimal("150000"), basic=Decimal("150000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS))
+    new_with_claim = STRATEGY.calculate(_PC(
+        gross=Decimal("150000"), basic=Decimal("150000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS,
+        annual_claims_total=Decimal("200000"),
+    ))
+    assert new_with_claim.annual_tax == new_without.annual_tax
+
+
+def test_perquisites_total_increases_taxable_income_under_both_regimes():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+    new_without = STRATEGY.calculate(_PC(gross=Decimal("200000"), basic=Decimal("200000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS))
+    new_with = STRATEGY.calculate(_PC(
+        gross=Decimal("200000"), basic=Decimal("200000"), country="IN", rate_map=IN_RATES, slabs=IN_SLABS,
+        annual_perquisites_total=Decimal("100000"),
+    ))
+    assert new_with.annual_tax - new_without.annual_tax == Decimal("10000")
+
+    old_without = STRATEGY.calculate(_PC(
+        gross=Decimal("150000"), basic=Decimal("150000"), country="IN",
+        rate_map=IN_RATES, slabs=IN_OLD_REGIME_SLABS, tax_regime="Old",
+    ))
+    old_with = STRATEGY.calculate(_PC(
+        gross=Decimal("150000"), basic=Decimal("150000"), country="IN",
+        rate_map=IN_RATES, slabs=IN_OLD_REGIME_SLABS, tax_regime="Old",
+        annual_perquisites_total=Decimal("100000"),
+    ))
+    assert old_with.annual_tax - old_without.annual_tax == Decimal("30000")  # top old-regime band is 30%
 
 
 def test_gratuity_capped_at_configured_max():
@@ -1677,6 +1892,7 @@ def _restore_ca_credit_method_switch():
     original_bc_reduction = set(shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES)
     original_in_pf_ceiling = set(shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES)
     original_in_code_wages = set(shared._IN_CODE_WAGES_ENABLED_COUNTRIES)
+    original_in_age_bands = set(shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES)
     original_us_state_tax = set(shared._US_STATE_TAX_ENABLED_STATES)
     original_us_state_program = set(shared._US_STATE_PROGRAM_ENABLED_STATES)
     yield
@@ -1702,6 +1918,8 @@ def _restore_ca_credit_method_switch():
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.update(original_in_pf_ceiling)
     shared._IN_CODE_WAGES_ENABLED_COUNTRIES.clear()
     shared._IN_CODE_WAGES_ENABLED_COUNTRIES.update(original_in_code_wages)
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.clear()
+    shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES.update(original_in_age_bands)
     shared._US_STATE_TAX_ENABLED_STATES.clear()
     shared._US_STATE_TAX_ENABLED_STATES.update(original_us_state_tax)
     shared._US_STATE_PROGRAM_ENABLED_STATES.clear()
@@ -2368,10 +2586,10 @@ def test_canada_cpp2_employer_side_never_reduces_net_pay():
 
 # ── Canada CPP/CPP2/EI real YTD accumulator (ctx.ytd_* fields) ──────────
 # Dormant in production behind engine/countries/shared.py's
-# _YTD_ACCUMULATOR_ENABLED_COUNTRIES (empty today) — these tests exercise
-# the engine directly via ctx.ytd_* fields, independent of that
-# service-layer rollout switch, proving the calculation itself is correct
-# whenever it IS wired.
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES (CA not in it — only "UK" is, as of
+# 2026-09-09 Phase 3) — these tests exercise the engine directly via
+# ctx.ytd_* fields, independent of that service-layer rollout switch,
+# proving the calculation itself is correct whenever it IS wired.
 
 def test_canada_ytd_pensionable_room_mid_period_crossing():
     # Employee already has $74,000 YTD pensionable (room: $600 left to
@@ -2631,9 +2849,10 @@ def test_canada_ytd_quebec_qpp_qpip_share_the_same_accumulator_mechanism():
 
 # ── Ontario EHT — org-level aggregate remuneration accumulator ──────────
 # Dormant behind engine/countries/shared.py's
-# _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES (empty today) — these tests
-# exercise canada.py directly via ctx.on_eht_ytd_remuneration_before,
-# independent of that service-layer switch.
+# _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES (CA not in it — only "UK" is,
+# as of 2026-09-09 Phase 3) — these tests exercise canada.py directly via
+# ctx.on_eht_ytd_remuneration_before, independent of that service-layer
+# switch.
 
 _ON_EHT_BANDS = [
     Slab(Decimal("0"), Decimal("200000"), Decimal("0.980"), rule_type="ON_EHT_BAND"),

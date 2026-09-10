@@ -43,12 +43,17 @@ from app.modules.payroll.schemas import (
     EmployerTaxProfileResponse, EmployerTaxProfileUpsert,
     ReciprocityRuleResponse, ReciprocityRuleUpsert,
     SourceArtifactResponse, SourceArtifactCreate,
+    StateLocalProgramReadinessResponse, StateLocalProgramReadinessUpsert,
+    TaxabilityRuleResponse, TaxabilityRuleUpsert,
     LocalityRateResponse, LocalityRateUpsert,
     ReportTemplateResponse, ReportTemplateUpsert, ReportTemplateStatusUpdate,
     ReportTemplateComponentResponse, ReportTemplateComponentUpsert,
     ReportTemplateFieldResponse, ReportTemplateFieldUpsert,
     AvailableComponentItem, AvailableDataFieldItem,
     FilingCalendarResponse, FilingCalendarUpsert, FilingCalendarStatusUpdate,
+    JurisdictionPackImpactPreviewResponse,
+    PackHotfixActivateRequest, PackHotfixReviewRequest, PackHotfixActivationResponse,
+    RtiFormsSummaryEntry, TestCertificationRunResponse,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -438,6 +443,109 @@ def get_compliance_policy_eligible_organizations(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.get_organizations_eligible_for_pack(db, id)
+
+
+# ── Super Admin UI completion (§19 gap-closure Part 11, 2026-09-09) ─────
+
+@router.get(
+    "/compliance/policies/{id}/impact-preview", response_model=JurisdictionPackImpactPreviewResponse, response_model_by_alias=True,
+    summary="Which organizations/employees/scheduled runs would actually be affected before publishing this pack version",
+)
+def get_compliance_policy_impact_preview(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_jurisdiction_pack_impact_preview(db, id)
+
+
+@router.put(
+    "/compliance/policies/{id}/hotfix-activate", response_model=JurisdictionPackResponse, response_model_by_alias=True,
+    summary="Emergency hotfix activation — bypasses the distinct-approver gate, requires an incident ID, always flagged for mandatory retrospective review",
+)
+def hotfix_activate_compliance_policy(
+    id: int,
+    payload: PackHotfixActivateRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.activate_jurisdiction_pack_hotfix(
+        db, id, payload.incident_id, payload.justification, actor_id=current_user.id,
+    )
+
+
+@router.get(
+    "/compliance/hotfix-activations", response_model=list[PackHotfixActivationResponse], response_model_by_alias=True,
+    summary="List emergency hotfix activations, optionally filtered by review status",
+)
+def list_compliance_hotfix_activations(
+    reviewed: Optional[bool] = None,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_pack_hotfix_activations(db, reviewed)
+
+
+@router.put(
+    "/compliance/hotfix-activations/{activation_id}/review", response_model=PackHotfixActivationResponse, response_model_by_alias=True,
+    summary="Mark a hotfix activation as retrospectively reviewed",
+)
+def review_compliance_hotfix_activation(
+    activation_id: int,
+    payload: PackHotfixReviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.review_pack_hotfix_activation(db, activation_id, payload.review_notes, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/rti-forms", response_model=list[RtiFormsSummaryEntry], response_model_by_alias=True,
+    summary="Cross-org UK RTI filing summary (FPS/EPS/P45/P60) with submission tracking status",
+)
+def get_rti_forms_summary(
+    organization_id: Optional[int] = None,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_rti_forms_summary(db, organization_id)
+
+
+@router.post(
+    "/compliance/test-certification/run", response_model=TestCertificationRunResponse, response_model_by_alias=True,
+    summary="Run the HMRC golden-test harness now and record the result",
+)
+def trigger_test_certification_run(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.run_golden_test_certification(db, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/test-certification/runs", response_model=list[TestCertificationRunResponse], response_model_by_alias=True,
+    summary="Golden-test certification run history, newest first",
+)
+def list_test_certification_runs(
+    limit: int = Query(20, ge=1, le=100),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_test_certification_runs(db, limit)
 
 
 @router.post(
@@ -1058,6 +1166,92 @@ def review_source_artifact(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
+
+
+# ── Taxability rules (India Code Wages classification, §7/§8) ────────────
+
+@router.get(
+    "/compliance/taxability-rules", response_model=List[TaxabilityRuleResponse], response_model_by_alias=True,
+    summary="List taxability rules (e.g. India Code Wages classification)",
+)
+def list_taxability_rules(
+    country: Optional[str] = Query(None), taxComponent: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_taxability_rules(db, country=country, tax_component=taxComponent)
+
+
+@router.post(
+    "/compliance/taxability-rules", response_model=TaxabilityRuleResponse, response_model_by_alias=True,
+    summary="Create or update a taxability rule (Super Admin only)",
+)
+def upsert_taxability_rule(
+    payload: TaxabilityRuleUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_taxability_rule(
+        db, payload.jurisdictionCountry, payload.taxComponent, payload.earningType, payload.isTaxable,
+        state=payload.jurisdictionState, effective_from=payload.effectiveFrom, effective_to=payload.effectiveTo,
+    )
+
+
+@router.delete(
+    "/compliance/taxability-rules/{id}", response_model=SuccessResponse,
+    summary="Delete a taxability rule (Super Admin only)",
+)
+def delete_taxability_rule(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_taxability_rule(db, id)
+    return {"message": "Taxability rule deleted."}
+
+
+# ── India: state/local statutory readiness registry (§16) ────────────────
+# One row per (state/UT, optional local authority, program) — prevents
+# silent gaps when a tenant adds a work location. Informational only in
+# this pass; no calculation or onboarding path enforces it yet.
+
+@router.get(
+    "/compliance/state-local-readiness", response_model=List[StateLocalProgramReadinessResponse], response_model_by_alias=True,
+    summary="List India state/local statutory program readiness rows",
+)
+def list_state_local_program_readiness(
+    country: Optional[str] = Query(None), state: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_state_local_program_readiness(db, country=country, state=state)
+
+
+@router.post(
+    "/compliance/state-local-readiness", response_model=StateLocalProgramReadinessResponse, response_model_by_alias=True,
+    summary="Create or update a state/local statutory program readiness row (Super Admin only)",
+)
+def upsert_state_local_program_readiness(
+    payload: StateLocalProgramReadinessUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_state_local_program_readiness(
+        db, payload.jurisdictionCountry, payload.jurisdictionState, payload.program, payload.legalStatus,
+        locality=payload.jurisdictionLocality, local_authority_required=payload.localAuthorityRequired,
+        registration_required=payload.registrationRequired, source_document_id=payload.sourceDocumentId,
+        notes=payload.notes,
+    )
 
 
 # ── Finance ────────────────────────────────────────────────────────────────

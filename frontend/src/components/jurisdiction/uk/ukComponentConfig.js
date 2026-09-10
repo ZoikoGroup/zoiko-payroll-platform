@@ -12,7 +12,17 @@
 //   _threshold (flat), ni_primary_thresh (flat), ni_upper_threshold (flat),
 //   ni_secondary_thresh (flat), ni_upper_rate (employee rate), k_code_cap
 //   _pct (employee rate), pension_qe_lower/upper (flat), sl_plan1/2/4/5
-//   _thresh + pg_loan_thresh (flat).
+//   _thresh + pg_loan_thresh (flat). Plus (2026-09-09 gap-closure Phase 2):
+//   ssp_weekly_cap/ssp_awe_pct, fam_pay_awe_pct/fam_pay_flat_rate/
+//   fam_pay_recov_thresh/_small/_std, appr_levy_rate/_allowance,
+//   empl_allowance_cap, c1a_benefits_rate, c1a_term_rate/_thresh,
+//   c1a_testim_rate/_thresh, c1b_psa_rate — read by uk.py's
+//   calculate_ssp/calculate_statutory_family_pay/
+//   calculate_family_pay_employer_recovery/
+//   calculate_apprenticeship_levy_period_amount/
+//   calculate_employment_allowance_net_liability/
+//   calculate_class_1a_1b_charge, none of which have a hardcoded
+//   fallback — they fail closed until a real row exists for these keys.
 //
 // NI Category Bands are TaxSlab rows (ruleType="NI_BAND"), not
 // ContributionRate rows — managed by the NI Bands section of the
@@ -58,6 +68,30 @@ const STATIC_MAP = {
   sl_plan4_thresh: { uiType: UI_TYPES.THRESHOLD },
   sl_plan5_thresh: { uiType: UI_TYPES.THRESHOLD },
   pg_loan_thresh: { uiType: UI_TYPES.THRESHOLD },
+  // 2026-09-09 gap-closure Phase 2 — Statutory Sick Pay / Statutory
+  // Family Pay + recovery. Without an explicit entry here, a newly-added
+  // row would still display (classifyUKContributionRate's populated-
+  // field heuristic never hides an unmapped key) but as the generic
+  // EMPLOYEE_EMPLOYER_PERCENTAGE shape whenever the employer-side fields
+  // above are populated alone — wrong for these genuinely single-sided
+  // figures.
+  ssp_weekly_cap: { uiType: UI_TYPES.THRESHOLD },
+  ssp_awe_pct: { uiType: UI_TYPES.EMPLOYEE_ONLY_RATE },
+  fam_pay_awe_pct: { uiType: UI_TYPES.EMPLOYEE_ONLY_RATE },
+  fam_pay_flat_rate: { uiType: UI_TYPES.THRESHOLD },
+  fam_pay_recov_thresh: { uiType: UI_TYPES.THRESHOLD },
+  fam_pay_recov_small: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
+  fam_pay_recov_std: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
+  // Apprenticeship Levy / Employment Allowance / Class 1A / Class 1B.
+  appr_levy_rate: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
+  appr_levy_allowance: { uiType: UI_TYPES.THRESHOLD },
+  empl_allowance_cap: { uiType: UI_TYPES.THRESHOLD },
+  c1a_benefits_rate: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
+  c1a_term_rate: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
+  c1a_term_thresh: { uiType: UI_TYPES.THRESHOLD },
+  c1a_testim_rate: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
+  c1a_testim_thresh: { uiType: UI_TYPES.THRESHOLD },
+  c1b_psa_rate: { uiType: UI_TYPES.EMPLOYER_ONLY_RATE },
 };
 
 export const PAYROLL_COMPONENT_CATEGORIES = {
@@ -65,6 +99,13 @@ export const PAYROLL_COMPONENT_CATEGORIES = {
   workplacePension: "Workplace Pension",
   studentLoans: "Student Loans",
   statutoryThresholds: "HMRC Statutory Thresholds",
+  // 2026-09-09 gap-closure Phase 2 — the doc's §11/§12 (Statutory Sick
+  // Pay, SMP/SPP/SAP/ShPP/SPBP/SNCP + employer recovery) and §14/§9.3
+  // (Apprenticeship Levy, Employment Allowance, Class 1A/1B) have been
+  // computable by the backend since the 2026-09-08 commit but had no
+  // admin UI category to live under at all.
+  statutoryPay: "Statutory Pay",
+  employerCharges: "Employer Charges",
 };
 
 // Business-language catalog for the "+ Add Component" picker — the admin
@@ -91,6 +132,24 @@ export const PAYROLL_COMPONENT_CATALOG = [
   { componentKey: "k_code_cap_pct", displayName: "K-Code Overriding Limit", category: "statutoryThresholds", description: "Maximum PAYE deduction as a percentage of gross pay for K-coded employees." },
   { componentKey: "__paye_income_tax", displayName: "PAYE Income Tax Bands", category: "statutoryThresholds", description: "Progressive income tax brackets — configured in the PAYE Income Tax tab.", navigatesTo: "paye", synthetic: true },
   { componentKey: "__ni_bands", displayName: "NI Category Bands", category: "nationalInsurance", description: "Per-category NI band rates (Employee % / Employer %) — managed below.", navigatesTo: "ni-bands", synthetic: true },
+  // 2026-09-09 gap-closure Phase 2 — Statutory Pay (§11/§12).
+  { componentKey: "ssp_weekly_cap", displayName: "Statutory Sick Pay — Weekly Cap", category: "statutoryPay", description: "Maximum weekly SSP amount — SSP pays the lower of this cap or the AWE percentage below." },
+  { componentKey: "ssp_awe_pct", displayName: "Statutory Sick Pay — AWE Percentage", category: "statutoryPay", description: "Percentage of Average Weekly Earnings used to calculate SSP (80%)." },
+  { componentKey: "fam_pay_awe_pct", displayName: "Statutory Family Pay — AWE Percentage", category: "statutoryPay", description: "Percentage of AWE used for SMP/SPP/SAP/ShPP/SPBP/SNCP (90%), including SMP/SAP's uncapped first 6 weeks." },
+  { componentKey: "fam_pay_flat_rate", displayName: "Statutory Family Pay — Standard Weekly Rate", category: "statutoryPay", description: "Flat weekly rate cap for statutory family pay after any uncapped first weeks (£194.32)." },
+  { componentKey: "fam_pay_recov_thresh", displayName: "Family Pay Recovery — Small Employer Threshold", category: "statutoryPay", description: "Prior-year total Class 1 NIC threshold (£45,000) that decides which recovery rate an employer gets." },
+  { componentKey: "fam_pay_recov_small", displayName: "Family Pay Recovery Rate — Small Employer", category: "statutoryPay", description: "Employer recovery rate when prior-year Class 1 NIC was at/below the threshold (109%)." },
+  { componentKey: "fam_pay_recov_std", displayName: "Family Pay Recovery Rate — Standard", category: "statutoryPay", description: "Employer recovery rate when prior-year Class 1 NIC was above the threshold (92%). SSP is never eligible for recovery." },
+  // 2026-09-09 gap-closure Phase 2 — Employer Charges (§9.3/§14).
+  { componentKey: "appr_levy_rate", displayName: "Apprenticeship Levy Rate", category: "employerCharges", description: "Employer levy rate on cumulative annual pay bill (0.5%)." },
+  { componentKey: "appr_levy_allowance", displayName: "Apprenticeship Levy Annual Allowance", category: "employerCharges", description: "Annual allowance offsetting the levy before any net charge applies (£15,000, shared across connected employers)." },
+  { componentKey: "empl_allowance_cap", displayName: "Employment Allowance Cap", category: "employerCharges", description: "Maximum reduction to eligible employer secondary Class 1 NIC liability per tax year (£10,500) — only applies once claimed." },
+  { componentKey: "c1a_benefits_rate", displayName: "Class 1A — Benefits & Expenses Rate", category: "employerCharges", description: "Employer NIC rate on payrolled/reported benefits and expenses (15%)." },
+  { componentKey: "c1a_term_rate", displayName: "Class 1A — Termination Awards Rate", category: "employerCharges", description: "Employer NIC rate on the portion of a termination award above its threshold (15%)." },
+  { componentKey: "c1a_term_thresh", displayName: "Class 1A — Termination Awards Threshold", category: "employerCharges", description: "Termination award amount (£30,000) below which no Class 1A charge applies." },
+  { componentKey: "c1a_testim_rate", displayName: "Class 1A — Sporting Testimonial Rate", category: "employerCharges", description: "Employer NIC rate on the portion of a qualifying sporting testimonial payment above its threshold (15%)." },
+  { componentKey: "c1a_testim_thresh", displayName: "Class 1A — Sporting Testimonial Threshold", category: "employerCharges", description: "Sporting testimonial payment amount (£100,000) below which no Class 1A charge applies." },
+  { componentKey: "c1b_psa_rate", displayName: "Class 1B — PAYE Settlement Agreement Rate", category: "employerCharges", description: "Employer NIC rate on PAYE Settlement Agreement items (15%)." },
 ];
 
 function isSet(v) {

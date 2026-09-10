@@ -97,6 +97,9 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     ["National Insurance", item.niEmployee],
     ["Workplace Pension", item.employeePension],
     ["Student Loan Deduction", item.studyLoanDeduction],
+    // UK: was reaching the API response (once the schema fix landed) but
+    // still had no row here — found 2026-09-09 gap-closure Phase 3.
+    ["Postgraduate Loan Deduction", item.postgradLoanDeduction],
   ].filter(([, v]) => Number(v) > 0);
 
   const employerContributions = [
@@ -106,6 +109,12 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     ["Employer Medicare", item.employerMedicare],
     [labels.employerPension, item.employerPension],
     ["Employer National Insurance", item.employerNi],
+    // UK: Apprenticeship Levy — computed since the 2026-09-08 commit but
+    // silently discarded before ever reaching a persisted PayslipItem;
+    // now actually persisted+serialized (Phase 3), shown here as an
+    // employer-only charge, consistent with Employer National Insurance
+    // above.
+    ["Apprenticeship Levy", item.employerApprenticeshipLevy],
   ].filter(([, v]) => Number(v) > 0);
 
   return (

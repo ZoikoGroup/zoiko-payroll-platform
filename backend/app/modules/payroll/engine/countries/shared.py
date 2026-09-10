@@ -86,7 +86,16 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 #      threshold share the identical current-period-annualized bug (see
 #      engine/countries/us.py) and are designed to reuse this exact
 #      mechanism — not enabled here, tracked as a separate follow-up.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = set()
+# UK — enabled 2026-09-09 gap-closure Phase 3. This switch is the ONLY
+#      gate on _load_uk_director_ytd/_upsert_uk_director_ytd_accumulator
+#      (service.py) — the plumbing was built and tested 2026-09-08 but
+#      left dormant. Unlike CA's caveat above, there is no existing UK
+#      payslip history to create a partial-year gap: zero UK employees
+#      existed in the live DB as of the 2026-09-07/09 audits, and even
+#      once enabled this only produces a nonzero effect for an employee
+#      with is_director=True (a field nobody has set, default False) —
+#      every non-director UK payslip is completely unaffected.
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -99,7 +108,16 @@ _YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = set()
 # regardless, since no employer levy calculation exists yet to call them
 # (this accumulator is built and tested standalone first — see
 # OrganizationYtdAccumulator's own docstring).
-_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = set()
+# UK — enabled 2026-09-09 gap-closure Phase 3, alongside
+#      _YTD_ACCUMULATOR_ENABLED_COUNTRIES above. Once on, every UK
+#      payslip starts accumulating the org's pay-bill/employer-NI
+#      totals (harmless bookkeeping — `calculate_apprenticeship_levy_
+#      period_amount`/`calculate_employment_allowance_net_liability`
+#      themselves still fail closed to 0/not-eligible until
+#      appr_levy_rate/appr_levy_allowance/empl_allowance_cap are
+#      actually configured for the org), so this is safe to enable
+#      before any org has configured those rates.
+_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK"}
 
 # Per-country rollout switch for the CRA-correct CREDIT method of
 # applying "amounts" (federal BPAF, provincial BPA, Quebec BPA — and any
@@ -263,8 +281,16 @@ _CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = set()
 # every such employee's next payslip, so it ships dormant like every
 # other fix in this file rather than silently changing live withholding.
 #
-# IN — not yet enabled.
-_IN_PF_WAGE_CEILING_ENABLED_COUNTRIES: set[str] = set()
+# IN — enabled 2026-09-10 (gap-analysis follow-up against
+#      ZP-TAX-IN-2026-27-001). resolve_jurisdiction_parameter's own
+#      fallback means an org with no "pf_wage_ceiling" row configured
+#      still gets the correct statutory ₹15,000 default rather than an
+#      error — so this is safe to enable even before any org has entered
+#      the ceiling explicitly. This DOES change real withheld PF for any
+#      live employee whose Basic already exceeds ₹15,000 (uncapped ->
+#      capped) — verify there is no such live employee, or that the
+#      change is wanted, before deploying past a dev/test environment.
+_IN_PF_WAGE_CEILING_ENABLED_COUNTRIES: set[str] = {"IN"}
 
 # Per-country rollout switch for India's Labour Code "code_wages" object
 # (ZP-TAX-IN-2026-27-001 §8: the 50%-allowance-cap add-back that becomes
@@ -275,17 +301,28 @@ _IN_PF_WAGE_CEILING_ENABLED_COUNTRIES: set[str] = set()
 # >= basic — a real payroll-affecting increase for any employee whose
 # non-basic components exceed 50% of gross, so this ships dormant.
 #
-# DISCLOSED SIMPLIFICATION: the document's code_wages object classifies
-# each EARNINGS LINE independently as included/excluded/add-back (§7's
-# earnings registry, code_wages_classification). This engine has no
-# itemized earnings breakdown to consume (ctx only carries scalar
-# gross/basic) — so this treats ctx.basic as the entirety of
-# core_included_wages and (gross - basic) as the entirety of
-# excluded_total, which is not the same as a real per-component
-# classification. Revisit once itemized earnings lines exist.
+# Phase B (2026-09-10, gap-closure follow-up): the DISCLOSED SIMPLIFICATION
+# that used to live here (basic-as-proxy for core_included_wages,
+# gross-minus-basic as a blind stand-in for excluded_total, because ctx
+# only carried scalar gross/basic) is resolved — india.py's
+# _calculate_code_wages now classifies each of the employee's own named
+# components (basic/hra/special_allowance/overtime/
+# additional_compensation/named_allowances) independently via
+# ctx.code_wages_rules (service.py's get_code_wages_classification,
+# backed by TaxabilityRule with tax_component="code_wages" — the
+# previously-orphaned model, now wired in). The DEFAULT classification
+# when no TaxabilityRule row is configured (basic=included, every other
+# component excluded) reproduces the exact pre-Phase-B arithmetic, so
+# enabling this is a pure no-op for any org that hasn't entered an
+# override yet — genuinely safe to enable now on that basis alone.
 #
-# IN — not yet enabled.
-_IN_CODE_WAGES_ENABLED_COUNTRIES: set[str] = set()
+# IN — enabled 2026-09-10, same gap-analysis follow-up as the PF-ceiling/
+#      age-bands switches above. Still a REAL payroll-number change for
+#      any live employee whose non-basic components (HRA/allowances/
+#      overtime/additional pay) exceed 50% of gross — same "confirm
+#      before deploying past dev/test" caution as those two switches;
+#      not yet independently verified against live data.
+_IN_CODE_WAGES_ENABLED_COUNTRIES: set[str] = {"IN"}
 
 # India Old Regime senior/super-senior age-based basic-exemption bands
 # (ZP-TAX-IN-2026-27-001 §4.1) — a real, correctness-affecting change for
@@ -297,8 +334,21 @@ _IN_CODE_WAGES_ENABLED_COUNTRIES: set[str] = set()
 # no-op while this set is empty, regardless of whether
 # date_of_birth/tax_residency_status are populated.
 #
-# IN — not yet enabled.
-_IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES: set[str] = set()
+# IN — enabled 2026-09-10 (gap-analysis follow-up against
+#      ZP-TAX-IN-2026-27-001). Safe even for an org with no
+#      SENIOR/SUPER_SENIOR-tagged Old-regime TaxSlab rows configured:
+#      _calculate_annual_tax's own filing_status-tagged-fallback logic
+#      (shared.py, "filing_status_tagged") falls back to the untagged
+#      ordinary bands whenever no row matches the resolved age category,
+#      so an employee just starts computing their own age category as a
+#      no-op until real senior/super-senior slabs exist for their
+#      jurisdiction pack. Per gap_closure_plan_and_india_phase1 memory,
+#      real senior/super-senior slab data was already entered against
+#      the live IN pack (id 77) on 2026-09-09 — meaning this DOES change
+#      real withheld tax for any live Old-regime resident employee aged
+#      60+ the next time this deploys; confirm that's wanted (or that no
+#      such live employee exists yet) before deploying past dev/test.
+_IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES: set[str] = {"IN"}
 
 # Per-country rollout switch for removing the UK engine's independent
 # Personal Allowance taper (ZP-TAX-UK-2026-27-001 §5.1 PAYE implementation
@@ -382,6 +432,63 @@ _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES: set[str] = {"UK"}
 # employees existed in the database at enable time).
 _UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES: set[str] = {"UK"}
 
+# Per-country rollout switch for deriving ni_category from real relief-
+# eligibility facts (PayrollNiReliefFact) instead of trusting whatever
+# letter an admin manually set on the employee record (ZP-TAX-UK-2026-27-
+# 001 §9.1/§9.3 gap-closure Part 2, 2026-09-09 — "Relief eligibility is
+# not a rate toggle"). While OFF (the default — genuinely new, unlike
+# most other UK switches in this file, which started dormant only briefly
+# before being enabled the same week they shipped), uk.py's
+# derive_ni_category() is never called at all; the employee's own
+# ni_category is used exactly as today, even for an employee who already
+# has a relief fact recorded. Left off pending a deliberate enable
+# decision, since this is a genuinely new-build feature (Part 2 of a
+# fresh 11-part roadmap), not a correction to something already shipped.
+_UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES: set[str] = {"UK"}
+# UK — enabled 2026-09-10 (deliberate enable decision, gap-analysis
+# follow-up). Zero live UK organizations existed in the database at
+# enable time. Still a practical no-op for every employee today: there
+# is no UI anywhere to record a PayrollNiReliefFact, so derive_ni_category()
+# has no facts to act on and returns None (use the manual ni_category)
+# for everyone until that UI is built.
+
+# Per-country rollout switch for computing a real Automatic Enrolment
+# assessment (ELIGIBLE_JOBHOLDER/NON_ELIGIBLE_JOBHOLDER/ENTITLED_WORKER
+# from age + qualifying earnings) instead of leaving it as the plain
+# manual yes/no field it's always been (ZP-TAX-UK-2026-27-001 §13 gap-
+# closure Part 3, 2026-09-09). While OFF (the default — genuinely new,
+# same as Part 2's switch above), uk.py's assess_auto_enrolment() is
+# never called; PayslipItem.auto_enrolment_status stays NULL for every
+# payslip exactly as today. Purely informational/output-only even once
+# enabled — never changes employee_pension/employer_pension's own
+# calculation (see uk.py's own comment on assess_auto_enrolment).
+_UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES: set[str] = {"UK"}
+# UK — enabled 2026-09-10, immediately after adding a generic Date of
+# Birth field to the employee form (EmployeeForm.jsx) — this switch was
+# gated on ctx.date_of_birth, which had no UI anywhere to set it until
+# now. Zero live UK organizations existed in the database at enable time.
+# Still purely informational/output-only even now enabled — never
+# changes employee_pension/employer_pension.
+
+# Per-country rollout switch for automatically computing and freezing a
+# Statutory Family Pay total (SMP/SPP/SAP/SHPP/SPBP/SNCP) the moment a
+# matching statutory leave request (leave_type in maternity/paternity/
+# adoption/sharedParental/bereavement/neonatal) is approved
+# (ZP-TAX-UK-2026-27-001 §11 gap-closure Part 7A, 2026-09-09). While OFF
+# (the default), approving one of these leave types behaves exactly as
+# any other leave type always has — no statutory_pay_* column is ever
+# populated. Purely additive on approval; never touches any existing
+# leave-balance/attendance-sync logic.
+_UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES: set[str] = {"UK"}
+# UK — enabled 2026-09-10 (deliberate enable decision, gap-analysis
+# follow-up). Zero live UK organizations existed in the database at
+# enable time, so no in-flight leave request could be affected by this
+# flip. From this point on, approving a maternity/paternity/adoption/
+# sharedParental/bereavement/neonatal leave request for a real UK
+# employee will automatically compute and add a statutory-pay amount
+# into that pay period's gross — see tests/test_uk_statutory_leave_
+# wiring.py for the already-proven enabled-path behavior.
+
 # Per-STATE (not per-country, unlike every switch above — the US isn't one
 # jurisdiction) rollout switch for a state's real income-tax withholding
 # (ZP-TAX-US-2026-001 §4). While a state is absent from this set, us.py
@@ -445,7 +552,14 @@ def resolve_period_threshold(annual_threshold: Decimal, pay_frequency: str | Non
     return annual_threshold / resolve_periods_per_year(pay_frequency)
 
 
-def resolve_direct_period_threshold(period_thresholds_by_frequency: dict, annual_threshold: Decimal, pay_frequency: str | None) -> Decimal:
+def resolve_direct_period_threshold(
+    period_thresholds_by_frequency: dict,
+    annual_threshold: Decimal,
+    pay_frequency: str | None,
+    rate_map: dict | None = None,
+    param_keys_by_frequency: dict | None = None,
+    country: str | None = None,
+) -> Decimal:
     """For a statutory threshold whose authority publishes REAL, genuinely
     independent per-period figures (e.g. UK NI's own Weekly/Monthly
     thresholds — HMRC rounds each period's table separately, so the
@@ -454,10 +568,24 @@ def resolve_direct_period_threshold(period_thresholds_by_frequency: dict, annual
     `period_thresholds_by_frequency`, falling back to
     resolve_period_threshold's derived annual/periods_per_year figure for
     any frequency the authority hasn't published a direct table for
-    (today's exact existing behavior for those)."""
+    (today's exact existing behavior for those).
+
+    2026-09-09 gap-closure Phase 1: these per-frequency figures used to
+    have NO database override path at all — a Super Admin could edit
+    every other UK figure except this one. `rate_map`/
+    `param_keys_by_frequency`/`country` are optional so every other
+    caller (none exist outside uk.py today, but this is a shared/
+    country-agnostic helper) keeps working with zero behavior change if
+    it doesn't pass them; when a caller does, a configured row for this
+    frequency's key overrides the hardcoded figure exactly like every
+    other UK parameter already does via resolve_jurisdiction_parameter."""
     frequency = pay_frequency or "Monthly"
     if frequency in period_thresholds_by_frequency:
-        return period_thresholds_by_frequency[frequency]
+        default = period_thresholds_by_frequency[frequency]
+        param_key = (param_keys_by_frequency or {}).get(frequency)
+        if rate_map is not None and param_key:
+            return resolve_jurisdiction_parameter(rate_map, param_key, default, country=country)
+        return default
     return resolve_period_threshold(annual_threshold, pay_frequency)
 
 
@@ -654,7 +782,17 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
     # are excluded for the identical reason — see
     # engine/countries/canada.py's _on_eht_rate_for_total, which reads
     # them directly instead.
-    bracket_slabs = [s for s in slabs if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT", "ON_EHT_BAND")]
+    # NI_BAND/NI_BAND_WEEKLY/NI_BAND_MONTHLY (UK National Insurance category
+    # bands) excluded for the identical reason, as a second layer of defense
+    # — engine/countries/uk.py's own income_slabs/state_income_slabs filter
+    # is supposed to strip these before calling here, but a 2026-09-10 live
+    # bug (that filter missed the two per-frequency variants) proved a
+    # caller CAN forget, and this function is the one place that would
+    # otherwise silently sum them in as bogus income-tax brackets.
+    bracket_slabs = [
+        s for s in slabs
+        if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY")
+    ]
 
     filing_status_tagged = [s for s in bracket_slabs if getattr(s, "filing_status", None) is not None]
     if filing_status_tagged:

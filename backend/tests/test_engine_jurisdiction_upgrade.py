@@ -12,6 +12,7 @@ test_engine_standard.py — no DB dependency.
 """
 
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -287,6 +288,24 @@ def test_uk_student_loan_plan2_threshold_configurable():
 def test_uk_postgrad_loan_threshold_configurable():
     default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
     configured_rates = {**UK_RATES, "pg_loan_thresh": Rate(flat_amount=Decimal("5000"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+# 2026-09-09 gap-closure Phase 1: the repayment RATE (9%/6%) was the one
+# hardcoded-with-no-override-path figure in _UK_STUDENT_LOAN_PLANS — the
+# threshold half of each tuple already had a configurable path (above).
+
+def test_uk_student_loan_plan1_rate_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_PLAN1", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "sl_plan1_rate": Rate(employee_rate_pct=Decimal("20"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_PLAN1", study_loan_balance=Decimal("20000"))
+    assert configured_result.study_loan_deduction > default_result.study_loan_deduction
+
+
+def test_uk_postgrad_loan_rate_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
+    configured_rates = {**UK_RATES, "pg_loan_rate": Rate(employee_rate_pct=Decimal("15"))}
     configured_result = calc("UK", 5000, configured_rates, UK_SLABS, study_loan_plan="UK_POSTGRAD", study_loan_balance=Decimal("20000"))
     assert configured_result.study_loan_deduction > default_result.study_loan_deduction
 
@@ -724,6 +743,42 @@ def test_uk_br_code_taxes_full_income_at_20pct_no_allowance():
     assert with_code.annual_tax != without_code.annual_tax
 
 
+# 2026-09-09 gap-closure Phase 1: each flat-rate code's % used to be a
+# bare Python-dict lookup with no rate_map row consulted at all — the
+# only UK figure left with no Super-Admin override path after the
+# K-code-cap fix (2026-09-07). A configured row must actually change tds.
+
+def test_interpret_tax_code_br_rate_configurable_via_rate_map():
+    rate_map = {"flat_br_pct": Rate(employee_rate_pct=Decimal("15"))}
+    result = interpret_tax_code("BR", Decimal("12570"), rate_map)
+    assert result["flat_rate_pct"] == Decimal("15")
+
+
+def test_interpret_tax_code_flat_rate_falls_back_without_rate_map():
+    # Every existing direct caller (the tests above) passes only 2
+    # positional args -- must keep resolving to the hardcoded default.
+    result = interpret_tax_code("BR", Decimal("12570"))
+    assert result["flat_rate_pct"] == Decimal("20")
+
+
+def test_uk_flat_rate_code_br_pct_configurable():
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="BR")
+    configured_rates = {**UK_RATES, "flat_br_pct": Rate(employee_rate_pct=Decimal("10"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, tax_code="BR")
+    assert default_result.tds == Decimal("1000.00")
+    assert configured_result.tds == Decimal("500.00")
+
+
+def test_uk_flat_rate_code_sd0_pct_configurable():
+    # Scottish SD0 (21%) — proves the fix covers the S-prefixed family too,
+    # not just the plain BR/D0/D1 codes.
+    default_result = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="SD0")
+    configured_rates = {**UK_RATES, "flat_sd0_pct": Rate(employee_rate_pct=Decimal("5"))}
+    configured_result = calc("UK", 5000, configured_rates, UK_SLABS, tax_code="SD0")
+    assert default_result.tds == Decimal("1050.00")
+    assert configured_result.tds == Decimal("250.00")
+
+
 def test_uk_nt_code_means_zero_annual_tax():
     result = calc("UK", 5000, UK_RATES, UK_SLABS, tax_code="NT")
     assert result.annual_tax == Decimal("0")
@@ -840,6 +895,25 @@ def test_uk_ni_direct_period_calc_diverges_from_annualize_then_divide():
     assert enabled_result.ni_employee == Decimal("0.00")
     assert disabled_result.employer_ni == Decimal("94.70")
     assert enabled_result.employer_ni == Decimal("94.65")
+
+
+def test_uk_ni_monthly_primary_threshold_configurable():
+    # 2026-09-09 gap-closure Phase 1: the Weekly/Monthly direct-period NI
+    # thresholds had NO database override path at all — a Super Admin
+    # could edit every other UK figure except these. Lowering the
+    # Monthly Primary Threshold must actually raise ni_employee.
+    default_result = calc("UK", 1048, UK_RATES, UK_SLABS, pay_frequency="Monthly")
+    configured_rates = {**UK_RATES, "ni_pt_thresh_mo": Rate(flat_amount=Decimal("500"))}
+    configured_result = calc("UK", 1048, configured_rates, UK_SLABS, pay_frequency="Monthly")
+    assert default_result.ni_employee == Decimal("0.00")
+    assert configured_result.ni_employee == Decimal("43.84")
+
+
+def test_uk_ni_weekly_secondary_threshold_configurable():
+    default_result = calc("UK", 300, UK_RATES, UK_SLABS, pay_frequency="Weekly")
+    configured_rates = {**UK_RATES, "ni_st_thresh_wk": Rate(flat_amount=Decimal("50"))}
+    configured_result = calc("UK", 300, configured_rates, UK_SLABS, pay_frequency="Weekly")
+    assert configured_result.employer_ni > default_result.employer_ni
 
 
 def test_uk_ni_fortnightly_unaffected_by_direct_period_setting():
@@ -1187,6 +1261,136 @@ def test_reference_vector_category_c_weekly_1000():
     assert employer_annual == Decimal("135.60")
 
 
+# ── Weekly/Monthly NI_BAND direct-period variant (found 2026-09-10 on a ──
+# fresh document re-read: the banded path above always annualizes first,
+# which can miss the document's own reference vectors by a penny —
+# £242 weekly PT x 52 = £12,584, not the real annual PT £12,570) ─────────
+
+def _make_period_ni_category_a_bands(rule_type):
+    bands = [
+        Slab(Decimal("0"), Decimal("96"), Decimal("0"), rule_type=rule_type),
+        Slab(Decimal("96"), Decimal("242"), Decimal("0"), rule_type=rule_type),
+        Slab(Decimal("242"), Decimal("967"), Decimal("8"), rule_type=rule_type),
+        Slab(Decimal("967"), None, Decimal("2"), rule_type=rule_type),
+    ]
+    for b, er in zip(bands, [Decimal("0"), Decimal("15"), Decimal("15"), Decimal("15")]):
+        b.employer_rate_pct = er
+        b.ni_category = "A"
+    return bands
+
+
+def test_weekly_ni_band_variant_reproduces_document_reference_vector_exactly():
+    """Through the REAL engine (not just the pure band-math helper): with
+    a genuine NI_BAND_WEEKLY variant present, Category A at £1,000/week
+    must match the document's published £58.66/£135.60 exactly — proving
+    the annualize-then-divide path's penny drift is gone once real
+    per-period bands exist."""
+    weekly_bands = _make_period_ni_category_a_bands("NI_BAND_WEEKLY")
+    result = calc("UK", 1000, {}, weekly_bands, pay_frequency="Weekly", ni_category="A", tax_code="NT")
+    assert result.ni_employee == Decimal("58.66")
+    assert result.employer_ni == Decimal("135.60")
+
+
+def test_annual_ni_band_path_unchanged_without_a_period_variant():
+    """The existing annual-band-then-divide behavior (with its known,
+    disclosed penny-level drift for Weekly/Monthly) is completely
+    unaffected when no NI_BAND_WEEKLY/MONTHLY rows exist — this is the
+    exact pre-existing behavior, not a regression."""
+    annual_bands = [
+        Slab(Decimal("0"), Decimal("5000"), Decimal("0"), rule_type="NI_BAND"),
+        Slab(Decimal("5000"), Decimal("12570"), Decimal("0"), rule_type="NI_BAND"),
+        Slab(Decimal("12570"), Decimal("50270"), Decimal("8"), rule_type="NI_BAND"),
+        Slab(Decimal("50270"), None, Decimal("2"), rule_type="NI_BAND"),
+    ]
+    for b, er in zip(annual_bands, [Decimal("0"), Decimal("15"), Decimal("15"), Decimal("15")]):
+        b.employer_rate_pct = er
+        b.ni_category = "A"
+    result = calc("UK", 1000, {}, annual_bands, pay_frequency="Weekly", ni_category="A", tax_code="NT")
+    assert result.ni_employee == Decimal("58.67")  # the known drift, unchanged
+    assert result.employer_ni == Decimal("135.58")
+
+
+def test_monthly_ni_band_variant_takes_precedence_over_annual():
+    """Both an annual NI_BAND and a NI_BAND_MONTHLY variant present for
+    the same category — Monthly pay must use the period-specific variant,
+    not silently fall back to the annual one."""
+    monthly_bands = [
+        Slab(Decimal("0"), Decimal("417"), Decimal("0"), rule_type="NI_BAND_MONTHLY"),
+        Slab(Decimal("417"), Decimal("1048"), Decimal("0"), rule_type="NI_BAND_MONTHLY"),
+        Slab(Decimal("1048"), Decimal("4189"), Decimal("8"), rule_type="NI_BAND_MONTHLY"),
+        Slab(Decimal("4189"), None, Decimal("2"), rule_type="NI_BAND_MONTHLY"),
+    ]
+    annual_bands = [
+        Slab(Decimal("0"), Decimal("5000"), Decimal("0"), rule_type="NI_BAND"),
+        Slab(Decimal("5000"), Decimal("12570"), Decimal("0"), rule_type="NI_BAND"),
+        Slab(Decimal("12570"), Decimal("50270"), Decimal("8"), rule_type="NI_BAND"),
+        Slab(Decimal("50270"), None, Decimal("2"), rule_type="NI_BAND"),
+    ]
+    for b, er in zip(monthly_bands + annual_bands, [Decimal("0"), Decimal("15"), Decimal("15"), Decimal("15")] * 2):
+        b.employer_rate_pct = er
+        b.ni_category = "A"
+    result_monthly_variant = calc("UK", 4333, {}, monthly_bands + annual_bands, pay_frequency="Monthly", ni_category="A", tax_code="NT")
+    result_annual_only = calc("UK", 4333, {}, annual_bands, pay_frequency="Monthly", ni_category="A", tax_code="NT")
+    # Different threshold boundaries (monthly £1,048/£4,189 vs annual/12
+    # £1,047.50/£4,189.17) produce a genuinely different result — proving
+    # the monthly-specific table, not the annual one, actually drove it.
+    assert result_monthly_variant.ni_employee != result_annual_only.ni_employee or result_monthly_variant.employer_ni != result_annual_only.employer_ni
+
+
+def test_period_ni_bands_fail_closed_for_unpublished_frequencies():
+    """Fortnightly/FourWeekly have no published per-period table (same
+    scope boundary as the flat direct-period path) — a NI_BAND_WEEKLY
+    row must never be silently reused for Fortnightly pay."""
+    from app.modules.payroll.engine.countries.uk import _resolve_ni_bands_by_frequency
+    weekly_bands = _make_period_ni_category_a_bands("NI_BAND_WEEKLY")
+    result = _resolve_ni_bands_by_frequency(weekly_bands, "A", "Fortnightly")
+    assert result == []
+
+
+# ── Bug found live 2026-09-10: NI_BAND_WEEKLY/MONTHLY leaking into the ────
+# income-tax bracket sum. income_slabs/state_income_slabs in uk.py's
+# calculate() only excluded literal rule_type "NI_BAND" — once the two
+# per-frequency variants above existed in the same live pack (as they now
+# do), every NI band row for every category got silently summed in as an
+# extra income-tax bracket, inflating a real £952.67/month PAYE figure
+# (£5,000 gross, tax code 1257L) to £2,722.88. Caught only by running the
+# real engine against real canonical data, not by any prior unit test —
+# every existing NI-band-frequency test above builds a slabs list with NO
+# separate MARGINAL_RATE rows in it, so it could never have exposed this.
+
+def test_ni_band_monthly_rows_do_not_inflate_income_tax():
+    marginal_rate_only = [
+        Slab(Decimal("0"), Decimal("37700"), Decimal("20"), rule_type="MARGINAL_RATE"),
+        Slab(Decimal("37700"), None, Decimal("40"), rule_type="MARGINAL_RATE"),
+    ]
+    monthly_ni_bands = _make_period_ni_category_a_bands("NI_BAND_MONTHLY")
+
+    tax_only_result = calc("UK", 5000, {}, marginal_rate_only, pay_frequency="Monthly", ni_category="A", tax_code="1257L")
+    combined_result = calc("UK", 5000, {}, marginal_rate_only + monthly_ni_bands, pay_frequency="Monthly", ni_category="A", tax_code="1257L")
+
+    assert combined_result.tds == tax_only_result.tds
+    # £5,000/month, tax code 1257L: (£50,270-£37,700 wait — annual gross
+    # £60,000, PA £12,570, taxable £47,430) 20% to £37,700 + 40% above =
+    # £7,540 + £3,892 = £11,432/year = £952.67/month.
+    assert combined_result.tds == Decimal("952.67")
+
+
+def test_ni_band_weekly_rows_excluded_from_shared_bracket_calculator_directly():
+    """Second layer of defense: _calculate_annual_tax itself (shared.py)
+    must never treat an NI_BAND/NI_BAND_WEEKLY/NI_BAND_MONTHLY row as an
+    income-tax bracket, even if a future caller forgets to pre-filter —
+    exactly the mistake that caused the live bug above."""
+    from app.modules.payroll.engine.countries.shared import _calculate_annual_tax
+    marginal_rate_only = [
+        Slab(Decimal("0"), Decimal("37700"), Decimal("20"), rule_type="MARGINAL_RATE"),
+        Slab(Decimal("37700"), None, Decimal("40"), rule_type="MARGINAL_RATE"),
+    ]
+    contaminated = marginal_rate_only + _make_period_ni_category_a_bands("NI_BAND_WEEKLY") + [
+        Slab(Decimal("0"), Decimal("5000"), Decimal("0"), rule_type="NI_BAND"),
+    ]
+    assert _calculate_annual_tax(Decimal("47430"), contaminated) == _calculate_annual_tax(Decimal("47430"), marginal_rate_only)
+
+
 # ── ZP-TAX-UK-2026-27-001 AC-04: tax-code prefix beats work_state ────────
 
 def test_region_resolution_prefers_tax_code_prefix_over_work_state():
@@ -1210,3 +1414,640 @@ def test_region_resolution_welsh_prefix_overrides_english_work_state():
     sub_jurisdiction, source = _resolve_uk_sub_jurisdiction_with_source("C1257L", "England")
     assert sub_jurisdiction == "Wales"
     assert source == "TAX_CODE_PREFIX"
+
+
+# ── NI category derivation from relief-eligibility facts (ZP-TAX-UK- ────
+# 2026-27-001 §8.2/§9.1/§9.3 gap-closure Part 2, 2026-09-09) ─────────────
+
+def test_derive_ni_category_returns_none_without_date_of_birth():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "FREEPORT", "effective_from": date(2026, 1, 1), "effective_to": None}]
+    assert derive_ni_category(None, date(2026, 6, 1), facts, {}) is None
+
+
+def test_derive_ni_category_returns_none_with_no_active_facts():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    assert derive_ni_category(date(1990, 1, 1), date(2026, 6, 1), [], {}) is None
+    # A fact that hasn't started yet is not active.
+    future_fact = [{"relief_type": "FREEPORT", "effective_from": date(2027, 1, 1), "effective_to": None}]
+    assert derive_ni_category(date(1990, 1, 1), date(2026, 6, 1), future_fact, {}) is None
+    # A fact that already ended is not active.
+    expired_fact = [{"relief_type": "FREEPORT", "effective_from": date(2020, 1, 1), "effective_to": date(2025, 12, 31)}]
+    assert derive_ni_category(date(1990, 1, 1), date(2026, 6, 1), expired_fact, {}) is None
+
+
+def test_derive_ni_category_freeport_standard():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "FREEPORT", "effective_from": date(2026, 1, 1), "effective_to": None}]
+    assert derive_ni_category(date(1990, 1, 1), date(2026, 6, 1), facts, {}) == "F"
+
+
+def test_derive_ni_category_freeport_at_state_pension_age():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "FREEPORT", "effective_from": date(2026, 1, 1), "effective_to": None}]
+    # Turns 66 (the default state pension age) exactly on the pay date.
+    assert derive_ni_category(date(1960, 6, 1), date(2026, 6, 1), facts, {}) == "S"
+
+
+def test_derive_ni_category_investment_zone_standard_and_spa():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "INVESTMENT_ZONE", "effective_from": date(2026, 1, 1), "effective_to": None}]
+    assert derive_ni_category(date(1990, 1, 1), date(2026, 6, 1), facts, {}) == "N"
+    assert derive_ni_category(date(1955, 1, 1), date(2026, 6, 1), facts, {}) == "K"
+
+
+def test_derive_ni_category_state_pension_age_without_a_site():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "VETERAN", "effective_from": date(2026, 1, 1), "effective_to": None}]
+    # Even with an active veteran fact, State Pension age takes precedence.
+    assert derive_ni_category(date(1955, 1, 1), date(2026, 6, 1), facts, {}) == "C"
+
+
+def test_derive_ni_category_qualifying_veteran():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "VETERAN", "effective_from": date(2026, 1, 1), "effective_to": date(2026, 12, 31)}]
+    assert derive_ni_category(date(1985, 1, 1), date(2026, 6, 1), facts, {}) == "V"
+    # Outside the 12-month qualifying window, the fact is no longer active.
+    assert derive_ni_category(date(1985, 1, 1), date(2027, 6, 1), facts, {}) is None
+
+
+def test_derive_ni_category_apprentice_under_25():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "APPRENTICE", "effective_from": date(2026, 1, 1), "effective_to": None}]
+    assert derive_ni_category(date(2003, 1, 1), date(2026, 6, 1), facts, {}) == "H"  # 23 years old
+    # An apprentice who has since turned 25 falls through to standard/under-21 logic.
+    assert derive_ni_category(date(1998, 1, 1), date(2026, 6, 1), facts, {}) is None  # 28 years old
+
+
+def test_derive_ni_category_under_21_standard():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    # Under 21 alone has no relief fact to trigger derivation at all (it
+    # isn't one of the 4 derivable relief types) — this proves the
+    # "no active facts -> None" contract, not an under-21 code path.
+    assert derive_ni_category(date(2008, 1, 1), date(2026, 6, 1), [], {}) is None
+
+
+def test_derive_ni_category_veteran_takes_precedence_over_apprentice():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [
+        {"relief_type": "VETERAN", "effective_from": date(2026, 1, 1), "effective_to": date(2026, 12, 31)},
+        {"relief_type": "APPRENTICE", "effective_from": date(2026, 1, 1), "effective_to": None},
+    ]
+    assert derive_ni_category(date(2003, 1, 1), date(2026, 6, 1), facts, {}) == "V"
+
+
+def test_derive_ni_category_state_pension_age_configurable():
+    from app.modules.payroll.engine.countries.uk import derive_ni_category
+    facts = [{"relief_type": "VETERAN", "effective_from": date(2026, 1, 1), "effective_to": date(2026, 12, 31)}]
+    # Turns 64 on the pay date — below the default SPA (66), so VETERAN
+    # would normally win; lowering the configured SPA to 64 must change
+    # the outcome to "C".
+    dob = date(1962, 6, 1)
+    default_result = derive_ni_category(dob, date(2026, 6, 1), facts, {})
+    assert default_result == "V"
+    configured_rates = {"state_pension_age": Rate(flat_amount=Decimal("64"))}
+    configured_result = derive_ni_category(dob, date(2026, 6, 1), facts, configured_rates)
+    assert configured_result == "C"
+
+
+# ── Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13/Layer 5 ────
+# gap-closure Part 3, 2026-09-09) ────────────────────────────────────────
+
+def test_assess_auto_enrolment_eligible_jobholder():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(30, Decimal("30000"), {}) == "ELIGIBLE_JOBHOLDER"
+
+
+def test_assess_auto_enrolment_non_eligible_when_under_22_but_above_trigger():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(21, Decimal("30000"), {}) == "NON_ELIGIBLE_JOBHOLDER"
+
+
+def test_assess_auto_enrolment_non_eligible_when_at_or_above_state_pension_age():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(67, Decimal("30000"), {}) == "NON_ELIGIBLE_JOBHOLDER"
+
+
+def test_assess_auto_enrolment_non_eligible_between_lower_qe_and_trigger():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    # £8,000/year is above the £6,240 lower qualifying earnings threshold
+    # but at/below the £10,000 trigger.
+    assert assess_auto_enrolment(30, Decimal("8000"), {}) == "NON_ELIGIBLE_JOBHOLDER"
+
+
+def test_assess_auto_enrolment_exactly_at_trigger_is_non_eligible_not_eligible():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    # "Above £10,000" per §13.1 — exactly at the trigger does not qualify.
+    assert assess_auto_enrolment(30, Decimal("10000"), {}) == "NON_ELIGIBLE_JOBHOLDER"
+
+
+def test_assess_auto_enrolment_entitled_worker_below_lower_qe():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(30, Decimal("5000"), {}) == "ENTITLED_WORKER"
+
+
+def test_assess_auto_enrolment_exactly_at_lower_qe_is_entitled_worker():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(30, Decimal("6240"), {}) == "ENTITLED_WORKER"
+
+
+def test_assess_auto_enrolment_none_without_age():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(None, Decimal("30000"), {}) is None
+
+
+def test_assess_auto_enrolment_none_outside_16_to_74_age_range():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    assert assess_auto_enrolment(15, Decimal("30000"), {}) is None
+    assert assess_auto_enrolment(75, Decimal("30000"), {}) is None
+
+
+def test_assess_auto_enrolment_thresholds_configurable():
+    from app.modules.payroll.engine.countries.uk import assess_auto_enrolment
+    default_result = assess_auto_enrolment(30, Decimal("9000"), {})
+    assert default_result == "NON_ELIGIBLE_JOBHOLDER"
+    configured_rates = {"pension_ae_trigger": Rate(flat_amount=Decimal("8000"))}
+    configured_result = assess_auto_enrolment(30, Decimal("9000"), configured_rates)
+    assert configured_result == "ELIGIBLE_JOBHOLDER"
+
+
+def test_uk_calculate_includes_auto_enrolment_status_when_enabled():
+    """UK — enabled by default since 2026-09-10 (see shared.py); still
+    force-set here (save/restore, not blind add/discard) so this test
+    passes regardless of the current default."""
+    from app.modules.payroll.engine.countries import shared as shared_module
+    was_enabled = "UK" in shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES
+    shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.add("UK")
+    try:
+        result = calc("UK", 5000, UK_RATES, UK_SLABS, date_of_birth=date(1995, 1, 1), pay_date=date(2026, 6, 1))
+    finally:
+        if not was_enabled:
+            shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.discard("UK")
+    assert result.auto_enrolment_status == "ELIGIBLE_JOBHOLDER"
+
+
+def test_uk_calculate_auto_enrolment_status_none_when_switch_off():
+    """A deployment that deliberately discards "UK" from this switch must
+    still get None — replaces the old dormant-by-default version of this
+    test now that UK is enabled by default (2026-09-10)."""
+    from app.modules.payroll.engine.countries import shared as shared_module
+    was_enabled = "UK" in shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES
+    shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.discard("UK")
+    try:
+        result = calc("UK", 5000, UK_RATES, UK_SLABS, date_of_birth=date(1995, 1, 1), pay_date=date(2026, 6, 1))
+    finally:
+        if was_enabled:
+            shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.add("UK")
+    assert result.auto_enrolment_status is None
+
+
+def test_uk_calculate_auto_enrolment_status_never_changes_pension_deduction():
+    from app.modules.payroll.engine.countries import shared as shared_module
+    was_enabled = "UK" in shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES
+    shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.discard("UK")
+    try:
+        without_switch = calc("UK", 5000, UK_RATES, UK_SLABS, date_of_birth=date(1995, 1, 1), pay_date=date(2026, 6, 1))
+    finally:
+        if was_enabled:
+            shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.add("UK")
+    shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.add("UK")
+    try:
+        with_switch = calc("UK", 5000, UK_RATES, UK_SLABS, date_of_birth=date(1995, 1, 1), pay_date=date(2026, 6, 1))
+    finally:
+        if not was_enabled:
+            shared_module._UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES.discard("UK")
+    assert without_switch.employee_pension == with_switch.employee_pension
+    assert without_switch.employer_pension == with_switch.employer_pension
+
+
+# ── Mileage Allowance Payments & Advisory Fuel Rates (ZP-TAX-UK-2026-27- ─
+# 001 §16 gap-closure Part 4, 2026-09-09) ────────────────────────────────
+
+_UK_MILEAGE_RATES = {
+    "mileage_car_first_10k": Rate(flat_amount=Decimal("0.55")),
+    "mileage_car_after_10k": Rate(flat_amount=Decimal("0.25")),
+    "mileage_car_ni": Rate(flat_amount=Decimal("0.55")),
+    "mileage_motorcycle": Rate(flat_amount=Decimal("0.24")),
+    "mileage_cycle": Rate(flat_amount=Decimal("0.20")),
+}
+
+
+def test_mileage_motorcycle_flat_rate():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    result = calculate_mileage_reimbursement("MOTORCYCLE", Decimal("100"), None, _UK_MILEAGE_RATES)
+    assert result["eligible"] is True
+    assert result["tax_free_amount"] == Decimal("24.00")
+    assert result["ni_free_amount"] == Decimal("24.00")
+
+
+def test_mileage_cycle_flat_rate():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    result = calculate_mileage_reimbursement("CYCLE", Decimal("50"), None, _UK_MILEAGE_RATES)
+    assert result["tax_free_amount"] == Decimal("10.00")
+    assert result["ni_free_amount"] == Decimal("10.00")
+
+
+def test_mileage_car_entirely_within_first_10000_miles():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    result = calculate_mileage_reimbursement("CAR", Decimal("1000"), Decimal("0"), _UK_MILEAGE_RATES)
+    # 1000 * 0.55 = 550.00 for both tax and NI (still within the threshold)
+    assert result["tax_free_amount"] == Decimal("550.00")
+    assert result["ni_free_amount"] == Decimal("550.00")
+
+
+def test_mileage_car_entirely_past_10000_miles_diverges_tax_from_ni():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    result = calculate_mileage_reimbursement("CAR", Decimal("1000"), Decimal("10000"), _UK_MILEAGE_RATES)
+    # Already at the threshold — all 1000 miles at the after-10k tax rate (25p),
+    # but the NI-approved rate never steps down (55p for all miles).
+    assert result["tax_free_amount"] == Decimal("250.00")
+    assert result["ni_free_amount"] == Decimal("550.00")
+
+
+def test_mileage_car_straddling_the_10000_mile_threshold():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    # 9,500 miles already claimed this year; this claim is 1,000 more —
+    # 500 miles at 55p (up to 10,000) + 500 miles at 25p (the excess).
+    result = calculate_mileage_reimbursement("CAR", Decimal("1000"), Decimal("9500"), _UK_MILEAGE_RATES)
+    expected_tax = Decimal("500") * Decimal("0.55") + Decimal("500") * Decimal("0.25")
+    assert result["tax_free_amount"] == expected_tax
+    assert result["ni_free_amount"] == Decimal("1000") * Decimal("0.55")
+
+
+def test_mileage_unknown_vehicle_type_not_eligible():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    result = calculate_mileage_reimbursement("SCOOTER", Decimal("100"), None, _UK_MILEAGE_RATES)
+    assert result["eligible"] is False
+
+
+def test_mileage_fails_closed_when_unconfigured():
+    from app.modules.payroll.engine.countries.uk import calculate_mileage_reimbursement
+    result = calculate_mileage_reimbursement("MOTORCYCLE", Decimal("100"), None, {})
+    assert result["eligible"] is False
+    assert "not configured" in result["reason"]
+
+
+_UK_AFR_RATES = {
+    "afr_petrol_le1400": Rate(flat_amount=Decimal("0.14")),
+    "afr_diesel_1601_2000": Rate(flat_amount=Decimal("0.17")),
+    "afr_electric_home": Rate(flat_amount=Decimal("0.07")),
+    "afr_electric_public": Rate(flat_amount=Decimal("0.15")),
+}
+
+
+def test_resolve_advisory_fuel_rate_petrol():
+    from app.modules.payroll.engine.countries.uk import resolve_advisory_fuel_rate
+    result = resolve_advisory_fuel_rate("PETROL", "LE_1400", _UK_AFR_RATES)
+    assert result["eligible"] is True
+    assert result["rate_per_mile"] == Decimal("0.14")
+
+
+def test_resolve_advisory_fuel_rate_diesel_uses_its_own_bands():
+    from app.modules.payroll.engine.countries.uk import resolve_advisory_fuel_rate
+    result = resolve_advisory_fuel_rate("DIESEL", "1601_2000", _UK_AFR_RATES)
+    assert result["rate_per_mile"] == Decimal("0.17")
+
+
+def test_resolve_advisory_fuel_rate_electric_by_charger_type():
+    from app.modules.payroll.engine.countries.uk import resolve_advisory_fuel_rate
+    home = resolve_advisory_fuel_rate("ELECTRIC", "HOME", _UK_AFR_RATES)
+    public = resolve_advisory_fuel_rate("ELECTRIC", "PUBLIC", _UK_AFR_RATES)
+    assert home["rate_per_mile"] == Decimal("0.07")
+    assert public["rate_per_mile"] == Decimal("0.15")
+
+
+def test_resolve_advisory_fuel_rate_unknown_combination():
+    from app.modules.payroll.engine.countries.uk import resolve_advisory_fuel_rate
+    result = resolve_advisory_fuel_rate("PETROL", "LE_1600", _UK_AFR_RATES)  # diesel's band, not petrol's
+    assert result["eligible"] is False
+
+
+def test_resolve_advisory_fuel_rate_fails_closed_when_unconfigured():
+    from app.modules.payroll.engine.countries.uk import resolve_advisory_fuel_rate
+    result = resolve_advisory_fuel_rate("PETROL", "GT_2000", {})
+    assert result["eligible"] is False
+    assert "not configured" in result["reason"]
+
+
+# ── National Minimum Wage compliance validation (ZP-TAX-UK-2026-27-001 ──
+# §15 gap-closure Part 5, 2026-09-09) ────────────────────────────────────
+
+_UK_NMW_RATES = {
+    "nmw_age_21_plus": Rate(flat_amount=Decimal("12.71")),
+    "nmw_age_18_20": Rate(flat_amount=Decimal("10.85")),
+    "nmw_under_18": Rate(flat_amount=Decimal("8.00")),
+    "nmw_apprentice_under_19": Rate(flat_amount=Decimal("8.00")),
+    "nmw_apprentice_19plus_yr1": Rate(flat_amount=Decimal("8.00")),
+}
+
+
+def test_resolve_nmw_rate_age_21_plus():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    result = resolve_nmw_rate(25, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["eligible"] is True
+    assert result["rate_per_hour"] == Decimal("12.71")
+
+
+def test_resolve_nmw_rate_age_18_to_20():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    result = resolve_nmw_rate(19, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["rate_per_hour"] == Decimal("10.85")
+
+
+def test_resolve_nmw_rate_under_18():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    result = resolve_nmw_rate(17, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["rate_per_hour"] == Decimal("8.00")
+
+
+def test_resolve_nmw_rate_apprentice_under_19_regardless_of_apprenticeship_length():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    # No apprenticeship_start_date at all -- an under-19 apprentice always
+    # gets the apprentice rate, not time-limited like the 19+ case.
+    result = resolve_nmw_rate(18, True, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["rate_per_hour"] == Decimal("8.00")
+
+
+def test_resolve_nmw_rate_apprentice_19plus_first_year():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    result = resolve_nmw_rate(22, True, date(2026, 1, 1), date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["rate_per_hour"] == Decimal("8.00")
+
+
+def test_resolve_nmw_rate_apprentice_19plus_after_first_year_reverts_to_age_band():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    # Apprenticeship started more than 365 days before the as_of date.
+    result = resolve_nmw_rate(22, True, date(2024, 1, 1), date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["rate_per_hour"] == Decimal("12.71")
+
+
+def test_resolve_nmw_rate_none_without_age():
+    from app.modules.payroll.engine.countries.uk import resolve_nmw_rate
+    result = resolve_nmw_rate(None, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["eligible"] is False
+
+
+def test_validate_nmw_compliance_compliant():
+    from app.modules.payroll.engine.countries.uk import validate_nmw_compliance
+    # 160 hours at exactly the 21+ rate -> fully compliant, no shortfall.
+    pay = Decimal("12.71") * 160
+    result = validate_nmw_compliance(pay, Decimal("160"), 25, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["eligible"] is True
+    assert result["compliant"] is True
+    assert result["shortfall_amount"] == Decimal("0")
+
+
+def test_validate_nmw_compliance_underpaid_reports_shortfall():
+    from app.modules.payroll.engine.countries.uk import validate_nmw_compliance
+    # Paid £10/hour equivalent for 160 hours (£1,600) but the 21+ rate is
+    # £12.71 -> shortfall = (12.71*160) - 1600.
+    result = validate_nmw_compliance(Decimal("1600"), Decimal("160"), 25, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["compliant"] is False
+    assert result["effective_hourly_rate"] == Decimal("10.00")
+    expected_shortfall = (Decimal("12.71") * 160) - Decimal("1600")
+    assert result["shortfall_amount"] == expected_shortfall.quantize(Decimal("0.01"))
+
+
+def test_validate_nmw_compliance_fails_closed_with_zero_hours():
+    from app.modules.payroll.engine.countries.uk import validate_nmw_compliance
+    result = validate_nmw_compliance(Decimal("1000"), Decimal("0"), 25, False, None, date(2026, 6, 1), _UK_NMW_RATES)
+    assert result["eligible"] is False
+
+
+def test_validate_nmw_compliance_fails_closed_when_rate_unconfigured():
+    from app.modules.payroll.engine.countries.uk import validate_nmw_compliance
+    result = validate_nmw_compliance(Decimal("1000"), Decimal("100"), 25, False, None, date(2026, 6, 1), {})
+    assert result["eligible"] is False
+
+
+# ── Tax-week/month calendar + week 53/54/56 (ZP-TAX-UK-2026-27-001 §7.2/ ─
+# §18.1 gap-closure Part 6, 2026-09-09) ──────────────────────────────────
+
+def test_resolve_uk_tax_week_and_month_week_1_starts_6_april():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    result = resolve_uk_tax_week_and_month(date(2026, 4, 6))
+    assert result["tax_week"] == 1
+    assert result["tax_month"] == 1
+    assert result["tax_year_start"] == date(2026, 4, 6)
+    assert result["tax_year_end"] == date(2027, 4, 5)
+
+
+def test_resolve_uk_tax_week_and_month_day_before_new_tax_year_is_week_53():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    result = resolve_uk_tax_week_and_month(date(2027, 4, 5))
+    assert result["tax_week"] == 53
+    assert result["tax_year_start"] == date(2026, 4, 6)
+
+
+def test_resolve_uk_tax_week_and_month_week_capped_at_53_even_in_leap_year():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    # 2027-28 tax year contains the 2028 leap day (29 Feb 2028), giving it
+    # 366 days -> still must cap at week 53, never 54.
+    result = resolve_uk_tax_week_and_month(date(2028, 4, 5))
+    assert result["tax_week"] == 53
+    assert result["tax_year_start"] == date(2027, 4, 6)
+
+
+def test_resolve_uk_tax_week_and_month_week_7_starts_18_may():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    # Week 1: 6-12 Apr, Week 2: 13-19 Apr, ... Week 7: 18-24 May.
+    result = resolve_uk_tax_week_and_month(date(2026, 5, 18))
+    assert result["tax_week"] == 7
+
+
+def test_resolve_uk_tax_week_and_month_tax_month_boundary_5th_vs_6th():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    assert resolve_uk_tax_week_and_month(date(2026, 5, 5))["tax_month"] == 1
+    assert resolve_uk_tax_week_and_month(date(2026, 5, 6))["tax_month"] == 2
+
+
+def test_resolve_uk_tax_week_and_month_tax_month_12_is_march():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    result = resolve_uk_tax_week_and_month(date(2027, 3, 10))
+    assert result["tax_month"] == 12
+    assert result["tax_year_start"] == date(2026, 4, 6)
+
+
+def test_resolve_uk_tax_week_and_month_before_6_april_belongs_to_prior_tax_year():
+    from app.modules.payroll.engine.countries.uk import resolve_uk_tax_week_and_month
+    result = resolve_uk_tax_week_and_month(date(2026, 4, 5))
+    assert result["tax_year_start"] == date(2025, 4, 6)
+    assert result["tax_year_end"] == date(2026, 4, 5)
+
+
+def test_detect_uk_extra_payday_weekly_period_53():
+    from app.modules.payroll.engine.countries.uk import detect_uk_extra_payday
+    result = detect_uk_extra_payday("Weekly", 53)
+    assert result["is_extra_payday"] is True
+    assert result["reporting_identifier"] == 53
+
+
+def test_detect_uk_extra_payday_fortnightly_period_27():
+    from app.modules.payroll.engine.countries.uk import detect_uk_extra_payday
+    result = detect_uk_extra_payday("Fortnightly", 27)
+    assert result["is_extra_payday"] is True
+    assert result["reporting_identifier"] == 54
+
+
+def test_detect_uk_extra_payday_four_weekly_period_14():
+    from app.modules.payroll.engine.countries.uk import detect_uk_extra_payday
+    result = detect_uk_extra_payday("FourWeekly", 14)
+    assert result["is_extra_payday"] is True
+    assert result["reporting_identifier"] == 56
+
+
+def test_detect_uk_extra_payday_false_for_ordinary_period():
+    from app.modules.payroll.engine.countries.uk import detect_uk_extra_payday
+    result = detect_uk_extra_payday("Weekly", 30)
+    assert result["is_extra_payday"] is False
+    assert result["reporting_identifier"] is None
+
+
+def test_detect_uk_extra_payday_monthly_has_no_extra_payday_concept():
+    from app.modules.payroll.engine.countries.uk import detect_uk_extra_payday
+    result = detect_uk_extra_payday("Monthly", 12)
+    assert result["is_extra_payday"] is False
+    assert result["reporting_identifier"] is None
+
+
+def test_uk_calculate_includes_tax_week_and_month_unconditionally():
+    # Part 6 is pure calendar metadata with zero calculation impact — no
+    # rollout switch, always populated when a pay_date is present.
+    result = calc("UK", 5000, UK_RATES, UK_SLABS, pay_date=date(2026, 6, 1))
+    assert result.tax_week == 9
+    assert result.tax_month == 2
+
+
+def test_uk_calculate_tax_week_and_month_none_without_pay_date():
+    result = calc("UK", 5000, UK_RATES, UK_SLABS)
+    assert result.tax_week is None
+    assert result.tax_month is None
+
+
+def test_uk_calculate_tax_week_and_month_never_changes_net_pay():
+    with_date = calc("UK", 5000, UK_RATES, UK_SLABS, pay_date=date(2026, 6, 1))
+    without_date = calc("UK", 5000, UK_RATES, UK_SLABS)
+    assert with_date.net_pay == without_date.net_pay
+
+
+# ── Court-Ordered Deductions (ZP-TAX-UK-2026-27-001 §17 gap-closure ──────
+# Part 8, 2026-09-09) ─────────────────────────────────────────────────────
+
+def test_aeo_ew_fails_closed_with_no_order_specific_rate_and_no_band_table():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_england_wales
+    result = calculate_court_order_deduction_england_wales(Decimal("2000"), None, None, None, [])
+    assert result["eligible"] is False
+    assert "AEO_EW_STANDARD" in result["reason"]
+
+
+def test_aeo_ew_order_specific_fixed_amount_takes_precedence_over_band_table():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_england_wales
+    band = Slab(min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("20"), rule_type="AEO_EW_STANDARD")
+    result = calculate_court_order_deduction_england_wales(Decimal("2000"), None, Decimal("150"), None, [band])
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("150")
+
+
+def test_aeo_ew_order_specific_rate_takes_precedence_over_band_table():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_england_wales
+    band = Slab(min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("20"), rule_type="AEO_EW_STANDARD")
+    result = calculate_court_order_deduction_england_wales(Decimal("2000"), Decimal("10"), None, None, [band])
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("200.00")
+
+
+def test_aeo_ew_fixed_amount_capped_by_protected_earnings_headroom():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_england_wales
+    result = calculate_court_order_deduction_england_wales(Decimal("2000"), None, Decimal("500"), Decimal("1800"), [])
+    # headroom = 2000 - 1800 = 200, less than the fixed 500.
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("200")
+
+
+def test_aeo_ew_uses_band_table_when_no_order_specific_value():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_england_wales
+    bands = [
+        Slab(min_amount=Decimal("0"), max_amount=Decimal("1000"), rate_pct=Decimal("5"), rule_type="AEO_EW_STANDARD"),
+        Slab(min_amount=Decimal("1000.01"), max_amount=None, rate_pct=Decimal("15"), rule_type="AEO_EW_STANDARD"),
+    ]
+    result = calculate_court_order_deduction_england_wales(Decimal("2000"), None, None, None, bands)
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("300.00")
+
+
+def test_aeo_ew_ignores_bands_for_other_rule_types():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_england_wales
+    other = Slab(min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("20"), rule_type="ARREST_SCOT_WK")
+    result = calculate_court_order_deduction_england_wales(Decimal("2000"), None, None, None, [other])
+    assert result["eligible"] is False
+
+
+def test_scottish_arrestment_fails_closed_for_unsupported_frequency():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_scotland
+    result = calculate_court_order_deduction_scotland(Decimal("2000"), "Daily", None, None, None, [])
+    assert result["eligible"] is False
+    assert "not defined" in result["reason"]
+
+
+def test_scottish_arrestment_uses_frequency_specific_band_table():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_scotland
+    weekly_band = Slab(min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("10"), rule_type="ARREST_SCOT_WK")
+    monthly_band = Slab(min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("25"), rule_type="ARREST_SCOT_MO")
+    result = calculate_court_order_deduction_scotland(Decimal("1000"), "Weekly", None, None, None, [weekly_band, monthly_band])
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("100.00")
+
+
+def test_scottish_arrestment_order_specific_rate_takes_precedence():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_scotland
+    result = calculate_court_order_deduction_scotland(Decimal("1000"), "Weekly", Decimal("12"), None, None, [])
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("120.00")
+
+
+def test_northern_ireland_order_fails_closed_without_band_table():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_northern_ireland
+    result = calculate_court_order_deduction_northern_ireland(Decimal("2000"), None, None, None, [])
+    assert result["eligible"] is False
+    assert "AEO_NI_STANDARD" in result["reason"]
+
+
+def test_northern_ireland_order_specific_amount_takes_precedence():
+    from app.modules.payroll.engine.countries.uk import calculate_court_order_deduction_northern_ireland
+    result = calculate_court_order_deduction_northern_ireland(Decimal("2000"), None, Decimal("80"), None, [])
+    assert result["eligible"] is True
+    assert result["deduction_amount"] == Decimal("80")
+
+
+def test_calculate_court_ordered_deductions_applies_priority_sequentially():
+    from app.modules.payroll.engine.countries.uk import calculate_court_ordered_deductions
+    orders = [
+        {"id": 1, "jurisdiction": "ENGLAND_WALES", "fixed_deduction_amount": Decimal("300"), "fixed_deduction_rate_pct": None, "protected_earnings_amount": None},
+        {"id": 2, "jurisdiction": "ENGLAND_WALES", "fixed_deduction_amount": Decimal("1800"), "fixed_deduction_rate_pct": None, "protected_earnings_amount": None},
+    ]
+    result = calculate_court_ordered_deductions(orders, Decimal("2000"), "Monthly", [])
+    # Order 1 takes 300, leaving 1700 remaining -> order 2's 1800 is capped at 1700.
+    assert result["total_deduction"] == Decimal("2000.00")
+    assert result["orders"][0]["deduction_amount"] == Decimal("300")
+    assert result["orders"][1]["deduction_amount"] == Decimal("1700")
+
+
+def test_calculate_court_ordered_deductions_reports_per_order_ineligibility():
+    from app.modules.payroll.engine.countries.uk import calculate_court_ordered_deductions
+    orders = [
+        {"id": 1, "jurisdiction": "SCOTLAND", "fixed_deduction_amount": None, "fixed_deduction_rate_pct": None, "protected_earnings_amount": None},
+    ]
+    result = calculate_court_ordered_deductions(orders, Decimal("2000"), "Weekly", [])
+    assert result["total_deduction"] == Decimal("0")
+    assert result["orders"][0]["eligible"] is False
+    assert result["orders"][0]["order_id"] == 1
+
+
+def test_calculate_court_ordered_deductions_unknown_jurisdiction():
+    from app.modules.payroll.engine.countries.uk import calculate_court_ordered_deductions
+    orders = [
+        {"id": 1, "jurisdiction": "WALES_ONLY", "fixed_deduction_amount": Decimal("100"), "fixed_deduction_rate_pct": None, "protected_earnings_amount": None},
+    ]
+    result = calculate_court_ordered_deductions(orders, Decimal("2000"), "Weekly", [])
+    assert result["orders"][0]["eligible"] is False
+    assert "unknown jurisdiction" in result["orders"][0]["reason"]

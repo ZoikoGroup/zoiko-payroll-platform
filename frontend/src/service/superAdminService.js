@@ -55,6 +55,36 @@ export const assignCompliancePolicy = (id, organizationIds) =>
 // setCompliancePolicyStatus(id, "Retired") for normal lifecycle
 // retirement instead (see JurisdictionLayout.jsx's status dropdown).
 
+// ── Super Admin UI completion (§19 gap-closure Part 11, 2026-09-09) ──────
+
+export const getPackImpactPreview = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/impact-preview`);
+
+// Emergency hotfix activation — bypasses the distinct-approver gate,
+// requires incident_id + justification, always flagged for mandatory
+// retrospective review (see HotfixActivateModal.jsx).
+export const hotfixActivatePack = (id, payload) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/hotfix-activate`, { method: "PUT", body: payload });
+
+export const getHotfixActivations = (params) =>
+  apiFetch("/api/super-admin/compliance/hotfix-activations", { params });
+
+export const reviewHotfixActivation = (id, payload) =>
+  apiFetch(`/api/super-admin/compliance/hotfix-activations/${id}/review`, { method: "PUT", body: payload });
+
+// Cross-org UK RTI filing summary (FPS/EPS/P45/P60) with submission
+// tracking status.
+export const getRtiFormsSummary = (params) =>
+  apiFetch("/api/super-admin/compliance/rti-forms", { params });
+
+// Golden-test certification (Part 10's harness) — trigger a run, and
+// read run history.
+export const runTestCertification = () =>
+  apiFetch("/api/super-admin/compliance/test-certification/run", { method: "POST" });
+
+export const getTestCertificationRuns = (params) =>
+  apiFetch("/api/super-admin/compliance/test-certification/runs", { params });
+
 // Every organization's ACTUAL, currently-configured compliance setup (as
 // opposed to the abstract policy templates above) — used by the Compliance
 // page's "Organization Compliance" view to promote real configs into
@@ -138,6 +168,31 @@ export const createSourceArtifact = (payload) =>
 
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
+// ── India: state/local statutory readiness registry (§16) ─────────────────
+// One row per (state/UT, optional local authority, program) — informational
+// only, no calculation/onboarding path enforces it yet.
+
+export const getStateLocalReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/state-local-readiness", { params });
+
+export const upsertStateLocalReadiness = (payload) =>
+  apiFetch("/api/super-admin/compliance/state-local-readiness", { method: "POST", body: payload });
+
+// ── Taxability rules (India Code Wages classification, §7/§8) ─────────────
+// Backs engine/countries/india.py's _calculate_code_wages — which of an
+// employee's own named salary components count as "core included wages" vs.
+// "excluded, subject to the 50%-cap add-back test." Had NO admin UI at all
+// before this (only a read-only backend resolver existed).
+
+export const getTaxabilityRules = (params) =>
+  apiFetch("/api/super-admin/compliance/taxability-rules", { params });
+
+export const upsertTaxabilityRule = (payload) =>
+  apiFetch("/api/super-admin/compliance/taxability-rules", { method: "POST", body: payload });
+
+export const deleteTaxabilityRule = (id) =>
+  apiFetch(`/api/super-admin/compliance/taxability-rules/${id}`, { method: "DELETE" });
 
 // ── Finance ──────────────────────────────────────────────────────────────
 

@@ -281,6 +281,109 @@ export const deleteEmployee = async (id) => {
   }
 };
 
+// UK Statutory Sick Pay / Statutory Family Pay calculator (ZP-TAX-UK-
+// 2026-27-001 §11/§12 gap-closure Phase 5, 2026-09-09) — an on-demand
+// preview, not a payslip mutation. `payload` shape matches the backend's
+// UKStatutoryPayRequest: { employeeId, paymentType, eventStartDate,
+// weekNumber?, qualifyingDaysInPeriod?, qualifyingDaysPerWeek?,
+// averageWeeklyEarnings?, includeEmployerRecovery?, priorYearTotalClass1Nic? }.
+export const calculateUkStatutoryPay = async (payload) => {
+  return await api.post("/api/payroll/uk/statutory-pay/calculate", {
+    employee_id: payload.employeeId,
+    payment_type: payload.paymentType,
+    event_start_date: payload.eventStartDate,
+    week_number: payload.weekNumber ?? 1,
+    qualifying_days_in_period: payload.qualifyingDaysInPeriod ?? null,
+    qualifying_days_per_week: payload.qualifyingDaysPerWeek ?? null,
+    average_weekly_earnings: payload.averageWeeklyEarnings ?? null,
+    include_employer_recovery: payload.includeEmployerRecovery ?? false,
+    prior_year_total_class1_nic: payload.priorYearTotalClass1Nic ?? null,
+  });
+};
+
+// UK NI category relief-eligibility facts (Freeport/Investment Zone/
+// veteran/apprentice, ZP-TAX-UK-2026-27-001 §8.2/§9.3 gap-closure Part 2,
+// 2026-09-09) — feeds derive_ni_category() once _UK_DERIVE_NI_CATEGORY_
+// ENABLED_COUNTRIES is on (enabled 2026-09-10). Same snake_case-request/
+// camelCase-response split as the court-orders API above.
+export const listUkNiReliefFacts = async (employeeId) => {
+  return await api.get(`/api/payroll/uk/employees/${employeeId}/ni-relief-facts`);
+};
+
+export const createUkNiReliefFact = async (employeeId, payload) => {
+  return await api.post(`/api/payroll/uk/employees/${employeeId}/ni-relief-facts`, {
+    relief_type: payload.reliefType,
+    reference: payload.reference || null,
+    effective_from: payload.effectiveFrom,
+    effective_to: payload.effectiveTo || null,
+  });
+};
+
+export const deleteUkNiReliefFact = async (employeeId, factId) => {
+  return await api.delete(`/api/payroll/uk/employees/${employeeId}/ni-relief-facts/${factId}`);
+};
+
+// UK Court-Ordered Deductions (ZP-TAX-UK-2026-27-001 §17 gap-closure Part
+// 8, 2026-09-09) — England & Wales Attachment of Earnings Orders, Scottish
+// arrestments, Northern Ireland's own equivalent. The create/list/status
+// endpoints take/return snake_case for the create payload (backend has no
+// alias on UKCourtOrderCreate) but camelCase for the response
+// (UKCourtOrderResponse) — matched exactly below, not assumed consistent.
+export const listUkCourtOrders = async (employeeId, status) => {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return await api.get(`/api/payroll/uk/employees/${employeeId}/court-orders${query}`);
+};
+
+export const createUkCourtOrder = async (employeeId, payload) => {
+  return await api.post(`/api/payroll/uk/employees/${employeeId}/court-orders`, {
+    jurisdiction: payload.jurisdiction,
+    order_type: payload.orderType,
+    start_date: payload.startDate,
+    court_reference: payload.courtReference || null,
+    issue_date: payload.issueDate || null,
+    end_date: payload.endDate || null,
+    priority: payload.priority !== "" && payload.priority !== undefined ? Number(payload.priority) : null,
+    fixed_deduction_rate_pct: payload.fixedDeductionRatePct || null,
+    fixed_deduction_amount: payload.fixedDeductionAmount || null,
+    protected_earnings_amount: payload.protectedEarningsAmount || null,
+    total_amount_to_collect: payload.totalAmountToCollect || null,
+  });
+};
+
+export const setUkCourtOrderStatus = async (employeeId, orderId, status) => {
+  return await api.put(`/api/payroll/uk/employees/${employeeId}/court-orders/${orderId}/status`, { status });
+};
+
+export const calculateUkCourtOrderDeductions = async (payload) => {
+  return await api.post("/api/payroll/uk/court-orders/calculate", {
+    employee_id: payload.employeeId,
+    attachable_earnings: payload.attachableEarnings,
+    pay_frequency: payload.payFrequency,
+    as_of: payload.asOf || null,
+  });
+};
+
+// UK Employer Annual Charges — Employment Allowance + Class 1A/1B
+// (ZP-TAX-UK-2026-27-001 §9.3/§14 gap-closure Phase 6, 2026-09-09).
+// Whole-tax-year, run-independent employer liabilities — see the
+// matching backend endpoints under /api/payroll/uk/employer-charges/.
+export const getUkEmployerChargesSummary = async () => {
+  return await api.get("/api/payroll/uk/employer-charges/summary");
+};
+
+export const calculateUkEmploymentAllowance = async (employerHasClaimed) => {
+  return await api.post("/api/payroll/uk/employer-charges/employment-allowance", {
+    employer_has_claimed: employerHasClaimed,
+  });
+};
+
+export const calculateUkClass1A1BCharge = async (chargeType, amount) => {
+  return await api.post("/api/payroll/uk/employer-charges/class-1a-1b", {
+    charge_type: chargeType,
+    amount,
+  });
+};
+
 export const bulkCreateEmployees = async (employees) => {
   try {
     // Expected response shape: { created: [...employees], failed: [{ row, reason }] }
@@ -1096,6 +1199,9 @@ const CONTRIBUTION_COLUMNS_BY_COUNTRY = {
     // Same "silently missing" gap as Workplace Pension above — Student/
     // Postgraduate Loan genuinely reduces Net Pay but had no column here.
     { id: "student-loan", label: "Student Loan Deduction", previewField: "monthlyStudyLoanDeduction", payslipField: "studyLoanDeduction" },
+    // Same gap, found 2026-09-09 gap-closure Phase 3 — a concurrent
+    // Postgraduate Loan also reduces Net Pay and had no column here.
+    { id: "postgrad-loan", label: "Postgraduate Loan Deduction", previewField: "monthlyPostgradLoanDeduction", payslipField: "postgradLoanDeduction" },
   ],
   AU: [
     { id: "medicare-levy", label: "Medicare Levy", previewField: "monthlyMedicare", payslipField: "medicare" },
@@ -1375,4 +1481,129 @@ export const downloadReportCertificatesZip = async (generatedReportId) => {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
+};
+
+// ── India: Gratuity (ZP-TAX-IN-2026-27-001 §11, gap-closure Phase D) ─────
+// calculate_india_employee_gratuity has always existed on the backend but
+// had NO frontend anywhere — this is that missing call.
+export const calculateIndiaGratuity = async (payload) => {
+  return await api.post("/api/payroll/india/gratuity/calculate", {
+    employee_id: payload.employeeId,
+    eligibility_event: payload.eligibilityEvent,
+    is_fixed_term: payload.isFixedTerm || false,
+    date_of_leaving: payload.dateOfLeaving || null,
+    last_drawn_monthly_wage: payload.lastDrawnMonthlyWage || null,
+  });
+};
+
+// ── India: Form 122 salary TDS declaration (§6.2, gap-closure Phase E) ───
+export const listIndiaSalaryTdsDeclarations = async (employeeId, taxYear) => {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  if (taxYear) params.set("taxYear", taxYear);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return await api.get(`/api/payroll/india/salary-tds-declarations${query}`);
+};
+
+export const createIndiaSalaryTdsDeclaration = async (payload) => {
+  return await api.post("/api/payroll/india/salary-tds-declarations", {
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+    prior_employer_salary: payload.priorEmployerSalary || 0,
+    prior_employer_tds_deducted: payload.priorEmployerTdsDeducted || 0,
+    other_income: payload.otherIncome || 0,
+    house_property_loss: payload.housePropertyLoss || 0,
+  });
+};
+
+export const submitIndiaSalaryTdsDeclaration = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-declarations/${id}/submit`);
+};
+
+export const approveIndiaSalaryTdsDeclaration = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-declarations/${id}/approve`);
+};
+
+// ── India: Form 124 salary TDS claims (§6.2, gap-closure Phase E) ────────
+export const listIndiaSalaryTdsClaims = async (employeeId, taxYear) => {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  if (taxYear) params.set("taxYear", taxYear);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return await api.get(`/api/payroll/india/salary-tds-claims${query}`);
+};
+
+export const createIndiaSalaryTdsClaim = async (payload) => {
+  return await api.post("/api/payroll/india/salary-tds-claims", {
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+    claim_type: payload.claimType,
+    claimed_amount: payload.claimedAmount,
+    evidence_reference: payload.evidenceReference || null,
+  });
+};
+
+export const submitIndiaSalaryTdsClaim = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-claims/${id}/submit`);
+};
+
+export const approveIndiaSalaryTdsClaim = async (id) => {
+  return await api.put(`/api/payroll/india/salary-tds-claims/${id}/approve`);
+};
+
+export const rejectIndiaSalaryTdsClaim = async (id, reason) => {
+  return await api.put(`/api/payroll/india/salary-tds-claims/${id}/reject`, { reason });
+};
+
+// ── India: Form 123 employee benefit valuation (§6.2/§7, gap-closure ─────
+// Phase E) — Zoiko does NOT compute perquisite valuation formulas (the
+// statutory pack gives none); the org enters its own already-determined
+// taxable value here.
+export const listIndiaEmployeeBenefitValuations = async (employeeId, taxYear) => {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  if (taxYear) params.set("taxYear", taxYear);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return await api.get(`/api/payroll/india/employee-benefit-valuations${query}`);
+};
+
+export const createIndiaEmployeeBenefitValuation = async (payload) => {
+  return await api.post("/api/payroll/india/employee-benefit-valuations", {
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+    benefit_type: payload.benefitType,
+    taxable_value: payload.taxableValue,
+    description: payload.description || null,
+  });
+};
+
+export const issueIndiaEmployeeBenefitValuation = async (id) => {
+  return await api.put(`/api/payroll/india/employee-benefit-valuations/${id}/issue`);
+};
+
+// ── India: Form 130/138/123 generation (gap-closure Phase E) — these are
+// NOT run-scoped like the generic generateReport() above, so they use
+// their own dedicated endpoints, same as UK's P45/P60/EPS.
+export const generateIndiaForm130 = async (payload) => {
+  return await api.post("/api/payroll/india/reports/form130", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateIndiaForm138 = async (payload) => {
+  return await api.post("/api/payroll/india/reports/form138", {
+    report_template_id: payload.reportTemplateId,
+    reporting_year: payload.reportingYear,
+    period_key: payload.periodKey,
+  });
+};
+
+export const generateIndiaForm123 = async (payload) => {
+  return await api.post("/api/payroll/india/reports/form123", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+  });
 };

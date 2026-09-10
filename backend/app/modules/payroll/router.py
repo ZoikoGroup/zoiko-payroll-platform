@@ -83,6 +83,22 @@ from app.modules.payroll.schemas import (
     AttendanceSummaryResponse, BulkAttendanceResponse,
     LeaveAllocationCreate, BulkLeaveRequest, LeaveAllocationResponse,
     PayrollLeaveRequestCreate, PayrollLeaveRequestUpdate, PayrollLeaveRequestResponse,
+    UKStatutoryPayRequest, UKStatutoryPayResponse,
+    UKEmployerChargesSummaryResponse, UKEmploymentAllowanceRequest, UKEmploymentAllowanceResponse,
+    UKClass1A1BRequest, UKClass1A1BResponse,
+    UKNiReliefFactCreate, UKNiReliefFactResponse,
+    UKMileageReimbursementRequest, UKMileageReimbursementResponse,
+    UKAdvisoryFuelRateRequest, UKAdvisoryFuelRateResponse,
+    UKNmwComplianceRequest, UKNmwComplianceResponse,
+    UKCourtOrderCreate, UKCourtOrderStatusUpdate, UKCourtOrderResponse,
+    UKCourtOrderCalculateRequest, UKCourtOrderCalculateResponse,
+    GratuityCalculateRequest, GratuityCalculateResponse,
+    IndiaForm138GenerateRequest, IndiaForm123GenerateRequest,
+    SalaryTdsDeclarationCreate, SalaryTdsDeclarationResponse,
+    SalaryTdsClaimCreate, SalaryTdsClaimResponse, SalaryTdsClaimRejectRequest,
+    EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
+    UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
+    RtiSubmissionCreate, RtiSubmissionStatusUpdate, RtiSubmissionResponse,
     HolidayCreate, BulkHolidayRequest, HolidayResponse,
     ApplicableTemplateResponse, GenerateReportRequest, GeneratedReportResponse, VoidGeneratedReportRequest,
     FilingCalendarResponse,
@@ -355,6 +371,411 @@ def add_item(
     run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
     country = service._resolve_org_country(db, current_user.organization_id)
     return service._serialize_payslip(item, run, country=country)
+
+
+@payroll_router.post(
+    "/uk/statutory-pay/calculate", response_model=UKStatutoryPayResponse, response_model_by_alias=True,
+    summary="On-demand UK Statutory Sick Pay / Statutory Family Pay calculator (preview only, not a payslip mutation)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_uk_statutory_pay(
+    data: UKStatutoryPayRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_uk_statutory_pay(
+        db, current_user.organization_id, data.employee_id,
+        data.payment_type, data.event_start_date, week_number=data.week_number,
+        qualifying_days_in_period=data.qualifying_days_in_period,
+        qualifying_days_per_week=data.qualifying_days_per_week,
+        average_weekly_earnings=data.average_weekly_earnings,
+        include_employer_recovery=data.include_employer_recovery,
+        prior_year_total_class1_nic=data.prior_year_total_class1_nic,
+    )
+
+
+@payroll_router.get(
+    "/uk/employer-charges/summary", response_model=UKEmployerChargesSummaryResponse, response_model_by_alias=True,
+    summary="Current UK tax-year cumulative employer NI / Apprenticeship Levy pay bill for this org",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_uk_employer_charges_summary(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_uk_employer_charges_summary(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/uk/employer-charges/employment-allowance", response_model=UKEmploymentAllowanceResponse, response_model_by_alias=True,
+    summary="Calculate UK Employment Allowance net employer NIC liability (whole-tax-year, not a payslip mutation)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_uk_employment_allowance(
+    data: UKEmploymentAllowanceRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_uk_employment_allowance(db, current_user.organization_id, data.employer_has_claimed)
+
+
+@payroll_router.post(
+    "/uk/employer-charges/class-1a-1b", response_model=UKClass1A1BResponse, response_model_by_alias=True,
+    summary="Calculate a UK Class 1A/1B employer NIC charge for one event (benefits, termination award, testimonial, or PSA item)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_uk_class_1a_1b_charge(
+    data: UKClass1A1BRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_uk_class_1a_1b_charge(db, current_user.organization_id, data.charge_type, data.amount)
+
+
+@payroll_router.post(
+    "/uk/employees/{employee_id}/ni-relief-facts", response_model=UKNiReliefFactResponse, response_model_by_alias=True,
+    summary="Record a UK NI category relief-eligibility fact (Freeport/Investment Zone/veteran/apprentice) for an employee",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_uk_ni_relief_fact(
+    employee_id: int,
+    data: UKNiReliefFactCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_uk_ni_relief_fact(
+        db, current_user.organization_id, employee_id,
+        data.relief_type, data.reference, data.effective_from, data.effective_to,
+        created_by_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/uk/employees/{employee_id}/ni-relief-facts", response_model=list[UKNiReliefFactResponse], response_model_by_alias=True,
+    summary="List an employee's UK NI category relief-eligibility facts",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_uk_ni_relief_facts(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_uk_ni_relief_facts(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.delete(
+    "/uk/employees/{employee_id}/ni-relief-facts/{fact_id}", response_model=SuccessResponse,
+    summary="Delete a UK NI category relief-eligibility fact",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def delete_uk_ni_relief_fact(
+    employee_id: int,
+    fact_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    service.delete_uk_ni_relief_fact(db, current_user.organization_id, employee_id, fact_id)
+    return {"message": "NI relief fact deleted."}
+
+
+@payroll_router.post(
+    "/uk/mileage/calculate", response_model=UKMileageReimbursementResponse, response_model_by_alias=True,
+    summary="Calculate the HMRC-approved tax-free/NI-free mileage reimbursement for a claim (preview only)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_uk_mileage_reimbursement(
+    data: UKMileageReimbursementRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_uk_mileage_reimbursement(
+        db, current_user.organization_id, data.employee_id,
+        data.vehicle_type, data.business_miles, data.claim_date, data.ytd_business_miles_before,
+    )
+
+
+@payroll_router.post(
+    "/uk/advisory-fuel-rate", response_model=UKAdvisoryFuelRateResponse, response_model_by_alias=True,
+    summary="Resolve the company-car advisory fuel/electricity rate for a fuel type and engine band",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def resolve_uk_advisory_fuel_rate(
+    data: UKAdvisoryFuelRateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.resolve_uk_advisory_fuel_rate(db, current_user.organization_id, data.fuel_type, data.engine_band, data.as_of)
+
+
+@payroll_router.post(
+    "/uk/nmw/validate", response_model=UKNmwComplianceResponse, response_model_by_alias=True,
+    summary="Validate an employee's National Minimum Wage compliance for a pay reference period",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def validate_uk_nmw_compliance(
+    data: UKNmwComplianceRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.validate_uk_nmw_compliance(
+        db, current_user.organization_id, data.employee_id,
+        data.period_start, data.period_end, data.nmw_countable_pay,
+    )
+
+
+@payroll_router.post(
+    "/uk/employees/{employee_id}/court-orders", response_model=UKCourtOrderResponse, response_model_by_alias=True,
+    summary="Record a UK court-ordered deduction (England & Wales AEO / Scottish arrestment / Northern Ireland order) for an employee",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_uk_court_ordered_deduction(
+    employee_id: int,
+    data: UKCourtOrderCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_court_ordered_deduction(
+        db, current_user.organization_id, employee_id,
+        data.jurisdiction, data.order_type, data.start_date,
+        court_reference=data.court_reference, issue_date=data.issue_date, end_date=data.end_date,
+        priority=data.priority,
+        fixed_deduction_rate_pct=data.fixed_deduction_rate_pct, fixed_deduction_amount=data.fixed_deduction_amount,
+        protected_earnings_amount=data.protected_earnings_amount, total_amount_to_collect=data.total_amount_to_collect,
+        created_by_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/uk/employees/{employee_id}/court-orders", response_model=list[UKCourtOrderResponse], response_model_by_alias=True,
+    summary="List an employee's UK court-ordered deductions",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_uk_court_ordered_deductions(
+    employee_id: int,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_court_ordered_deductions(db, current_user.organization_id, employee_id, status)
+
+
+@payroll_router.put(
+    "/uk/employees/{employee_id}/court-orders/{order_id}/status", response_model=UKCourtOrderResponse, response_model_by_alias=True,
+    summary="Cancel/complete a UK court-ordered deduction (no hard delete — a legal instrument stays in the record)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def set_uk_court_ordered_deduction_status(
+    employee_id: int,
+    order_id: int,
+    data: UKCourtOrderStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.set_court_ordered_deduction_status(db, current_user.organization_id, employee_id, order_id, data.status)
+
+
+@payroll_router.post(
+    "/uk/court-orders/calculate", response_model=UKCourtOrderCalculateResponse, response_model_by_alias=True,
+    summary="Calculate this period's court-ordered deductions for an employee (whole-tax-year-independent, per-period calculation)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_uk_court_ordered_deductions(
+    data: UKCourtOrderCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_uk_court_ordered_deductions(
+        db, current_user.organization_id, data.employee_id,
+        data.attachable_earnings, data.pay_frequency, data.as_of,
+    )
+
+
+@payroll_router.post(
+    "/india/gratuity/calculate", response_model=GratuityCalculateResponse, response_model_by_alias=True,
+    summary="Calculate an India employee's gratuity liability (termination/fixed-term benefit, not a payroll deduction)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_india_gratuity(
+    data: GratuityCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_india_employee_gratuity(
+        db, current_user.organization_id, data.employee_id,
+        eligibility_event=data.eligibility_event, is_fixed_term=data.is_fixed_term,
+        date_of_leaving_override=data.date_of_leaving,
+        last_drawn_monthly_wage_override=data.last_drawn_monthly_wage,
+    )
+
+
+# ── India: Form 122 (prior-employer salary/other-income declaration) ────
+
+@payroll_router.post(
+    "/india/salary-tds-declarations", response_model=SalaryTdsDeclarationResponse, response_model_by_alias=True,
+    summary="Create a Form 122 salary TDS declaration (Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_salary_tds_declaration(
+    data: SalaryTdsDeclarationCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_salary_tds_declaration(
+        db, current_user.organization_id, data.employee_id, data.tax_year,
+        prior_employer_salary=data.prior_employer_salary, prior_employer_tds_deducted=data.prior_employer_tds_deducted,
+        other_income=data.other_income, house_property_loss=data.house_property_loss,
+    )
+
+
+@payroll_router.get(
+    "/india/salary-tds-declarations", response_model=List[SalaryTdsDeclarationResponse], response_model_by_alias=True,
+    summary="List Form 122 salary TDS declarations",
+)
+def list_salary_tds_declarations(
+    employeeId: Optional[int] = None, taxYear: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_salary_tds_declarations(db, current_user.organization_id, employee_id=employeeId, tax_year=taxYear)
+
+
+@payroll_router.put(
+    "/india/salary-tds-declarations/{declaration_id}/submit", response_model=SalaryTdsDeclarationResponse, response_model_by_alias=True,
+    summary="Submit a Form 122 declaration (Draft -> Submitted)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def submit_salary_tds_declaration(
+    declaration_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.submit_salary_tds_declaration(db, current_user.organization_id, declaration_id)
+
+
+@payroll_router.put(
+    "/india/salary-tds-declarations/{declaration_id}/approve", response_model=SalaryTdsDeclarationResponse, response_model_by_alias=True,
+    summary="Approve a Form 122 declaration (Submitted -> Approved) — supersedes any prior Approved declaration for this employee+tax year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def approve_salary_tds_declaration(
+    declaration_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.approve_salary_tds_declaration(db, current_user.organization_id, declaration_id, current_user.id)
+
+
+# ── India: Form 124 (Chapter VIII claims/evidence) ───────────────────────
+
+@payroll_router.post(
+    "/india/salary-tds-claims", response_model=SalaryTdsClaimResponse, response_model_by_alias=True,
+    summary="Create a Form 124 salary TDS claim (Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_salary_tds_claim(
+    data: SalaryTdsClaimCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_salary_tds_claim(
+        db, current_user.organization_id, data.employee_id, data.tax_year,
+        data.claim_type, data.claimed_amount, evidence_reference=data.evidence_reference,
+    )
+
+
+@payroll_router.get(
+    "/india/salary-tds-claims", response_model=List[SalaryTdsClaimResponse], response_model_by_alias=True,
+    summary="List Form 124 salary TDS claims",
+)
+def list_salary_tds_claims(
+    employeeId: Optional[int] = None, taxYear: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_salary_tds_claims(db, current_user.organization_id, employee_id=employeeId, tax_year=taxYear)
+
+
+@payroll_router.put(
+    "/india/salary-tds-claims/{claim_id}/submit", response_model=SalaryTdsClaimResponse, response_model_by_alias=True,
+    summary="Submit a Form 124 claim (Draft -> Submitted)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def submit_salary_tds_claim(
+    claim_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.submit_salary_tds_claim(db, current_user.organization_id, claim_id)
+
+
+@payroll_router.put(
+    "/india/salary-tds-claims/{claim_id}/approve", response_model=SalaryTdsClaimResponse, response_model_by_alias=True,
+    summary="Approve a Form 124 claim (Submitted -> Approved)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def approve_salary_tds_claim(
+    claim_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.approve_salary_tds_claim(db, current_user.organization_id, claim_id, current_user.id)
+
+
+@payroll_router.put(
+    "/india/salary-tds-claims/{claim_id}/reject", response_model=SalaryTdsClaimResponse, response_model_by_alias=True,
+    summary="Reject a Form 124 claim (Submitted -> Rejected)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def reject_salary_tds_claim(
+    claim_id: int,
+    data: SalaryTdsClaimRejectRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.reject_salary_tds_claim(db, current_user.organization_id, claim_id, data.reason)
+
+
+# ── India: Form 123 (employer-recorded perquisite/benefit valuation) ────
+
+@payroll_router.post(
+    "/india/employee-benefit-valuations", response_model=EmployeeBenefitValuationResponse, response_model_by_alias=True,
+    summary="Create a Form 123 employee benefit valuation (Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_employee_benefit_valuation(
+    data: EmployeeBenefitValuationCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_employee_benefit_valuation(
+        db, current_user.organization_id, data.employee_id, data.tax_year,
+        data.benefit_type, data.taxable_value, description=data.description,
+    )
+
+
+@payroll_router.get(
+    "/india/employee-benefit-valuations", response_model=List[EmployeeBenefitValuationResponse], response_model_by_alias=True,
+    summary="List Form 123 employee benefit valuations",
+)
+def list_employee_benefit_valuations(
+    employeeId: Optional[int] = None, taxYear: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_employee_benefit_valuations(db, current_user.organization_id, employee_id=employeeId, tax_year=taxYear)
+
+
+@payroll_router.put(
+    "/india/employee-benefit-valuations/{valuation_id}/issue", response_model=EmployeeBenefitValuationResponse, response_model_by_alias=True,
+    summary="Issue a Form 123 benefit valuation (Draft -> Issued)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def issue_employee_benefit_valuation(
+    valuation_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.issue_employee_benefit_valuation(db, current_user.organization_id, valuation_id)
 
 
 @payroll_router.get(
@@ -1080,6 +1501,157 @@ def download_report_certificates_zip(
         zip_buf,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="certificates-{generated_report_id}.zip"'},
+    )
+
+
+# ── UK RTI: P45/P60 (per-employee) + EPS (per-period) generation, ────────
+# RTI XML download, submission tracking (ZP-TAX-UK-2026-27-001 §18
+# gap-closure Part 9, 2026-09-09).
+
+@payroll_router.post(
+    "/uk/reports/employee", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a per-employee UK RTI report (P45 or P60) — not tied to any PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_uk_employee_report(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/uk/reports/eps", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate an Employer Payment Summary (EPS) for a period — employer-level only, no PayrollRun required",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_uk_eps(
+    data: UKEpsGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_eps(
+        db, current_user.organization_id, data.report_template_id, data.tax_year, data.period_key,
+        employer_has_claimed_allowance=data.employer_has_claimed_allowance,
+        no_employees_paid=data.no_employees_paid, final_submission=data.final_submission,
+        total_statutory_pay_recovered=data.total_statutory_pay_recovered,
+        as_of=data.as_of, actor_id=current_user.id,
+    )
+
+
+# ── India: Form 130 (per-employee) + Form 138 (per-quarter) generation ──
+# (ZP-TAX-IN-2026-27-001 §6.2/§6.3, gap-closure Phase E, 2026-09-10).
+
+@payroll_router.post(
+    "/india/reports/form130", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate an India Form 130 salary TDS certificate for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_india_form_130(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/india/reports/form138", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate India's Form 138 quarterly salary TDS statement — employer-level, sums every finalized payslip across the quarter's 3 runs",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_india_form_138(
+    data: IndiaForm138GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_india_form_138(
+        db, current_user.organization_id, data.report_template_id, data.reporting_year, data.period_key,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/india/reports/form123", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate an India Form 123 employer perquisite statement for one employee — sourced from Issued benefit valuations",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_india_form_123(
+    data: IndiaForm123GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_india_form_123(
+        db, current_user.organization_id, data.report_template_id, data.employee_id, data.tax_year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/generated-reports/{generated_report_id}/rti-xml",
+    summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def download_rti_xml(
+    generated_report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    xml_bytes = service.generate_rti_xml_bytes(db, current_user.organization_id, generated_report_id)
+    return StreamingResponse(
+        io.BytesIO(xml_bytes),
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="rti-{generated_report_id}.xml"'},
+    )
+
+
+@payroll_router.post(
+    "/uk/rti-submissions", response_model=RtiSubmissionResponse, response_model_by_alias=True,
+    summary="Start tracking an FPS/EPS/P45 GeneratedReport toward HMRC filing (status tracking only, no transmission)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_rti_submission(
+    data: RtiSubmissionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_rti_submission(db, current_user.organization_id, data.generated_report_id, created_by_id=current_user.id)
+
+
+@payroll_router.get(
+    "/uk/rti-submissions", response_model=list[RtiSubmissionResponse], response_model_by_alias=True,
+    summary="List this organization's RTI submissions, optionally filtered by status",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_rti_submissions(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_rti_submissions(db, current_user.organization_id, status)
+
+
+@payroll_router.put(
+    "/uk/rti-submissions/{submission_id}/status", response_model=RtiSubmissionResponse, response_model_by_alias=True,
+    summary="Record a manual RTI filing status transition (a human filed through HMRC's own tools — this never calls HMRC itself)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def set_rti_submission_status(
+    submission_id: int,
+    data: RtiSubmissionStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.set_rti_submission_status(
+        db, current_user.organization_id, submission_id, data.status,
+        hmrc_correlation_id=data.hmrc_correlation_id, rejection_reason=data.rejection_reason,
     )
 
 

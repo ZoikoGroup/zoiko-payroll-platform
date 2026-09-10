@@ -29,6 +29,34 @@ const GENERIC_RATE_KEYS = [
   { key: "sl_plan4_thresh", label: "Student Loan Plan 4 Threshold", shape: "flat" },
   { key: "sl_plan5_thresh", label: "Student Loan Plan 5 Threshold", shape: "flat" },
   { key: "pg_loan_thresh", label: "Postgraduate Loan Threshold", shape: "flat" },
+  // 2026-09-09 gap-closure Phase 2: Statutory Sick Pay / Statutory Family
+  // Pay + recovery keys — these have been readable by uk.py's
+  // calculate_ssp()/calculate_statutory_family_pay()/
+  // calculate_family_pay_employer_recovery() since the 2026-09-08 commit,
+  // but had no UI path to configure at all (no hardcoded fallback either
+  // — they fail closed until a Super Admin enters a real row here).
+  { key: "ssp_weekly_cap", label: "Statutory Sick Pay — Weekly Cap", shape: "flat" },
+  { key: "ssp_awe_pct", label: "Statutory Sick Pay — AWE Percentage", shape: "rate_single" },
+  { key: "fam_pay_awe_pct", label: "Statutory Family Pay — AWE Percentage", shape: "rate_single" },
+  { key: "fam_pay_flat_rate", label: "Statutory Family Pay — Standard Weekly Rate", shape: "flat" },
+  { key: "fam_pay_recov_thresh", label: "Family Pay Recovery — Small Employer Threshold", shape: "flat" },
+  // Employer recovery %s — uk.py reads these via .employer_rate_pct, not
+  // .employee_rate_pct (it's what the EMPLOYER reclaims, not an employee
+  // deduction), so "rate_single_employer" (not "rate_single") is correct here.
+  { key: "fam_pay_recov_small", label: "Family Pay Recovery Rate — Small Employer", shape: "rate_single_employer" },
+  { key: "fam_pay_recov_std", label: "Family Pay Recovery Rate — Standard", shape: "rate_single_employer" },
+  // Apprenticeship Levy / Employment Allowance / Class 1A / Class 1B —
+  // all employer-only charges, same "readable but unconfigurable until
+  // now" status as the statutory-pay keys above.
+  { key: "appr_levy_rate", label: "Apprenticeship Levy Rate", shape: "rate_single_employer" },
+  { key: "appr_levy_allowance", label: "Apprenticeship Levy Annual Allowance", shape: "flat" },
+  { key: "empl_allowance_cap", label: "Employment Allowance Cap", shape: "flat" },
+  { key: "c1a_benefits_rate", label: "Class 1A — Benefits & Expenses Rate", shape: "rate_single_employer" },
+  { key: "c1a_term_rate", label: "Class 1A — Termination Awards Rate", shape: "rate_single_employer" },
+  { key: "c1a_term_thresh", label: "Class 1A — Termination Awards Threshold", shape: "flat" },
+  { key: "c1a_testim_rate", label: "Class 1A — Sporting Testimonial Rate", shape: "rate_single_employer" },
+  { key: "c1a_testim_thresh", label: "Class 1A — Sporting Testimonial Threshold", shape: "flat" },
+  { key: "c1b_psa_rate", label: "Class 1B — PAYE Settlement Agreement Rate", shape: "rate_single_employer" },
 ];
 
 // The single entry point for every UK Tax Components tab Add/Edit modal.

@@ -1,0 +1,15 @@
+{
+  "description": "ILLUSTRATIVE SAMPLE ONLY — proves the harness mechanism works end-to-end (JSON -> PayrollContext -> engine -> comparison). This is a HAND-CALCULATED figure using this codebase's own Plan 2 threshold/rate constants (hardcoded_defaults.py: £29,385 threshold, 9% rate, round-down-to-whole-pound switch ON) — it is NOT sourced from an actual HMRC test file and must never be treated as a real golden-test result. Real cases go in files WITHOUT a leading underscore, converted from the actual downloaded HMRC spreadsheets — see README.md.",
+  "source": "hand-calculated for harness self-check, not HMRC-sourced",
+  "context": {
+    "gross": "3000.00",
+    "pay_frequency": "Monthly",
+    "pay_date": "2026-06-30",
+    "tax_code": "NT",
+    "study_loan_plan": "UK_PLAN2",
+    "study_loan_balance": "5000"
+  },
+  "expected": {
+    "study_loan_deduction": "49"
+  }
+}

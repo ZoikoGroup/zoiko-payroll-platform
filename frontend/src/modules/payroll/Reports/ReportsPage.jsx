@@ -1,20 +1,41 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { BarChart3, FileText, History, Download, TrendingUp, Banknote } from "lucide-react";
+import { BarChart3, FileText, History, Download, TrendingUp, Banknote, Landmark } from "lucide-react";
 import { useToast } from "../ToastContext";
 import { getPayrollReports, downloadReport, downloadBankTransferFile } from "../../../service/payrollService";
 import ReportGenerationPanel from "./ReportGenerationPanel";
 import GeneratedReportPreview from "./GeneratedReportPreview";
 import GeneratedReportsHistoryTable from "./GeneratedReportsHistoryTable";
+import UKEmployerChargesPanel from "./UKEmployerChargesPanel";
+import INForm138Panel from "./INForm138Panel";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
-const tabs = [
+const BASE_TABS = [
   { id: "payroll-reports", label: "Payroll Reports", icon: BarChart3 },
   { id: "generate-report",  label: "Generate Report", icon: FileText },
   { id: "report-history",   label: "Report History",  icon: History },
 ];
 
+// UK Employer Annual Charges (ZP-TAX-UK-2026-27-001 §9.3/§14 gap-closure
+// Phase 6, 2026-09-09) is a whole-tax-year, run-independent employer
+// liability, unlike everything else on this page — shown as its own tab,
+// only for a UK org, rather than forced into the per-run Generate Report
+// flow it doesn't fit.
+const UK_EMPLOYER_CHARGES_TAB = { id: "uk-employer-charges", label: "UK Employer Charges", icon: Landmark };
+// India Form 138 (§6.2/§6.3, gap-closure Phase E, 2026-09-10) is
+// quarter-level, employer-wide, and never tied to a single PayrollRun —
+// same reasoning as the UK Employer Charges tab above for its own tab
+// rather than being forced into the run-scoped Generate Report flow.
+const IN_FORM_138_TAB = { id: "in-form-138", label: "India Form 138", icon: FileText };
+
 export default function ReportsPage() {
   const { addToast } = useToast();
+  const { company, currencyCode } = usePayrollSetup();
+  const jurisdictionCountry = (company?.jurisdictionCountry || company?.jurisdiction_country || "").toUpperCase();
+  const isUk = jurisdictionCountry === "UK";
+  // Permissive default-to-IN, same reasoning as EmployeeDetailPanel's own
+  // India-forms button gate — most orgs never explicitly set this field.
+  const isIndia = !jurisdictionCountry || jurisdictionCountry === "IN";
+  const tabs = [...BASE_TABS, ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []), ...(isIndia ? [IN_FORM_138_TAB] : [])];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +43,6 @@ export default function ReportsPage() {
   const [downloadCount, setDownloadCount] = useState(0);
   const [bankFileFormat, setBankFileFormat] = useState({});
   const [downloadingBankFileId, setDownloadingBankFileId] = useState(null);
-  const { currencyCode } = usePayrollSetup();
 
   // The most recently generated statutory report (Generate Report tab) —
   // shown as a preview until the user generates another one or leaves
@@ -252,6 +272,9 @@ export default function ReportsPage() {
           />
         </div>
       )}
+
+      {isUk && activeTab === "uk-employer-charges" && <UKEmployerChargesPanel />}
+      {isIndia && activeTab === "in-form-138" && <INForm138Panel />}
     </div>
   );
 }

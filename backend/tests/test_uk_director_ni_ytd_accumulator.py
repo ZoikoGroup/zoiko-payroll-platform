@@ -46,9 +46,23 @@ def _restore_ytd_switch():
 
 
 def test_load_uk_director_ytd_empty_when_switch_off(db, organization):
+    # Phase 3 (2026-09-09) flipped the default to {"UK"} — the OLD,
+    # superseded off-state remains reachable only by explicitly
+    # discarding "UK", same pattern as every other UK rollout switch's
+    # "_if_explicitly_reverted" test.
     emp = _make_uk_director(db, organization.id)
-    assert "UK" not in shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES
+    shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.discard("UK")
     result = service._load_uk_director_ytd(db, emp.id, date(2026, 6, 1))
+    assert result == {}
+
+
+def test_load_uk_director_ytd_active_by_default(db, organization):
+    emp = _make_uk_director(db, organization.id)
+    assert "UK" in shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES
+    result = service._load_uk_director_ytd(db, emp.id, date(2026, 6, 1))
+    # No accumulator row exists yet — never guesses/backfills a starting
+    # value, same discipline as _load_ca_ytd. The empty dict here proves
+    # the switch being ON doesn't itself fabricate a starting balance.
     assert result == {}
 
 

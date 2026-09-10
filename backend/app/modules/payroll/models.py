@@ -304,6 +304,24 @@ class PayrollEmployee(Base):
     # existing employee's calculation changes.
     church_tax_liable = Column(Boolean, default=False, nullable=False, server_default="false")
 
+    # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09) —
+    # a Full Payment Submission's Employee Details section requires a
+    # home address (mandatory for a new starter with no NINO match) and,
+    # for a new starter, one of HMRC's own starter-declaration codes
+    # (A/B/C — "this is my first job since last 6 April" / "I have
+    # another job" / etc.). No other feature in this codebase needed an
+    # employee's home address before — NULL for every employee until
+    # entered, same "no behavior changes until explicitly set" convention
+    # as every other field in this section. Not UK-only by name (a home
+    # address is generically useful HR data) but no other country's
+    # calculation reads these today.
+    address_line1     = Column(String(200), nullable=True)
+    address_line2     = Column(String(200), nullable=True)
+    address_town      = Column(String(100), nullable=True)
+    address_county    = Column(String(100), nullable=True)
+    address_postcode  = Column(String(20), nullable=True)
+    starter_declaration = Column(String(1), nullable=True)  # A | B | C
+
     # Non-India statutory/bank identifiers (SSN, NINO, TFN, SIN, Steuer-ID,
     # IBAN, etc. — see employee_validation.py for the field set per
     # country). India keeps its own dedicated pan/uan/ifsc columns above
@@ -658,6 +676,17 @@ class PayslipItem(Base):
     # UK: Apprenticeship Levy — same org-level-accumulator-banded contract
     # as employer_eht above (ZP-TAX-UK-2026-27-001 §14).
     employer_apprenticeship_levy = Column(Numeric(12, 2), default=0, server_default="0")
+    # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13 gap-
+    # closure Part 3) — "ELIGIBLE_JOBHOLDER"/"NON_ELIGIBLE_JOBHOLDER"/
+    # "ENTITLED_WORKER", or NULL (dormant switch, or no date_of_birth on
+    # record). Purely informational — never affects employee_pension/
+    # employer_pension above.
+    auto_enrolment_status = Column(String(30), nullable=True)
+    # UK: HMRC tax week (1-53) / tax month (1-12) this payslip falls in
+    # (ZP-TAX-UK-2026-27-001 §18.1 gap-closure Part 6) — pure calendar
+    # metadata, no rollout switch (computed whenever pay_date is known).
+    tax_week = Column(Integer, nullable=True)
+    tax_month = Column(Integer, nullable=True)
     # Canada: BC EHT, Manitoba HE Levy, NL HAPSET — same org-level-
     # accumulator-banded contract as employer_eht above, one column per
     # levy since each is legally distinct and jurisdiction-exclusive
@@ -883,6 +912,28 @@ class ContributionRate(Base):
     # from. NULL on org-scoped rows created before this column existed.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
+    # Per-rule-family effective dating (ZP-TAX-UK-2026-27-001 §3.2 gap-
+    # closure Part 1A, 2026-09-09) — a rule family like National Minimum
+    # Wage (effective 1 April) or Advisory Fuel Rates (effective 1 June,
+    # then quarterly) needs its OWN effective window distinct from the
+    # tax_year pack's 6 April window. NULL (every row today) means "use
+    # the parent JurisdictionPack's own effective_from/effective_to" —
+    # completely additive; only enforced by tax_resolver.py's
+    # resolve_tax_configuration (the canonical-pack path, which already
+    # takes a payroll_date). The legacy per-org get_contribution_rates
+    # path has no date parameter at all and does not consult these —
+    # a deliberately scoped-down first pass, not an oversight.
+    effective_from        = Column(Date, nullable=True)
+    effective_to          = Column(Date, nullable=True)
+
+    # Per-rule evidence (ZP-TAX-UK-2026-27-001 §4.2 gap-closure Part 1B,
+    # 2026-09-09) — until now, SourceArtifact could only be linked to a
+    # whole JurisdictionPack (or a handful of US-specific side tables),
+    # never to one individual rate row, even though §4.2 requires evidence
+    # PER PUBLISHED RULE. Reuses the existing SourceArtifact table — no
+    # new table needed, just this FK. NULL for every row today.
+    source_document_id   = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
     sort_order           = Column(Integer, default=0)
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
@@ -989,6 +1040,16 @@ class TaxSlab(Base):
     # rule_type — additive, no existing row's behavior changes.
     flat_amount           = Column(Numeric(10, 2), nullable=True)
     adjustment_amount     = Column(Numeric(10, 2), nullable=True)
+    # PT_FLAT only (ZP-TAX-IN-2026-27-001 §12.1's state_rule schema field
+    # of the same name): which income figure this bracket's min_amount/
+    # max_amount are measured against. NULL/"MONTHLY_WAGE" (every existing
+    # PT_FLAT row, e.g. Telangana) means "and above" — engine/countries/
+    # india.py's exact existing behavior — is unaffected;
+    # "HALF_YEAR_INCOME" (Greater Chennai Corporation's local schedule,
+    # §14.1) matches an average half-yearly income instead. "ANNUAL_SALARY"/
+    # "OTHER" are recognized per the document's own enum but have no
+    # sourced India state using them yet — reserved, not implemented.
+    assessment_basis      = Column(String(20), nullable=True)
     # NI_BAND only (UK National Insurance categories): which NI category
     # letter ("A"/"B"/"C"/"H"/"M") this band applies to, and the employer
     # rate for this band — `rate_pct` above doubles as the EMPLOYEE rate
@@ -1000,6 +1061,19 @@ class TaxSlab(Base):
     employer_rate_pct     = Column(Numeric(6, 4), nullable=True)
     # Which canonical tax pack version this row was authored under/synced from.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
+    # Per-rule-family effective dating — same rationale/scope as
+    # ContributionRate.effective_from/effective_to above (ZP-TAX-UK-2026-
+    # 27-001 §3.2 gap-closure Part 1A, 2026-09-09). NULL means "use the
+    # parent JurisdictionPack's window"; only enforced by tax_resolver.py's
+    # canonical-pack resolution path.
+    effective_from        = Column(Date, nullable=True)
+    effective_to          = Column(Date, nullable=True)
+
+    # Per-rule evidence — same rationale as ContributionRate.
+    # source_document_id above (ZP-TAX-UK-2026-27-001 §4.2 gap-closure
+    # Part 1B, 2026-09-09). NULL for every row today.
+    source_document_id   = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
@@ -1019,6 +1093,15 @@ class CompanyComplianceDetails(Base):
     tax_no                = Column(String(50), default="")
     employer_id           = Column(String(50), default="")  # doubles as "Registration Number" in the UI
     address               = Column(String(300), default="")
+    # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09) —
+    # every FPS/EPS's Employer Details section requires both identifiers;
+    # neither is the same as employer_id/tax_no above (those are the
+    # jurisdiction-generic registration fields every country's Compliance
+    # Details form already collects). NULL for every org until entered —
+    # no UI sets these yet, same disclosed "no admin surface yet" pattern
+    # as bc_eht_employer_classification/connected_group_code elsewhere.
+    paye_reference             = Column(String(20), nullable=True)
+    accounts_office_reference  = Column(String(20), nullable=True)
     industry              = Column(String(100), default="")
     email                 = Column(String(255), default="")
     phone                 = Column(String(50), default="")
@@ -1208,6 +1291,45 @@ class JurisdictionPack(Base):
         return "NATIONAL" if not self.jurisdiction_state else "SUB_JURISDICTION"
 
 
+class PackHotfixActivation(Base):
+    """A record of an emergency hotfix activation of a JurisdictionPack —
+    Super Admin UI Part 11 (§19, 2026-09-09). The normal path
+    (set_jurisdiction_pack_status) refuses to activate a pack without a
+    distinct approver (maker-checker). Hotfix mode deliberately bypasses
+    that single gate for a genuine production emergency (e.g. a live
+    statutory bug actively producing wrong payslips) — but ONLY that one
+    gate: every other guard (date-range overlap, inverted dates) still
+    applies unchanged. In exchange, hotfix mode REQUIRES a mandatory
+    incident reference and justification, and ALWAYS creates this row,
+    flagged for mandatory retrospective review — the accountability
+    maker-checker would normally have provided is deferred to an
+    after-the-fact human review, never silently skipped."""
+    __tablename__ = "payroll_pack_hotfix_activations"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=False, index=True)
+
+    incident_id         = Column(String(100), nullable=False)
+    justification        = Column(Text, nullable=False)
+
+    activated_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    activated_at         = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Mandatory retrospective review — never auto-closes itself.
+    reviewed             = Column(Boolean, nullable=False, default=False, server_default="false")
+    reviewed_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at          = Column(DateTime(timezone=True), nullable=True)
+    review_notes         = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_pack_hotfix_pack", "jurisdiction_pack_id"),
+        Index("ix_pack_hotfix_unreviewed", "reviewed"),
+    )
+
+    def __repr__(self):
+        return f"<PackHotfixActivation pack={self.jurisdiction_pack_id} incident={self.incident_id} reviewed={self.reviewed}>"
+
+
 # ── Tax Configuration Audit ─────────────────────────────────────────────
 # One canonical audit trail for every mutation to a Super-Admin-owned
 # canonical tax/contribution/pack row. No audit system existed anywhere in
@@ -1395,7 +1517,27 @@ class GeneratedReport(Base):
     template_version    = Column(String(20), nullable=False)   # snapshotted at generation time
     report_type          = Column(String(50), nullable=False)   # denormalized from template, for cheap listing
 
-    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id"), nullable=False, index=True)
+    # NULLABLE since ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9
+    # (2026-09-09) — every report type before RTI was tied to exactly one
+    # finalized PayrollRun, but a P45/P60 is per-EMPLOYEE (triggered by a
+    # leaving date / tax-year end, not a specific run) and an EPS is
+    # per-PERIOD at the whole-employer level (an employer can file an EPS
+    # for a period with zero payroll runs at all — e.g. "no employees
+    # paid this period"). Every report generated before this column was
+    # widened has this set exactly as before; only the new non-run-based
+    # generators ever leave it NULL.
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True, index=True)
+    # Set only for a per-employee report (P45/P60) — lets a caller filter
+    # "all reports for this employee" without parsing scope_key. NULL for
+    # every run-based and period-based report.
+    employee_id    = Column(Integer, ForeignKey("payroll_employees.id"), nullable=True, index=True)
+    # Set only when payroll_run_id is NULL — the uniqueness key for a
+    # non-run-based report ("EMPLOYEE:<id>" for P45/P60, "PERIOD:<tax_
+    # year>:<period_key>" for EPS), since the existing (org, run,
+    # template) uniqueness below can't express "one Generated P60 per
+    # employee per tax year" or "one Generated EPS per employer per
+    # period." NULL for every run-based report — completely unaffected.
+    scope_key      = Column(String(100), nullable=True)
 
     jurisdiction_country = Column(String(100), nullable=False)
     jurisdiction_state    = Column(String(100), nullable=True)
@@ -1428,13 +1570,113 @@ class GeneratedReport(Base):
             "uq_generated_report_org_run_template_active",
             "organization_id", "payroll_run_id", "report_template_id",
             unique=True,
-            postgresql_where=text("status = 'Generated'"),
-            sqlite_where=text("status = 'Generated'"),
+            postgresql_where=text("status = 'Generated' AND payroll_run_id IS NOT NULL"),
+            sqlite_where=text("status = 'Generated' AND payroll_run_id IS NOT NULL"),
+        ),
+        # The non-run-based counterpart (Part 9, 2026-09-09) — one
+        # Generated row per (org, template, scope_key) at a time, exactly
+        # mirroring the run-based index above but keyed by scope_key
+        # instead of payroll_run_id.
+        Index(
+            "uq_generated_report_org_scope_template_active",
+            "organization_id", "scope_key", "report_template_id",
+            unique=True,
+            postgresql_where=text("status = 'Generated' AND scope_key IS NOT NULL"),
+            sqlite_where=text("status = 'Generated' AND scope_key IS NOT NULL"),
         ),
     )
 
     def __repr__(self):
-        return f"<GeneratedReport org={self.organization_id} run={self.payroll_run_id} template={self.report_template_id} status={self.status}>"
+        return f"<GeneratedReport org={self.organization_id} run={self.payroll_run_id} scope={self.scope_key} template={self.report_template_id} status={self.status}>"
+
+
+class RtiSubmission(Base):
+    """Submission-queue/status tracking for a GeneratedReport that is
+    itself an HMRC RTI filing (FPS/EPS/P45) — ZP-TAX-UK-2026-27-001 §18.3
+    gap-closure Part 9B, 2026-09-09.
+
+    This table is DELIBERATELY a status tracker only — it never actually
+    transmits anything to HMRC. Real transmission needs a Government
+    Gateway enrolment and digital credentials this codebase has no way
+    to obtain; when those exist, the only new work should be wiring a
+    real API call into the DRAFT -> SUBMITTED transition below, not a
+    redesign of this table. Until then, every transition past READY is
+    driven by a human manually filing through HMRC's own tools and then
+    recording what happened here — an honest record of real-world state,
+    not a working pipeline.
+    """
+    __tablename__ = "payroll_rti_submissions"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    generated_report_id = Column(Integer, ForeignKey("payroll_generated_reports.id"), nullable=False, index=True)
+
+    # FPS | EPS | P45 — denormalized from the GeneratedReport's own
+    # report_type for cheap listing, same convention GeneratedReport
+    # itself uses for report_type against ReportTemplate.
+    submission_type = Column(String(20), nullable=False)
+
+    # DRAFT -> READY -> SUBMITTED -> ACKNOWLEDGED | REJECTED. DRAFT is the
+    # state a fresh row starts in; READY means a human has reviewed it and
+    # judged it ready to file; SUBMITTED/ACKNOWLEDGED/REJECTED are
+    # currently only ever set by a human recording what they did outside
+    # this system (see class docstring) — never by an automated call.
+    status = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Populated only once a real Government Gateway integration exists —
+    # NULL for every row today, by construction (nothing in this codebase
+    # can obtain one yet).
+    hmrc_correlation_id = Column(String(100), nullable=True)
+
+    submitted_at    = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_rti_submission_org_status", "organization_id", "status"),
+    )
+
+    def __repr__(self):
+        return f"<RtiSubmission org={self.organization_id} type={self.submission_type} status={self.status}>"
+
+
+class TestCertificationRun(Base):
+    """One execution of the HMRC golden-test harness (Part 10) —
+    Super Admin UI Part 11's "Test Certification" tab (§19, 2026-09-09)
+    reads this table for pass/fail history rather than reading raw pytest
+    output, which isn't persisted or queryable anywhere. `real_case_count`
+    is tracked SEPARATELY from `total_cases`/`passed_cases` so the UI can
+    honestly show "0 real HMRC cases" instead of implying certification
+    happened when it structurally couldn't (see tests/hmrc_golden's own
+    package docstring — Part 10 is blocked on real HMRC files)."""
+    __tablename__ = "payroll_test_certification_runs"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    run_at            = Column(DateTime(timezone=True), server_default=func.now())
+    triggered_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    real_case_count   = Column(Integer, nullable=False, default=0)
+    total_cases       = Column(Integer, nullable=False, default=0)
+    passed_cases      = Column(Integer, nullable=False, default=0)
+    failed_cases      = Column(Integer, nullable=False, default=0)
+
+    # PASS | FAIL | NO_REAL_CASES — NO_REAL_CASES (real_case_count == 0)
+    # is deliberately NOT the same as PASS: an empty real-case set proves
+    # nothing about correctness, and the UI must never conflate the two.
+    status            = Column(String(20), nullable=False)
+
+    failure_details   = Column(JSON, nullable=True)  # [{"case": "...", "field": "...", "expected": ..., "actual": ...}, ...]
+
+    __table_args__ = (
+        Index("ix_test_cert_run_at", "run_at"),
+    )
+
+    def __repr__(self):
+        return f"<TestCertificationRun id={self.id} status={self.status} real_cases={self.real_case_count}>"
 
 
 # ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
@@ -1587,6 +1829,24 @@ class PayrollLeaveRequest(Base):
     reviewed_by         = Column(Integer, nullable=True)
     reviewed_at         = Column(DateTime(timezone=True), nullable=True)
     source              = Column(String(20), nullable=False, default="manual")  # manual / email
+
+    # UK statutory leave wiring (ZP-TAX-UK-2026-27-001 §11/§12 gap-closure
+    # Part 7A, 2026-09-09) — set only when leave_type is one of the 6
+    # statutory business-language values (maternity/paternity/adoption/
+    # sharedParental/bereavement/neonatal) AND the rollout switch is on.
+    # statutory_pay_type is the matching HMRC code (SMP/SPP/SAP/SHPP/SPBP/
+    # SNCP) uk.py's calculate_statutory_family_pay() actually expects.
+    # AWE and the total are computed ONCE at approval time and frozen here
+    # — never recomputed later, so a subsequent payslip correction that
+    # would shift a live AWE calculation can never retroactively change
+    # what was already promised/paid for this claim. total_amount stays
+    # NULL (not 0) when the underlying calculation failed closed (e.g.
+    # insufficient pay history for AWE, or an unconfigured rate) —
+    # statutory_pay_note carries the reason either way.
+    statutory_pay_type       = Column(String(10), nullable=True)
+    statutory_awe_snapshot   = Column(Numeric(12, 2), nullable=True)
+    statutory_pay_total_amount = Column(Numeric(12, 2), nullable=True)
+    statutory_pay_note       = Column(String(255), nullable=True)
 
     created_at          = Column(DateTime(timezone=True), server_default=func.now())
     updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
@@ -1906,6 +2166,159 @@ class TaxabilityRule(Base):
         return f"<TaxabilityRule {self.earning_type}x{self.tax_component}={self.is_taxable}>"
 
 
+class StateLocalProgramReadiness(Base):
+    """ZP-TAX-IN-2026-27-001 §16's "India state/local readiness registry" —
+    one row per (state/UT, optional local authority, statutory program),
+    even when the applicable status is NOT_APPLICABLE or SOURCE_REQUIRED
+    ("This prevents silent gaps when a tenant adds a work location").
+
+    Platform-wide by construction (jurisdiction_country, not IN-only) even
+    though every row seeded so far is India's, matching this schema's
+    existing country-generic convention (TaxabilityRule/SourceArtifact
+    above). Deliberately INFORMATIONAL/admin-facing only in this pass —
+    no calculation or onboarding path reads legal_status to block
+    anything yet (same dormant-registry convention as
+    _VALIDATION_ENABLED_COUNTRIES in engine/countries/shared.py: fail-
+    closed ENFORCEMENT is a separate, deliberate decision from having the
+    registry data exist)."""
+    __tablename__ = "payroll_state_local_program_readiness"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    jurisdiction_country      = Column(String(10), nullable=False)
+    jurisdiction_state        = Column(String(100), nullable=False)
+    # NULL = state-level row (e.g. Karnataka STATE_PT); set = a specific
+    # local authority's own row (e.g. Chennai's LOCAL_PT), same null-means-
+    # broader-scope convention as ContributionRate/TaxSlab.jurisdiction_locality.
+    jurisdiction_locality     = Column(String(100), nullable=True)
+    program                   = Column(String(30), nullable=False)   # STATE_PT | LOCAL_PT | LWF | OTHER_STATE_PAYROLL
+    legal_status              = Column(String(20), nullable=False, default="SOURCE_REQUIRED", server_default="SOURCE_REQUIRED")  # APPLICABLE | NOT_APPLICABLE | SOURCE_REQUIRED
+    local_authority_required  = Column(Boolean, nullable=False, default=False, server_default="false")
+    registration_required     = Column(Boolean, nullable=False, default=False, server_default="false")
+    source_document_id        = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    notes                     = Column(String(500), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "jurisdiction_country", "jurisdiction_state", "jurisdiction_locality", "program",
+            name="uq_state_local_program_readiness_scope",
+        ),
+    )
+
+    def __repr__(self):
+        locality = f"/{self.jurisdiction_locality}" if self.jurisdiction_locality else ""
+        return f"<StateLocalProgramReadiness {self.jurisdiction_country}-{self.jurisdiction_state}{locality} {self.program}={self.legal_status}>"
+
+
+class SalaryTdsDeclaration(Base):
+    """ZP-TAX-IN-2026-27-001 §6.2 Form 122 — an employee's own versioned
+    declaration of prior-employer salary/TDS, other specified income, and
+    house-property loss for one tax year (§6.1 step 4's "employee-
+    provided other-employer salary / eligible other income / house-
+    property loss and tax already deducted"). Feeds the salary TDS
+    projection (engine/countries/india.py) once Approved — see
+    service.py's get_india_salary_tds_inputs.
+
+    A NEW declaration is a new row, never an edit — the prior Approved
+    row (if any) is marked Superseded, matching this schema's existing
+    immutable-versioning convention (JurisdictionPack, ReportTemplate,
+    StatutoryFilingCalendar)."""
+    __tablename__ = "payroll_salary_tds_declarations"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    tax_year        = Column(String(20), nullable=False)   # "2026-27"
+
+    prior_employer_salary       = Column(Numeric(14, 2), nullable=False, default=0)
+    prior_employer_tds_deducted = Column(Numeric(14, 2), nullable=False, default=0)
+    other_income                = Column(Numeric(14, 2), nullable=False, default=0)
+    house_property_loss         = Column(Numeric(14, 2), nullable=False, default=0)
+
+    status         = Column(String(20), nullable=False, default="Draft")  # Draft | Submitted | Approved | Superseded
+    submitted_at   = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at    = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<SalaryTdsDeclaration employee={self.employee_id} year={self.tax_year} status={self.status}>"
+
+
+class SalaryTdsClaim(Base):
+    """ZP-TAX-IN-2026-27-001 §6.2 Form 124 — one employee claim/evidence
+    row for a Chapter VIII deduction or exemption used to estimate salary
+    TDS (successor workflow to the old Form 12BB). §4.2: "Accept only
+    claim types valid for old-regime payroll TDS... source-driven caps
+    and eligibility" — the document names no per-claim-type ceiling
+    itself (unlike the standard-deduction/rebate/PF figures elsewhere in
+    this pack), so this build sums Approved claims uncapped rather than
+    inventing a threshold; a real per-type cap can be layered in once a
+    certified source gives one, the same fail-closed-not-guessed
+    convention as every other unsourced figure in this codebase.
+
+    evidence_reference is free text (a receipt number/description), not
+    an uploaded file — no file-storage capability exists in this build."""
+    __tablename__ = "payroll_salary_tds_claims"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    tax_year        = Column(String(20), nullable=False)
+
+    claim_type         = Column(String(50), nullable=False)   # "SECTION_80C" | "HRA_EXEMPTION" | "HOME_LOAN_INTEREST" | "LTA" | "OTHER"
+    claimed_amount      = Column(Numeric(14, 2), nullable=False)
+    evidence_reference  = Column(String(300), nullable=True)
+
+    status            = Column(String(20), nullable=False, default="Draft")  # Draft | Submitted | Approved | Rejected | Superseded
+    rejection_reason  = Column(String(300), nullable=True)
+    approved_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at       = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<SalaryTdsClaim employee={self.employee_id} type={self.claim_type} status={self.status}>"
+
+
+class EmployeeBenefitValuation(Base):
+    """ZP-TAX-IN-2026-27-001 §6.2/§7 Form 123 — the employer's own
+    recorded taxable value of a perquisite/profit-in-lieu-of-salary
+    benefit for one employee (car, accommodation, stock benefit,
+    employer-paid obligation, ...).
+
+    DISCLOSED SCOPE: this document gives no perquisite VALUATION FORMULA
+    (car/accommodation/ESOP valuation rules are notified separately and
+    are not in this pack) — Zoiko does not compute a perquisite's taxable
+    value here; the organization enters its own already-determined value,
+    which then feeds Form 123 generation and both regimes' salary TDS
+    projection (perquisites are salary income under both regimes, unlike
+    Chapter VIII claims, which are Old-regime only)."""
+    __tablename__ = "payroll_employee_benefit_valuations"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    tax_year        = Column(String(20), nullable=False)
+
+    benefit_type   = Column(String(50), nullable=False)   # "CAR" | "ACCOMMODATION" | "STOCK_BENEFIT" | "EMPLOYER_PAID_OBLIGATION" | "OTHER"
+    description    = Column(String(300), nullable=True)
+    taxable_value  = Column(Numeric(14, 2), nullable=False)
+
+    status     = Column(String(20), nullable=False, default="Draft")   # Draft | Issued | Superseded
+    issued_at  = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<EmployeeBenefitValuation employee={self.employee_id} type={self.benefit_type} status={self.status}>"
+
+
 class EmployeePreTaxDeductionElection(Base):
     """An employee's elected pre-tax deduction (401(k) deferral, Section 125
     cafeteria-plan contribution, etc.) — the concrete thing TaxabilityRule
@@ -1955,6 +2368,127 @@ class ReciprocityRule(Base):
         return f"<ReciprocityRule {self.resident_jurisdiction}->{self.work_jurisdiction}>"
 
 
+class PayrollNiReliefFact(Base):
+    """UK National Insurance category relief eligibility evidence
+    (ZP-TAX-UK-2026-27-001 §9.1/§9.3 gap-closure Part 2, 2026-09-09) —
+    "Relief eligibility is not a rate toggle... Store the eligibility
+    evidence and relief start/end separately from the NI category
+    letter; category changes must be effective-dated and auditable."
+
+    One row per qualifying fact (a Freeport/Investment Zone site
+    assignment, a veteran's qualifying 12-month window, an apprenticeship
+    program enrolment) — deliberately its OWN table rather than more
+    columns on PayrollEmployee, since an employee can accumulate several
+    of these over time (e.g. a Freeport assignment that later ends, then
+    years later becomes a qualifying veteran) and each needs its own
+    audit trail, not an overwritable single field. Read by
+    engine/countries/uk.py's derive_ni_category() via
+    service.py's _load_uk_ni_relief_facts loader — never written to by
+    the engine itself.
+
+    Empty table = no fact recorded for anyone = the NI category always
+    falls back to PayrollEmployee.ni_category exactly as today, even once
+    the consuming switch (_UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES) is on."""
+    __tablename__ = "payroll_ni_relief_facts"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    # FREEPORT | INVESTMENT_ZONE | VETERAN | APPRENTICE — deliberately NOT
+    # including the married-women/widows reduced-rate election (B/E/I) or
+    # the "already paying NI elsewhere" deferment categories (D/J/K/L/Z):
+    # both require an HMRC-issued certificate (CA4139/CA2700) that is a
+    # historical election, not a derivable fact — those categories stay
+    # manual-only, same "never guess" discipline as every other UK figure.
+    relief_type       = Column(String(20), nullable=False)
+    # Free-text evidence reference — a Freeport/IZ site name or reference
+    # number, or a note about the qualifying event (e.g. "left Royal Navy
+    # 2026-03-01"). Not a foreign key to a separate "sites" table: no
+    # other feature in this codebase yet needs to enumerate registered
+    # Freeport/IZ sites as first-class entities, so a free-text evidence
+    # field is the minimum honest representation, not a placeholder for
+    # a table this pass doesn't otherwise need.
+    reference         = Column(String(200), nullable=True)
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<PayrollNiReliefFact employee={self.employee_id} type={self.relief_type}>"
+
+
+class CourtOrderedDeduction(Base):
+    """A court-ordered payroll deduction (ZP-TAX-UK-2026-27-001 §17
+    gap-closure Part 8, 2026-09-09) — England & Wales Attachment of
+    Earnings Orders, Scottish arrestments, and Northern Ireland's own
+    equivalent orders. One row per order; an employee can have several
+    concurrent orders, distinguished by `priority` (lower = deducted
+    first) exactly as §17 requires.
+
+    `jurisdiction` says which of engine/countries/uk.py's THREE
+    deliberately-separate calculation functions applies — the document
+    is explicit that Scotland's arrestment rules must NOT be computed
+    with England & Wales's AEO logic, so this is a dispatch key, never a
+    cosmetic label.
+
+    The fixed_* columns are order-specific overrides: when the issuing
+    court specifies its own rate/amount/protected-earnings figure
+    directly on the order (rather than "use the standard published
+    table"), that value ALWAYS takes precedence over any generic banded
+    rate (§17's own instruction) — NULL means "use the standard table
+    for this order_type," never a guessed default.
+    """
+    __tablename__ = "payroll_court_ordered_deductions"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    # ENGLAND_WALES | SCOTLAND | NORTHERN_IRELAND.
+    jurisdiction      = Column(String(20), nullable=False)
+    # Free-text, not an enum — the recognized set differs per
+    # jurisdiction (e.g. England & Wales: AEO_PRIORITY/AEO_NON_PRIORITY/
+    # COUNCIL_TAX_AEO; Scotland: EARNINGS_ARRESTMENT/CURRENT_MAINTENANCE_
+    # ARRESTMENT/CONJOINED_ARRESTMENT) and may need to grow without a
+    # migration.
+    order_type        = Column(String(40), nullable=False)
+
+    court_reference   = Column(String(100), nullable=True)
+    issue_date        = Column(Date, nullable=True)
+    start_date        = Column(Date, nullable=False)
+    end_date          = Column(Date, nullable=True)
+
+    # Lower number = higher priority when more than one order is active
+    # for this employee at once. NULL = unspecified (treated as lowest
+    # priority — deducted last — by the resolver, never guessed as "most
+    # important").
+    priority          = Column(Integer, nullable=True)
+
+    fixed_deduction_rate_pct   = Column(Numeric(6, 3), nullable=True)
+    fixed_deduction_amount     = Column(Numeric(12, 2), nullable=True)
+    protected_earnings_amount  = Column(Numeric(12, 2), nullable=True)
+
+    # Running totals against a fixed total-debt order (e.g. a Council
+    # Tax AEO for a specific arrears amount) — both nullable: an
+    # open-ended order (ongoing maintenance) has no total to collect.
+    total_amount_to_collect    = Column(Numeric(12, 2), nullable=True)
+    total_amount_collected     = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+
+    status            = Column(String(20), nullable=False, default="active", server_default="active")  # active / completed / cancelled
+
+    created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at        = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_court_order_employee", "employee_id"),
+        Index("ix_court_order_org_status", "organization_id", "status"),
+    )
+
+    def __repr__(self):
+        return f"<CourtOrderedDeduction employee={self.employee_id} jurisdiction={self.jurisdiction} type={self.order_type}>"
+
+
 class PayrollYtdAccumulator(Base):
     """Running year-to-date taxable-wages/tax-withheld total per employee
     per tax component, for jurisdictions whose statutory caps (Social
@@ -1969,7 +2503,15 @@ class PayrollYtdAccumulator(Base):
 
     id                        = Column(Integer, primary_key=True, index=True)
     employee_id               = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
-    tax_year                  = Column(String(10), nullable=False)   # "US-CY-2026"
+    # Widened from String(10) 2026-09-09 (UK gap-closure Phase 6 audit):
+    # "US-CY-2026"/"CA-CY-2026" both fit 10 chars, but _uk_tax_year()'s own
+    # "UK-TY-2026-27" format (service.py) is 13 chars — would have raised
+    # a hard Postgres "value too long" error on the very first real UK
+    # director payslip once _YTD_ACCUMULATOR_ENABLED_COUNTRIES included
+    # "UK" (Phase 3). Found before ever hitting a real database — this
+    # table (see migration note below) had never been written to in
+    # production for ANY country until that switch flipped.
+    tax_year                  = Column(String(20), nullable=False)   # "US-CY-2026" / "UK-TY-2026-27"
     tax_component             = Column(String(30), nullable=False)   # "social_security" | "futa" | "medicare_additional" | ...
     ytd_taxable_wages         = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     ytd_tax_withheld          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
@@ -2014,7 +2556,11 @@ class OrganizationYtdAccumulator(Base):
 
     id                        = Column(Integer, primary_key=True, index=True)
     organization_id           = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
-    tax_year                  = Column(String(10), nullable=False)   # "CA-CY-2026"
+    # Widened from String(10) 2026-09-09 — same "UK-TY-2026-27" (13 chars)
+    # overflow risk as PayrollYtdAccumulator.tax_year above; this table's
+    # own switch (_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES) also newly
+    # includes "UK" as of Phase 3.
+    tax_year                  = Column(String(20), nullable=False)   # "CA-CY-2026" / "UK-TY-2026-27"
     tax_component             = Column(String(30), nullable=False)   # "on_eht" | "bc_eht" | "mb_he_levy" | "nl_hapset" | "qc_hsf" | ...
     ytd_taxable_wages         = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     ytd_tax_withheld          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")

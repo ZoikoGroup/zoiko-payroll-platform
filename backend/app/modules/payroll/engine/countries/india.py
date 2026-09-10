@@ -98,6 +98,47 @@ def _apply_surcharge(annual_tax: Decimal, taxable_income: Decimal, slabs, rate_m
 
 
 _IN_PT_ADJUSTMENT_MONTH = 2  # February — the only real-world case this document gives (Maharashtra, §13.2)
+_IN_PT_HALF_YEAR_MONTHS = Decimal("6")
+
+
+def _pt_assessment_income(gross: Decimal, assessment_basis: str | None) -> Decimal:
+    """Which income figure a PT_FLAT tier's min_amount/max_amount are
+    measured against, per that tier's own assessment_basis
+    (§12.1's state_rule schema field) — NULL/"MONTHLY_WAGE" (every
+    existing state's data, e.g. Telangana) matches monthly gross
+    unchanged; "HALF_YEAR_INCOME" (Greater Chennai Corporation's local
+    half-yearly schedule, §14.1) matches an average half-yearly income.
+
+    DISCLOSED SIMPLIFICATION: this engine has no rolling multi-month
+    gross history for India (see MONTHS_PER_YEAR's identical
+    current-period-times-N annualization for salary TDS elsewhere in
+    this file) — half-yearly income is approximated as 6x this period's
+    gross rather than a true trailing 6-month average."""
+    basis = (assessment_basis or "MONTHLY_WAGE").strip().upper()
+    if basis == "HALF_YEAR_INCOME":
+        return gross * _IN_PT_HALF_YEAR_MONTHS
+    if basis == "ANNUAL_SALARY":
+        return gross * MONTHS_PER_YEAR
+    return gross  # MONTHLY_WAGE / OTHER / unrecognized -> today's exact existing behavior
+
+
+def _pt_half_year_deduction_active(state_rate_map: dict, pay_date) -> bool:
+    """Half-yearly PT (assessment_basis="HALF_YEAR_INCOME") is a
+    twice-a-year collection, not a monthly one — this returns True only
+    in a state/locality's own configured collection month(s)
+    (state_rate_map's pt_half_year_deduct_month_1/_2, same per-state-
+    configurable-month convention as calculate()'s own LWF
+    lwf_deduct_month below). No hardcoded fallback: an unconfigured
+    half-year-assessed locality charges nothing in any month, rather than
+    guessing a due date the source document doesn't give (§1.1's "never
+    hard-code... a due date")."""
+    if pay_date is None:
+        return False
+    for key in ("pt_half_year_deduct_month_1", "pt_half_year_deduct_month_2"):
+        row = (state_rate_map or {}).get(key)
+        if row is not None and row.flat_amount is not None and int(row.flat_amount) == pay_date.month:
+            return True
+    return False
 
 
 def _resolve_state_pt_bracket(gross: Decimal, state_slabs, gender: str | None = None, pay_date=None):
@@ -137,7 +178,8 @@ def _resolve_state_pt_bracket(gross: Decimal, state_slabs, gender: str | None = 
     )
     candidates = [
         t for t in tiers
-        if gross >= t.min_amount and (t.max_amount is None or gross <= t.max_amount)
+        if (assessed := _pt_assessment_income(gross, getattr(t, "assessment_basis", None))) >= t.min_amount
+        and (t.max_amount is None or assessed <= t.max_amount)
     ]
     if not candidates:
         return None
@@ -158,31 +200,84 @@ def _resolve_state_pt_bracket(gross: Decimal, state_slabs, gender: str | None = 
         pay_date is not None and pay_date.month == _IN_PT_ADJUSTMENT_MONTH
         and getattr(match, "adjustment_amount", None) is not None
     ):
-        return _PtAdjustmentAmount(match.adjustment_amount)
+        return _PtAdjustmentAmount(match.adjustment_amount, getattr(match, "assessment_basis", None))
     return match
 
 
 class _PtAdjustmentAmount:
     """Thin wrapper so the caller's existing `pt_bracket.flat_amount`
     read (calculate() below) picks up the February-adjusted figure
-    without needing to know which of the two columns won."""
-    def __init__(self, amount: Decimal):
+    without needing to know which of the two columns won. Also carries
+    the original tier's assessment_basis through, so a half-year-assessed
+    tier's February adjustment (if one ever exists) still gates on the
+    half-year deduction month check rather than silently losing that
+    classification."""
+    def __init__(self, amount: Decimal, assessment_basis: str | None = None):
         self.flat_amount = amount
+        self.assessment_basis = assessment_basis
 
 
-def _calculate_code_wages(basic: Decimal, gross: Decimal) -> Decimal:
+# Default classification when no TaxabilityRule(tax_component="code_wages")
+# row exists for a component — preserves this function's ORIGINAL
+# basic-vs-everything-else approximation exactly: only "basic" defaults
+# to core-included, every other named component defaults to excluded
+# (subject to the add-back test), matching real Wage-Code practice
+# (Basic/DA included; HRA/allowances excluded) as well as this engine's
+# own pre-Phase-B behavior.
+_IN_CODE_WAGES_DEFAULT_INCLUDED_COMPONENT = "basic"
+
+
+def _resolve_code_wages_classification(component_key: str, code_wages_rules: dict) -> bool:
+    """True = counts toward core_included_wages; False = excluded,
+    subject to the 50%-cap add-back test. An explicit row in
+    code_wages_rules (service.py's get_code_wages_classification, backed
+    by TaxabilityRule) always wins; absent one, falls back to the default
+    above."""
+    if component_key in code_wages_rules:
+        return code_wages_rules[component_key]
+    return component_key == _IN_CODE_WAGES_DEFAULT_INCLUDED_COMPONENT
+
+
+def _calculate_code_wages(ctx: PayrollContext, code_wages_rules: dict) -> Decimal:
     """ZP-TAX-IN-2026-27-001 §8.1's canonical Code-wages object — the
     50%-allowance-cap add-back that becomes the wage base for EPF/EPS/
-    EDLI, not Basic directly. See _IN_CODE_WAGES_ENABLED_COUNTRIES's own
-    comment (shared.py) for the disclosed simplification this uses in
-    place of a real itemized earnings classification: `basic` stands in
-    for core_included_wages, and (gross - basic) stands in for
-    excluded_total, matching the document's own worked example shape
-    (§8.2: remuneration_base = gross)."""
-    excluded_total = max(Decimal("0"), gross - basic)
-    allowance_cap = gross * _IN_CODE_WAGES_ALLOWANCE_CAP_PCT / Decimal("100")
+    EDLI, not Basic directly.
+
+    Phase B (2026-09-10 gap-closure follow-up): real per-component
+    classification, replacing the earlier basic-vs-(gross-basic)
+    two-bucket approximation. Classifies each of the employee's own named
+    salary components (basic/hra/special_allowance/overtime/
+    additional_compensation) plus a residual "named_allowances" bucket —
+    for org-policy-driven allowances that are folded into ctx.gross but
+    not individually exposed as their own PayrollContext field — via
+    code_wages_rules (see _resolve_code_wages_classification). Every
+    rupee of ctx.gross lands in exactly one bucket: named_allowances is
+    defined as whatever remains of gross after the other five, so it
+    always equals the org's configured allowance total exactly, and
+    core_included_wages + excluded_total always equals ctx.gross."""
+    named_allowances = max(
+        Decimal("0"),
+        ctx.gross - ctx.basic - ctx.hra - ctx.special_allowance - ctx.overtime - ctx.additional_compensation,
+    )
+    components = {
+        "basic": ctx.basic,
+        "hra": ctx.hra,
+        "special_allowance": ctx.special_allowance,
+        "overtime": ctx.overtime,
+        "additional_compensation": ctx.additional_compensation,
+        "named_allowances": named_allowances,
+    }
+    core_included_wages = Decimal("0")
+    excluded_total = Decimal("0")
+    for key, amount in components.items():
+        if _resolve_code_wages_classification(key, code_wages_rules):
+            core_included_wages += amount
+        else:
+            excluded_total += amount
+
+    allowance_cap = ctx.gross * _IN_CODE_WAGES_ALLOWANCE_CAP_PCT / Decimal("100")
     add_back = max(Decimal("0"), excluded_total - allowance_cap)
-    return basic + add_back
+    return core_included_wages + add_back
 
 
 def _apply_cess(tax_plus_surcharge: Decimal, rate_map: dict) -> Decimal:
@@ -238,11 +333,16 @@ def _resolve_old_regime_age_category(date_of_birth: date, tax_residency_status: 
 def _calculate_annual_tax_in(
     annual_gross: Decimal, slabs, rate_map: dict, tax_regime: str = None, age_category: str = None,
     annual_professional_tax: Decimal = Decimal("0"), annual_employer_nps: Decimal = Decimal("0"),
+    annual_other_income: Decimal = Decimal("0"), annual_claims_total: Decimal = Decimal("0"),
+    annual_perquisites_total: Decimal = Decimal("0"), annual_tds_already_deducted: Decimal = Decimal("0"),
 ) -> dict:
     is_old = (tax_regime or "").strip().lower() == "old"
     default_standard_deduction = _IN_STANDARD_DEDUCTION_OLD if is_old else _IN_STANDARD_DEDUCTION
     standard_deduction = resolve_jurisdiction_parameter(rate_map, "standard_deduction", default_standard_deduction, country="IN")
-    taxable = max(Decimal("0"), annual_gross - standard_deduction)
+    # Form 123 perquisites/profits-in-lieu-of-salary (§7) are salary
+    # income under BOTH regimes — added alongside annual_gross itself,
+    # before the standard deduction, not as a post-deduction adjustment.
+    taxable = max(Decimal("0"), annual_gross + annual_perquisites_total - standard_deduction)
     # ZP-TAX-IN-2026-27-001 §4.2 "Critical regime separation": Professional
     # Tax reduces taxable salary under the OLD regime's own salary-deduction
     # framework, but must NEVER reduce taxable salary under the New/default
@@ -251,6 +351,12 @@ def _calculate_annual_tax_in(
     # didn't exist for EITHER regime at all.
     if is_old:
         taxable = max(Decimal("0"), taxable - annual_professional_tax)
+        # Form 124 Chapter VIII claims (§4.2/§6.2) — Old regime only, per
+        # the document's own "Accept only claim types valid for old-regime
+        # payroll TDS." No source-given per-claim-type ceiling exists in
+        # this pack, so Approved claims are summed uncapped (see
+        # SalaryTdsClaim's own docstring for this disclosed choice).
+        taxable = max(Decimal("0"), taxable - annual_claims_total)
     else:
         # §3.2's employer-NPS-contribution deduction is listed only under
         # the New Regime's own salary-deductions table (the document gives
@@ -259,11 +365,23 @@ def _calculate_annual_tax_in(
         # world 80CCD(2) rule (which also exists under Old regime), since
         # this document is the production source of truth for this build.
         taxable = max(Decimal("0"), taxable - annual_employer_nps)
+    # Form 122 (§6.1 step 4) — employee's own declared prior-employer
+    # salary / other specified income / house-property loss, aggregated
+    # into estimated total income. The document scopes this step
+    # generically (not regime-specific like PT/NPS/claims above), so it
+    # applies under both regimes.
+    taxable = max(Decimal("0"), taxable + annual_other_income)
     tax = _calculate_annual_tax(taxable, slabs, filing_status=age_category)
     tax = max(Decimal("0"), _apply_section_87a_rebate(tax, taxable, rate_map, tax_regime=tax_regime))
     surcharge = _apply_surcharge(tax, taxable, slabs, rate_map)
     cess = _apply_cess(tax + surcharge, rate_map)
-    return {"annual_tax": tax, "annual_surcharge": surcharge, "annual_cess": cess}
+    # Form 122 (§6.1 step 7) — credit for tax already deducted by a prior
+    # employer this tax year, against the TOTAL liability; never negative.
+    net_liability = max(Decimal("0"), (tax + surcharge + cess) - annual_tds_already_deducted)
+    return {
+        "annual_tax": tax, "annual_surcharge": surcharge, "annual_cess": cess,
+        "annual_net_liability": net_liability,
+    }
 
 
 def calculate(ctx: PayrollContext) -> dict:
@@ -280,7 +398,7 @@ def calculate(ctx: PayrollContext) -> dict:
     # exactly `basic` until deliberately enabled.
     pf_base_pre_ceiling = basic
     if "IN" in _IN_CODE_WAGES_ENABLED_COUNTRIES:
-        pf_base_pre_ceiling = _calculate_code_wages(basic, gross)
+        pf_base_pre_ceiling = _calculate_code_wages(ctx, ctx.code_wages_rules)
     # ZP-TAX-IN-2026-27-001 §9.1: EPF's contribution base is capped at the
     # statutory monthly wage ceiling (₹15,000), not full uncapped Basic.
     # Dormant by default (_IN_PF_WAGE_CEILING_ENABLED_COUNTRIES) — see
@@ -361,6 +479,15 @@ def calculate(ctx: PayrollContext) -> dict:
     pt_bracket = _resolve_state_pt_bracket(gross, ctx.state_slabs, gender=ctx.gender, pay_date=ctx.pay_date)
     if pt_bracket is not None:
         professional_tax = pt_bracket.flat_amount or Decimal("0")
+        # Half-yearly-assessed PT (Greater Chennai Corporation's local
+        # schedule, §14.1) is a twice-a-year collection, not a monthly
+        # deduction — zero it out except in the state/locality's own
+        # configured collection month(s) (see
+        # _pt_half_year_deduction_active's own docstring for why there is
+        # no hardcoded fallback due date).
+        pt_basis = (getattr(pt_bracket, "assessment_basis", None) or "MONTHLY_WAGE").strip().upper()
+        if pt_basis == "HALF_YEAR_INCOME" and not _pt_half_year_deduction_active(ctx.state_rate_map, ctx.pay_date):
+            professional_tax = Decimal("0")
     else:
         state_pt_rate = (ctx.state_rate_map or {}).get("pt")
         pt_rate = state_pt_rate if state_pt_rate and state_pt_rate.flat_amount else rate_map.get("pt")
@@ -390,15 +517,23 @@ def calculate(ctx: PayrollContext) -> dict:
         annual_gross, ctx.slabs, rate_map, tax_regime=ctx.tax_regime, age_category=age_category,
         annual_professional_tax=professional_tax * MONTHS_PER_YEAR,
         annual_employer_nps=employer_nps * MONTHS_PER_YEAR,
+        # Forms 122/123/124 (§6.2) already carry whole-tax-year figures —
+        # unlike professional_tax/employer_nps above, these are NOT
+        # multiplied by MONTHS_PER_YEAR.
+        annual_other_income=ctx.other_income_for_tds, annual_claims_total=ctx.annual_claims_total,
+        annual_perquisites_total=ctx.annual_perquisites_total, annual_tds_already_deducted=ctx.tds_already_deducted,
     )
     annual_tax = tax_breakdown["annual_tax"]
     annual_surcharge = tax_breakdown["annual_surcharge"]
     annual_cess = tax_breakdown["annual_cess"]
-    # tds is the FULL monthly income-tax liability — base tax + surcharge +
-    # cess, all three, matching how TDS actually works in practice.
-    # surcharge/cess below are just the breakdown of what's already
-    # inside tds, not additional deductions layered on top of it.
-    tds = _round2((annual_tax + annual_surcharge + annual_cess) / MONTHS_PER_YEAR)
+    annual_net_liability = tax_breakdown["annual_net_liability"]
+    # tds is the FULL monthly income-tax liability, net of any Form 122
+    # prior-employer-TDS credit — base tax + surcharge + cess, minus that
+    # credit, spread evenly over the remaining months. surcharge/cess
+    # below are still the un-netted breakdown of what's INSIDE the gross
+    # (pre-credit) liability, for display — not additional deductions
+    # layered on top of tds.
+    tds = _round2(annual_net_liability / MONTHS_PER_YEAR)
     surcharge = _round2(annual_surcharge / MONTHS_PER_YEAR)
     cess = _round2(annual_cess / MONTHS_PER_YEAR)
 

@@ -94,6 +94,23 @@ def run():
             ],
         )
 
+        print("Seeding India Form 123 (Employer Perquisite Statement, per-employee)...")
+        _seed_template(
+            db, template_key="IN-FORM-123", name="Employer Perquisite Statement (Form 123)", report_type="FORM_123",
+            country="IN", reporting_year="2026-27", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Tax Registration Number (TAN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+            ],
+        )
+        # Benefit-line content (car/accommodation/stock benefit/...) comes
+        # directly from Issued EmployeeBenefitValuation rows at generation
+        # time (service.generate_india_form_123), not from a component/
+        # field mapping — there's no PayslipItem column for a perquisite's
+        # value.
+
         print("Seeding India Form 138 (Quarterly Salary TDS Statement, aggregate)...")
         _seed_template(
             db, template_key="IN-FORM-138", name="Quarterly Salary TDS Statement (Form 138)", report_type="FORM_138",
