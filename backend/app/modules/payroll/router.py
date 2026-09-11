@@ -98,6 +98,11 @@ from app.modules.payroll.schemas import (
     SalaryTdsClaimCreate, SalaryTdsClaimResponse, SalaryTdsClaimRejectRequest,
     EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
+    CAPd7aGenerateRequest,
+    CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
+    CARetiringAllowanceCalculateRequest, CARetiringAllowanceCalculateResponse,
+    CATd1xCommissionCalculateRequest, CATd1xCommissionCalculateResponse,
+    CAWsdrfCalculateRequest, CAWsdrfCalculateResponse,
     RtiSubmissionCreate, RtiSubmissionStatusUpdate, RtiSubmissionResponse,
     HolidayCreate, BulkHolidayRequest, HolidayResponse,
     ApplicableTemplateResponse, GenerateReportRequest, GeneratedReportResponse, VoidGeneratedReportRequest,
@@ -605,6 +610,69 @@ def calculate_india_gratuity(
         eligibility_event=data.eligibility_event, is_fixed_term=data.is_fixed_term,
         date_of_leaving_override=data.date_of_leaving,
         last_drawn_monthly_wage_override=data.last_drawn_monthly_wage,
+    )
+
+
+@payroll_router.post(
+    "/canada/special-payment/calculate", response_model=CASpecialPaymentCalculateResponse, response_model_by_alias=True,
+    summary="Calculate additional withholding for a Canada bonus/retroactive pay/vacation-not-taken/accumulated-overtime special payment (CRA's real incremental-tax method)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_ca_special_payment(
+    data: CASpecialPaymentCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_ca_special_payment_withholding(
+        db, current_user.organization_id, data.employee_id,
+        data.regular_annual_pay, data.special_payment_amount, payroll_date=data.payroll_date,
+    )
+
+
+@payroll_router.post(
+    "/canada/retiring-allowance/calculate", response_model=CARetiringAllowanceCalculateResponse, response_model_by_alias=True,
+    summary="Calculate federal lump-sum withholding for a Canada retiring allowance/severance payment (rate-table lookup, no hardcoded rate)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_ca_retiring_allowance(
+    data: CARetiringAllowanceCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_ca_retiring_allowance_withholding(
+        db, current_user.organization_id, data.employee_id, data.amount, payroll_date=data.payroll_date,
+    )
+
+
+@payroll_router.post(
+    "/canada/td1x-commission/calculate", response_model=CATd1xCommissionCalculateResponse, response_model_by_alias=True,
+    summary="Calculate recommended per-period withholding for a Canada commission employee with TD1X estimates on file",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_ca_td1x_commission(
+    data: CATd1xCommissionCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_ca_td1x_commission_withholding(
+        db, current_user.organization_id, data.employee_id,
+        payroll_date=data.payroll_date, pay_periods_per_year=data.pay_periods_per_year,
+    )
+
+
+@payroll_router.post(
+    "/canada/wsdrf/calculate", response_model=CAWsdrfCalculateResponse, response_model_by_alias=True,
+    summary="Calculate Quebec WSDRF shortfall for a period — 1% of total Quebec payroll minus declared eligible training expenditure",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_ca_wsdrf(
+    data: CAWsdrfCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_ca_wsdrf_shortfall(
+        db, current_user.organization_id, data.period_start, data.period_end,
+        training_expenditure_override=data.training_expenditure_override,
     )
 
 
@@ -1590,6 +1658,73 @@ def generate_india_form_123(
 ):
     return service.generate_india_form_123(
         db, current_user.organization_id, data.report_template_id, data.employee_id, data.tax_year,
+        actor_id=current_user.id,
+    )
+
+
+# ── Canada: T4/RL-1/ROE (per-employee) + PD7A (per-period) generation ───
+# (ZP-TAX-CA-2026-001, forms/reports gap-closure).
+
+@payroll_router.post(
+    "/canada/reports/t4", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Canada T4 (Statement of Remuneration Paid) for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_ca_t4(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/canada/reports/rl1", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Quebec RL-1 (Relevé 1) for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_ca_rl1(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/canada/reports/roe", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Canada ROE (Record of Employment) for one employee, triggered by an interruption of earnings",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_ca_roe(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/canada/reports/pd7a", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Canada PD7A statement of account for current source deductions over a remittance period",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_ca_pd7a(
+    data: CAPd7aGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_ca_pd7a(
+        db, current_user.organization_id, data.report_template_id, data.period_start, data.period_end,
         actor_id=current_user.id,
     )
 

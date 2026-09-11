@@ -59,6 +59,8 @@ export const COUNTRY_FIELD_SPECS = {
   CA: [
     { key: "sin", label: "SIN", type: "text", placeholder: "9 digits", required: true, strip: "- ", pattern: /^\d{9}$/, error: "SIN must be 9 digits (e.g. 123-456-789)." },
     { key: "td1_claim_amount", label: "TD1 claim amount", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TD1 claim amount must be a number." },
+    { key: "provincial_td1_claim_amount", label: "Provincial/territorial TD1 claim amount", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "Provincial TD1 claim amount must be a number." },
+    { key: "qc_tp1015_claim_amount", label: "TP-1015.3-V claim amount (Quebec)", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TP-1015.3-V claim amount must be a number." },
     { key: "td1_additional_tax", label: "TD1X additional tax per pay period", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TD1X additional tax must be a number." },
     { key: "province", label: "Province of employment", type: "select", required: true, upper: true, choices: ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"] },
     { key: "transit_number", label: "Bank transit number", type: "text", placeholder: "5 digits", pattern: /^\d{5}$/, error: "Transit number must be 5 digits." },

@@ -1,0 +1,39 @@
+{
+  "description": "Prince Edward Island employee at $25,000/month ($300,000/yr, genuinely crosses the new >$200,000 top bracket), paid 2026-11-01 (H2) -- exercises §9's PE H2 override: the document's own Option 2 guidance is 'use annual 20% rate' above $200,000 (not H1's 'no separate bracket' or H2 Option 1's prorated 21%). Expands §24's 'PE H2' golden-test family -- the trickiest of the three H1/H2 provinces since PE genuinely differs in BRACKET COUNT, not just a rate.",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal brackets/BPAF/CEA), Section 8 (PE 2026 brackets: 33,928/65,820/106,890/142,520/200,000 at 9.50/13.47/16.60/17.62/19/20%, PE basic amount $15,000), Section 9 (PE's new >$200,000 20% bracket for 2026+). Recomputed by running the real engine, not hand-derived.",
+  "context": {
+    "gross": "25000.00",
+    "country": "CA",
+    "pay_date": "2026-11-01",
+    "work_state": "PE",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ],
+    "state_rate_map": {
+      "provincial_bpa": {"flat_amount": "15000"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "33928", "rate_pct": "9.50"},
+      {"min_amount": "33928", "max_amount": "65820", "rate_pct": "13.47"},
+      {"min_amount": "65820", "max_amount": "106890", "rate_pct": "16.60"},
+      {"min_amount": "106890", "max_amount": "142520", "rate_pct": "17.62"},
+      {"min_amount": "142520", "max_amount": "200000", "rate_pct": "19.00"},
+      {"min_amount": "200000", "max_amount": null, "rate_pct": "20.00"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "5823.51",
+    "state_income_tax": "4175.90",
+    "tds": "9999.41",
+    "social_security": "352.54",
+    "employee_esi": "93.59"
+  }
+}

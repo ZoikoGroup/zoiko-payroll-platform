@@ -1406,6 +1406,19 @@ def test_rti_forms_summary_includes_india_forms(db, organization):
     assert rows[0]["submissions"] == []  # RTI submission tracking is UK-only
 
 
+def test_rti_forms_summary_includes_ca_forms(db, organization):
+    creator = _make_user(db, "creator_summary3@test.com")
+    approver = _make_user(db, "approver_summary3@test.com")
+    _make_company(db, organization.id, country="CA")
+    template = _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-SUMMARY")
+    service.generate_ca_pd7a(db, organization.id, template.id, date(2026, 1, 1), date(2026, 1, 31))
+
+    rows = service.get_rti_forms_summary(db, organization.id)
+    assert len(rows) == 1
+    assert rows[0]["reportType"] == "PD7A"
+    assert rows[0]["submissions"] == []  # RTI submission tracking is UK-only
+
+
 def test_rti_forms_summary_excludes_unrelated_report_types(db, organization):
     creator = _make_user(db, "creator_summary2@test.com")
     approver = _make_user(db, "approver_summary2@test.com")
@@ -1478,3 +1491,215 @@ def test_generate_india_form_123_rejects_wrong_report_type(db, organization):
     template = _build_template(db, creator, approver, country="IN", version="10.0")  # TDS, not FORM_123
     with pytest.raises(BadRequestException):
         service.generate_india_form_123(db, organization.id, template.id, 1, "2026-27")
+
+
+# ── Canada T4/RL-1/ROE (per-employee) + PD7A (per-period) ────────────────
+# (ZP-TAX-CA-2026-001, forms/reports gap-closure). T4/RL-1/ROE reuse the
+# widened generate_uk_employee_report exactly like India's Form 130 above;
+# PD7A is genuinely new (cross-run remittance-period aggregation, same
+# shape as Form 138 but with an explicit date range instead of a fixed
+# FY-quarter scheme).
+
+def _build_ca_t4_template(db, creator, approver, key="CA-T4-GEN-TEST", report_type="T4"):
+    template = service.upsert_report_template(
+        db, ReportTemplateUpsert(
+            templateKey=key, name="T4", reportType=report_type,
+            jurisdictionCountry="CA", reportingYear="2026",
+            documentScope="PER_EMPLOYEE",
+        ), actor_id=creator.id,
+    )
+    employee_info = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="employee_info", label="Employee Information"),
+        actor_id=creator.id,
+    )
+    service.upsert_report_field(
+        db, employee_info.id, ReportTemplateFieldUpsert(
+            fieldKey="employee_name", label="Employee Name", fieldType="text",
+            dataSourceKind="PAYROLL_EMPLOYEE", sourceColumn="name",
+        ), actor_id=creator.id,
+    )
+    earnings = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="earnings", label="Earnings"), actor_id=creator.id,
+    )
+    for field_key, source_column in (
+        ("employment_income", "gross_pay"), ("income_tax_deducted", "tds"),
+        ("cpp_contributions", "social_security"), ("ei_premiums", "esi"),
+    ):
+        service.upsert_report_field(
+            db, earnings.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=field_key, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn=source_column, aggregation="SUM_YTD",
+            ), actor_id=creator.id,
+        )
+    service.set_report_template_approver(db, template.id, actor_id=approver.id)
+    service.set_report_template_status(db, template.id, "Published", actor_id=creator.id)
+    service.set_report_template_status(db, template.id, "Active", actor_id=creator.id)
+    return template
+
+
+def test_generate_ca_t4_via_widened_uk_employee_report(db, organization):
+    creator = _make_user(db, "creator_t4a@test.com")
+    approver = _make_user(db, "approver_t4a@test.com")
+    _make_company(db, organization.id, country="CA")
+    run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
+    run.period_end = date(2026, 6, 15)
+    item.gross_pay = 8000
+    item.tds = 1200
+    item.social_security = 396
+    item.esi = 104
+    db.commit()
+
+    template = _build_ca_t4_template(db, creator, approver)
+    generated = service.generate_uk_employee_report(
+        db, organization.id, template.id, employee.id, date(2026, 12, 31), actor_id=creator.id,
+    )
+    assert generated.report_type == "T4"
+    assert generated.payroll_run_id is None
+    assert generated.scope_key == f"EMPLOYEE:{employee.id}"
+    values = generated.rendered_data["employees"][0]["values"]
+    assert values["employee_name"] == employee.name  # PAYROLL_EMPLOYEE, not the (unresolvable, item=None) PAYSLIP_ITEM field
+    assert values["employment_income"] == 8000.0
+    assert values["income_tax_deducted"] == 1200.0
+    assert values["cpp_contributions"] == 396.0
+    assert values["ei_premiums"] == 104.0
+
+
+def test_generate_ca_rl1_and_roe_reuse_same_widened_function(db, organization):
+    # RL-1 and ROE are just two more entries on generate_uk_employee_
+    # report's report_type allow-list — this proves both are actually
+    # reachable, not merely documented.
+    creator = _make_user(db, "creator_t4b@test.com")
+    approver = _make_user(db, "approver_t4b@test.com")
+    _make_company(db, organization.id, country="CA")
+    run, employee, item = _make_run_with_payslip(db, organization.id, status="Approved")
+    run.period_end = date(2026, 6, 15)
+    item.gross_pay = 5000
+    db.commit()
+
+    rl1_template = _build_ca_t4_template(db, creator, approver, key="CA-RL1-GEN-TEST", report_type="RL1")
+    rl1 = service.generate_uk_employee_report(
+        db, organization.id, rl1_template.id, employee.id, date(2026, 12, 31), actor_id=creator.id,
+    )
+    assert rl1.report_type == "RL1"
+    assert rl1.rendered_data["employees"][0]["values"]["employment_income"] == 5000.0
+
+    roe_template = _build_ca_t4_template(db, creator, approver, key="CA-ROE-GEN-TEST", report_type="ROE")
+    roe = service.generate_uk_employee_report(
+        db, organization.id, roe_template.id, employee.id, date(2026, 9, 30), actor_id=creator.id,
+    )
+    assert roe.report_type == "ROE"
+    assert roe.rendered_data["asOfDate"] == "2026-09-30"
+
+
+def _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-GEN-TEST"):
+    template = service.upsert_report_template(
+        db, ReportTemplateUpsert(
+            templateKey=key, name="PD7A", reportType="PD7A",
+            jurisdictionCountry="CA", reportingYear="2026",
+        ), actor_id=creator.id,
+    )
+    remittance = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="remittance", label="Remittance"), actor_id=creator.id,
+    )
+    for field_key, source_column in (
+        ("income_tax_withheld", "tds"), ("cpp_employee", "social_security"),
+        ("cpp_employer", "employer_social_security"), ("ei_employee", "esi"), ("ei_employer", "employer_esi"),
+    ):
+        service.upsert_report_field(
+            db, remittance.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=field_key, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn=source_column, aggregation="SUM_RUN",
+            ), actor_id=creator.id,
+        )
+    service.set_report_template_approver(db, template.id, actor_id=approver.id)
+    service.set_report_template_status(db, template.id, "Published", actor_id=creator.id)
+    service.set_report_template_status(db, template.id, "Active", actor_id=creator.id)
+    return template
+
+
+def _make_ca_period_run(db, organization_id, employee_id, period_end, *, tds, cpp_ee, cpp_er, ei_ee, ei_er, status="Approved"):
+    from app.modules.payroll.models import PayrollRun, PayslipItem
+
+    run = PayrollRun(
+        organization_id=organization_id, period_label=str(period_end),
+        period_start=period_end.replace(day=1), period_end=period_end, pay_date=period_end,
+        status=status,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    item = PayslipItem(
+        payroll_run_id=run.id, employee_id=employee_id, organization_id=organization_id,
+        employee_name="Remittance Employee", country_code="CA",
+        gross_pay=8000, tds=tds, social_security=cpp_ee, employer_social_security=cpp_er,
+        esi=ei_ee, employer_esi=ei_er, total_deductions=0, net_pay=8000,
+    )
+    db.add(item)
+    db.commit()
+    return run, item
+
+
+def test_generate_ca_pd7a_sums_across_period_runs(db, organization):
+    from app.modules.payroll.models import PayrollEmployee
+
+    creator = _make_user(db, "creator_pd7a1@test.com")
+    approver = _make_user(db, "approver_pd7a1@test.com")
+    _make_company(db, organization.id, country="CA")
+    employee = PayrollEmployee(organization_id=organization.id, employee_code="ECA1", name="Remittance Employee")
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+
+    # Inside the January remittance period.
+    _make_ca_period_run(db, organization.id, employee.id, date(2026, 1, 15), tds=1200, cpp_ee=396, cpp_er=396, ei_ee=104, ei_er=146)
+    _make_ca_period_run(db, organization.id, employee.id, date(2026, 1, 31), tds=1200, cpp_ee=396, cpp_er=396, ei_ee=104, ei_er=146)
+    # Outside the period — must NOT be summed in.
+    _make_ca_period_run(db, organization.id, employee.id, date(2026, 2, 15), tds=9999, cpp_ee=9999, cpp_er=9999, ei_ee=9999, ei_er=9999)
+    # Inside the period but still Draft — must NOT be summed in.
+    _make_ca_period_run(db, organization.id, employee.id, date(2026, 1, 20), tds=8888, cpp_ee=8888, cpp_er=8888, ei_ee=8888, ei_er=8888, status="Draft")
+
+    template = _build_ca_pd7a_template(db, creator, approver)
+    generated = service.generate_ca_pd7a(
+        db, organization.id, template.id, date(2026, 1, 1), date(2026, 1, 31), actor_id=creator.id,
+    )
+    assert generated.report_type == "PD7A"
+    assert generated.payroll_run_id is None
+    assert generated.scope_key == "PERIOD:2026-01-01:2026-01-31"
+    assert generated.rendered_data["employer"]["income_tax_withheld"] == 2400.0
+    assert generated.rendered_data["employer"]["cpp_employee"] == 792.0
+    assert generated.rendered_data["employer"]["cpp_employer"] == 792.0
+    assert generated.rendered_data["employer"]["ei_employee"] == 208.0
+    assert generated.rendered_data["employer"]["ei_employer"] == 292.0
+    assert generated.rendered_data["employeeCount"] == 1
+    assert generated.rendered_data["totalRemittance"] == 2400.0 + 792.0 + 792.0 + 208.0 + 292.0
+
+
+def test_generate_ca_pd7a_rejects_wrong_report_type(db, organization):
+    creator = _make_user(db, "creator_pd7a2@test.com")
+    approver = _make_user(db, "approver_pd7a2@test.com")
+    _make_company(db, organization.id, country="CA")
+    template = _build_template(db, creator, approver, country="CA", version="12.0")  # TDS, not PD7A
+    with pytest.raises(BadRequestException):
+        service.generate_ca_pd7a(db, organization.id, template.id, date(2026, 1, 1), date(2026, 1, 31))
+
+
+def test_generate_ca_pd7a_rejects_inverted_date_range(db, organization):
+    creator = _make_user(db, "creator_pd7a3@test.com")
+    approver = _make_user(db, "approver_pd7a3@test.com")
+    _make_company(db, organization.id, country="CA")
+    template = _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-INVERTED")
+    with pytest.raises(BadRequestException):
+        service.generate_ca_pd7a(db, organization.id, template.id, date(2026, 1, 31), date(2026, 1, 1))
+
+
+def test_generate_ca_pd7a_regenerating_supersedes_prior(db, organization):
+    creator = _make_user(db, "creator_pd7a4@test.com")
+    approver = _make_user(db, "approver_pd7a4@test.com")
+    _make_company(db, organization.id, country="CA")
+    template = _build_ca_pd7a_template(db, creator, approver, key="CA-PD7A-SUPERSEDE")
+
+    first = service.generate_ca_pd7a(db, organization.id, template.id, date(2026, 1, 1), date(2026, 1, 31))
+    second = service.generate_ca_pd7a(db, organization.id, template.id, date(2026, 1, 1), date(2026, 1, 31))
+    db.refresh(first)
+    assert first.status == "Superseded"
+    assert second.status == "Generated"

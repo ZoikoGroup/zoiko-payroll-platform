@@ -1,0 +1,25 @@
+{
+  "description": "IN-PT-CHN-001 (ZP-TAX-IN-2026-27-001 §21) — Greater Chennai Corporation's local half-yearly Professional Tax. Monthly gross ₹15,000 is assessed as an average HALF-YEAR income (assessment_basis=\"HALF_YEAR_INCOME\") — india.py's _pt_assessment_income approximates this as 6× the period's gross = ₹90,000, which is > ₹75,001, so it matches the top tier (flat ₹1,250). pay_date is June, one of this fixture's configured half-year collection months, so the deduction actually fires (it resolves to ₹0 in any other month) — matching the doc's own stated 'average income >75,001: local PT 1,250' exactly.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-PT-CHN-001 + §14.1 (Greater Chennai Corporation local PT schedule, source IN-CHN-PT). Bracket rows reproduced verbatim from hardcoded_defaults.py's own Chennai PT_FLAT rows (sort_order 48-53); state_rate_map's pt_half_year_deduct_month_1 is fixture-local (the document gives no remittance month for Chennai's own collection cycle, so hardcoded_defaults.py deliberately doesn't seed one — this fixture supplies its own so the half-year gate can be exercised). Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "15000.00",
+    "basic": "15000.00",
+    "country": "IN",
+    "pay_date": "2026-06-15",
+    "work_state": "Tamil Nadu",
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "21000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "0.00", "jurisdiction_state": "Tamil Nadu", "jurisdiction_locality": "Chennai", "assessment_basis": "HALF_YEAR_INCOME"},
+      {"min_amount": "21001", "max_amount": "30000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "180.00", "jurisdiction_state": "Tamil Nadu", "jurisdiction_locality": "Chennai", "assessment_basis": "HALF_YEAR_INCOME"},
+      {"min_amount": "30001", "max_amount": "45000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "425.00", "jurisdiction_state": "Tamil Nadu", "jurisdiction_locality": "Chennai", "assessment_basis": "HALF_YEAR_INCOME"},
+      {"min_amount": "45001", "max_amount": "60000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "930.00", "jurisdiction_state": "Tamil Nadu", "jurisdiction_locality": "Chennai", "assessment_basis": "HALF_YEAR_INCOME"},
+      {"min_amount": "60001", "max_amount": "75000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "1025.00", "jurisdiction_state": "Tamil Nadu", "jurisdiction_locality": "Chennai", "assessment_basis": "HALF_YEAR_INCOME"},
+      {"min_amount": "75001", "max_amount": null, "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "1250.00", "jurisdiction_state": "Tamil Nadu", "jurisdiction_locality": "Chennai", "assessment_basis": "HALF_YEAR_INCOME"}
+    ],
+    "state_rate_map": {
+      "pt_half_year_deduct_month_1": {"flat_amount": "6"}
+    }
+  },
+  "expected": {
+    "professional_tax": "1250.00"
+  }
+}

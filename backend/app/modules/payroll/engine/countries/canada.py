@@ -47,14 +47,18 @@ ctx.qc_hsf_employer_category, same "no UI sets it yet" disclosed gap as
 BC's classification) and _calculate_qc_labour_standards (a per-EMPLOYEE
 capped contribution, no org accumulator needed, annualized like CPP/EI
 were before their own YTD wiring existed — no hardcoded rate, since the
-document withholds one). WSDRF and the "temporary HSF sector exemption"
-(§13) are deliberately NOT implemented: WSDRF is a shortfall computed
-from eligible TRAINING EXPENDITURE this schema has no concept of at
-all, and the sector exemption needs the same kind of effective-dated
-employer-eligibility-with-evidence tracking WCB already has but this
-doesn't yet — both are separate, materially larger pieces, the same
-reasoning Ontario's associated-employer-group allocation was excluded
-for. Quebec's "deduction for workers" ($1,450 cap, §12/§13) IS
+document withholds one). Gap-closure Phase 7 (2026-09-11): the
+"temporary HSF sector exemption" (§15) IS now implemented — an
+effective-dated EmployerTaxProfile row reclassifies a qualifying
+employer as PRIMARY_MANUFACTURING for HSF purposes for that window
+(gated on _CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES), reusing
+the already-sourced primary-manufacturing rate rather than inventing a
+new number. WSDRF is implemented as a STANDALONE calculator (service.
+calculate_ca_wsdrf_shortfall) — 1% of total Quebec payroll minus the
+employer's own declared eligible training expenditure — since it's an
+annual reconciliation figure, not a recurring per-payslip deduction;
+never wired into calculate() below. Quebec's "deduction for workers"
+($1,450 cap, §12/§13) IS
 implemented, inside _calculate_quebec_provincial_tax. The gratuity/
 retroactive-pay method threshold and the RDSP fixed-withholding rule
 (§12) are NOT implemented — both are non-periodic/special-payment
@@ -136,7 +140,9 @@ from app.modules.payroll.engine.countries.shared import (
     _CA_AGE_GATED_CPP_ENABLED_COUNTRIES, _CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES,
     _CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES, _CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES,
     _CA_LSVCC_CREDIT_ENABLED_COUNTRIES, _CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES,
-    _CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES,
+    _CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES, _CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES,
+    _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES, _CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES,
+    _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES, resolve_periods_per_year,
 )
 # Fallback constants moved to hardcoded_defaults.py — imported back under
 # their original names so nothing else needs to change.
@@ -179,9 +185,12 @@ def _lowest_bracket_rate(slabs) -> Decimal:
     separate, independently-editable config row that could drift out of
     sync with the bracket table itself). Excludes the same non-bracket
     rule_types _calculate_annual_tax already excludes (SURCHARGE/
-    PT_FLAT/ON_EHT_BAND). Empty/unconfigured slabs resolve to 0%, never
-    a guess."""
-    bracket_slabs = [s for s in (slabs or []) if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT", "ON_EHT_BAND")]
+    PT_FLAT/ON_EHT_BAND/CA_RETIRING_ALLOWANCE_BAND). Empty/unconfigured
+    slabs resolve to 0%, never a guess."""
+    bracket_slabs = [
+        s for s in (slabs or [])
+        if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "CA_RETIRING_ALLOWANCE_BAND")
+    ]
     if not bracket_slabs:
         return Decimal("0")
     return min(bracket_slabs, key=lambda s: s.min_amount).rate_pct or Decimal("0")
@@ -201,6 +210,57 @@ def _calculate_lsvcc_credit(lsvcc_investment_amount: Optional[Decimal], rate_map
     rate = resolve_jurisdiction_parameter(rate_map, "lsvcc_credit_rate", _CA_LSVCC_CREDIT_RATE, country="CA")
     cap = resolve_jurisdiction_parameter(rate_map, "lsvcc_credit_max", _CA_LSVCC_CREDIT_MAX, country="CA")
     return min(_round2(lsvcc_investment_amount * rate / Decimal("100")), cap)
+
+
+# ── Taxability Matrix: per-program wage base (§17/AC-17, gap-closure ────
+# Phase 5, 2026-09-11). Reuses the exact same TaxabilityRule-backed
+# mechanism india.py's Code Wages already established (get_taxability_
+# classification/get_ca_taxability_rules_bundle in service.py), just
+# with a DIFFERENT default: every component counts (True) unless an
+# admin has explicitly excluded it, matching today's single-ctx.gross
+# behavior for the "core four" programs (income tax federal/provincial,
+# CPP/QPP pensionable, EI/QPIP insurable) this phase covers. Employer-
+# levy-related taxability flags (qc_hsf_subject/on_eht_subject/etc., also
+# named in §17's matrix) are NOT wired here — each employer levy already
+# resolves its own base from ctx.gross directly and none of them have a
+# documented case for differing per earning-component; left as a smaller,
+# separate follow-up if one is ever needed, not silently expanded into
+# here.
+def _resolve_ca_taxability(component_key: str, rules: dict) -> bool:
+    if component_key in rules:
+        return rules[component_key]
+    return True
+
+
+def _calculate_ca_program_wages(ctx: PayrollContext, tax_component: str) -> Decimal:
+    """Per-program (income_tax_federal/income_tax_provincial/
+    cpp_pensionable/ei_insurable) wage base for the CURRENT pay period —
+    which of the employee's own named salary components count toward
+    THIS specific program, independently of every other one (§17: "A
+    benefit may be income-taxable but not pensionable or insurable, or
+    may be subject to an employer levy but not an employee deduction").
+    `rules` comes from ctx.ca_taxability_rules[tax_component] (service.
+    get_ca_taxability_rules_bundle). Every dollar of ctx.gross lands in
+    exactly one bucket — named_allowances is whatever remains of gross
+    after the other five, so included-total always equals ctx.gross when
+    every component is (as by default) included, the same "no dollar
+    double-counted or dropped" contract india.py's _calculate_code_wages
+    already uses for its own per-component classification."""
+    rules = (ctx.ca_taxability_rules or {}).get(tax_component, {})
+    named_allowances = max(
+        Decimal("0"),
+        ctx.gross - ctx.basic - ctx.hra - ctx.special_allowance - ctx.overtime - ctx.additional_compensation,
+    )
+    components = {
+        "basic": ctx.basic, "hra": ctx.hra, "special_allowance": ctx.special_allowance,
+        "overtime": ctx.overtime, "additional_compensation": ctx.additional_compensation,
+        "named_allowances": named_allowances,
+    }
+    included = Decimal("0")
+    for key, amount in components.items():
+        if _resolve_ca_taxability(key, rules):
+            included += amount
+    return included
 
 
 def _calculate_annual_tax_ca(annual_gross: Decimal, slabs, rate_map: dict, td1_claim_amount: Optional[Decimal] = None,
@@ -502,6 +562,29 @@ def _on_eht_rate_for_total(total: Decimal, eht_bands: list) -> Decimal:
     return Decimal("0")
 
 
+def _retiring_allowance_rate_for_amount(amount: Decimal, bands: list) -> Decimal:
+    """ONE flat rate for the whole retiring-allowance/severance amount —
+    CRA's lump-sum withholding is a rate-TABLE lookup by amount, not a
+    marginal bracket sum (§19: 'Use payment-specific withholding... for
+    retiring allowance/severance'). `bands` are the jurisdiction_country=
+    "CA", jurisdiction_state=None TaxSlab rows with rule_type=
+    "CA_RETIRING_ALLOWANCE_BAND" (min_amount/max_amount/rate_pct,
+    max_amount None meaning "and above") — genuinely statutory data with
+    NO hardcoded fallback (the source document names this payment type
+    but gives no actual percentage figures, unlike every other rate in
+    this engine); an unconfigured band table resolves to 0%, never a
+    guessed rate. Same lookup shape as _on_eht_rate_for_total above.
+    Quebec's own combined federal+provincial rate table is NOT modeled
+    here — this is federal-only, matching the bands' own jurisdiction_
+    state=None scope."""
+    for band in bands:
+        lower = band.min_amount
+        upper = band.max_amount
+        if amount > lower and (upper is None or amount <= upper):
+            return band.rate_pct
+    return Decimal("0")
+
+
 def _calculate_on_eht_period_amount(gross: Decimal, ytd_remuneration_before: Decimal, eht_bands: list, exemption: Decimal) -> Decimal:
     """Computed incrementally as annual_EHT(cumulative_after) −
     annual_EHT(cumulative_before) so the correct annual total accrues
@@ -673,6 +756,117 @@ def _is_age_gated_cpp_stopped(date_of_birth, pay_date) -> bool:
     return age < _CA_CPP_MIN_AGE or age >= _CA_CPP_MAX_AGE
 
 
+# ── Associated-employer-group exemption sharing (§15, gap-closure ───────
+# Phase 6, 2026-09-11). Ontario/BC EHT and Manitoba HE Levy's "associated
+# employers share exemption" — this org's own elected share of the full
+# statutory exemption, read from an EmployerTaxProfile row (component_code
+# "<LEVY>_EXEMPTION_ALLOCATION_PCT", the SAME state-scoped "CA-<province>"
+# profile dict WCB/EI-reduced-rate already populate — see service.py's
+# _resolve_employee_calc_inputs) rather than a new PayrollContext field.
+# No row configured (every org today) means 100% — this org gets the
+# full exemption, byte-for-byte the pre-Phase-6 behavior. The org-level
+# "before" remuneration figure feeding into the notch/band calculation
+# is ALREADY summed across the whole group by this point (see service.
+# _ca_org_levy_read_inputs) whenever this same switch is on — the
+# exemption-scaling below and the group-sum upstream are two additive
+# halves of one feature, gated together.
+def _ca_apply_levy_exemption_allocation(exemption: Decimal, ctx: PayrollContext, component_code: str) -> Decimal:
+    if "CA" not in _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES:
+        return exemption
+    profile = (ctx.employer_tax_profiles or {}).get(component_code)
+    allocation_pct = profile.employer_rate_pct if profile and profile.employer_rate_pct is not None else Decimal("100")
+    return _round2(exemption * allocation_pct / Decimal("100"))
+
+
+def _apply_ca_federal_tax_adjustments(annual_federal_tax: Decimal, work_state: Optional[str], rate_map: dict, is_quebec: bool) -> Decimal:
+    """Quebec federal abatement / beyond-province surtax (§6/§7: "Apply
+    Quebec abatement or beyond-province factor only for the matching
+    jurisdiction branch") — extracted so Option 2 cumulative averaging
+    (gap-closure Phase 9, below) reuses this exact adjustment unchanged
+    against its OWN (differently-derived) annual federal tax estimate,
+    rather than duplicating the abatement/surtax logic a second time."""
+    if is_quebec:
+        abatement_pct = resolve_jurisdiction_parameter(rate_map, "qc_fed_abatement", _CA_QUEBEC_FEDERAL_ABATEMENT_PCT, country="CA")
+        return _round2(annual_federal_tax * (Decimal("100") - abatement_pct) / Decimal("100"))
+    elif (work_state or "").strip().upper() == "XP" and "CA" in _CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES:
+        surtax_pct = resolve_jurisdiction_parameter(rate_map, "beyond_province_surtax", _CA_BEYOND_PROVINCE_SURTAX_PCT, country="CA")
+        return _round2(annual_federal_tax * (Decimal("100") + surtax_pct) / Decimal("100"))
+    return annual_federal_tax
+
+
+# ── CRA Option 2: cumulative averaging (§7, gap-closure Phase 9, ────────
+# 2026-09-11). A genuinely DIFFERENT income-tax withholding methodology
+# from Option 1 (this engine's only-ever-implemented "annualize THIS
+# period's pay independently" method): average the employee's own gross
+# pay over every pay period elapsed so far this year (including this
+# one), re-inflate that average into an estimated ANNUAL figure, run the
+# SAME annual tax formula Option 1 already uses on that estimate, then
+# withhold the difference between "cumulative tax that should have been
+# withheld to date" and "tax actually withheld so far" — smoothing an
+# irregular/bonus-heavy pay pattern across the whole year instead of
+# spiking withholding in whichever single period the irregular amount
+# lands in. Gated on ctx.option2_cumulative_gross_before is not None
+# (calc-layer dormancy, mirroring CPP/EI's ytd_pensionable_earnings
+# contract exactly) AND shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES
+# (read-layer rollout gate — see that switch's own long comment).
+#
+# DISCLOSED SIMPLIFICATIONS:
+# 1. Federal and provincial cumulative gross share ONE tracked total
+#    (ctx.option2_cumulative_gross_before), built from ctx.gross BEFORE
+#    any Taxability-Matrix per-program adjustment (Phase 5) — identical
+#    to federal_taxable_gross/provincial_taxable_gross in the common
+#    case (that switch off/unconfigured), a disclosed approximation only
+#    when BOTH switches are active together with genuinely different
+#    per-program taxable wages (an untested combination).
+# 2. K2/K3 CPP/EI federal credits (_CA_CPP_EI_FEDERAL_CREDIT_ENABLED_
+#    COUNTRIES, itself dormant) are NOT applied under Option 2 — that
+#    credit's own formula hardcodes MONTHS_PER_YEAR to annualize a
+#    single period's CPP/EI contribution, which would be wrong for a
+#    non-monthly pay frequency under Option 2's own periods_per_year;
+#    fixing that cross-dormant-switch interaction is deferred rather
+#    than silently using the wrong multiplier.
+# 3. Territorial payroll tax (NWT/Nunavut) and TD1X additional
+#    withholding are NOT affected by Option 2 — CRA's Option 1/Option 2
+#    split is specifically an income-tax-withholding methodology, not a
+#    territorial-tax or employee-declared-flat-amount one.
+def _calculate_ca_option2_income_tax(ctx: PayrollContext, rate_map: dict, state_rate_map: dict, is_quebec: bool) -> tuple:
+    periods_per_year = resolve_periods_per_year(ctx.pay_frequency)
+    cumulative_gross_after = ctx.option2_cumulative_gross_before + ctx.gross
+    periods_elapsed_after = ctx.option2_periods_elapsed_before + 1
+    average_period_gross = cumulative_gross_after / periods_elapsed_after
+    estimated_annual_gross = average_period_gross * periods_per_year
+
+    annual_federal_tax = _calculate_annual_tax_ca(
+        estimated_annual_gross, ctx.slabs, rate_map, ctx.td1_claim_amount,
+        lsvcc_investment_amount=ctx.lsvcc_investment_amount,
+    )
+    annual_federal_tax = _apply_ca_federal_tax_adjustments(annual_federal_tax, ctx.work_state, rate_map, is_quebec)
+    average_federal_tax_per_period = annual_federal_tax / periods_per_year
+    cumulative_federal_due = average_federal_tax_per_period * periods_elapsed_after
+    federal_income_tax = max(Decimal("0"), _round2(cumulative_federal_due - ctx.option2_federal_tax_withheld_before))
+    option2_federal_tax_withheld_after = ctx.option2_federal_tax_withheld_before + federal_income_tax
+
+    if is_quebec:
+        annual_provincial_tax = _calculate_quebec_provincial_tax(
+            estimated_annual_gross, ctx.state_slabs, state_rate_map, qc_tp1015_claim_amount=ctx.qc_tp1015_claim_amount,
+        )
+    else:
+        annual_provincial_tax = _calculate_provincial_tax_ca(
+            estimated_annual_gross, ctx.work_state, ctx.state_slabs, state_rate_map,
+            provincial_td1_claim_amount=ctx.provincial_td1_claim_amount, rate_map=rate_map,
+        )
+    average_provincial_tax_per_period = annual_provincial_tax / periods_per_year
+    cumulative_provincial_due = average_provincial_tax_per_period * periods_elapsed_after
+    state_income_tax = max(Decimal("0"), _round2(cumulative_provincial_due - ctx.option2_provincial_tax_withheld_before))
+    option2_provincial_tax_withheld_after = ctx.option2_provincial_tax_withheld_before + state_income_tax
+
+    return (
+        federal_income_tax, state_income_tax, annual_federal_tax, annual_provincial_tax,
+        cumulative_gross_after, periods_elapsed_after,
+        option2_federal_tax_withheld_after, option2_provincial_tax_withheld_after,
+    )
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """Canada: CPP/QPP (contributory earnings floored by the Basic
     Exemption Amount, capped at the Year's Maximum Pensionable Earnings)
@@ -696,6 +890,23 @@ def calculate(ctx: PayrollContext) -> dict:
     gross = ctx.gross
     annual_gross = gross * MONTHS_PER_YEAR
     is_quebec = (ctx.work_state or "").strip().upper() == "QC"
+
+    # Taxability Matrix (§17/AC-17, gap-closure Phase 5) — per-program
+    # wage base, replacing the single `gross`/`annual_gross` figure below
+    # for the four programs it covers (income tax federal/provincial,
+    # CPP/QPP pensionable, EI/QPIP insurable). While OFF (default), or for
+    # any program with no TaxabilityRule override configured, these are
+    # BYTE-FOR-BYTE identical to gross/annual_gross — see
+    # _calculate_ca_program_wages's own docstring.
+    _ca_taxability_on = "CA" in _CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES
+    cpp_pensionable_gross = _calculate_ca_program_wages(ctx, "cpp_pensionable") if _ca_taxability_on else gross
+    annual_cpp_pensionable_gross = cpp_pensionable_gross * MONTHS_PER_YEAR
+    ei_insurable_gross = _calculate_ca_program_wages(ctx, "ei_insurable") if _ca_taxability_on else gross
+    annual_ei_insurable_gross = ei_insurable_gross * MONTHS_PER_YEAR
+    federal_taxable_gross = _calculate_ca_program_wages(ctx, "income_tax_federal") if _ca_taxability_on else gross
+    annual_federal_taxable_gross = federal_taxable_gross * MONTHS_PER_YEAR
+    provincial_taxable_gross = _calculate_ca_program_wages(ctx, "income_tax_provincial") if _ca_taxability_on else gross
+    annual_provincial_taxable_gross = provincial_taxable_gross * MONTHS_PER_YEAR
 
     # First-layer pension contribution: CPP everywhere except Quebec,
     # which routes to QPP instead — identical YMPE/basic-exemption
@@ -725,19 +936,19 @@ def calculate(ctx: PayrollContext) -> dict:
             max(Decimal("0"), cpp_basic_exemption - ytd_exemption_used),
         )
         pensionable_room = max(Decimal("0"), cpp_ympe - ctx.ytd_pensionable_earnings)
-        period_first_layer_pensionable = max(Decimal("0"), min(gross, pensionable_room) - period_exemption)
+        period_first_layer_pensionable = max(Decimal("0"), min(cpp_pensionable_gross, pensionable_room) - period_exemption)
         ytd_pensionable_earnings_after = ctx.ytd_pensionable_earnings + period_first_layer_pensionable
         ytd_basic_exemption_used_after = ytd_exemption_used + period_exemption
         # This period's gross beyond first-layer room is the pool eligible
         # for CPP2/QPP2 below — correctly starts CPP2 exactly at the pay
         # period where the employee crosses YMPE mid-period, not before.
-        period_gross_over_ympe = max(Decimal("0"), gross - pensionable_room)
+        period_gross_over_ympe = max(Decimal("0"), cpp_pensionable_gross - pensionable_room)
     else:
-        annual_first_layer_pensionable = max(Decimal("0"), min(annual_gross, cpp_ympe) - cpp_basic_exemption)
+        annual_first_layer_pensionable = max(Decimal("0"), min(annual_cpp_pensionable_gross, cpp_ympe) - cpp_basic_exemption)
         period_first_layer_pensionable = annual_first_layer_pensionable / MONTHS_PER_YEAR
         ytd_pensionable_earnings_after = None
         ytd_basic_exemption_used_after = None
-        period_gross_over_ympe = max(Decimal("0"), annual_gross - cpp_ympe) / MONTHS_PER_YEAR
+        period_gross_over_ympe = max(Decimal("0"), annual_cpp_pensionable_gross - cpp_ympe) / MONTHS_PER_YEAR
 
     pension_rate = state_rate_map.get("qpp") if is_quebec else rate_map.get("cpp")
     social_security = (
@@ -764,7 +975,7 @@ def calculate(ctx: PayrollContext) -> dict:
         period_cpp2_pensionable = max(Decimal("0"), min(period_gross_over_ympe, cpp2_room))
         ytd_cpp2_pensionable_earnings_after = ctx.ytd_cpp2_pensionable_earnings + period_cpp2_pensionable
     else:
-        annual_cpp2_pensionable = max(Decimal("0"), min(annual_gross, cpp2_yampe) - cpp_ympe)
+        annual_cpp2_pensionable = max(Decimal("0"), min(annual_cpp_pensionable_gross, cpp2_yampe) - cpp_ympe)
         period_cpp2_pensionable = annual_cpp2_pensionable / MONTHS_PER_YEAR
         ytd_cpp2_pensionable_earnings_after = None
     cpp2 = _round2(period_cpp2_pensionable * (cpp2_rate / Decimal("100")))
@@ -788,7 +999,18 @@ def calculate(ctx: PayrollContext) -> dict:
         "CA" in _CA_AGE_GATED_CPP_ENABLED_COUNTRIES
         and _is_age_gated_cpp_stopped(ctx.date_of_birth, ctx.pay_date)
     )
-    if (ctx.cpp_qpp_election_status or "").strip().upper() == "STOPPED" or age_gated_stopped:
+    # AC-16: "Age and CPP/QPP election status is effective-dated" — a
+    # STOPPED election only actually suppresses CPP/QPP from the pay
+    # period it took effect onward. Without ctx.cpp_election_effective_
+    # date set (every employee before this field existed) or without a
+    # ctx.pay_date to compare against, apply STOPPED immediately — the
+    # exact prior behavior, unchanged.
+    cpt30_stopped = (ctx.cpp_qpp_election_status or "").strip().upper() == "STOPPED" and (
+        ctx.cpp_election_effective_date is None
+        or ctx.pay_date is None
+        or ctx.pay_date >= ctx.cpp_election_effective_date
+    )
+    if cpt30_stopped or age_gated_stopped:
         social_security = Decimal("0")
         employer_social_security = Decimal("0")
         cpp2 = Decimal("0")
@@ -845,10 +1067,10 @@ def calculate(ctx: PayrollContext) -> dict:
     if insurable_mie is not None:
         if ctx.ytd_insurable_earnings is not None:
             insurable_room = max(Decimal("0"), insurable_mie - ctx.ytd_insurable_earnings)
-            period_insurable = max(Decimal("0"), min(gross, insurable_room))
+            period_insurable = max(Decimal("0"), min(ei_insurable_gross, insurable_room))
             ytd_insurable_earnings_after = ctx.ytd_insurable_earnings + period_insurable
         else:
-            period_insurable = min(annual_gross, insurable_mie) / MONTHS_PER_YEAR
+            period_insurable = min(annual_ei_insurable_gross, insurable_mie) / MONTHS_PER_YEAR
             ytd_insurable_earnings_after = None
         employee_esi = (
             _round2(period_insurable * (rate_row.employee_rate_pct / 100))
@@ -890,44 +1112,36 @@ def calculate(ctx: PayrollContext) -> dict:
         employer_esi = Decimal("0")
         ytd_insurable_earnings_after = ctx.ytd_insurable_earnings if ctx.ytd_insurable_earnings is not None else None
 
-    annual_federal_tax = _calculate_annual_tax_ca(
-        annual_gross, ctx.slabs, rate_map, ctx.td1_claim_amount,
-        period_cpp_contribution=social_security + cpp2, period_ei_contribution=employee_esi,
-        lsvcc_investment_amount=ctx.lsvcc_investment_amount,
-    )
-    if is_quebec:
-        # Quebec federal abatement — CRA federal tax is reduced (not
-        # replaced) for a Quebec employee, since Quebec collects its own
-        # provincial tax independently of the generic provincial path
-        # (ZP-TAX-CA-2026-001 §6/§12). This constant WAS already prepared
-        # in Phase 2 specifically for this branch.
-        abatement_pct = resolve_jurisdiction_parameter(rate_map, "qc_fed_abatement", _CA_QUEBEC_FEDERAL_ABATEMENT_PCT, country="CA")
-        annual_federal_tax = _round2(annual_federal_tax * (Decimal("100") - abatement_pct) / Decimal("100"))
-    elif (ctx.work_state or "").strip().upper() == "XP" and "CA" in _CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES:
-        # Beyond-province/outside-Canada surtax (§6/§7: "Federal tax
-        # payable (T1): Apply Quebec abatement or beyond-province factor
-        # only for the matching jurisdiction branch") — the SAME formula
-        # step as the Quebec abatement above, just an INCREASE instead of
-        # a reduction, for an employee whose work_state is literally "XP"
-        # (§3's CA-XP code — no Canadian establishment at all, so no
-        # province collects its own tax; this substitutes for that).
-        # Gated on its own switch — see shared._CA_BEYOND_PROVINCE_
-        # SURTAX_ENABLED_COUNTRIES for why, even though no automated POE
-        # path can produce "XP" yet (that's Phase 9's scope).
-        surtax_pct = resolve_jurisdiction_parameter(rate_map, "beyond_province_surtax", _CA_BEYOND_PROVINCE_SURTAX_PCT, country="CA")
-        annual_federal_tax = _round2(annual_federal_tax * (Decimal("100") + surtax_pct) / Decimal("100"))
-    federal_income_tax = _round2(annual_federal_tax / MONTHS_PER_YEAR)
-
-    if is_quebec:
-        annual_provincial_tax = _calculate_quebec_provincial_tax(
-            annual_gross, ctx.state_slabs, state_rate_map, qc_tp1015_claim_amount=ctx.qc_tp1015_claim_amount,
-        )
+    if ctx.option2_cumulative_gross_before is not None and "CA" in _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES:
+        (
+            federal_income_tax, state_income_tax, annual_federal_tax, annual_provincial_tax,
+            option2_cumulative_gross_after, option2_periods_elapsed_after,
+            option2_federal_tax_withheld_after, option2_provincial_tax_withheld_after,
+        ) = _calculate_ca_option2_income_tax(ctx, rate_map, state_rate_map, is_quebec)
     else:
-        annual_provincial_tax = _calculate_provincial_tax_ca(
-            annual_gross, ctx.work_state, ctx.state_slabs, state_rate_map,
-            provincial_td1_claim_amount=ctx.provincial_td1_claim_amount, rate_map=rate_map,
+        option2_cumulative_gross_after = None
+        option2_periods_elapsed_after = None
+        option2_federal_tax_withheld_after = None
+        option2_provincial_tax_withheld_after = None
+
+        annual_federal_tax = _calculate_annual_tax_ca(
+            annual_federal_taxable_gross, ctx.slabs, rate_map, ctx.td1_claim_amount,
+            period_cpp_contribution=social_security + cpp2, period_ei_contribution=employee_esi,
+            lsvcc_investment_amount=ctx.lsvcc_investment_amount,
         )
-    state_income_tax = _round2(annual_provincial_tax / MONTHS_PER_YEAR)
+        annual_federal_tax = _apply_ca_federal_tax_adjustments(annual_federal_tax, ctx.work_state, rate_map, is_quebec)
+        federal_income_tax = _round2(annual_federal_tax / MONTHS_PER_YEAR)
+
+        if is_quebec:
+            annual_provincial_tax = _calculate_quebec_provincial_tax(
+                annual_provincial_taxable_gross, ctx.state_slabs, state_rate_map, qc_tp1015_claim_amount=ctx.qc_tp1015_claim_amount,
+            )
+        else:
+            annual_provincial_tax = _calculate_provincial_tax_ca(
+                annual_provincial_taxable_gross, ctx.work_state, ctx.state_slabs, state_rate_map,
+                provincial_td1_claim_amount=ctx.provincial_td1_claim_amount, rate_map=rate_map,
+            )
+        state_income_tax = _round2(annual_provincial_tax / MONTHS_PER_YEAR)
 
     # NWT/Nunavut employee territorial payroll tax — reuses the generic
     # `local_tax` field (the same one US locality tax populates). MUST be
@@ -965,8 +1179,21 @@ def calculate(ctx: PayrollContext) -> dict:
     employer_qc_hsf = Decimal("0")
     qc_hsf_ytd_remuneration_after = None
     if is_quebec and ctx.qc_hsf_ytd_remuneration_before is not None:
+        # Temporary HSF sector exemption (§15, gap-closure Phase 7) — an
+        # effective-dated EmployerTaxProfile row (already date-filtered
+        # by service.get_employer_tax_profiles, so its mere presence here
+        # means "active as of this pay date") reclassifies a qualifying
+        # agriculture/forestry/fishing employer as PRIMARY_MANUFACTURING
+        # for this calculation only, never touching the org's own
+        # ctx.qc_hsf_employer_category setting.
+        qc_hsf_category = ctx.qc_hsf_employer_category
+        if (
+            "CA" in _CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES
+            and (ctx.employer_tax_profiles or {}).get("QC_HSF_TEMP_SECTOR_EXEMPTION") is not None
+        ):
+            qc_hsf_category = "PRIMARY_MANUFACTURING"
         employer_qc_hsf = _calculate_qc_hsf_period_amount(
-            gross, ctx.qc_hsf_ytd_remuneration_before, ctx.qc_hsf_employer_category, state_rate_map,
+            gross, ctx.qc_hsf_ytd_remuneration_before, qc_hsf_category, state_rate_map,
         )
         qc_hsf_ytd_remuneration_after = ctx.qc_hsf_ytd_remuneration_before + gross
 
@@ -991,6 +1218,7 @@ def calculate(ctx: PayrollContext) -> dict:
         eht_bands = [s for s in (ctx.state_slabs or []) if getattr(s, "rule_type", None) == "ON_EHT_BAND"]
         exemption_row = (state_rate_map or {}).get("on_eht_exemption")
         exemption = exemption_row.flat_amount if exemption_row and exemption_row.flat_amount else Decimal("0")
+        exemption = _ca_apply_levy_exemption_allocation(exemption, ctx, "ON_EHT_EXEMPTION_ALLOCATION_PCT")
         employer_eht = _calculate_on_eht_period_amount(gross, ctx.on_eht_ytd_remuneration_before, eht_bands, exemption)
         on_eht_ytd_remuneration_after = ctx.on_eht_ytd_remuneration_before + gross
 
@@ -1007,9 +1235,13 @@ def calculate(ctx: PayrollContext) -> dict:
         bc_upper_row = (state_rate_map or {}).get(f"{bc_prefix}_upper_threshold")
         bc_notch_row = (state_rate_map or {}).get(f"{bc_prefix}_notch_rate")
         bc_flat_row = (state_rate_map or {}).get(f"{bc_prefix}_flat_rate")
+        bc_exemption_threshold = (
+            _ca_apply_levy_exemption_allocation(bc_exemption_row.flat_amount, ctx, "BC_EHT_EXEMPTION_ALLOCATION_PCT")
+            if bc_exemption_row and bc_exemption_row.flat_amount is not None else None
+        )
         employer_bc_eht = _calculate_notch_levy_period_amount(
             gross, ctx.bc_eht_ytd_remuneration_before,
-            exemption_threshold=bc_exemption_row.flat_amount if bc_exemption_row else None,
+            exemption_threshold=bc_exemption_threshold,
             notch_rate=bc_notch_row.employer_rate_pct if bc_notch_row else None,
             upper_threshold=bc_upper_row.flat_amount if bc_upper_row else None,
             flat_rate=bc_flat_row.employer_rate_pct if bc_flat_row else None,
@@ -1024,9 +1256,13 @@ def calculate(ctx: PayrollContext) -> dict:
         mb_upper_row = (state_rate_map or {}).get("mb_he_levy_upper_threshold")
         mb_notch_row = (state_rate_map or {}).get("mb_he_levy_notch_rate")
         mb_flat_row = (state_rate_map or {}).get("mb_he_levy_flat_rate")
+        mb_exemption_threshold = (
+            _ca_apply_levy_exemption_allocation(mb_exemption_row.flat_amount, ctx, "MB_HE_LEVY_EXEMPTION_ALLOCATION_PCT")
+            if mb_exemption_row and mb_exemption_row.flat_amount is not None else None
+        )
         employer_mb_he_levy = _calculate_notch_levy_period_amount(
             gross, ctx.mb_he_levy_ytd_remuneration_before,
-            exemption_threshold=mb_exemption_row.flat_amount if mb_exemption_row else None,
+            exemption_threshold=mb_exemption_threshold,
             notch_rate=mb_notch_row.employer_rate_pct if mb_notch_row else None,
             upper_threshold=mb_upper_row.flat_amount if mb_upper_row else None,
             flat_rate=mb_flat_row.employer_rate_pct if mb_flat_row else None,
@@ -1040,9 +1276,13 @@ def calculate(ctx: PayrollContext) -> dict:
     if (ctx.work_state or "").strip().upper() == "NL" and ctx.nl_hapset_ytd_remuneration_before is not None:
         nl_exemption_row = (state_rate_map or {}).get("nl_hapset_exemption_threshold")
         nl_notch_row = (state_rate_map or {}).get("nl_hapset_flat_rate")
+        nl_exemption_threshold = (
+            _ca_apply_levy_exemption_allocation(nl_exemption_row.flat_amount, ctx, "NL_HAPSET_EXEMPTION_ALLOCATION_PCT")
+            if nl_exemption_row and nl_exemption_row.flat_amount is not None else None
+        )
         employer_nl_hapset = _calculate_notch_levy_period_amount(
             gross, ctx.nl_hapset_ytd_remuneration_before,
-            exemption_threshold=nl_exemption_row.flat_amount if nl_exemption_row else None,
+            exemption_threshold=nl_exemption_threshold,
             notch_rate=nl_notch_row.employer_rate_pct if nl_notch_row else None,
             upper_threshold=None, flat_rate=None,
         )
@@ -1072,4 +1312,8 @@ def calculate(ctx: PayrollContext) -> dict:
         employer_qc_hsf=employer_qc_hsf, qc_hsf_ytd_remuneration_after=qc_hsf_ytd_remuneration_after,
         employer_qc_labour_standards=employer_qc_labour_standards,
         tds=tds, annual_tax=annual_tax,
+        option2_cumulative_gross_after=option2_cumulative_gross_after,
+        option2_periods_elapsed_after=option2_periods_elapsed_after,
+        option2_federal_tax_withheld_after=option2_federal_tax_withheld_after,
+        option2_provincial_tax_withheld_after=option2_provincial_tax_withheld_after,
     )

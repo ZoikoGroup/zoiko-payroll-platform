@@ -10,7 +10,7 @@ import logging
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -53,7 +53,8 @@ from app.modules.payroll.schemas import (
     FilingCalendarResponse, FilingCalendarUpsert, FilingCalendarStatusUpdate,
     JurisdictionPackImpactPreviewResponse,
     PackHotfixActivateRequest, PackHotfixReviewRequest, PackHotfixActivationResponse,
-    RtiFormsSummaryEntry, TestCertificationRunResponse,
+    RtiFormsSummaryEntry, TestCertificationRunResponse, TestCertificationRunRequest,
+    SalaryTdsDeclarationResponse, SalaryTdsClaimResponse, GeneratedReportResponse,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -523,15 +524,18 @@ def get_rti_forms_summary(
 
 @router.post(
     "/compliance/test-certification/run", response_model=TestCertificationRunResponse, response_model_by_alias=True,
-    summary="Run the HMRC golden-test harness now and record the result",
+    summary="Run the golden-test harness for a jurisdiction now and record the result (UK/HMRC, or CA/CRA-RQ)",
 )
 def trigger_test_certification_run(
+    data: TestCertificationRunRequest = Body(default=TestCertificationRunRequest()),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.run_golden_test_certification(db, actor_id=current_user.id)
+    return payroll_service.run_golden_test_certification(
+        db, jurisdiction_country=data.jurisdiction_country, actor_id=current_user.id,
+    )
 
 
 @router.get(
@@ -540,12 +544,13 @@ def trigger_test_certification_run(
 )
 def list_test_certification_runs(
     limit: int = Query(20, ge=1, le=100),
+    jurisdiction_country: Optional[str] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_test_certification_runs(db, limit)
+    return payroll_service.list_test_certification_runs(db, limit, jurisdiction_country=jurisdiction_country)
 
 
 @router.post(
@@ -852,6 +857,64 @@ def set_filing_calendar_entry_status(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.set_filing_calendar_status(db, id, payload.status, actor_id=current_user.id)
+
+
+# ── India: Salary TDS / Forms status (gap-closure Phase F, 2026-09-11) ──
+# Thin Super-Admin-authenticated pass-throughs over the EXISTING org-
+# scoped list functions (list_salary_tds_declarations/list_salary_tds_
+# claims/get_generated_reports — all built in earlier phases, zero new
+# business logic here) — the org-facing payroll_router versions derive
+# their organization scope from current_user.organization_id, which a
+# Super Admin token has no meaningful value for (a Super Admin isn't a
+# member of any one organization). These three let a Super Admin pick
+# ANY organization (organizationId, required — same "cross-org view via
+# an explicit org filter" shape as finance_overview/finance_summary
+# above) to see that org's Form 122/123/124/130/138 status, instead of
+# duplicating the underlying query logic.
+
+@router.get(
+    "/india/salary-tds-declarations", response_model=List[SalaryTdsDeclarationResponse], response_model_by_alias=True,
+    summary="Cross-org view: an organization's Form 122 salary TDS declarations",
+)
+def super_admin_list_india_salary_tds_declarations(
+    organizationId: int = Query(...),
+    taxYear: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_salary_tds_declarations(db, organizationId, tax_year=taxYear)
+
+
+@router.get(
+    "/india/salary-tds-claims", response_model=List[SalaryTdsClaimResponse], response_model_by_alias=True,
+    summary="Cross-org view: an organization's Form 124 salary TDS claims",
+)
+def super_admin_list_india_salary_tds_claims(
+    organizationId: int = Query(...),
+    taxYear: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_salary_tds_claims(db, organizationId, tax_year=taxYear)
+
+
+@router.get(
+    "/india/forms", response_model=List[GeneratedReportResponse], response_model_by_alias=True,
+    summary="Cross-org view: an organization's generated India Form 123/130/138 reports",
+)
+def super_admin_list_india_forms(
+    organizationId: int = Query(...),
+    reportType: Optional[str] = Query(None, description="FORM_123 | FORM_130 | FORM_138"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_generated_reports(db, organizationId, report_type=reportType)
 
 
 # ── Canonical Tax Configuration (government-mandated values; Super Admin-only) ──

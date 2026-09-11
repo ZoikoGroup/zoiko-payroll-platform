@@ -16,7 +16,11 @@ the state-level build-out plan:
   it). This DOES represent a real number for any employee with
   work_state="CO"/"KY" once _US_STATE_TAX_ENABLED_STATES (shared.py) adds
   that state — deliberately left OUT of that set by this script; enabling
-  it is a separate, explicit step.
+  it is a separate, explicit step. Incremental build-out 2026-09-11
+  (ZP-TAX-US-2026-001 §4 Matrix): AZ/IL/MA/MI/PA added with a complete
+  literal flat percentage and allowance_by_filing_status={} (the document
+  says None for every status), so no state_standard_deduction row is
+  seeded for them.
 
   Phase 3 (_US_STATE_PROGRAMS): state-level statutory payroll programs
   (SDI/Paid Leave/TDI/Universal Paid Leave/WA Cares/NJ's 4-program
@@ -27,9 +31,11 @@ the state-level build-out plan:
 
   Phase 3C (_US_STATE_HEADCOUNT_PROGRAMS / _US_DE_PAID_LEAVE):
   headcount-conditional programs (CO FAMLI, ME PFML, WA PFML, DE Paid
-  Leave's two tiers) — same as Phase 3 but with an extra
-  "<key>_employer_headcount_min"/"_max" companion row gating the EMPLOYER
-  side only. This script seeds the CANONICAL rate/threshold data only —
+  Leave's two tiers, MA PFML added 2026-09-11) — same as Phase 3 but with
+  an extra "<key>_employer_headcount_min"/"_max" companion row gating the
+  EMPLOYER side only, plus an optional "<key>_wage_cap" companion row
+  (CO FAMLI and DE Paid Leave both carry the document's $184,500 cap).
+  This script seeds the CANONICAL rate/threshold data only —
   it cannot seed any real employer's actual covered_employee_count (a
   genuinely tenant-specific fact, entered per org via the SUI Employer
   Rates screen), so every employer's headcount-gated employer share
@@ -289,6 +295,13 @@ def run():
                     total=f"{d['employer_headcount_min']} employees", flat_amount=Decimal(d["employer_headcount_min"]), sort_order=2,
                 )
                 row_count += 1
+                if d.get("wage_cap") is not None:
+                    _upsert_rate(
+                        db, state, f"{key}_wage_cap", pack.id,
+                        label=f"{label} — Taxable Wage Cap", employee_share="—", employer_share="—",
+                        total=f"${d['wage_cap']:,.2f}", flat_amount=d["wage_cap"], sort_order=3,
+                    )
+                    row_count += 1
             db.commit()
             record_tax_audit(
                 db, actor_id=None, action="create", entity_type="jurisdiction_pack", entity_id=pack.id,
@@ -322,29 +335,39 @@ def run():
             total=f"{de['full_coverage_min']} employees", flat_amount=Decimal(de["full_coverage_min"]), sort_order=2,
         )
         _upsert_rate(
+            db, "DE", "paid_leave_wage_cap", de_pack.id,
+            label="Paid Leave (Full Coverage) — Taxable Wage Cap", employee_share="—", employer_share="—",
+            total=f"${de['wage_cap']:,.2f}", flat_amount=de["wage_cap"], sort_order=3,
+        )
+        _upsert_rate(
             db, "DE", "paid_leave_parental", de_pack.id,
             label="Paid Leave (Parental Only)", employee_share="—", employer_share="—",
             total=f"{de['parental_only_rate_pct']}% employer (at {de['parental_only_min']}-{de['full_coverage_min'] - 1} employees)",
-            employee_rate_pct=None, employer_rate_pct=de["parental_only_rate_pct"], sort_order=3,
+            employee_rate_pct=None, employer_rate_pct=de["parental_only_rate_pct"], sort_order=4,
         )
         _upsert_rate(
             db, "DE", "paid_leave_parental_employer_headcount_min", de_pack.id,
             label="Paid Leave (Parental Only) — Employer Share Headcount Threshold (Min)", employee_share="—", employer_share="—",
-            total=f"{de['parental_only_min']} employees", flat_amount=Decimal(de["parental_only_min"]), sort_order=4,
+            total=f"{de['parental_only_min']} employees", flat_amount=Decimal(de["parental_only_min"]), sort_order=5,
         )
         _upsert_rate(
             db, "DE", "paid_leave_parental_employer_headcount_max", de_pack.id,
             label="Paid Leave (Parental Only) — Employer Share Headcount Threshold (Max, exclusive)", employee_share="—", employer_share="—",
-            total=f"{de['full_coverage_min']} employees", flat_amount=Decimal(de["full_coverage_min"]), sort_order=5,
+            total=f"{de['full_coverage_min']} employees", flat_amount=Decimal(de["full_coverage_min"]), sort_order=6,
+        )
+        _upsert_rate(
+            db, "DE", "paid_leave_parental_wage_cap", de_pack.id,
+            label="Paid Leave (Parental Only) — Taxable Wage Cap", employee_share="—", employer_share="—",
+            total=f"${de['wage_cap']:,.2f}", flat_amount=de["wage_cap"], sort_order=7,
         )
         db.commit()
         record_tax_audit(
             db, actor_id=None, action="create", entity_type="jurisdiction_pack", entity_id=de_pack.id,
             jurisdiction_pack_id=de_pack.id, tax_version=de_pack.version,
             reason="US state-level build-out (ZP-TAX-US-2026-001): Delaware Paid Leave two-tier data",
-            new_value={"contributionRates": 5},
+            new_value={"contributionRates": 7},
         )
-        print(f"Phase 3C: DE -> pack {de_pack.pack_id} v{de_pack.version}, 5 contribution rate row(s) (paid_leave, paid_leave_parental).")
+        print(f"Phase 3C: DE -> pack {de_pack.pack_id} v{de_pack.version}, 7 contribution rate row(s) (paid_leave, paid_leave_parental).")
 
         for state, d in _US_LOCALITY_DATA.items():
             dataset = (

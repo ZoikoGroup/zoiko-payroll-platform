@@ -1522,6 +1522,49 @@ def test_regenerate_replays_original_rate_after_canonical_rate_edited(db, organi
     assert Decimal(replayed_rate_entry["employeeRatePct"]) == Decimal("12")
 
 
+def test_regenerate_replays_original_wcb_rate_after_employer_profile_edited(db, organization, monkeypatch):
+    # AC-32's previously-disclosed narrower gap (ZP-TAX-CA-2026-001):
+    # state_rate_map/employer_tax_profiles/reciprocity/locality_rate were
+    # NOT captured in the snapshot at all, so unlike the country-level
+    # rate_map/slabs test above, a WCB rate change made after generation
+    # WOULD have silently changed a "historical" replay's result. This
+    # proves that gap is closed.
+    _stub_business_code_generation(monkeypatch)
+    profile = EmployerTaxProfile(
+        organization_id=organization.id, jurisdiction_id="CA-ON", component_code="WCB",
+        employer_rate_pct=Decimal("2.00"), taxable_wage_base=Decimal("200000"), effective_from=date(2026, 1, 1),
+    )
+    db.add(profile)
+    db.commit()
+
+    employee = _make_employee(db, organization.id, "CA-WCB-REPLAY-1", country="CA", work_state="ON", ctc=Decimal("120000"))
+    run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
+    ).first()
+    original_wcb = item.employer_sui
+    assert original_wcb == Decimal("200.00")  # 120000 * 2% / 12
+    assert item.tax_rule_snapshot is not None
+    original_profile_entry = item.tax_rule_snapshot["employerTaxProfiles"]["WCB"]
+    assert Decimal(original_profile_entry["employerRatePct"]) == Decimal("2.00")
+
+    # Super Admin/Tax Ops edits the SAME employer's WCB rate after
+    # generation — simulating a real-world rate-notice update.
+    profile.employer_rate_pct = Decimal("5.00")
+    db.commit()
+
+    service.regenerate_employee_payslip(db, run.id, employee.id, organization.id)
+    db.refresh(item)
+
+    # Recalculating must reproduce the ORIGINAL 2%-derived figure, not
+    # silently pick up the now-live 5%.
+    assert item.employer_sui == original_wcb
+    replayed_profile_entry = item.tax_rule_snapshot["employerTaxProfiles"]["WCB"]
+    assert Decimal(replayed_profile_entry["employerRatePct"]) == Decimal("2.00")
+
+
 # ── Per-rule evidence + payslip rule-ID traceability (ZP-TAX-UK-2026-27- ─
 # 001 §4.2/§20/AC-29 gap-closure Part 1B, 2026-09-09) ────────────────────
 
@@ -1573,9 +1616,14 @@ def test_rate_and_slab_source_document_id_default_to_none(db):
 
 def test_regenerate_still_falls_back_to_live_rates_without_a_snapshot(db, organization, monkeypatch):
     # An org never opted into canonical tax-pack tracking (the common
-    # case) has no tax_rule_snapshot to replay from at all — recalculation
-    # must fall back to live resolution exactly as it did before this fix,
-    # not silently produce a zeroed/broken payslip.
+    # case) has no COUNTRY-LEVEL rate_map/slabs captured in its snapshot
+    # to replay from at all — recalculation must fall back to live
+    # resolution exactly as it did before this fix, not silently produce
+    # a zeroed/broken payslip. tax_rule_snapshot itself is no longer None
+    # (the state/employer/reciprocity/locality overlay, AC-32's own
+    # replay-gap closure, is captured regardless of canonical-pack opt-in
+    # — get_state_scoped_config/get_employer_tax_profiles are independent
+    # of it), but it carries no contributionRates/taxSlabs keys.
     _stub_business_code_generation(monkeypatch)
     db.add(_make_rate("IN", "pf", organization_id=organization.id, rate_pct=Decimal("12")))
     db.commit()
@@ -1587,7 +1635,8 @@ def test_regenerate_still_falls_back_to_live_rates_without_a_snapshot(db, organi
     item = db.query(PayslipItem).filter(
         PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == employee.id,
     ).first()
-    assert item.tax_rule_snapshot is None
+    assert not item.tax_rule_snapshot.get("contributionRates")
+    assert not item.tax_rule_snapshot.get("taxSlabs")
     original_pf = item.pf
 
     service.regenerate_employee_payslip(db, run.id, employee.id, organization.id)
@@ -2543,6 +2592,9 @@ def _seed_ca_cpp_rate(db):
 
 
 def test_generate_payslips_for_run_age_gating_dormant_by_default(db, organization, monkeypatch):
+    import app.modules.payroll.engine.countries.shared as shared
+    shared._CA_AGE_GATED_CPP_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
+
     _stub_business_code_generation(monkeypatch)
     _seed_ca_cpp_rate(db)
     employee = _make_employee(db, organization.id, "CA-AGE-1", country="CA")

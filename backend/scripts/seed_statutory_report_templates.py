@@ -190,6 +190,123 @@ def run():
             ],
         )
 
+        print("Seeding Canada T4 (Statement of Remuneration Paid, per-employee)...")
+        _seed_template(
+            db, template_key="CA-T4", name="T4 - Statement of Remuneration Paid", report_type="T4",
+            country="CA", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bn", "Business Number (BN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("earnings", "Earnings (Year-to-Date)", [
+                    ("employment_income", "Box 14 - Employment Income", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                ]),
+                ("tax", "Tax (Year-to-Date)", [
+                    ("income_tax_deducted", "Box 22 - Income Tax Deducted", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                ]),
+                ("cpp", "CPP (Year-to-Date)", [
+                    ("cpp_contributions", "Box 16 - CPP Contributions", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                    ("cpp2_contributions", "Box 16A - CPP2 Contributions", "currency", "PAYSLIP_ITEM", "cpp2", "SUM_YTD"),
+                ]),
+                ("ei", "EI (Year-to-Date)", [
+                    ("ei_premiums", "Box 18 - EI Premiums", "currency", "PAYSLIP_ITEM", "esi", "SUM_YTD"),
+                ]),
+                ("employer_contributions", "Employer Contributions (Year-to-Date, informational)", [
+                    ("employer_cpp", "Employer CPP", "currency", "PAYSLIP_ITEM", "employer_social_security", "SUM_YTD"),
+                    ("employer_cpp2", "Employer CPP2", "currency", "PAYSLIP_ITEM", "employer_cpp2", "SUM_YTD"),
+                    ("employer_ei", "Employer EI", "currency", "PAYSLIP_ITEM", "employer_esi", "SUM_YTD"),
+                ]),
+            ],
+        )
+        # Box numbers above match CRA's published T4 layout at the time this
+        # template was authored — re-verify against the current T4 guide
+        # before relying on box numbers for anything beyond internal display.
+
+        print("Seeding Quebec RL-1 (Relevé 1, per-employee)...")
+        _seed_template(
+            db, template_key="CA-QC-RL1", name="RL-1 - Releve de renseignements", report_type="RL1",
+            country="CA", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bn", "Quebec Enterprise Number (NEQ)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("earnings", "Earnings (Year-to-Date)", [
+                    ("employment_income", "Employment Income", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                ]),
+                ("tax", "Tax (Year-to-Date)", [
+                    ("quebec_income_tax", "Quebec Income Tax Withheld", "currency", "PAYSLIP_ITEM", "state_income_tax", "SUM_YTD"),
+                ]),
+                ("qpp_qpip", "QPP / QPIP (Year-to-Date)", [
+                    ("qpp_contributions", "QPP Contributions", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                    ("qpp2_contributions", "QPP2 Contributions", "currency", "PAYSLIP_ITEM", "cpp2", "SUM_YTD"),
+                    ("qpip_premiums", "QPIP Premiums", "currency", "PAYSLIP_ITEM", "esi", "SUM_YTD"),
+                ]),
+            ],
+        )
+        # Field labels use descriptive names rather than asserting exact RL-1
+        # box letters (A/B/E/etc.) — verify against Revenu Quebec's current
+        # RL-1 form/guide before relying on box lettering specifically.
+
+        print("Seeding Canada ROE (Record of Employment, per-employee, triggered by an interruption of earnings)...")
+        _seed_template(
+            db, template_key="CA-ROE", name="ROE - Record of Employment", report_type="ROE",
+            country="CA", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bn", "Business Number (BN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("earnings", "Insurable Earnings (Year-to-Date, approximation)", [
+                    ("insurable_earnings", "Insurable Earnings", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                    ("ei_premiums_deducted", "EI Premiums Deducted", "currency", "PAYSLIP_ITEM", "esi", "SUM_YTD"),
+                ]),
+            ],
+        )
+        # Block 15C (insurable hours per pay period) is NOT populated — this
+        # codebase has no insurable-hours accumulator wired to reports yet;
+        # see generate_uk_employee_report's own docstring for this
+        # disclosed limitation. The interruption/last-day-worked date is
+        # captured generically as rendered_data.asOfDate, not a template field.
+
+        print("Seeding Canada PD7A (Statement of Account for Current Source Deductions, aggregate/period)...")
+        _seed_template(
+            db, template_key="CA-PD7A", name="PD7A - Statement of Account for Current Source Deductions", report_type="PD7A",
+            country="CA", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bn", "Business Number (BN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("remittance", "Remittance Totals (Period)", [
+                    ("income_tax_withheld", "Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                    ("cpp_employee", "CPP - Employee", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("cpp_employer", "CPP - Employer", "currency", "PAYSLIP_ITEM", "employer_social_security", "SUM_RUN"),
+                    ("cpp2_employee", "CPP2 - Employee", "currency", "PAYSLIP_ITEM", "cpp2", "SUM_RUN"),
+                    ("cpp2_employer", "CPP2 - Employer", "currency", "PAYSLIP_ITEM", "employer_cpp2", "SUM_RUN"),
+                    ("ei_employee", "EI - Employee", "currency", "PAYSLIP_ITEM", "esi", "SUM_RUN"),
+                    ("ei_employer", "EI - Employer", "currency", "PAYSLIP_ITEM", "employer_esi", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # PD7A's own SUM_RUN fields are reinterpreted by generate_ca_pd7a as
+        # "sum across every finalized CA payslip in the given date range,"
+        # the same cross-run reinterpretation Form 138 uses for SUM_RUN
+        # above — service.py's own docstring explains why. totalRemittance
+        # (the actual amount owed) is computed directly in that function,
+        # not as a mapped field, since it's a sum-of-sums no single
+        # PayslipItem column represents.
+
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:
         db.close()

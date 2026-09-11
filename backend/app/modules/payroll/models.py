@@ -230,6 +230,19 @@ class PayrollEmployee(Base):
     # withholding — additive on top of the statutory calculation, never
     # overwriting it (ZP-TAX-CA-2026-001 §18). NULL means "none requested."
     td1_additional_tax = Column(Numeric(12, 2), nullable=True)
+    # Canada-specific: TD1X's REAL purpose — a commission employee's own
+    # estimated annual commission income/expenses, used by CRA's
+    # commission formula (§18/§19: "do not convert to ordinary TD1").
+    # Previously td1_additional_tax above was the only TD1X-adjacent
+    # field, which only covers the flat-additional-withholding half of
+    # TD1X, not the actual commission formula (see service.
+    # calculate_ca_td1x_commission_withholding, a standalone calculator
+    # like the special-payment/retiring-allowance ones, not woven into
+    # the regular per-period calculate() path). NULL means "no TD1X
+    # commission election on file" — the regular TD1 method applies as
+    # today.
+    td1x_estimated_annual_commission = Column(Numeric(12, 2), nullable=True)
+    td1x_estimated_annual_expenses    = Column(Numeric(12, 2), nullable=True)
     # Canada-specific: labour-sponsored funds tax credit (LCF, §6) —
     # the employee's declared LSVCC share purchase amount for the year;
     # the federal credit itself is min(this * 15%, $750), computed in
@@ -1658,6 +1671,11 @@ class TestCertificationRun(Base):
     id                = Column(Integer, primary_key=True, index=True)
     run_at            = Column(DateTime(timezone=True), server_default=func.now())
     triggered_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Generalized to Canada (gap-closure Phase 8, 2026-09-11) — every row
+    # before this column existed was implicitly UK (the harness's only
+    # jurisdiction at the time), so it defaults to "UK" rather than NULL,
+    # keeping every existing run's history correctly labeled.
+    jurisdiction_country = Column(String(10), nullable=False, default="UK", server_default="UK")
 
     real_case_count   = Column(Integer, nullable=False, default=0)
     total_cases       = Column(Integer, nullable=False, default=0)

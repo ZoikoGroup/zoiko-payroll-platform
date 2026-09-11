@@ -77,6 +77,10 @@ class EmployeeCreate(BaseModel):
     # Canada-specific: labour-sponsored funds tax credit declaration
     # (ZP-TAX-CA-2026-001 §6 — see canada.py's _calculate_lsvcc_credit).
     lsvcc_investment_amount: Optional[Decimal] = Field(None, validation_alias="lsvccInvestmentAmount")
+    # Canada-specific: TD1X commission formula inputs (ZP-TAX-CA-2026-001
+    # §18/§19 — see service.calculate_ca_td1x_commission_withholding).
+    td1x_estimated_annual_commission: Optional[Decimal] = Field(None, validation_alias="td1xEstimatedAnnualCommission")
+    td1x_estimated_annual_expenses:   Optional[Decimal] = Field(None, validation_alias="td1xEstimatedAnnualExpenses")
     compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
     # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09).
     address_line1:    Optional[str] = Field(None, validation_alias="addressLine1")
@@ -110,6 +114,8 @@ class EmployeeUpdate(BaseModel):
     ifsc:             Optional[str] = Field(None, validation_alias="ifscCode")
     country_code:     Optional[str] = Field(None, validation_alias="countryCode")
     lsvcc_investment_amount: Optional[Decimal] = Field(None, validation_alias="lsvccInvestmentAmount")
+    td1x_estimated_annual_commission: Optional[Decimal] = Field(None, validation_alias="td1xEstimatedAnnualCommission")
+    td1x_estimated_annual_expenses:   Optional[Decimal] = Field(None, validation_alias="td1xEstimatedAnnualExpenses")
     compliance_fields: Optional[dict] = Field(None, validation_alias="complianceFields")
     address_line1:    Optional[str] = Field(None, validation_alias="addressLine1")
     address_line2:    Optional[str] = Field(None, validation_alias="addressLine2")
@@ -149,6 +155,8 @@ class EmployeeResponse(BaseModel):
     ifsc:            Optional[str] = Field(None, serialization_alias="ifscCode")
     countryCode:     Optional[str] = Field(None, validation_alias="country_code", serialization_alias="countryCode")
     lsvccInvestmentAmount: Optional[Decimal] = Field(None, validation_alias="lsvcc_investment_amount", serialization_alias="lsvccInvestmentAmount")
+    td1xEstimatedAnnualCommission: Optional[Decimal] = Field(None, validation_alias="td1x_estimated_annual_commission", serialization_alias="td1xEstimatedAnnualCommission")
+    td1xEstimatedAnnualExpenses:   Optional[Decimal] = Field(None, validation_alias="td1x_estimated_annual_expenses", serialization_alias="td1xEstimatedAnnualExpenses")
     complianceFields: Optional[dict] = Field(None, validation_alias="compliance_fields", serialization_alias="complianceFields")
     customFields:    Optional[dict] = Field(None, validation_alias="custom_fields", serialization_alias="customFields")
     addressLine1:    Optional[str] = Field(None, validation_alias="address_line1", serialization_alias="addressLine1")
@@ -704,6 +712,80 @@ class GratuityCalculateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# ── Canada: bonus/retroactive-pay special-payment method ────────────────
+# (ZP-TAX-CA-2026-001 §19, gap-closure 2026-09-11) — see service.
+# calculate_ca_special_payment_withholding's own docstring for why
+# regular_annual_pay is required rather than estimated.
+class CASpecialPaymentCalculateRequest(BaseModel):
+    employee_id: int
+    regular_annual_pay: Decimal
+    special_payment_amount: Decimal
+    payroll_date: Optional[date] = None
+
+
+class CARetiringAllowanceCalculateRequest(BaseModel):
+    employee_id: int
+    amount: Decimal
+    payroll_date: Optional[date] = None
+
+
+class CARetiringAllowanceCalculateResponse(BaseModel):
+    amount: Decimal = Field(validation_alias="amount", serialization_alias="amount")
+    ratePct: Decimal = Field(validation_alias="rate_pct", serialization_alias="ratePct")
+    withholding: Decimal = Field(validation_alias="withholding", serialization_alias="withholding")
+    configured: bool = Field(validation_alias="configured", serialization_alias="configured")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CATd1xCommissionCalculateRequest(BaseModel):
+    employee_id: int
+    payroll_date: Optional[date] = None
+    pay_periods_per_year: int = 12
+
+
+class CATd1xCommissionCalculateResponse(BaseModel):
+    estimatedAnnualCommission: Decimal = Field(validation_alias="estimated_annual_commission", serialization_alias="estimatedAnnualCommission")
+    estimatedAnnualExpenses: Decimal = Field(validation_alias="estimated_annual_expenses", serialization_alias="estimatedAnnualExpenses")
+    netAnnualCommissionIncome: Decimal = Field(validation_alias="net_annual_commission_income", serialization_alias="netAnnualCommissionIncome")
+    federalAnnualTax: Decimal = Field(validation_alias="federal_annual_tax", serialization_alias="federalAnnualTax")
+    provincialAnnualTax: Decimal = Field(validation_alias="provincial_annual_tax", serialization_alias="provincialAnnualTax")
+    totalAnnualTax: Decimal = Field(validation_alias="total_annual_tax", serialization_alias="totalAnnualTax")
+    payPeriodsPerYear: int = Field(validation_alias="pay_periods_per_year", serialization_alias="payPeriodsPerYear")
+    perPeriodWithholding: Decimal = Field(validation_alias="per_period_withholding", serialization_alias="perPeriodWithholding")
+    isQuebec: bool = Field(validation_alias="is_quebec", serialization_alias="isQuebec")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CAWsdrfCalculateRequest(BaseModel):
+    period_start: date
+    period_end: date
+    training_expenditure_override: Optional[Decimal] = None
+
+
+class CAWsdrfCalculateResponse(BaseModel):
+    totalQuebecPayroll: Decimal = Field(validation_alias="total_quebec_payroll", serialization_alias="totalQuebecPayroll")
+    wsdrfRatePct: Decimal = Field(validation_alias="wsdrf_rate_pct", serialization_alias="wsdrfRatePct")
+    requiredInvestment: Decimal = Field(validation_alias="required_investment", serialization_alias="requiredInvestment")
+    trainingExpenditure: Decimal = Field(validation_alias="training_expenditure", serialization_alias="trainingExpenditure")
+    shortfall: Decimal = Field(validation_alias="shortfall", serialization_alias="shortfall")
+    employeeCount: int = Field(validation_alias="employee_count", serialization_alias="employeeCount")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CASpecialPaymentCalculateResponse(BaseModel):
+    regularAnnualPay: Decimal = Field(validation_alias="regular_annual_pay", serialization_alias="regularAnnualPay")
+    specialPaymentAmount: Decimal = Field(validation_alias="special_payment_amount", serialization_alias="specialPaymentAmount")
+    federalTaxBefore: Decimal = Field(validation_alias="federal_tax_before", serialization_alias="federalTaxBefore")
+    federalTaxAfter: Decimal = Field(validation_alias="federal_tax_after", serialization_alias="federalTaxAfter")
+    provincialTaxBefore: Decimal = Field(validation_alias="provincial_tax_before", serialization_alias="provincialTaxBefore")
+    provincialTaxAfter: Decimal = Field(validation_alias="provincial_tax_after", serialization_alias="provincialTaxAfter")
+    federalWithholding: Decimal = Field(validation_alias="federal_withholding", serialization_alias="federalWithholding")
+    provincialWithholding: Decimal = Field(validation_alias="provincial_withholding", serialization_alias="provincialWithholding")
+    totalWithholding: Decimal = Field(validation_alias="total_withholding", serialization_alias="totalWithholding")
+    isQuebec: bool = Field(validation_alias="is_quebec", serialization_alias="isQuebec")
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ── Company Holidays ─────────────────────────────────────────────────────
 
 class HolidayCreate(BaseModel):
@@ -1174,10 +1256,15 @@ class RtiFormsSummaryEntry(BaseModel):
     submissions: List[RtiSubmissionEntry] = []
 
 
+class TestCertificationRunRequest(BaseModel):
+    jurisdiction_country: str = "UK"
+
+
 class TestCertificationRunResponse(BaseModel):
     id: int
     runAt: Optional[datetime] = Field(None, validation_alias="run_at", serialization_alias="runAt")
     triggeredById: Optional[int] = Field(None, validation_alias="triggered_by_id", serialization_alias="triggeredById")
+    jurisdictionCountry: str = Field("UK", validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
     realCaseCount: int = Field(0, validation_alias="real_case_count", serialization_alias="realCaseCount")
     totalCases: int = Field(0, validation_alias="total_cases", serialization_alias="totalCases")
     passedCases: int = Field(0, validation_alias="passed_cases", serialization_alias="passedCases")
@@ -1479,6 +1566,21 @@ class IndiaForm123GenerateRequest(BaseModel):
     report_template_id: int
     employee_id: int
     tax_year: str  # e.g. "2026-27"
+
+
+# ── Canada: T4/RL-1/ROE (per-employee) + PD7A (per-period) generation ───
+# (ZP-TAX-CA-2026-001 gap-closure, forms/reports phase). T4/RL-1/ROE reuse
+# UKEmployeeReportGenerateRequest as-is (report_template_id/employee_id/
+# as_of_date) — see service.generate_uk_employee_report's own docstring
+# for why that function was never actually UK-specific. PD7A is genuinely
+# period-based across possibly several PayrollRuns (like India's Form
+# 138), but CRA remittance periods are monthly/quarterly/threshold-based
+# rather than a fixed FY-quarter scheme, so it takes an explicit date
+# range instead of a reporting_year/period_key pair.
+class CAPd7aGenerateRequest(BaseModel):
+    report_template_id: int
+    period_start: date
+    period_end: date
 
 
 class RtiSubmissionCreate(BaseModel):

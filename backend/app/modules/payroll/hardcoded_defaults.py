@@ -983,6 +983,13 @@ _CA_QUEBEC_FEDERAL_ABATEMENT_PCT = Decimal("16.5")
 _CA_BEYOND_PROVINCE_SURTAX_PCT = Decimal("48")
 _CA_LSVCC_CREDIT_RATE = Decimal("15")
 _CA_LSVCC_CREDIT_MAX = Decimal("750")
+# WSDRF (§13/§15, gap-closure Phase 7) — the document's own "generally
+# based on 1% workforce-skills investment requirement" figure, DB-
+# configurable like every other rate (state_rate_map "wsdrf_rate"),
+# this is only the fallback default. Computed by service.
+# calculate_ca_wsdrf_shortfall, a standalone annual calculator, never
+# wired into engine/countries/canada.py's calculate().
+_CA_WSDRF_RATE_PCT = Decimal("1")
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1051,6 +1058,46 @@ _US_STATE_TAX_RATES = {
         source_title="2026 Kentucky Withholding Tax Formula 42A003 (TCF)",
         rate_pct=Decimal("3.50"),
         allowance_by_filing_status={None: Decimal("3360.00")},
+    ),
+    # Incremental build-out (ZP-TAX-US-2026-001 §4 Matrix): the five
+    # flat-rate states the document gives a complete literal percentage for.
+    # Every new state has allowance_by_filing_status={} because the document
+    # says None for all filing statuses (no state standard deduction row is
+    # seeded — the full gross is taxed, same as if the row were configured
+    # to 0). AZ's 2.0% is the document's stated no-A-4-form default (the
+    # statutory per-employee choice spans 0.5%-3.5%, but the engine applies
+    # ONE rate — the document's 2.0%). All five read behind the same
+    # _US_STATE_TAX_ENABLED_STATES switch; enabled immediately below in
+    # shared.py.
+    "AZ": dict(
+        agency="Arizona DOR",
+        source_title="Arizona Form A-4 — statutory flat withholding default (ZP-TAX-US-2026-001 §4 Matrix)",
+        rate_pct=Decimal("2.00"),
+        allowance_by_filing_status={},
+    ),
+    "IL": dict(
+        agency="Illinois DOR",
+        source_title="IL-700-T (2026) percentage method (ZP-TAX-US-2026-001 §4 Matrix)",
+        rate_pct=Decimal("4.95"),
+        allowance_by_filing_status={},
+    ),
+    "MA": dict(
+        agency="Massachusetts DOR",
+        source_title="Massachusetts Circular M — 5.0% base withholding (ZP-TAX-US-2026-001 §4 Matrix)",
+        rate_pct=Decimal("5.00"),
+        allowance_by_filing_status={},
+    ),
+    "MI": dict(
+        agency="Michigan Treasury",
+        source_title="Michigan Form 446 (2026) — ZP-TAX-US-2026-001 §4 Matrix/Appendix A",
+        rate_pct=Decimal("4.25"),
+        allowance_by_filing_status={},
+    ),
+    "PA": dict(
+        agency="Pennsylvania DOR",
+        source_title="Flat state PIT withholding rate (ZP-TAX-US-2026-001 §4 Matrix)",
+        rate_pct=Decimal("3.07"),
+        allowance_by_filing_status={},
     ),
 }
 
@@ -1152,20 +1199,22 @@ _US_STATE_HEADCOUNT_PROGRAMS = {
     #
     # Only states where the document gives a COMPLETE numeric threshold
     # AND a complete employee/employer split are included:
-    # - Massachusetts: gives the 25-employee threshold but explicitly says
-    #   "contribution split must be configured" — no split given.
+    # - Massachusetts: added 2026-09-11 — the document's split (EE 0.44% /
+    #   ER 0.44% at 25+) is complete, so it is no longer deferred (see the
+    #   MA entry below).
     # - Minnesota: gives "large" vs "qualifying small employer" rate
     #   splits but NO numeric headcount threshold distinguishing them.
     # - Oregon: gives the large-employer split (60/40) but no numeric
     #   threshold defining "large", and no split at all for its
     #   small-employer exception.
-    # All three are deferred — building them would require inventing a
+    # MN/OR remain deferred — building them would require inventing a
     # number the source document doesn't give.
     "CO": {
         "famli": dict(
             agency="Colorado CDLE", source_title="FAMLI program",
             employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"),
             employer_headcount_min=10, employer_component_code="FAMLI",
+            wage_cap=Decimal("184500.00"),
         ),
     },
     "ME": {
@@ -1187,6 +1236,22 @@ _US_STATE_HEADCOUNT_PROGRAMS = {
             employer_headcount_min=50, employer_component_code="PFML",
         ),
     },
+    # Massachusetts PFML (ZP-TAX-US-2026-001 §5) — added 2026-09-11 with
+    # the incremental flat-state build-out. The document gives a complete
+    # split: total 0.88% (medical 0.61% + family 0.27% per the program's
+    # own breakdown), employee 0.44% unconditional, employer 0.44% at 25+
+    # covered individuals. The <25 case ("no employer share required") is
+    # the absence-of-gate's normal behavior — the employer's own
+    # covered_employee_count in EmployerTaxProfile is the gate. The
+    # document lists no wage cap ("annual program wage limit" only), so no
+    # wage_cap companion row is seeded.
+    "MA": {
+        "ma_pfml": dict(
+            agency="Massachusetts DOR", source_title="Massachusetts PFML — 2026 contribution rates",
+            employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"),
+            employer_headcount_min=25, employer_component_code="MA_PFML",
+        ),
+    },
 }
 
 # Delaware Paid Leave (ZP-TAX-US-2026-001 §5) — a genuinely different
@@ -1204,6 +1269,7 @@ _US_DE_PAID_LEAVE = dict(
     parental_only_rate_pct=Decimal("0.32"), parental_only_min=10,
     full_coverage_rate_pct=Decimal("0.80"), full_coverage_min=25,
     employer_component_code="PAID_LEAVE",
+    wage_cap=Decimal("184500.00"),
 )
 
 _CA_PROVINCIAL_BRACKETS = {

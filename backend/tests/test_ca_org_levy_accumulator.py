@@ -33,6 +33,7 @@ def _restore_org_levy_switch():
 
 
 def test_load_ca_org_levy_ytd_empty_when_switch_off(db, organization):
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     assert "CA" not in shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES
     result = service._load_ca_org_levy_ytd(db, organization.id, date(2026, 6, 1), ("on_eht",))
     assert result == {}

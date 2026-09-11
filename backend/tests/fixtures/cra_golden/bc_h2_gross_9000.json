@@ -1,0 +1,40 @@
+{
+  "description": "British Columbia employee at $9,000/month, paid 2026-08-15 (H2) -- exercises the genuine BC H2 override this document calls out (§9: 6.14% prorated lowest rate + $805 basic tax reduction under Option 1, vs. the annual 5.60%/$690 Option 2 values). Expands golden-test coverage beyond the single Ontario/Quebec/federal-only cases toward §24's 'BC H2' test family.",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal brackets/BPAF/CEA), Section 8 (BC 2026 brackets: 50,363/100,728/115,648/140,430/190,405/265,545 at 5.60/7.70/10.50/12.29/14.70/16.80/20.50%, BC basic amount $13,216), Section 10-11 (CPP/EI). Recomputed by running the real engine (build_context/calculate_payroll), not hand-derived.",
+  "context": {
+    "gross": "9000.00",
+    "country": "CA",
+    "pay_date": "2026-08-15",
+    "work_state": "BC",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ],
+    "state_rate_map": {
+      "provincial_bpa": {"flat_amount": "13216"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "50363", "rate_pct": "5.60"},
+      {"min_amount": "50363", "max_amount": "100728", "rate_pct": "7.70"},
+      {"min_amount": "100728", "max_amount": "115648", "rate_pct": "10.50"},
+      {"min_amount": "115648", "max_amount": "140430", "rate_pct": "12.29"},
+      {"min_amount": "140430", "max_amount": "190405", "rate_pct": "14.70"},
+      {"min_amount": "190405", "max_amount": "265545", "rate_pct": "16.80"},
+      {"min_amount": "265545", "max_amount": null, "rate_pct": "20.50"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "1251.24",
+    "state_income_tax": "560.16",
+    "tds": "1811.40",
+    "social_security": "352.54",
+    "employee_esi": "93.59"
+  }
+}

@@ -40,6 +40,13 @@ const EMPTY_FORM = {
   addressCounty: "",
   addressPostcode: "",
   starterDeclaration: "",
+  // Canada TD1X (ZP-TAX-CA-2026-001 §18/§19) — real top-level
+  // PayrollEmployee columns (like UK's address fields above), not
+  // complianceFields entries, since the CRA commission formula needs
+  // typed Decimal inputs rather than employee_validation.py's generic
+  // string-pattern validation.
+  td1xEstimatedAnnualCommission: "",
+  td1xEstimatedAnnualExpenses: "",
 };
 
 function Field({ label, children, error }) {
@@ -119,6 +126,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
     try {
       const isIndia = form.countryCode === "IN";
       const isUk = form.countryCode === "UK";
+      const isCanada = form.countryCode === "CA";
       const payload = {
         ...form,
         ctc: Number(form.ctc),
@@ -143,6 +151,10 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         addressCounty: isUk && form.addressCounty !== "" ? form.addressCounty : null,
         addressPostcode: isUk && form.addressPostcode !== "" ? form.addressPostcode : null,
         starterDeclaration: isUk && form.starterDeclaration !== "" ? form.starterDeclaration : null,
+        // TD1X commission fields are Canada's own dedicated columns —
+        // same "null for every other jurisdiction" convention as above.
+        td1xEstimatedAnnualCommission: isCanada && form.td1xEstimatedAnnualCommission !== "" ? Number(form.td1xEstimatedAnnualCommission) : null,
+        td1xEstimatedAnnualExpenses: isCanada && form.td1xEstimatedAnnualExpenses !== "" ? Number(form.td1xEstimatedAnnualExpenses) : null,
       };
       const saved = isEdit ? await updateEmployee(employee.id, payload) : await createEmployee(payload);
       onSaved?.(saved);
@@ -311,6 +323,31 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
                 <option value="B">B &mdash; Only job, but had another since last 6 April</option>
                 <option value="C">C &mdash; Has another job or pension</option>
               </select>
+            </Field>
+          </div>
+        </div>
+      )}
+
+      {form.countryCode === "CA" && (
+        <div className="border-t border-border pt-6">
+          <h3 className="text-[15px] font-bold text-foreground">TD1X &mdash; commission employees</h3>
+          <p className="mt-1 text-[12px] text-foreground-muted">
+            Only applies if this employee has filed a TD1X commission declaration. Leave blank for a regular (non-commission) employee.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Estimated annual commission income">
+              <input
+                type="number" min="0" step="0.01" className={inputClass}
+                value={form.td1xEstimatedAnnualCommission}
+                onChange={(e) => update("td1xEstimatedAnnualCommission", e.target.value)}
+              />
+            </Field>
+            <Field label="Estimated annual commission expenses">
+              <input
+                type="number" min="0" step="0.01" className={inputClass}
+                value={form.td1xEstimatedAnnualExpenses}
+                onChange={(e) => update("td1xEstimatedAnnualExpenses", e.target.value)}
+              />
             </Field>
           </div>
         </div>

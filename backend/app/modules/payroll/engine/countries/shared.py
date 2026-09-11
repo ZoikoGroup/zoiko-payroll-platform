@@ -117,7 +117,19 @@ _YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK"}
 #      appr_levy_rate/appr_levy_allowance/empl_allowance_cap are
 #      actually configured for the org), so this is safe to enable
 #      before any org has configured those rates.
-_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK"}
+#
+# CA — enabled 2026-09-11 (gap-closure Phase 1 completion). Found this
+#      same day: service.py's _ca_org_levy_read_inputs/_load_ca_org_levy_
+#      ytd gate ALL FIVE org-banded levies (Ontario EHT, BC EHT, Manitoba
+#      HE Levy, NL HAPSET, Quebec HSF) on this switch, not just the
+#      associated-group sharing feature that documented needing it — so
+#      despite Phase 2's rate data and Phases 6/7's mechanisms all being
+#      built, every one of these levies had silently stayed $0 for any
+#      employee this whole time. 0 CA employees exist on the live DB as
+#      of this date, so flipping this changes no already-generated
+#      payslip; it takes effect once a real ON/BC/MB/NL/QC employee's
+#      payslip is generated.
+_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "CA"}
 
 # Per-country rollout switch for the CRA-correct CREDIT method of
 # applying "amounts" (federal BPAF, provincial BPA, Quebec BPA — and any
@@ -139,12 +151,12 @@ _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK"}
 # out deliberately rather than silently changing every existing
 # Canadian payslip's federal/provincial/Quebec tax the moment it ships).
 #
-# CA — not yet enabled. Flipping this WILL change the actual withheld
-#      tax amount on every future Canadian payslip once flipped; this is
-#      a real payroll/compliance decision, not a pure engineering one —
-#      needs an explicit go-ahead, ideally at a period boundary so it
-#      doesn't retroactively disagree with already-generated payslips.
-_CA_CREDIT_METHOD_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead).
+#      A read-only DB check the same day confirmed 0 CA employees and 0
+#      CA payroll runs exist on the live DB, so flipping this changes no
+#      already-generated payslip; it takes effect for the first real CA
+#      employee/run going forward.
+_CA_CREDIT_METHOD_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for Manitoba's and Yukon's own DYNAMIC
 # income-tapered Basic Personal Amount formulas (§8's "Dynamic basic
@@ -156,8 +168,9 @@ _CA_CREDIT_METHOD_ENABLED_COUNTRIES: set[str] = set()
 # moment this ships, if it weren't gated — this switch exists so that
 # never happens without a deliberate decision.
 #
-# CA — not yet enabled.
-_CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead;
+#      0 CA employees/runs exist on the live DB as of that date).
+_CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for CPP/QPP's mandatory age-18/age-70
 # contribution window (§10's "Age 18"/"Age 70" controls). No
@@ -171,8 +184,11 @@ _CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES: set[str] = set()
 # names the controls but doesn't spell out CRA's exact month-boundary
 # administrative rule).
 #
-# CA — not yet enabled.
-_CA_AGE_GATED_CPP_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead).
+#      Still a no-op today: 0 CA employees exist, and no date_of_birth
+#      backfill has been run for any country, so ctx.date_of_birth stays
+#      None regardless. Takes effect only once a CA employee's DOB is set.
+_CA_AGE_GATED_CPP_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for CPP/QPP first-layer BASE (4.95%) vs.
 # FIRST-ADDITIONAL (1.00%) traceability (AC-11: "CPP first-layer base
@@ -189,8 +205,10 @@ _CA_AGE_GATED_CPP_ENABLED_COUNTRIES: set[str] = set()
 # never configured or are configured inconsistently with the combined
 # row — the breakdown just stays $0/$0 until they exist.
 #
-# CA — not yet enabled.
-_CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead).
+#      Purely informational per this switch's own docstring above — cannot
+#      change any actual withheld amount regardless of employee count.
+_CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for the federal K2/K3 credits — CRA's
 # per-pay-period credit for CPP/QPP and EI/QPIP premiums ACTUALLY
@@ -208,8 +226,11 @@ _CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES: set[str] = set()
 # transfer" control) without any special-case code: the credit is based
 # on whatever was actually withheld this period, regardless of plan.
 #
-# CA — not yet enabled.
-_CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead,
+#      alongside _CA_CREDIT_METHOD_ENABLED_COUNTRIES above, whose R×A
+#      formula this only has any effect within). 0 CA employees/runs exist
+#      on the live DB as of that date.
+_CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for the EI/QPIP employer 1.4x-default
 # premium mechanism (§11: "Default employer EI is 1.4 × employee
@@ -227,8 +248,9 @@ _CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES: set[str] = set()
 # is federal, not provincial — see service.py's _resolve_employee_calc_
 # inputs/add_payslip_item).
 #
-# CA — not yet enabled.
-_CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead;
+#      0 CA employees/runs exist on the live DB as of that date).
+_CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for the labour-sponsored funds tax credit
 # (LCF, §6: "Labour-sponsored fund credit rate / max: 15% / $750 — use
@@ -238,8 +260,10 @@ _CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES: set[str] = set()
 # has entered employee LSVCC declarations, so backfilling that data
 # ahead of time changes nothing until this is deliberately flipped.
 #
-# CA — not yet enabled.
-_CA_LSVCC_CREDIT_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead).
+#      Still a no-op today: 0 CA employees exist and no
+#      lsvcc_investment_amount data entry path exists yet.
+_CA_LSVCC_CREDIT_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for the beyond-province/outside-Canada
 # federal surtax (§6: "Beyond-province/outside-Canada surtax factor: 48%
@@ -255,8 +279,12 @@ _CA_LSVCC_CREDIT_ENABLED_COUNTRIES: set[str] = set()
 # through any AUTOMATED path yet — an org could always have typed it in
 # directly.
 #
-# CA — not yet enabled.
-_CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead).
+#      A read-only DB check the same day confirmed 0 CA employees exist
+#      at all (let alone one with work_state == "XP"), so this is a no-op
+#      today; takes effect only for a future employee explicitly assigned
+#      to CA-XP.
+_CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for BC's "basic tax reduction" (§9's
 # mid-year override table: annual $690 / H1 $575 / H2 $805). Genuinely
@@ -268,8 +296,99 @@ _CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES: set[str] = set()
 # _calculate_provincial_tax_ca for the exact comment and the separate,
 # pre-existing H1/H2-resolution gap this also surfaced).
 #
-# CA — not yet enabled.
-_CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = set()
+# CA — enabled 2026-09-11 (gap-closure Phase 1, Venu's explicit go-ahead;
+#      0 CA employees/runs exist on the live DB as of that date).
+_CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = {"CA"}
+
+# Per-country rollout switch for Canada's Taxability Matrix (ZP-TAX-CA-
+# 2026-001 §17/AC-17, gap-closure Phase 5, 2026-09-11) — per-program
+# (federal tax/provincial tax/CPP/EI) earning-component classification via
+# TaxabilityRule, replacing today's single ctx.gross figure feeding all
+# four. While OFF, every program keeps using ctx.gross exactly as today,
+# regardless of any TaxabilityRule rows an admin has entered — same
+# "mechanism can exist and be configured without changing live output
+# until deliberately enabled" contract every other switch in this file
+# uses. Even once ON, a fully unconfigured org sees IDENTICAL numbers
+# (canada.py's _resolve_ca_taxability defaults every component to
+# included) — this only changes a payslip once an admin has entered an
+# actual override row AND enabled this switch.
+#
+# CA — enabled 2026-09-11 (gap-closure completion, Venu's explicit go-
+#      ahead). Even now, a fully unconfigured org sees IDENTICAL numbers
+#      (canada.py's _resolve_ca_taxability defaults every component to
+#      included) — this only changes a payslip once an admin has entered
+#      an actual TaxabilityRule override row, which none has today.
+_CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"CA"}
+
+# Per-country rollout switch for Canada's associated-employer-group
+# exemption sharing (ZP-TAX-CA-2026-001 §15, gap-closure Phase 6,
+# 2026-09-11) — Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET's
+# "associated employers share exemption." Reuses Organization.
+# connected_group_code (the same field UK's Apprenticeship Levy/
+# Employment Allowance sharing already uses — genuinely country-agnostic
+# despite its name) and the existing _ORG_LEVY_ACCUMULATOR_ENABLED_
+# COUNTRIES accumulator, layered with two additive changes gated
+# TOGETHER behind this one switch: (1) the org-level YTD "before" figure
+# sums across every org sharing this org's connected_group_code instead
+# of reading this org alone, and (2) each levy's exemption threshold is
+# scaled by this org's own elected allocation share (EmployerTaxProfile,
+# component_code "<LEVY>_EXEMPTION_ALLOCATION_PCT" — see service.py's
+# _ca_levy_exemption_allocation_pct) instead of assuming it gets the
+# full exemption. While OFF, or for any org with no connected_group_code
+# set (every org today — no admin UI sets it yet), both changes are
+# complete no-ops: a "group of one" sums to exactly this org's own
+# total, and an unconfigured allocation defaults to 100%.
+#
+# CA — enabled 2026-09-11 (gap-closure completion, Venu's explicit go-
+# ahead), alongside _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES above now
+# also including "CA" (required for either change here to have any
+# effect at all). No org has Organization.connected_group_code set today
+# ("every org today" per this comment's own original text), so an org
+# sums across a "group of one" -- unchanged from reading its own total
+# alone -- until an admin actually groups two orgs together.
+_CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES: set[str] = {"CA"}
+
+# Per-country rollout switch for Quebec's temporary HSF sector exemption
+# (ZP-TAX-CA-2026-001 §15, gap-closure Phase 7, 2026-09-11) — "Eligibility
+# for qualifying agriculture/forestry/fishing businesses is a separately
+# effective-dated employer eligibility rule, never a default rate
+# change." Implemented as an effective-dated EmployerTaxProfile row
+# (component_code "QC_HSF_TEMP_SECTOR_EXEMPTION") that, while active,
+# reclassifies the employer as "PRIMARY_MANUFACTURING" for HSF rate
+# purposes for that window — reusing the ALREADY-configured, ALREADY-
+# sourced primary/manufacturing HSF rate rather than inventing a new
+# "exemption rate" the document never actually gives a number for. No
+# row configured (every org today) means no reclassification — unchanged.
+#
+# CA — enabled 2026-09-11 (gap-closure completion, Venu's explicit go-
+#      ahead). No row configured for any org today, so this stays a
+#      no-op until an admin actually enters the effective-dated
+#      EmployerTaxProfile eligibility row.
+_CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES: set[str] = {"CA"}
+
+# Per-country rollout switch for CRA's Option 2 (cumulative averaging)
+# income tax withholding method (ZP-TAX-CA-2026-001 §7/AC — gap-closure
+# Phase 9, 2026-09-11) — a genuinely DIFFERENT federal/provincial income
+# tax calculation methodology from this engine's only-ever-implemented
+# Option 1 (flat period x periods-per-year annualization), not a
+# correction of it. Gates service.py's _load_ca_option2_ytd, which is
+# what actually populates canada.py's ctx.option2_* fields — while OFF
+# (default), that reader always returns {}, every ctx.option2_* field
+# stays None, and canada.py's calculate() takes its EXACT existing
+# Option 1 branch, byte-for-byte unchanged, for every employee/org. This
+# is an employer-level METHOD CHOICE (CRA requires consistent use, not a
+# per-payslip toggle) — enabling it is a real, deliberate decision by
+# Venu, not a small correctness fix, so it gets the same "confirm before
+# deploying past dev/test" caution as every other switch in this file,
+# more so given it changes HOW tax is computed, not just a rate/threshold
+# within the existing method.
+#
+# CA — enabled 2026-09-11 (gap-closure completion, Venu's explicit go-
+#      ahead as a full employer-level method choice, not a correctness
+#      fix — 0 CA employees exist on the live DB, so this takes effect
+#      as the default method for the first real CA employee onward, not
+#      retroactively against anything already generated).
+_CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES: set[str] = {"CA"}
 
 # Per-country rollout switch for India's statutory EPF wage ceiling
 # (ZP-TAX-IN-2026-27-001 §9.1: "Current mandatory wage ceiling INR
@@ -504,7 +623,15 @@ _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES: set[str] = {"UK"}
 # CO/KY — enabled 2026-09-07 (build-out per ZP-TAX-US-2026-001): zero live
 # US employees existed in the database at enable time, so this was purely
 # additive with no real-payslip effect.
-_US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY"}
+#
+# AZ/IL/MA/MI/PA — enabled 2026-09-11 (incremental flat-rate build-out per
+# ZP-TAX-US-2026-001 §4 Matrix): zero live US organizations were in the
+# database at enable time, and the document gives each a complete literal
+# flat withholding percentage (AZ 2.0% no-A-4 default, IL 4.95%, MA 5.0%,
+# MI 4.25%, PA 3.07%) with no state standard deduction, so seeding a single
+# FLAT_RATE TaxSlab and enabling each here is fully determined by the
+# document with no invented numbers.
+_US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY", "AZ", "IL", "MA", "MI", "PA"}
 
 # Per-state rollout switch for a state's own statutory payroll programs
 # (SDI/PFML/Paid Leave/TDI/etc., ZP-TAX-US-2026-001 §5) beyond plain income
@@ -520,10 +647,12 @@ _US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY"}
 # at enable time, so this was purely additive with no real-payslip effect.
 # CO/DE/ME added the same day (Phase 3C, headcount-conditional programs —
 # see hardcoded_defaults.py's _US_STATE_HEADCOUNT_PROGRAMS/_US_DE_PAID_LEAVE),
-# same zero-live-employees reasoning. Massachusetts/Minnesota/Oregon are
-# deliberately NOT added — the source document doesn't give a complete
-# numeric threshold and/or employee/employer split for those three.
-_US_STATE_PROGRAM_ENABLED_STATES: set[str] = {"CA", "CT", "DC", "NY", "RI", "WA", "NJ", "CO", "DE", "ME"}
+# same zero-live-employees reasoning. Massachusetts added 2026-09-11 with
+# the flat-state build-out — the document's MA PFML split (EE 0.44% / ER
+# 0.44% at 25+ covered) is complete. Minnesota/Oregon are deliberately NOT
+# added — the source document doesn't give a complete numeric threshold
+# and/or employee/employer split for those two.
+_US_STATE_PROGRAM_ENABLED_STATES: set[str] = {"CA", "CT", "DC", "NY", "RI", "WA", "NJ", "CO", "DE", "ME", "MA"}
 
 # ── Pay frequency (generic — any country's calculator may use this) ────────
 # PayrollContext.pay_frequency defaults to "Monthly", so
@@ -536,6 +665,19 @@ PERIODS_PER_YEAR = {
     "Fortnightly": Decimal("26"),
     "FourWeekly": Decimal("13"),
     "Monthly": MONTHS_PER_YEAR,
+    # Added for Canada's Option 2 cumulative averaging (gap-closure Phase
+    # 9, 2026-09-11) — the frontend's own pay-schedule field
+    # (RunDetailPage.jsx) offers "Bi-Weekly"/"Semi-Monthly" literally,
+    # neither of which matched any existing key here (both would have
+    # silently fallen back to Monthly/12 via this function's own
+    # default). Both spellings kept (with/without the hyphen) since nothing
+    # in this codebase normalizes the string before it reaches here.
+    # Semi-Monthly (24/year, twice a month) is genuinely distinct from
+    # Bi-Weekly (26/year, every two weeks) — never conflate the two.
+    "BiWeekly": Decimal("26"),
+    "Bi-Weekly": Decimal("26"),
+    "SemiMonthly": Decimal("24"),
+    "Semi-Monthly": Decimal("24"),
 }
 
 
@@ -789,9 +931,17 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
     # bug (that filter missed the two per-frequency variants) proved a
     # caller CAN forget, and this function is the one place that would
     # otherwise silently sum them in as bogus income-tax brackets.
+    # CA_RETIRING_ALLOWANCE_BAND (Canada's retiring-allowance/severance
+    # lump-sum withholding rate table, ZP-TAX-CA-2026-001 §19) is the same
+    # "ONE flat rate for the whole amount, not a marginal bracket sum"
+    # shape as ON_EHT_BAND — see engine/countries/canada.py's
+    # _retiring_allowance_rate_for_amount, which reads these rows directly.
     bracket_slabs = [
         s for s in slabs
-        if getattr(s, "rule_type", None) not in ("SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY")
+        if getattr(s, "rule_type", None) not in (
+            "SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY",
+            "CA_RETIRING_ALLOWANCE_BAND",
+        )
     ]
 
     filing_status_tagged = [s for s in bracket_slabs if getattr(s, "filing_status", None) is not None]

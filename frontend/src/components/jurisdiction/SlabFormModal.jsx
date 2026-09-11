@@ -22,7 +22,14 @@ const RULE_TYPE_OPTIONS_BY_COUNTRY = {
   // bracket sum like MARGINAL_RATE — see engine/countries/canada.py's
   // _on_eht_rate_for_total (ZP-TAX-CA-2026-001 §15/§16). State should be
   // set to "ON" on each band row, same as any other provincial slab.
-  CA: ["MARGINAL_RATE", "ON_EHT_BAND", "FORMULA"],
+  // CA_RETIRING_ALLOWANCE_BAND: CRA's lump-sum retiring-allowance/
+  // severance withholding rate table — same "ONE flat rate for the
+  // whole amount, not a marginal bracket sum" shape as ON_EHT_BAND, read
+  // by engine/countries/canada.py's _retiring_allowance_rate_for_amount
+  // (ZP-TAX-CA-2026-001 §19). Leave State blank (federal-only) and
+  // Jurisdiction State as country-level — this table has no hardcoded
+  // fallback, so it stays 0% until real CRA-sourced bands are entered.
+  CA: ["MARGINAL_RATE", "ON_EHT_BAND", "CA_RETIRING_ALLOWANCE_BAND", "FORMULA"],
 };
 const DEFAULT_RULE_TYPE_OPTIONS = ["MARGINAL_RATE", "FORMULA"];
 const NI_CATEGORIES = ["A", "B", "C", "D", "E", "F", "H", "I", "J", "K", "L", "M", "N", "S", "V", "Z"];

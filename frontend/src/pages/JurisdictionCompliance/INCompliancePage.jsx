@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Plus, Pencil, Trash2, X, Percent } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Percent, BookOpen, CalendarClock, Landmark, FileText } from "lucide-react";
 import Modal from "../../components/Modal";
 import { upsertCanonicalContributionRate, upsertCanonicalTaxSlab } from "../../service/superAdminService";
 import { inputClass, labelClass } from "../../components/jurisdiction/constants";
@@ -9,6 +9,10 @@ import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout
 import INTaxComponentsTab from "../../components/jurisdiction/india/INTaxComponentsTab";
 import INStateLocalReadinessTab from "../../components/jurisdiction/india/INStateLocalReadinessTab";
 import INCodeWagesTab from "../../components/jurisdiction/india/INCodeWagesTab";
+import INSourceEvidenceTab from "../../components/jurisdiction/india/INSourceEvidenceTab";
+import INComplianceCalendarTab from "../../components/jurisdiction/india/INComplianceCalendarTab";
+import INGratuityTab from "../../components/jurisdiction/india/INGratuityTab";
+import INSalaryTdsFormsTab from "../../components/jurisdiction/india/INSalaryTdsFormsTab";
 import { sanitizeNumeric } from "../../components/jurisdiction/india/inComponentConfig";
 
 // India — everything country-specific for this jurisdiction lives in this
@@ -788,10 +792,41 @@ const indiaComplianceConfig = {
     },
     {
       key: "codeWages",
-      label: "Code Wages",
+      label: "Earnings & Taxability",
       icon: Percent,
       isVisible: (pack) => !pack.jurisdictionState,
       render: () => <INCodeWagesTab />,
+    },
+    // Not pack-scoped data (platform-wide/org-wide registries), shown
+    // regardless of which pack is currently selected — same reasoning as
+    // "readiness" above.
+    {
+      key: "sourceEvidence",
+      label: "Source Evidence",
+      icon: BookOpen,
+      isVisible: () => true,
+      render: () => <INSourceEvidenceTab />,
+    },
+    {
+      key: "complianceCalendar",
+      label: "Compliance Calendar",
+      icon: CalendarClock,
+      isVisible: () => true,
+      render: () => <INComplianceCalendarTab />,
+    },
+    {
+      key: "gratuity",
+      label: "Gratuity",
+      icon: Landmark,
+      isVisible: (pack) => !pack.jurisdictionState,
+      render: ({ rates }) => <INGratuityTab rates={rates} />,
+    },
+    {
+      key: "salaryTdsForms",
+      label: "Salary TDS / Forms",
+      icon: FileText,
+      isVisible: () => true,
+      render: () => <INSalaryTdsFormsTab />,
     },
   ],
   hiddenTabs: ["rates"],

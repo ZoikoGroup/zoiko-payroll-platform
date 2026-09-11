@@ -72,6 +72,7 @@ from fastapi import HTTPException, status as http_status
 from app.modules.payroll.engine.standard import MONTHS_PER_YEAR
 from app.modules.payroll.engine.countries.shared import (
     _YTD_ACCUMULATOR_ENABLED_COUNTRIES, _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES,
+    _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES, _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES,
     _UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES, _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
 )
 
@@ -174,6 +175,24 @@ def get_contribution_rates(
     query = db.query(ContributionRate)
     query = _apply_org_filter(query, ContributionRate, organization_id)
     query = query.filter(ContributionRate.jurisdiction_country == country)
+    # Country-level ONLY (real bug fix, 2026-09-11 — found while building
+    # a new CA calculator, see [[ca_special_payment_phase_and_resolver_bug_found]]
+    # in this session's own memory). This function's own architectural
+    # counterpart, get_state_scoped_config, is the SEPARATE, ADDITIVE
+    # lookup for province/state-level rows — without this filter, any
+    # province/state-tagged row for this country (e.g. a province's own
+    # ContributionRate) would leak into what is supposed to be the
+    # federal-only rate_map, which is harmless here (rate_map is a
+    # component_key-keyed dict; a stray provincial key never collides
+    # with a federal lookup key) but IS harmful for the identical leak in
+    # get_tax_slabs below (a flat LIST fed straight into a marginal-
+    # bracket sum, where a leaked provincial bracket row gets silently
+    # summed into federal tax). Fixed in both functions together for
+    # consistency, even though only get_tax_slabs was ever provably
+    # wrong. Matches EITHER NULL or "" for "no state" (both conventions
+    # exist elsewhere in this schema) — never excludes a legitimate
+    # country-level row.
+    query = query.filter(or_(ContributionRate.jurisdiction_state.is_(None), ContributionRate.jurisdiction_state == ""))
     if filing_status:
         # Filing-status-agnostic rows always apply, a row tagged for THIS
         # filing status also applies and wins the dict collapse, rows
@@ -208,7 +227,10 @@ def get_contribution_rates(
             _seed_contribution_rates(db, organization_id, country)
         rows = (
             db.query(ContributionRate)
-            .filter(ContributionRate.organization_id == organization_id, ContributionRate.jurisdiction_country == country)
+            .filter(
+                ContributionRate.organization_id == organization_id, ContributionRate.jurisdiction_country == country,
+                or_(ContributionRate.jurisdiction_state.is_(None), ContributionRate.jurisdiction_state == ""),
+            )
             .order_by(ContributionRate.sort_order)
             .all()
         )
@@ -245,6 +267,18 @@ def get_tax_slabs(db: Session, organization_id: int = None, *, country: str, tax
     query = db.query(TaxSlab)
     query = _apply_org_filter(query, TaxSlab, organization_id)
     query = query.filter(TaxSlab.jurisdiction_country == country)
+    # Country-level ONLY — real bug fix, 2026-09-11: without this, any
+    # province/state-tagged TaxSlab row for this country (e.g. a
+    # province's own income-tax brackets) leaks into what's supposed to
+    # be the federal-only `slabs` list, which then gets summed as extra
+    # marginal brackets by _calculate_annual_tax — reproduced directly by
+    # seeding a federal + an "ON" row for the same org and observing
+    # federal tax computed at the SUM of both rates. get_state_scoped_
+    # config is this function's own architectural counterpart for
+    # province/state-level rows; never fold them back in here. See
+    # get_contribution_rates' identical fix above for why both functions
+    # needed this together.
+    query = query.filter(or_(TaxSlab.jurisdiction_state.is_(None), TaxSlab.jurisdiction_state == ""))
     rows = query.order_by(TaxSlab.sort_order).all()
     if tax_regime:
         # Same regime-agnostic-plus-specific pattern as get_contribution_rates
@@ -261,7 +295,10 @@ def get_tax_slabs(db: Session, organization_id: int = None, *, country: str, tax
             _seed_tax_slabs(db, organization_id, country)
         rows = (
             db.query(TaxSlab)
-            .filter(TaxSlab.organization_id == organization_id, TaxSlab.jurisdiction_country == country)
+            .filter(
+                TaxSlab.organization_id == organization_id, TaxSlab.jurisdiction_country == country,
+                or_(TaxSlab.jurisdiction_state.is_(None), TaxSlab.jurisdiction_state == ""),
+            )
             .order_by(TaxSlab.sort_order)
             .all()
         )
@@ -884,6 +921,98 @@ def _pack_to_tax_snapshot(rates, slabs, pack) -> dict:
     return {"tax_policy_pack_id": pack.id, "tax_policy_version": pack.version, "tax_rule_snapshot": snapshot}
 
 
+def _build_overlay_tax_snapshot(state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate) -> dict:
+    """Additive capture of the region-scoped/tenant-overlay inputs
+    _pack_to_tax_snapshot's own country-level rates/slabs don't cover:
+    state_rate_map/state_slabs (get_state_scoped_config — deliberately
+    independent of any JurisdictionPack, see that function's own
+    docstring), employer_tax_profiles (EmployerTaxProfile rows — WCB/SUI/
+    EHT-exemption-allocation/etc.), reciprocity (US-specific
+    PayrollContext kwargs), and locality_rate.
+
+    Closes ZP-TAX-CA-2026-001 AC-32's previously-disclosed gap (see
+    _reconstruct_rate_map_and_slabs_from_snapshot's own docstring, and
+    regenerate_employee_payslip's comment on replaying_from_snapshot):
+    before this, only the country-level canonical pack was ever replayed
+    on a correction/regenerate, so a provincial bracket, WCB rate, or
+    locality rate change made since the original run would silently
+    change a "historical" replay's result even when the country-level
+    snapshot was correctly reused. Merged into the SAME tax_rule_snapshot
+    dict _pack_to_tax_snapshot/_resolve_tax_snapshot produce (by the
+    caller, since this must run regardless of whether a country-level
+    pack resolved — state_rate_map/employer_tax_profiles/locality_rate
+    can all be configured for an org with no canonical pack at all).
+
+    Always returns a dict (never None) — empty lists/dicts and a None
+    locality_rate are themselves meaningful ("nothing configured"), not
+    an error; a payslip generated before this existed simply has no
+    "stateContributionRates"/etc. keys at all, and
+    _reconstruct_overlay_from_snapshot degrades gracefully for that."""
+    def _dec(v):
+        return str(v) if v is not None else None
+
+    def _rate_rows_to_snapshot(rate_map_or_list):
+        rows = list(rate_map_or_list.values()) if isinstance(rate_map_or_list, dict) else (rate_map_or_list or [])
+        return [
+            {
+                "componentKey": getattr(r, "component_key", None), "label": getattr(r, "label", None),
+                "employeeShare": getattr(r, "employee_share", None), "employerShare": getattr(r, "employer_share", None),
+                "total": getattr(r, "total", None),
+                "employeeRatePct": _dec(getattr(r, "employee_rate_pct", None)), "employerRatePct": _dec(getattr(r, "employer_rate_pct", None)),
+                "flatAmount": _dec(getattr(r, "flat_amount", None)), "textValue": getattr(r, "text_value", None),
+                "jurisdictionCountry": getattr(r, "jurisdiction_country", None), "jurisdictionState": getattr(r, "jurisdiction_state", None),
+                "jurisdictionLocality": getattr(r, "jurisdiction_locality", None), "taxRegime": getattr(r, "tax_regime", None),
+                "filingStatus": getattr(r, "filing_status", None),
+            }
+            for r in rows
+        ]
+
+    def _slab_rows_to_snapshot(slab_list):
+        return [
+            {
+                "minAmount": _dec(s.min_amount), "maxAmount": _dec(s.max_amount), "ratePct": _dec(s.rate_pct),
+                "rateLabel": s.rate_label, "taxFormula": s.tax_formula, "sortOrder": s.sort_order,
+                "jurisdictionCountry": s.jurisdiction_country, "jurisdictionState": s.jurisdiction_state,
+                "jurisdictionLocality": s.jurisdiction_locality, "taxRegime": s.tax_regime,
+                "filingStatus": s.filing_status, "ruleType": s.rule_type, "formulaExpression": s.formula_expression,
+                "flatAmount": _dec(s.flat_amount), "adjustmentAmount": _dec(s.adjustment_amount),
+                "niCategory": s.ni_category, "employerRatePct": _dec(s.employer_rate_pct),
+            }
+            for s in (slab_list or [])
+        ]
+
+    # _resolve_us_reciprocity's dict carries PayrollContext kwargs
+    # verbatim — when reciprocity actually applies, that includes
+    # resident_state_rate_map (a dict of live ContributionRate rows) and
+    # resident_state_slabs (a list of live TaxSlab rows), neither JSON-
+    # serializable as-is. Only reciprocity_suppresses_work_state (a bool)
+    # is safe to store directly; the two row collections get the same
+    # row-serialization treatment as state_rate_map/state_slabs above.
+    reciprocity = reciprocity or {}
+    reciprocity_snapshot = {
+        "reciprocity_suppresses_work_state": reciprocity.get("reciprocity_suppresses_work_state", False),
+        "resident_state_rate_map": _rate_rows_to_snapshot(reciprocity.get("resident_state_rate_map")),
+        "resident_state_slabs": _slab_rows_to_snapshot(reciprocity.get("resident_state_slabs")),
+    }
+
+    return {
+        "stateContributionRates": _rate_rows_to_snapshot(state_rate_map),
+        "stateTaxSlabs": _slab_rows_to_snapshot(state_slabs),
+        "employerTaxProfiles": {
+            code: {
+                "componentCode": p.component_code, "jurisdictionId": p.jurisdiction_id,
+                "taxableWageBase": _dec(p.taxable_wage_base), "rateSource": p.rate_source,
+                "employerRatePct": _dec(p.employer_rate_pct), "assessmentRatePct": _dec(p.assessment_rate_pct),
+                "coveredEmployeeCount": p.covered_employee_count,
+                "reimbursableStatus": getattr(p, "reimbursable_status", None),
+            }
+            for code, p in (employer_tax_profiles or {}).items()
+        },
+        "reciprocity": reciprocity_snapshot,
+        "localityRate": _dec(locality_rate),
+    }
+
+
 class _ReplayContributionRate:
     """A frozen-snapshot stand-in for a live ContributionRate ORM row —
     exposes the exact same attributes resolve_jurisdiction_parameter/
@@ -895,6 +1024,22 @@ class _ReplayContributionRate:
         "employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
         "jurisdiction_country", "jurisdiction_state", "jurisdiction_locality",
         "tax_regime", "filing_status",
+    )
+
+    def __init__(self, **kwargs):
+        for slot in self.__slots__:
+            setattr(self, slot, kwargs.get(slot))
+
+
+class _ReplayEmployerTaxProfile:
+    """A frozen-snapshot stand-in for a live EmployerTaxProfile ORM row —
+    see _ReplayContributionRate above; same reasoning, for the tenant-
+    specific overlay (WCB/SUI/EHT-exemption-allocation/etc.) side rather
+    than the statutory rate/bracket side. See _build_overlay_tax_snapshot/
+    _reconstruct_overlay_from_snapshot."""
+    __slots__ = (
+        "component_code", "jurisdiction_id", "taxable_wage_base", "rate_source",
+        "employer_rate_pct", "assessment_rate_pct", "covered_employee_count", "reimbursable_status",
     )
 
     def __init__(self, **kwargs):
@@ -969,6 +1114,78 @@ def _reconstruct_rate_map_and_slabs_from_snapshot(snapshot: Optional[dict]) -> t
         for s in (snapshot.get("taxSlabs") or [])
     ]
     return rates, slabs
+
+
+def _reconstruct_overlay_from_snapshot(snapshot: Optional[dict]):
+    """Replay half of _build_overlay_tax_snapshot — see that function's
+    docstring for why this exists (ZP-TAX-CA-2026-001 AC-32's provincial/
+    employer-overlay replay gap). Returns (state_rate_map, state_slabs,
+    employer_tax_profiles, reciprocity, locality_rate), matching
+    _resolve_employee_calc_inputs' own tuple shape so a caller can splice
+    these straight into the variables it would otherwise have live-
+    resolved. Every piece defaults to the "nothing configured" value
+    ({}, [], {}, {}, None) for a missing/empty/pre-this-field snapshot —
+    identical to what live resolution returns for an employee with none
+    of these configured, never raises."""
+    if not snapshot:
+        return {}, [], {}, {}, None
+
+    def _pdec(v):
+        return Decimal(v) if v is not None else None
+
+    def _rates_from_snapshot(rows):
+        return {
+            r["componentKey"]: _ReplayContributionRate(
+                component_key=r.get("componentKey"), label=r.get("label"),
+                employee_share=r.get("employeeShare"), employer_share=r.get("employerShare"), total=r.get("total"),
+                employee_rate_pct=_pdec(r.get("employeeRatePct")), employer_rate_pct=_pdec(r.get("employerRatePct")),
+                flat_amount=_pdec(r.get("flatAmount")), text_value=r.get("textValue"),
+                jurisdiction_country=r.get("jurisdictionCountry"), jurisdiction_state=r.get("jurisdictionState"),
+                jurisdiction_locality=r.get("jurisdictionLocality"), tax_regime=r.get("taxRegime"),
+                filing_status=r.get("filingStatus"),
+            )
+            for r in (rows or [])
+            if r.get("componentKey")
+        }
+
+    def _slabs_from_snapshot(rows):
+        return [
+            _ReplayTaxSlab(
+                min_amount=_pdec(s.get("minAmount")), max_amount=_pdec(s.get("maxAmount")), rate_pct=_pdec(s.get("ratePct")),
+                rate_label=s.get("rateLabel"), tax_formula=s.get("taxFormula"), sort_order=s.get("sortOrder"),
+                jurisdiction_country=s.get("jurisdictionCountry"), jurisdiction_state=s.get("jurisdictionState"),
+                jurisdiction_locality=s.get("jurisdictionLocality"), tax_regime=s.get("taxRegime"),
+                filing_status=s.get("filingStatus"), rule_type=s.get("ruleType"), formula_expression=s.get("formulaExpression"),
+                flat_amount=_pdec(s.get("flatAmount")), adjustment_amount=_pdec(s.get("adjustmentAmount")),
+                ni_category=s.get("niCategory"), employer_rate_pct=_pdec(s.get("employerRatePct")),
+            )
+            for s in (rows or [])
+        ]
+
+    state_rate_map = _rates_from_snapshot(snapshot.get("stateContributionRates"))
+    state_slabs = _slabs_from_snapshot(snapshot.get("stateTaxSlabs"))
+    employer_tax_profiles = {
+        code: _ReplayEmployerTaxProfile(
+            component_code=p.get("componentCode"), jurisdiction_id=p.get("jurisdictionId"),
+            taxable_wage_base=_pdec(p.get("taxableWageBase")), rate_source=p.get("rateSource"),
+            employer_rate_pct=_pdec(p.get("employerRatePct")), assessment_rate_pct=_pdec(p.get("assessmentRatePct")),
+            covered_employee_count=p.get("coveredEmployeeCount"), reimbursable_status=p.get("reimbursableStatus"),
+        )
+        for code, p in (snapshot.get("employerTaxProfiles") or {}).items()
+    }
+    # Mirrors _resolve_us_reciprocity's own return shape exactly (a dict of
+    # PayrollContext kwargs) so a caller can **-splat this the same way —
+    # resident_state_rate_map/resident_state_slabs rebuilt as the same
+    # frozen-snapshot stand-ins as state_rate_map/state_slabs above, not
+    # the raw JSON dicts _build_overlay_tax_snapshot stored them as.
+    reciprocity_raw = snapshot.get("reciprocity") or {}
+    reciprocity = {
+        "reciprocity_suppresses_work_state": reciprocity_raw.get("reciprocity_suppresses_work_state", False),
+        "resident_state_rate_map": _rates_from_snapshot(reciprocity_raw.get("resident_state_rate_map")),
+        "resident_state_slabs": _slabs_from_snapshot(reciprocity_raw.get("resident_state_slabs")),
+    }
+    locality_rate = _pdec(snapshot.get("localityRate"))
+    return state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate
 
 
 def _check_missing_required_keys(rate_map: dict, slabs: list, country: str) -> List[dict]:
@@ -1303,26 +1520,29 @@ def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_
 # identical; is_taxable=True here means "core included wages" and False
 # means "excluded, subject to the add-back test".
 
-def get_code_wages_classification(db: Session, country: str, organization_id: int = None, as_of=None) -> dict:
+def get_taxability_classification(
+    db: Session, country: str, tax_component: str, organization_id: int = None, as_of=None,
+) -> dict:
     """Returns {earning_type: is_taxable} for every TaxabilityRule row
-    configured against tax_component="code_wages" for this country,
-    org-specific rows winning over canonical (organization_id IS NULL)
-    ones for the same earning_type — same "specific beats generic"
-    precedence get_state_scoped_config's filing_status handling above
-    already uses. Effective-dated like every other lookup in this file.
+    configured against the given (country, tax_component), org-specific
+    rows winning over canonical (organization_id IS NULL) ones for the
+    same earning_type — same "specific beats generic" precedence
+    get_state_scoped_config's filing_status handling above already uses.
+    Effective-dated like every other lookup in this file.
 
-    Empty dict (every jurisdiction/org today, since nothing has been
-    configured yet) means india.py's own _resolve_code_wages_classification
-    falls back to its hardcoded default (basic=included, everything else
-    excluded) — the exact pre-existing basic-vs-everything-else
-    approximation, completely unchanged until an admin explicitly
-    overrides a specific component."""
+    Empty dict (every jurisdiction/org/tax_component combination that
+    hasn't been explicitly configured) means the calling country's own
+    resolver falls back to whatever its own hardcoded default is — see
+    india.py's _resolve_code_wages_classification (basic=included,
+    everything else excluded) and canada.py's _resolve_ca_taxability
+    (everything included, matching today's single-lump-gross behavior)
+    for the two callers of this generalized function today."""
     as_of = as_of or date.today()
     rows = (
         db.query(TaxabilityRule)
         .filter(
             TaxabilityRule.jurisdiction_country == country,
-            TaxabilityRule.tax_component == "code_wages",
+            TaxabilityRule.tax_component == tax_component,
             or_(TaxabilityRule.organization_id.is_(None), TaxabilityRule.organization_id == organization_id),
             or_(TaxabilityRule.effective_from.is_(None), TaxabilityRule.effective_from <= as_of),
             or_(TaxabilityRule.effective_to.is_(None), TaxabilityRule.effective_to >= as_of),
@@ -1333,6 +1553,78 @@ def get_code_wages_classification(db: Session, country: str, organization_id: in
     for row in sorted(rows, key=lambda r: r.organization_id is None):  # org-specific (False) before canonical (True)
         result.setdefault(row.earning_type, row.is_taxable)
     return result
+
+
+def get_code_wages_classification(db: Session, country: str, organization_id: int = None, as_of=None) -> dict:
+    """India Code Wages — thin wrapper over get_taxability_classification
+    for tax_component="code_wages", kept under its original name for
+    backward compatibility with existing callers/tests."""
+    return get_taxability_classification(db, country, "code_wages", organization_id, as_of)
+
+
+# ── India: EPF/ESI/PT wage-base classification (gap-closure Phase G,
+# 2026-09-11) — same TaxabilityRule primitive/precedence as Code Wages
+# above, extended to the three other India wage-base questions the doc's
+# own §7-§13 raise: which named components feed the EPF contribution
+# base, the ESI wage base, and the Professional Tax assessment base.
+# Deliberately THREE separate tax_components (not folded into
+# "code_wages") — an org may want to configure EPF's wage base without
+# touching Code Wages at all (e.g. it never enables the Code Wages
+# rollout switch), and ESI/PT have never had a per-component axis before
+# this. Empty dict (every org/state today) reproduces this engine's
+# EXACT prior behavior in india.py's calculate() — see
+# engine/countries/india.py's _classify_wage_base for the default-vs-
+# override contract this backs.
+
+def get_epf_base_classification(db: Session, country: str, organization_id: int = None, as_of=None) -> dict:
+    """{earning_type: is_included} for EPF's own wage base. No row for a
+    component -> only "basic" defaults to included, reproducing
+    india.py's pre-existing `pf_base_pre_ceiling = basic` exactly (when
+    the separate Code Wages switch is off; Code Wages, when enabled,
+    still takes priority over this — see india.py's calculate())."""
+    return get_taxability_classification(db, country, "epf_base", organization_id, as_of)
+
+
+def get_esi_base_classification(db: Session, country: str, organization_id: int = None, as_of=None) -> dict:
+    """{earning_type: is_included} for ESI's own wage base. No row for a
+    component -> every component defaults to included, reproducing
+    india.py's pre-existing `gross`-based ESI wage/ceiling test exactly
+    (basic+hra+special_allowance+overtime+additional_compensation+
+    named_allowances always sums back to ctx.gross when every component
+    is included, by construction)."""
+    return get_taxability_classification(db, country, "esi_base", organization_id, as_of)
+
+
+def get_pt_base_classification(db: Session, country: str, organization_id: int = None, as_of=None) -> dict:
+    """{earning_type: is_included} for Professional Tax's own assessment
+    base. No row for a component -> every component defaults to
+    included, reproducing india.py's pre-existing `gross`-based PT
+    bracket resolution exactly (same "sums back to gross when
+    unconfigured" contract as get_esi_base_classification above)."""
+    return get_taxability_classification(db, country, "pt_base", organization_id, as_of)
+
+
+# ── Canada: per-program (federal tax/provincial tax/CPP/EI) taxability ──
+# (ZP-TAX-CA-2026-001 §17/AC-17, gap-closure Phase 5, 2026-09-11). Same
+# TaxabilityRule model, same get_taxability_classification primitive as
+# India's Code Wages above — one query per tax_component, bundled into a
+# single dict so canada.py's calculate() only needs one new PayrollContext
+# field (ctx.ca_taxability_rules) instead of four.
+_CA_TAXABILITY_COMPONENTS = ("income_tax_federal", "income_tax_provincial", "cpp_pensionable", "ei_insurable")
+
+
+def get_ca_taxability_rules_bundle(db: Session, organization_id: int = None, as_of=None) -> dict:
+    """Returns {tax_component: {earning_type: is_taxable}} for all four
+    CA programs (AC-17: "each earning/benefit has independent flags for
+    income tax, CPP/QPP, EI/QPIP"). Empty per-component dicts (every
+    jurisdiction/org today) mean canada.py's _resolve_ca_taxability falls
+    back to "every component counts," reproducing today's single-ctx.gross
+    behavior exactly — see _CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES in
+    engine/countries/shared.py for the rollout switch this is gated on."""
+    return {
+        component: get_taxability_classification(db, "CA", component, organization_id, as_of)
+        for component in _CA_TAXABILITY_COMPONENTS
+    }
 
 
 # ── TaxabilityRule CRUD (previously had none at all — only the read-only
@@ -3400,6 +3692,16 @@ _EMPLOYER_PROFILE_FIELD_CATALOG = {
 # key inside PayrollEmployee.compliance_fields (see that model's own
 # docstring for why NINO lives there rather than as a dedicated column).
 _PAYROLL_EMPLOYEE_FIELD_CATALOG = {
+    # Generic, jurisdiction-agnostic — added for Canada's T4/RL-1/ROE
+    # templates, which (unlike every existing per-employee template) have
+    # NO employee_info component at all otherwise: a plain PAYSLIP_ITEM
+    # "employee_name" field resolves to None in generate_uk_employee_
+    # report's no-run context (see its own docstring), so the employee's
+    # real name has to come from the PAYROLL_EMPLOYEE object that function
+    # actually passes in. Available to every country, not CA-only — see
+    # _PAYROLL_EMPLOYEE_FIELDS_BY_COUNTRY below for the per-country picker
+    # subset.
+    "name": ("Employee Name", "text", False),
     "nino": ("National Insurance Number", "text", False),
     "date_of_birth": ("Date of Birth", "date", False),
     "gender": ("Gender", "text", False),
@@ -3416,6 +3718,7 @@ _PAYROLL_EMPLOYEE_FIELD_CATALOG = {
 }
 _PAYROLL_EMPLOYEE_FIELDS_BY_COUNTRY = {
     "UK": list(_PAYROLL_EMPLOYEE_FIELD_CATALOG.keys()),
+    "CA": ["name", "date_of_birth", "date_of_joining"],
 }
 
 _REPORT_FIELD_ALLOWED_COLUMNS = {
@@ -3454,7 +3757,7 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     # country-appropriate display labels on the reused fields.
     "CA": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
-           "federal_income_tax", "state_income_tax", "local_tax", "social_security", "esi", "cpp2",
+           "federal_income_tax", "state_income_tax", "local_tax", "tds", "social_security", "esi", "cpp2",
            "total_deductions", "employer_social_security", "employer_esi", "employer_sui", "employer_cpp2",
            "net_pay"],
 }
@@ -3471,6 +3774,7 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "esi": "Employment Insurance (Employee)",
         "employer_esi": "Employment Insurance (Employer)",
         "employer_sui": "Workers' Compensation (Employer)",
+        "tds": "Income Tax Deducted (Federal + Provincial, Combined)",
     },
 }
 
@@ -3562,6 +3866,31 @@ _REPORT_COMPONENTS_BY_TYPE = {
     "P45": [
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("tax", "Tax"), ("ytd", "Year-to-Date"),
+    ],
+    # Canada T4 — per EMPLOYEE, annual (calendar-year-end), no PayrollRun.
+    "T4": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings (Year-to-Date)"), ("tax", "Tax (Year-to-Date)"),
+        ("cpp", "CPP (Year-to-Date)"), ("ei", "EI (Year-to-Date)"),
+        ("employer_contributions", "Employer Contributions (Year-to-Date)"),
+    ],
+    # Quebec RL-1 — same shape as T4, QPP/QPIP instead of CPP/EI.
+    "RL1": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings (Year-to-Date)"), ("tax", "Tax (Year-to-Date)"),
+        ("qpp_qpip", "QPP / QPIP (Year-to-Date)"),
+    ],
+    # Canada ROE — per EMPLOYEE, triggered by an interruption of earnings,
+    # no PayrollRun. Insurable hours (Block 15C) are not modeled — see
+    # generate_uk_employee_report's own docstring.
+    "ROE": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Insurable Earnings (Year-to-Date, approximation)"),
+    ],
+    # Canada PD7A — per PERIOD (a CRA remittance period), employer-level
+    # only, cross-run aggregation via generate_ca_pd7a.
+    "PD7A": [
+        ("employer_info", "Employer Information"), ("remittance", "Remittance Totals (Period)"),
     ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
@@ -4593,15 +4922,27 @@ def generate_uk_employee_report(
 ) -> GeneratedReport:
     """Generates a per-employee, non-run-based annual/leaving report —
     UK's P45 (triggered by a leaving date), P60 (triggered by tax-year
-    end), or India's Form 130 salary TDS certificate (also triggered by
-    FY-end, ZP-TAX-IN-2026-27-001 §6.2, gap-closure Phase E 2026-09-10 —
-    added here rather than as a separate function since this function's
-    own logic was never actually UK-specific, just gated to UK report
-    types; kept its original name for backward compatibility with
-    existing callers/tests). `as_of_date` is the YTD boundary every
-    SUM_YTD field on the template resolves against (the leaving date for
-    a P45, the tax year's own 5 April/31 March end date for a P60/Form
-    130).
+    end), India's Form 130 salary TDS certificate (also triggered by
+    FY-end, ZP-TAX-IN-2026-27-001 §6.2, gap-closure Phase E 2026-09-10),
+    or Canada's T4/RL-1 (triggered by calendar-year end) and ROE (Record
+    of Employment, triggered by an interruption of earnings — the same
+    "leaving/trigger date" shape as a P45, ZP-TAX-CA-2026-001 forms/
+    reports gap-closure) — added here rather than as separate functions
+    since this function's own logic was never actually UK-specific, just
+    gated to a report_type allow-list; kept its original name for
+    backward compatibility with existing callers/tests. `as_of_date` is
+    the YTD boundary every SUM_YTD field on the template resolves
+    against (the leaving date for a P45/ROE, the tax year's own 5
+    April/31 March/31 December end date for a P60/Form 130/T4/RL-1).
+    _report_ytd_period_start's fallback branch (calendar-year start) is
+    already correct for Canada — no CA-specific case needed there.
+
+    ROE's real Block 15C (insurable hours) isn't computed here — this
+    codebase tracks attendance hours per day but has no insurable-hours
+    accumulator wired to this report yet; only the fields the underlying
+    template actually maps (insurable earnings/EI premiums/dates) are
+    populated, same "resolve what's mappable, don't fabricate the rest"
+    contract as every other report type.
 
     Only PAYROLL_EMPLOYEE, EMPLOYER_PROFILE, and SUM_YTD PAYSLIP_ITEM
     fields are meaningful here — there's no single period's PayslipItem
@@ -4609,8 +4950,8 @@ def generate_uk_employee_report(
     maps one simply resolves it to None here, the same as any other
     field this engine can't currently resolve."""
     template = get_report_template(db, report_template_id)
-    if template.report_type not in ("P45", "P60", "FORM_130"):
-        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130 templates, not {template.report_type!r}.")
+    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE"):
+        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE templates, not {template.report_type!r}.")
     if template.status != "Active":
         raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
     employee = db.query(PayrollEmployee).filter(
@@ -5048,6 +5389,132 @@ def generate_india_form_123(
     return row
 
 
+# ── Canada: PD7A statement of account for current source deductions ────
+# (ZP-TAX-CA-2026-001, forms/reports gap-closure). Period-based,
+# employer-level, never tied to a single PayrollRun — a CRA remittance
+# period is monthly/quarterly/threshold-based, not fixed to one payroll
+# run, the same "genuinely cross-run" shape as India's Form 138. Unlike
+# Form 138's fixed FY-quarter scheme, PD7A takes an explicit date range
+# since CRA remittance frequency varies by employer (see
+# CAPd7aGenerateRequest's own docstring).
+
+_CA_PD7A_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def generate_ca_pd7a(
+    db: Session, organization_id: int, report_template_id: int,
+    period_start: date, period_end: date, *, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Generates Canada's PD7A statement of account for current source
+    deductions — the employer's actual remittance total for the given
+    period, summed directly from real PayslipItem rows across every
+    FINALIZED (Approved/Authorized/Paid/Closed — never Draft/Review)
+    Canadian payslip whose run's period_end falls within [period_start,
+    period_end], exactly like generate_india_form_138's cross-run
+    summation. Sums both employee and employer sides of CPP/CPP2 (or
+    QPP/QPP2 for Quebec employees, same columns per canada.py's own
+    "QPP replaces CPP" convention) and EI (or QPIP), plus combined
+    income tax withheld (`tds`, federal+provincial/QC combined — same
+    canonical field every country's report uses for "tax withheld"),
+    since that combined total is what an employer actually remits to
+    CRA, not a per-program breakdown."""
+    if period_end < period_start:
+        raise BadRequestException(f"period_end ({period_end}) cannot be before period_start ({period_start}).")
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PD7A":
+        raise BadRequestException(f"generate_ca_pd7a is only for PD7A templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == template.id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "CA",
+            PayrollRun.period_end >= period_start,
+            PayrollRun.period_end <= period_end,
+            PayrollRun.status.in_(_CA_PD7A_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+    component_snapshots = []
+    values: dict = {}
+    for component in components:
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        field_snapshots = []
+        for field in fields:
+            field_snapshots.append({
+                "fieldKey": field.field_key, "label": field.label, "type": field.field_type,
+                "dataSourceKind": field.data_source_kind, "sourceColumn": field.source_column,
+                "aggregation": field.aggregation,
+            })
+            if field.data_source_kind == "EMPLOYER_PROFILE":
+                values[field.field_key] = _resolve_field_value(db, field, None, None, company, organization_id)
+            elif field.data_source_kind == "PAYSLIP_ITEM" and field.aggregation == "SUM_RUN":
+                total = sum(
+                    (Decimal(str(getattr(i, field.source_column, 0) or 0)) for i in period_items),
+                    Decimal("0"),
+                )
+                values[field.field_key] = float(total)
+        component_snapshots.append({"componentKey": component.component_key, "label": component.label, "fields": field_snapshots})
+
+    total_remittance = sum(
+        (Decimal(str(getattr(i, col, 0) or 0)) for i in period_items
+         for col in ("tds", "social_security", "employer_social_security", "cpp2", "employer_cpp2", "esi", "employer_esi")),
+        Decimal("0"),
+    )
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeCount": len({i.employee_id for i in period_items}),
+        "totalRemittance": float(total_remittance),
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=template.reporting_year, reporting_period=f"{period_start.isoformat()}_{period_end.isoformat()}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
 # ── RTI XML rendering (§18 gap-closure Part 9, 2026-09-09) ──────────────
 # Serializes a FPS/EPS/P45 GeneratedReport's rendered_data into HMRC's
 # real RTI top-level element structure — a correctly-SHAPED submission
@@ -5199,7 +5666,8 @@ def set_rti_submission_status(
 # needed no schema change.
 _UK_RTI_REPORT_TYPES = ("FPS", "EPS", "P45", "P60")
 _INDIA_FORM_REPORT_TYPES = ("FORM_130", "FORM_138", "FORM_123")
-_RTI_FORMS_SUMMARY_REPORT_TYPES = _UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES
+_CA_FORM_REPORT_TYPES = ("T4", "RL1", "ROE", "PD7A")
+_RTI_FORMS_SUMMARY_REPORT_TYPES = _UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES
 
 
 def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) -> list[dict]:
@@ -5230,18 +5698,36 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
     ]
 
 
-# ── Test Certification (Super Admin UI Part 11, §19, 2026-09-09) ───────
-# Triggers a real run of the Part 10 HMRC golden-test harness and
-# records the result — see TestCertificationRun's own model docstring
-# for why real_case_count is tracked separately from pass/fail (an empty
-# real-case set is NOT the same as a passing certification).
-def run_golden_test_certification(db: Session, actor_id: Optional[int] = None) -> TestCertificationRun:
+# ── Test Certification (Super Admin UI Part 11, §19, 2026-09-09; ───────
+# generalized to Canada, gap-closure Phase 8, 2026-09-11, ZP-TAX-CA-
+# 2026-001 §20 "Test Lab"/AC-29). Triggers a real run of the golden-test
+# harness for the given jurisdiction and records the result — see
+# TestCertificationRun's own model docstring for why real_case_count is
+# tracked separately from pass/fail (an empty real-case set is NOT the
+# same as a passing certification). Each jurisdiction gets its own
+# fixtures directory (never a shared pool a wrong-country case could
+# silently leak into) — "UK" keeps its original, unchanged
+# tests/fixtures/hmrc_golden/ path for backward compatibility with every
+# existing fixture/README reference; "CA" is new.
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden"}
+
+
+def run_golden_test_certification(
+    db: Session, jurisdiction_country: str = "UK", actor_id: Optional[int] = None,
+) -> TestCertificationRun:
     import json as _json
     from pathlib import Path as _Path
 
     from app.modules.payroll.hmrc_golden_harness import run_golden_case, GoldenCaseMismatch
 
-    fixtures_dir = _Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "hmrc_golden"
+    jurisdiction_country = (jurisdiction_country or "UK").strip().upper()
+    fixtures_dirname = _GOLDEN_FIXTURES_DIR_BY_COUNTRY.get(jurisdiction_country)
+    if not fixtures_dirname:
+        raise BadRequestException(
+            f"No golden-test fixtures directory configured for jurisdiction {jurisdiction_country!r} "
+            f"— supported: {sorted(_GOLDEN_FIXTURES_DIR_BY_COUNTRY)}."
+        )
+    fixtures_dir = _Path(__file__).resolve().parents[3] / "tests" / "fixtures" / fixtures_dirname
     real_cases = []
     if fixtures_dir.exists():
         for path in sorted(fixtures_dir.glob("*.json")):
@@ -5271,7 +5757,8 @@ def run_golden_test_certification(db: Session, actor_id: Optional[int] = None) -
         status = "FAIL"
 
     run = TestCertificationRun(
-        triggered_by_id=actor_id, real_case_count=total, total_cases=total,
+        triggered_by_id=actor_id, jurisdiction_country=jurisdiction_country,
+        real_case_count=total, total_cases=total,
         passed_cases=passed, failed_cases=failed, status=status,
         failure_details=failures or None,
     )
@@ -5281,9 +5768,12 @@ def run_golden_test_certification(db: Session, actor_id: Optional[int] = None) -
     return run
 
 
-def list_test_certification_runs(db: Session, limit: int = 20) -> list[TestCertificationRun]:
+def list_test_certification_runs(db: Session, limit: int = 20, jurisdiction_country: Optional[str] = None) -> list[TestCertificationRun]:
+    query = db.query(TestCertificationRun)
+    if jurisdiction_country:
+        query = query.filter(TestCertificationRun.jurisdiction_country == jurisdiction_country.strip().upper())
     return (
-        db.query(TestCertificationRun)
+        query
         .order_by(TestCertificationRun.run_at.desc())
         .limit(limit)
         .all()
@@ -5816,6 +6306,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_uk_director_ytd(db, emp.id, period_end or date.today())
             if country == "UK" else {}
         )
+        option2_inputs = (
+            _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if country == "CA" else {}
+        )
 
         # Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET org-level —
         # READ ONLY, same reasoning as ytd_inputs above: preview persists
@@ -5836,6 +6329,22 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             get_code_wages_classification(db, country, organization_id, as_of=period_end or date.today())
             if country == "IN" else {}
         )
+        epf_base_rules = (
+            get_epf_base_classification(db, country, organization_id, as_of=period_end or date.today())
+            if country == "IN" else {}
+        )
+        esi_base_rules = (
+            get_esi_base_classification(db, country, organization_id, as_of=period_end or date.today())
+            if country == "IN" else {}
+        )
+        pt_base_rules = (
+            get_pt_base_classification(db, country, organization_id, as_of=period_end or date.today())
+            if country == "IN" else {}
+        )
+        ca_taxability_rules = (
+            get_ca_taxability_rules_bundle(db, organization_id, as_of=period_end or date.today())
+            if country == "CA" else {}
+        )
         salary_tds_inputs = (
             get_india_salary_tds_inputs(db, organization_id, emp.id, india_tax_year_for_date(period_end or date.today()))
             if country == "IN" else {}
@@ -5849,6 +6358,8 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             unpaid_leave_days=unpaid_leave_days,
             country=country, rate_map=rate_map, slabs=slabs,
             code_wages_rules=code_wages_rules,
+            epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
+            ca_taxability_rules=ca_taxability_rules,
             other_income_for_tds=salary_tds_inputs.get("other_income_for_tds", Decimal("0")),
             tds_already_deducted=salary_tds_inputs.get("tds_already_deducted", Decimal("0")),
             annual_claims_total=salary_tds_inputs.get("claims_total", Decimal("0")),
@@ -5858,6 +6369,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             ni_category_override=ni_category_override,
             **ytd_inputs,
             **org_levy_inputs,
+            **option2_inputs,
         )
         calc = calculate_payroll(ctx, calculation_mode)
 
@@ -6371,6 +6883,94 @@ def _upsert_ca_ytd_accumulator(db: Session, employee_id: int, pay_date, work_sta
     db.flush()
 
 
+# ── Canada: Option 2 cumulative-averaging income tax withholding ────────
+# (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9, 2026-09-11). A
+# genuinely different income-tax methodology from Option 1 annualization
+# — see engine/countries/shared.py's _CA_OPTION2_WITHHOLDING_ENABLED_
+# COUNTRIES for the rollout gate and canada.py's own module docstring
+# for the calculation itself. Reuses the SAME PayrollYtdAccumulator
+# table/get-or-create shape as _load_ca_ytd/_upsert_ca_ytd_accumulator
+# above and the UK Director NIC accumulator below — no schema change.
+# Deliberately 4 separate components (not folded into _CA_YTD_COMPONENTS)
+# since Option 2 tracks income-tax-specific state, independent of CPP/
+# EI/QPP/QPIP's own YTD caps.
+_CA_OPTION2_GROSS_COMPONENT = "income_tax_option2_gross"
+_CA_OPTION2_PERIODS_COMPONENT = "income_tax_option2_periods_elapsed"
+_CA_OPTION2_FEDERAL_WITHHELD_COMPONENT = "income_tax_option2_federal_withheld"
+_CA_OPTION2_PROVINCIAL_WITHHELD_COMPONENT = "income_tax_option2_provincial_withheld"
+
+
+def _load_ca_option2_ytd(db: Session, employee_id: int, pay_date, work_state: str = None) -> dict:
+    """Returns {} when the rollout switch is off (every employee today);
+    once enabled, always returns all four keys with explicit 0 defaults
+    (never omitted), so canada.py's calculate() can start Option 2's
+    accumulation from a clean $0/0-periods state on an employee's very
+    first payslip under the method, matching _load_ca_ytd's own
+    contract for CPP/EI."""
+    if "CA" not in _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _ca_ytd_tax_year(pay_date, work_state)
+    components = (
+        _CA_OPTION2_GROSS_COMPONENT, _CA_OPTION2_PERIODS_COMPONENT,
+        _CA_OPTION2_FEDERAL_WITHHELD_COMPONENT, _CA_OPTION2_PROVINCIAL_WITHHELD_COMPONENT,
+    )
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component.in_(components),
+        )
+        .all()
+    )
+    by_component = {r.tax_component: r for r in rows}
+    gross_row = by_component.get(_CA_OPTION2_GROSS_COMPONENT)
+    periods_row = by_component.get(_CA_OPTION2_PERIODS_COMPONENT)
+    federal_row = by_component.get(_CA_OPTION2_FEDERAL_WITHHELD_COMPONENT)
+    provincial_row = by_component.get(_CA_OPTION2_PROVINCIAL_WITHHELD_COMPONENT)
+    return dict(
+        option2_cumulative_gross_before=gross_row.ytd_taxable_wages if gross_row else Decimal("0"),
+        option2_periods_elapsed_before=int(periods_row.ytd_taxable_wages) if periods_row else 0,
+        option2_federal_tax_withheld_before=federal_row.ytd_tax_withheld if federal_row else Decimal("0"),
+        option2_provincial_tax_withheld_before=provincial_row.ytd_tax_withheld if provincial_row else Decimal("0"),
+    )
+
+
+def _upsert_ca_option2_ytd_accumulator(db: Session, employee_id: int, pay_date, work_state: str, result, payslip_id: int = None):
+    """No-op if the calculation ran dormant (result.option2_cumulative_
+    gross_after is None), so calling this unconditionally from every
+    persisting entry point is safe even while the rollout switch is
+    off — same contract as _upsert_ca_ytd_accumulator above."""
+    if result.option2_cumulative_gross_after is None:
+        return
+    tax_year = _ca_ytd_tax_year(pay_date, work_state)
+
+    def _set(component, wages=None, withheld=None):
+        row = (
+            db.query(PayrollYtdAccumulator)
+            .filter(
+                PayrollYtdAccumulator.employee_id == employee_id,
+                PayrollYtdAccumulator.tax_year == tax_year,
+                PayrollYtdAccumulator.tax_component == component,
+            )
+            .first()
+        )
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=component)
+            db.add(row)
+        if wages is not None:
+            row.ytd_taxable_wages = wages
+        if withheld is not None:
+            row.ytd_tax_withheld = withheld
+        row.last_updated_payslip_id = payslip_id
+
+    _set(_CA_OPTION2_GROSS_COMPONENT, wages=result.option2_cumulative_gross_after)
+    _set(_CA_OPTION2_PERIODS_COMPONENT, wages=Decimal(result.option2_periods_elapsed_after))
+    _set(_CA_OPTION2_FEDERAL_WITHHELD_COMPONENT, withheld=result.option2_federal_tax_withheld_after)
+    _set(_CA_OPTION2_PROVINCIAL_WITHHELD_COMPONENT, withheld=result.option2_provincial_tax_withheld_after)
+    db.flush()
+
+
 # ── UK Directors NIC YTD accumulator (ZP-TAX-UK-2026-27-001 §9.2) ───────
 # Dormant until "UK" is added to the SAME shared
 # _YTD_ACCUMULATOR_ENABLED_COUNTRIES set Canada uses above (one switch,
@@ -6643,13 +7243,308 @@ def calculate_india_employee_gratuity(
             basic_pct, _hra_pct = _resolve_salary_split_pct(db, organization_id)
             last_drawn_monthly_wage = _round2(monthly_gross * basic_pct / 100)
 
+    # org_opted_in fix, 2026-09-11: this call previously omitted it
+    # entirely (always defaulting to False, the legacy org-scoped-copy
+    # path) regardless of whether the org has actually opted into
+    # canonical tax-pack tracking — every REAL calculation call site
+    # (generate_payslips_for_run included) computes this first. Found
+    # while wiring the same fix into the new CA special-payment/
+    # retiring-allowance/TD1X calculators; ported back here since it's
+    # the same gap in gratuity's own rate_map resolution.
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
     _country, rate_map, _slabs, _pack, _state, _state_rate_map, _state_slabs, _profiles, _recip, _loc, _poe, _res_state = (
-        _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=date_of_leaving)
+        _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=date_of_leaving, org_opted_in=org_opted_in)
     )
     return calculate_gratuity(
         date_of_joining, date_of_leaving, last_drawn_monthly_wage, rate_map,
         eligibility_event=eligibility_event, is_fixed_term=is_fixed_term,
     )
+
+
+# ── Canada: bonus/retroactive-pay special-payment method ────────────────
+# (ZP-TAX-CA-2026-001 §19, forms/reports-adjacent gap-closure phase,
+# 2026-09-11). CRA's actual method for a bonus, retroactive pay increase,
+# vacation pay paid without leave being taken, or accumulated overtime
+# paid separately (§19's own routing table sends all four to "the
+# non-periodic method") is NOT a flat supplemental rate — it recomputes
+# annual tax with the special payment added to the employee's regular
+# annualized pay, then takes the INCREMENTAL tax as the amount to
+# withhold from the special payment itself. Deliberately NOT woven into
+# the regular per-period calculate() path (a much larger, riskier change
+# to the core engine every existing payslip runs through) — this is a
+# standalone calculator, same architecture as calculate_india_employee_
+# gratuity above: a real termination/special-event liability, not a
+# routine payroll deduction.
+#
+# regular_annual_pay is a REQUIRED, caller-supplied figure rather than
+# something this function estimates from stored fields — unlike
+# gratuity's last_drawn_monthly_wage (where "monthly Basic" is an
+# unambiguous existing concept), "this employee's estimated annual pay
+# excluding the bonus" is genuinely ambiguous (current-period annualized?
+# YTD-projected? CTC?) and guessing wrong would silently mis-withhold a
+# real tax amount — a payroll operator supplying it directly avoids that.
+def calculate_ca_special_payment_withholding(
+    db: Session, organization_id: int, employee_id: int,
+    regular_annual_pay: Decimal, special_payment_amount: Decimal, payroll_date=None,
+) -> dict:
+    """Returns the additional income tax to withhold from a Canadian
+    special payment (bonus/retroactive pay/vacation pay paid without
+    leave/accumulated overtime), using CRA's real incremental-tax bonus
+    method: tax on (regular_annual_pay + special_payment_amount) minus
+    tax on regular_annual_pay alone, computed separately for federal and
+    provincial/Quebec tax using this engine's own existing, already-
+    tested annual tax functions (_calculate_annual_tax_ca/
+    _calculate_provincial_tax_ca/_calculate_quebec_provincial_tax) — no
+    new statutory numbers are introduced by this function itself.
+
+    Reuses the employee's own current TD1/TD1X/TP-1015.3-V claim amounts
+    and jurisdiction (rate_map/slabs/state_rate_map/state_slabs) exactly
+    as the regular per-period engine resolves them via
+    _resolve_employee_calc_inputs, so this stays consistent with whatever
+    that employee's own payslip would otherwise compute."""
+    from app.modules.payroll.engine.countries.canada import (
+        _calculate_annual_tax_ca, _calculate_provincial_tax_ca, _calculate_quebec_provincial_tax,
+    )
+
+    if special_payment_amount is None or special_payment_amount < 0:
+        raise BadRequestException("special_payment_amount must be zero or positive.")
+    if regular_annual_pay is None or regular_annual_pay < 0:
+        raise BadRequestException("regular_annual_pay must be zero or positive.")
+
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "CA":
+        raise BadRequestException("The special-payment (bonus) method only applies to Canada employees.")
+
+    # Same org_opted_in resolution every real calculation call site uses
+    # (see generate_payslips_for_run) — without this, an org that HAS
+    # opted into canonical tax-pack tracking would still be resolved
+    # through the legacy org-scoped-copy path here, which could disagree
+    # with whatever the org's real payslips actually use.
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    (
+        _country, rate_map, slabs, _pack, work_state, state_rate_map, state_slabs,
+        _profiles, _recip, _loc, _poe, _res_state,
+    ) = _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=payroll_date, org_opted_in=org_opted_in)
+    is_quebec = (work_state or "").strip().upper() == "QC"
+
+    annual_before = regular_annual_pay
+    annual_after = regular_annual_pay + special_payment_amount
+
+    federal_before = _calculate_annual_tax_ca(annual_before, slabs, rate_map, employee.td1_claim_amount)
+    federal_after = _calculate_annual_tax_ca(annual_after, slabs, rate_map, employee.td1_claim_amount)
+
+    if is_quebec:
+        provincial_before = _calculate_quebec_provincial_tax(
+            annual_before, state_slabs, state_rate_map, qc_tp1015_claim_amount=employee.qc_tp1015_claim_amount,
+        )
+        provincial_after = _calculate_quebec_provincial_tax(
+            annual_after, state_slabs, state_rate_map, qc_tp1015_claim_amount=employee.qc_tp1015_claim_amount,
+        )
+    else:
+        provincial_before = _calculate_provincial_tax_ca(
+            annual_before, work_state, state_slabs, state_rate_map,
+            provincial_td1_claim_amount=employee.provincial_td1_claim_amount, rate_map=rate_map,
+        )
+        provincial_after = _calculate_provincial_tax_ca(
+            annual_after, work_state, state_slabs, state_rate_map,
+            provincial_td1_claim_amount=employee.provincial_td1_claim_amount, rate_map=rate_map,
+        )
+
+    federal_withholding = max(Decimal("0"), federal_after - federal_before)
+    provincial_withholding = max(Decimal("0"), provincial_after - provincial_before)
+    return {
+        "regular_annual_pay": annual_before, "special_payment_amount": special_payment_amount,
+        "federal_tax_before": federal_before, "federal_tax_after": federal_after,
+        "provincial_tax_before": provincial_before, "provincial_tax_after": provincial_after,
+        "federal_withholding": federal_withholding, "provincial_withholding": provincial_withholding,
+        "total_withholding": federal_withholding + provincial_withholding,
+        "is_quebec": is_quebec,
+    }
+
+
+# ── Canada: retiring allowance / severance withholding ───────────────────
+# (ZP-TAX-CA-2026-001 §19). A rate-TABLE lookup by amount (CRA's real
+# lump-sum withholding method), not a marginal bracket sum — see
+# engine/countries/canada.py's _retiring_allowance_rate_for_amount for why
+# there is deliberately NO hardcoded fallback rate: the source document
+# names this payment type but gives no actual percentage figures, unlike
+# every other rate in this engine, so this resolves to 0% until Tax Ops
+# sources and enters the real CRA bands via Super Admin (same "mechanism
+# without fabricated data" contract as WSDRF/the temporary HSF sector
+# exemption in the same document).
+def calculate_ca_retiring_allowance_withholding(
+    db: Session, organization_id: int, employee_id: int, amount: Decimal, payroll_date=None,
+) -> dict:
+    """Returns the federal lump-sum withholding for a Canada retiring
+    allowance/severance payment, resolved from jurisdiction_country="CA",
+    jurisdiction_state=None TaxSlab rows with rule_type=
+    "CA_RETIRING_ALLOWANCE_BAND" (Super Admin > Compliance > Canada > Rate
+    & Threshold Registry). Federal-only — Quebec's own combined federal+
+    provincial rate is not modeled (no source figures for it either)."""
+    from app.modules.payroll.engine.countries.canada import _retiring_allowance_rate_for_amount
+
+    if amount is None or amount < 0:
+        raise BadRequestException("amount must be zero or positive.")
+
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "CA":
+        raise BadRequestException("Retiring-allowance withholding only applies to Canada employees.")
+
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    _country, _rate_map, slabs, _pack, _state, _state_rate_map, _state_slabs, _profiles, _recip, _loc, _poe, _res_state = (
+        _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=payroll_date, org_opted_in=org_opted_in)
+    )
+    bands = [s for s in (slabs or []) if getattr(s, "rule_type", None) == "CA_RETIRING_ALLOWANCE_BAND"]
+    rate_pct = _retiring_allowance_rate_for_amount(amount, bands)
+    withholding = _round2(amount * rate_pct / Decimal("100"))
+    return {
+        "amount": amount, "rate_pct": rate_pct, "withholding": withholding,
+        "configured": bool(bands),
+    }
+
+
+# ── Canada: TD1X commission-formula withholding ──────────────────────────
+# (ZP-TAX-CA-2026-001 §18/§19). CRA's real commission method for an
+# employee with a valid TD1X on file: estimate the employee's NET annual
+# commission income (estimated commission minus estimated expenses,
+# floored at 0), compute a full year's federal + provincial/Quebec tax on
+# THAT figure (not on annualized periodic salary), then divide by the
+# number of pay periods in the year to get the per-period withholding —
+# a materially different base than the regular salary method, per the
+# document's own "do not convert to ordinary TD1" instruction. Reuses the
+# employee's existing TD1/TP-1015.3-V claim amounts and jurisdiction
+# exactly as the regular engine resolves them; no new statutory numbers.
+# Standalone calculator, same architecture as calculate_ca_special_
+# payment_withholding above — an operator uses this INSTEAD OF the
+# regular per-period calculation for a commission employee's periodic
+# withholding, it does not modify a payslip directly.
+def calculate_ca_td1x_commission_withholding(
+    db: Session, organization_id: int, employee_id: int, payroll_date=None, pay_periods_per_year: int = 12,
+) -> dict:
+    """Returns the recommended per-period withholding for a Canada
+    commission employee with TD1X estimates on file
+    (td1x_estimated_annual_commission/td1x_estimated_annual_expenses).
+    `pay_periods_per_year` defaults to 12 (monthly), matching this
+    engine's own MONTHS_PER_YEAR convention used everywhere else in
+    canada.py — pass a different value for a non-monthly pay frequency."""
+    from app.modules.payroll.engine.countries.canada import (
+        _calculate_annual_tax_ca, _calculate_provincial_tax_ca, _calculate_quebec_provincial_tax,
+    )
+
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "CA":
+        raise BadRequestException("The TD1X commission formula only applies to Canada employees.")
+    if employee.td1x_estimated_annual_commission is None:
+        raise BadRequestException(
+            "This employee has no TD1X commission election on file (td1x_estimated_annual_commission is not set)."
+        )
+    if pay_periods_per_year is None or pay_periods_per_year <= 0:
+        raise BadRequestException("pay_periods_per_year must be a positive integer.")
+
+    estimated_commission = employee.td1x_estimated_annual_commission
+    estimated_expenses = employee.td1x_estimated_annual_expenses or Decimal("0")
+    net_annual_commission_income = max(Decimal("0"), estimated_commission - estimated_expenses)
+
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    (
+        _country, rate_map, slabs, _pack, work_state, state_rate_map, state_slabs,
+        _profiles, _recip, _loc, _poe, _res_state,
+    ) = _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=payroll_date, org_opted_in=org_opted_in)
+    is_quebec = (work_state or "").strip().upper() == "QC"
+
+    federal_tax = _calculate_annual_tax_ca(net_annual_commission_income, slabs, rate_map, employee.td1_claim_amount)
+    if is_quebec:
+        provincial_tax = _calculate_quebec_provincial_tax(
+            net_annual_commission_income, state_slabs, state_rate_map,
+            qc_tp1015_claim_amount=employee.qc_tp1015_claim_amount,
+        )
+    else:
+        provincial_tax = _calculate_provincial_tax_ca(
+            net_annual_commission_income, work_state, state_slabs, state_rate_map,
+            provincial_td1_claim_amount=employee.provincial_td1_claim_amount, rate_map=rate_map,
+        )
+
+    total_annual_tax = federal_tax + provincial_tax
+    per_period_withholding = _round2(total_annual_tax / Decimal(pay_periods_per_year))
+    return {
+        "estimated_annual_commission": estimated_commission, "estimated_annual_expenses": estimated_expenses,
+        "net_annual_commission_income": net_annual_commission_income,
+        "federal_annual_tax": federal_tax, "provincial_annual_tax": provincial_tax,
+        "total_annual_tax": total_annual_tax, "pay_periods_per_year": pay_periods_per_year,
+        "per_period_withholding": per_period_withholding, "is_quebec": is_quebec,
+    }
+
+
+# ── Quebec: WSDRF (Workforce Skills Development and Recognition Fund) ───
+# (ZP-TAX-CA-2026-001 §13/§15, gap-closure Phase 7, 2026-09-11). An
+# ANNUAL reconciliation figure — 1% of total Quebec payroll (DB-
+# configurable, "wsdrf_rate", falling back to the document's own stated
+# "generally...1%") minus the employer's own declared eligible training
+# expenditure for the year, floored at 0 — NOT a recurring per-payslip
+# deduction, so this is a standalone calculator (same architecture as
+# calculate_ca_retiring_allowance_withholding), never wired into
+# canada.py's calculate(). Training expenditure comes from an
+# EmployerTaxProfile row (component_code "QC_WSDRF_TRAINING_EXPENDITURE",
+# jurisdiction "CA-QC", the dollar amount stored in taxable_wage_base —
+# the same generic tenant-notice mechanism WCB/exemption-allocation
+# already reuse) — absent, expenditure defaults to $0 (no credit assumed
+# without an explicit declaration).
+_CA_WSDRF_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def calculate_ca_wsdrf_shortfall(
+    db: Session, organization_id: int, period_start, period_end, *,
+    training_expenditure_override: Optional[Decimal] = None,
+) -> dict:
+    """Returns this employer's WSDRF shortfall for [period_start,
+    period_end] — sums real Quebec (work_state == "QC") PayslipItem gross
+    pay across every FINALIZED (Approved/Authorized/Paid/Closed — never
+    Draft/Review) CA payslip in range, same cross-run summation
+    discipline as generate_india_form_138/generate_ca_pd7a.
+    training_expenditure_override lets a caller supply a what-if figure
+    without touching the employer's own on-file declaration; None (the
+    default) reads the real EmployerTaxProfile row."""
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.hardcoded_defaults import _CA_WSDRF_RATE_PCT
+
+    if period_end < period_start:
+        raise BadRequestException(f"period_end ({period_end}) cannot be before period_start ({period_start}).")
+
+    quebec_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "CA", PayslipItem.work_state == "QC",
+            PayrollRun.period_end >= period_start, PayrollRun.period_end <= period_end,
+            PayrollRun.status.in_(_CA_WSDRF_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+    total_quebec_payroll = sum((Decimal(str(i.gross_pay or 0)) for i in quebec_items), Decimal("0"))
+
+    state_rate_map, _state_slabs = get_state_scoped_config(db, "CA", "QC", as_of=period_end)
+    wsdrf_rate = resolve_jurisdiction_parameter(state_rate_map, "wsdrf_rate", _CA_WSDRF_RATE_PCT, country="CA")
+
+    if training_expenditure_override is not None:
+        training_expenditure = training_expenditure_override
+    else:
+        profiles = get_employer_tax_profiles(db, organization_id, "CA-QC", as_of=period_end)
+        wsdrf_profile = profiles.get("QC_WSDRF_TRAINING_EXPENDITURE")
+        training_expenditure = wsdrf_profile.taxable_wage_base if wsdrf_profile and wsdrf_profile.taxable_wage_base is not None else Decimal("0")
+
+    required_investment = _round2(total_quebec_payroll * wsdrf_rate / Decimal("100"))
+    shortfall = max(Decimal("0"), required_investment - training_expenditure)
+    return {
+        "total_quebec_payroll": total_quebec_payroll, "wsdrf_rate_pct": wsdrf_rate,
+        "required_investment": required_investment, "training_expenditure": training_expenditure,
+        "shortfall": shortfall, "employee_count": len({i.employee_id for i in quebec_items}),
+    }
 
 
 def _resolve_uk_ni_category_override(db: Session, employee, pay_date, rate_map: dict) -> str | None:
@@ -6842,6 +7737,12 @@ _CA_ORG_LEVY_CLASSIFICATION_FIELD = {
     "bc_eht": "bc_eht_employer_classification",
     "qc_hsf": "qc_hsf_employer_category",
 }
+# Which of the five org-banded levies actually have a documented
+# "associated employers share exemption" rule (§15) — Quebec HSF is
+# NOT among them (its own sliding-rate mechanism has no such provision
+# in the document), so qc_hsf is deliberately excluded from group-aware
+# summation even when _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES is on.
+_CA_ASSOCIATED_GROUP_LEVY_COMPONENTS = {"on_eht", "bc_eht", "mb_he_levy", "nl_hapset"}
 
 
 def _ca_org_levy_read_inputs(db: Session, organization_id: int, pay_date, work_state: str) -> dict:
@@ -6853,14 +7754,30 @@ def _ca_org_levy_read_inputs(db: Session, organization_id: int, pay_date, work_s
     {} when the employee isn't in one of these five jurisdictions, OR
     when the rollout switch is off (_load_ca_org_levy_ytd's own dormancy
     contract) — the caller then passes nothing through to
-    build_context_from_employee, and canada.py resolves that levy to 0."""
+    build_context_from_employee, and canada.py resolves that levy to 0.
+
+    Associated-employer-group support (§15, gap-closure Phase 6): when
+    _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES has "CA" AND this component is
+    one of the four with a documented sharing rule, the "before" figure
+    is summed across every org sharing this org's connected_group_code
+    (same mechanism/helper UK's Apprenticeship Levy already uses) instead
+    of read from this org alone — an org with no connected_group_code set
+    (every org today) sums across a "group of one," i.e. unchanged."""
     component = _CA_ORG_LEVY_COMPONENT_BY_WORK_STATE.get((work_state or "").strip().upper())
     if not component:
         return {}
-    org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, (component,))
-    if not org_levy_ytd:
-        return {}
-    inputs = {f"{component}_ytd_remuneration_before": org_levy_ytd[component]}
+    if "CA" in _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES and component in _CA_ASSOCIATED_GROUP_LEVY_COMPONENTS:
+        if "CA" not in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
+            return {}
+        tax_year = _org_ytd_tax_year(pay_date)
+        _group_code, member_ids = _connected_group_member_ids(db, organization_id)
+        remuneration_before = _sum_org_ytd_component_across_orgs(db, member_ids, tax_year, component)
+        inputs = {f"{component}_ytd_remuneration_before": remuneration_before}
+    else:
+        org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, (component,))
+        if not org_levy_ytd:
+            return {}
+        inputs = {f"{component}_ytd_remuneration_before": org_levy_ytd[component]}
     classification_field = _CA_ORG_LEVY_CLASSIFICATION_FIELD.get(component)
     if classification_field:
         compliance = db.query(CompanyComplianceDetails).filter(
@@ -6888,14 +7805,20 @@ _UK_APPR_LEVY_COMPONENT = "uk_appr_levy"
 _UK_EMPLOYER_NI_TOTAL_COMPONENT = "uk_employer_ni_total"
 
 
-def _uk_connected_group_member_ids(db: Session, organization_id: int) -> tuple:
+def _connected_group_member_ids(db: Session, organization_id: int) -> tuple:
     """Returns (connected_group_code_or_None, member_organization_ids).
     member_organization_ids always includes this org itself, even when
     ungrouped (a "group of one") — shared by every connected-employer-
-    aware UK calculation (Employment Allowance sharing, Part 7B; the
-    Apprenticeship Levy sharing this same helper now also powers, per
-    §14/AC-24's explicit "connected employers share one allowance"
-    requirement for the Levy specifically)."""
+    aware calculation, UK (Employment Allowance sharing, Part 7B; the
+    Apprenticeship Levy sharing this same helper, per §14/AC-24's
+    explicit "connected employers share one allowance" requirement) AND
+    Canada (Ontario/BC EHT and Manitoba HE Levy's "associated employers
+    share exemption," ZP-TAX-CA-2026-001 §15, gap-closure Phase 6) alike
+    — genuinely country-agnostic despite the historical name; kept as
+    ONE shared field (Organization.connected_group_code) rather than a
+    second country-specific one, since the underlying concept (multiple
+    legal entities sharing one statutory allowance/exemption) is
+    identical."""
     from app.modules.organizations.models import Organization
 
     this_org = db.query(Organization).filter(Organization.id == organization_id).first()
@@ -6944,7 +7867,7 @@ def _load_uk_org_levy_ytd(db: Session, organization_id: int, pay_date) -> dict:
     if "UK" not in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
         return {}
     tax_year = _uk_tax_year(pay_date)
-    _group_code, member_ids = _uk_connected_group_member_ids(db, organization_id)
+    _group_code, member_ids = _connected_group_member_ids(db, organization_id)
     levy_before = _sum_org_ytd_component_across_orgs(db, member_ids, tax_year, _UK_APPR_LEVY_COMPONENT)
     employer_ni_before = _sum_org_ytd_component_across_orgs(db, [organization_id], tax_year, _UK_EMPLOYER_NI_TOTAL_COMPONENT)
     return {
@@ -7321,7 +8244,7 @@ def _load_uk_connected_group_employer_ni(db: Session, organization_id: int, as_o
     "group_employer_ni", "member_organization_ids"}. member_organization_
     ids always includes this org itself, even when ungrouped."""
     this_org_ni = _load_uk_org_levy_ytd(db, organization_id, as_of).get("employer_ni_ytd_before", Decimal("0"))
-    group_code, member_ids = _uk_connected_group_member_ids(db, organization_id)
+    group_code, member_ids = _connected_group_member_ids(db, organization_id)
     tax_year = _uk_tax_year(as_of)
     group_total = _sum_org_ytd_component_across_orgs(db, member_ids, tax_year, _UK_EMPLOYER_NI_TOTAL_COMPONENT)
     return {
@@ -7477,6 +8400,18 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     code_wages_rules = (
         get_code_wages_classification(db, country, run.organization_id, as_of=run.pay_date) if country == "IN" else {}
     )
+    epf_base_rules = (
+        get_epf_base_classification(db, country, run.organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    esi_base_rules = (
+        get_esi_base_classification(db, country, run.organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    pt_base_rules = (
+        get_pt_base_classification(db, country, run.organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    ca_taxability_rules = (
+        get_ca_taxability_rules_bundle(db, run.organization_id, as_of=run.pay_date) if country == "CA" else {}
+    )
     salary_tds_inputs = (
         get_india_salary_tds_inputs(db, run.organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
@@ -7488,6 +8423,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         unpaid_leave_days=unpaid_leave_days,
         country=country, rate_map=rate_map, slabs=slabs,
         code_wages_rules=code_wages_rules,
+        epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
+        ca_taxability_rules=ca_taxability_rules,
         other_income_for_tds=salary_tds_inputs.get("other_income_for_tds", Decimal("0")),
         tds_already_deducted=salary_tds_inputs.get("tds_already_deducted", Decimal("0")),
         annual_claims_total=salary_tds_inputs.get("claims_total", Decimal("0")),
@@ -7509,6 +8446,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         tax_snapshot = _pack_to_tax_snapshot(resolved_rates, resolved_slabs, pack)
     else:
         tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
+    # AC-32 historical-replay gap closure — see _build_overlay_tax_snapshot's
+    # own docstring. Runs regardless of which branch produced tax_snapshot
+    # above (state_rate_map/employer_tax_profiles/locality_rate can all be
+    # configured even with no country-level canonical pack in play).
+    if tax_snapshot.get("tax_rule_snapshot") is None:
+        tax_snapshot["tax_rule_snapshot"] = {}
+    tax_snapshot["tax_rule_snapshot"].update(
+        _build_overlay_tax_snapshot(state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate)
+    )
 
     return {
         "employee_name": employee_name,
@@ -7625,6 +8571,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Directors NIC (ZP-TAX-UK-2026-27-001 §9.2) — a separate key
         # since it's gated on a different result field entirely.
         "_uk_director_ytd_result": result if result.ytd_director_ni_gross is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for Canada
+        # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
+        # — a separate key since it's gated on ITS OWN result field,
+        # independent of CPP/EI's ytd_pensionable_earnings.
+        "_option2_ytd_result": result if result.option2_cumulative_gross_after is not None else None,
         # "_org_levy_result" is NOT a PayslipItem column either — same
         # splat-then-pop contract as "_ytd_result" above. Carries this
         # employee's own period INCREMENT (after − before), not the
@@ -7709,6 +8660,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     )
     ytd_result = values.pop("_ytd_result", None)
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
+    option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
     uk_org_levy_increment = values.pop("_uk_org_levy_increment", None)
 
@@ -7725,6 +8677,10 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         db.flush()  # need item.id for last_updated_payslip_id
         work_state = getattr(employee, "work_state", None)
         _upsert_ca_ytd_accumulator(db, employee.id, run.pay_date, work_state, ytd_result, payslip_id=item.id)
+    if option2_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        work_state = getattr(employee, "work_state", None)
+        _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, option2_ytd_result, payslip_id=item.id)
     if uk_director_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_uk_director_ytd_accumulator(db, employee.id, run.pay_date, uk_director_ytd_result, payslip_id=item.id)
@@ -8056,13 +9012,15 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # Super Admin has since edited/superseded the tax pack that produced
     # them, not silently pick up whatever rates are live today (the
     # pre-existing gap this closes — see _reconstruct_rate_map_and_slabs_
-    # from_snapshot's own docstring). Only the country-level
-    # rate_map/slabs are replayed this way; state_rate_map/state_slabs,
-    # employer_tax_profiles, reciprocity and locality_rate are NOT yet
-    # snapshotted anywhere and still re-resolve against current live
-    # data — a disclosed, narrower gap than before this fix, not a new
-    # one. Falls back to live resolution unchanged whenever no snapshot
-    # exists to replay from (every payslip before canonical tracking, or
+    # from_snapshot's own docstring). Both the country-level rate_map/
+    # slabs AND the state_rate_map/state_slabs/employer_tax_profiles/
+    # reciprocity/locality_rate overlay are replayed this way (the latter
+    # via _reconstruct_overlay_from_snapshot, closing what was previously
+    # a disclosed narrower gap — those used to still re-resolve against
+    # current live data even when the country-level snapshot replayed
+    # correctly). Falls back to live resolution unchanged whenever no
+    # snapshot exists to replay from (every payslip before canonical
+    # tracking, or
     # for an org never opted in).
     replaying_from_snapshot = False
     existing_tax_snapshot = getattr(existing_item, "tax_rule_snapshot", None)
@@ -8072,6 +9030,30 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             rate_map = {_normalize_engine_component_key(r.component_key): r for r in replay_rates}
             slabs = replay_slabs
             replaying_from_snapshot = True
+        # AC-32 historical-replay gap closure (see _build_overlay_tax_
+        # snapshot's own docstring) — replay the provincial/employer-
+        # overlay/reciprocity/locality inputs too, not just the country-
+        # level rate_map/slabs above, so a bracket/WCB-rate/locality-rate
+        # change made since the original run can't silently change this
+        # "historical" replay's result. Only overrides the live-resolved
+        # values above when the snapshot actually carries this data
+        # (every payslip generated before this field existed has none —
+        # falls through to live resolution unchanged, exactly as before).
+        # Gate on whether THIS snapshot ever captured overlay data at all
+        # (key presence), not on whether the reconstruction came back
+        # non-empty — reciprocity's reconstructed value is a fixed-shape
+        # dict (never literally empty/falsy) even when nothing applied,
+        # so a truthiness check here would wrongly override a pre-this-
+        # fix payslip's live-resolved state/employer/locality data with
+        # blank defaults instead of falling back to live resolution.
+        has_overlay_snapshot = any(
+            key in existing_tax_snapshot
+            for key in ("stateContributionRates", "stateTaxSlabs", "employerTaxProfiles", "reciprocity", "localityRate")
+        )
+        if has_overlay_snapshot:
+            state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate = (
+                _reconstruct_overlay_from_snapshot(existing_tax_snapshot)
+            )
 
     # Canada YTD — this is a CORRECTION path, not initial generation: it
     # must NOT read the live accumulator and write a new post-period
@@ -8111,6 +9093,15 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # same as _ytd_result.
     values.pop("_org_levy_result", None)
     values.pop("_uk_org_levy_increment", None)
+    # Option 2 cumulative-averaging (gap-closure Phase 9): option2_inputs
+    # is likewise never passed above, for the identical reason — this is
+    # a single-payslip CORRECTION path, and re-reading/re-incrementing
+    # the live cumulative-gross/periods-elapsed/tax-withheld accumulator
+    # here would cascade into every LATER payslip's own frozen state for
+    # this employee/tax-year, the same retroactive-correction-cascade
+    # problem already disclosed (and left unbuilt) for CPP/EI above.
+    # Popped purely to keep it off existing_item.
+    values.pop("_option2_ytd_result", None)
     if replaying_from_snapshot:
         # _compute_payslip_values always re-derives a tax_snapshot from
         # whatever rate_map/slabs it was given (see its own resolved_pack
@@ -8424,6 +9415,7 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
     # (using the incoming value for both sides makes the diff meaningless).
     declaration_fields = (
         "td1_claim_amount", "provincial_td1_claim_amount", "qc_tp1015_claim_amount", "lsvcc_investment_amount",
+        "td1x_estimated_annual_commission", "td1x_estimated_annual_expenses",
     )
     old_declaration_values = {f: getattr(employee, f, None) for f in declaration_fields}
 
@@ -9210,6 +10202,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         else _load_uk_org_levy_ytd(db, organization_id, run.pay_date) if country == "UK"
         else {}
     )
+    option2_inputs = (
+        _load_ca_option2_ytd(db, employee.id, run.pay_date, work_state) if country == "CA" else {}
+    )
 
     # Delegate to the strategy engine (no attendance data for manual payslips)
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
@@ -9218,6 +10213,18 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     )
     code_wages_rules = (
         get_code_wages_classification(db, country, organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    epf_base_rules = (
+        get_epf_base_classification(db, country, organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    esi_base_rules = (
+        get_esi_base_classification(db, country, organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    pt_base_rules = (
+        get_pt_base_classification(db, country, organization_id, as_of=run.pay_date) if country == "IN" else {}
+    )
+    ca_taxability_rules = (
+        get_ca_taxability_rules_bundle(db, organization_id, as_of=run.pay_date) if country == "CA" else {}
     )
     salary_tds_inputs = (
         get_india_salary_tds_inputs(db, organization_id, employee.id, india_tax_year_for_date(run.pay_date))
@@ -9230,6 +10237,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         unpaid_leave_days=0,
         country=country, rate_map=rate_map, slabs=slabs,
         code_wages_rules=code_wages_rules,
+        epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
+        ca_taxability_rules=ca_taxability_rules,
         other_income_for_tds=salary_tds_inputs.get("other_income_for_tds", Decimal("0")),
         tds_already_deducted=salary_tds_inputs.get("tds_already_deducted", Decimal("0")),
         annual_claims_total=salary_tds_inputs.get("claims_total", Decimal("0")),
@@ -9242,6 +10251,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         **reciprocity,
         **ytd_inputs,
         **org_levy_inputs,
+        **option2_inputs,
     )
     calc = calculate_payroll(ctx, calculation_mode)
 
@@ -9250,6 +10260,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         tax_snapshot = _pack_to_tax_snapshot(canonical_rates, slabs, pack)
     else:
         tax_snapshot = _resolve_tax_snapshot(db, country, run.pay_date)
+    # AC-32 historical-replay gap closure — see _build_overlay_tax_snapshot.
+    if tax_snapshot.get("tax_rule_snapshot") is None:
+        tax_snapshot["tax_rule_snapshot"] = {}
+    tax_snapshot["tax_rule_snapshot"].update(
+        _build_overlay_tax_snapshot(state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate)
+    )
 
     item = PayslipItem(
         payroll_run_id=run_id,
@@ -9359,6 +10375,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_director_ni_gross is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_uk_director_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.option2_cumulative_gross_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, calc, payslip_id=item.id)
     org_levy_increments = {
         **({"on_eht": calc.on_eht_ytd_remuneration_after - ctx.on_eht_ytd_remuneration_before}
            if calc.on_eht_ytd_remuneration_after is not None else {}),

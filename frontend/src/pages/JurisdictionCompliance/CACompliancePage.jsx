@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Landmark, Coins, MapPin, Compass } from "lucide-react";
+import { Landmark, Coins, MapPin, Compass, Percent } from "lucide-react";
 import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
 import SuiEmployerRatesPanel from "../../components/jurisdiction/SuiEmployerRatesPanel";
 import CARateGroupTab from "../../components/jurisdiction/canada/CARateGroupTab";
+import CATaxabilityMatrixTab from "../../components/jurisdiction/canada/CATaxabilityMatrixTab";
 import { CPP_EI_KEYS, FEDERAL_PARAM_KEYS, QUEBEC_KEYS, buildTerritorialKeys } from "../../components/jurisdiction/canada/caComponentConfig";
 
 // Canada — everything country-specific for this jurisdiction lives in
@@ -76,6 +77,11 @@ const extraTabs = [
         />
       );
     },
+  },
+  {
+    key: "taxability-matrix", label: "Taxability Matrix", icon: Percent, after: "territorial-tax",
+    isVisible: (pack) => !pack.jurisdictionState,
+    render: () => <CATaxabilityMatrixTab />,
   },
 ];
 

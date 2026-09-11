@@ -5,6 +5,7 @@ import UKStatutoryPayCalculatorModal from "./UKStatutoryPayCalculatorModal";
 import UKCourtOrdersModal from "./UKCourtOrdersModal";
 import UKNiReliefFactsModal from "./UKNiReliefFactsModal";
 import IndiaStatutoryFormsModal from "./IndiaStatutoryFormsModal";
+import CAStatutoryFormsModal from "./CAStatutoryFormsModal";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
 
 const DEPARTMENT_STYLES = {
@@ -63,6 +64,7 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [showCourtOrders, setShowCourtOrders] = useState(false);
   const [showNiReliefFacts, setShowNiReliefFacts] = useState(false);
   const [showIndiaStatutoryForms, setShowIndiaStatutoryForms] = useState(false);
+  const [showCaStatutoryForms, setShowCaStatutoryForms] = useState(false);
 
   useEffect(() => {
     getCustomFields().then(setCustomFieldDefs).catch(() => {});
@@ -202,6 +204,17 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                     </button>
                   </div>
                 )}
+                {employee.countryCode === "CA" && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowCaStatutoryForms(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Statutory Forms &amp; Special Payments (T4 / RL-1 / ROE)
+                    </button>
+                  </div>
+                )}
               </div>
 
               {customFieldEntries.length > 0 && (
@@ -278,6 +291,9 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
       )}
       {showIndiaStatutoryForms && (
         <IndiaStatutoryFormsModal employee={employee} onClose={() => setShowIndiaStatutoryForms(false)} />
+      )}
+      {showCaStatutoryForms && (
+        <CAStatutoryFormsModal employee={employee} onClose={() => setShowCaStatutoryForms(false)} />
       )}
     </div>
   );

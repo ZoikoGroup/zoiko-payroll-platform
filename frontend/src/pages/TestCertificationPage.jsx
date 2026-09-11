@@ -5,12 +5,11 @@ import { useToast } from "../context/ToastContext";
 import { runTestCertification, getTestCertificationRuns } from "../service/superAdminService";
 
 // Super Admin > Compliance > Test Certification (§19 gap-closure
-// Part 11, 2026-09-09) — triggers a real run of the Part 10 HMRC
-// golden-test harness and shows run history. "NO_REAL_CASES" is
+// Part 11, 2026-09-09; generalized to Canada, gap-closure Phase 8,
+// 2026-09-11) — triggers a real run of the golden-test harness for the
+// selected jurisdiction and shows its run history. "NO_REAL_CASES" is
 // deliberately never displayed as a pass — an empty real-case set
-// proves nothing about correctness (Part 10 is blocked on Venu
-// obtaining the actual HMRC test-data files; see tests/hmrc_golden's
-// own README for how to get them).
+// proves nothing about correctness.
 const STATUS_STYLE = {
   PASS: "bg-success/10 text-success",
   FAIL: "bg-error/10 text-error",
@@ -19,25 +18,33 @@ const STATUS_STYLE = {
 const STATUS_LABEL = {
   PASS: "Pass", FAIL: "Fail", NO_REAL_CASES: "No real cases yet",
 };
+const JURISDICTIONS = [
+  { value: "UK", label: "UK (HMRC)", fixturesPath: "backend/tests/fixtures/hmrc_golden/README.md" },
+  { value: "CA", label: "Canada (CRA/Revenu Quebec)", fixturesPath: "backend/tests/fixtures/cra_golden/README.md" },
+  { value: "IN", label: "India (CBDT/EPFO/ESIC)", fixturesPath: "backend/tests/fixtures/in_golden/README.md" },
+];
 
 export default function TestCertificationPage() {
   const { addToast } = useToast() || {};
+  const [jurisdiction, setJurisdiction] = useState("UK");
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const activeJurisdiction = JURISDICTIONS.find((j) => j.value === jurisdiction) || JURISDICTIONS[0];
 
   function load() {
-    getTestCertificationRuns().then(setRuns).finally(() => setLoading(false));
+    setLoading(true);
+    getTestCertificationRuns({ jurisdiction_country: jurisdiction }).then(setRuns).finally(() => setLoading(false));
   }
-  useEffect(load, []);
+  useEffect(load, [jurisdiction]);
 
   async function handleRun() {
     setRunning(true);
     try {
-      const run = await runTestCertification();
+      const run = await runTestCertification(jurisdiction);
       if (run.status === "NO_REAL_CASES") {
-        addToast?.("Run complete — 0 real HMRC cases exist yet. Nothing was certified.", "info");
+        addToast?.(`Run complete — 0 real ${activeJurisdiction.label} cases exist yet. Nothing was certified.`, "info");
       } else {
         addToast?.(`Run complete — ${run.passedCases}/${run.totalCases} passed.`, run.status === "PASS" ? "success" : "error");
       }
@@ -59,20 +66,28 @@ export default function TestCertificationPage() {
           <ShieldCheck size={20} className="text-primary" />
           <div>
             <h1 className="text-2xl font-bold text-foreground">Test Certification</h1>
-            <p className="text-sm text-foreground-muted mt-0.5">HMRC golden-test harness pass/fail history (Part 10).</p>
+            <p className="text-sm text-foreground-muted mt-0.5">Golden-test harness pass/fail history.</p>
           </div>
         </div>
-        <button
-          onClick={handleRun} disabled={running}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
-        >
-          <Play size={14} /> {running ? "Running…" : "Run Now"}
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)}
+            className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-foreground"
+          >
+            {JURISDICTIONS.map((j) => <option key={j.value} value={j.value}>{j.label}</option>)}
+          </select>
+          <button
+            onClick={handleRun} disabled={running}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover disabled:opacity-60"
+          >
+            <Play size={14} /> {running ? "Running…" : "Run Now"}
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-foreground-secondary">
-        Real HMRC test-data files haven't been obtained yet (GOV.UK's own published payroll test data) — every run today will
-        correctly report "No real cases yet" rather than a false pass. See <code>backend/tests/fixtures/hmrc_golden/README.md</code> for how to add real cases.
+        Golden cases are only as good as their source — see <code>{activeJurisdiction.fixturesPath}</code> for how
+        cases for {activeJurisdiction.label} are sourced and added.
       </div>
 
       {loading ? (

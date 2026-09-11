@@ -1,0 +1,39 @@
+{
+  "description": "Northwest Territories employee at $6,000/month -- exercises §14's employee-paid territorial payroll tax (2%, NWT_PAYROLL_TAX deduction code, folded into `local_tax`/`tds`), plus NWT's own real 2026 federal-style progressive bracket table (this document's §8 matrix). Closes a real §24 golden-test gap: no territorial-tax scenario existed in the golden suite at all before this.",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal brackets/BPAF/CEA), Section 8 (NT 2026 brackets: 53,003/106,009/172,346 at 5.90/8.60/12.20/14.05%, NT basic amount $18,198), Section 14 (NWT 2% employee territorial payroll tax). Recomputed by running the real engine, not hand-derived.",
+  "context": {
+    "gross": "6000.00",
+    "country": "CA",
+    "pay_date": "2026-06-30",
+    "work_state": "NT",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ],
+    "state_rate_map": {
+      "provincial_bpa": {"flat_amount": "18198"},
+      "nwt_payroll_tax": {"employee_rate_pct": "2.00"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "53003", "rate_pct": "5.90"},
+      {"min_amount": "53003", "max_amount": "106009", "rate_pct": "8.60"},
+      {"min_amount": "106009", "max_amount": "172346", "rate_pct": "12.20"},
+      {"min_amount": "172346", "max_amount": null, "rate_pct": "14.05"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "642.90",
+    "state_income_tax": "307.27",
+    "local_tax": "120.00",
+    "tds": "1070.17",
+    "social_security": "339.65",
+    "employee_esi": "93.59"
+  }
+}

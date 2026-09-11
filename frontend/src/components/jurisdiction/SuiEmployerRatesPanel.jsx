@@ -152,7 +152,24 @@ const COMPONENT_OPTIONS_BY_COUNTRY = {
   // headcount for a state program whose employer share is
   // headcount-conditional (see the Covered Employees field below).
   US: ["SUI", "ETT", "WF", "JDA", "FAMLI", "PFML", "PAID_LEAVE"],
-  CA: ["WCB"],
+  // *_EXEMPTION_ALLOCATION_PCT (ZP-TAX-CA-2026-001 §15, gap-closure
+  // Phase 6): this org's own elected share (0-100, stored in Employer
+  // Rate %) of a shared exemption when connected_group_code links it to
+  // other associated employers — see engine/countries/canada.py's
+  // _ca_apply_levy_exemption_allocation. Unconfigured (every org today)
+  // defaults to 100% — this org gets the full exemption, unchanged.
+  // QC_WSDRF_TRAINING_EXPENDITURE (gap-closure Phase 7): this employer's
+  // own declared eligible training expenditure for the year (stored in
+  // Taxable Wage Base, despite the field's name — see service.
+  // calculate_ca_wsdrf_shortfall). QC_HSF_TEMP_SECTOR_EXEMPTION: presence
+  // of an effective-dated row (no rate/amount needed) is itself the
+  // eligibility signal for the temporary agriculture/forestry/fishing
+  // sector reclassification.
+  CA: [
+    "WCB", "ON_EHT_EXEMPTION_ALLOCATION_PCT", "BC_EHT_EXEMPTION_ALLOCATION_PCT",
+    "MB_HE_LEVY_EXEMPTION_ALLOCATION_PCT", "NL_HAPSET_EXEMPTION_ALLOCATION_PCT",
+    "QC_WSDRF_TRAINING_EXPENDITURE", "QC_HSF_TEMP_SECTOR_EXEMPTION",
+  ],
 };
 
 // A row for one of these components is headcount-only — it never carries
@@ -182,6 +199,9 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   const isHeadcountOnly = HEADCOUNT_ONLY_COMPONENTS.includes(form.componentCode);
+  const isExemptionAllocation = form.componentCode.endsWith("_EXEMPTION_ALLOCATION_PCT");
+  const isTrainingExpenditure = form.componentCode === "QC_WSDRF_TRAINING_EXPENDITURE";
+  const isSectorExemptionFlag = form.componentCode === "QC_HSF_TEMP_SECTOR_EXEMPTION";
 
   useEffect(() => {
     getSourceArtifacts().then(setSources).catch(() => setSources([]));
@@ -197,6 +217,18 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
         addToast?.("Covered Employees is required for this component.", "error");
         return;
       }
+    } else if (isExemptionAllocation) {
+      if (form.employerRatePct === "") {
+        addToast?.("Exemption Allocation % is required for this component.", "error");
+        return;
+      }
+    } else if (isTrainingExpenditure) {
+      if (form.taxableWageBase === "") {
+        addToast?.("Eligible Training Expenditure is required for this component.", "error");
+        return;
+      }
+    } else if (isSectorExemptionFlag) {
+      // No rate/amount required — presence + effective dates are the signal.
     } else if (form.taxableWageBase === "" || form.employerRatePct === "") {
       addToast?.("Wage base and employer rate are required.", "error");
       return;
@@ -206,8 +238,10 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
       await upsertEmployerTaxProfile({
         id: profile?.id, organizationId: Number(organizationId),
         jurisdictionId: form.jurisdictionId, componentCode: form.componentCode,
-        taxableWageBase: isHeadcountOnly ? null : form.taxableWageBase,
-        employerRatePct: isHeadcountOnly ? null : form.employerRatePct,
+        taxableWageBase: (isHeadcountOnly || isExemptionAllocation || isSectorExemptionFlag)
+          ? null : (form.taxableWageBase === "" ? null : form.taxableWageBase),
+        employerRatePct: (isHeadcountOnly || isTrainingExpenditure || isSectorExemptionFlag)
+          ? null : (form.employerRatePct === "" ? null : form.employerRatePct),
         coveredEmployeeCount: form.coveredEmployeeCount === "" ? null : Number(form.coveredEmployeeCount),
         rateSource: form.rateSource, effectiveFrom: form.effectiveFrom,
         effectiveTo: form.effectiveTo || null, agencyAccountId: form.agencyAccountId || null,
@@ -237,6 +271,22 @@ function SuiProfileFormModal({ organizationId, profile, country = "US", onClose,
             <label className={labelClass}>Covered Employees</label>
             <input type="number" min="0" className={inputClass} value={form.coveredEmployeeCount} onChange={set("coveredEmployeeCount")} placeholder="e.g. 15" />
             <p className="mt-1 text-[11px] text-foreground-muted">This employer's own headcount for this program — determines whether the employer share applies, per the statutory threshold configured in Tax Components.</p>
+          </div>
+        ) : isExemptionAllocation ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Exemption Allocation %</label>
+            <input className={inputClass} value={form.employerRatePct} onChange={set("employerRatePct")} placeholder="e.g. 40" />
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own elected share (0-100) of the exemption shared across every organization with the same connected/associated group code. Leave unconfigured for 100% (the full exemption, unchanged from a standalone employer).</p>
+          </div>
+        ) : isTrainingExpenditure ? (
+          <div className="col-span-2">
+            <label className={labelClass}>Eligible Training Expenditure ($, for the year)</label>
+            <input className={inputClass} value={form.taxableWageBase} onChange={set("taxableWageBase")} placeholder="e.g. 30000" />
+            <p className="mt-1 text-[11px] text-foreground-muted">This employer's own declared eligible training expenditure for the year — reduces the WSDRF shortfall dollar-for-dollar. Unconfigured defaults to $0 (no credit assumed).</p>
+          </div>
+        ) : isSectorExemptionFlag ? (
+          <div className="col-span-2">
+            <p className="text-[11px] text-foreground-muted">No rate or amount needed — the presence of this row, within its Effective From/To window below, is itself the eligibility signal for the temporary agriculture/forestry/fishing sector reclassification (reclassifies this employer as Primary/Manufacturing for HSF purposes during that window).</p>
           </div>
         ) : (
           <>

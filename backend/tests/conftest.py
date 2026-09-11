@@ -32,6 +32,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
+import app.modules.payroll.engine.countries.shared as _rollout_shared
+
+
+@pytest.fixture(autouse=True)
+def _reset_rollout_switches():
+    """Snapshot every per-country rollout switch (the module-level
+    `_..._ENABLED_COUNTRIES` sets in engine/countries/shared.py) before
+    each test and restore its exact prior contents after, regardless of
+    what the test itself does to it.
+
+    These sets are deliberately mutable global state so a test can flip
+    one on/off inline without touching a database - but many existing
+    tests call `.add("CA")` (or similar) with no matching cleanup,
+    historically relying on file ordering (a "dormant" test placed before
+    the test that flips a switch on) to avoid cross-test pollution within
+    one pytest session. That ordering trick stopped being enough the
+    moment any of these switches got a real default of `{"CA"}` instead
+    of `set()` (see CA gap-closure Phase 1, 2026-09-11, which flipped 9 of
+    them on) - a test running anywhere else in the suite could otherwise
+    observe whatever an earlier, unrelated test happened to leave behind.
+    This fixture makes every test's switch state isolated regardless of
+    order or another test's cleanup discipline, without changing any
+    module's actual default.
+    """
+    switch_names = [
+        name for name in dir(_rollout_shared)
+        if name.endswith("_ENABLED_COUNTRIES") and isinstance(getattr(_rollout_shared, name), set)
+    ]
+    snapshot = {name: set(getattr(_rollout_shared, name)) for name in switch_names}
+    yield
+    for name, original in snapshot.items():
+        current = getattr(_rollout_shared, name)
+        current.clear()
+        current.update(original)
+
 
 @pytest.fixture()
 def db():

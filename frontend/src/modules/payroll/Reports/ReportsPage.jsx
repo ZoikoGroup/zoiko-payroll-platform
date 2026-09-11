@@ -7,6 +7,8 @@ import GeneratedReportPreview from "./GeneratedReportPreview";
 import GeneratedReportsHistoryTable from "./GeneratedReportsHistoryTable";
 import UKEmployerChargesPanel from "./UKEmployerChargesPanel";
 import INForm138Panel from "./INForm138Panel";
+import CAPd7aPanel from "./CAPd7aPanel";
+import CAWsdrfPanel from "./CAWsdrfPanel";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const BASE_TABS = [
@@ -26,6 +28,13 @@ const UK_EMPLOYER_CHARGES_TAB = { id: "uk-employer-charges", label: "UK Employer
 // same reasoning as the UK Employer Charges tab above for its own tab
 // rather than being forced into the run-scoped Generate Report flow.
 const IN_FORM_138_TAB = { id: "in-form-138", label: "India Form 138", icon: FileText };
+// Canada PD7A (ZP-TAX-CA-2026-001, forms/reports gap-closure) is a
+// remittance-period, employer-wide statement, never tied to a single
+// PayrollRun — same reasoning as the India Form 138 tab above.
+const CA_PD7A_TAB = { id: "ca-pd7a", label: "Canada PD7A", icon: Landmark };
+// Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
+// reasoning as the PD7A tab above.
+const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark };
 
 export default function ReportsPage() {
   const { addToast } = useToast();
@@ -35,7 +44,13 @@ export default function ReportsPage() {
   // Permissive default-to-IN, same reasoning as EmployeeDetailPanel's own
   // India-forms button gate — most orgs never explicitly set this field.
   const isIndia = !jurisdictionCountry || jurisdictionCountry === "IN";
-  const tabs = [...BASE_TABS, ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []), ...(isIndia ? [IN_FORM_138_TAB] : [])];
+  const isCanada = jurisdictionCountry === "CA";
+  const tabs = [
+    ...BASE_TABS,
+    ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
+    ...(isIndia ? [IN_FORM_138_TAB] : []),
+    ...(isCanada ? [CA_PD7A_TAB, CA_WSDRF_TAB] : []),
+  ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -275,6 +290,8 @@ export default function ReportsPage() {
 
       {isUk && activeTab === "uk-employer-charges" && <UKEmployerChargesPanel />}
       {isIndia && activeTab === "in-form-138" && <INForm138Panel />}
+      {isCanada && activeTab === "ca-pd7a" && <CAPd7aPanel />}
+      {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
     </div>
   );
 }

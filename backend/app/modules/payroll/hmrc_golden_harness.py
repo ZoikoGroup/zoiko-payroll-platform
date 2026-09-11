@@ -1,10 +1,22 @@
 """
 app/modules/payroll/hmrc_golden_harness.py
 --------------------------------------------
-Runs one normalized golden-test case through the REAL production UK
-engine (engine/countries/uk.py via calculate_payroll) and compares the
-result against HMRC's own expected figures, exactly — no tolerance, no
-rounding leniency (ZP-TAX-UK-2026-27-001 §7.2's own rule).
+Runs one normalized golden-test case through the REAL production engine
+(via calculate_payroll) and compares the result against an authority's
+own expected figures, exactly — no tolerance, no rounding leniency
+(ZP-TAX-UK-2026-27-001 §7.2's own rule, extended to every jurisdiction
+this harness now supports).
+
+Originally UK/HMRC-only (hence the module's historical name — kept
+unchanged rather than renamed, to avoid a blast-radius rename across the
+existing tests/hmrc_golden/runner.py re-export shim and every existing
+fixture reference, for no functional benefit). Generalized to Canada
+(gap-closure Phase 8, 2026-09-11, ZP-TAX-CA-2026-001 §20's "Test Lab"
+module/AC-29): `country` is now read from the case JSON's own `context`
+(defaulting to "UK" for every existing fixture that predates this,
+unchanged) instead of hardcoded, and `work_state`/`state_rate_map`/
+`state_slabs`/`td1_claim_amount` are now accepted for jurisdictions
+(Canada) that need a province/state layer on top of the federal one.
 
 Lives in the app package (not under tests/) because Super Admin UI
 Part 11's "Test Certification" tab needs to trigger a real run of this
@@ -91,6 +103,13 @@ class GoldenSlab:
     flat_amount: Optional[Decimal] = None
     filing_status: Optional[str] = None
     jurisdiction_state: Optional[str] = None
+    # India PT_FLAT brackets (gap-closure Phase F, 2026-09-11): the
+    # February-adjustment amount and the assessment-basis tag
+    # india.py's _resolve_state_pt_bracket reads off a real TaxSlab row
+    # (see models.py's own adjustment_amount/assessment_basis columns).
+    # Optional/None for every existing UK/CA case, unaffected.
+    adjustment_amount: Optional[Decimal] = None
+    assessment_basis: Optional[str] = None
 
 
 def _to_decimal(value):
@@ -133,6 +152,8 @@ def _build_slabs(raw: Optional[list]) -> list:
             flat_amount=_to_decimal(s.get("flat_amount")),
             filing_status=s.get("filing_status"),
             jurisdiction_state=s.get("jurisdiction_state"),
+            adjustment_amount=_to_decimal(s.get("adjustment_amount")),
+            assessment_basis=s.get("assessment_basis"),
         )
         for s in raw
     ]
@@ -143,7 +164,7 @@ def build_context(case_context: dict) -> PayrollContext:
     return PayrollContext(
         gross=gross,
         basic=gross,
-        country="UK",
+        country=case_context.get("country", "UK"),
         pay_frequency=case_context.get("pay_frequency", "Monthly"),
         pay_date=_to_date(case_context.get("pay_date")),
         tax_code=case_context.get("tax_code"),
@@ -155,6 +176,24 @@ def build_context(case_context: dict) -> PayrollContext:
         date_of_birth=_to_date(case_context.get("date_of_birth")),
         rate_map=_build_rate_map(case_context.get("rate_map")),
         slabs=_build_slabs(case_context.get("slabs")),
+        # Canada (and any future province/state-layered jurisdiction):
+        # optional, default to the engine's own no-state-configured
+        # behavior when omitted (every UK case today).
+        work_state=case_context.get("work_state"),
+        state_rate_map=_build_rate_map(case_context.get("state_rate_map")),
+        state_slabs=_build_slabs(case_context.get("state_slabs")),
+        td1_claim_amount=_to_decimal(case_context.get("td1_claim_amount")),
+        provincial_td1_claim_amount=_to_decimal(case_context.get("provincial_td1_claim_amount")),
+        qc_tp1015_claim_amount=_to_decimal(case_context.get("qc_tp1015_claim_amount")),
+        # India (gap-closure Phase F, 2026-09-11): tax_regime ("New"/"Old"),
+        # gender (Maharashtra PT's gender-differentiated brackets — see
+        # india.py's _resolve_state_pt_bracket), and state_rate_map's own
+        # flat-amount rows (LWF/half-year-PT deduction months) are already
+        # covered by state_rate_map above via _build_rate_map. Optional/
+        # None for every existing UK/CA case, unaffected.
+        tax_regime=case_context.get("tax_regime"),
+        gender=case_context.get("gender"),
+        tax_residency_status=case_context.get("tax_residency_status"),
     )
 
 

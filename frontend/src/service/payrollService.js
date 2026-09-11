@@ -1607,3 +1607,83 @@ export const generateIndiaForm123 = async (payload) => {
     tax_year: payload.taxYear,
   });
 };
+
+// ── Canada: T4/RL-1/ROE (per-employee) + PD7A (per-period) generation ──
+// (ZP-TAX-CA-2026-001, forms/reports gap-closure). T4/RL-1/ROE share the
+// same shape as India's Form 130 above (report_template_id/employee_id/
+// as_of_date) — same widened backend endpoint family, just Canada's own
+// paths.
+export const generateCaT4 = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/t4", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateCaRl1 = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/rl1", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateCaRoe = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/roe", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    as_of_date: payload.asOfDate,
+  });
+};
+
+export const generateCaPd7a = async (payload) => {
+  return await api.post("/api/payroll/canada/reports/pd7a", {
+    report_template_id: payload.reportTemplateId,
+    period_start: payload.periodStart,
+    period_end: payload.periodEnd,
+  });
+};
+
+// Canada bonus/retroactive-pay/vacation-not-taken/accumulated-overtime
+// special-payment method (§19) — a standalone calculator, same footing
+// as calculateIndiaGratuity, not a payroll-run deduction.
+export const calculateCaSpecialPayment = async (payload) => {
+  return await api.post("/api/payroll/canada/special-payment/calculate", {
+    employee_id: payload.employeeId,
+    regular_annual_pay: payload.regularAnnualPay,
+    special_payment_amount: payload.specialPaymentAmount,
+    payroll_date: payload.payrollDate || null,
+  });
+};
+
+// Canada retiring allowance/severance lump-sum withholding (§19) — rate-
+// table lookup, resolves to 0%/unconfigured until Tax Ops enters real
+// CRA-sourced bands via Super Admin.
+export const calculateCaRetiringAllowance = async (payload) => {
+  return await api.post("/api/payroll/canada/retiring-allowance/calculate", {
+    employee_id: payload.employeeId,
+    amount: payload.amount,
+    payroll_date: payload.payrollDate || null,
+  });
+};
+
+// Canada TD1X commission formula (§18/§19) — recommended per-period
+// withholding for a commission employee with TD1X estimates on file.
+export const calculateCaTd1xCommission = async (payload) => {
+  return await api.post("/api/payroll/canada/td1x-commission/calculate", {
+    employee_id: payload.employeeId,
+    payroll_date: payload.payrollDate || null,
+    pay_periods_per_year: payload.payPeriodsPerYear || 12,
+  });
+};
+
+// Quebec WSDRF shortfall (§13/§15) — annual reconciliation, employer-
+// level, not tied to a single employee or payroll run.
+export const calculateCaWsdrf = async (payload) => {
+  return await api.post("/api/payroll/canada/wsdrf/calculate", {
+    period_start: payload.periodStart,
+    period_end: payload.periodEnd,
+    training_expenditure_override: payload.trainingExpenditureOverride || null,
+  });
+};

@@ -60,6 +60,31 @@ class PayrollContext:
     # default, unchanged from before this field existed.
     code_wages_rules: dict = field(default_factory=dict)
 
+    # India EPF/ESI/PT wage-base classification (ZP-TAX-IN-2026-27-001,
+    # gap-closure Phase G, 2026-09-11) — same {earning_type: is_included}
+    # shape/precedence as code_wages_rules above, resolved by service.py's
+    # get_epf_base_classification/get_esi_base_classification/
+    # get_pt_base_classification, but a SEPARATE axis from Code Wages: no
+    # 50%-cap add-back test, just a plain per-component sum (see
+    # engine/countries/india.py's _classify_wage_base). Empty dict (every
+    # org/state today) reproduces this engine's exact prior EPF/ESI/PT
+    # wage-base calculation — see india.py's calculate() for exactly
+    # where/how each is consumed.
+    epf_base_rules: dict = field(default_factory=dict)
+    esi_base_rules: dict = field(default_factory=dict)
+    pt_base_rules: dict = field(default_factory=dict)
+
+    # Canada: per-program (federal tax/provincial tax/CPP/EI) earning-
+    # component taxability (ZP-TAX-CA-2026-001 §17/AC-17, gap-closure
+    # Phase 5) — {tax_component: {earning_type: is_taxable}}, resolved by
+    # service.get_ca_taxability_rules_bundle, backed by the same
+    # TaxabilityRule model as code_wages_rules above. Empty dict (every
+    # jurisdiction/org today) means canada.py's _resolve_ca_taxability
+    # falls back to "every component counts," unchanged from before this
+    # field existed — see shared.py's _CA_TAXABILITY_MATRIX_ENABLED_
+    # COUNTRIES for the rollout switch this is additionally gated on.
+    ca_taxability_rules: dict = field(default_factory=dict)
+
     # India Forms 122/123/124 (§6.1/§6.2, gap-closure Phase E) — resolved
     # by service.py's get_india_salary_tds_inputs from the employee's own
     # Approved/Issued form rows. All default to 0, meaning india.py's
@@ -171,6 +196,14 @@ class PayrollContext:
     # CPP2/QPP2) entirely for this employee; None/"ACTIVE" (every
     # employee today) changes nothing from existing behavior.
     cpp_qpp_election_status: str = None
+    # ZP-TAX-CA-2026-001 §10/AC-16: "Age and CPP/QPP election status is
+    # effective-dated." The month a CPT30 STOPPED election actually took
+    # effect — canada.py only applies the STOPPED suppression once
+    # ctx.pay_date >= this date, so a stop filed mid-period doesn't
+    # retroactively zero CPP for periods before the employee actually
+    # filed it. None (every employee before this field existed) means
+    # "apply STOPPED immediately," the exact prior behavior — additive.
+    cpp_election_effective_date: date = None
 
     # Canada CPP/CPP2/EI (and Quebec QPP/QPP2/QPIP) year-to-date state,
     # as of BEFORE this pay period — read from PayrollYtdAccumulator by
@@ -185,6 +218,24 @@ class PayrollContext:
     ytd_cpp2_pensionable_earnings: Decimal = None  # CPP2/QPP2
     ytd_insurable_earnings: Decimal = None         # EI/QPIP
     ytd_basic_exemption_used: Decimal = None       # CPP/QPP $3,500 exemption, YTD-consumed
+
+    # Canada Option 2 cumulative-averaging income tax withholding
+    # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9) — this employee's
+    # own income-tax-specific YTD state, as of BEFORE this pay period,
+    # read from PayrollYtdAccumulator by service.py's
+    # _load_ca_option2_ytd, gated on engine/countries/shared.py's
+    # _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES. None (every employee/org
+    # today) means "Option 2 not in use for this employee" —
+    # engine/countries/canada.py MUST take its existing Option 1
+    # (annualization) branch, unchanged, whenever this is None; only a
+    # non-None value here switches an employee's calculation onto the
+    # cumulative-averaging method. Deliberately SEPARATE from the CPP/
+    # EI/QPP/QPIP YTD fields above — Option 2 is an income-tax-only
+    # methodology, it does not touch CPP/EI's own cap mechanics.
+    option2_cumulative_gross_before: Decimal = None
+    option2_periods_elapsed_before: int = None
+    option2_federal_tax_withheld_before: Decimal = None
+    option2_provincial_tax_withheld_before: Decimal = None
 
     # Canada: the ORG's (not this employee's own) aggregate Ontario
     # remuneration YTD, as of BEFORE this pay period — read from
@@ -337,6 +388,14 @@ class PayrollResult:
     ytd_cpp2_pensionable_earnings: Decimal = None
     ytd_insurable_earnings: Decimal = None
     ytd_basic_exemption_used: Decimal = None
+    # Canada Option 2 cumulative-averaging income tax withholding —
+    # cumulative figures AFTER this period, same None-means-"not
+    # applicable" contract as the ytd_* fields above. See PayrollContext's
+    # matching option2_* fields for the full explanation.
+    option2_cumulative_gross_after: Decimal = None
+    option2_periods_elapsed_after: int = None
+    option2_federal_tax_withheld_after: Decimal = None
+    option2_provincial_tax_withheld_after: Decimal = None
     # UK: cumulative Directors NIC figures AFTER this period — same
     # None-means-"not applicable" contract as Canada's fields above.
     # Populated whenever ctx.is_director is True, REGARDLESS of which

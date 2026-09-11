@@ -280,6 +280,41 @@ def _calculate_code_wages(ctx: PayrollContext, code_wages_rules: dict) -> Decima
     return core_included_wages + add_back
 
 
+def _classify_wage_base(ctx: PayrollContext, rules: dict, default_included: set | None = None) -> Decimal:
+    """Generic per-component wage-base classifier for EPF/ESI/PT (gap-
+    closure Phase G, 2026-09-11) — same six-component split and the same
+    "explicit row wins, else default" precedence as
+    _resolve_code_wages_classification/_calculate_code_wages above, but
+    WITHOUT the 50%-allowance-cap add-back test (that mechanic is
+    Code-Wages-specific, §8.1). A plain classified sum: every rupee of
+    ctx.gross lands in exactly one bucket (named_allowances is the
+    residual, same construction as _calculate_code_wages), so when every
+    component defaults to included (default_included=None), the result
+    always equals ctx.gross exactly — reproducing today's gross-based
+    ESI/PT calculation byte-for-byte when `rules` is empty (every org
+    today). When only a specific subset defaults to included (e.g.
+    {"basic"}), an empty `rules` dict reproduces a basic-only wage base —
+    exactly EPF's pre-existing `pf_base_pre_ceiling = basic`."""
+    named_allowances = max(
+        Decimal("0"),
+        ctx.gross - ctx.basic - ctx.hra - ctx.special_allowance - ctx.overtime - ctx.additional_compensation,
+    )
+    components = {
+        "basic": ctx.basic, "hra": ctx.hra, "special_allowance": ctx.special_allowance,
+        "overtime": ctx.overtime, "additional_compensation": ctx.additional_compensation,
+        "named_allowances": named_allowances,
+    }
+    total = Decimal("0")
+    for key, amount in components.items():
+        if key in rules:
+            included = rules[key]
+        else:
+            included = True if default_included is None else key in default_included
+        if included:
+            total += amount
+    return total
+
+
 def _apply_cess(tax_plus_surcharge: Decimal, rate_map: dict) -> Decimal:
     cess_pct = resolve_jurisdiction_parameter(rate_map, "cess_pct", _IN_CESS_PCT, country="IN")
     return _round2(tax_plus_surcharge * (cess_pct / Decimal("100")))
@@ -396,7 +431,12 @@ def calculate(ctx: PayrollContext) -> dict:
     # then passed into each scheme calculator (§8.1's "Design rule") —
     # dormant by default (_IN_CODE_WAGES_ENABLED_COUNTRIES), so this stays
     # exactly `basic` until deliberately enabled.
-    pf_base_pre_ceiling = basic
+    # EPF wage-base classification (gap-closure Phase G) — with no
+    # ctx.epf_base_rules configured (every org today) this resolves to
+    # exactly `basic` (default_included={"basic"}), identical to the
+    # engine's original hardcoded line. Code Wages, when its OWN switch
+    # is enabled below, still takes priority over this — unchanged.
+    pf_base_pre_ceiling = _classify_wage_base(ctx, ctx.epf_base_rules, default_included={"basic"})
     if "IN" in _IN_CODE_WAGES_ENABLED_COUNTRIES:
         pf_base_pre_ceiling = _calculate_code_wages(ctx, ctx.code_wages_rules)
     # ZP-TAX-IN-2026-27-001 §9.1: EPF's contribution base is capped at the
@@ -465,9 +505,16 @@ def calculate(ctx: PayrollContext) -> dict:
 
     esi_rate = rate_map.get("esi")
     esi_ceiling = resolve_jurisdiction_parameter(rate_map, "esi_wage_ceiling", ESI_MONTHLY_WAGE_CEILING, country="IN")
-    esi_applicable = gross <= esi_ceiling
-    employee_esi = _round2(gross * (esi_rate.employee_rate_pct / 100)) if esi_rate and esi_rate.employee_rate_pct and esi_applicable else Decimal("0")
-    employer_esi = _round2(gross * (esi_rate.employer_rate_pct / 100)) if esi_rate and esi_rate.employer_rate_pct and esi_applicable else Decimal("0")
+    # ESI wage-base classification (gap-closure Phase G) — with no
+    # ctx.esi_base_rules configured (every org today), every component
+    # defaults to included, so this sum always equals ctx.gross exactly
+    # (named_allowances is the residual, by construction) — reproducing
+    # the engine's original gross-based ESI ceiling test/contribution
+    # calculation byte-for-byte.
+    esi_wage_base = _classify_wage_base(ctx, ctx.esi_base_rules, default_included=None)
+    esi_applicable = esi_wage_base <= esi_ceiling
+    employee_esi = _round2(esi_wage_base * (esi_rate.employee_rate_pct / 100)) if esi_rate and esi_rate.employee_rate_pct and esi_applicable else Decimal("0")
+    employer_esi = _round2(esi_wage_base * (esi_rate.employer_rate_pct / 100)) if esi_rate and esi_rate.employer_rate_pct and esi_applicable else Decimal("0")
 
     # Professional Tax is genuinely state-specific in India, and in several
     # states genuinely bracketed by the employee's own gross salary (not a
@@ -476,7 +523,16 @@ def calculate(ctx: PayrollContext) -> dict:
     # bracket resolves (every state except Telangana today) does this fall
     # back to the single-flat-rate ctx.state_rate_map lookup, then the
     # country-level flat "pt" rate — both exactly as before this existed.
-    pt_bracket = _resolve_state_pt_bracket(gross, ctx.state_slabs, gender=ctx.gender, pay_date=ctx.pay_date)
+    # PT wage-base classification (gap-closure Phase G) — with no
+    # ctx.pt_base_rules configured (every org/state today), every
+    # component defaults to included, so this sum always equals
+    # ctx.gross exactly (same "sums back to gross when unconfigured"
+    # contract as esi_wage_base above) — reproducing the engine's
+    # original gross-based PT bracket resolution byte-for-byte. The
+    # flat-rate (non-bracketed) fallback below never depended on gross
+    # for its own lookup, so it's unaffected either way.
+    pt_wage_base = _classify_wage_base(ctx, ctx.pt_base_rules, default_included=None)
+    pt_bracket = _resolve_state_pt_bracket(pt_wage_base, ctx.state_slabs, gender=ctx.gender, pay_date=ctx.pay_date)
     if pt_bracket is not None:
         professional_tax = pt_bracket.flat_amount or Decimal("0")
         # Half-yearly-assessed PT (Greater Chennai Corporation's local

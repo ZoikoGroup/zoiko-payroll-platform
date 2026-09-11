@@ -1,0 +1,20 @@
+{
+  "description": "IN-LWF-KA-001 (ZP-TAX-IN-2026-27-001 §21) — Karnataka Labour Welfare Fund, an ANNUAL (not monthly) contribution charged only in the state's own configured deduction month (January, flat_amount=1). employee_lwf=₹50, employer_lwf=₹100 (₹150 total) — matching the doc's own stated figures exactly. A February/March/etc. pay_date would deduct ₹0/₹0 instead — not exercised in this fixture, but see india.py's own LWF comment for that contract.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-LWF-KA-001 + §15 (Karnataka LWF, source IN-KA-LWF). Rows reproduced verbatim from hardcoded_defaults.py's own Karnataka lwf_employee_amt/lwf_employer_amt/lwf_deduct_month rows. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "18000.00",
+    "basic": "18000.00",
+    "country": "IN",
+    "pay_date": "2026-01-15",
+    "work_state": "Karnataka",
+    "state_rate_map": {
+      "lwf_employee_amt": {"flat_amount": "50.00"},
+      "lwf_employer_amt": {"flat_amount": "100.00"},
+      "lwf_deduct_month": {"flat_amount": "1"}
+    }
+  },
+  "expected": {
+    "employee_lwf": "50.00",
+    "employer_lwf": "100.00"
+  }
+}

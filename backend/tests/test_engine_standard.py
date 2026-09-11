@@ -83,7 +83,8 @@ STRATEGY = StandardStrategy()
 def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status=None, employer_tax_profiles=None,
          state_slabs=None, reciprocity_suppresses_work_state=False, resident_state_slabs=None, locality_rate=None,
          work_state=None, state_rate_map=None, td1_claim_amount=None, td1_additional_tax=None,
-         cpp_qpp_election_status=None, ytd_pensionable_earnings=None, ytd_cpp2_pensionable_earnings=None,
+         cpp_qpp_election_status=None, cpp_election_effective_date=None,
+         ytd_pensionable_earnings=None, ytd_cpp2_pensionable_earnings=None,
          ytd_insurable_earnings=None, ytd_basic_exemption_used=None,
          provincial_td1_claim_amount=None, qc_tp1015_claim_amount=None,
          on_eht_ytd_remuneration_before=None, bc_eht_ytd_remuneration_before=None,
@@ -93,7 +94,9 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          lsvcc_investment_amount=None, gender=None, pay_frequency=None,
          is_director=False, director_ni_method=None, is_final_ni_period=False,
          ytd_director_ni_gross=None, ytd_director_ni_employee_paid=None,
-         ytd_director_ni_employer_paid=None, tax_residency_status=None):
+         ytd_director_ni_employer_paid=None, tax_residency_status=None,
+         option2_cumulative_gross_before=None, option2_periods_elapsed_before=None,
+         option2_federal_tax_withheld_before=None, option2_provincial_tax_withheld_before=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -105,6 +108,7 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         work_state=work_state, state_rate_map=state_rate_map or {},
         td1_claim_amount=td1_claim_amount, td1_additional_tax=td1_additional_tax,
         cpp_qpp_election_status=cpp_qpp_election_status,
+        cpp_election_effective_date=cpp_election_effective_date,
         ytd_pensionable_earnings=ytd_pensionable_earnings, ytd_cpp2_pensionable_earnings=ytd_cpp2_pensionable_earnings,
         ytd_insurable_earnings=ytd_insurable_earnings, ytd_basic_exemption_used=ytd_basic_exemption_used,
         provincial_td1_claim_amount=provincial_td1_claim_amount, qc_tp1015_claim_amount=qc_tp1015_claim_amount,
@@ -124,6 +128,10 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         ytd_director_ni_gross=ytd_director_ni_gross,
         ytd_director_ni_employee_paid=ytd_director_ni_employee_paid,
         ytd_director_ni_employer_paid=ytd_director_ni_employer_paid,
+        option2_cumulative_gross_before=option2_cumulative_gross_before,
+        option2_periods_elapsed_before=option2_periods_elapsed_before,
+        option2_federal_tax_withheld_before=option2_federal_tax_withheld_before,
+        option2_provincial_tax_withheld_before=option2_provincial_tax_withheld_before,
     )
     return STRATEGY.calculate(ctx)
 
@@ -1188,6 +1196,116 @@ def test_us_de_paid_leave_full_tier_at_25_plus():
     assert result.employer_state_program_contributions == pytest.approx(Decimal("80.00"), abs=Decimal("0.01"))
 
 
+def test_us_flat_rate_states_tax_full_gross_no_standard_deduction():
+    """The five new flat-rate states (ZP-TAX-US-2026-001 §4 Matrix — AZ 2.0%,
+    IL 4.95%, MA 5.0%, MI 4.25%, PA 3.07%) have no state standard deduction
+    (the document says None for every filing status), so the full annual gross
+    is taxed at the flat rate: $120,000/yr * 3.07% / 12 = $307.00/mo."""
+    pa_slabs = [Slab(Decimal("0"), None, Decimal("3.07"), jurisdiction_state="PA")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("PA")
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=pa_slabs)
+    assert result.state_income_tax == pytest.approx(Decimal("307.00"), abs=Decimal("0.01"))
+
+
+def test_us_flat_rate_state_illinois_4_95():
+    """Illinois flat 4.95%: $120,000/yr * 4.95% / 12 = $495.00/mo."""
+    il_slabs = [Slab(Decimal("0"), None, Decimal("4.95"), jurisdiction_state="IL")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("IL")
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=il_slabs)
+    assert result.state_income_tax == pytest.approx(Decimal("495.00"), abs=Decimal("0.01"))
+
+
+def test_us_flat_rate_state_michigan_4_25():
+    """Michigan flat 4.25%: $120,000/yr * 4.25% / 12 = $425.00/mo."""
+    mi_slabs = [Slab(Decimal("0"), None, Decimal("4.25"), jurisdiction_state="MI")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("MI")
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=mi_slabs)
+    assert result.state_income_tax == pytest.approx(Decimal("425.00"), abs=Decimal("0.01"))
+
+
+def test_us_flat_rate_state_massachusetts_5_0():
+    """Massachusetts flat 5.0%: $120,000/yr * 5.0% / 12 = $500.00/mo."""
+    ma_slabs = [Slab(Decimal("0"), None, Decimal("5.00"), jurisdiction_state="MA")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("MA")
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=ma_slabs)
+    assert result.state_income_tax == pytest.approx(Decimal("500.00"), abs=Decimal("0.01"))
+
+
+def test_us_flat_rate_state_arizona_default_percentage():
+    """Arizona flat 2.0% (the no-A-4 default the document specifies):
+    $120,000/yr * 2.0% / 12 = $200.00/mo."""
+    az_slabs = [Slab(Decimal("0"), None, Decimal("2.00"), jurisdiction_state="AZ")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("AZ")
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=az_slabs)
+    assert result.state_income_tax == pytest.approx(Decimal("200.00"), abs=Decimal("0.01"))
+
+
+def test_us_ma_pfml_headcount_gate_below_threshold():
+    """MA PFML (ZP-TAX-US-2026-001 §5): employee's 0.44% always applies;
+    employer's 0.44% only applies at 25+ covered individuals. No profile —
+    employer share stays 0 (never inferred)."""
+    rate_map = dict(
+        US_RATES,
+        ma_pfml=Rate(employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"), jurisdiction_state="MA"),
+        ma_pfml_employer_headcount_min=Rate(flat_amount=Decimal("25")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("MA")
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map)
+    # $120,000/yr * 0.44% / 12 = $44.00/mo (employee, unconditional).
+    assert result.state_program_deductions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+    assert result.employer_state_program_contributions == Decimal("0.00")
+
+
+def test_us_ma_pfml_headcount_gate_at_or_above_threshold():
+    """Same MA PFML setup with a real profile at 30 covered individuals —
+    the employer's 0.44% now applies alongside the employee's."""
+    rate_map = dict(
+        US_RATES,
+        ma_pfml=Rate(employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"), jurisdiction_state="MA"),
+        ma_pfml_employer_headcount_min=Rate(flat_amount=Decimal("25")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("MA")
+    profiles = {"MA_PFML": EmployerTaxProfileStub(covered_employee_count=30)}
+    result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    assert result.state_program_deductions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+
+
+def test_us_co_famli_wage_cap_limits_taxable():
+    """Colorado FAMLI's wage cap (added 2026-09-11 per the document's
+    $184,500 figure): at a $250,000/yr gross, both shares are computed on
+    the capped $184,500 — $184,500 * 0.44% / 12 = $67.65/mo each."""
+    rate_map = dict(
+        US_RATES,
+        famli=Rate(employee_rate_pct=Decimal("0.44"), employer_rate_pct=Decimal("0.44"), jurisdiction_state="CO"),
+        famli_employer_headcount_min=Rate(flat_amount=Decimal("10")),
+        famli_wage_cap=Rate(flat_amount=Decimal("184500")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("CO")
+    profiles = {"FAMLI": EmployerTaxProfileStub(covered_employee_count=15)}
+    result = calc("US", Decimal("20833.33"), rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    # $250,000/yr (annualized from the given gross) capped at $184,500.
+    assert result.state_program_deductions == pytest.approx(Decimal("67.65"), abs=Decimal("0.01"))
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("67.65"), abs=Decimal("0.01"))
+
+
+def test_us_de_paid_leave_wage_cap_limits_taxable():
+    """Delaware Paid Leave wage caps (added 2026-09-11 per the document's
+    $184,500 figure): the full-coverage tier at 25+ computes on the capped
+    amount — $184,500 * 0.80% / 12 = $123.00/mo."""
+    rate_map = dict(
+        US_RATES,
+        paid_leave=Rate(employer_rate_pct=Decimal("0.80"), jurisdiction_state="DE"),
+        paid_leave_employer_headcount_min=Rate(flat_amount=Decimal("25")),
+        paid_leave_wage_cap=Rate(flat_amount=Decimal("184500")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("DE")
+    profiles = {"PAID_LEAVE": EmployerTaxProfileStub(covered_employee_count=30)}
+    result = calc("US", Decimal("20833.33"), rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    # $250,000/yr capped at $184,500 * 0.80% / 12 = $123.00/mo.
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("123.00"), abs=Decimal("0.01"))
+
+
 def test_us_filing_status_falls_back_to_untagged_row_when_present():
     """A mix of tagged + untagged rows: an employee whose filing_status
     doesn't match any tagged row falls back to the untagged (generic) row
@@ -1759,6 +1877,12 @@ def test_canada_bpaf_flat_at_min_above_taper_threshold():
 
 
 def test_canada_cea_credit_reduces_annual_tax_at_lowest_rate():
+    # This test is about the legacy deduction method's own CEA-at-lowest-
+    # rate mechanic specifically (see the comment below) - isolate it from
+    # the credit method (on by default since Phase 1), which would apply
+    # BPA as a credit at lowest_rate (14%) instead of a deduction at the
+    # slab's own 10% rate, changing the expected figures below.
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")
     rates = {
         "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
         "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
@@ -1780,6 +1904,11 @@ def test_canada_provincial_tax_zero_when_unconfigured():
 
 
 def test_canada_provincial_tax_added_on_top_of_federal():
+    # Legacy-deduction-method math (see comments below) - isolate from the
+    # credit method (on by default since Phase 1), which would apply both
+    # federal and provincial BPA as credits at their own lowest_rate
+    # instead of a deduction at the slab's own 10% rate.
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")
     rates = {
         "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
         "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
@@ -1890,6 +2019,10 @@ def _restore_ca_credit_method_switch():
     original_lsvcc = set(shared._CA_LSVCC_CREDIT_ENABLED_COUNTRIES)
     original_surtax = set(shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES)
     original_bc_reduction = set(shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES)
+    original_ca_taxability_matrix = set(shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES)
+    original_ca_assoc_group = set(shared._CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES)
+    original_ca_hsf_temp_exemption = set(shared._CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES)
+    original_ca_option2 = set(shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES)
     original_in_pf_ceiling = set(shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES)
     original_in_code_wages = set(shared._IN_CODE_WAGES_ENABLED_COUNTRIES)
     original_in_age_bands = set(shared._IN_OLD_REGIME_AGE_BANDS_ENABLED_COUNTRIES)
@@ -1914,6 +2047,14 @@ def _restore_ca_credit_method_switch():
     shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES.update(original_surtax)
     shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES.clear()
     shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES.update(original_bc_reduction)
+    shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES.clear()
+    shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES.update(original_ca_taxability_matrix)
+    shared._CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES.clear()
+    shared._CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES.update(original_ca_assoc_group)
+    shared._CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES.clear()
+    shared._CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES.update(original_ca_hsf_temp_exemption)
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.clear()
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.update(original_ca_option2)
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.clear()
     shared._IN_PF_WAGE_CEILING_ENABLED_COUNTRIES.update(original_in_pf_ceiling)
     shared._IN_CODE_WAGES_ENABLED_COUNTRIES.clear()
@@ -1949,6 +2090,7 @@ def test_federal_tax_legacy_and_credit_methods_agree_with_a_single_flat_bracket(
 
 
 def test_federal_tax_legacy_method_understates_tax_once_income_crosses_a_bracket():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # simulate the legacy method (switch OFF)
     annual_gross = Decimal("78523")  # BPAF-reduced taxable (62,071) crosses into the 20.5% bracket
     legacy = _canada._calculate_annual_tax_ca(annual_gross, _CA_FEDERAL_2026_SLABS, {})
     # taxable = 78523 - 16452 = 62071; tax = 58523*14% + (62071-58523)*20.5%
@@ -1978,6 +2120,7 @@ def test_federal_tax_credit_method_honors_td1_claim_amount_override():
 
 
 def test_provincial_tax_credit_method_uses_the_provinces_own_lowest_rate():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # start from the legacy method
     provincial_slabs = [
         Slab(Decimal("0"), Decimal("50000"), Decimal("10.00")),
         Slab(Decimal("50000"), None, Decimal("20.00")),
@@ -2039,6 +2182,7 @@ def test_provincial_tax_uses_dynamic_mb_bpa_when_enabled():
 
 
 def test_provincial_tax_mb_dormant_uses_flat_row_instead():
+    shared._CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     state_rates = {**_MB_BPA_RATES, "provincial_bpa": Rate("provincial_bpa", flat_amount=Decimal("10000"))}
     result = _canada._calculate_provincial_tax_ca(Decimal("300000"), "MB", _FLAT_10_SLAB, state_rates)
     # Switch is OFF -> flat 10,000 row used, NOT the tapered 7,890.00:
@@ -2055,6 +2199,7 @@ def test_provincial_tax_uses_federal_bpaf_for_yukon_when_enabled():
 
 
 def test_provincial_tax_yt_dormant_uses_flat_row_instead():
+    shared._CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     state_rates = {"provincial_bpa": Rate("provincial_bpa", flat_amount=Decimal("12000"))}
     result = _canada._calculate_provincial_tax_ca(Decimal("100000"), "YT", _FLAT_10_SLAB, state_rates, rate_map={})
     # Switch is OFF -> flat 12,000 row used, NOT federal BPAF's 16,452:
@@ -2085,6 +2230,7 @@ _BC_REDUCTION_RATES = {
 
 
 def test_bc_tax_reduction_dormant_by_default():
+    shared._CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     result = _canada._calculate_provincial_tax_ca(Decimal("70000"), "BC", _FLAT_10_SLAB, _BC_REDUCTION_RATES)
     # taxable = 70000-12000 = 58000 * 10% = 5800.00 — reduction NOT applied
     assert result == Decimal("5800.00")
@@ -2151,6 +2297,7 @@ def test_calc_level_credit_method_switch_flows_through_to_tds():
     """End-to-end confirmation that the switch actually reaches
     StandardStrategy.calculate() -> canada.calculate() -> tds, not just
     the unit-level functions tested directly above."""
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # start from the legacy method
     legacy = calc("CA", Decimal("78523") / 12, {}, _CA_FEDERAL_2026_SLABS)
     shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.add("CA")
     credit = calc("CA", Decimal("78523") / 12, {}, _CA_FEDERAL_2026_SLABS)
@@ -2164,6 +2311,7 @@ def test_calc_level_credit_method_switch_flows_through_to_tds():
 
 def test_federal_k2_k3_credit_dormant_even_with_credit_method_on():
     shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.add("CA")
+    shared._CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES.discard("CA")  # simulate K2/K3's own switch OFF
     result = _canada._calculate_annual_tax_ca(
         Decimal("58523"), _CA_FEDERAL_2026_SLABS, {},
         period_cpp_contribution=Decimal("300"), period_ei_contribution=Decimal("100"),
@@ -2188,6 +2336,7 @@ def test_federal_k2_k3_credit_reduces_tax_when_both_switches_enabled():
 def test_federal_k2_k3_credit_inert_under_legacy_deduction_method():
     # Credit method itself is OFF -> K2/K3's own switch has nothing to
     # hook into; the legacy path never even looks at the CPP/EI amounts.
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")
     shared._CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES.add("CA")
     result = _canada._calculate_annual_tax_ca(
         Decimal("58523"), _CA_FEDERAL_2026_SLABS, {},
@@ -2198,6 +2347,7 @@ def test_federal_k2_k3_credit_inert_under_legacy_deduction_method():
 
 def test_calc_level_k2_k3_credit_flows_through_to_tds():
     shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.add("CA")
+    shared._CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES.discard("CA")  # simulate K2/K3's own switch OFF
     rates = {
         "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
         "ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("2.282")),
@@ -2217,11 +2367,14 @@ def test_calc_level_k2_k3_credit_flows_through_to_tds():
 # (annual_tax 4144.66) so the credit's effect is isolated and obvious.
 
 def test_lsvcc_credit_dormant_by_default():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
+    shared._CA_LSVCC_CREDIT_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, lsvcc_investment_amount=Decimal("5000"))
     assert result.annual_tax == Decimal("4144.66")  # unaffected by switch being off
 
 
 def test_lsvcc_credit_capped_at_750():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     shared._CA_LSVCC_CREDIT_ENABLED_COUNTRIES.add("CA")
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, lsvcc_investment_amount=Decimal("5000"))
     # 5000*15% = 750, already at the cap -> annual_tax = 4144.66 - 750.00
@@ -2229,6 +2382,7 @@ def test_lsvcc_credit_capped_at_750():
 
 
 def test_lsvcc_credit_below_cap_uses_15_pct():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     shared._CA_LSVCC_CREDIT_ENABLED_COUNTRIES.add("CA")
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, lsvcc_investment_amount=Decimal("2000"))
     # 2000*15% = 300.00 (under the $750 cap) -> 4144.66 - 300.00
@@ -2236,6 +2390,7 @@ def test_lsvcc_credit_below_cap_uses_15_pct():
 
 
 def test_lsvcc_credit_zero_when_no_investment_declared():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     shared._CA_LSVCC_CREDIT_ENABLED_COUNTRIES.add("CA")
     result = calc("CA", 5000, {}, _FLAT_10_SLAB)
     assert result.annual_tax == Decimal("4144.66")
@@ -2257,11 +2412,14 @@ def test_lsvcc_credit_applies_under_credit_method_too():
 # increase instead of a reduction.
 
 def test_beyond_province_surtax_dormant_by_default():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
+    shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="XP")
     assert result.annual_tax == Decimal("4144.66")  # unaffected by switch being off
 
 
 def test_beyond_province_surtax_increases_federal_tax_by_48_pct():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES.add("CA")
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="XP")
     # 4144.66 * 148% = 6134.0968 -> 6134.10
@@ -2270,12 +2428,14 @@ def test_beyond_province_surtax_increases_federal_tax_by_48_pct():
 
 
 def test_beyond_province_surtax_does_not_apply_to_a_normal_province():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES.add("CA")
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="ON")
     assert result.annual_tax == Decimal("4144.66")  # only "XP" triggers the surtax
 
 
 def test_beyond_province_surtax_and_quebec_abatement_are_mutually_exclusive():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES.add("CA")
     # is_quebec branch wins even if the surtax switch is also on — the
     # two adjustments occupy the same formula slot and are for disjoint
@@ -2295,6 +2455,7 @@ def test_beyond_province_surtax_and_quebec_abatement_are_mutually_exclusive():
 # logic from any cap-related rounding.
 
 def test_ei_employer_rate_dormant_by_default_uses_configured_row():
+    shared._CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     rates = {"ei": Rate("ei", employee_rate_pct=Decimal("1.63"), employer_rate_pct=Decimal("3.00"))}
     result = calc("CA", 5000, rates, _FLAT_10_SLAB)
     assert result.employee_esi == Decimal("81.50")    # 5000 * 1.63%
@@ -2379,6 +2540,7 @@ def test_canada_quebec_qpip_zero_when_cap_not_configured():
 
 
 def test_canada_quebec_federal_abatement_reduces_federal_tax():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     result_qc = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="QC")
     result_on = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="ON")
     assert result_qc.federal_income_tax < result_on.federal_income_tax
@@ -2390,6 +2552,7 @@ def test_canada_quebec_federal_abatement_reduces_federal_tax():
 
 
 def test_canada_territorial_payroll_tax_nwt():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     state_rates = {"nwt_payroll_tax": Rate("nwt_payroll_tax", employee_rate_pct=Decimal("2"))}
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, work_state="NT", state_rate_map=state_rates)
     # annual 60000 * 2% / 12 = 100.00
@@ -2426,6 +2589,7 @@ def test_canada_wcb_zero_when_no_profile_configured():
 
 
 def test_canada_td1_claim_amount_overrides_dynamic_bpaf():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_claim_amount=Decimal("20000"))
     # taxable = 60000 - 20000 (TD1, not the default 16452 BPAF) = 40000
     # * 10% = 4000.00, less CEA credit 210.14 = 3789.86 -> /12 = 315.82
@@ -2443,6 +2607,7 @@ def test_canada_td1_claim_amount_zero_is_honored_not_treated_as_unset():
 
 
 def test_canada_no_td1_falls_back_to_dynamic_bpaf():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     result_no_td1 = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_claim_amount=None)
     result_default = calc("CA", 5000, {}, _FLAT_10_SLAB)
     assert result_no_td1.federal_income_tax == result_default.federal_income_tax == Decimal("345.39")
@@ -2512,6 +2677,7 @@ def test_canada_no_qc_tp1015_falls_back_to_quebec_bpa():
 
 
 def test_canada_td1_additional_tax_added_to_tds():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     result = calc("CA", 5000, {}, _FLAT_10_SLAB, td1_additional_tax=Decimal("50"))
     # 345.39 (federal, unchanged from the plain default-BPAF test) + 50
     # flat additional withholding, never touching the statutory base.
@@ -2520,6 +2686,7 @@ def test_canada_td1_additional_tax_added_to_tds():
 
 
 def test_canada_td1_additional_tax_zero_when_unset():
+    shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES.discard("CA")  # isolate from Phase 1's credit-method default
     result = calc("CA", 5000, {}, _FLAT_10_SLAB)
     assert result.tds == Decimal("345.39")
 
@@ -2537,6 +2704,37 @@ def test_canada_cpt30_active_does_not_suppress_cpp():
     rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
     result = calc("CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="ACTIVE")
     assert result.social_security > Decimal("0")
+
+
+# ── CPT30 effective-dating (AC-16: "election status is effective-dated") ──
+
+def test_canada_cpt30_stopped_is_effective_dated_not_yet_in_effect():
+    from datetime import date as _date
+    rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    result = calc(
+        "CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED",
+        cpp_election_effective_date=_date(2026, 8, 1), pay_date=_date(2026, 6, 30),
+    )
+    # Election filed for August, but this pay date is June -> CPP still applies.
+    assert result.social_security > Decimal("0")
+
+
+def test_canada_cpt30_stopped_applies_once_effective_date_reached():
+    from datetime import date as _date
+    rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    result = calc(
+        "CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED",
+        cpp_election_effective_date=_date(2026, 8, 1), pay_date=_date(2026, 8, 31),
+    )
+    assert result.social_security == Decimal("0")
+
+
+def test_canada_cpt30_stopped_with_no_effective_date_applies_immediately():
+    # Backward compatibility: an employee with no cpp_election_effective_date
+    # set (every employee before this field existed) is unaffected.
+    rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    result = calc("CA", 7000, rates, _FLAT_10_SLAB, cpp_qpp_election_status="STOPPED")
+    assert result.social_security == Decimal("0")
 
 
 def test_canada_cpt30_stopped_does_not_affect_ei():
@@ -2708,6 +2906,7 @@ def test_age_gated_cpp_false_when_inputs_missing():
 
 
 def test_calc_age_gating_dormant_by_default():
+    shared._CA_AGE_GATED_CPP_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     rates = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
     result = calc("CA", 5000, rates, _FLAT_10_SLAB, date_of_birth=date(2015, 1, 1), pay_date=date(2026, 1, 1))
     assert result.social_security > Decimal("0")  # switch off -> date_of_birth never consumed
@@ -2753,6 +2952,7 @@ def test_calc_age_gating_freezes_ytd_when_stopped():
 # only proportions it after the fact.
 
 def test_cpp_component_split_dormant_by_default():
+    shared._CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     rates = {
         "cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95")),
         "cpp_base": Rate(employee_rate_pct=Decimal("4.00"), employer_rate_pct=Decimal("4.00")),
@@ -2845,6 +3045,251 @@ def test_canada_ytd_quebec_qpp_qpip_share_the_same_accumulator_mechanism():
     assert result.employee_esi == Decimal("0")           # QPIP already at its MIE cap
     assert result.ytd_insurable_earnings == Decimal("103000.00")  # unchanged
     assert result.social_security > Decimal("0")          # QPP still has first-layer room
+
+
+# ── Taxability Matrix — per-program earning-component classification ────
+# (ZP-TAX-CA-2026-001 §17/AC-17, gap-closure Phase 5, 2026-09-11).
+# Dormant behind shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES (empty by
+# default) — see canada.py's _calculate_ca_program_wages for the "every
+# component counts unless excluded" default that makes an unconfigured
+# org's numbers identical whether the switch is on or off.
+
+def test_ca_taxability_matrix_dormant_by_default_ignores_ca_taxability_rules():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
+    rate_map = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="CA", rate_map=rate_map, slabs=_FLAT_10_SLAB,
+    )
+    baseline = STRATEGY.calculate(_PC(**common))
+    # Switch OFF — an excluding rule must have zero effect, exactly as if
+    # ca_taxability_rules were never passed at all.
+    excluded = STRATEGY.calculate(_PC(
+        **common, ca_taxability_rules={"cpp_pensionable": {"special_allowance": False}},
+    ))
+    assert excluded.social_security == baseline.social_security
+
+
+def test_ca_taxability_matrix_unconfigured_program_defaults_to_everything_included():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("CA")
+    rate_map = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="CA", rate_map=rate_map, slabs=_FLAT_10_SLAB,
+    )
+    switch_off = STRATEGY.calculate(_PC(**common))
+    switch_on_unconfigured = STRATEGY.calculate(_PC(**common, ca_taxability_rules={}))
+    assert switch_on_unconfigured.social_security == switch_off.social_security
+    assert switch_on_unconfigured.federal_income_tax == switch_off.federal_income_tax
+
+
+def test_ca_taxability_matrix_excludes_component_from_cpp_only():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    # Isolate from the federal K2/K3 credit (on by default since Phase 1):
+    # baseline/excluded withhold different CPP amounts by design here, and
+    # K2/K3 (a credit on ACTUAL CPP/EI withheld this period) would
+    # otherwise leak that CPP difference into federal tax too, defeating
+    # this test's own "federal tax completely unaffected" assertion below.
+    shared._CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES.discard("CA")
+    shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("CA")
+    rate_map = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="CA", rate_map=rate_map, slabs=_FLAT_10_SLAB,
+    )
+    baseline = STRATEGY.calculate(_PC(**common))
+    excluded = STRATEGY.calculate(_PC(
+        **common, ca_taxability_rules={"cpp_pensionable": {"special_allowance": False}},
+    ))
+    # Both stay comfortably within the (unconfigured, hardcoded-fallback)
+    # $3,500 basic exemption and $74,600 YMPE either way, so the drop is
+    # EXACTLY special_allowance * cpp_rate — no cap/exemption interaction
+    # to complicate the math.
+    assert baseline.social_security - excluded.social_security == Decimal("178.50")  # 3000 * 5.95%
+    # Federal tax must be COMPLETELY unaffected — this is a CPP-only
+    # exclusion, proving the four programs are genuinely independent
+    # (AC-17: "A benefit may be income-taxable but not pensionable").
+    assert excluded.federal_income_tax == baseline.federal_income_tax
+
+
+def test_ca_taxability_matrix_excludes_component_from_federal_tax_only():
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("CA")
+    rate_map = {"cpp": Rate("cpp", employee_rate_pct=Decimal("5.95"), employer_rate_pct=Decimal("5.95"))}
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="CA", rate_map=rate_map, slabs=_FLAT_10_SLAB,
+    )
+    baseline = STRATEGY.calculate(_PC(**common))
+    excluded = STRATEGY.calculate(_PC(
+        **common, ca_taxability_rules={"income_tax_federal": {"special_allowance": False}},
+    ))
+    assert excluded.federal_income_tax < baseline.federal_income_tax
+    # CPP untouched — this is a federal-tax-only exclusion.
+    assert excluded.social_security == baseline.social_security
+
+
+def test_ca_calculate_program_wages_named_allowances_is_the_remainder():
+    # Direct unit coverage of _calculate_ca_program_wages: gross minus the
+    # five named components always lands in "named_allowances" — every
+    # dollar in exactly one bucket, same contract india.py's
+    # _calculate_code_wages already documents for its own version of this.
+    from app.modules.payroll.engine.base import PayrollContext as _PC
+
+    ctx = _PC(
+        gross=Decimal("10000"), basic=Decimal("4000"), hra=Decimal("1000"),
+        special_allowance=Decimal("2000"), overtime=Decimal("500"), additional_compensation=Decimal("500"),
+        country="CA", ca_taxability_rules={"income_tax_federal": {"named_allowances": False}},
+    )
+    # named_allowances = 10000 - 4000 - 1000 - 2000 - 500 - 500 = 2000,
+    # excluded here -> included total = gross - named_allowances = 8000.
+    included = _canada._calculate_ca_program_wages(ctx, "income_tax_federal")
+    assert included == Decimal("8000")
+
+
+# ── Option 2: cumulative averaging income tax withholding ────────────────
+# (ZP-TAX-CA-2026-001 §7, gap-closure Phase 9, 2026-09-11). Dormant
+# behind shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES (empty by
+# default). BPA/CEA are explicitly zeroed via rate_map overrides for the
+# bracket-crossing tests below, purely so the expected figures are
+# hand-verifiable against the raw bracket table without also tracking
+# BPA/CEA's own (already separately tested) interaction — every number
+# below was independently cross-checked by running this exact scenario
+# through the real engine at authoring time, not just hand-derived.
+
+_CA_OPTION2_ZEROED_BPA_RATES = {
+    # Both bpaf_max (basic_personal_amt) AND bpaf_min zeroed — with only
+    # bpaf_max overridden, _resolve_ca_bpaf's tapering formula (bpaf_max
+    # BELOW the still-hardcoded-default bpaf_min of $14,829) produces a
+    # confusing negative-reduction result once net_income enters the
+    # taper band, not a clean $0. Zeroing both floor and ceiling avoids
+    # the taper band mattering at all, regardless of income tested.
+    "basic_personal_amt": Rate(flat_amount=Decimal("0")),
+    "bpaf_min": Rate(flat_amount=Decimal("0")),
+    "cea": Rate(flat_amount=Decimal("0")),
+}
+_CA_OPTION2_TWO_BRACKET_SLABS = [
+    Slab(Decimal("0"), Decimal("50000"), Decimal("10")),
+    Slab(Decimal("50000"), None, Decimal("20")),
+]
+
+
+def test_ca_option2_dormant_by_default_ignores_ctx_fields():
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
+    result = calc(
+        "CA", 3000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS,
+        option2_cumulative_gross_before=Decimal("0"), option2_periods_elapsed_before=0,
+        option2_federal_tax_withheld_before=Decimal("0"), option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    assert result.option2_cumulative_gross_after is None
+    assert result.option2_periods_elapsed_after is None
+    assert result.option2_federal_tax_withheld_after is None
+
+
+def test_ca_option2_dormant_when_ctx_fields_absent_even_if_switch_on():
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.add("CA")
+    result = calc("CA", 3000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS)
+    assert result.option2_cumulative_gross_after is None
+
+
+def test_ca_option2_first_period_matches_option1_for_monthly_frequency():
+    # Period 1 (periods_elapsed_before=0, cumulative_gross_before=0):
+    # average = this period's gross / 1, re-inflated by periods_per_year
+    # (12 for the default "Monthly" pay_frequency) -> mathematically
+    # identical to Option 1's own gross*12 annualization for the very
+    # first period under the method.
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.add("CA")
+    option1_result = calc("CA", 3000, {}, _CA_FEDERAL_2026_SLABS)
+    option2_result = calc(
+        "CA", 3000, {}, _CA_FEDERAL_2026_SLABS,
+        option2_cumulative_gross_before=Decimal("0"), option2_periods_elapsed_before=0,
+        option2_federal_tax_withheld_before=Decimal("0"), option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    assert option2_result.federal_income_tax == option1_result.federal_income_tax
+    assert option2_result.option2_periods_elapsed_after == 1
+    assert option2_result.option2_cumulative_gross_after == Decimal("3000")
+
+
+def test_ca_option2_steady_state_withholds_the_same_amount_each_period():
+    # Identical gross every period -> the cumulative average never
+    # changes -> each period's incremental withholding must be identical
+    # (this period's newly-due amount, not a growing/shrinking one).
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.add("CA")
+    p1 = calc(
+        "CA", 4000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS,
+        option2_cumulative_gross_before=Decimal("0"), option2_periods_elapsed_before=0,
+        option2_federal_tax_withheld_before=Decimal("0"), option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    p2 = calc(
+        "CA", 4000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS,
+        option2_cumulative_gross_before=p1.option2_cumulative_gross_after,
+        option2_periods_elapsed_before=p1.option2_periods_elapsed_after,
+        option2_federal_tax_withheld_before=p1.option2_federal_tax_withheld_after,
+        option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    assert p1.federal_income_tax == p2.federal_income_tax == Decimal("400.00")  # (4000*12*10%) / 12
+
+
+def test_ca_option2_smooths_a_bonus_period_instead_of_spiking_it():
+    # The actual point of Option 2: a bonus in period 2 gets averaged
+    # against the whole year's pay-to-date, not annualized on its own —
+    # every figure below independently verified against the real engine
+    # at authoring time (see this section's own header comment).
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.add("CA")
+    # The comparison "option1_p2" call below takes the plain Option 1
+    # branch (no option2_* ctx fields set), which - unlike Option 2's own
+    # path above, which deliberately never applies K2/K3 (see this
+    # module's own Option 2 docstring) - DOES honor the federal K2/K3
+    # credit (on by default since Phase 1) against the CPP/EI this test's
+    # rate_map has no explicit rows for but still computes via hardcoded
+    # fallback rates. Isolate that comparison from Phase 1's default.
+    shared._CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES.discard("CA")
+    p1 = calc(
+        "CA", 3000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS,
+        option2_cumulative_gross_before=Decimal("0"), option2_periods_elapsed_before=0,
+        option2_federal_tax_withheld_before=Decimal("0"), option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    assert p1.federal_income_tax == Decimal("300.00")
+
+    p2 = calc(
+        "CA", 20000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS,
+        option2_cumulative_gross_before=p1.option2_cumulative_gross_after,
+        option2_periods_elapsed_before=p1.option2_periods_elapsed_after,
+        option2_federal_tax_withheld_before=p1.option2_federal_tax_withheld_after,
+        option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    assert p2.federal_income_tax == Decimal("3466.67")
+    assert p2.option2_federal_tax_withheld_after == Decimal("3766.67")
+
+    # What Option 1 would have withheld for THIS SAME bonus period alone,
+    # for comparison — genuinely different from Option 2's smoothed
+    # figure above, proving the two methods are not coincidentally equal.
+    option1_p2 = calc("CA", 20000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS)
+    assert option1_p2.federal_income_tax == Decimal("3583.33")
+    assert option1_p2.federal_income_tax != p2.federal_income_tax
+
+
+def test_ca_option2_respects_non_monthly_pay_frequency():
+    # Bi-Weekly (26 periods/year) must use 26, not the default 12, when
+    # re-inflating the cumulative average — a real, pre-existing gap
+    # this phase closes (canada.py never read ctx.pay_frequency at all
+    # before Option 2 existed).
+    shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES.add("CA")
+    result = calc(
+        "CA", 3000, _CA_OPTION2_ZEROED_BPA_RATES, _CA_OPTION2_TWO_BRACKET_SLABS,
+        pay_frequency="Bi-Weekly",
+        option2_cumulative_gross_before=Decimal("0"), option2_periods_elapsed_before=0,
+        option2_federal_tax_withheld_before=Decimal("0"), option2_provincial_tax_withheld_before=Decimal("0"),
+    )
+    # annual estimate = 3000 * 26 = 78000 -> tax = 50000*10% + 28000*20% = 5000+5600 = 10600
+    # per-period = 10600/26 = 407.6923... -> period 1 (elapsed=1) = 407.69
+    assert result.federal_income_tax == Decimal("407.69")
 
 
 # ── Ontario EHT — org-level aggregate remuneration accumulator ──────────
@@ -3187,6 +3632,42 @@ def test_qc_hsf_default_category_is_general():
     result = calc(
         "CA", 100000, {}, _FLAT_10_SLAB, work_state="QC", state_rate_map=_QC_HSF_GENERAL_RATES,
         qc_hsf_ytd_remuneration_before=Decimal("500000"), qc_hsf_employer_category=None,
+    )
+    assert result.employer_qc_hsf == Decimal("1650.00")
+
+
+def test_qc_hsf_temp_sector_exemption_dormant_by_default():
+    # Switch off -> the EmployerTaxProfile row is ignored entirely, even
+    # though it's present -> GENERAL category rate applies unchanged.
+    shared._CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
+    merged_rates = {**_QC_HSF_GENERAL_RATES, **_QC_HSF_PRIMARY_RATES}
+    result = calc(
+        "CA", 100000, {}, _FLAT_10_SLAB, work_state="QC", state_rate_map=merged_rates,
+        qc_hsf_ytd_remuneration_before=Decimal("500000"), qc_hsf_employer_category="GENERAL",
+        employer_tax_profiles={"QC_HSF_TEMP_SECTOR_EXEMPTION": Rate()},
+    )
+    assert result.employer_qc_hsf == Decimal("1650.00")
+
+
+def test_qc_hsf_temp_sector_exemption_reclassifies_to_primary_when_active():
+    shared._CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES.add("CA")
+    merged_rates = {**_QC_HSF_GENERAL_RATES, **_QC_HSF_PRIMARY_RATES}
+    result = calc(
+        "CA", 100000, {}, _FLAT_10_SLAB, work_state="QC", state_rate_map=merged_rates,
+        qc_hsf_ytd_remuneration_before=Decimal("500000"), qc_hsf_employer_category="GENERAL",
+        employer_tax_profiles={"QC_HSF_TEMP_SECTOR_EXEMPTION": Rate()},
+    )
+    # PRIMARY's 1.25% applied instead of GENERAL's 1.65% -> same figure
+    # test_qc_hsf_primary_manufacturing_uses_its_own_rates proves directly.
+    assert result.employer_qc_hsf == Decimal("1250.00")
+
+
+def test_qc_hsf_temp_sector_exemption_no_effect_without_a_configured_profile():
+    # Switch on, but no EmployerTaxProfile row at all -> unaffected.
+    shared._CA_QC_HSF_TEMP_SECTOR_EXEMPTION_ENABLED_COUNTRIES.add("CA")
+    result = calc(
+        "CA", 100000, {}, _FLAT_10_SLAB, work_state="QC", state_rate_map=_QC_HSF_GENERAL_RATES,
+        qc_hsf_ytd_remuneration_before=Decimal("500000"), qc_hsf_employer_category="GENERAL",
     )
     assert result.employer_qc_hsf == Decimal("1650.00")
 

@@ -4,14 +4,36 @@ import Modal from "../../Modal";
 import { getTaxabilityRules, upsertTaxabilityRule, deleteTaxabilityRule } from "../../../service/superAdminService";
 import { inputClass, labelClass } from "../constants";
 
-// India Code Wages classification (ZP-TAX-IN-2026-27-001 §7/§8, gap-
-// closure Phase B/E) — which of an employee's own named salary
-// components count as "core included wages" vs. "excluded, subject to
-// the 50%-cap add-back test" (india.py's _calculate_code_wages). Backs
-// TaxabilityRule (tax_component="code_wages") — a model that existed for
-// a while with zero admin UI (only a read-only backend resolver). With
-// no row configured for a component, it defaults to "basic" = included,
-// everything else excluded — the rows below are overrides only.
+// India Earnings & Taxability (ZP-TAX-IN-2026-27-001 §7/§8/§9/§10/§13,
+// gap-closure Phase B/E/G) — which of an employee's own named salary
+// components count toward FOUR independent wage bases: Code Wages (the
+// Labour Codes' 50%-cap add-back mechanism, feeding EPF/EPS/EDLI when
+// that switch is on), and three plainer per-component sums added in
+// Phase G (2026-09-11) — EPF's own wage base, ESI's wage base, and
+// Professional Tax's assessment base — for orgs that want to configure
+// those without the Code Wages add-back complexity. All four back the
+// SAME TaxabilityRule model (tax_component="code_wages"/"epf_base"/
+// "esi_base"/"pt_base" respectively), so this is one tab with a program
+// selector rather than four near-identical tabs — same shape Canada's
+// CATaxabilityMatrixTab.jsx already established for its own 4 programs.
+//
+// Defaults (india.py's _resolve_code_wages_classification /
+// _classify_wage_base) differ per program, exactly matching each
+// program's ORIGINAL hardcoded behavior with no rows configured:
+//   - Code Wages: only "basic" defaults to core-included.
+//   - EPF base:   only "basic" defaults to included (today's
+//                 `pf_base_pre_ceiling = basic`).
+//   - ESI / PT base: every component defaults to included (today's
+//                 plain `gross`-based calculation).
+// With no row configured for a component on any of the four, engine
+// behavior is completely unchanged — every row here is an override.
+
+const PROGRAMS = [
+  { value: "code_wages", label: "Code Wages (EPF/EPS/EDLI add-back)", defaultIncluded: new Set(["basic"]), includedLabel: "Core included wages", excludedLabel: "Excluded (subject to 50% add-back test)" },
+  { value: "epf_base", label: "EPF Wage Base", defaultIncluded: new Set(["basic"]), includedLabel: "Included in EPF wage base", excludedLabel: "Excluded from EPF wage base" },
+  { value: "esi_base", label: "ESI Wage Base", defaultIncluded: null, includedLabel: "Included in ESI wage base", excludedLabel: "Excluded from ESI wage base" },
+  { value: "pt_base", label: "Professional Tax Assessment Base", defaultIncluded: null, includedLabel: "Included in PT assessment base", excludedLabel: "Excluded from PT assessment base" },
+];
 
 const COMPONENTS = [
   { value: "basic", label: "Basic" },
@@ -22,7 +44,7 @@ const COMPONENTS = [
   { value: "named_allowances", label: "Named Allowances (policy-defined)" },
 ];
 
-function RuleFormModal({ onClose, onSaved, addToast }) {
+function RuleFormModal({ taxComponent, onClose, onSaved, addToast }) {
   const [earningType, setEarningType] = useState("additional_compensation");
   const [isTaxable, setIsTaxable] = useState(true);
   const [state, setState] = useState("");
@@ -33,7 +55,7 @@ function RuleFormModal({ onClose, onSaved, addToast }) {
     try {
       await upsertTaxabilityRule({
         jurisdictionCountry: "IN", jurisdictionState: state.trim() || null,
-        taxComponent: "code_wages", earningType, isTaxable,
+        taxComponent, earningType, isTaxable,
       });
       addToast?.("Classification saved.", "success");
       onSaved();
@@ -43,6 +65,8 @@ function RuleFormModal({ onClose, onSaved, addToast }) {
       setSaving(false);
     }
   }
+
+  const program = PROGRAMS.find((p) => p.value === taxComponent) || PROGRAMS[0];
 
   return (
     <Modal title="Add / Update Classification" onClose={onClose} maxWidth="max-w-sm">
@@ -56,8 +80,8 @@ function RuleFormModal({ onClose, onSaved, addToast }) {
         <div>
           <label className={labelClass}>Classification</label>
           <select className={inputClass} value={isTaxable ? "1" : "0"} onChange={(e) => setIsTaxable(e.target.value === "1")}>
-            <option value="1">Core included wages</option>
-            <option value="0">Excluded (subject to 50% add-back test)</option>
+            <option value="1">{program.includedLabel}</option>
+            <option value="0">{program.excludedLabel}</option>
           </select>
         </div>
         <div>
@@ -74,10 +98,13 @@ function RuleFormModal({ onClose, onSaved, addToast }) {
 }
 
 export default function INCodeWagesTab() {
+  const [program, setProgram] = useState("code_wages");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [toast, setToast] = useState(null);
+
+  const activeProgram = PROGRAMS.find((p) => p.value === program) || PROGRAMS[0];
 
   function addToast(message, type) {
     setToast({ message, type });
@@ -87,14 +114,14 @@ export default function INCodeWagesTab() {
   async function refresh() {
     setLoading(true);
     try {
-      const data = await getTaxabilityRules({ country: "IN", taxComponent: "code_wages" });
+      const data = await getTaxabilityRules({ country: "IN", taxComponent: program });
       setRows(Array.isArray(data) ? data : []);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [program]);
 
   async function handleDelete(id) {
     try {
@@ -105,6 +132,10 @@ export default function INCodeWagesTab() {
     }
   }
 
+  const defaultText = activeProgram.defaultIncluded
+    ? `With no row configured for a component, it defaults to: ${[...activeProgram.defaultIncluded].join(", ")} = included, every other component excluded.`
+    : "With no row configured for a component, every component defaults to included (today's plain gross-based calculation).";
+
   return (
     <div className="space-y-3">
       {toast && (
@@ -112,10 +143,18 @@ export default function INCodeWagesTab() {
           {toast.message}
         </div>
       )}
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-muted p-1 flex-wrap">
+        {PROGRAMS.map((p) => (
+          <button
+            key={p.value} onClick={() => setProgram(p.value)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold ${program === p.value ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
       <div className="rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-[11px] text-foreground-secondary">
-        With no row configured for a component, it defaults to: Basic = core included, every other component
-        (HRA, Special Allowance, Overtime, Additional Compensation, Named Allowances) = excluded. Add a row below
-        only to override that default for a specific component.
+        {defaultText} Add a row below only to override that default for a specific component.
       </div>
       <div className="flex items-center justify-between">
         <p className="text-xs text-foreground-muted">Overrides only — see default above.</p>
@@ -145,7 +184,7 @@ export default function INCodeWagesTab() {
                   <td className="px-3 py-2 text-foreground-secondary">{r.jurisdictionState || "Country-wide"}</td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 font-semibold ${r.isTaxable ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
-                      {r.isTaxable ? "Core included" : "Excluded"}
+                      {r.isTaxable ? activeProgram.includedLabel : activeProgram.excludedLabel}
                     </span>
                   </td>
                   <td className="px-3 py-2">
@@ -158,7 +197,7 @@ export default function INCodeWagesTab() {
         </div>
       )}
       {showForm && (
-        <RuleFormModal onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); refresh(); }} addToast={addToast} />
+        <RuleFormModal taxComponent={program} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); refresh(); }} addToast={addToast} />
       )}
     </div>
   );

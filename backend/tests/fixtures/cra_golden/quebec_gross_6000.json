@@ -1,0 +1,41 @@
+{
+  "description": "Quebec employee -- routes through Revenu Quebec's own provincial module (not the generic provincial bracket path) plus QPP (replaces CPP) and QPIP (replaces EI), at $6,000/month. federal_income_tax/state_income_tax updated 2026-09-11 (gap-closure Phase 1): the CRA-correct credit method (now default) switches BOTH federal BPA/CEA AND Quebec's own quebec_bpa to a credit at each jurisdiction's own lowest rate (canada.py's _calculate_quebec_provincial_tax gates on the same _CA_CREDIT_METHOD_ENABLED_COUNTRIES switch as federal/generic-provincial) -- worker_deduction stays a genuine income deduction either way. Recomputed by running the real engine, not hand-derived.",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal brackets/BPAF/CEA, same as federal_only_flat_gross_4000.json), Section 12 (Quebec 2026 brackets: 54,345/108,680/132,245 at 14/19/24/25.75%, Quebec basic personal amount $18,952, maximum deduction for workers $1,450, QPP first-layer 6.30% each side, QPIP employee 0.430%/employer 0.602%, QPIP max insurable earnings $103,000). Hand-verified against the document's own bracket tables and cross-checked by running the actual engine at authoring time -- not run through Revenu Quebec's WebRAS.",
+  "context": {
+    "gross": "6000.00",
+    "country": "CA",
+    "pay_date": "2026-06-30",
+    "work_state": "QC",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ],
+    "state_rate_map": {
+      "quebec_bpa": {"flat_amount": "18952"},
+      "qc_worker_deduction": {"flat_amount": "1450"},
+      "qpp": {"employee_rate_pct": "6.30", "employer_rate_pct": "6.30"},
+      "qpip": {"employee_rate_pct": "0.430", "employer_rate_pct": "0.602"},
+      "qpip_mie": {"flat_amount": "103000"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "54345", "rate_pct": "14"},
+      {"min_amount": "54345", "max_amount": "108680", "rate_pct": "19"},
+      {"min_amount": "108680", "max_amount": "132245", "rate_pct": "24"},
+      {"min_amount": "132245", "max_amount": null, "rate_pct": "25.75"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "542.41",
+    "state_income_tax": "669.50",
+    "social_security": "359.63",
+    "employee_esi": "25.80",
+    "employer_esi": "36.12"
+  }
+}

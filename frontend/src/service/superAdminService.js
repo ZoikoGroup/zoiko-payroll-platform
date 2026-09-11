@@ -77,10 +77,13 @@ export const reviewHotfixActivation = (id, payload) =>
 export const getRtiFormsSummary = (params) =>
   apiFetch("/api/super-admin/compliance/rti-forms", { params });
 
-// Golden-test certification (Part 10's harness) — trigger a run, and
-// read run history.
-export const runTestCertification = () =>
-  apiFetch("/api/super-admin/compliance/test-certification/run", { method: "POST" });
+// Golden-test certification (Part 10's harness, generalized to Canada
+// gap-closure Phase 8) — trigger a run for a jurisdiction, and read run
+// history. jurisdictionCountry defaults to "UK" for back-compat.
+export const runTestCertification = (jurisdictionCountry = "UK") =>
+  apiFetch("/api/super-admin/compliance/test-certification/run", {
+    method: "POST", body: { jurisdiction_country: jurisdictionCountry },
+  });
 
 export const getTestCertificationRuns = (params) =>
   apiFetch("/api/super-admin/compliance/test-certification/runs", { params });
@@ -193,6 +196,20 @@ export const upsertTaxabilityRule = (payload) =>
 
 export const deleteTaxabilityRule = (id) =>
   apiFetch(`/api/super-admin/compliance/taxability-rules/${id}`, { method: "DELETE" });
+
+// ── India: Salary TDS / Forms cross-org status (gap-closure Phase F) ──────
+// A Super Admin token has no organization_id of its own, so these call
+// dedicated cross-org endpoints (organizationId required) rather than the
+// org-facing payrollService.js versions of the same underlying data.
+
+export const getIndiaSalaryTdsDeclarationsForOrg = (organizationId, taxYear) =>
+  apiFetch("/api/super-admin/india/salary-tds-declarations", { params: { organizationId, taxYear } });
+
+export const getIndiaSalaryTdsClaimsForOrg = (organizationId, taxYear) =>
+  apiFetch("/api/super-admin/india/salary-tds-claims", { params: { organizationId, taxYear } });
+
+export const getIndiaFormsForOrg = (organizationId, reportType) =>
+  apiFetch("/api/super-admin/india/forms", { params: { organizationId, reportType } });
 
 // ── Finance ──────────────────────────────────────────────────────────────
 
