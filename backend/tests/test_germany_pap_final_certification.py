@@ -20,12 +20,34 @@ fixture; this file's own tests use synthetic/structural assertions only.
 
 import inspect
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
+from app.modules.payroll.engine.germany_pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
 from app.modules.payroll.models import GermanyPapRelease
+
+
+def _certified_golden_vectors(asset_hash: str):
+    """Same governance-mechanics fixture as
+    test_germany_pap_release_governance.py's helper of the same name —
+    an AUTHORITATIVE_BMF-classified vector whose actual outputs are
+    constructed to match exactly, standing in for a real Super Admin
+    certification run so these tests can exercise the OTHER release
+    gates/workflows without re-litigating golden-vector correctness."""
+    vector = GermanyPapGoldenVector(
+        vector_id="TEST-CERT-001",
+        source_document="Governance-mechanics test fixture, not a real BMF Pruftabelle row",
+        source_page=0,
+        source_hash_sha256=asset_hash,
+        description="Mechanism-verification vector for final-certification tests",
+        inputs={"STKL": 1, "RE4": Decimal("2000000")},
+        expected_outputs={"LSTLZZ": Decimal("38000")},
+        source_classification=AUTHORITATIVE_BMF,
+    )
+    return [vector], {"TEST-CERT-001": {"LSTLZZ": Decimal("38000")}}
 
 
 def _publish_asset(db, tax_year="2026", pap_version="2026-11-12-final", content=b"official BMF PAP source content placeholder"):
@@ -59,7 +81,11 @@ def _drive_release_to_active(db, asset, preparer_id=1, approver_id=2, activator_
         db, release.id, actor_id=preparer_id, status="AUTHORIZED",
         authority="Test-only fixture, NOT real legal/BMF authorization",
     )
-    service.record_pap_release_golden_vectors(db, release.id, actor_id=preparer_id, source_sha256=asset.source_content_sha256)
+    vectors, actual_outputs = _certified_golden_vectors(asset.source_content_sha256)
+    service.record_pap_release_golden_vectors(
+        db, release.id, actor_id=preparer_id, source_sha256=asset.source_content_sha256,
+        vectors=vectors, actual_outputs=actual_outputs,
+    )
     service.record_pap_release_security_certification(db, release.id, actor_id=preparer_id)
     service.mark_pap_release_ready(db, release.id, actor_id=preparer_id)
     service.approve_pap_release(db, release.id, actor_id=approver_id)
@@ -237,7 +263,11 @@ def test_second_activation_attempt_observes_first_committed_activation(db):
     service.record_pap_release_source_hash_verification(db, release_a.id, actor_id=1)
     service.record_pap_release_source_finality(db, release_a.id, actor_id=1, status="VERIFIED")
     service.record_pap_release_licensing(db, release_a.id, actor_id=1, status="AUTHORIZED")
-    service.record_pap_release_golden_vectors(db, release_a.id, actor_id=1, source_sha256=asset_a.source_content_sha256)
+    vectors_a, actual_outputs_a = _certified_golden_vectors(asset_a.source_content_sha256)
+    service.record_pap_release_golden_vectors(
+        db, release_a.id, actor_id=1, source_sha256=asset_a.source_content_sha256,
+        vectors=vectors_a, actual_outputs=actual_outputs_a,
+    )
     service.record_pap_release_security_certification(db, release_a.id, actor_id=1)
     service.mark_pap_release_ready(db, release_a.id, actor_id=1)
     service.approve_pap_release(db, release_a.id, actor_id=2)
@@ -256,7 +286,11 @@ def test_second_activation_attempt_observes_first_committed_activation(db):
     service.record_pap_release_source_hash_verification(db, release_b.id, actor_id=1)
     service.record_pap_release_source_finality(db, release_b.id, actor_id=1, status="VERIFIED")
     service.record_pap_release_licensing(db, release_b.id, actor_id=1, status="AUTHORIZED")
-    service.record_pap_release_golden_vectors(db, release_b.id, actor_id=1, source_sha256=asset_b.source_content_sha256)
+    vectors_b, actual_outputs_b = _certified_golden_vectors(asset_b.source_content_sha256)
+    service.record_pap_release_golden_vectors(
+        db, release_b.id, actor_id=1, source_sha256=asset_b.source_content_sha256,
+        vectors=vectors_b, actual_outputs=actual_outputs_b,
+    )
     service.record_pap_release_security_certification(db, release_b.id, actor_id=1)
     service.mark_pap_release_ready(db, release_b.id, actor_id=1)
     service.approve_pap_release(db, release_b.id, actor_id=2)
@@ -324,7 +358,11 @@ def test_full_release_governance_workflow_end_to_end(db):
     service.record_pap_release_source_hash_verification(db, release.id, actor_id=1)
     service.record_pap_release_source_finality(db, release.id, actor_id=1, status="VERIFIED", authority="TEST-FIXTURE-ONLY")
     service.record_pap_release_licensing(db, release.id, actor_id=1, status="AUTHORIZED", authority="TEST-FIXTURE-ONLY")
-    service.record_pap_release_golden_vectors(db, release.id, actor_id=1, source_sha256=asset.source_content_sha256)
+    vectors, actual_outputs = _certified_golden_vectors(asset.source_content_sha256)
+    service.record_pap_release_golden_vectors(
+        db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+        vectors=vectors, actual_outputs=actual_outputs,
+    )
     service.record_pap_release_security_certification(db, release.id, actor_id=1)
 
     gate = service.evaluate_pap_release_gate(db, release.id)

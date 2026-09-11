@@ -284,8 +284,20 @@ def test_attach_applies_financial_deltas_atomically(db, organization):
         db, component.id, payslip_item.id, organization.id, actor_id=1,
     )
     assert attached.attachment_status == "ATTACHED"
-    assert attached.financial_integration_status == "PARTIAL_WAGE_TAX_PENDING_PAP"
+    # Phase 8BW: this fixture's payslip_item carries NO
+    # germany_calculation_snapshot at all (_make_payslip_item constructs a
+    # bare PayslipItem, deliberately bypassing the engine — see this file's
+    # own module docstring) — so there is no zvE base to compute a marginal
+    # wage-tax/Soli/Kirchensteuer delta FROM. This is the genuinely-correct
+    # BLOCKED outcome (renamed from the retired PARTIAL_WAGE_TAX_PENDING_PAP,
+    # which is now reserved for a component-specific unavailable-church-tax
+    # case — see test_attach_computes_real_wage_tax_soli_and_church_tax_deltas
+    # below for the CALCULATED path with a real snapshot).
+    assert attached.financial_integration_status == "BLOCKED"
     assert attached.applied_gross_delta == Decimal("100.00")
+    assert attached.applied_wage_tax_delta == Decimal("0.00")
+    assert attached.applied_soli_delta == Decimal("0.00")
+    assert attached.applied_church_tax_delta == Decimal("0.00")
 
     db.refresh(payslip_item)
     assert payslip_item.gross_pay == Decimal("100.00")
@@ -442,3 +454,159 @@ def test_same_batch_reference_allowed_across_different_organizations(db, organiz
         .count()
         == 2
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 5. Phase 8BI — central audit-trail regression coverage
+# ═══════════════════════════════════════════════════════════════════════
+# The Phase 8BH audit found that classification, wage-tax calculation,
+# social-insurance calculation, and premium-component building all
+# persisted real financial-input rows with only row-level
+# created_by_id/created_at provenance — none wrote a central
+# TaxConfigurationAudit entry, unlike every other Germany overtime
+# mutation (attach/detach, work-record creation/approval) in this module.
+# Fixed in service.py; these tests prove each of the four now does.
+#
+# Wage-tax/social-insurance/premium-component calculation need a full
+# statutory registry setup this file deliberately does not duplicate (see
+# the module docstring above) — those three tests monkeypatch the
+# underlying engine call so they can isolate and prove the SERVICE
+# wrapper's own added audit-write behavor without re-deriving that
+# registry setup. Classification needs no registry (pure §3b EStG time-
+# window logic), so its test exercises the real, unmocked path.
+
+def test_classify_overtime_writes_central_audit_entry(db, organization):
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    emp = _make_employee(db, organization.id)
+    # 2026-01-04 is a Sunday (matches test_classifier_sunday_day_shift_is_tagged_sunday
+    # above) — a Tuesday daytime shift produces zero qualifying segments,
+    # since ordinary daytime work has no §3b EStG premium category at all.
+    record = _make_work_record(
+        db, emp, organization.id,
+        datetime(2026, 1, 4, 9, 0, tzinfo=timezone.utc), datetime(2026, 1, 4, 17, 0, tzinfo=timezone.utc),
+    )
+    # SQLite tz-naive-after-reload gotcha — see the identical note on
+    # test_overlapping_manual_records_are_marked_ambiguous_and_block_classification above.
+    record.start_datetime = record.start_datetime.replace(tzinfo=timezone.utc)
+    record.end_datetime = record.end_datetime.replace(tzinfo=timezone.utc)
+
+    segments = service.classify_and_list_germany_overtime_time_segments(db, record.id, organization.id, actor_id=7)
+    assert len(segments) > 0
+
+    audit = (
+        db.query(TaxConfigurationAudit)
+        .filter(
+            TaxConfigurationAudit.entity_type == "germany_overtime_work_record",
+            TaxConfigurationAudit.entity_id == record.id,
+            TaxConfigurationAudit.action == "overtime_classified",
+        )
+        .one()
+    )
+    assert audit.actor_id == 7
+    assert audit.new_value.get("segment_count") == len(segments)
+
+
+def test_calculate_overtime_wage_tax_writes_central_audit_entry(db, organization, monkeypatch):
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    emp = _make_employee(db, organization.id)
+    record = _make_work_record(
+        db, emp, organization.id,
+        datetime(2026, 1, 6, 9, 0, tzinfo=timezone.utc), datetime(2026, 1, 6, 17, 0, tzinfo=timezone.utc),
+    )
+
+    def _fake_calculate(db, work_record, persist=True, actor_id=None):
+        return ["result-a", "result-b"]
+
+    import app.modules.payroll.engine.germany_overtime_wage_tax as wage_tax_module
+    monkeypatch.setattr(wage_tax_module, "calculate_germany_overtime_wage_tax", _fake_calculate)
+
+    results = service.calculate_and_list_germany_overtime_wage_tax(db, record.id, organization.id, actor_id=9)
+    assert results == ["result-a", "result-b"]
+
+    audit = (
+        db.query(TaxConfigurationAudit)
+        .filter(
+            TaxConfigurationAudit.entity_type == "germany_overtime_work_record",
+            TaxConfigurationAudit.entity_id == record.id,
+            TaxConfigurationAudit.action == "overtime_wage_tax_calculated",
+        )
+        .one()
+    )
+    assert audit.actor_id == 9
+    assert audit.new_value.get("result_count") == 2
+
+
+def test_calculate_overtime_social_insurance_writes_central_audit_entry(db, organization, monkeypatch):
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    emp = _make_employee(db, organization.id)
+    record = _make_work_record(
+        db, emp, organization.id,
+        datetime(2026, 1, 6, 9, 0, tzinfo=timezone.utc), datetime(2026, 1, 6, 17, 0, tzinfo=timezone.utc),
+    )
+
+    def _fake_calculate(db, work_record, persist=True, actor_id=None):
+        return ["si-result"]
+
+    import app.modules.payroll.engine.germany_overtime_social_insurance as si_module
+    monkeypatch.setattr(si_module, "calculate_germany_overtime_social_insurance", _fake_calculate)
+
+    results = service.calculate_and_list_germany_overtime_social_insurance(db, record.id, organization.id, actor_id=11)
+    assert results == ["si-result"]
+
+    audit = (
+        db.query(TaxConfigurationAudit)
+        .filter(
+            TaxConfigurationAudit.entity_type == "germany_overtime_work_record",
+            TaxConfigurationAudit.entity_id == record.id,
+            TaxConfigurationAudit.action == "overtime_social_insurance_calculated",
+        )
+        .one()
+    )
+    assert audit.actor_id == 11
+    assert audit.new_value.get("result_count") == 1
+
+
+def test_build_overtime_premium_components_writes_central_audit_entry(db, organization, monkeypatch):
+    from app.modules.payroll.models import TaxConfigurationAudit
+
+    emp = _make_employee(db, organization.id)
+    record = _make_work_record(
+        db, emp, organization.id,
+        datetime(2026, 1, 6, 9, 0, tzinfo=timezone.utc), datetime(2026, 1, 6, 17, 0, tzinfo=timezone.utc),
+    )
+
+    class _FakeGroup:
+        segment_start = record.start_datetime
+        segment_end = record.end_datetime
+
+        @staticmethod
+        def as_dict():
+            return {
+                "segment_start": record.start_datetime, "segment_end": record.end_datetime,
+                "work_date_local": record.work_date, "qualifying_hours": Decimal("2.0000"),
+                "combination_status": "COMPLETE",
+                "gross_premium_amount": Decimal("50.00"), "wage_tax_free_amount": Decimal("0.00"),
+                "wage_taxable_amount": Decimal("50.00"), "si_exempt_amount": Decimal("0.00"),
+                "si_contributory_amount": Decimal("50.00"),
+            }
+
+    import app.modules.payroll.engine.germany_overtime_premium_component as premium_module
+    monkeypatch.setattr(premium_module, "build_premium_component_groups", lambda db, work_record: [_FakeGroup()])
+
+    rows = service.build_germany_overtime_premium_components(db, record.id, organization.id, actor_id=13)
+    assert len(rows) == 1
+
+    audit = (
+        db.query(TaxConfigurationAudit)
+        .filter(
+            TaxConfigurationAudit.entity_type == "germany_overtime_work_record",
+            TaxConfigurationAudit.entity_id == record.id,
+            TaxConfigurationAudit.action == "overtime_premium_components_built",
+        )
+        .one()
+    )
+    assert audit.actor_id == 13
+    assert audit.new_value.get("built_count") == 1

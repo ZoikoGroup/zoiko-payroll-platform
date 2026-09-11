@@ -19,7 +19,7 @@ Python field names.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, List, Annotated, ClassVar
+from typing import Optional, List, Dict, Annotated, ClassVar
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, BeforeValidator, model_validator
 from app.modules.payroll.models import PayrollStatus, PayslipStatus, ActivityStatus
@@ -403,6 +403,13 @@ class GermanyOvertimePremiumComponentResponse(BaseModel):
     appliedGrossDelta:         Optional[Decimal] = Field(None, validation_alias="applied_gross_delta", serialization_alias="appliedGrossDelta")
     appliedPfDelta:            Optional[Decimal] = Field(None, validation_alias="applied_pf_delta", serialization_alias="appliedPfDelta")
     appliedEsiDelta:           Optional[Decimal] = Field(None, validation_alias="applied_esi_delta", serialization_alias="appliedEsiDelta")
+    # Phase 8BW: previously wage tax had no dedicated applied-delta column
+    # at all (always 0, undisclosed beyond financialIntegrationStatus's own
+    # "PARTIAL_WAGE_TAX_PENDING_PAP" string) — now genuinely computed via
+    # the internal §32a/§39b calculator; see _compute_overtime_financial_delta.
+    appliedWageTaxDelta:       Optional[Decimal] = Field(None, validation_alias="applied_wage_tax_delta", serialization_alias="appliedWageTaxDelta")
+    appliedSoliDelta:          Optional[Decimal] = Field(None, validation_alias="applied_soli_delta", serialization_alias="appliedSoliDelta")
+    appliedChurchTaxDelta:     Optional[Decimal] = Field(None, validation_alias="applied_church_tax_delta", serialization_alias="appliedChurchTaxDelta")
     createdAt:                 Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -825,6 +832,19 @@ class PayslipItemResponse(BaseModel):
     tds:                Decimal
     surcharge:          Decimal = Decimal("0")
     cess:               Decimal = Decimal("0")
+    # Germany (Kirchensteuer / church tax) — computed by the Germany engine
+    # and persisted on PayslipItem.church_tax, but this schema had no field
+    # for it, so FastAPI's response_model filtering stripped the key from
+    # every payslip API response. Defaulted to 0 so non-Germany payslips
+    # (and pre-existing rows) stay unchanged.
+    churchTax:          Decimal = Decimal("0")
+    # Germany (Solidaritätszuschlag / Soli) — computed by the Germany engine
+    # and persisted on PayslipItem.soli, but absent here (same
+    # response_model-stripped defect as churchTax above). Informational
+    # only: never summed into tds/totalDeductions/netPay (already folded
+    # into `tds`). Defaulted to 0 so non-Germany payslips and pre-existing
+    # rows stay unchanged.
+    soli:               Decimal = Decimal("0")
     federalIncomeTax:   Decimal = Decimal("0")
     stateIncomeTax:     Decimal = Decimal("0")
     localTax:           Decimal = Decimal("0")
@@ -865,6 +885,19 @@ class PayslipItemResponse(BaseModel):
     complianceFields:   Optional[dict] = None
     status:             PayslipStatus
     notes:              Optional[str] = None
+    # Phase 8BS: Germany-only — `_serialize_payslip` started emitting these
+    # three fields (calculation-mode provenance + block reason), but this
+    # response_model would have silently stripped them at the API boundary
+    # without a declared field, exactly the same "computed, serialized in
+    # the dict, dropped by response_model filtering" defect class as
+    # churchTax/soli above. None for every non-Germany payslip.
+    calculationMode:      Optional[str] = None
+    blockedReasonCode:    Optional[str] = None
+    blockedReasonMessage: Optional[str] = None
+    # Phase 8BU: PARTIAL-status support — same "declare it or response_model
+    # strips it" hazard noted above.
+    germanyUnavailableComponents: Optional[list] = None
+    calculationStatus:            Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1839,8 +1872,30 @@ class GermanyPapReleaseLicensingUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class GermanyPapGoldenVectorPayload(BaseModel):
+    """One certified golden vector, submitted with the actual outputs
+    produced when it was executed — see
+    service.record_pap_release_golden_vectors for why both the vector's
+    own classification/hash AND the actual outputs are required (a bare
+    hash + free-text note used to be sufficient, which is the Phase 8BG
+    defect this schema closes)."""
+
+    vectorId:              str = Field(validation_alias="vectorId")
+    sourceDocument:         str = Field(validation_alias="sourceDocument")
+    sourcePage:             int = Field(validation_alias="sourcePage")
+    sourceHashSha256:       str = Field(validation_alias="sourceHashSha256")
+    description:            str = Field(validation_alias="description")
+    inputs:                 Dict[str, object] = Field(validation_alias="inputs")
+    expectedOutputs:        Dict[str, Decimal] = Field(validation_alias="expectedOutputs")
+    sourceClassification:   str = Field(validation_alias="sourceClassification")
+    actualOutputs:          Dict[str, Decimal] = Field(validation_alias="actualOutputs")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
 class GermanyPapReleaseGoldenVectorUpdate(BaseModel):
     sourceSha256:  str = Field(validation_alias="sourceSha256")
+    vectors:        List[GermanyPapGoldenVectorPayload] = Field(default_factory=list, validation_alias="vectors")
     notes:          Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -2045,6 +2100,40 @@ class GermanyContributionCeilingResponse(BaseModel):
     branch:              str
     monthlyCeiling:      Decimal = Field(validation_alias="monthly_ceiling", serialization_alias="monthlyCeiling")
     annualCeiling:       Decimal = Field(validation_alias="annual_ceiling", serialization_alias="annualCeiling")
+    effectiveFrom:       date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:              str
+    authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
+    previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
+    approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Germany: Minijob / Midijob statutory parameters (Phase 8BK) ─────────
+# Same shape/conventions as GermanyContributionCeilingCreate/Response
+# immediately above — see models.GermanyMinijobMidijobParameter's own
+# docstring for the closed parameter_code vocabulary.
+class GermanyMinijobMidijobParameterCreate(BaseModel):
+    parameter_code:    str = Field(validation_alias="parameterCode")
+    value:             Decimal = Field(validation_alias="value")
+    value_type:        str = Field(validation_alias="valueType")
+    label:             str = Field(validation_alias="label")
+    effective_from:    date = Field(validation_alias="effectiveFrom")
+    effective_to:      Optional[date] = Field(None, validation_alias="effectiveTo")
+    authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class GermanyMinijobMidijobParameterResponse(BaseModel):
+    id:                  int
+    parameterCode:       str = Field(validation_alias="parameter_code", serialization_alias="parameterCode")
+    value:               Decimal
+    valueType:           str = Field(validation_alias="value_type", serialization_alias="valueType")
+    label:               str
     effectiveFrom:       date = Field(validation_alias="effective_from", serialization_alias="effectiveFrom")
     effectiveTo:         Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
     status:              str

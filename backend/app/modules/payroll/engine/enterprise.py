@@ -78,6 +78,12 @@ class EnterpriseStrategy(PayrollStrategy):
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
+        # Phase 8BU: see StandardStrategy's identical comment (engine/
+        # standard.py) — a PARTIAL Germany result must never present a
+        # net_pay computed as if the unavailable wage tax were zero.
+        germany_unavailable_components = deductions.get("_germany_unavailable_components") or []
+        if germany_unavailable_components:
+            net_pay = Decimal("0.00")
 
         # India Code on Wages §8.3 (AC-18) — see StandardStrategy's own
         # comment (engine/standard.py) for the full rationale; same
@@ -161,6 +167,7 @@ class EnterpriseStrategy(PayrollStrategy):
             state_disability_insurance=deductions.get("state_disability_insurance", Decimal("0")),
             germany_statutory_profile_id=deductions.get("_germany_statutory_profile_id"),
             germany_calculation_snapshot=deductions.get("_germany_calculation_snapshot"),
+            germany_unavailable_components=germany_unavailable_components,
             state_program_deductions=deductions.get("state_program_deductions", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,

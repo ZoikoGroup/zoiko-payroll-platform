@@ -36,9 +36,31 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from decimal import Decimal
+
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import service
+from app.modules.payroll.engine.germany_pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
 from app.modules.payroll.models import GermanyPapRelease
+
+
+def _certified_golden_vectors(asset_hash: str):
+    """Same governance-mechanics fixture used by the other PAP
+    release-governance test files — an AUTHORITATIVE_BMF-classified
+    vector whose actual outputs match exactly, standing in for a real
+    certification run so these tests can exercise rollback/concurrency
+    without re-litigating golden-vector correctness."""
+    vector = GermanyPapGoldenVector(
+        vector_id="TEST-CERT-001",
+        source_document="Governance-mechanics test fixture, not a real BMF Pruftabelle row",
+        source_page=0,
+        source_hash_sha256=asset_hash,
+        description="Mechanism-verification vector for rollback/concurrency tests",
+        inputs={"STKL": 1, "RE4": Decimal("2000000")},
+        expected_outputs={"LSTLZZ": Decimal("38000")},
+        source_classification=AUTHORITATIVE_BMF,
+    )
+    return [vector], {"TEST-CERT-001": {"LSTLZZ": Decimal("38000")}}
 
 
 def _publish_asset(db, tax_year="2026", pap_version="2026-11-12-final", content=b"official BMF PAP source content placeholder"):
@@ -64,7 +86,11 @@ def _fully_satisfy_all_gates(db, release_id, asset_hash, preparer_id=1, approver
         db, release_id, actor_id=preparer_id, status="AUTHORIZED",
         authority="Test-only fixture, NOT real BMF/legal authorization", reference="TEST-FIXTURE-ONLY",
     )
-    service.record_pap_release_golden_vectors(db, release_id, actor_id=preparer_id, source_sha256=asset_hash)
+    vectors, actual_outputs = _certified_golden_vectors(asset_hash)
+    service.record_pap_release_golden_vectors(
+        db, release_id, actor_id=preparer_id, source_sha256=asset_hash,
+        vectors=vectors, actual_outputs=actual_outputs,
+    )
     service.record_pap_release_security_certification(db, release_id, actor_id=preparer_id)
     service.mark_pap_release_ready(db, release_id, actor_id=preparer_id)
     service.approve_pap_release(db, release_id, actor_id=approver_id)

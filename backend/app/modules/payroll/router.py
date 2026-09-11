@@ -754,6 +754,26 @@ def germany_statutory_configuration_readiness(
     return service.get_germany_statutory_configuration_readiness(db)
 
 
+@payroll_router.get(
+    "/germany/reports/summary",
+    summary="Phase 8BI: Germany statutory payroll summary — gross/net, "
+    "employee counts by classification, statutory contributions, and "
+    "wage-tax/PAP-blocked status, aggregated from real persisted payslips",
+)
+def germany_payroll_summary_report(
+    period_start: Optional[date] = None,
+    period_end: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Read-only, tenant-scoped. Never fabricates a figure this codebase
+    cannot compute today — see service.get_germany_payroll_summary_report's
+    own docstring for the CALCULATED/BLOCKED/UNAVAILABLE contract."""
+    return service.get_germany_payroll_summary_report(
+        db, current_user.organization_id, period_start=period_start, period_end=period_end,
+    )
+
+
 # ── Germany ELSTER transmission boundary (Phase 8BF) ────────────────────
 # See engine/germany_elster.py's own module docstring: no real ELSTER
 # connector exists or is authorized. Every endpoint below prepares/
@@ -808,6 +828,22 @@ def list_germany_elster_transmissions(
     current_user=Depends(get_current_user),
 ):
     return service.list_elster_transmissions(db, current_user.organization_id)
+
+
+@payroll_router.get(
+    "/germany/elster-transmissions/{transmission_id}", response_model=GermanyElsterTransmissionResponse,
+    response_model_by_alias=True, summary="Get one ELSTER transmission attempt by id (Phase 8BI)",
+)
+def get_germany_elster_transmission(
+    transmission_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Tenant-scoped: 404s (not a cross-tenant leak) if the transmission
+    doesn't belong to this organization — same
+    get_elster_transmission_by_id lookup validate/transmit already use
+    internally, simply not previously exposed as its own GET route."""
+    return service.get_elster_transmission_by_id(db, transmission_id, current_user.organization_id)
 
 
 @payroll_router.post(
@@ -1111,6 +1147,13 @@ def download_payslip(
 @payroll_router.delete(
     "/payslips/{payslip_id}",
     summary="Delete a payslip",
+    # Phase 8BW: every OTHER delete endpoint in this router (delete_employee,
+    # delete_run, delete_holiday, etc.) requires get_current_payroll_operator
+    # — this one was the one confirmed outlier still gated on bare
+    # get_current_user, allowing ANY authenticated org role to delete a
+    # payslip. Fixed to match the established sibling pattern (no new
+    # authorization concept introduced).
+    dependencies=[Depends(get_current_payroll_operator)],
 )
 def delete_payslip(
     payslip_id: int,

@@ -278,11 +278,10 @@ def test_calculate_end_to_end_routes_bonus_via_sonstb_and_reduces_re4():
     """End-to-end via germany.calculate(): a German employee with a bonus
     this period has it routed through SONSTB, not blindly summed into RE4."""
     profile = _FakeProfile()
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(gross=Decimal("6000"), germany_statutory_profile=profile, germany_sonstb=Decimal("1000")))
-    trace = excinfo.value.trace
-    assert trace.sonstb_used == "1000"
-    assert trace.regular_wage_used == "5000"
+    result = germany.calculate(_ctx(gross=Decimal("6000"), germany_statutory_profile=profile, germany_sonstb=Decimal("1000")))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["sonstbUsed"] == "1000"
+    assert snap["regularWageUsed"] == "5000"
 
 
 def test_calculate_end_to_end_no_bonus_field_defaults_sonstb_to_zero():
@@ -290,11 +289,10 @@ def test_calculate_end_to_end_no_bonus_field_defaults_sonstb_to_zero():
     call site, and every Germany call site with no bonus this period) —
     calculate() must not crash and must trace a real, explicit zero."""
     profile = _FakeProfile()
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert trace.sonstb_used == "0"
-    assert trace.regular_wage_used == "5000"
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["sonstbUsed"] == "0"
+    assert snap["regularWageUsed"] == "5000"
 
 
 def test_field_sources_documents_every_field():
@@ -587,27 +585,41 @@ def test_calculate_raises_for_midijob_classification_with_out_of_range_earnings(
         germany.calculate(_ctx(germany_statutory_profile=profile))
 
 
-def test_calculate_blocks_at_pap_with_everything_else_resolved():
-    """The central Phase 7 behavior: with a full statutory profile, both
-    ceilings, a health fund, and a PV configuration all resolved, the
-    calculation still correctly raises GermanyPapNotAvailableError (no
-    PAP asset exists) — but the trace shows RV/ALV/GKV/PV/employer_levies
-    all resolved successfully before the block, proving those branches are
-    genuinely wired, not just "everything blocked together."."""
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx())
-    trace = excinfo.value.trace
-    assert isinstance(trace, GermanyCalculationTrace)
-    assert trace.calculation_status == "BLOCKED"
-    assert trace.blocked_reason_code == "GERMANY_PAP_NOT_AVAILABLE"
-    assert set(trace.resolved.keys()) == {"rv", "alv", "gkv", "pv", "employer_levies"}
-    assert Decimal(trace.resolved["rv"]["employee"]) > 0
+def test_calculate_completes_via_internal_tax_calculator_with_everything_resolved():
+    """Phase 8BR: with a full statutory profile, both ceilings, a health
+    fund, and a PV configuration all resolved, the calculation now reaches
+    COMPLETE via the internal functional wage-tax calculator (no certified
+    BMF PAP asset exists, so the official path still isn't used — see
+    test_calculate_falls_back_to_internal_tax_when_pap_unavailable below)
+    — and the trace shows RV/ALV/GKV/PV/employer_levies all resolved, same
+    as before this phase."""
+    result = germany.calculate(_ctx())
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["calculationStatus"] == "COMPLETE"
+    assert {"rv", "alv", "gkv", "pv", "employer_levies"} <= set(snap["resolved"].keys())
+    assert Decimal(snap["resolved"]["rv"]["employee"]) > 0
     # Phase 8M: U3 (Insolvenzumlage) now computed for REGULAR too (spec
     # §14 — a flat federal rate, not Minijob-specific); U1/U2/accident
     # insurance stay explicitly disclosed, never silently zero.
-    assert Decimal(trace.resolved["employer_levies"]["u3_insolvency_levy"]) > 0
-    assert trace.resolved["employer_levies"]["u1"] == "NOT_CONFIGURED — health-fund/tariff-specific rate not available"
-    assert trace.accident_insurance_status == "NOT_CONFIGURED — carrier-specific rate not available"
+    assert Decimal(snap["resolved"]["employer_levies"]["u3_insolvency_levy"]) > 0
+    assert snap["resolved"]["employer_levies"]["u1"] == "NOT_CONFIGURED — health-fund/tariff-specific rate not available"
+    assert snap["accidentInsuranceStatus"] == "NOT_CONFIGURED — carrier-specific rate not available"
+    # Phase 8BR: wage tax/Soli are real, non-fabricated, INTERNAL_FUNCTIONAL_REFERENCE numbers.
+    assert result["tds"] > 0
+    assert any("INTERNAL_FUNCTIONAL_REFERENCE" in w for w in snap["warnings"])
+
+
+def test_calculate_falls_back_to_internal_tax_when_pap_unavailable():
+    """The specific fallback mechanics: resolve_pap_executor() still
+    always returns UnavailablePapExecutor (unchanged, official path still
+    genuinely blocked) — germany.calculate() catches that specific
+    GermanyPapNotAvailableError and completes via
+    germany_internal_tax.InternalGermanyWageTaxCalculator instead."""
+    executor = resolve_pap_executor(None)
+    with pytest.raises(GermanyPapNotAvailableError):
+        executor.execute(build_pap_input(profile=_FakeProfile(), gross_monthly=Decimal("5000"), kvz_rate=Decimal("1.0")))
+    result = germany.calculate(_ctx())
+    assert result["_germany_calculation_snapshot"]["papVersion"] == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
 
 
 def test_calculate_raises_ceiling_missing_before_pap():
@@ -622,49 +634,44 @@ def test_calculate_jaeg_warning_surfaces_on_trace_for_private_below_threshold():
     is advisory, not a hard reject) but must be visible on the trace for
     Tax Operations/QA review — never silently accepted."""
     profile = _FakeProfile(de_health_insurance_status="PRIVATE")
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert any("JAEG" in w for w in trace.warnings)
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert any("JAEG" in w for w in snap["warnings"])
 
 
 def test_calculate_no_jaeg_warning_for_private_above_threshold():
     profile = _FakeProfile(de_health_insurance_status="PRIVATE")
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile, gross=Decimal("8000")))
-    trace = excinfo.value.trace
-    assert not any("JAEG" in w for w in trace.warnings)
+    result = germany.calculate(_ctx(germany_statutory_profile=profile, gross=Decimal("8000")))
+    snap = result["_germany_calculation_snapshot"]
+    assert not any("JAEG" in w for w in snap["warnings"])
 
 
 def test_calculate_main_secondary_warning_surfaces_on_trace():
     """Phase 8N: MAIN employment recorded alongside tax class VI is
     advisory, not blocking — but must reach the trace for QA review."""
     profile = _FakeProfile(de_tax_class="VI", de_main_employment=True)
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert any("VI" in w for w in trace.warnings)
-    assert trace.main_employment_used is True
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert any("VI" in w for w in snap["warnings"])
+    assert snap["mainEmploymentUsed"] is True
 
 
 def test_calculate_no_main_secondary_warning_for_secondary_class_vi():
     profile = _FakeProfile(de_tax_class="VI", de_main_employment=False)
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert not any("tax class is VI" in w for w in trace.warnings)
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert not any("tax class is VI" in w for w in snap["warnings"])
 
 
 def test_calculate_traces_new_elstam_fields_end_to_end():
     profile = _FakeProfile(
         de_jfreib=Decimal("1200.00"), de_pkpv=Decimal("350.00"), de_zkf_override=Decimal("0.5"),
     )
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert trace.jfreib_used == "1200.00"
-    assert trace.pkpv_used == "350.00"
-    assert trace.zkf_used == "0.5"
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["jfreibUsed"] == "1200.00"
+    assert snap["pkpvUsed"] == "350.00"
+    assert snap["zkfUsed"] == "0.5"
 
 
 def test_calculate_raises_health_fund_missing_before_pap():
@@ -681,27 +688,73 @@ def test_calculate_skips_gkv_and_pv_for_private_health_insurance():
     profile = _FakeProfile(de_health_insurance_status="PRIVATE")
     # PV configuration/health fund both None — must NOT block on either,
     # since a privately-insured employee needs neither.
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(
-            germany_statutory_profile=profile, germany_health_fund=None, germany_pv_configuration=None,
-        ))
-    trace = excinfo.value.trace
-    assert trace.resolved["gkv"]["employee"] == "0"
-    assert "pv" not in trace.resolved
+    result = germany.calculate(_ctx(
+        germany_statutory_profile=profile, germany_health_fund=None, germany_pv_configuration=None,
+    ))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["resolved"]["gkv"]["employee"] == "0"
+    assert "pv" not in snap["resolved"]
 
 
 def test_calculate_church_tax_land_resolved_before_pap_block():
     profile = _FakeProfile(de_church_tax_liable=True, de_church_tax_land="DE-BY")
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert any("church tax Land rate: 8" in s for s in trace.steps)
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert any("church tax Land rate: 8" in s for s in snap["steps"])
+    assert result["church_tax"] > 0
 
 
-def test_calculate_church_tax_missing_land_raises_before_pap():
+def test_calculate_church_tax_missing_land_is_partial_not_blocked():
+    """Phase 8BU (Part 21 — "remove unnecessary internal blocking"): a
+    church-tax-liable employee whose Land is unresolved must NOT lose their
+    entire payroll calculation over one unresolvable component. RV/ALV/GKV/
+    PV and wage tax/Soli (independent of church tax) all still calculate as
+    real, non-fabricated figures; only church_tax itself is forced to 0 and
+    explicitly flagged as unavailable — never silently presented as "not
+    liable"."""
     profile = _FakeProfile(de_church_tax_liable=True, de_church_tax_land=None)
-    with pytest.raises(GermanyStatutoryProfileMissingError):
-        germany.calculate(_ctx(germany_statutory_profile=profile))
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["calculationStatus"] == "PARTIALLY_CALCULATED"
+    assert snap["unavailableComponents"] == ["church_tax"]
+    assert result["_germany_unavailable_components"] == ["church_tax"]
+    # Church tax itself is the unavailable component — forced to 0, never
+    # fabricated as a real figure.
+    assert result["church_tax"] == Decimal("0")
+    # Everything independent of church tax is still a real, calculated
+    # figure — not discarded just because church tax couldn't resolve.
+    assert result["employee_pf"] > 0
+    assert result["employee_esi"] > 0
+    assert result["tds"] > 0
+
+
+def test_calculate_wage_tax_unavailable_is_partial_with_si_preserved():
+    """Phase 8BU: a payroll date before this codebase's earliest verified
+    internal §32a tariff (see germany_internal_tax._TARIFF_VERSIONS) makes
+    wage tax/Soli/church tax genuinely unavailable — this must NOT discard
+    the RV/ALV/GKV/PV social-insurance figures already computed earlier in
+    the same calculation. net pay itself is a strategy-layer concern
+    (engine/standard.py forces it to 0.00); this test covers only the
+    country-calculator dict germany.calculate() returns."""
+    profile = _FakeProfile(de_church_tax_liable=True, de_church_tax_land="DE-BY")
+    result = germany.calculate(_ctx(
+        germany_statutory_profile=profile, germany_payroll_date=date(2022, 12, 31),
+    ))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["calculationStatus"] == "PARTIALLY_CALCULATED"
+    assert set(snap["unavailableComponents"]) == {"wage_tax", "soli", "church_tax"}
+    assert set(result["_germany_unavailable_components"]) == {"wage_tax", "soli", "church_tax"}
+    # Wage tax/Soli/church tax are all unavailable — forced to 0, never a
+    # fabricated real-looking figure.
+    assert result["tds"] == Decimal("0")
+    assert result["soli"] == Decimal("0")
+    assert result["church_tax"] == Decimal("0")
+    # Social insurance resolves BEFORE the wage-tax stage and is completely
+    # independent of it — still real, still calculated.
+    assert result["employee_pf"] > 0
+    assert result["employee_esi"] > 0
+    assert result["employer_pf"] > 0
+    assert result["employer_esi"] > 0
 
 
 # ── Phase 8AM church-tax EXCEPTION (Bad Wimpfen) engine wiring — added
@@ -718,13 +771,12 @@ def test_calculate_uses_church_tax_exception_rate_when_context_provides_one():
     Land rate in the actual calculation trace."""
     profile = _FakeProfile(de_church_tax_liable=True, de_church_tax_land="DE-BW")
     exception = _FakeChurchTaxException(exception_rate_pct=Decimal("9.00"))
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile, germany_church_tax_exception=exception))
-    trace = excinfo.value.trace
-    assert any("EXCEPTION" in s and "9" in s for s in trace.steps), (
-        f"expected an exception-rate trace step mentioning 9%, got: {trace.steps}"
+    result = germany.calculate(_ctx(germany_statutory_profile=profile, germany_church_tax_exception=exception))
+    snap = result["_germany_calculation_snapshot"]
+    assert any("EXCEPTION" in s and "9" in s for s in snap["steps"]), (
+        f"expected an exception-rate trace step mentioning 9%, got: {snap['steps']}"
     )
-    assert not any("church tax Land rate: 8" in s for s in trace.steps), (
+    assert not any("church tax Land rate: 8" in s for s in snap["steps"]), (
         "the ordinary 8% Baden-Württemberg Land rate must NOT be used once an exception is resolved"
     )
 
@@ -738,20 +790,18 @@ def test_calculate_ignores_absent_church_tax_exception_and_uses_ordinary_land_ra
     itself prove the None-case is handled — only that the field's absence
     from _ctx()'s defaults doesn't crash)."""
     profile = _FakeProfile(de_church_tax_liable=True, de_church_tax_land="DE-BW")
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile, germany_church_tax_exception=None))
-    trace = excinfo.value.trace
-    assert any("church tax Land rate: 8" in s for s in trace.steps)
-    assert not any("EXCEPTION" in s for s in trace.steps)
+    result = germany.calculate(_ctx(germany_statutory_profile=profile, germany_church_tax_exception=None))
+    snap = result["_germany_calculation_snapshot"]
+    assert any("church tax Land rate: 8" in s for s in snap["steps"])
+    assert not any("EXCEPTION" in s for s in snap["steps"])
 
 
 def test_calculate_rv_alv_exempt_flags_honored_end_to_end():
     profile = _FakeProfile(de_pension_insurance_exempt=True, de_unemployment_insurance_exempt=True)
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(_ctx(germany_statutory_profile=profile))
-    trace = excinfo.value.trace
-    assert trace.resolved["rv"]["employee"] == "0"
-    assert trace.resolved["alv"]["employee"] == "0"
+    result = germany.calculate(_ctx(germany_statutory_profile=profile))
+    snap = result["_germany_calculation_snapshot"]
+    assert snap["resolved"]["rv"]["employee"] == "0"
+    assert snap["resolved"]["alv"]["employee"] == "0"
 
 
 def test_legacy_simplified_calculator_still_importable_and_unused_by_production_path():
@@ -860,7 +910,10 @@ def test_resolve_germany_calc_inputs_returns_all_registries(db, organization):
     assert resolved["pv_configuration"].child_category == "CHILDLESS"
 
 
-def test_preview_germany_calculation_blocked_on_pap_with_full_registry(db, organization):
+def test_preview_germany_calculation_completes_regular_via_internal_tax_with_full_registry(db, organization):
+    """Phase 8BR: with a full registry, the official BMF PAP is still
+    unavailable (unchanged), but the diagnostic preview now reaches
+    blocked=False via the internal functional wage-tax calculator."""
     emp = _make_employee(db, organization.id)
     _make_full_profile(db, emp, organization.id)
     _publish_ceiling(db, "GKV_PV", Decimal("5812.50"), Decimal("69750.00"))
@@ -869,9 +922,25 @@ def test_preview_germany_calculation_blocked_on_pap_with_full_registry(db, organ
     _publish_pv_configuration(db, "CHILDLESS", False)
 
     result = service.preview_germany_calculation(db, organization.id, emp.id, date(2026, 6, 1))
-    assert result["blocked"] is True
-    assert result["blockedReasonCode"] == "GERMANY_PAP_NOT_AVAILABLE"
+    assert result["blocked"] is False
+    assert result["result"]["monthlyTax"] > 0
     assert result["trace"]["resolved"]["rv"]["employee"] is not None
+    assert result["trace"]["papVersion"] == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+
+
+def test_preview_germany_calculation_still_blocks_when_ceiling_genuinely_missing(db, organization):
+    """The 'never fabricate' guarantee still holds for a GENUINE block —
+    a missing RV_ALV ceiling has nothing to do with wage tax and must
+    still block, regardless of the internal tax calculator's existence."""
+    emp = _make_employee(db, organization.id)
+    _make_full_profile(db, emp, organization.id)
+    _publish_ceiling(db, "GKV_PV", Decimal("5812.50"), Decimal("69750.00"))
+    _publish_health_fund(db, "E2E-FUND")
+    _publish_pv_configuration(db, "CHILDLESS", False)
+
+    result = service.preview_germany_calculation(db, organization.id, emp.id, date(2026, 6, 1))
+    assert result["blocked"] is True
+    assert result["blockedReasonCode"] == "GERMANY_CEILING_NOT_AVAILABLE"
 
 
 def test_preview_germany_calculation_rejects_non_german_employee(db, organization):
@@ -905,12 +974,14 @@ def _stub_business_code_generation(monkeypatch):
     monkeypatch.setattr(code_generation, "generate_business_code", _fake)
 
 
-def test_create_payroll_run_blocks_with_structured_error_no_pap(db, organization, monkeypatch):
+def test_create_payroll_run_completes_regular_employee_via_internal_tax_calculator(db, organization, monkeypatch):
     """The full E2E path this phase's §33 requires: real employee, real
-    attendance, real full registry setup — and the real payroll-run
-    creation path still correctly refuses to fabricate a payslip, raising
-    GermanyCalculationBlockedException (400) rather than silently falling
-    back to the legacy simplified calculator."""
+    attendance, real full registry setup — Phase 8BR: a Regular employee
+    now reaches a real, persisted, non-fabricated calculation via the
+    internal functional wage-tax calculator (official BMF PAP remains
+    genuinely unavailable — see test_create_payroll_run_still_blocks_on_missing_ceiling
+    below for proof the 'never fabricate when genuinely blocked' guarantee
+    still holds for an actual block)."""
     _stub_business_code_generation(monkeypatch)
     emp = _make_employee(db, organization.id)
     _make_full_profile(db, emp, organization.id)
@@ -929,27 +1000,70 @@ def test_create_payroll_run_blocks_with_structured_error_no_pap(db, organization
         periodStart=date(2026, 1, 1), periodEnd=date(2026, 1, 31), payDate=date(2026, 2, 1),
         employeeIds=[emp.id], auto_generate_payslips=True,
     )
-    with pytest.raises(GermanyCalculationBlockedException) as excinfo:
-        service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
-    assert excinfo.value.error_code == "GERMANY_PAP_NOT_AVAILABLE"
-    assert excinfo.value.trace.get("resolved", {}).get("rv") is not None
+    run = service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
+    assert run.status == "Draft"
 
-    # No PAYSLIP is ever fabricated for the blocked employee — the one
-    # thing this phase's "never a fake result" rule actually guarantees.
-    # NOTE (pre-existing, not introduced by Phase 7): create_payroll_run
-    # commits the PayrollRun row BEFORE calling generate_payslips_for_run,
-    # so a Draft run with zero payslips is left behind on ANY mid-generation
-    # error for ANY country — see this phase's report, "Known Risks."
     from app.modules.payroll.models import PayslipItem, PayrollRun
-    assert db.query(PayslipItem).count() == 0
+
+    item = db.query(PayslipItem).one()
+    assert item.status == "Pending"  # calculated, awaiting payslip generation — never "Failed"
+    assert item.gross_pay > Decimal("0.00")
+    assert item.net_pay > Decimal("0.00")
+    assert item.net_pay < item.gross_pay
+    trace = item.germany_calculation_snapshot or {}
+    assert trace.get("calculationStatus") == "COMPLETE"
+    assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+    assert trace.get("resolved", {}).get("rv") is not None
+
     remaining_run = db.query(PayrollRun).one()
     assert remaining_run.status == "Draft"
+    assert remaining_run.employee_count == 1
+
+
+def test_create_payroll_run_still_blocks_on_missing_ceiling(db, organization, monkeypatch):
+    """The 'never fabricate a payslip' guarantee still applies to a
+    genuinely blocked calculation (a missing RV_ALV ceiling has nothing
+    to do with wage tax) — Phase 8BI's FAILED-sentinel-per-employee
+    behavior, re-pinned against a real block that still exists today."""
+    _stub_business_code_generation(monkeypatch)
+    emp = _make_employee(db, organization.id)
+    _make_full_profile(db, emp, organization.id)
+    _publish_ceiling(db, "GKV_PV", Decimal("5812.50"), Decimal("69750.00"))
+    _publish_health_fund(db, "E2E-FUND")
+    _publish_pv_configuration(db, "CHILDLESS", False)
+
+    db.add(PayrollAttendanceRecord(
+        organization_id=organization.id, employee_id=emp.id, date=date(2026, 1, 15),
+        status="present", check_in="09:00", check_out="18:00",
+    ))
+    db.commit()
+
+    run_data = PayrollRunCreate(
+        periodStart=date(2026, 1, 1), periodEnd=date(2026, 1, 31), payDate=date(2026, 2, 1),
+        employeeIds=[emp.id], auto_generate_payslips=True,
+    )
+    run = service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
+    assert run.status == "Draft"
+
+    from app.modules.payroll.models import PayslipItem, PayrollRun
+
+    item = db.query(PayslipItem).one()
+    assert item.status == "Failed"
+    assert item.gross_pay == Decimal("0.00")
+    assert item.net_pay == Decimal("0.00")
+    trace = item.germany_calculation_snapshot or {}
+    assert trace.get("blockedReasonCode") == "GERMANY_CEILING_NOT_AVAILABLE"
+
+    remaining_run = db.query(PayrollRun).one()
+    assert remaining_run.status == "Draft"
+    assert remaining_run.employee_count == 0  # FAILED items never counted
 
 
 def test_create_payroll_run_blocks_on_missing_statutory_profile(db, organization, monkeypatch):
     """No EmployeeStatutoryProfile at all is the FIRST thing that blocks —
     proves the profile requirement is enforced even before any registry
-    lookup happens."""
+    lookup happens. Phase 8BI: recorded as a FAILED sentinel, not a
+    raised exception — see the test above for the rationale."""
     _stub_business_code_generation(monkeypatch)
     emp = _make_employee(db, organization.id, code="DE-E2E-002")
     db.add(PayrollAttendanceRecord(
@@ -962,9 +1076,14 @@ def test_create_payroll_run_blocks_on_missing_statutory_profile(db, organization
         periodStart=date(2026, 1, 1), periodEnd=date(2026, 1, 31), payDate=date(2026, 2, 1),
         employeeIds=[emp.id], auto_generate_payslips=True,
     )
-    with pytest.raises(GermanyCalculationBlockedException) as excinfo:
-        service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
-    assert excinfo.value.error_code == "GERMANY_STATUTORY_PROFILE_MISSING"
+    run = service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
+    assert run is not None
+
+    from app.modules.payroll.models import PayslipItem
+    item = db.query(PayslipItem).one()
+    assert item.status == "Failed"
+    trace = item.germany_calculation_snapshot or {}
+    assert trace.get("blockedReasonCode") == "GERMANY_STATUTORY_PROFILE_MISSING"
 
 
 # ── Phase 8E: snapshot value capture + manual payslip Germany wiring ────
@@ -1017,31 +1136,28 @@ def test_calculate_snapshot_captures_statutory_values():
         germany_ceiling_rv_alv=_RichCeiling(branch="RV_ALV", monthly_ceiling=Decimal("8450.00"), annual_ceiling=Decimal("101400.00")),
         germany_pv_configuration=_RichPvConfig(),
     )
-    with pytest.raises(GermanyPapNotAvailableError) as excinfo:
-        germany.calculate(ctx)
-    trace = excinfo.value.trace
+    result = germany.calculate(ctx)
+    # Phase 8BR: calculate() now returns a plain result dict (COMPLETE via
+    # the internal tax calculator) rather than raising — the snapshot is
+    # the same JSON-safe GermanyCalculationTrace.to_dict() as before,
+    # just reached via the success path instead of an exception's .trace.
+    snap = result["_germany_calculation_snapshot"]
 
-    assert trace.ceiling_gkv_pv_monthly == "5812.50"
-    assert trace.ceiling_gkv_pv_annual == "69750.00"
-    assert trace.ceiling_rv_alv_monthly == "8450.00"
-    assert trace.ceiling_rv_alv_annual == "101400.00"
+    assert snap["ceilingGkvPvMonthly"] == "5812.50"
+    assert snap["ceilingGkvPvAnnual"] == "69750.00"
+    assert snap["ceilingRvAlvMonthly"] == "8450.00"
+    assert snap["ceilingRvAlvAnnual"] == "101400.00"
 
-    assert trace.health_fund_name == "Test Fund"
-    assert trace.health_fund_effective_from == "2026-01-01"
-    assert trace.health_fund_is_average_rate is False
-    assert trace.health_fund_supplementary_rate_pct == "1.7000"
+    assert snap["healthFundName"] == "Test Fund"
+    assert snap["healthFundEffectiveFrom"] == "2026-01-01"
+    assert snap["healthFundIsAverageRate"] is False
+    assert snap["healthFundSupplementaryRatePct"] == "1.7000"
 
-    assert trace.pv_configuration_total_rate_pct == "4.2000"
-    assert trace.pv_configuration_standard_employee_rate_pct == "2.4000"
-    assert trace.pv_configuration_employer_rate_pct == "1.8000"
-    assert trace.pv_configuration_saxony_employee_rate_pct == "2.9000"
-    assert trace.pv_configuration_effective_from == "2026-01-01"
-
-    # All values round-trip through the JSON-safe to_dict() dict.
-    d = trace.to_dict()
-    assert d["ceilingRvAlvAnnual"] == "101400.00"
-    assert d["healthFundIsAverageRate"] is False
-    assert d["pvConfigurationTotalRatePct"] == "4.2000"
+    assert snap["pvConfigurationTotalRatePct"] == "4.2000"
+    assert snap["pvConfigurationStandardEmployeeRatePct"] == "2.4000"
+    assert snap["pvConfigurationEmployerRatePct"] == "1.8000"
+    assert snap["pvConfigurationSaxonyEmployeeRatePct"] == "2.9000"
+    assert snap["pvConfigurationEffectiveFrom"] == "2026-01-01"
 
 
 def _make_run(db, emp, org_id, period_start=date(2026, 1, 1), pay_date=date(2026, 2, 1)):
@@ -1056,12 +1172,13 @@ def _make_run(db, emp, org_id, period_start=date(2026, 1, 1), pay_date=date(2026
     return run
 
 
-def test_manual_payslip_germany_path_blocks_on_pap(db, organization, monkeypatch):
+def test_manual_payslip_germany_path_completes_via_internal_tax_calculator(db, organization, monkeypatch):
     """Phase 8E §25/§26: the MANUAL single-payslip path (add_payslip_item)
-    for a Germany employee must consume the same effective-dated statutory
-    inputs and fail closed with the structured 400 — it must NOT be able to
-    create a wageslip that bypasses the statutory profile/health-fund/ceiling
-    wiring, and it must never fabricate a net-pay while PAP is unavailable."""
+    for a Germany employee consumes the same effective-dated statutory
+    inputs as a batch run. Phase 8BR: with a full registry, this now
+    completes via the internal functional wage-tax calculator (official
+    BMF PAP remains genuinely unavailable, unchanged) — see the test below
+    for proof a genuine block still refuses to fabricate a wageslip."""
     emp = _make_employee(db, organization.id, code="DE-MANUAL-001")
     _make_full_profile(db, emp, organization.id)
     _publish_ceiling(db, "GKV_PV", Decimal("5812.50"), Decimal("69750.00"))
@@ -1074,11 +1191,34 @@ def test_manual_payslip_germany_path_blocks_on_pap(db, organization, monkeypatch
         employee_id=emp.id, basic_salary=Decimal("5000"), hra=Decimal("0"),
         special_allowance=Decimal("0"), notes="manual DE payslip",
     )
+    item = service.add_payslip_item(db, run.id, data, organization.id)
+
+    assert item.net_pay > Decimal("0.00")
+    assert item.net_pay < item.gross_pay
+    trace = item.germany_calculation_snapshot or {}
+    assert trace.get("calculationStatus") == "COMPLETE"
+    assert trace.get("resolved", {}).get("rv") is not None
+    assert db.query(PayslipItem).count() == 1
+
+
+def test_manual_payslip_germany_path_still_blocks_on_genuine_block(db, organization, monkeypatch):
+    """Same manual path, but with a genuinely missing registry (RV_ALV
+    ceiling) — must still fail closed with the structured 400 and never
+    fabricate a wageslip row, exactly as before this phase."""
+    emp = _make_employee(db, organization.id, code="DE-MANUAL-002")
+    _make_full_profile(db, emp, organization.id)
+    _publish_ceiling(db, "GKV_PV", Decimal("5812.50"), Decimal("69750.00"))
+    _publish_health_fund(db, "E2E-FUND")
+    _publish_pv_configuration(db, "CHILDLESS", False)
+    run = _make_run(db, emp, organization.id)
+
+    data = PayslipItemCreate(
+        employee_id=emp.id, basic_salary=Decimal("5000"), hra=Decimal("0"),
+        special_allowance=Decimal("0"), notes="manual DE payslip",
+    )
     with pytest.raises(GermanyCalculationBlockedException) as excinfo:
         service.add_payslip_item(db, run.id, data, organization.id)
 
-    assert excinfo.value.error_code == "GERMANY_PAP_NOT_AVAILABLE"
-    trace = excinfo.value.trace or {}
-    assert trace.get("resolved", {}).get("rv") is not None
+    assert excinfo.value.error_code == "GERMANY_CEILING_NOT_AVAILABLE"
     # The one thing this rule guarantees: no wageslip row was fabricated.
     assert db.query(PayslipItem).count() == 0

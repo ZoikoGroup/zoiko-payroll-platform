@@ -161,6 +161,20 @@ class StandardStrategy(PayrollStrategy):
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
+        # Phase 8BU: a PARTIAL Germany result (wage_tax/soli/church_tax
+        # genuinely unavailable, RV/ALV/GKV/PV genuinely computed) must
+        # NEVER present a net_pay computed as if the missing tax were
+        # zero — that would silently understate the employee's real
+        # deduction and overstate net pay as a plausible-looking but
+        # false number. Forced to 0.00 here, matching this codebase's
+        # existing "0.00 + an explicit non-COMPLETE status is the only
+        # honest way to represent an unavailable figure" convention
+        # (the same one FAILED payslips already use) — never displayed
+        # as a real net pay by the API/frontend/PDF, which all gate on
+        # PayslipStatus.PARTIAL instead.
+        germany_unavailable_components = deductions.get("_germany_unavailable_components") or []
+        if germany_unavailable_components:
+            net_pay = Decimal("0.00")
 
         # India Code on Wages §8.3 (AC-18) — see PayrollResult.
         # wage_deduction_cap_exceeded's own comment for why this is a
@@ -206,6 +220,12 @@ class StandardStrategy(PayrollStrategy):
             postgrad_loan_deduction=deductions.get("postgrad_loan_deduction", Decimal("0")),
             employee_pension=deductions.get("employee_pension", Decimal("0")),
             church_tax=deductions.get("church_tax", Decimal("0")),
+            # Germany: Solidaritätszuschlag — informational, already folded
+            # into `tds` above (see PayrollResult.soli's own comment), so it
+            # is NOT added to total_employee_deductions. Absent from every
+            # non-DE calculator dict, so a .get with a zero default keeps
+            # every other country's PayrollResult unchanged.
+            soli=deductions.get("soli", Decimal("0")),
             cpp2=deductions.get("cpp2", Decimal("0")),
             employer_social_security=deductions.get("employer_social_security", Decimal("0")),
             employer_medicare=deductions.get("employer_medicare", Decimal("0")),
@@ -247,6 +267,7 @@ class StandardStrategy(PayrollStrategy):
             state_disability_insurance=deductions.get("state_disability_insurance", Decimal("0")),
             germany_statutory_profile_id=deductions.get("_germany_statutory_profile_id"),
             germany_calculation_snapshot=deductions.get("_germany_calculation_snapshot"),
+            germany_unavailable_components=germany_unavailable_components,
             state_program_deductions=deductions.get("state_program_deductions", Decimal("0")),
             total_deductions=total_employee_deductions,
             net_pay=net_pay,

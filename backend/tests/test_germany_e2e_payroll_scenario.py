@@ -37,7 +37,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.exceptions import GermanyCalculationBlockedException
 from app.modules.payroll import service
 from app.modules.payroll.engine.countries import germany
 from app.modules.payroll.engine.germany_pap.core import (
@@ -277,8 +276,11 @@ class TestMidijobE2E:
 
     def test_midijob_full_pipeline_blocks_on_pap_with_si_resolved(self, db, organization, monkeypatch):
         """AUTHORITATIVE: Midijob employee (EUR 1,500/month) has RV/ALV/
-        GKV/PV computed correctly, then the pipeline FAILS CLOSED on
-        PAP. No payslip is fabricated."""
+        GKV/PV computed correctly. Phase 8BR: wage tax now completes via
+        the internal functional wage-tax calculator (official BMF PAP
+        remains genuinely unavailable, unchanged — see
+        engine/germany_internal_tax.py) rather than failing closed, so a
+        real, non-fabricated payslip is produced end to end."""
         _stub_business_code_generation(monkeypatch)
         emp = _make_employee(db, organization.id, code="DE-MIDI-001", gross=1500)
         _make_full_profile(
@@ -297,19 +299,31 @@ class TestMidijobE2E:
             periodStart=date(2026, 1, 1), periodEnd=date(2026, 1, 31), payDate=date(2026, 2, 1),
             employeeIds=[emp.id], auto_generate_payslips=True,
         )
-        with pytest.raises(GermanyCalculationBlockedException) as excinfo:
-            service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
-        assert excinfo.value.error_code == "GERMANY_PAP_NOT_AVAILABLE"
+        run = service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
+        assert run is not None
 
-        # The trace proves SI was resolved before the PAP block
-        trace = excinfo.value.trace or {}
+        # A real, calculated item is recorded — never a fabricated result,
+        # never a permanently blocked one either.
+        item = db.query(PayslipItem).filter(PayslipItem.employee_id == emp.id).one()
+        assert item.status == "Pending"
+        assert item.net_pay > Decimal("0.00")
+        assert item.net_pay < item.gross_pay
+        assert item.gross_pay == Decimal("1500.00")
+
+        # The trace proves SI resolved AND wage tax completed via the
+        # internal calculator (clearly labeled, not BMF-certified).
+        trace = item.germany_calculation_snapshot or {}
+        assert trace.get("calculationStatus") == "COMPLETE"
+        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
         assert "midijob_rv" in trace.get("resolved", {})
         assert "midijob_alv" in trace.get("resolved", {})
         assert "midijob_gkv" in trace.get("resolved", {})
         assert "midijob_pv" in trace.get("resolved", {})
 
-        # No payslip can exist for the blocked employee
-        assert db.query(PayslipItem).filter(PayslipItem.employee_id == emp.id).count() == 0
+        # A completed payslip IS counted in the run's aggregates.
+        db.refresh(run)
+        assert run.employee_count == 1
+        assert run.total_net == item.net_pay
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -322,7 +336,10 @@ class TestRegularE2E:
 
     def test_regular_blocks_on_pap_with_full_si_resolved(self, db, organization, monkeypatch):
         """AUTHORITATIVE: REGULAR employee (EUR 5,000/month) — RV/ALV/GKV/
-        PV all resolve and compute, then the pipeline fails closed on PAP."""
+        PV all resolve and compute. Phase 8BR: wage tax now completes via
+        the internal functional wage-tax calculator (official BMF PAP
+        remains genuinely unavailable, unchanged) rather than failing
+        closed, producing a real, non-fabricated, persisted payslip."""
         _stub_business_code_generation(monkeypatch)
         emp = _make_employee(db, organization.id, code="DE-REG-001", gross=5000)
         _make_full_profile(db, emp, organization.id)
@@ -338,16 +355,23 @@ class TestRegularE2E:
             periodStart=date(2026, 1, 1), periodEnd=date(2026, 1, 31), payDate=date(2026, 2, 1),
             employeeIds=[emp.id], auto_generate_payslips=True,
         )
-        with pytest.raises(GermanyCalculationBlockedException) as excinfo:
-            service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
-        assert excinfo.value.error_code == "GERMANY_PAP_NOT_AVAILABLE"
+        run = service.create_payroll_run(db, created_by=1, data=run_data, organization_id=organization.id)
+        assert run is not None
 
-        trace = excinfo.value.trace or {}
+        item = db.query(PayslipItem).filter(PayslipItem.employee_id == emp.id).one()
+        assert item.status == "Pending"
+        assert item.net_pay > Decimal("0.00")
+        assert item.net_pay < item.gross_pay
+
+        trace = item.germany_calculation_snapshot or {}
+        assert trace.get("calculationStatus") == "COMPLETE"
+        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
         assert trace.get("resolved", {}).get("rv") is not None
         assert trace.get("resolved", {}).get("gkv") is not None
         assert trace.get("resolved", {}).get("pv") is not None
 
-        assert db.query(PayslipItem).filter(PayslipItem.employee_id == emp.id).count() == 0
+        db.refresh(run)
+        assert run.employee_count == 1
 
 
 # ══════════════════════════════════════════════════════════════════════════

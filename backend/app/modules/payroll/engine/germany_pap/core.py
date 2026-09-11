@@ -279,6 +279,13 @@ class GermanyCalculationTrace:
     factor_used: Optional[str] = None
     zkf_used: Optional[str] = None
     church_tax_liable_used: Optional[bool] = None
+    # Phase 8BL: the actual resolved church-tax rate (a plain percentage
+    # number, e.g. "9.00") — Land-general or sub-Land-exception, whichever
+    # applied — as a structured field instead of only the free-text
+    # trace.step() message, so a resolved rate is queryable/auditable the
+    # same way tax_class_used/factor_used already are. None whenever
+    # church tax was never resolved (de_church_tax_liable is False).
+    church_tax_rate_used: Optional[str] = None
 
     # ── Phase 8N: ELStAM / employee-withholding-state completion ────────
     jfreib_used: Optional[str] = None
@@ -328,9 +335,17 @@ class GermanyCalculationTrace:
     steps: list = field(default_factory=list)     # ordered list[str] — human-readable step log
     resolved: dict = field(default_factory=dict)   # branch name -> resolved Decimal amounts (as str)
     warnings: list = field(default_factory=list)
-    calculation_status: str = "IN_PROGRESS"        # IN_PROGRESS | COMPLETE | BLOCKED
+    calculation_status: str = "IN_PROGRESS"        # IN_PROGRESS | COMPLETE | BLOCKED | PARTIALLY_CALCULATED
     blocked_reason_code: Optional[str] = None
     blocked_reason_message: Optional[str] = None
+    # Phase 8BU: explicit machine-readable list of components this
+    # calculation could NOT produce a real figure for (e.g. "wage_tax",
+    # "soli", "church_tax") when calculation_status is
+    # PARTIALLY_CALCULATED. Consumers (PDF/frontend/summary/register) must
+    # key off this list — never infer "unavailable" from a 0 value, since
+    # a genuinely zero church tax (not liable) is indistinguishable from a
+    # forced-zero placeholder by value alone.
+    unavailable_components: list = field(default_factory=list)
 
     def step(self, message: str) -> None:
         self.steps.append(message)
@@ -385,6 +400,7 @@ class GermanyCalculationTrace:
             "factorUsed": self.factor_used,
             "zkfUsed": self.zkf_used,
             "churchTaxLiableUsed": self.church_tax_liable_used,
+            "churchTaxRateUsed": self.church_tax_rate_used,
             "jfreibUsed": self.jfreib_used,
             "lzzfreibUsed": self.lzzfreib_used,
             "jhinzuUsed": self.jhinzu_used,
@@ -401,6 +417,7 @@ class GermanyCalculationTrace:
             "calculationStatus": self.calculation_status,
             "blockedReasonCode": self.blocked_reason_code,
             "blockedReasonMessage": self.blocked_reason_message,
+            "unavailableComponents": list(self.unavailable_components),
         }
 
 
@@ -455,6 +472,26 @@ class PapInputContract:
     sonstb_cents: int = 0                  # SONSTB
     jre4_cents: int = 0                    # JRE4
 
+    # Phase 8BR: the employee's ACTUAL computed annual RV+ALV+GKV+PV
+    # contributions (this same calculation run, before this field was
+    # added) — consumed ONLY by germany_internal_tax.py's
+    # InternalGermanyWageTaxCalculator as its Vorsorgepauschale proxy.
+    # Zero for any caller that does not set it (i.e. every pre-8BR call
+    # site and any future real PapExecutor, which computes its own
+    # Vorsorgepauschale from the PAP's own formula and ignores this).
+    vorsorgepauschale_annual_cents: int = 0
+
+    # Phase 8BT: the RAW EmployeeStatutoryProfile.de_child_count, kept
+    # distinct from `zkf` (which can be a de_zkf_override half-integer for
+    # split-custody, a DIFFERENT legal concept per this file's own
+    # existing zkf_value comment) and from `pva` (a Pflegeversicherung/
+    # SGB-XI-context field, not an income-tax one, despite the
+    # coincidentally shared BMF PAP field name). Consumed ONLY by
+    # germany_internal_tax.py's Tax Class II Entlastungsbetrag fuer
+    # Alleinerziehende calculation (section 24b EStG) — additional
+    # children beyond the first are `max(0, child_count - 1)`.
+    child_count: int = 0
+
     def field_sources(self) -> dict:
         """Documents where every field's value came from — never exposed
         raw to an unauthorized caller (see PapExecutionResult's own
@@ -472,6 +509,7 @@ class PapInputContract:
             "pvs": "EmployeeStatutoryProfile.de_saxony",
             "pvz": "EmployeeStatutoryProfile.de_childless",
             "pva": "EmployeeStatutoryProfile.de_child_count (2nd-5th child discount count)",
+            "child_count": "EmployeeStatutoryProfile.de_child_count (raw count, Phase 8BT Entlastungsbetrag use)",
             "lzz": "payroll run pay frequency (monthly, fixed 30-day model)",
             "re4_cents": "PayrollContext.gross minus germany_sonstb (regular period taxable wage, before PAP allowances)",
             "kvz": "GermanyHealthFund.supplementary_rate_pct (resolved by de_health_fund_code + payroll date)",
@@ -483,6 +521,10 @@ class PapInputContract:
             "pkpvagz_cents": "EmployeeStatutoryProfile.de_pkpvagz (0 if unset)",
             "sonstb_cents": "PayrollContext.germany_sonstb (PayrollAttendanceRecord.bonus; 0 if none recorded this period)",
             "jre4_cents": "12x regular (non-SONSTB) monthly wage — 0 unless sonstb_cents > 0",
+            "vorsorgepauschale_annual_cents": (
+                "12x this same run's already-computed employee RV+ALV+GKV+PV contributions "
+                "(Phase 8BR internal-tax-calculator Vorsorgepauschale proxy only; 0 for the official PAP path)"
+            ),
         }
 
 
@@ -556,6 +598,7 @@ def build_pap_input(
         pvs=bool(getattr(profile, "de_saxony", False)),
         pvz=bool(getattr(profile, "de_childless", False)),
         pva=max(0, min(int(child_count), 4)),  # discount count applies to the 2nd-5th child, per spec §10
+        child_count=int(child_count),
         lzz=lzz,
         re4_cents=int((regular_wage * 100).to_integral_value()),
         kvz=kvz_rate,
@@ -736,11 +779,18 @@ def resolve_pv_child_category(profile) -> str:
     return str(child_count)
 
 
-def _two_sided_rate(rate_map: dict, key: str, default_employee: Decimal, default_employer: Decimal):
+def two_sided_rate(rate_map: dict, key: str, default_employee: Decimal, default_employer: Decimal):
     """Same convention germany.py's pre-Phase-7 `calculate()` already used
     for "pension"/"social-insurance": a rate_map component row with its
     own employee_rate_pct/employer_rate_pct, falling back to the
-    hardcoded default independently per side."""
+    hardcoded default independently per side.
+
+    Phase 8BJ: made public (was `_two_sided_rate`) — previously only
+    calculate_rv/calculate_alv/calculate_gkv (the REGULAR path) called
+    this; germany.py's Midijob path now calls it directly too, so the
+    identical statutory rate (e.g. "rv_pension") resolves consistently
+    from the SAME canonical-tax-pack-aware rate_map for both REGULAR and
+    MIDIJOB employees, not just REGULAR ones."""
     row = rate_map.get(key)
     employee_pct = row.employee_rate_pct if (row and row.employee_rate_pct is not None) else default_employee
     employer_pct = row.employer_rate_pct if (row and row.employer_rate_pct is not None) else default_employer
@@ -759,7 +809,7 @@ def calculate_rv(*, annual_gross: Decimal, ceiling_rv_alv, rate_map: dict, exemp
             "No PUBLISHED RV_ALV contribution ceiling is resolvable for this payroll date."
         )
     base = min(annual_gross, Decimal(ceiling_rv_alv.annual_ceiling))
-    employee_pct, employer_pct = _two_sided_rate(rate_map, "rv_pension", rv_employee_default, rv_employer_default)
+    employee_pct, employer_pct = two_sided_rate(rate_map, "rv_pension", rv_employee_default, rv_employer_default)
     employee = _r2((base * employee_pct / 100) / months_per_year)
     employer = _r2((base * employer_pct / 100) / months_per_year)
     return employee, employer
@@ -776,7 +826,7 @@ def calculate_alv(*, annual_gross: Decimal, ceiling_rv_alv, rate_map: dict, exem
             "No PUBLISHED RV_ALV contribution ceiling is resolvable for this payroll date."
         )
     base = min(annual_gross, Decimal(ceiling_rv_alv.annual_ceiling))
-    employee_pct, employer_pct = _two_sided_rate(rate_map, "alv_unemployment", alv_employee_default, alv_employer_default)
+    employee_pct, employer_pct = two_sided_rate(rate_map, "alv_unemployment", alv_employee_default, alv_employer_default)
     employee = _r2((base * employee_pct / 100) / months_per_year)
     employer = _r2((base * employer_pct / 100) / months_per_year)
     return employee, employer
@@ -810,7 +860,7 @@ def calculate_gkv(*, annual_gross: Decimal, ceiling_gkv_pv, rate_map: dict, heal
             "must be published in the Health Fund Registry."
         )
     base = min(annual_gross, Decimal(ceiling_gkv_pv.annual_ceiling))
-    general_employee_pct, general_employer_pct = _two_sided_rate(
+    general_employee_pct, general_employer_pct = two_sided_rate(
         rate_map, "gkv_general", gkv_employee_default, gkv_employer_default,
     )
     general_employee = _r2((base * general_employee_pct / 100) / months_per_year)

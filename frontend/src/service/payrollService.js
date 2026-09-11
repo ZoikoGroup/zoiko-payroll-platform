@@ -402,6 +402,17 @@ export const getGermanyStatutoryConfigurationReadiness = async () => {
   }
 };
 
+// Phase 8BI — Germany statutory payroll summary, aggregated from real,
+// persisted PayslipItem/PayrollRun rows (never a fabricated figure). Optional
+// periodStart/periodEnd (YYYY-MM-DD) filter by the owning run's period.
+export const getGermanyPayrollSummaryReport = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/germany/reports/summary", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
 // ── Germany ELSTER transmission boundary (Phase 8BF) ─────────────────────
 // These calls only prepare/validate GermanyElsterTransmission records and
 // certificate-config references against Zoiko's own backend — they never

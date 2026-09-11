@@ -35,6 +35,20 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, Optional
 
+# Phase 8BG — governance classification for a golden vector's evidentiary
+# weight. A vector's `source_classification` is the ONLY thing this module
+# (or the release-governance gate in service.py) trusts to decide whether
+# a vector can ever count as authoritative statutory validation evidence.
+# Engineering test fixtures must always be SYNTHETIC; only a vector
+# actually transcribed from a published BMF Prüftabelle may be
+# AUTHORITATIVE_BMF. Nothing in this codebase upgrades a vector from one
+# classification to the other automatically — it is set once, by
+# whoever constructs the vector, and is part of what the release gate
+# (service.record_pap_release_golden_vectors) checks before accepting it.
+SYNTHETIC = "SYNTHETIC"
+AUTHORITATIVE_BMF = "AUTHORITATIVE_BMF"
+_VALID_CLASSIFICATIONS = frozenset({SYNTHETIC, AUTHORITATIVE_BMF})
+
 
 @dataclass(frozen=True)
 class GermanyPapGoldenVector:
@@ -42,7 +56,12 @@ class GermanyPapGoldenVector:
     every PAP input the row implies (never relying on interpreter/adapter
     defaults for a certification vector — the whole point is to prove the
     mechanical result against a fully-specified, independently-traceable
-    input set)."""
+    input set).
+
+    `source_classification` must be exactly one of SYNTHETIC or
+    AUTHORITATIVE_BMF (enforced in `__post_init__`) — this is the field
+    the production release gate uses to refuse engineering/test data as
+    statutory evidence; see service.record_pap_release_golden_vectors."""
 
     vector_id: str
     source_document: str
@@ -51,6 +70,14 @@ class GermanyPapGoldenVector:
     description: str
     inputs: Dict[str, object]
     expected_outputs: Dict[str, Decimal]
+    source_classification: str
+
+    def __post_init__(self) -> None:
+        if self.source_classification not in _VALID_CLASSIFICATIONS:
+            raise ValueError(
+                f"Invalid source_classification {self.source_classification!r} for golden vector "
+                f"{self.vector_id!r}: must be one of {sorted(_VALID_CLASSIFICATIONS)}."
+            )
 
 
 @dataclass(frozen=True)

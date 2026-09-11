@@ -22,6 +22,8 @@ from decimal import Decimal
 import pytest
 
 from app.modules.payroll.engine.germany_pap.golden_vector import (
+    AUTHORITATIVE_BMF,
+    SYNTHETIC,
     GermanyPapGoldenVector,
     GoldenVectorComparison,
     all_exact,
@@ -39,7 +41,27 @@ def _synthetic_vector(**expected_outputs_kwargs):
         description="Synthetic vector for mechanics-only testing",
         inputs={"STKL": 1, "RE4": Decimal("2000000")},
         expected_outputs=expected_outputs,
+        source_classification=SYNTHETIC,
     )
+
+
+# ── source_classification governance ────────────────────────────────────
+
+def test_golden_vector_rejects_unknown_classification():
+    with pytest.raises(ValueError):
+        GermanyPapGoldenVector(
+            vector_id="BAD-001", source_document="x", source_page=0, source_hash_sha256="0" * 64,
+            description="x", inputs={}, expected_outputs={}, source_classification="OFFICIAL_LOOKING",
+        )
+
+
+def test_golden_vector_accepts_authoritative_bmf_classification():
+    vector = GermanyPapGoldenVector(
+        vector_id="AUTH-001", source_document="BMF Prüftabelle p.39", source_page=39,
+        source_hash_sha256="1" * 64, description="real check-table row", inputs={"STKL": 1},
+        expected_outputs={"LSTLZZ": Decimal("1")}, source_classification=AUTHORITATIVE_BMF,
+    )
+    assert vector.source_classification == AUTHORITATIVE_BMF
 
 
 # ── GermanyPapGoldenVector: data model ──────────────────────────────────

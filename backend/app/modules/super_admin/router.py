@@ -55,6 +55,7 @@ from app.modules.payroll.schemas import (
     GermanyAccidentInsuranceProfileResponse, GermanyAccidentInsuranceProfileCreate,
     GermanyHealthFundU1TariffCreate,
     GermanyContributionCeilingResponse, GermanyContributionCeilingCreate,
+    GermanyMinijobMidijobParameterResponse, GermanyMinijobMidijobParameterCreate,
     GermanyPvConfigurationResponse, GermanyPvConfigurationCreate,
     GermanyEarningTaxabilityRuleResponse, GermanyEarningTaxabilityRuleCreate,
     GermanyOvertimePremiumCategoryResponse, GermanyOvertimePremiumCategoryCreate,
@@ -1433,9 +1434,20 @@ def record_pap_release_golden_vectors(
     db: Session = Depends(get_db),
 ):
     from app.modules.payroll import service as payroll_service
+    from app.modules.payroll.engine.germany_pap.golden_vector import GermanyPapGoldenVector
 
+    vectors = [
+        GermanyPapGoldenVector(
+            vector_id=v.vectorId, source_document=v.sourceDocument, source_page=v.sourcePage,
+            source_hash_sha256=v.sourceHashSha256, description=v.description, inputs=v.inputs,
+            expected_outputs=v.expectedOutputs, source_classification=v.sourceClassification,
+        )
+        for v in body.vectors
+    ]
+    actual_outputs = {v.vectorId: v.actualOutputs for v in body.vectors}
     return payroll_service.record_pap_release_golden_vectors(
-        db, id, actor_id=current_user.id, source_sha256=body.sourceSha256, notes=body.notes,
+        db, id, actor_id=current_user.id, source_sha256=body.sourceSha256,
+        vectors=vectors, actual_outputs=actual_outputs, notes=body.notes,
     )
 
 
@@ -1831,6 +1843,99 @@ def set_contribution_ceiling_status(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.set_contribution_ceiling_status(db, id, status_value, actor_id=current_user.id)
+
+
+# ── Germany: Minijob / Midijob statutory parameters (Phase 8BK) ─────────
+# Identical CRUD/lifecycle pattern as the contribution-ceiling section
+# immediately above. Super-Admin-only, same security domain.
+
+@router.get(
+    "/compliance/germany/minijob-midijob-parameters", response_model=List[GermanyMinijobMidijobParameterResponse],
+    response_model_by_alias=True, summary="List Germany Minijob/Midijob statutory parameter records",
+)
+def list_minijob_midijob_parameters(
+    parameter_code: Optional[str] = Query(None, alias="parameterCode"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_minijob_midijob_parameters(db, parameter_code=parameter_code)
+
+
+@router.get(
+    "/compliance/germany/minijob-midijob-parameters/resolve",
+    response_model=Optional[GermanyMinijobMidijobParameterResponse],
+    response_model_by_alias=True, summary="Resolve the PUBLISHED parameter record applicable on a date",
+)
+def resolve_minijob_midijob_parameter(
+    parameter_code: str = Query(..., alias="parameterCode"),
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.resolve_minijob_midijob_parameter(db, parameter_code, as_of=as_of)
+
+
+@router.get(
+    "/compliance/germany/minijob-midijob-parameters/{id}", response_model=GermanyMinijobMidijobParameterResponse,
+    response_model_by_alias=True, summary="Get a single Germany Minijob/Midijob parameter record",
+)
+def get_minijob_midijob_parameter(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_minijob_midijob_parameter_by_id(db, id)
+
+
+@router.post(
+    "/compliance/germany/minijob-midijob-parameters", response_model=GermanyMinijobMidijobParameterResponse,
+    response_model_by_alias=True, status_code=status.HTTP_201_CREATED,
+    summary="Record a new DRAFT Germany Minijob/Midijob parameter version",
+)
+def create_minijob_midijob_parameter(
+    payload: GermanyMinijobMidijobParameterCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.create_minijob_midijob_parameter_record(db, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/minijob-midijob-parameters/{id}/approve", response_model=GermanyMinijobMidijobParameterResponse,
+    response_model_by_alias=True,
+    summary="Record that the calling Super Admin approves this Minijob/Midijob parameter record",
+)
+def approve_minijob_midijob_parameter(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_minijob_midijob_parameter_approver(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/germany/minijob-midijob-parameters/{id}/status", response_model=GermanyMinijobMidijobParameterResponse,
+    response_model_by_alias=True, summary="Advance a Germany Minijob/Midijob parameter record's lifecycle status",
+)
+def set_minijob_midijob_parameter_status(
+    id: int,
+    status_value: str = Query(..., alias="status"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_minijob_midijob_parameter_status(db, id, status_value, actor_id=current_user.id)
 
 
 # ── Germany: PV (Long-Term Care Insurance) Child/Saxony Configuration ────

@@ -68,6 +68,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const deductionRows = [
     ...getIncomeTaxLines(payslip).map(([label, amount]) => ({ label, amount })),
     ...(labels.churchTax ? [{ label: labels.churchTax, amount: payslip.churchTax || 0 }] : []),
+    // Solidaritätszuschlag (Soli) — real, persisted (PayslipItem.soli),
+    // already emitted by the API (_serialize_payslip), but this on-screen
+    // payslip never rendered it — same "computed but never surfaced"
+    // defect class the churchTax line above already fixed for Germany.
+    ...(labels.solidaritySurcharge ? [{ label: labels.solidaritySurcharge, amount: payslip.soli || 0 }] : []),
     { label: labels.pf, amount: payslip.pf },
     { label: labels.esi, amount: payslip.esi },
     { label: "Professional Tax", amount: payslip.professionalTax },
@@ -107,6 +112,32 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const half = Math.ceil(employeeFields.length / 2);
   const leftFields = employeeFields.slice(0, half);
   const rightFields = employeeFields.slice(half);
+
+  // A blocked payslip (PayslipStatus.FAILED — e.g. Germany's
+  // GERMANY_PAP_NOT_AVAILABLE/GERMANY_STATUTORY_PROFILE_MISSING/etc.)
+  // persists ZERO monetary figures. Without this check, this on-screen
+  // view rendered an all-zero payslip indistinguishable from a
+  // legitimate zero-pay slip — the backend's own PDF renderer already
+  // shows an explicit "STATUS: BLOCKED" document for exactly this case
+  // (see generate_payslip_pdf_bytes/_render_blocked_payslip_pdf_bytes);
+  // this on-screen stub previously had no equivalent.
+  const isBlocked = payslip.status === "Failed";
+
+  // Phase 8BU: a PARTIAL payslip (Part 21 — "remove unnecessary internal
+  // blocking") DOES carry real figures for whichever components resolved
+  // (gross/RV/ALV/GKV/PV) — unlike a Failed one, earnings/deductions ARE
+  // shown — but wage tax/Soli/church tax (whichever are named in
+  // germanyUnavailableComponents) are forced to 0 server-side and net pay
+  // is ALWAYS forced to 0 too (engine/standard.py never presents a
+  // plausible net pay built on an unavailable wage tax). Net pay must
+  // therefore read "UNAVAILABLE" here, never a numeric €0.00.
+  const isPartial = payslip.status === "Partial";
+  const unavailableComponents = payslip.germanyUnavailableComponents || [];
+  const unavailableLabels = {
+    wage_tax: "Lohnsteuer (wage tax)",
+    soli: "Solidaritätszuschlag (Soli)",
+    church_tax: "Kirchensteuer (church tax)",
+  };
 
   return createPortal(
     <>
@@ -148,8 +179,43 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               ))}
             </div>
 
+            {/* BLOCKED STATE — mirrors the backend's dedicated blocked-payslip PDF */}
+            {isBlocked && (
+              <div className="rounded-[8px] bg-error/10 border border-error/40 px-4 py-3 mb-6">
+                <p className="text-[13px] font-bold text-error">STATUS: BLOCKED — NO PAYSLIP ISSUED</p>
+                <p className="text-[12px] text-foreground-muted mt-1">
+                  This payroll could NOT be calculated for {payslip.employee || "this employee"}.
+                  {payslip.blockedReasonCode ? ` Reason code: ${payslip.blockedReasonCode}.` : ""}
+                </p>
+                {payslip.blockedReasonMessage ? (
+                  <p className="text-[12px] text-foreground-muted mt-1">{payslip.blockedReasonMessage}</p>
+                ) : null}
+                <p className="text-[11px] text-foreground-disabled mt-2">
+                  No monetary figures below are real — every amount is zero because none was ever calculated.
+                </p>
+              </div>
+            )}
+
+            {/* PARTIAL STATE — real figures shown below, but net pay and
+                the named unavailable component(s) are never a fabricated
+                zero */}
+            {isPartial && (
+              <div className="rounded-[8px] bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700/50 px-4 py-3 mb-6">
+                <p className="text-[13px] font-bold text-amber-700 dark:text-amber-400">STATUS: PARTIALLY CALCULATED</p>
+                <p className="text-[12px] text-foreground-muted mt-1">
+                  The figures below that ARE shown are real, calculated amounts. {" "}
+                  {unavailableComponents.length > 0
+                    ? `${unavailableComponents.map((c) => unavailableLabels[c] || c).join(", ")} could NOT be calculated.`
+                    : "One or more tax components could NOT be calculated."}
+                </p>
+                <p className="text-[11px] text-foreground-disabled mt-2">
+                  Net Pay is shown as UNAVAILABLE, not zero — it is never computed as if the unavailable amount were €0.00.
+                </p>
+              </div>
+            )}
+
             {/* PRORATION WARNING */}
-            {payslip.payableDays != null && payslip.totalWorkingDays != null &&
+            {!isBlocked && payslip.payableDays != null && payslip.totalWorkingDays != null &&
               payslip.payableDays < payslip.totalWorkingDays && (
               <div className="rounded-[8px] bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 px-4 py-2.5 flex items-start gap-2 mb-6">
                 <span className="text-amber-500 text-[13px] mt-0.5">⚠</span>
@@ -161,7 +227,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               </div>
             )}
 
-            {/* EARNINGS & DEDUCTIONS */}
+            {/* EARNINGS & DEDUCTIONS \u2014 hidden for a blocked payslip: every
+                figure would be a real, persisted zero, but showing a full
+                zeroed-out breakdown next to the BLOCKED banner above reads
+                as "calculated to zero" rather than "never calculated". */}
+            {!isBlocked && (
             <div className="ps-body grid grid-cols-2 gap-6 mb-5">
               {/* EARNINGS TABLE */}
               <div>
@@ -205,8 +275,10 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 </div>
               </div>
             </div>
+            )}
 
             {/* SALARY SUMMARY */}
+            {!isBlocked && (
             <div className="flex justify-end mb-5">
               <div className="w-[50%] border border-border rounded-[8px] overflow-hidden">
                 <div className="flex justify-between px-4 py-3 border-b border-border text-[13px] bg-surface">
@@ -223,14 +295,18 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 </div>
               </div>
             </div>
+            )}
 
             {/* NET SALARY IN WORDS */}
+            {!isBlocked && (
             <div className="mb-5">
               <p className="text-[13px] font-bold text-foreground mb-2">Net Salary in Words</p>
               <p className="text-[13px] text-foreground-muted">{netInWords} Only.</p>
             </div>
+            )}
 
             {/* PAYMENT DETAILS */}
+            {!isBlocked && (
             <div className="border border-border rounded-[8px] overflow-hidden mb-6">
               <div className="grid grid-cols-2 border-b border-border">
                 <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider border-r border-border">Payment Mode</div>
@@ -241,6 +317,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 <div className="px-4 py-3 text-[13px] font-medium text-foreground">{payslip.payDate || "\u2014"}</div>
               </div>
             </div>
+            )}
 
             {/* FOOTER */}
             <div className="ps-footer border-t border-border pt-4 text-center">

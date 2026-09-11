@@ -15,7 +15,7 @@ from datetime import date
 
 import pytest
 
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
 from app.modules.payroll.engine.germany_elster import (
     ElsterTransmissionRequest, GermanyElsterUnavailableError, resolve_elster_transmitter,
@@ -163,3 +163,77 @@ def test_transmissions_are_tenant_scoped(db, organization):
     )
     assert service.list_elster_transmissions(db, organization.id) != []
     assert service.list_elster_transmissions(db, other_org.id) == []
+
+
+# ── Phase 8BI: single-record GET (the missing endpoint Phase 8BH found) ─────
+
+def test_get_transmission_by_id_returns_the_right_record(db, organization):
+    row = service.create_elster_transmission(
+        db, organization.id,
+        GermanyElsterTransmissionCreate(
+            transmission_type="LOHNSTEUER_ANMELDUNG",
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+        ),
+        actor_id=1,
+    )
+    fetched = service.get_elster_transmission_by_id(db, row.id, organization.id)
+    assert fetched.id == row.id
+    assert fetched.transmission_type == "LOHNSTEUER_ANMELDUNG"
+
+
+def test_get_transmission_by_id_not_found_raises(db, organization):
+    with pytest.raises(NotFoundException):
+        service.get_elster_transmission_by_id(db, 999999, organization.id)
+
+
+def test_get_transmission_by_id_malformed_identifier_raises(db, organization):
+    # FastAPI's own path-param validation rejects a non-integer id before
+    # this function is ever reached (int type coercion on the route) — at
+    # the service layer, a value that CAN coerce to int but matches no row
+    # (e.g. 0, negative) must behave identically to any other not-found id,
+    # never silently return None or a wrong row.
+    with pytest.raises(NotFoundException):
+        service.get_elster_transmission_by_id(db, 0, organization.id)
+    with pytest.raises(NotFoundException):
+        service.get_elster_transmission_by_id(db, -1, organization.id)
+
+
+def test_get_transmission_by_id_cross_tenant_access_is_refused(db, organization):
+    """A transmission id that's real, but belongs to ANOTHER organization,
+    must 404 — never leak another tenant's ELSTER transmission record."""
+    from app.modules.organizations.models import Organization
+
+    other_org = Organization(organization_name="Other Org", organization_code="ELSTERGETOTHER")
+    db.add(other_org)
+    db.commit()
+    db.refresh(other_org)
+
+    other_orgs_transmission = service.create_elster_transmission(
+        db, other_org.id,
+        GermanyElsterTransmissionCreate(
+            transmission_type="LOHNSTEUER_ANMELDUNG",
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+        ),
+        actor_id=1,
+    )
+    with pytest.raises(NotFoundException):
+        service.get_elster_transmission_by_id(db, other_orgs_transmission.id, organization.id)
+
+
+def test_get_transmission_by_id_reflects_blocked_state(db, organization):
+    """The GET must surface the same BLOCKED_EXTERNAL state a caller would
+    already see from list/transmit — no divergent view of the same row."""
+    row = service.create_elster_transmission(
+        db, organization.id,
+        GermanyElsterTransmissionCreate(
+            transmission_type="LOHNSTEUER_ANMELDUNG",
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+        ),
+        actor_id=1,
+    )
+    service.validate_elster_transmission(db, row.id, organization.id, actor_id=1)
+    service.attempt_transmit_elster_transmission(db, row.id, organization.id, actor_id=1)
+
+    fetched = service.get_elster_transmission_by_id(db, row.id, organization.id)
+    assert fetched.status == "BLOCKED_EXTERNAL"
+    assert fetched.blocked_reason

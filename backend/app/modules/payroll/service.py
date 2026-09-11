@@ -26,6 +26,7 @@ import os as _os
 import re
 import copy
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
@@ -47,7 +48,7 @@ from app.modules.payroll.models import (
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate,
     ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
     StatutoryFilingCalendar,     EmployeeStatutoryProfile, PapAlgorithmAsset, GermanyHealthFund,
-    GermanyContributionCeiling, GermanyPvConfiguration, GermanyPapRelease,
+    GermanyContributionCeiling, GermanyPvConfiguration, GermanyPapRelease, GermanyMinijobMidijobParameter,
     GermanyElstamChangeListBatch, GermanyElstamImportAttempt, GermanyEarningTaxabilityRule,
     GermanyElsterCertificateConfig, GermanyElsterTransmission,
     GermanyHealthFundU1Tariff, GermanyOvertimeWorkRecord,
@@ -163,21 +164,21 @@ def _seed_contribution_rates(db: Session, organization_id: int, country: str) ->
     return rows
 
 
-def _seed_org_rates_for_country(db: Session, organization_id: int, country: str) -> bool:
-    """First-use seed for an org+country: pulls from the canonical
-    Super-Admin-owned tax pack (engine/tax_resolver.py) when one exists,
+def _seed_org_rates_for_country(db: Session, organization_id: int, country: str, payroll_date=None) -> bool:
+    """Attempt to seed an org's initial ContributionRate/TaxSlab rows
+    from the canonical Super-Admin-owned tax pack for this country,
     falling back to the hardcoded _CONTRIBUTION_RATES_BY_COUNTRY/
     _TAX_SLABS_BY_COUNTRY dicts otherwise — so a jurisdiction with no
     canonical pack configured yet (a brand-new country Super Admin hasn't
     set up) still seeds exactly as it did before this existed. Returns
     True if canonical data was used."""
-    result = sync_org_rates_from_canonical(db, organization_id, country)
+    result = sync_org_rates_from_canonical(db, organization_id, country, payroll_date=payroll_date)
     return bool(result.get("synced"))
 
 
 def get_contribution_rates(
     db: Session, organization_id: int = None, *, country: str, tax_regime: str = None,
-    filing_status: str = None,
+    filing_status: str = None, payroll_date=None,
 ) -> List[ContributionRate]:
     from app.modules.payroll.engine.tax_resolver import _normalize_regime_label
 
@@ -214,7 +215,7 @@ def get_contribution_rates(
         ]
         rows.sort(key=lambda r: _normalize_regime_label(r.tax_regime) is not None)
     if not rows and organization_id:
-        if not _seed_org_rates_for_country(db, organization_id, country):
+        if not _seed_org_rates_for_country(db, organization_id, country, payroll_date=payroll_date):
             _seed_contribution_rates(db, organization_id, country)
         rows = (
             db.query(ContributionRate)
@@ -249,7 +250,7 @@ def _seed_tax_slabs(db: Session, organization_id: int, country: str) -> List[Tax
     return rows
 
 
-def get_tax_slabs(db: Session, organization_id: int = None, *, country: str, tax_regime: str = None) -> List[TaxSlab]:
+def get_tax_slabs(db: Session, organization_id: int = None, *, country: str, tax_regime: str = None, payroll_date=None) -> List[TaxSlab]:
     from app.modules.payroll.engine.tax_resolver import _normalize_regime_label
 
     query = db.query(TaxSlab)
@@ -267,7 +268,7 @@ def get_tax_slabs(db: Session, organization_id: int = None, *, country: str, tax
             or _normalize_regime_label(r.tax_regime) == tax_regime
         ]
     if not rows and organization_id:
-        if not _seed_org_rates_for_country(db, organization_id, country):
+        if not _seed_org_rates_for_country(db, organization_id, country, payroll_date=payroll_date):
             _seed_tax_slabs(db, organization_id, country)
         rows = (
             db.query(TaxSlab)
@@ -1141,9 +1142,12 @@ def _resolve_effective_rate_inputs(
     effective_tax_regime = tax_regime or ("New" if country == "IN" else None)
     rate_map = {
         _normalize_engine_component_key(r.component_key): r
-        for r in get_contribution_rates(db, organization_id, country=country, tax_regime=effective_tax_regime, filing_status=filing_status)
+        for r in get_contribution_rates(
+            db, organization_id, country=country, tax_regime=effective_tax_regime,
+            filing_status=filing_status, payroll_date=payroll_date,
+        )
     }
-    slabs = get_tax_slabs(db, organization_id, country=country, tax_regime=effective_tax_regime)
+    slabs = get_tax_slabs(db, organization_id, country=country, tax_regime=effective_tax_regime, payroll_date=payroll_date)
     _assert_jurisdiction_ready(rate_map, slabs, country, organization_id)
     return rate_map, slabs, None, None
 
@@ -2633,12 +2637,52 @@ def record_pap_release_licensing(
 
 
 def record_pap_release_golden_vectors(
-    db: Session, release_id: int, actor_id: Optional[int], source_sha256: str, notes: Optional[str] = None,
+    db: Session, release_id: int, actor_id: Optional[int], source_sha256: str,
+    vectors: "Optional[List[GermanyPapGoldenVector]]" = None,
+    actual_outputs: "Optional[Dict[str, Dict[str, Decimal]]]" = None,
+    notes: Optional[str] = None,
 ) -> GermanyPapRelease:
     """Records that golden-vector certification passed for THIS EXACT
     source hash. A certification run against a different hash (a
     different PAP version's bytes) is rejected outright — certifying
-    version A must never be accepted as proof for version B (§12)."""
+    version A must never be accepted as proof for version B (§12).
+
+    Phase 8BG fix: this used to be a pure self-attestation — it accepted
+    a hash and a free-text note with NO vector data at all, so nothing
+    stopped a caller from asserting "passed" with zero evidence, let
+    alone synthetic evidence. It now requires the actual vectors being
+    certified (`vectors`) and the outputs that were actually produced for
+    each of them (`actual_outputs`, keyed by vector_id), and:
+
+      1. refuses any vector whose `source_classification` is not
+         AUTHORITATIVE_BMF — a SYNTHETIC (engineering/test) vector can
+         never satisfy this gate, no matter how it compares;
+      2. refuses any vector whose own `source_hash_sha256` does not match
+         the exact source hash being certified — a vector transcribed
+         from a different PAP version's Prüftabelle cannot certify this
+         one;
+      3. re-derives the exact-match comparison itself (via
+         `compare_exact`/`all_exact`) from the caller-supplied actual
+         outputs rather than trusting a caller's own claim that they
+         matched — any mismatch, or any vector missing its actual
+         outputs, fails the whole call closed (no partial credit, no
+         partial write).
+
+    This function still cannot itself prove the `actual_outputs` were
+    honestly produced by really executing the bound PAP asset — as with
+    every other evidence-recording function in this file
+    (record_pap_release_source_finality, record_pap_release_licensing),
+    that remains a Super Admin process responsibility, not something
+    engineering can force from inside a data-recording call. What this
+    function CAN and does enforce in code is that no synthetic vector,
+    and no unverified/mismatched comparison, can mechanically satisfy the
+    gate."""
+    from app.modules.payroll.engine.germany_pap.golden_vector import (
+        AUTHORITATIVE_BMF,
+        all_exact,
+        compare_exact,
+    )
+
     row = get_pap_release_by_id(db, release_id)
     _require_pap_release_editable(row)
     if not row.bound_source_content_sha256 or source_sha256 != row.bound_source_content_sha256:
@@ -2646,16 +2690,60 @@ def record_pap_release_golden_vectors(
             "Golden-vector certification hash does not match this release's bound source hash — "
             "certification for a different PAP version/source cannot be accepted here."
         )
+    vectors = vectors or []
+    actual_outputs = actual_outputs or {}
+    if not vectors:
+        raise BadRequestException(
+            "At least one golden vector is required to certify this release — an empty vector "
+            "list can never satisfy this gate."
+        )
+
+    certified_vector_ids = []
+    for vector in vectors:
+        if vector.source_classification != AUTHORITATIVE_BMF:
+            raise BadRequestException(
+                f"Golden vector {vector.vector_id!r} is classified "
+                f"{vector.source_classification!r}, not AUTHORITATIVE_BMF — synthetic or "
+                "otherwise non-authoritative vectors can never satisfy a production release gate."
+            )
+        if vector.source_hash_sha256 != source_sha256:
+            raise BadRequestException(
+                f"Golden vector {vector.vector_id!r} cites source_hash_sha256="
+                f"{vector.source_hash_sha256!r}, which does not match the source hash being "
+                f"certified ({source_sha256!r}) — a vector transcribed for a different PAP "
+                "version/source cannot certify this one."
+            )
+        vector_actual = actual_outputs.get(vector.vector_id)
+        if vector_actual is None:
+            raise BadRequestException(
+                f"No actual execution output was supplied for golden vector {vector.vector_id!r} — "
+                "a vector cannot be certified without a corresponding actual result to compare."
+            )
+        comparisons = compare_exact(vector_actual, vector.expected_outputs)
+        if not all_exact(comparisons):
+            mismatches = [c for c in comparisons if not c.exact_match]
+            detail = "; ".join(f"{c.output_name}: expected {c.expected}, got {c.actual}" for c in mismatches)
+            raise BadRequestException(
+                f"Golden vector {vector.vector_id!r} failed exact comparison: {detail}"
+            )
+        certified_vector_ids.append(vector.vector_id)
+
     row.golden_vectors_passed = True
     row.golden_vectors_source_sha256 = source_sha256
     row.golden_vectors_verified_by_id = actor_id
     row.golden_vectors_verified_at = datetime.utcnow()
-    row.golden_vectors_notes = notes
+    row.golden_vectors_notes = json.dumps(
+        {"certified_vector_ids": certified_vector_ids, "classification": AUTHORITATIVE_BMF, "notes": notes}
+    )
     db.commit()
     db.refresh(row)
     record_tax_audit(
         db, actor_id=actor_id, action="update", entity_type="pap_release", entity_id=row.id,
-        old_value=None, new_value={"golden_vectors_passed": True, "source_sha256": source_sha256},
+        old_value=None,
+        new_value={
+            "golden_vectors_passed": True, "source_sha256": source_sha256,
+            "certified_vector_ids": certified_vector_ids,
+        },
         reason="Golden-vector certification recorded",
     )
     return row
@@ -3650,6 +3738,282 @@ def resolve_germany_contribution_ceiling(
     )
 
 
+# ── Germany: Minijob / Midijob statutory parameters (Phase 8BK) ─────────
+# Identical lifecycle/overlap/maker-checker pattern as
+# GermanyContributionCeiling immediately above — see
+# models.GermanyMinijobMidijobParameter's own header comment for why this
+# is a NEW, dedicated, generic parameter_code+value registry rather than
+# routed through ContributionRate/rate_map (deliberately not
+# org-overridable) or folded into GermanyPvConfiguration (no shared
+# per-row identity across these 14 independent constants).
+#
+# Phase 8BL note on scope: this table/model is still named for its
+# original Minijob/Midijob motivation, but two Phase 8BL additions below
+# (`employer_insolvency_levy_rate`, the 16 `church_tax_rate_de_*` codes)
+# are federal statutory facts that also apply to REGULAR employees, not
+# just Minijob/Midijob. Extending this EXISTING generic parameter_code+
+# value table (Option B — no migration) was still the correct minimal
+# choice over creating a second, near-identical table just for a better
+# name; a future cosmetic rename (e.g. to GermanyStatutoryParameter)
+# would need its own migration and is not urgent enough to justify one
+# on its own.
+_GERMANY_MINIJOB_MIDIJOB_PARAMETER_CODES = (
+    "minijob_upper_threshold",
+    "midijob_upper_threshold",
+    "minijob_employer_health_rate",
+    "minijob_employer_pension_rate",
+    "minijob_u1_rate",
+    "minijob_u2_rate",
+    "minijob_u3_rate",
+    "minijob_employee_pension_topup_rate",
+    "minijob_flat_tax_rate",
+    "midijob_total_base_multiplier",
+    "midijob_total_base_subtrahend",
+    "midijob_employee_base_multiplier",
+    "midijob_employee_base_subtrahend",
+    "midijob_pv_childless_surcharge_rate",
+    # Phase 8BL: U3 (Insolvenzumlage) is a flat FEDERAL rate applying to
+    # every Germany employment classification (spec §14) — distinct from
+    # minijob_u3_rate above, which is Minijob's OWN, separately-tracked
+    # constant (see docs/PHASE_8BL_..._REPORT.md §4 for why these are
+    # deliberately NOT unified even though they hold the same value
+    # today: preserving two independently-versioned entries lets them
+    # diverge safely in the future without touching Minijob's own
+    # already-proven call site).
+    "employer_insolvency_levy_rate",
+    # Phase 8BL: the general 16-Land Kirchensteuer rate table
+    # (CHURCH_TAX_LAND_RATES) — previously a static, undated Python dict
+    # with no registry/provenance/effective-dating at all, unlike the
+    # sub-Land GermanyChurchTaxException overlay already built on top of
+    # it. One parameter_code per "DE-<ISO subdivision>" code.
+    "church_tax_rate_de_bw", "church_tax_rate_de_by", "church_tax_rate_de_be",
+    "church_tax_rate_de_bb", "church_tax_rate_de_hb", "church_tax_rate_de_hh",
+    "church_tax_rate_de_he", "church_tax_rate_de_mv", "church_tax_rate_de_ni",
+    "church_tax_rate_de_nw", "church_tax_rate_de_rp", "church_tax_rate_de_sl",
+    "church_tax_rate_de_sn", "church_tax_rate_de_st", "church_tax_rate_de_sh",
+    "church_tax_rate_de_th",
+)
+_GERMANY_MINIJOB_MIDIJOB_PARAMETER_VALUE_TYPES = (
+    "PERCENTAGE", "EUR_THRESHOLD", "COEFFICIENT_MULTIPLIER", "COEFFICIENT_SUBTRAHEND",
+)
+_MINIJOB_MIDIJOB_PARAMETER_EDITABLE_STATUSES = ("DRAFT", "VERIFIED", "APPROVED")
+_MINIJOB_MIDIJOB_PARAMETER_VALID_STATUSES = ("DRAFT", "VERIFIED", "APPROVED", "PUBLISHED", "SUPERSEDED")
+_MINIJOB_MIDIJOB_PARAMETER_ALLOWED_TRANSITIONS = {
+    "DRAFT": {"VERIFIED"},
+    "VERIFIED": {"APPROVED", "DRAFT"},
+    "APPROVED": {"PUBLISHED", "VERIFIED"},
+    # Same "SUPERSEDED is a correction, not the normal new-version case"
+    # convention as GermanyContributionCeiling.
+    "PUBLISHED": {"SUPERSEDED"},
+    "SUPERSEDED": set(),
+}
+
+
+def _require_editable_minijob_midijob_parameter(row: "GermanyMinijobMidijobParameter") -> None:
+    if row.status not in _MINIJOB_MIDIJOB_PARAMETER_EDITABLE_STATUSES:
+        raise BadRequestException(
+            f"Minijob/Midijob parameter record for {row.parameter_code} ({row.effective_from}) is "
+            f"{row.status} — no longer editable. Record a new effective-dated version instead."
+        )
+
+
+def _validate_minijob_midijob_parameter_no_overlap(
+    db: Session, parameter_code: str, effective_from: date, effective_to: Optional[date],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Identical "no two overlapping ranges for the same identity" check
+    as _validate_contribution_ceiling_no_overlap, applied to
+    `parameter_code` instead of `branch`."""
+    query = db.query(GermanyMinijobMidijobParameter).filter(
+        GermanyMinijobMidijobParameter.parameter_code == parameter_code,
+    )
+    if exclude_id is not None:
+        query = query.filter(GermanyMinijobMidijobParameter.id != exclude_id)
+    new_end = effective_to or date.max
+    for existing in query.all():
+        existing_end = existing.effective_to or date.max
+        if effective_from <= existing_end and existing.effective_from <= new_end:
+            raise BadRequestException(
+                f"Period {effective_from} to {effective_to or 'open-ended'} overlaps existing Minijob/Midijob "
+                f"parameter record #{existing.id} for {parameter_code} ({existing.effective_from} to "
+                f"{existing.effective_to or 'open-ended'}). Close or adjust that record first."
+            )
+
+
+def list_minijob_midijob_parameters(
+    db: Session, parameter_code: Optional[str] = None,
+) -> List["GermanyMinijobMidijobParameter"]:
+    query = db.query(GermanyMinijobMidijobParameter)
+    if parameter_code:
+        query = query.filter(GermanyMinijobMidijobParameter.parameter_code == parameter_code)
+    return query.order_by(
+        GermanyMinijobMidijobParameter.parameter_code, GermanyMinijobMidijobParameter.effective_from.desc(),
+    ).all()
+
+
+def get_minijob_midijob_parameter_by_id(db: Session, record_id: int) -> "GermanyMinijobMidijobParameter":
+    row = db.query(GermanyMinijobMidijobParameter).filter(GermanyMinijobMidijobParameter.id == record_id).first()
+    if not row:
+        raise NotFoundException("GermanyMinijobMidijobParameter", record_id)
+    return row
+
+
+def create_minijob_midijob_parameter_record(
+    db: Session, data: "GermanyMinijobMidijobParameterCreate", actor_id: Optional[int] = None,
+    auto_close_previous: bool = True,
+) -> "GermanyMinijobMidijobParameter":
+    """Append a new effective-dated Minijob/Midijob parameter version.
+    Never updates an existing row. Mirrors
+    create_contribution_ceiling_record's auto-close-previous-open-row
+    behavior exactly."""
+    if data.parameter_code not in _GERMANY_MINIJOB_MIDIJOB_PARAMETER_CODES:
+        raise BadRequestException(
+            f"parameterCode must be one of {_GERMANY_MINIJOB_MIDIJOB_PARAMETER_CODES}, got {data.parameter_code!r}."
+        )
+    if data.value_type not in _GERMANY_MINIJOB_MIDIJOB_PARAMETER_VALUE_TYPES:
+        raise BadRequestException(
+            f"valueType must be one of {_GERMANY_MINIJOB_MIDIJOB_PARAMETER_VALUE_TYPES}, got {data.value_type!r}."
+        )
+    if data.value is None:
+        raise BadRequestException("value is required.")
+    if data.effective_to is not None and data.effective_to < data.effective_from:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+
+    previous_open = (
+        db.query(GermanyMinijobMidijobParameter)
+        .filter(
+            GermanyMinijobMidijobParameter.parameter_code == data.parameter_code,
+            GermanyMinijobMidijobParameter.effective_to.is_(None),
+        )
+        .first()
+    )
+    closing_previous = bool(
+        auto_close_previous and previous_open and previous_open.effective_from < data.effective_from
+    )
+    if closing_previous:
+        previous_open.effective_to = data.effective_from - timedelta(days=1)
+
+    _validate_minijob_midijob_parameter_no_overlap(
+        db, data.parameter_code, data.effective_from, data.effective_to,
+        exclude_id=previous_open.id if closing_previous else None,
+    )
+
+    row = GermanyMinijobMidijobParameter(
+        parameter_code=data.parameter_code, value=data.value, value_type=data.value_type, label=data.label,
+        effective_from=data.effective_from, effective_to=data.effective_to,
+        authority_source_id=data.authority_source_id, status="DRAFT",
+        previous_version_id=previous_open.id if closing_previous else None,
+        created_by_id=actor_id, updated_by_id=actor_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="germany_minijob_midijob_parameter", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "parameter_code": data.parameter_code, "value": str(data.value), "value_type": data.value_type,
+            "effective_from": str(data.effective_from),
+            "effective_to": str(data.effective_to) if data.effective_to else None,
+        },
+    )
+    return row
+
+
+def set_minijob_midijob_parameter_status(
+    db: Session, record_id: int, status: str, actor_id: Optional[int] = None,
+) -> "GermanyMinijobMidijobParameter":
+    """Advance a Minijob/Midijob parameter record's lifecycle — identical
+    maker-checker gate as set_contribution_ceiling_status."""
+    row = get_minijob_midijob_parameter_by_id(db, record_id)
+    if status not in _MINIJOB_MIDIJOB_PARAMETER_VALID_STATUSES:
+        raise BadRequestException(f"Unknown Minijob/Midijob parameter status: {status!r}.")
+    if status not in _MINIJOB_MIDIJOB_PARAMETER_ALLOWED_TRANSITIONS.get(row.status, set()):
+        raise BadRequestException(f"Cannot move a Minijob/Midijob parameter record from {row.status} to {status}.")
+
+    if status == "PUBLISHED":
+        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+            raise BadRequestException(
+                "This Minijob/Midijob parameter record needs a distinct approver before it can be published — "
+                "use the approve action with a different Super Admin than whoever last edited it."
+            )
+        if not row.authority_source_id:
+            raise BadRequestException(
+                "A Minijob/Midijob parameter record cannot be published without a linked source evidence "
+                "artifact (authoritySourceId) — record one via /compliance/source-artifacts first."
+            )
+
+    old_status = row.status
+    row.status = status
+    row.updated_by_id = actor_id
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="status_change", entity_type="germany_minijob_midijob_parameter", entity_id=row.id,
+        old_value={"status": old_status}, new_value={"status": status},
+    )
+    return row
+
+
+def set_minijob_midijob_parameter_approver(
+    db: Session, record_id: int, actor_id: Optional[int] = None,
+) -> "GermanyMinijobMidijobParameter":
+    """Sets approved_by_id — same distinct, lightweight action as
+    set_contribution_ceiling_approver. Auto-advances VERIFIED -> APPROVED only."""
+    row = get_minijob_midijob_parameter_by_id(db, record_id)
+    _require_editable_minijob_midijob_parameter(row)
+    old_approver = row.approved_by_id
+    old_status = row.status
+    row.approved_by_id = actor_id
+    if row.status == "VERIFIED":
+        row.status = "APPROVED"
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="germany_minijob_midijob_parameter", entity_id=row.id,
+        old_value={"approved_by_id": old_approver, "status": old_status},
+        new_value={"approved_by_id": actor_id, "status": row.status},
+        reason="Approver set",
+    )
+    return row
+
+
+def resolve_minijob_midijob_parameter(
+    db: Session, parameter_code: str, as_of: Optional[date] = None,
+) -> Optional["GermanyMinijobMidijobParameter"]:
+    """Return the PUBLISHED parameter record applicable on `as_of`
+    (defaults to today) for one specific parameter_code. Returns None
+    (never raises) if no published record covers that date — callers
+    fall back to the hardcoded 2026 default exactly as before this
+    registry existed (see engine/countries/germany.py's
+    _resolve_minijob_midijob_value)."""
+    as_of = as_of or date.today()
+    return (
+        db.query(GermanyMinijobMidijobParameter)
+        .filter(
+            GermanyMinijobMidijobParameter.parameter_code == parameter_code,
+            GermanyMinijobMidijobParameter.status == "PUBLISHED",
+            GermanyMinijobMidijobParameter.effective_from <= as_of,
+            (GermanyMinijobMidijobParameter.effective_to.is_(None)) | (GermanyMinijobMidijobParameter.effective_to >= as_of),
+        )
+        .order_by(GermanyMinijobMidijobParameter.effective_from.desc())
+        .first()
+    )
+
+
+def resolve_all_minijob_midijob_parameters(db: Session, as_of: Optional[date] = None) -> dict:
+    """Resolves every known parameter_code in one call — used once per
+    calculation by _resolve_germany_calc_inputs, exactly like
+    earning_taxability's own {key: resolve(key)} dict pattern, so
+    germany.py's Minijob/Midijob call sites never issue their own
+    per-parameter queries."""
+    return {
+        code: resolve_minijob_midijob_parameter(db, code, as_of=as_of)
+        for code in _GERMANY_MINIJOB_MIDIJOB_PARAMETER_CODES
+    }
+
+
 # ── Germany: PV (Long-Term Care Insurance) Child/Saxony Configuration ────
 # Configuration/registry only — see models.GermanyPvConfiguration's own
 # docstring and docs/PHASE_6_GERMANY_PV_CHILD_SAXONY_EVIDENCE_REPORT.md.
@@ -4638,6 +5002,11 @@ def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, pa
         "REGULAR_SALARY": resolve_germany_earning_taxability_rule(db, "REGULAR_SALARY", as_of=payroll_date),
         "BONUS_ANNUAL_BONUS": resolve_germany_earning_taxability_rule(db, "BONUS_ANNUAL_BONUS", as_of=payroll_date),
     }
+    # Phase 8BK — resolved once per calculation, exactly like
+    # earning_taxability above; None entries mean "fall back to the
+    # hardcoded default" (see engine/countries/germany.py's
+    # _resolve_minijob_midijob_value).
+    minijob_midijob_parameters = resolve_all_minijob_midijob_parameters(db, as_of=payroll_date)
 
     return dict(
         statutory_profile=profile,
@@ -4649,6 +5018,7 @@ def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, pa
         pv_configuration=pv_configuration,
         earning_taxability=earning_taxability,
         church_tax_exception=church_tax_exception,
+        minijob_midijob_parameters=minijob_midijob_parameters,
     )
 
 
@@ -4694,6 +5064,7 @@ def preview_germany_calculation(db: Session, organization_id: int, employee_id: 
         germany_ceiling_rv_alv=resolved["ceiling_rv_alv"],
         germany_pv_configuration=resolved["pv_configuration"],
         germany_church_tax_exception=resolved["church_tax_exception"],
+        germany_minijob_midijob_parameters=resolved["minijob_midijob_parameters"],
         germany_employee_id=employee.id,
         germany_organization_id=organization_id,
         germany_payroll_date=payroll_date,
@@ -5819,6 +6190,7 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "postgrad_loan_deduction": ("Postgraduate Loan Deduction (Concurrent)", "currency", True),
     "employee_pension": ("Workplace Pension (Employee)", "currency", True),
     "church_tax": ("Church Tax", "currency", True),
+    "soli": ("Solidaritätszuschlag (Soli)", "currency", True),
     "cpp2": ("CPP2", "currency", True),
     "total_deductions": ("Total Deductions", "currency", True),
     "employer_pf": ("Provident Fund (Employer)", "currency", True),
@@ -5897,6 +6269,19 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
            "federal_income_tax", "state_income_tax", "local_tax", "social_security", "esi", "cpp2",
            "total_deductions", "employer_social_security", "employer_esi", "employer_sui", "employer_cpp2",
            "net_pay"],
+    # Germany: RV -> pf, ALV+GKV+PV (and U1/U2/U3 on the employer side) ->
+    # esi/employer_esi (the same reused PayrollResult fields, exactly like
+    # Canada EI above), Kirchensteuer -> church_tax, Lohnsteuer+Soli ->
+    # tds. The engine populates exactly these PayslipItem columns — nothing
+    # more — so this is the precise DE surface, with DE-appropriate labels
+    # applied via _PAYSLIP_FIELD_LABEL_OVERRIDES below. Previously DE fell
+    # back to _DEFAULT_PAYSLIP_FIELDS (the entire catalog), flooding the
+    # Super Admin field picker with India/US-only columns (uan, cess,
+    # FUTA/SUI, CPP2, ...) that a German report can never populate.
+    "DE": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "payable_days", "total_working_days", "pf", "esi", "church_tax", "soli", "tds",
+           "total_deductions", "employer_pf", "employer_esi", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -5911,6 +6296,18 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "esi": "Employment Insurance (Employee)",
         "employer_esi": "Employment Insurance (Employer)",
         "employer_sui": "Workers' Compensation (Employer)",
+    },
+    # Germany reuses the multi-country catalog's fields under its own
+    # statutory names — same mechanism Canada uses above, only changing
+    # labels, never which PayslipItem column is read (the PDF's own
+    # Germany labels follow the same convention).
+    "DE": {
+        "pf": "Pension Insurance (Employee)",
+        "esi": "Social Insurance (Health / Unemployment / Care)",
+        "tds": "Lohnsteuer (incl. Soli)",
+        "church_tax": "Kirchensteuer",
+        "employer_pf": "Pension Insurance (Employer)",
+        "employer_esi": "Social Insurance (Employer)",
     },
 }
 
@@ -7477,6 +7874,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
                 germany_ceiling_rv_alv=resolved_de["ceiling_rv_alv"],
                 germany_pv_configuration=resolved_de["pv_configuration"],
                 germany_church_tax_exception=resolved_de["church_tax_exception"],
+                germany_minijob_midijob_parameters=resolved_de["minijob_midijob_parameters"],
                 germany_employee_id=emp.id,
                 germany_organization_id=organization_id,
                 germany_payroll_date=period_end or date.today(),
@@ -7528,9 +7926,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             calc = calculate_payroll(ctx, calculation_mode)
         except GermanyCalculationError as exc:
             # Preview is diagnostic across a batch — one blocked German
-            # employee must not abort the whole preview (unlike a real
-            # run, see generate_payslips_for_run, which correctly DOES
-            # fail the whole request). Surface the block + trace instead.
+            # employee must not abort the whole preview. Surface the
+            # block + trace instead. (Phase 8BI: a real run,
+            # generate_payslips_for_run, now ALSO doesn't abort the whole
+            # batch for this specific exception — it persists a FAILED
+            # PayslipItem per blocked employee instead of raising past
+            # the whole loop; unlike preview, it never returns a
+            # non-persisted diagnostic dict, since a real run must leave
+            # a queryable record behind.)
             results.append({
                 "employeeId": emp.id,
                 "employeeName": employee_name,
@@ -8453,6 +8856,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             germany_ceiling_rv_alv=resolved["ceiling_rv_alv"],
             germany_pv_configuration=resolved["pv_configuration"],
             germany_church_tax_exception=resolved["church_tax_exception"],
+            germany_minijob_midijob_parameters=resolved["minijob_midijob_parameters"],
             germany_employee_id=employee.id,
             germany_organization_id=run.organization_id,
             germany_payroll_date=run.pay_date,
@@ -8527,6 +8931,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "postgrad_loan_deduction": result.postgrad_loan_deduction,
         "employee_pension": result.employee_pension,
         "church_tax": result.church_tax,
+        "soli": result.soli,
         "cpp2": result.cpp2,
         "cpp_base_amount": result.cpp_base_amount,
         "cpp_first_additional_amount": result.cpp_first_additional_amount,
@@ -8600,6 +9005,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Directors NIC (ZP-TAX-UK-2026-27-001 §9.2) — a separate key
         # since it's gated on a different result field entirely.
         "_uk_director_ytd_result": result if result.ytd_director_ni_gross is not None else None,
+        # Phase 8BU: non-empty ONLY for a PARTIAL Germany result — see
+        # _generate_single_payslip, which pops this to decide
+        # PayslipStatus.PENDING vs PARTIAL, and PayslipItem has no column
+        # for it (it's fully redundant with germany_calculation_snapshot's
+        # own "PARTIALLY_CALCULATED" calculationStatus + `warnings`, which
+        # ARE persisted) — this key exists purely to drive the status
+        # decision without re-parsing the snapshot dict back out.
+        "_germany_unavailable_components": result.germany_unavailable_components,
         # "_org_levy_result" is NOT a PayslipItem column either — same
         # splat-then-pop contract as "_ytd_result" above. Carries this
         # employee's own period INCREMENT (after − before), not the
@@ -8686,13 +9099,26 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
     uk_org_levy_increment = values.pop("_uk_org_levy_increment", None)
+    germany_unavailable_components = values.pop("_germany_unavailable_components", None)
 
     item = PayslipItem(
         payroll_run_id=run.id,
         employee_id=employee.id,
         organization_id=run.organization_id,
         payslip_number=payslip_number,
-        status=PayslipStatus.PENDING,
+        # Phase 8BU: PARTIAL when RV/ALV/GKV/PV genuinely calculated but
+        # at least one OTHER component (wage tax/Soli/church tax) is
+        # genuinely unavailable for this employee/date — never silently
+        # presented as a complete Pending payslip. See
+        # countries/germany.py's calculate() and engine/standard.py's
+        # net_pay override for the full chain.
+        status=(PayslipStatus.PARTIAL if germany_unavailable_components else PayslipStatus.PENDING),
+        # Phase 8BU: same "the Remarks column only ever reads item.notes"
+        # reasoning as the FAILED sentinel above — without this, a PARTIAL
+        # row's Run Detail Remarks column would just show "—", giving no
+        # clue which component(s) are unavailable.
+        notes=(f"[PARTIALLY_CALCULATED] Unavailable: {', '.join(germany_unavailable_components)}"
+               if germany_unavailable_components else None),
         **values,
     )
     db.add(item)
@@ -8714,11 +9140,38 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
 
 
 def _recompute_run_aggregates(db: Session, run: PayrollRun):
-    items = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
+    # Phase 8BI: a FAILED item (a statutorily-blocked employee, e.g.
+    # Germany PAP unavailable — see generate_payslips_for_run) carries
+    # zero fabricated monetary figures by construction, but is excluded
+    # here explicitly rather than relying on "it's just zero anyway" —
+    # employee_count in particular must reflect employees who actually
+    # got a real payslip, not one who was correctly refused one.
+    #
+    # Phase 8BU: a PARTIAL item (RV/ALV/GKV/PV genuinely calculated;
+    # wage_tax/soli/church_tax genuinely unavailable) DOES count as a real
+    # payslip and DOES contribute real gross/deductions/employer-cost
+    # figures below (those components are independently real regardless
+    # of wage-tax availability) — but its net_pay is a placeholder 0.00
+    # (see engine/standard.py's override), never a real figure, so it is
+    # excluded from total_net specifically to avoid silently understating
+    # the run's aggregate net pay with a number that was never computed.
+    items = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.status != PayslipStatus.FAILED,
+    ).all()
+    net_pay_known_items = [i for i in items if i.status != PayslipStatus.PARTIAL]
+    # total_taxes sums `tds` specifically — for a PARTIAL item whose own
+    # unavailableComponents names "wage_tax", tds is the SAME kind of
+    # forced-zero placeholder net_pay is (see above), not a real "$0 owed"
+    # result, so it gets the same exclusion net_pay does. A PARTIAL item
+    # unavailable only on church_tax still has a real tds and stays in.
+    tax_known_items = [
+        i for i in items
+        if "wage_tax" not in ((i.germany_calculation_snapshot or {}).get("unavailableComponents") or [])
+    ]
     run.employee_count = len(items)
     run.total_gross = sum((i.gross_pay for i in items), Decimal("0"))
     run.total_deductions = sum((i.total_deductions for i in items), Decimal("0"))
-    run.total_taxes = sum((i.tds for i in items), Decimal("0"))
+    run.total_taxes = sum((i.tds for i in tax_known_items), Decimal("0"))
     run.total_employer_contribution = sum(
         (i.employer_pf + i.employer_esi + i.employer_social_security + i.employer_medicare + i.employer_pension
          + i.employer_ni + i.employer_futa + i.employer_sui + i.employer_state_program_contributions
@@ -8732,7 +9185,7 @@ def _recompute_run_aggregates(db: Session, run: PayrollRun):
          + i.employer_edli + (i.employer_nps or Decimal("0")) + i.employer_lwf + i.employer_apprenticeship_levy for i in items),
         Decimal("0"),
     )
-    run.total_net = sum((i.net_pay for i in items), Decimal("0"))
+    run.total_net = sum((i.net_pay for i in net_pay_known_items), Decimal("0"))
     db.commit()
     db.refresh(run)
     return run
@@ -8867,7 +9320,15 @@ def _resolve_employee_calc_inputs(
 def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
     """Generate a payslip for every Active employee in the org (or only the
     specified employee_ids if provided). Idempotent: re-running skips
-    employees who already have a payslip in this run."""
+    employees who already have a payslip in this run.
+
+    Phase 8BI (P0): a statutorily-blocked employee (e.g. Germany PAP
+    unavailable) is recorded as its own FAILED PayslipItem rather than
+    aborting the whole batch — see the try/except inside the loop below
+    for the exact contract. Every OTHER exception still propagates and
+    aborts the whole call, exactly as before this phase."""
+    from app.core.exceptions import GermanyCalculationBlockedException
+
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     # Org-level, not per-employee — resolved once for the whole run, same as
     # rate_map/slabs are cached per-jurisdiction below.
@@ -8892,10 +9353,29 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     )
     employees = employees_query.all()
 
+    # Phase 8BI: a FAILED item (a prior statutorily-blocked attempt —
+    # e.g. Germany PAP unavailable) does NOT count as "already generated"
+    # for idempotency purposes — only a real PENDING/PAID payslip does.
+    # This lets a re-run of the same call (the normal "add employees to
+    # an existing run" / retry path) re-attempt a previously-blocked
+    # employee instead of permanently skipping them once blocked.
     existing_ids = {
         row.employee_id for row in
-        db.query(PayslipItem.employee_id).filter(PayslipItem.payroll_run_id == run.id).all()
+        db.query(PayslipItem.employee_id).filter(
+            PayslipItem.payroll_run_id == run.id, PayslipItem.status != PayslipStatus.FAILED,
+        ).all()
     }
+    retry_candidate_ids = {e.id for e in employees} - existing_ids
+    if retry_candidate_ids:
+        # Clear any stale FAILED sentinel for an employee about to be
+        # retried, so the retry produces exactly one payslip_items row
+        # for them (a fresh success or an updated FAILED row), never a
+        # duplicate alongside the old one.
+        db.query(PayslipItem).filter(
+            PayslipItem.payroll_run_id == run.id,
+            PayslipItem.employee_id.in_(retry_candidate_ids),
+            PayslipItem.status == PayslipStatus.FAILED,
+        ).delete(synchronize_session="fetch")
 
     # Batch-fetch every remaining employee's attendance rows for the run's
     # period in ONE query instead of 2 queries per employee (unpaid-leave
@@ -8970,14 +9450,68 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
             if country == "UK" else {}
         )
-        _generate_single_payslip(
-            db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
-            attendance_records=attendance_by_employee.get(emp.id, []),
-            allowance_components=allowance_components, resolved_pack=resolved_pack,
-            state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-            reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs, poe_snapshot=poe_snapshot,
-            org_levy_inputs=org_levy_inputs or None,
-        )
+        # Phase 8BI (P0): a statutorily-blocked employee (today, only
+        # Germany — GermanyCalculationBlockedException, e.g. no PUBLISHED
+        # PAP asset / no effective EmployeeStatutoryProfile) must NEVER
+        # abort processing for every OTHER employee in this batch, and
+        # must NEVER be silently turned into a fabricated successful
+        # result. Caught here specifically (not a bare `except Exception`)
+        # so a genuinely unexpected error (a real bug, a DB error) still
+        # propagates and aborts the whole call exactly as before — only
+        # this one well-defined, typed "statutory calculation intentionally
+        # blocked" outcome gets employee-level handling. No database write
+        # happens for this employee before the exception can be raised
+        # (_compute_payslip_values is pure calculation until it returns),
+        # so nothing needs to be rolled back — the loop simply records a
+        # FAILED sentinel payslip (real, persisted, but carrying zero
+        # fabricated monetary figures) and moves on to the next employee.
+        try:
+            generated_item = _generate_single_payslip(
+                db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
+                attendance_records=attendance_by_employee.get(emp.id, []),
+                allowance_components=allowance_components, resolved_pack=resolved_pack,
+                state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+                reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs, poe_snapshot=poe_snapshot,
+                org_levy_inputs=org_levy_inputs or None,
+            )
+            # Phase 8BV: a PARTIAL payslip (Phase 8BU) is a real, persisted
+            # outcome an operator needs to know about — the FAILED sentinel
+            # below already gets a log_activity entry; PARTIAL previously
+            # got none, leaving it invisible in the activity log even
+            # though it means net_pay is not yet a real figure for this
+            # employee.
+            if generated_item.status == PayslipStatus.PARTIAL:
+                employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
+                log_activity(
+                    db, organization_id,
+                    f"Payroll for {employee_name} in run '{run.period_label}' is PARTIAL: {generated_item.notes or 'one or more components unavailable'}",
+                    ActivityStatus.INFO, actor_id=run.created_by,
+                )
+        except GermanyCalculationBlockedException as exc:
+            employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
+            db.add(PayslipItem(
+                payroll_run_id=run.id, employee_id=emp.id, organization_id=run.organization_id,
+                employee_name=employee_name, country_code=country, status=PayslipStatus.FAILED,
+                germany_calculation_snapshot=exc.trace,
+                # Phase 8BS: `notes` was left NULL on every blocked Germany
+                # payslip — the ONLY place the block reason ever reached
+                # was the raw snapshot dict, which no frontend surface
+                # (Run Detail's Remarks column included) ever read. A
+                # short, human-readable reason here means the existing
+                # generic Remarks column shows something meaningful
+                # without that screen needing Germany-specific code.
+                notes=f"[{exc.error_code}] {exc.message}",
+            ))
+            log_activity(
+                db, organization_id,
+                f"Payroll for {employee_name} in run '{run.period_label}' is blocked: {exc.message}",
+                ActivityStatus.INFO, actor_id=run.created_by,
+            )
+            # Deliberately does NOT increment seq — no payslip_number was
+            # consumed for this employee, so the next successfully-generated
+            # employee reuses it; payslip_number stays NULL (allowed,
+            # unique-but-nullable) on this FAILED row.
+            continue
         seq += 1
 
     db.commit()
@@ -9092,6 +9626,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # same as _ytd_result.
     values.pop("_org_levy_result", None)
     values.pop("_uk_org_levy_increment", None)
+    germany_unavailable_components = values.pop("_germany_unavailable_components", None)
     if replaying_from_snapshot:
         # _compute_payslip_values always re-derives a tax_snapshot from
         # whatever rate_map/slabs it was given (see its own resolved_pack
@@ -9118,7 +9653,18 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         )
     for field, value in values.items():
         setattr(existing_item, field, value)
-    existing_item.status = PayslipStatus.PENDING
+    # Phase 8BU: same PARTIAL-vs-PENDING decision as the initial-generation
+    # path (_generate_single_payslip) — a recalculation can just as easily
+    # land on/off the internal tariff's verified date range.
+    existing_item.status = PayslipStatus.PARTIAL if germany_unavailable_components else PayslipStatus.PENDING
+    if germany_unavailable_components:
+        existing_item.notes = f"[PARTIALLY_CALCULATED] Unavailable: {', '.join(germany_unavailable_components)}"
+    elif (existing_item.notes or "").startswith("[PARTIALLY_CALCULATED]"):
+        # This payslip WAS partial and just cleared on recalculation (e.g.
+        # the missing config got resolved) — drop the now-stale note
+        # rather than leaving a misleading "unavailable" message on a now-
+        # fully-calculated payslip. Never touches an admin's own note.
+        existing_item.notes = None
 
     # Phase 8AT: force the ORM to actually execute the delete-orphan removal
     # of the old allowance_items (staged by the setattr above, not yet sent
@@ -9151,9 +9697,20 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     db.commit()
     run = _recompute_run_aggregates(db, run)
 
+    # Phase 8BV: distinguish a recalculation that LANDED on PARTIAL from an
+    # ordinary successful recalculation — previously both produced the
+    # identical generic log line, so an operator scanning the activity log
+    # had no way to tell a recalculation had left this payslip's net_pay
+    # short a genuinely unavailable component.
+    partial_suffix = (
+        f" Result is PARTIAL: {existing_item.notes}"
+        if existing_item.status == PayslipStatus.PARTIAL and existing_item.notes else
+        " Result is PARTIAL (one or more components unavailable)."
+        if existing_item.status == PayslipStatus.PARTIAL else ""
+    )
     log_activity(
         db, organization_id,
-        f"Recalculated payslip for '{employee.name}' in run '{run.period_label}'.",
+        f"Recalculated payslip for '{employee.name}' in run '{run.period_label}'.{partial_suffix}",
         ActivityStatus.INFO, actor_id=actor_id,
     )
     return run
@@ -9735,7 +10292,7 @@ def classify_and_list_germany_overtime_time_segments(
             "before classification can proceed — the system does not choose a source automatically."
         )
     try:
-        return classify_germany_overtime_work_record(db, work_record, persist=True)
+        segments = classify_germany_overtime_work_record(db, work_record, persist=True)
     except GermanyOvertimeClassificationError as exc:
         # Found during Phase 8AI's HTTP-contract test: this previously
         # propagated as a raw, unhandled 500 — the same data-state issue
@@ -9743,6 +10300,20 @@ def classify_and_list_germany_overtime_time_segments(
         # Germany blocker in this file surfaces as a clean 4xx, not a
         # server crash.
         raise BadRequestException(f"{exc.code}: {exc.message}")
+    # Phase 8BI: classification persists real financial-input rows
+    # (GermanyOvertimeTimeSegment) but, unlike every other Germany
+    # overtime mutation in this module, never wrote a central
+    # TaxConfigurationAudit entry — only the row-level created_at
+    # provenance existed. Re-classification REPLACES any prior segments
+    # (see this function's own docstring), so this is a genuine mutation
+    # worth a central audit entry, not just a read.
+    record_tax_audit(
+        db, actor_id=actor_id, action="overtime_classified",
+        entity_type="germany_overtime_work_record", entity_id=work_record.id,
+        new_value={"segment_count": len(segments)},
+        reason="Overtime time segments classified/reclassified",
+    )
+    return segments
 
 
 def list_germany_overtime_time_segments(
@@ -9773,13 +10344,21 @@ def calculate_and_list_germany_overtime_wage_tax(
 
     work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
     try:
-        return calculate_germany_overtime_wage_tax(db, work_record, persist=True, actor_id=actor_id)
+        results = calculate_germany_overtime_wage_tax(db, work_record, persist=True, actor_id=actor_id)
     except GermanyOvertimeNotClassifiedError as exc:
         # Phase 8AP fix: this sibling of classify_and_list_germany_overtime_time_segments()
         # never got that function's own Phase 8AI fix — calling wage-tax
         # calculation before classification previously propagated as a
         # raw, unhandled 500 instead of a clean 4xx.
         raise BadRequestException(f"{exc.code}: {exc.message}")
+    # Phase 8BI: same central-audit gap as classification above.
+    record_tax_audit(
+        db, actor_id=actor_id, action="overtime_wage_tax_calculated",
+        entity_type="germany_overtime_work_record", entity_id=work_record.id,
+        new_value={"result_count": len(results)},
+        reason="Overtime wage-tax calculated/recalculated",
+    )
+    return results
 
 
 def list_germany_overtime_wage_tax_results(
@@ -9811,10 +10390,18 @@ def calculate_and_list_germany_overtime_social_insurance(
 
     work_record = get_germany_overtime_work_record_by_id(db, record_id, organization_id)
     try:
-        return calculate_germany_overtime_social_insurance(db, work_record, persist=True, actor_id=actor_id)
+        results = calculate_germany_overtime_social_insurance(db, work_record, persist=True, actor_id=actor_id)
     except GermanyOvertimeSINotClassifiedError as exc:
         # Phase 8AP fix: same sibling gap as calculate_and_list_germany_overtime_wage_tax above.
         raise BadRequestException(f"{exc.code}: {exc.message}")
+    # Phase 8BI: same central-audit gap as classification above.
+    record_tax_audit(
+        db, actor_id=actor_id, action="overtime_social_insurance_calculated",
+        entity_type="germany_overtime_work_record", entity_id=work_record.id,
+        new_value={"result_count": len(results)},
+        reason="Overtime social-insurance calculated/recalculated",
+    )
+    return results
 
 
 def list_germany_overtime_social_insurance_results(
@@ -9895,6 +10482,16 @@ def build_germany_overtime_premium_components(
     db.commit()
     for row in rows:
         db.refresh(row)
+
+    # Phase 8BI: same central-audit gap as classification/wage-tax/SI
+    # above — building components is a real mutation (new rows, or a
+    # rebuild of never-attached ones) that had no central audit entry.
+    record_tax_audit(
+        db, actor_id=actor_id, action="overtime_premium_components_built",
+        entity_type="germany_overtime_work_record", entity_id=work_record.id,
+        new_value={"built_count": len(rows), "skipped_attached_count": len(attached_ranges)},
+        reason="Overtime premium components built/rebuilt",
+    )
 
     return (
         db.query(GermanyOvertimePremiumComponent)
@@ -10015,6 +10612,9 @@ def _germany_overtime_premium_component_trace_dict(component: GermanyOvertimePre
         "appliedGrossDelta": _n(component.applied_gross_delta),
         "appliedPfDelta": _n(component.applied_pf_delta),
         "appliedEsiDelta": _n(component.applied_esi_delta),
+        "appliedWageTaxDelta": _n(component.applied_wage_tax_delta),
+        "appliedSoliDelta": _n(component.applied_soli_delta),
+        "appliedChurchTaxDelta": _n(component.applied_church_tax_delta),
         "attachedAt": component.attached_at.isoformat() if component.attached_at else None,
     }
 
@@ -10040,6 +10640,16 @@ from app.modules.payroll.hardcoded_defaults import (
     _DE_RV_EMPLOYEE_RATE, _DE_RV_EMPLOYER_RATE,
     _DE_ALV_EMPLOYEE_RATE, _DE_ALV_EMPLOYER_RATE,
     _DE_GKV_GENERAL_EMPLOYEE_RATE, _DE_GKV_GENERAL_EMPLOYER_RATE,
+    # Phase 8BW: same constants germany.py itself passes to
+    # InternalGermanyWageTaxCalculator (bare, not resolved through any
+    # rate_map override) — reused here so the marginal Soli delta below
+    # is computed under the IDENTICAL threshold/rate the base payslip's
+    # own Soli used, never a second, possibly-divergent source of truth.
+    _DE_SOLI_THRESHOLD, _DE_SOLI_RATE,
+)  # noqa: E402
+from app.modules.payroll.engine.germany_internal_tax import (
+    compute_tax_for_class, compute_soli, resolve_income_tax_tariff,
+    GermanyInternalTariffNotAvailableError,
 )  # noqa: E402
 
 
@@ -10048,10 +10658,6 @@ class _OvertimeFinancialDelta:
     """Computed financial impact of attaching one overtime premium
     component to a payslip. All amounts are in EUR, rounded to 2 decimals.
 
-    wages_tax_delta: additional wage tax attributable to this premium.
-        0 when PAP is not available (the accurate computation requires
-        PAP's marginal-rate calculation — see status field). Stored on the
-        component for future engine integration.
     employee_pf_delta: additional employee-side pension insurance (RV,
         Rentenversicherung) contribution on the SI-contributory portion
         of this premium — mapped onto PayslipItem.pf, matching the engine's
@@ -10064,17 +10670,36 @@ class _OvertimeFinancialDelta:
     employer_si_delta: additional employer-side social insurance (RV + ALV
         + GKV contributions on the SI-contributory portion). Stored for
         audit; not yet applied to PayslipItem because employer-side
-        contributions are informational only."""
+        contributions are informational only.
+    wage_tax_delta / soli_delta / church_tax_delta: Phase 8BW — a marginal
+        T2-T1 computation (base zvE vs. base zvE + this premium's taxable
+        amount) on the EXACT zvE the base payslip's own internal §32a/§39b
+        calculation used, only when that base calculation actually ran via
+        the internal calculator (see `status`). 0 (never fabricated as a
+        real figure) whenever `status != "CALCULATED"`/`"PARTIAL"` doesn't
+        cover that specific component.
+    status: "CALCULATED" (all three tax deltas genuinely computed) |
+        "PARTIAL" (wage_tax_delta/soli_delta genuinely computed, but this
+        employee's own base payslip has church tax flagged unavailable —
+        see Phase 8BU — so church_tax_delta stays an explicitly-flagged 0)
+        | "BLOCKED" (the base payslip's own wage tax was never computed via
+        the internal calculator at all — no snapshot, or a future/different
+        PAP version this delta logic doesn't know how to extend — so NONE
+        of the three tax deltas can be safely derived; only gross/SI apply).
+    status_reason: human-readable explanation of `status`, always set."""
     gross_delta: Decimal
     wage_tax_delta: Decimal
+    soli_delta: Decimal
+    church_tax_delta: Decimal
     employee_pf_delta: Decimal
     employee_esi_delta: Decimal
     employer_si_delta: Decimal
-    status: str  # "COMPLETE" or "PARTIAL_WAGE_TAX_PENDING_PAP"
+    status: str
+    status_reason: str
 
 
 def _compute_overtime_financial_delta(
-    component: GermanyOvertimePremiumComponent,
+    component: GermanyOvertimePremiumComponent, payslip_item: "PayslipItem", run: "PayrollRun",
 ) -> _OvertimeFinancialDelta:
     """Compute the financial impact of attaching one Germany overtime
     premium component to a payslip line.
@@ -10093,8 +10718,18 @@ def _compute_overtime_financial_delta(
            branch rates, applying each to its correct payslip field
            (matching the engine's employee_pf=Rentenversicherung /
            employee_esi=ALV+GKV+PV field reuse)
-        3. Wage-tax delta on wage_taxable_amount — NOT COMPUTABLE without
-           PAP (see status field); stored as 0 pending engine integration
+        3. Phase 8BW: wage_taxable_amount's marginal wage-tax/Soli/
+           Kirchensteuer impact, treated as a one-off SONSTB-style addition
+           (§39b Abs. 3 EStG: T2 = tax(base zvE + one-off amount), T1 =
+           tax(base zvE), the one-off's own withholding = T2 - T1, applied
+           IN FULL this period, never smoothed across 12 months — the same
+           treatment a bonus/SONSTB already gets elsewhere in this engine).
+           `base zvE` is read verbatim from THIS payslip's own
+           germany_calculation_snapshot (never re-derived/guessed), so the
+           delta is computed on the identical base the payslip's own
+           Lohnsteuer used — reusing compute_tax_for_class/compute_soli
+           from engine/germany_internal_tax.py directly, NOT a second tax
+           engine.
 
     PV (Pflegeversicherung) is deliberately excluded from employee_esi_delta
     here: it depends on per-employee configuration (standard vs Saxony,
@@ -10110,12 +10745,13 @@ def _compute_overtime_financial_delta(
     in the base SI calculation would handle ceilings correctly — this
     delta-based approach is an approximation for the current architecture.
 
-    When PAP becomes available, the engine will compute a single integrated
-    wage-tax result for (regular salary + overtime premium), making this
-    separate delta unnecessary. At that point, this function becomes a
-    transitional compatibility layer."""
+    When the official BMF PAP becomes available, the engine will compute a
+    single integrated wage-tax result for (regular salary + overtime
+    premium), making this separate delta unnecessary. At that point, this
+    function becomes a transitional compatibility layer."""
     gross = Decimal(str(component.gross_premium_amount or 0))
     si_contributory = Decimal(str(component.si_contributory_amount or 0))
+    wage_taxable = Decimal(str(component.wage_taxable_amount or 0))
 
     # Employee-side SI split onto the two payslip SI fields, using the
     # branch rates for REGULAR employees:
@@ -10130,19 +10766,95 @@ def _compute_overtime_financial_delta(
         si_contributory * (_DE_RV_EMPLOYER_RATE + _DE_ALV_EMPLOYER_RATE + _DE_GKV_GENERAL_EMPLOYER_RATE) / Decimal("100")
     )
 
-    # Wage-tax delta: requires PAP's marginal-rate computation on the
-    # taxable amount. Without PAP, this is uncomputable — stored as 0
-    # with an explicit PARTIAL status.
-    wage_tax = Decimal("0")
-    status = "PARTIAL_WAGE_TAX_PENDING_PAP"
+    wage_tax_delta = Decimal("0")
+    soli_delta = Decimal("0")
+    church_tax_delta = Decimal("0")
+
+    if wage_taxable <= 0:
+        # A real, trivial zero — this premium is entirely §3b-tax-free
+        # (wage_tax_free_amount == gross_premium_amount), so there is
+        # genuinely nothing to derive a marginal tax delta FROM, regardless
+        # of whether the base payslip's own wage tax is even computable.
+        # Never "BLOCKED" (that implies an unknown amount) for a component
+        # that has no taxable portion at all.
+        return _OvertimeFinancialDelta(
+            gross_delta=gross, wage_tax_delta=Decimal("0"), soli_delta=Decimal("0"),
+            church_tax_delta=Decimal("0"), employee_pf_delta=employee_pf_delta,
+            employee_esi_delta=employee_esi_delta, employer_si_delta=employer_si,
+            status="CALCULATED",
+            status_reason="This premium's wage_taxable_amount is 0 (fully §3b tax-free) — no wage-tax/Soli/Kirchensteuer delta applies.",
+        )
+
+    status = "BLOCKED"
+    status_reason = (
+        "This payslip's own wage tax was not computed via the internal §32a/§39b calculator "
+        "(no germany_calculation_snapshot, or an unrecognized calculation mode) — no marginal "
+        "wage-tax/Soli/Kirchensteuer delta can be safely derived for this overtime premium."
+    )
+
+    snapshot = payslip_item.germany_calculation_snapshot or {}
+    pap_version = snapshot.get("papVersion") or ""
+    resolved = snapshot.get("resolved") or {}
+    internal_wage_tax = resolved.get("internal_wage_tax") or {}
+    tax_class = snapshot.get("taxClassUsed")
+
+    if pap_version.startswith("INTERNAL_FUNCTIONAL_REFERENCE") and tax_class and "ZVE_LOHNSTEUER" in internal_wage_tax:
+        try:
+            tariff = resolve_income_tax_tariff(run.pay_date) if run.pay_date else None
+        except GermanyInternalTariffNotAvailableError:
+            tariff = None
+        if tariff is not None:
+            zve_lohnsteuer_base = Decimal(internal_wage_tax["ZVE_LOHNSTEUER"])
+            t1_lohnsteuer = compute_tax_for_class(zve_lohnsteuer_base, tax_class, tariff)
+            t2_lohnsteuer = compute_tax_for_class(zve_lohnsteuer_base + wage_taxable, tax_class, tariff)
+            wage_tax_delta = _round2(t2_lohnsteuer - t1_lohnsteuer)
+
+            zve_surcharges_base = Decimal(internal_wage_tax.get("ZVE_SURCHARGES", internal_wage_tax["ZVE_LOHNSTEUER"]))
+            t1_surcharge_base = compute_tax_for_class(zve_surcharges_base, tax_class, tariff)
+            t2_surcharge_base = compute_tax_for_class(zve_surcharges_base + wage_taxable, tax_class, tariff)
+            soli_t1 = compute_soli(t1_surcharge_base, is_splitting=(tax_class == "III"),
+                                    soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE)
+            soli_t2 = compute_soli(t2_surcharge_base, is_splitting=(tax_class == "III"),
+                                    soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE)
+            soli_delta = _round2(soli_t2 - soli_t1)
+
+            church_tax_liable = bool(snapshot.get("churchTaxLiableUsed"))
+            church_tax_rate_raw = snapshot.get("churchTaxRateUsed")
+            if not church_tax_liable:
+                # A real zero — this employee owes no church tax at all,
+                # never an unavailable/flagged one.
+                status, status_reason = "CALCULATED", (
+                    "Wage tax/Soli deltas computed via the internal §32a/§39b calculator on this "
+                    "payslip's own zvE base; employee is not church-tax-liable, so church tax delta is 0."
+                )
+            elif church_tax_rate_raw:
+                church_tax_rate = Decimal(str(church_tax_rate_raw))
+                church_tax_delta = _round2((t2_surcharge_base - t1_surcharge_base) * church_tax_rate / Decimal("100"))
+                status, status_reason = "CALCULATED", (
+                    "Wage tax/Soli/Kirchensteuer deltas all genuinely computed via the internal "
+                    "§32a/§39b calculator on this payslip's own zvE base."
+                )
+            else:
+                # Church-tax-liable but no resolved rate — this employee's
+                # base payslip is itself PARTIAL on church tax (Phase 8BU).
+                # Wage tax/Soli ARE real; church tax stays an explicitly
+                # flagged, unfabricated 0.
+                status, status_reason = "PARTIAL", (
+                    "Wage tax/Soli deltas genuinely computed; this employee's church-tax rate is "
+                    "unavailable on the base payslip (church-tax Land unresolved) — church tax delta "
+                    "on this premium is explicitly unavailable, never fabricated as 0 with no flag."
+                )
 
     return _OvertimeFinancialDelta(
         gross_delta=gross,
-        wage_tax_delta=wage_tax,
+        wage_tax_delta=wage_tax_delta,
+        soli_delta=soli_delta,
+        church_tax_delta=church_tax_delta,
         employee_pf_delta=employee_pf_delta,
         employee_esi_delta=employee_esi_delta,
         employer_si_delta=employer_si,
         status=status,
+        status_reason=status_reason,
     )
 
 
@@ -10220,11 +10932,13 @@ def _attach_one_germany_overtime_premium_component(
     points below — one architecture, not two. Phase 8AR: this function
     now not only credits the gross_premium_amount to the PayslipAllowanceItem
     line but also computes and applies the financial deltas (gross_pay,
-    SI employee deductions, net_pay) to the PayslipItem. Wage-tax delta
-    is stored but set to 0 while PAP is BLOCKED_EXTERNAL — the status
-    is PARTIAL_WAGE_TAX_PENDING_PAP, visible in the API response and
-    the germany_calculation_snapshot trace, so an operator can tell the
-    payslip is correct for SI but not yet for final wage tax.
+    SI employee deductions, net_pay) to the PayslipItem. Phase 8BW: the
+    wage-tax/Soli/Kirchensteuer deltas are now genuinely computed (via the
+    internal §32a/§39b calculator, reusing the base payslip's own zvE) when
+    that base payslip's own wage tax was itself computed that way —
+    financial_integration_status (CALCULATED/PARTIAL/BLOCKED) is visible in
+    the API response and the germany_calculation_snapshot trace, so an
+    operator can tell exactly which components are real vs. unavailable.
 
     Raises the real NotFoundException/BadRequestException (or the
     BadRequestException subclasses _OvertimeAttachAlreadyAttached /
@@ -10371,7 +11085,7 @@ def _attach_one_germany_overtime_premium_component(
     # stay at their pre-attach defaults) rather than silently half-correct.
 
     # 1. Compute the financial delta for this component.
-    fin_delta = _compute_overtime_financial_delta(component)
+    fin_delta = _compute_overtime_financial_delta(component, payslip_item, run)
 
     # 2. Atomically credit the allowance line (unchanged from Phase 8AH).
     db.query(PayslipAllowanceItem).filter(PayslipAllowanceItem.id == allowance_item.id).update(
@@ -10381,11 +11095,14 @@ def _attach_one_germany_overtime_premium_component(
 
     # 3. Apply the financial deltas to PayslipItem — atomically.
     # gross_pay increases by gross_delta; total_deductions increases by
-    # the employee-side SI deltas (pf + esi) plus the wage-tax delta;
-    # net_pay increases by the remainder (gross_delta - additional
-    # employee deductions). The UPDATE is a single statement to avoid
-    # read-modify-write races.
-    employee_deduction_delta = fin_delta.employee_pf_delta + fin_delta.employee_esi_delta + fin_delta.wage_tax_delta
+    # the employee-side SI deltas (pf + esi) plus wage_tax_delta+soli_delta
+    # (tds combines Lohnsteuer+Soli, matching the base engine's own field
+    # reuse) plus church_tax_delta; net_pay increases by the remainder.
+    # The UPDATE is a single statement to avoid read-modify-write races.
+    employee_deduction_delta = (
+        fin_delta.employee_pf_delta + fin_delta.employee_esi_delta
+        + fin_delta.wage_tax_delta + fin_delta.soli_delta + fin_delta.church_tax_delta
+    )
     net_delta = fin_delta.gross_delta - employee_deduction_delta
     payslip_update = {
         "gross_pay": PayslipItem.gross_pay + fin_delta.gross_delta,
@@ -10398,17 +11115,53 @@ def _attach_one_germany_overtime_premium_component(
         # adds ALV+GKV to the base esi (which already includes base PV).
         "pf": PayslipItem.pf + fin_delta.employee_pf_delta,
         "esi": PayslipItem.esi + fin_delta.employee_esi_delta,
+        # Phase 8BW: tds is the combined Lohnsteuer+Soli figure (matching
+        # PayslipItem.tds's established meaning across this whole engine —
+        # see engine/countries/germany.py's monthly_lohnsteuer_soli); soli
+        # and church_tax are each also updated on their own dedicated,
+        # separately-surfaced columns.
+        "tds": PayslipItem.tds + fin_delta.wage_tax_delta + fin_delta.soli_delta,
+        "soli": PayslipItem.soli + fin_delta.soli_delta,
+        "church_tax": PayslipItem.church_tax + fin_delta.church_tax_delta,
     }
+    # Phase 8BV/8BW: a BLOCKED (or PARTIAL, on church tax specifically)
+    # overtime tax status is visible ONLY on the attached component's own
+    # `financialIntegrationStatus` field — an operator viewing the PAYSLIP
+    # itself (Run Detail Remarks column, the PayslipStub modal, the payslip
+    # PDF) had no indication net_pay is short a known, disclosed amount.
+    # Reusing PayslipStatus.PARTIAL here would be WRONG (that status means
+    # "net_pay is a 0.00 placeholder, entirely unknown" — here net_pay is
+    # real, just short by one known, bounded amount) — so this surfaces the
+    # SAME honest disclosure through the notes/Remarks channel Phase 8BU
+    # already established. Idempotent per status: re-attaching another
+    # component with the SAME status never duplicates the note; a
+    # DIFFERENT status (e.g. a later attach lands on PARTIAL after an
+    # earlier one was CALCULATED) appends its own distinct marker.
+    existing_notes = payslip_item.notes or ""
+    _OVERTIME_STATUS_MARKERS = {
+        "BLOCKED": (
+            "[OVERTIME_WAGE_TAX_BLOCKED] Net pay does not reflect wage tax (or Soli/Kirchensteuer) on "
+            "attached overtime premiums' taxable portion — gross and social insurance ARE fully applied. "
+            "See the attached component's financialIntegrationStatus/status_reason."
+        ),
+        "PARTIAL": (
+            "[OVERTIME_CHURCH_TAX_PENDING] Wage tax and Soli on attached overtime premiums ARE reflected "
+            "in net pay; Kirchensteuer on the taxable portion is unavailable (church-tax Land unresolved) "
+            "and is NOT — see the attached component's financialIntegrationStatus/status_reason."
+        ),
+    }
+    marker_text = _OVERTIME_STATUS_MARKERS.get(fin_delta.status)
+    if marker_text and marker_text not in existing_notes:
+        payslip_update["notes"] = f"{existing_notes}; {marker_text}" if existing_notes else marker_text
     db.query(PayslipItem).filter(PayslipItem.id == payslip_item.id).update(
         payslip_update, synchronize_session=False,
     )
 
-    # 4. Record the financial integration delta on the component itself
-    # for audit and future engine integration. applied_gross_delta /
-    # applied_pf_delta / applied_esi_delta hold the EXACT amounts applied
-    # so detach can reverse precisely; wage-tax delta (currently 0 while
-    # PAP is pending) is reflected in financial_integration_status and the
-    # snapshot/audit trace (no dedicated column).
+    # 4. Record the financial integration delta on the component itself for
+    # audit and idempotent detach/recalculation-reapply — applied_gross_delta/
+    # applied_pf_delta/applied_esi_delta/applied_wage_tax_delta/
+    # applied_soli_delta/applied_church_tax_delta hold the EXACT amounts
+    # applied so detach reverses precisely what was applied.
     db.query(GermanyOvertimePremiumComponent).filter(
         GermanyOvertimePremiumComponent.id == component.id,
     ).update(
@@ -10417,6 +11170,9 @@ def _attach_one_germany_overtime_premium_component(
             "applied_gross_delta": fin_delta.gross_delta,
             "applied_pf_delta": fin_delta.employee_pf_delta,
             "applied_esi_delta": fin_delta.employee_esi_delta,
+            "applied_wage_tax_delta": fin_delta.wage_tax_delta,
+            "applied_soli_delta": fin_delta.soli_delta,
+            "applied_church_tax_delta": fin_delta.church_tax_delta,
         },
         synchronize_session=False,
     )
@@ -10429,8 +11185,11 @@ def _attach_one_germany_overtime_premium_component(
     trace_entry = _germany_overtime_premium_component_trace_dict(component)
     trace_entry["financialIntegration"] = {
         "status": fin_delta.status,
+        "statusReason": fin_delta.status_reason,
         "grossDelta": float(fin_delta.gross_delta),
         "wageTaxDelta": float(fin_delta.wage_tax_delta),
+        "soliDelta": float(fin_delta.soli_delta),
+        "churchTaxDelta": float(fin_delta.church_tax_delta),
         "employeePfDelta": float(fin_delta.employee_pf_delta),
         "employeeEsiDelta": float(fin_delta.employee_esi_delta),
         "employerSiDelta": float(fin_delta.employer_si_delta),
@@ -10448,8 +11207,11 @@ def _attach_one_germany_overtime_premium_component(
             "payslip_allowance_item_id": allowance_item.id,
             "financial_integration": {
                 "status": fin_delta.status,
+                "status_reason": fin_delta.status_reason,
                 "gross_delta": str(fin_delta.gross_delta),
                 "wage_tax_delta": str(fin_delta.wage_tax_delta),
+                "soli_delta": str(fin_delta.soli_delta),
+                "church_tax_delta": str(fin_delta.church_tax_delta),
                 "employee_pf_delta": str(fin_delta.employee_pf_delta),
                 "employee_esi_delta": str(fin_delta.employee_esi_delta),
                 "employer_si_delta": str(fin_delta.employer_si_delta),
@@ -10601,15 +11363,15 @@ def _detach_one_germany_overtime_premium_component(
     stored_gross_delta = Decimal(str(component.applied_gross_delta or 0))
     stored_pf_delta = Decimal(str(component.applied_pf_delta or 0))
     stored_esi_delta = Decimal(str(component.applied_esi_delta or 0))
-    # Wage-tax delta is NOT persisted in its own column (no such column in
-    # the Phase 8AR migration) — it is 0 whenever the status is
-    # PARTIAL_WAGE_TAX_PENDING_PAP (the only attach-time status today, since
-    # PAP is BLOCKED_EXTERNAL). When a future engine pass stores a real
-    # wage-tax delta, the reversal of it will be handled by that pass. The
-    # older attached rows written by pre-8AR phases have NULL applied_*
-    # columns, so all stored deltas default to 0 and detach reverses nothing
-    # extra — exactly correct for those historical rows.
-    stored_wage_tax_delta = Decimal("0")
+    # Phase 8BW: wage tax/Soli/Kirchensteuer deltas are now genuinely
+    # computed and persisted (applied_wage_tax_delta/applied_soli_delta/
+    # applied_church_tax_delta) — read here BEFORE reversing, same pattern
+    # as the other applied_*_delta columns. Rows attached before this phase
+    # (or under a BLOCKED status) have these columns NULL, so `or 0`
+    # correctly reverses nothing extra for them.
+    stored_wage_tax_delta = Decimal(str(component.applied_wage_tax_delta or 0))
+    stored_soli_delta = Decimal(str(component.applied_soli_delta or 0))
+    stored_church_tax_delta = Decimal(str(component.applied_church_tax_delta or 0))
 
     # 1. Reverse the allowance line credit (unchanged from Phase 8AQ).
     db.query(PayslipAllowanceItem).filter(PayslipAllowanceItem.id == allowance_item.id).update(
@@ -10618,14 +11380,20 @@ def _detach_one_germany_overtime_premium_component(
     )
 
     # 2. Reverse the financial deltas on PayslipItem — atomically.
-    net_delta = stored_gross_delta - stored_pf_delta - stored_esi_delta - stored_wage_tax_delta
+    employee_deduction_delta = (
+        stored_pf_delta + stored_esi_delta + stored_wage_tax_delta + stored_soli_delta + stored_church_tax_delta
+    )
+    net_delta = stored_gross_delta - employee_deduction_delta
     payslip_update = {
         "gross_pay": PayslipItem.gross_pay - stored_gross_delta,
-        "total_deductions": PayslipItem.total_deductions - stored_pf_delta - stored_esi_delta - stored_wage_tax_delta,
+        "total_deductions": PayslipItem.total_deductions - employee_deduction_delta,
         "net_pay": PayslipItem.net_pay - net_delta,
         # Reverse the employee-side SI split onto its two payslip fields.
         "pf": PayslipItem.pf - stored_pf_delta,
         "esi": PayslipItem.esi - stored_esi_delta,
+        "tds": PayslipItem.tds - stored_wage_tax_delta - stored_soli_delta,
+        "soli": PayslipItem.soli - stored_soli_delta,
+        "church_tax": PayslipItem.church_tax - stored_church_tax_delta,
     }
     db.query(PayslipItem).filter(PayslipItem.id == payslip_item.id).update(
         payslip_update, synchronize_session=False,
@@ -10640,6 +11408,9 @@ def _detach_one_germany_overtime_premium_component(
             "applied_gross_delta": None,
             "applied_pf_delta": None,
             "applied_esi_delta": None,
+            "applied_wage_tax_delta": None,
+            "applied_soli_delta": None,
+            "applied_church_tax_delta": None,
         },
         synchronize_session=False,
     )
@@ -10664,6 +11435,8 @@ def _detach_one_germany_overtime_premium_component(
                 "status": "REVERSED",
                 "grossDelta": float(stored_gross_delta),
                 "wageTaxDelta": float(stored_wage_tax_delta),
+                "soliDelta": float(stored_soli_delta),
+                "churchTaxDelta": float(stored_church_tax_delta),
                 "pfDelta": float(stored_pf_delta),
                 "esiDelta": float(stored_esi_delta),
             }
@@ -10680,6 +11453,8 @@ def _detach_one_germany_overtime_premium_component(
             "financial_reversal": {
                 "gross_delta": str(stored_gross_delta),
                 "wage_tax_delta": str(stored_wage_tax_delta),
+                "soli_delta": str(stored_soli_delta),
+                "church_tax_delta": str(stored_church_tax_delta),
                 "pf_delta": str(stored_pf_delta),
                 "esi_delta": str(stored_esi_delta),
             },
@@ -10857,18 +11632,26 @@ def _reapply_attached_germany_overtime_deltas(
             c.payslip_allowance_item_id = allowance_item.id
 
     # 3. Apply the SUM of stored deltas to the payslip fields (same Phase 8AR
-    #    math: net = gross - pf - esi - wage_tax; wage_tax stored delta is 0
-    #    while PAP is BLOCKED_EXTERNAL). applied_*_delta are the EXACT amounts
-    #    recorded at each component's own attach time — never recomputed.
+    #    math: net = gross - pf - esi - wage_tax - soli - church_tax).
+    #    applied_*_delta are the EXACT amounts recorded at each component's
+    #    own attach time — never recomputed here (Phase 8BW: wage_tax/soli/
+    #    church_tax deltas are now genuinely non-zero for a CALCULATED/
+    #    PARTIAL component, not unconditionally 0).
     gross_delta = sum((Decimal(str(c.applied_gross_delta or 0)) for c in attached), Decimal("0"))
     pf_delta = sum((Decimal(str(c.applied_pf_delta or 0)) for c in attached), Decimal("0"))
     esi_delta = sum((Decimal(str(c.applied_esi_delta or 0)) for c in attached), Decimal("0"))
-    wage_tax_delta = Decimal("0")
+    wage_tax_delta = sum((Decimal(str(c.applied_wage_tax_delta or 0)) for c in attached), Decimal("0"))
+    soli_delta = sum((Decimal(str(c.applied_soli_delta or 0)) for c in attached), Decimal("0"))
+    church_tax_delta = sum((Decimal(str(c.applied_church_tax_delta or 0)) for c in attached), Decimal("0"))
+    employee_deduction_delta = pf_delta + esi_delta + wage_tax_delta + soli_delta + church_tax_delta
     payslip_item.gross_pay = Decimal(str(payslip_item.gross_pay or 0)) + gross_delta
     payslip_item.pf = Decimal(str(payslip_item.pf or 0)) + pf_delta
     payslip_item.esi = Decimal(str(payslip_item.esi or 0)) + esi_delta
-    payslip_item.total_deductions = Decimal(str(payslip_item.total_deductions or 0)) + pf_delta + esi_delta + wage_tax_delta
-    payslip_item.net_pay = Decimal(str(payslip_item.net_pay or 0)) + gross_delta - pf_delta - esi_delta - wage_tax_delta
+    payslip_item.tds = Decimal(str(payslip_item.tds or 0)) + wage_tax_delta + soli_delta
+    payslip_item.soli = Decimal(str(payslip_item.soli or 0)) + soli_delta
+    payslip_item.church_tax = Decimal(str(payslip_item.church_tax or 0)) + church_tax_delta
+    payslip_item.total_deductions = Decimal(str(payslip_item.total_deductions or 0)) + employee_deduction_delta
+    payslip_item.net_pay = Decimal(str(payslip_item.net_pay or 0)) + gross_delta - employee_deduction_delta
 
     # 4. Re-merge each attached component's trace into the fresh engine
     #    snapshot (the recompute replaced it), recreating the financial
@@ -10881,9 +11664,11 @@ def _reapply_attached_germany_overtime_deltas(
             continue
         trace_entry = _germany_overtime_premium_component_trace_dict(c)
         trace_entry["financialIntegration"] = {
-            "status": c.financial_integration_status or "PARTIAL_WAGE_TAX_PENDING_PAP",
+            "status": c.financial_integration_status or "BLOCKED",
             "grossDelta": float(Decimal(str(c.applied_gross_delta or 0))),
-            "wageTaxDelta": float(0.0),
+            "wageTaxDelta": float(Decimal(str(c.applied_wage_tax_delta or 0))),
+            "soliDelta": float(Decimal(str(c.applied_soli_delta or 0))),
+            "churchTaxDelta": float(Decimal(str(c.applied_church_tax_delta or 0))),
             "employeePfDelta": float(Decimal(str(c.applied_pf_delta or 0))),
             "employeeEsiDelta": float(Decimal(str(c.applied_esi_delta or 0))),
         }
@@ -10910,6 +11695,9 @@ def _reapply_attached_germany_overtime_deltas(
             "applied_gross_delta": str(gross_delta),
             "applied_pf_delta": str(pf_delta),
             "applied_esi_delta": str(esi_delta),
+            "applied_wage_tax_delta": str(wage_tax_delta),
+            "applied_soli_delta": str(soli_delta),
+            "applied_church_tax_delta": str(church_tax_delta),
             "allowance_item_id": allowance_item.id,
         },
         auto_commit=False,
@@ -12427,6 +13215,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
             germany_ceiling_rv_alv=resolved_de["ceiling_rv_alv"],
             germany_pv_configuration=resolved_de["pv_configuration"],
             germany_church_tax_exception=resolved_de["church_tax_exception"],
+            germany_minijob_midijob_parameters=resolved_de["minijob_midijob_parameters"],
             germany_employee_id=employee.id,
             germany_organization_id=organization_id,
             germany_payroll_date=run.pay_date,
@@ -12527,6 +13316,22 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         cpp_base_amount=calc.cpp_base_amount,
         cpp_first_additional_amount=calc.cpp_first_additional_amount,
         tds=calc.tds,
+        # Germany (Phase 8BN): Kirchensteuer — same "computed and deducted
+        # from net_pay but never persisted" defect class as cpp2/studyLoan
+        # above. engine/standard.py folds church_tax into
+        # total_employee_deductions, so a manually-added German payslip's
+        # net_pay was real but its church_tax column stayed 0 — the payslip
+        # then showed "Kirchensteuer 0.00" alongside a net pay that had
+        # actually been reduced. The engine's `church_tax` (a PayrollResult
+        # field, populated by engine/countries/germany.py) is persisted here
+        # exactly like the batch path persists it via _compute_payslip_values.
+        church_tax=calc.church_tax,
+        # Germany (Phase 8BN): Solidaritätszuschlag — mirrored onto a
+        # manually-added payslip exactly like church_tax above, so the new
+        # PayslipItem.soli column never silently stays 0 on a manual row
+        # whose engine PayrollResult genuinely carried Soli (informational:
+        # tds/net_pay are unaffected — Soli was already folded into them).
+        soli=calc.soli,
         # US: broken-out federal/state/local tax — added alongside tds
         # above so a manually-added US payslip doesn't reintroduce the
         # same "totals right, detail columns silently zero" gap this field
@@ -12567,7 +13372,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         # batch path; None for every non-German manual payslip.
         employee_statutory_profile_id=calc.germany_statutory_profile_id,
         germany_calculation_snapshot=calc.germany_calculation_snapshot,
-        status=PayslipStatus.PENDING,
+        # Phase 8BU: same PARTIAL-vs-PENDING decision as the batch path
+        # (_generate_single_payslip) — a manually-added Germany payslip
+        # must not silently present a PARTIAL calculation as complete.
+        status=(PayslipStatus.PARTIAL if getattr(calc, "germany_unavailable_components", None) else PayslipStatus.PENDING),
         notes=data.notes,
         ytd_snapshot=(
             {
@@ -12838,6 +13646,19 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "tds": item.tds or z,
         "surcharge": item.surcharge or z,
         "cess": item.cess or z,
+        # Germany (Kirchensteuer): computed by the Germany engine and
+        # persisted on PayslipItem.church_tax, but this serializer never
+        # emitted it — so every payslip API response silently dropped the
+        # value (the same computed-but-never-serialized defect class as
+        # cpp2/studyLoanDeduction above). Surfaced now as its own line.
+        "churchTax": item.church_tax or z,
+        # Germany (Solidaritätszuschlag): same computed-but-unserialized
+        # defect class as churchTax above — persisted on PayslipItem.soli
+        # but never emitted, so every payslip API response dropped it and
+        # the summary report could only report UNAVAILABLE. Surfaced now
+        # as its own informational line; `tds` remains the COMBINED
+        # statutory total for backward compatibility (Soli is folded in).
+        "soli": item.soli or z,
         # US: federal/state/local income tax broken out separately — `tds`
         # above remains the correct COMBINED total for backward
         # compatibility (existing reports/consumers that sum `tds` still
@@ -12893,6 +13714,26 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "complianceFields": item.compliance_fields or {},
         "status": item.status,
         "notes": item.notes,
+        # Phase 8BS: Germany's germany_calculation_snapshot (RV/ALV/GKV/PV
+        # trace, blocked-reason, wage-tax provenance) was persisted since
+        # Phase 7 but never reached ANY payslip API response — meaning no
+        # frontend surface could ever show a block reason, or distinguish
+        # an INTERNAL_FUNCTIONAL_REFERENCE wage-tax result from a future
+        # official BMF-certified one. Never exposes the raw snapshot here
+        # (some of it — resolved registry ids/rates — is more detail than
+        # a general payslip API response should carry); only the specific,
+        # already-designed-to-be-public fields a UI actually needs.
+        "calculationMode": (item.germany_calculation_snapshot or {}).get("papVersion") if country == "DE" else None,
+        "blockedReasonCode": (item.germany_calculation_snapshot or {}).get("blockedReasonCode") if country == "DE" else None,
+        "blockedReasonMessage": (item.germany_calculation_snapshot or {}).get("blockedReasonMessage") if country == "DE" else None,
+        # Phase 8BU: PARTIAL-status support — the explicit list of
+        # components this calculation could NOT produce (e.g. ["wage_tax",
+        # "soli", "church_tax"]), so the frontend/PDF can label exactly
+        # which figures are unavailable instead of inferring it from a 0
+        # value (a genuinely-zero church tax and a forced-zero placeholder
+        # are otherwise indistinguishable by value alone).
+        "germanyUnavailableComponents": (item.germany_calculation_snapshot or {}).get("unavailableComponents") if country == "DE" else None,
+        "calculationStatus": (item.germany_calculation_snapshot or {}).get("calculationStatus") if country == "DE" else None,
     }
 
 
@@ -13107,6 +13948,27 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     company_name = getattr(company, "name", None) or "Company Name"
     company_address = getattr(company, "address", None) or ""
 
+    # A statutorily-blocked payslip (PayslipStatus.FAILED — today: Germany
+    # PAP unavailable / no effective EmployeeStatutoryProfile, recorded as
+    # Phase 8BI's FAILED sentinel) carries ZERO monetary figures. Rendering
+    # the normal layout here would fabricate a €0.00 payslip document —
+    # explicitly forbidden (§25: never fabricate zero). Render the explicit
+    # blocked-state document instead, which contains NO monetary amounts.
+    if item.status == PayslipStatus.FAILED:
+        return _render_blocked_payslip_pdf_bytes(data, item, run, company_name, company_address)
+
+    # Phase 8BU: a PARTIALLY_CALCULATED Germany payslip (Part 21 — "remove
+    # unnecessary internal blocking") DOES carry real, non-fabricated
+    # figures for whichever components resolved (SI contributions, gross,
+    # employer levies) but NOT for wage tax/Soli/church tax when those are
+    # the unavailable component(s). The normal payslip layout below cannot
+    # render this correctly — its `fmt()` helper can't distinguish a real
+    # €0.00 from an unavailable one — so route to a dedicated renderer that
+    # shows the real figures plainly and marks only the actually-unavailable
+    # ones as "UNAVAILABLE" text, never as a numeric zero.
+    if item.status == PayslipStatus.PARTIAL:
+        return _render_partial_payslip_pdf_bytes(data, item, run, company_name, company_address)
+
     # data["country"] is get_payslip_by_id()'s already-resolved country —
     # the payslip's own snapshotted jurisdiction (its employee's country at
     # generation time), not the org's current default. Re-deriving it here
@@ -13199,6 +14061,18 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
             ("State Tax", "stateIncomeTax"),
             ("Local Tax", "localTax"),
         ]
+    elif country == "DE" and float(data.get("soli", 0) or 0) > 0:
+        # Phase 8BR: `tds` for Germany is (Lohnsteuer + Soli)/12 combined
+        # (engine/countries/germany.py's monthly_lohnsteuer_soli) — shown
+        # here as two separate lines (Lohnsteuer alone, then Soli) so the
+        # PDF doesn't mislabel the combined figure as pure Lohnsteuer.
+        # `data["lohnsteuerOnly"]` is computed just below; falls back to
+        # the old combined-under-"Lohnsteuer" behavior if soli is 0.
+        data["lohnsteuerOnly"] = float(data.get("tds", 0) or 0) - float(data.get("soli", 0) or 0)
+        income_tax_line_items = [
+            ("Lohnsteuer", "lohnsteuerOnly"),
+            ("Solidaritätszuschlag (Soli)", "soli"),
+        ]
     else:
         income_tax_line_items = [(income_tax_labels.get(country, "TDS"), "tds")]
     pf_esi_labels = {
@@ -13219,7 +14093,11 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # PayslipItem.church_tax and populated by the engine. Only shown when
     # the value is actually nonzero.
     if country == "DE":
-        church_tax_val = float(data.get("church_tax", 0) or 0)
+        # Key is the serializer's camelCase "churchTax" (emitted by
+        # _serialize_payslip) — the previous snake_case key never existed
+        # in the data dict, so this branch was dead and Kirchensteuer
+        # never appeared on a German PDF.
+        church_tax_val = float(data.get("churchTax", 0) or 0)
         if church_tax_val > 0:
             deduction_items.append(("Kirchensteuer", church_tax_val))
     other_labels = {
@@ -13575,6 +14453,395 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     c.save()
     return buf.getvalue()
 
+
+def _render_blocked_payslip_pdf_bytes(data: dict, item: PayslipItem, run: PayrollRun,
+                                      company_name: str, company_address: str) -> bytes:
+    """Renders the explicit blocked-state document for a statutorily-blocked
+    payslip (PayslipStatus.FAILED — e.g. Germany PAP unavailable or no
+    effective EmployeeStatutoryProfile, recorded as Phase 8BI's FAILED
+    sentinel).
+
+    Deliberately NOT a payslip: the document contains ZERO monetary figures.
+    The FAILED row stores none (every money column is 0 by construction), so
+    a normal payslip layout would fabricate a €0.00 document — explicitly
+    forbidden (§25: never fabricate zero). Instead it states that no
+    statutory payroll amount could be calculated for this employee for the
+    period and surfaces the already-redacted blocker (blockedReasonCode /
+    blockedReasonMessage) stored in the sentinel's
+    germany_calculation_snapshot, for operator traceability."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas
+
+    import io
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    base_font = _register_rupee_font(c)
+    F = base_font or "Helvetica"
+    FB = f"{base_font}-Bold" if base_font else "Helvetica-Bold"
+    try:
+        c.setFont(FB, 9)
+    except Exception:
+        FB = F
+
+    navy = colors.HexColor("#1e3a8a")
+    gray_100 = colors.HexColor("#F3F4F6")
+    gray_300 = colors.HexColor("#D1D5DB")
+    gray_500 = colors.HexColor("#6B7280")
+    gray_900 = colors.HexColor("#111827")
+    red_600 = colors.HexColor("#DC2626")
+    red_bg = colors.HexColor("#FEF2F2")
+    amber_600 = colors.HexColor("#92400E")
+    amber_bg = colors.HexColor("#FEF3C7")
+    white = colors.white
+
+    card_margin = 6 * mm
+    card_x = card_margin
+    card_w = width - 2 * card_margin
+    margin_l = 14 * mm
+    margin_r = width - 14 * mm
+    page_w = margin_r - margin_l
+    col_mid = width / 2
+    y = height - card_margin
+
+    snapshot = dict(item.germany_calculation_snapshot or {})
+    blocked_reason_code = snapshot.get("blockedReasonCode")
+    blocked_reason_message = snapshot.get("blockedReasonMessage")
+    salary_month = run.period_start.strftime("%B %Y") if run.period_start else (run.period_label or "")
+
+    def text_line(x, yy, val, font, size, color):
+        c.setFillColor(color)
+        c.setFont(font, size)
+        c.drawString(x, yy, val)
+
+    # ── 1. Header — navy banner, company name/address ──
+    header_h = 24 * mm
+    c.setFillColor(navy)
+    c.rect(card_x, y - header_h, card_w, header_h, fill=True, stroke=False)
+    text_line(margin_l + 5 * mm, y - 9 * mm, company_name.upper(), FB, 20, white)
+    if company_address:
+        text_line(margin_l + 5 * mm, y - 16 * mm, company_address, F, 10.5, white)
+    y -= header_h
+
+    # ── 2. Sub-header — gray band, "PAYSLIP" + blocked status ──
+    sub_h = 14 * mm
+    c.setFillColor(gray_100)
+    c.rect(card_x, y - sub_h, card_w, sub_h, fill=True, stroke=False)
+    salary_month_label = "Salary Month : {}".format(salary_month) if salary_month else ""
+    text_line(margin_l, y - 5.5 * mm, salary_month_label, F, 10.5, gray_500)
+    text_line(col_mid - 60, y - 5.5 * mm, "PAYSLIP", FB, 18, gray_900)
+    text_line(margin_r - 78, y - 5.5 * mm, "STATUS : BLOCKED", FB, 10.5, red_600)
+    y -= sub_h + 6 * mm
+
+    # ── 3. Red banner — no amounts issued ──
+    c.setFillColor(red_bg)
+    c.rect(card_x, y - 30 * mm, card_w, 30 * mm, fill=True, stroke=False)
+    c.setStrokeColor(red_600)
+    c.setLineWidth(1)
+    c.rect(card_x, y - 30 * mm, card_w, 30 * mm, fill=False, stroke=True)
+    text_line(margin_l + 4 * mm, y - 10 * mm, "NO PAYSLIP ISSUED - PAYROLL CALCULATION BLOCKED", FB, 13, red_600)
+    text_line(margin_l + 4 * mm, y - 17 * mm,
+              "A statutory payroll amount could NOT be calculated for this employee for the stated period.",
+              F, 10.5, gray_900)
+    text_line(margin_l + 4 * mm, y - 23 * mm,
+              "No monetary figures are shown on this document because none were legally calculable.",
+              F, 10.5, gray_900)
+    y -= 30 * mm + 6 * mm
+
+    # ── 4. Employee details ──
+    text_line(margin_l, y, "Employee Details", FB, 13, gray_900)
+    y -= 6 * mm
+
+    row_h = 9 * mm
+    label_w = page_w * 0.20
+    value_w = page_w * 0.30
+    col_x = [margin_l, margin_l + label_w, margin_l + label_w + value_w,
+             margin_l + 2 * label_w + value_w, margin_r]
+
+    id_row1, id_row2, id_row3 = _payslip_identity_rows(_normalize_country(data.get("country") or "IN"), data)
+    emp_rows = [
+        [("Employee Name", data["employee"] if data.get("employee") else f"Employee #{item.employee_id}"),
+         ("Employee ID", str(item.employee_id))],
+        [("Department", data.get("department") or "-"), ("Designation", data.get("designation") or "-")],
+        [("Period", run.period_label or "-"), (id_row1[0], id_row1[1] or "-")],
+        [(id_row2[0], id_row2[1] or "-"), ("Bank", data.get("bankName") or "-")],
+        [("Account No.", str(data.get("bankAccount") or "-")), (id_row3[0], id_row3[1] or "-")],
+    ]
+    for row in emp_rows:
+        c.setStrokeColor(gray_300)
+        c.setLineWidth(0.4)
+        c.rect(margin_l, y - row_h, page_w, row_h, fill=False, stroke=True)
+        for cx in col_x[1:-1]:
+            c.line(cx, y, cx, y - row_h)
+        baseline = y - row_h / 2 - 1.6 * mm
+        for i, (lbl, val) in enumerate(row):
+            lx = col_x[i * 2]
+            vx = col_x[i * 2 + 1]
+            text_line(lx + 3 * mm, baseline, lbl, FB, 10, gray_900)
+            text_line(vx + 3 * mm, baseline, str(val), F, 10, gray_900)
+        y -= row_h
+    y -= 6 * mm
+
+    # ── 5. Blocked reason panel ──
+    panel_h = 46 * mm
+    c.setFillColor(amber_bg)
+    c.rect(card_x, y - panel_h, card_w, panel_h, fill=True, stroke=False)
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.8)
+    c.rect(card_x, y - panel_h, card_w, panel_h, fill=False, stroke=True)
+    text_line(margin_l + 4 * mm, y - 9 * mm, "Why this employee is blocked", FB, 12, amber_600)
+    reason_code = blocked_reason_code or "UNKNOWN"
+    text_line(margin_l + 4 * mm, y - 17 * mm, "Block code : {}".format(reason_code), FB, 10, gray_900)
+    message = blocked_reason_message or "No statutory payroll result could be calculated for this employee."
+    y_text = y - 24 * mm
+    chunks = []
+    words = str(message).split()
+    line = ""
+    for w in words:
+        trial = (line + " " + w).strip()
+        if len(trial) <= 90:
+            line = trial
+        else:
+            chunks.append(line)
+            line = w
+    if line:
+        chunks.append(line)
+    for chunk in chunks[:5]:
+        text_line(margin_l + 4 * mm, y_text, chunk, F, 10, gray_900)
+        y_text -= 4.6 * mm
+    text_line(margin_l + 4 * mm, y - 40 * mm,
+              "Resolve the blocker (e.g. in Germany Compliance / Statutory Configuration) and recalculate once cleared.",
+              F, 10, gray_500)
+
+    # ── 6. Footer + outer frame ──
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.4)
+    c.line(margin_l, 12 * mm, margin_r, 12 * mm)
+    text_line(margin_l, 8 * mm,
+              "This document confirms that no statutory payroll result could be calculated for this employee for this period.",
+              F, 9, gray_500)
+    text_line(margin_l, 4.5 * mm,
+              "It is NOT a payslip and contains no monetary amounts.",
+              F, 9, gray_500)
+
+    card_bottom = card_margin
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.8)
+    c.rect(card_x, card_bottom, card_w, y + card_margin - card_bottom, fill=0, stroke=1)
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+_GERMANY_COMPONENT_LABELS = {
+    "wage_tax": "Lohnsteuer (wage tax)",
+    "soli": "Solidaritätszuschlag (Soli)",
+    "church_tax": "Kirchensteuer (church tax)",
+}
+
+
+def _render_partial_payslip_pdf_bytes(data: dict, item: PayslipItem, run: PayrollRun,
+                                       company_name: str, company_address: str) -> bytes:
+    """Renders a Germany PARTIALLY_CALCULATED payslip (PayslipStatus.PARTIAL
+    — Phase 8BU, Part 21 "remove unnecessary internal blocking").
+
+    Unlike ``_render_blocked_payslip_pdf_bytes`` (which shows zero monetary
+    figures because NOTHING was calculable), this document shows the REAL,
+    non-fabricated figures for whichever components the engine actually
+    resolved this period (gross pay, RV, ALV+GKV+PV) while explicitly
+    labelling the specific unavailable component(s) (typically wage tax /
+    Soli / church tax, per ``germanyUnavailableComponents``) as
+    "UNAVAILABLE" text rather than a numeric €0.00 — the same "never
+    fabricate zero" rule the blocked-document renderer already follows."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas
+
+    import io
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    base_font = _register_rupee_font(c)
+    F = base_font or "Helvetica"
+    FB = f"{base_font}-Bold" if base_font else "Helvetica-Bold"
+    try:
+        c.setFont(FB, 9)
+    except Exception:
+        FB = F
+
+    navy = colors.HexColor("#1e3a8a")
+    gray_100 = colors.HexColor("#F3F4F6")
+    gray_300 = colors.HexColor("#D1D5DB")
+    gray_500 = colors.HexColor("#6B7280")
+    gray_900 = colors.HexColor("#111827")
+    amber_600 = colors.HexColor("#92400E")
+    amber_bg = colors.HexColor("#FEF3C7")
+    white = colors.white
+
+    sym = _get_currency_symbol("DE")
+
+    def fmt_real(val):
+        return f"{sym} {float(val or 0):,.2f}"
+
+    card_margin = 6 * mm
+    card_x = card_margin
+    card_w = width - 2 * card_margin
+    margin_l = 14 * mm
+    margin_r = width - 14 * mm
+    page_w = margin_r - margin_l
+    col_mid = width / 2
+    y = height - card_margin
+
+    unavailable = list(data.get("germanyUnavailableComponents") or [])
+    unavailable_labels = [_GERMANY_COMPONENT_LABELS.get(c_, c_) for c_ in unavailable]
+    salary_month = run.period_start.strftime("%B %Y") if run.period_start else (run.period_label or "")
+
+    def text_line(x, yy, val, font, size, color):
+        c.setFillColor(color)
+        c.setFont(font, size)
+        c.drawString(x, yy, val)
+
+    # ── 1. Header ──
+    header_h = 24 * mm
+    c.setFillColor(navy)
+    c.rect(card_x, y - header_h, card_w, header_h, fill=True, stroke=False)
+    text_line(margin_l + 5 * mm, y - 9 * mm, company_name.upper(), FB, 20, white)
+    if company_address:
+        text_line(margin_l + 5 * mm, y - 16 * mm, company_address, F, 10.5, white)
+    y -= header_h
+
+    # ── 2. Sub-header ──
+    sub_h = 14 * mm
+    c.setFillColor(gray_100)
+    c.rect(card_x, y - sub_h, card_w, sub_h, fill=True, stroke=False)
+    salary_month_label = "Salary Month : {}".format(salary_month) if salary_month else ""
+    text_line(margin_l, y - 5.5 * mm, salary_month_label, F, 10.5, gray_500)
+    text_line(col_mid - 60, y - 5.5 * mm, "PAYSLIP", FB, 18, gray_900)
+    text_line(margin_r - 108, y - 5.5 * mm, "STATUS : PARTIALLY CALCULATED", FB, 10.5, amber_600)
+    y -= sub_h + 6 * mm
+
+    # ── 3. Amber banner — explains what is/isn't available ──
+    banner_h = 30 * mm
+    c.setFillColor(amber_bg)
+    c.rect(card_x, y - banner_h, card_w, banner_h, fill=True, stroke=False)
+    c.setStrokeColor(amber_600)
+    c.setLineWidth(1)
+    c.rect(card_x, y - banner_h, card_w, banner_h, fill=False, stroke=True)
+    text_line(margin_l + 4 * mm, y - 10 * mm, "PARTIAL PAYROLL RESULT — SOME COMPONENTS UNAVAILABLE", FB, 12.5, amber_600)
+    text_line(margin_l + 4 * mm, y - 17 * mm,
+              "The figures below marked with a value ARE real, calculated amounts. Components marked",
+              F, 10, gray_900)
+    unavailable_str = ", ".join(unavailable_labels) if unavailable_labels else "one or more tax components"
+    text_line(margin_l + 4 * mm, y - 23 * mm,
+              "\"UNAVAILABLE\" ({}) could NOT be calculated and are never shown as zero.".format(unavailable_str),
+              F, 10, gray_900)
+    y -= banner_h + 6 * mm
+
+    # ── 4. Employee details ──
+    text_line(margin_l, y, "Employee Details", FB, 13, gray_900)
+    y -= 6 * mm
+
+    row_h = 9 * mm
+    label_w = page_w * 0.20
+    value_w = page_w * 0.30
+    col_x = [margin_l, margin_l + label_w, margin_l + label_w + value_w,
+             margin_l + 2 * label_w + value_w, margin_r]
+
+    id_row1, id_row2, id_row3 = _payslip_identity_rows(_normalize_country(data.get("country") or "DE"), data)
+    emp_rows = [
+        [("Employee Name", data["employee"] if data.get("employee") else f"Employee #{item.employee_id}"),
+         ("Employee ID", str(item.employee_id))],
+        [("Department", data.get("department") or "-"), ("Designation", data.get("designation") or "-")],
+        [("Period", run.period_label or "-"), (id_row1[0], id_row1[1] or "-")],
+        [(id_row2[0], id_row2[1] or "-"), ("Bank", data.get("bankName") or "-")],
+        [("Account No.", str(data.get("bankAccount") or "-")), (id_row3[0], id_row3[1] or "-")],
+    ]
+    for row in emp_rows:
+        c.setStrokeColor(gray_300)
+        c.setLineWidth(0.4)
+        c.rect(margin_l, y - row_h, page_w, row_h, fill=False, stroke=True)
+        for cx in col_x[1:-1]:
+            c.line(cx, y, cx, y - row_h)
+        baseline = y - row_h / 2 - 1.6 * mm
+        for i, (lbl, val) in enumerate(row):
+            lx = col_x[i * 2]
+            vx = col_x[i * 2 + 1]
+            text_line(lx + 3 * mm, baseline, lbl, FB, 10, gray_900)
+            text_line(vx + 3 * mm, baseline, str(val), F, 10, gray_900)
+        y -= row_h
+    y -= 6 * mm
+
+    # ── 5. Available-vs-unavailable figures table ──
+    text_line(margin_l, y, "Payroll Components", FB, 13, gray_900)
+    y -= 6 * mm
+
+    def is_unavailable(component_key: str) -> bool:
+        return component_key in unavailable
+
+    rows = [
+        ("Gross Salary", fmt_real(data.get("salary")), False),
+        ("Pension Insurance (RV, employee)", fmt_real(data.get("pf")), False),
+        ("Social Insurance — ALV/GKV/PV (employee)", fmt_real(data.get("esi")), False),
+        ("Lohnsteuer (wage tax)", "UNAVAILABLE" if is_unavailable("wage_tax") else fmt_real(data.get("tds")), is_unavailable("wage_tax")),
+        ("Solidaritätszuschlag (Soli)", "UNAVAILABLE" if is_unavailable("soli") else fmt_real(data.get("soli")), is_unavailable("soli")),
+        ("Kirchensteuer (church tax)", "UNAVAILABLE" if is_unavailable("church_tax") else fmt_real(data.get("churchTax")), is_unavailable("church_tax")),
+        ("NET PAY", "UNAVAILABLE", True),
+    ]
+    tbl_row_h = 8 * mm
+    label_col_w = page_w * 0.62
+    for lbl, val, unavail in rows:
+        c.setStrokeColor(gray_300)
+        c.setLineWidth(0.4)
+        c.rect(margin_l, y - tbl_row_h, page_w, tbl_row_h, fill=False, stroke=True)
+        c.line(margin_l + label_col_w, y, margin_l + label_col_w, y - tbl_row_h)
+        baseline = y - tbl_row_h / 2 - 1.6 * mm
+        text_line(margin_l + 3 * mm, baseline, lbl, FB if lbl == "NET PAY" else F, 10, gray_900)
+        val_color = amber_600 if unavail else gray_900
+        text_line(margin_l + label_col_w + 3 * mm, baseline, val, FB if unavail else F, 10, val_color)
+        y -= tbl_row_h
+    y -= 6 * mm
+
+    # ── 6. Why this is partial ──
+    reason_h = 22 * mm
+    c.setFillColor(gray_100)
+    c.rect(card_x, y - reason_h, card_w, reason_h, fill=True, stroke=False)
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.8)
+    c.rect(card_x, y - reason_h, card_w, reason_h, fill=False, stroke=True)
+    text_line(margin_l + 4 * mm, y - 8 * mm, "Why this payslip is partial", FB, 11, gray_900)
+    text_line(margin_l + 4 * mm, y - 15 * mm,
+              "The above unavailable component(s) require configuration/certification not yet available for this",
+              F, 9.5, gray_500)
+    text_line(margin_l + 4 * mm, y - 19.5 * mm,
+              "employee. Recalculate once resolved — the real figures already shown will not change retroactively.",
+              F, 9.5, gray_500)
+    y -= reason_h + 4 * mm
+
+    # ── 7. Footer + outer frame ──
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.4)
+    c.line(margin_l, 12 * mm, margin_r, 12 * mm)
+    text_line(margin_l, 8 * mm,
+              "This document reflects only the payroll components that were actually calculated for this period.",
+              F, 9, gray_500)
+    text_line(margin_l, 4.5 * mm,
+              "Amounts marked UNAVAILABLE are not zero — they could not be calculated and are excluded from Net Pay.",
+              F, 9, gray_500)
+
+    card_bottom = card_margin
+    c.setStrokeColor(gray_300)
+    c.setLineWidth(0.8)
+    c.rect(card_x, card_bottom, card_w, y + card_margin - card_bottom, fill=0, stroke=1)
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
 
 
 def _enrich_attendance_record(db: Session, record: PayrollAttendanceRecord, organization_id: int) -> dict:
@@ -15214,6 +16481,226 @@ def _get_report_run(db: Session, report_id: int, organization_id: int = None):
     return run
 
 
+# ── Germany-specific reporting (Phase 8BI) ───────────────────────────────
+# Phase 8BH's audit found NO Germany-specific report existed at all — the
+# generic Payroll Register (get_payroll_reports/generate_payroll_register_pdf
+# above) is a per-run operational summary shared by every country, labels
+# Lohnsteuer as generic "Income Tax," and has no Kirchensteuer column.
+# This is a genuinely NEW, Germany-specific statutory summary, built
+# directly from real, already-persisted PayslipItem/PayrollRun rows —
+# never a new report-template registration, since this is a fixed-shape
+# operational/compliance summary, not a user-authorable template.
+#
+# CALCULATED / BLOCKED / UNAVAILABLE is used deliberately, never
+# conflated: CALCULATED means a real, persisted PayslipItem (status
+# PENDING or PAID); BLOCKED means a real, persisted FAILED PayslipItem
+# (Phase 8BI's own batch-processing fix — see generate_payslips_for_run);
+# UNAVAILABLE means a figure this codebase has no path to ever compute
+# today (Solidaritätszuschlag has no persisted field at all, correctly
+# deferred with PAP activation — see docs/GERMANY_JURISDICTION_PRODUCTION_READINESS_REPORT.md).
+# No tax value is ever fabricated for a BLOCKED or UNAVAILABLE figure.
+
+def get_germany_payroll_summary_report(
+    db: Session, organization_id: int, period_start: Optional[date] = None, period_end: Optional[date] = None,
+) -> dict:
+    """Aggregates real, already-persisted Germany PayslipItem rows for one
+    organization into a statutory summary. Tenant-scoped by
+    `organization_id` (mandatory — this is org-owned payroll data, unlike
+    the global PAP/registry data). `period_start`/`period_end` filter by
+    the OWNING PayrollRun's own period (inclusive), matching how runs are
+    already filtered elsewhere in this module — omit both for an
+    all-time summary across every run this org has ever generated."""
+    query = (
+        db.query(PayslipItem, PayrollRun)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(PayslipItem.organization_id == organization_id, PayslipItem.country_code == "DE")
+    )
+    if period_start is not None:
+        query = query.filter(PayrollRun.period_end >= period_start)
+    if period_end is not None:
+        query = query.filter(PayrollRun.period_start <= period_end)
+    rows = query.order_by(PayrollRun.period_start.desc()).all()
+
+    classification_counts: dict = {"MINIJOB": 0, "MIDIJOB": 0, "REGULAR": 0, "UNKNOWN": 0}
+    blocked_reason_counts: dict = {}
+    blocked_employees: List[dict] = []
+    # Phase 8BU: PARTIAL is a THIRD, distinct bucket from CALCULATED/
+    # BLOCKED — a real, persisted PayslipItem where SOME components
+    # calculated (gross/RV/ALV/GKV/PV — always real, folded into the
+    # totals below same as CALCULATED) while at least one other
+    # component (per-item `unavailableComponents`) did not. That
+    # component's own total (net pay / Soli / church tax) must exclude
+    # this item's forced-zero placeholder, or the aggregate would
+    # silently fabricate a real-looking sum that includes a fake zero.
+    partial_count = 0
+    partial_employees: List[dict] = []
+    net_pay_unavailable_count = 0
+    soli_unavailable_count = 0
+    church_tax_unavailable_count = 0
+    calculated_count = 0
+    blocked_count = 0
+    gross_total = Decimal("0")
+    net_total = Decimal("0")
+    pension_insurance_employee_total = Decimal("0")
+    pension_insurance_employer_total = Decimal("0")
+    social_insurance_combined_employee_total = Decimal("0")
+    social_insurance_combined_employer_total = Decimal("0")
+    church_tax_total = Decimal("0")
+    soli_total = Decimal("0")
+    runs_seen: dict = {}
+    # Phase 8BS: which wage-tax calculation mode actually produced these
+    # CALCULATED figures — surfaced so a viewer never mistakes an internal
+    # functional-reference result for an official BMF-certified one.
+    calculation_modes_seen: dict = {}
+
+    for item, run in rows:
+        snapshot = item.germany_calculation_snapshot or {}
+        classification = (snapshot.get("employmentClassification") or "UNKNOWN").upper()
+        if classification not in classification_counts:
+            classification = "UNKNOWN"
+        classification_counts[classification] += 1
+
+        runs_seen.setdefault(run.id, {
+            "runId": run.id, "periodLabel": run.period_label, "runStatus": run.status,
+            "payDate": run.pay_date.isoformat() if run.pay_date else None,
+            "calculatedCount": 0, "blockedCount": 0, "partialCount": 0,
+        })
+
+        if item.status == PayslipStatus.FAILED:
+            blocked_count += 1
+            runs_seen[run.id]["blockedCount"] += 1
+            reason_code = snapshot.get("blockedReasonCode") or "UNKNOWN"
+            blocked_reason_counts[reason_code] = blocked_reason_counts.get(reason_code, 0) + 1
+            blocked_employees.append({
+                "employeeId": item.employee_id, "employeeName": item.employee_name,
+                "payrollRunId": run.id, "periodLabel": run.period_label,
+                "blockedReasonCode": reason_code,
+                "blockedReasonMessage": snapshot.get("blockedReasonMessage"),
+            })
+            continue  # a BLOCKED payslip contributes zero to every monetary sum below
+
+        is_partial = item.status == PayslipStatus.PARTIAL
+        unavailable = set(snapshot.get("unavailableComponents") or []) if is_partial else set()
+
+        if is_partial:
+            partial_count += 1
+            runs_seen[run.id]["partialCount"] += 1
+            partial_employees.append({
+                "employeeId": item.employee_id, "employeeName": item.employee_name,
+                "payrollRunId": run.id, "periodLabel": run.period_label,
+                "unavailableComponents": sorted(unavailable),
+            })
+        else:
+            calculated_count += 1
+            runs_seen[run.id]["calculatedCount"] += 1
+
+        # Gross pay and social-insurance figures resolve BEFORE the
+        # wage-tax stage, so they are always real here — CALCULATED or
+        # PARTIAL alike — never a forced zero.
+        gross_total += item.gross_pay or Decimal("0")
+        pension_insurance_employee_total += item.pf or Decimal("0")
+        pension_insurance_employer_total += item.employer_pf or Decimal("0")
+        social_insurance_combined_employee_total += item.esi or Decimal("0")
+        social_insurance_combined_employer_total += item.employer_esi or Decimal("0")
+
+        # net_pay is forced to 0.00 for EVERY PARTIAL item (engine/standard.py
+        # and engine/enterprise.py never present a plausible-looking net pay
+        # built on top of an unavailable wage tax) — always exclude it here.
+        if is_partial:
+            net_pay_unavailable_count += 1
+        else:
+            net_total += item.net_pay or Decimal("0")
+
+        # church tax / Soli are each forced to 0.00 ONLY when that specific
+        # component is in this item's own unavailableComponents — a
+        # genuinely-zero (not-liable / below-threshold) figure on a
+        # CALCULATED or a still-available-on-this-PARTIAL-item field must
+        # still be summed as the real result it is.
+        if "church_tax" in unavailable:
+            church_tax_unavailable_count += 1
+        else:
+            church_tax_total += item.church_tax or Decimal("0")
+        # Soli is informational (already folded into `tds`): summed from the
+        # persisted column, never recomputed, never re-added to any other
+        # total. Phase 8BR: genuinely computed (by the internal functional
+        # wage-tax calculator, or a future real PAP) whenever a payslip's
+        # annual Lohnsteuer exceeds the SolzG exemption threshold — 0.00
+        # below it, which is a REAL result, not a placeholder.
+        if "soli" in unavailable:
+            soli_unavailable_count += 1
+        else:
+            soli_total += item.soli or Decimal("0")
+        pap_version = snapshot.get("papVersion") or "UNKNOWN"
+        calculation_modes_seen[pap_version] = calculation_modes_seen.get(pap_version, 0) + 1
+
+    return {
+        "organizationId": organization_id,
+        "periodStart": period_start.isoformat() if period_start else None,
+        "periodEnd": period_end.isoformat() if period_end else None,
+        "employeeCounts": {
+            "total": calculated_count + blocked_count + partial_count,
+            "byClassification": classification_counts,
+            "byStatus": {"CALCULATED": calculated_count, "BLOCKED": blocked_count, "PARTIAL": partial_count},
+        },
+        "grossPay": {"status": "CALCULATED", "amount": str(gross_total)},
+        "netPay": {
+            "status": "PARTIAL" if net_pay_unavailable_count else "CALCULATED",
+            "amount": str(net_total),
+            "excludedPartialCount": net_pay_unavailable_count,
+            "note": ("Excludes {} PARTIAL payslip(s) whose net pay is unavailable (wage tax not "
+                     "calculable) — never summed as a fabricated zero.".format(net_pay_unavailable_count)
+                     if net_pay_unavailable_count else None),
+        },
+        "statutoryContributions": {
+            "pensionInsurance": {
+                "status": "CALCULATED",
+                "employeeAmount": str(pension_insurance_employee_total),
+                "employerAmount": str(pension_insurance_employer_total),
+            },
+            # ALV + GKV + PV combined — PayslipItem has no discrete
+            # per-branch columns today (see the phase report's own
+            # "Payslip" section); reported honestly as one combined
+            # figure rather than fabricating a breakdown that doesn't
+            # exist on the underlying row.
+            "socialInsuranceCombined": {
+                "status": "CALCULATED",
+                "employeeAmount": str(social_insurance_combined_employee_total),
+                "employerAmount": str(social_insurance_combined_employer_total),
+            },
+            "churchTax": {
+                "status": "PARTIAL" if church_tax_unavailable_count else "CALCULATED",
+                "amount": str(church_tax_total),
+                "excludedPartialCount": church_tax_unavailable_count,
+            },
+            "solidaritySurcharge": {
+                "status": "PARTIAL" if soli_unavailable_count else "CALCULATED",
+                "amount": str(soli_total.quantize(Decimal("0.01"))),
+                "excludedPartialCount": soli_unavailable_count,
+                "note": "Informational (already folded into Wage Tax / Lohnsteuer incl. Soli). "
+                        "Genuinely computed per payslip (real 0.00 for any employee below the "
+                        "SolzG exemption threshold, a nonzero real amount above it) — see "
+                        "calculationModes below for which calculator produced these figures. "
+                        "Excludes any PARTIAL payslip where Soli itself is unavailable.",
+            },
+        },
+        "wageTaxStatus": {
+            "calculated": calculated_count, "blocked": blocked_count, "partial": partial_count,
+            "blockedReasonCounts": blocked_reason_counts,
+        },
+        # Phase 8BS: never let a CALCULATED figure be mistaken for an
+        # official BMF-certified one. Every real Regular/Midijob wage-tax
+        # figure today reads INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023
+        # (engine/germany_internal_tax.py) — a future real PAP executor
+        # would report a different, genuinely BMF-certified pap_version
+        # string here instead, distinguishable at a glance.
+        "calculationModes": calculation_modes_seen,
+        "papBlockedPayrollCount": blocked_reason_counts.get("GERMANY_PAP_NOT_AVAILABLE", 0),
+        "blockedEmployees": blocked_employees,
+        "partialEmployees": partial_employees,
+        "payrollRuns": sorted(runs_seen.values(), key=lambda r: r["runId"], reverse=True),
+    }
+
+
 # Per-jurisdiction statutory/contribution columns for the Payroll Register
 # PDF — (header, PayslipItem field, width_mm). Field choices mirror the same
 # per-country reuse already established for generate_payslip_pdf_bytes's
@@ -15234,10 +16721,66 @@ _STATUTORY_COLUMNS_BY_COUNTRY = {
     "US": [("Fed. Tax", "federal_income_tax", 13), ("State Tax", "state_income_tax", 12), ("Local Tax", "local_tax", 12), ("Soc. Security", "social_security", 16), ("Medicare", "medicare", 13)],
     "UK": [("PAYE", "tds", 13), ("Nat'l Insurance", "ni_employee", 19)],
     "AU": [("PAYG", "tds", 13), ("Superannuation", "employer_pension", 19)],
-    "DE": [("Income Tax", "tds", 15), ("Pension Ins.", "pf", 15), ("Social Ins.", "esi", 15)],
+    # Phase 8BS: was mislabeled "Income Tax" (a generic gloss, not how a
+    # German payroll register reads) and omitted Kirchensteuer/Soli
+    # entirely, even though both are real, persisted PayslipItem columns
+    # — the same defect class the payslip PDF's own income_tax_labels/
+    # church-tax fix already addressed (see generate_payslip_pdf_bytes).
+    # "lohnsteuer_only" is a synthetic field name (tds - soli), resolved by
+    # _resolve_statutory_column_value below — `tds` alone is the COMBINED
+    # Lohnsteuer+Soli figure, and showing both raw `tds` and `soli` as
+    # separate columns would double-count Soli visually.
+    "DE": [
+        ("Lohnsteuer", "lohnsteuer_only", 14), ("Kirchensteuer", "church_tax", 14), ("Soli", "soli", 11),
+        ("Pension Ins.", "pf", 14), ("Social Ins.", "esi", 14),
+    ],
     "CA": [("CPP", "social_security", 12), ("EI", "esi", 10), ("Fed. Tax", "tds", 14), ("Prov. Tax", "professional_tax", 14)],
 }
 _DEFAULT_STATUTORY_COLUMNS = [("Income Tax", "tds", 15)]
+
+
+def _resolve_statutory_column_value(item, field: str) -> Decimal:
+    """Resolves one `_STATUTORY_COLUMNS_BY_COUNTRY` cell. Almost always a
+    direct `getattr` passthrough; the one synthetic field, `lohnsteuer_only`
+    (Germany), computes `tds - soli` so a register showing both a
+    "Lohnsteuer" and a "Soli" column never double-counts Soli (`tds` alone
+    is the combined Lohnsteuer+Soli figure — see PayslipItem.tds /
+    engine/countries/germany.py's `monthly_lohnsteuer_soli`)."""
+    if field == "lohnsteuer_only":
+        return Decimal(str(item.tds or 0)) - Decimal(str(item.soli or 0))
+    return Decimal(str(getattr(item, field, 0) or 0))
+
+
+# Phase 8BU: which `_STATUTORY_COLUMNS_BY_COUNTRY` field each Germany
+# `unavailableComponents` entry corresponds to — used by the register
+# PDF/CSV to render "N/A" instead of a fabricated €0.00 for a PARTIAL
+# item's specific unavailable column, without touching any other
+# CALCULATED/BLOCKED row's rendering.
+_DE_STATUTORY_FIELD_TO_UNAVAILABLE_COMPONENT = {
+    "lohnsteuer_only": "wage_tax", "church_tax": "church_tax", "soli": "soli",
+}
+
+
+def _statutory_cell_text(item, field: str, fmt) -> str:
+    """Register PDF/CSV cell text for one statutory column: "N/A" when this
+    specific PARTIAL item's own `unavailableComponents` names this field's
+    component, the real formatted amount otherwise."""
+    if item.status == PayslipStatus.PARTIAL:
+        component = _DE_STATUTORY_FIELD_TO_UNAVAILABLE_COMPONENT.get(field)
+        unavailable = set((item.germany_calculation_snapshot or {}).get("unavailableComponents") or [])
+        if component and component in unavailable:
+            return "N/A"
+    return fmt(_resolve_statutory_column_value(item, field))
+
+
+def _net_salary_cell_text(item, fmt) -> str:
+    """Register PDF/CSV Net Salary cell: "N/A" for a PARTIAL item (net_pay
+    is always forced to 0.00 there — see engine/standard.py — never shown
+    as a real figure), the real amount otherwise."""
+    if item.status == PayslipStatus.PARTIAL:
+        return "N/A"
+    return fmt(item.net_pay)
+    return Decimal(str(getattr(item, field, 0) or 0))
 
 
 def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int = None) -> bytes:
@@ -15418,9 +16961,25 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
         # isolates just the LOP/attendance deduction, for every jurisdiction.
         def _other_deductions(it):
             total_ded = Decimal(str(it.total_deductions or 0))
+            # Phase 8BX (real-UAT finding): this list previously omitted
+            # church_tax/employee_lwf/employee_pension/study_loan_deduction/
+            # postgrad_loan_deduction/cpp2/state_disability_insurance/
+            # state_program_deductions — every one of them IS already
+            # summed into total_deductions (engine/standard.py's
+            # total_employee_deductions) and already rendered as its own
+            # dedicated register column, so omitting them here double-
+            # counted them into "Other Deductions" too. Caught because a
+            # real Germany church-tax-liable employee's register row
+            # didn't reconcile (Gross - every displayed column != Net Pay)
+            # by exactly the church-tax amount. Now the complete field list
+            # total_deductions is actually built from (attendance_deduction
+            # is intentionally excluded — it's rendered as its own LOP line
+            # item, never folded into this bucket).
             employee_statutory = sum(
                 (Decimal(str(getattr(it, f, 0) or 0)) for f in
-                 ("pf", "esi", "professional_tax", "tds", "social_security", "medicare", "ni_employee")),
+                 ("pf", "esi", "professional_tax", "employee_lwf", "tds", "social_security", "medicare",
+                  "ni_employee", "study_loan_deduction", "postgrad_loan_deduction", "employee_pension",
+                  "church_tax", "cpp2", "state_disability_insurance", "state_program_deductions")),
                 Decimal("0"),
             )
             return total_ded - employee_statutory
@@ -15431,22 +16990,32 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
         # align: "L" left (identity columns), "C" center (day counts),
         # "R" right (all monetary values).
         col_defs = [
-            ("ID",         10, lambda it: str(it.employee_id or "-"), "L"),
-            ("Employee",   32, lambda it: str(it.employee_name or "-")[:28], "L"),
-            ("Paid Days",  12, lambda it: f"{float(it.payable_days or 0):.1f}", "C"),
-            ("LOP Days",   12, lambda it: f"{max(float(it.total_working_days or 0) - float(it.payable_days or 0), 0):.1f}", "C"),
-            ("Basic",      17, lambda it: fmt(it.basic_salary), "R"),
-            ("HRA",        15, lambda it: fmt(it.hra), "R"),
-            ("Spl. Allow", 17, lambda it: fmt(it.special_allowance), "R"),
-            ("Overtime",   13, lambda it: fmt(it.overtime), "R"),
-            ("Addl. Comp", 15, lambda it: fmt(it.additional_compensation), "R"),
+            # Phase 8BU: each shaved 1mm (Employee 4mm) to make exactly
+            # 12mm of room for the new Status column below without
+            # exceeding content_w — these columns previously summed to
+            # exactly content_w by design (see the Status column's own
+            # comment).
+            ("ID",         9,  lambda it: str(it.employee_id or "-"), "L"),
+            ("Employee",   28, lambda it: str(it.employee_name or "-")[:28], "L"),
+            ("Paid Days",  11, lambda it: f"{float(it.payable_days or 0):.1f}", "C"),
+            ("LOP Days",   11, lambda it: f"{max(float(it.total_working_days or 0) - float(it.payable_days or 0), 0):.1f}", "C"),
+            ("Basic",      16, lambda it: fmt(it.basic_salary), "R"),
+            ("HRA",        14, lambda it: fmt(it.hra), "R"),
+            ("Spl. Allow", 16, lambda it: fmt(it.special_allowance), "R"),
+            ("Overtime",   12, lambda it: fmt(it.overtime), "R"),
+            ("Addl. Comp", 14, lambda it: fmt(it.additional_compensation), "R"),
             ("Gross",      17, lambda it: fmt(it.gross_pay), "R"),
             *[
-                (label, width, (lambda it, f=field: fmt(getattr(it, f, 0))), "R")
+                (label, width, (lambda it, f=field: _statutory_cell_text(it, f, fmt)), "R")
                 for label, field, width in statutory_cols
             ],
             ("Other Ded.", 15, lambda it: fmt(_other_deductions(it)), "R"),
-            ("Net Salary", 19, lambda it: fmt(it.net_pay), "R"),
+            ("Net Salary", 19, lambda it: _net_salary_cell_text(it, fmt), "R"),
+            # Phase 8BU: makes a BLOCKED/PARTIAL row's all-zero or
+            # partially-zero figures legible at a glance instead of
+            # reading as an ordinary fully-calculated employee. 12mm,
+            # matching exactly what was shaved off the columns above.
+            ("Status", 12, lambda it: {"Failed": "BLOCKED", "Partial": "PARTIAL"}.get(it.status, ""), "C"),
         ]
 
         col_x = [margin_l]
@@ -15616,9 +17185,15 @@ def generate_report_csv_bytes(db: Session, report_id: int, organization_id: int 
 
     def _other_deductions(it):
         total_ded = Decimal(str(it.total_deductions or 0))
+        # Phase 8BX: same double-counting fix as generate_report_pdf_bytes's
+        # own _other_deductions — see that copy's comment for the full
+        # account (a real church-tax-liable employee's CSV row previously
+        # failed to reconcile Gross-to-Net by exactly the church-tax amount).
         employee_statutory = sum(
             (Decimal(str(getattr(it, f, 0) or 0)) for f in
-             ("pf", "esi", "professional_tax", "tds", "social_security", "medicare", "ni_employee")),
+             ("pf", "esi", "professional_tax", "employee_lwf", "tds", "social_security", "medicare",
+              "ni_employee", "study_loan_deduction", "postgrad_loan_deduction", "employee_pension",
+              "church_tax", "cpp2", "state_disability_insurance", "state_program_deductions")),
             Decimal("0"),
         )
         return total_ded - employee_statutory
@@ -15628,13 +17203,15 @@ def generate_report_csv_bytes(db: Session, report_id: int, organization_id: int 
     writer.writerow(
         ["Employee", "Department", "Gross Pay"]
         + [label for label, _field, _width in statutory_cols]
-        + ["Other Deductions", "Net Pay"]
+        + ["Other Deductions", "Net Pay", "Status"]
     )
+    csv_fmt = lambda v: float(v)
     for item in items:
         writer.writerow(
             [item.employee_name, item.department or "", float(item.gross_pay or 0)]
-            + [float(getattr(item, field, 0) or 0) for _label, field, _width in statutory_cols]
-            + [float(_other_deductions(item)), float(item.net_pay or 0)]
+            + [_statutory_cell_text(item, field, csv_fmt) for _label, field, _width in statutory_cols]
+            + [float(_other_deductions(item)), _net_salary_cell_text(item, csv_fmt),
+               {"Failed": "BLOCKED", "Partial": "PARTIAL"}.get(item.status, "")]
         )
     return buf.getvalue().encode("utf-8")
 

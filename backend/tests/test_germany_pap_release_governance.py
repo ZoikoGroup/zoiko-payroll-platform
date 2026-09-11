@@ -16,13 +16,37 @@ ACTIVE with every gate green.
 
 import hashlib
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from app.core.exceptions import BadRequestException, ForbiddenException, GermanyPapGateBlockedException
 from app.modules.payroll import service
 from app.modules.payroll.engine.germany_pap import production_gate
+from app.modules.payroll.engine.germany_pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
 from app.modules.payroll.models import TaxConfigurationAudit
+
+
+def _certified_golden_vectors(asset_hash: str):
+    """Builds one AUTHORITATIVE_BMF-classified vector whose actual outputs
+    are constructed to match its expected outputs exactly, purely to
+    exercise the release-governance gate mechanism in these tests. This is
+    NOT real BMF evidence — it is a fixture standing in for "a Super Admin
+    supplied a real, matching certification run" so these tests can drive
+    a release through every OTHER gate without re-litigating golden-vector
+    correctness here (that mechanism has its own dedicated coverage in
+    test_germany_pap_golden_vector.py and the negative-path tests below)."""
+    vector = GermanyPapGoldenVector(
+        vector_id="TEST-CERT-001",
+        source_document="Governance-mechanics test fixture, not a real BMF Pruftabelle row",
+        source_page=0,
+        source_hash_sha256=asset_hash,
+        description="Mechanism-verification vector for release-governance tests",
+        inputs={"STKL": 1, "RE4": Decimal("2000000")},
+        expected_outputs={"LSTLZZ": Decimal("38000")},
+        source_classification=AUTHORITATIVE_BMF,
+    )
+    return [vector], {"TEST-CERT-001": {"LSTLZZ": Decimal("38000")}}
 
 
 # ── Fixtures / helpers ─────────────────────────────────────────────────────
@@ -72,7 +96,11 @@ def _fully_satisfy_all_gates(db, release_id, asset_hash, preparer_id=1, approver
         db, release_id, actor_id=preparer_id, status="AUTHORIZED",
         authority="Test-only fixture, NOT real BMF/legal authorization", reference="TEST-FIXTURE-ONLY",
     )
-    service.record_pap_release_golden_vectors(db, release_id, actor_id=preparer_id, source_sha256=asset_hash)
+    vectors, actual_outputs = _certified_golden_vectors(asset_hash)
+    service.record_pap_release_golden_vectors(
+        db, release_id, actor_id=preparer_id, source_sha256=asset_hash,
+        vectors=vectors, actual_outputs=actual_outputs,
+    )
     service.record_pap_release_security_certification(db, release_id, actor_id=preparer_id)
     service.mark_pap_release_ready(db, release_id, actor_id=preparer_id)
     service.approve_pap_release(db, release_id, actor_id=approver_id)
@@ -157,6 +185,80 @@ def test_golden_vectors_against_wrong_hash_rejected(db):
     assert "golden_vectors_passed" in result.failed_gates
 
 
+def test_golden_vectors_with_no_vectors_supplied_rejected(db):
+    """Phase 8BG regression: the old implementation accepted a bare hash
+    with NO vector data at all and set golden_vectors_passed=True on pure
+    assertion. Even a matching hash must never be sufficient by itself."""
+    asset = _publish_asset(db)
+    release = service.create_pap_release(db, asset.id, actor_id=1)
+    with pytest.raises(BadRequestException):
+        service.record_pap_release_golden_vectors(
+            db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+        )
+    result = service.evaluate_pap_release_gate(db, release.id)
+    assert "golden_vectors_passed" in result.failed_gates
+
+
+def test_synthetic_golden_vector_can_never_satisfy_the_gate(db):
+    """Phase 8BG regression: a SYNTHETIC-classified vector must be refused
+    outright, regardless of whether its numbers happen to match — the
+    classification check runs before, and independent of, the comparison."""
+    from app.modules.payroll.engine.germany_pap.golden_vector import SYNTHETIC
+
+    asset = _publish_asset(db)
+    release = service.create_pap_release(db, asset.id, actor_id=1)
+    synthetic_vector = GermanyPapGoldenVector(
+        vector_id="SYNTH-001", source_document="synthetic-test-fixture, not a real BMF publication",
+        source_page=0, source_hash_sha256=asset.source_content_sha256,
+        description="synthetic", inputs={"STKL": 1}, expected_outputs={"LSTLZZ": Decimal("38000")},
+        source_classification=SYNTHETIC,
+    )
+    with pytest.raises(BadRequestException):
+        service.record_pap_release_golden_vectors(
+            db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+            vectors=[synthetic_vector], actual_outputs={"SYNTH-001": {"LSTLZZ": Decimal("38000")}},
+        )
+    result = service.evaluate_pap_release_gate(db, release.id)
+    assert "golden_vectors_passed" in result.failed_gates
+
+
+def test_golden_vector_citing_a_different_source_hash_rejected(db):
+    """A vector whose OWN source_hash_sha256 doesn't match the release's
+    bound source hash must be refused even if source_sha256 (the outer
+    call argument) is correct — this catches a vector transcribed for a
+    different PAP version being smuggled in alongside a correct-looking
+    top-level hash."""
+    asset = _publish_asset(db)
+    release = service.create_pap_release(db, asset.id, actor_id=1)
+    mismatched_vector = GermanyPapGoldenVector(
+        vector_id="AUTH-999", source_document="a different release's Pruftabelle",
+        source_page=0, source_hash_sha256="9" * 64,
+        description="wrong source", inputs={"STKL": 1}, expected_outputs={"LSTLZZ": Decimal("38000")},
+        source_classification=AUTHORITATIVE_BMF,
+    )
+    with pytest.raises(BadRequestException):
+        service.record_pap_release_golden_vectors(
+            db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+            vectors=[mismatched_vector], actual_outputs={"AUTH-999": {"LSTLZZ": Decimal("38000")}},
+        )
+
+
+def test_golden_vector_output_mismatch_rejected(db):
+    """An AUTHORITATIVE_BMF vector with correct hash but WRONG actual
+    output must still fail — classification and hash binding alone are
+    not enough, the numbers must actually match exactly."""
+    asset = _publish_asset(db)
+    release = service.create_pap_release(db, asset.id, actor_id=1)
+    vectors, _ = _certified_golden_vectors(asset.source_content_sha256)
+    with pytest.raises(BadRequestException):
+        service.record_pap_release_golden_vectors(
+            db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+            vectors=vectors, actual_outputs={"TEST-CERT-001": {"LSTLZZ": Decimal("1")}},
+        )
+    result = service.evaluate_pap_release_gate(db, release.id)
+    assert "golden_vectors_passed" in result.failed_gates
+
+
 def test_security_not_certified_blocks_gate(db):
     asset = _publish_asset(db)
     release = service.create_pap_release(db, asset.id, actor_id=1)
@@ -164,7 +266,11 @@ def test_security_not_certified_blocks_gate(db):
     service.record_pap_release_source_hash_verification(db, release.id, actor_id=1)
     service.record_pap_release_source_finality(db, release.id, actor_id=1, status="VERIFIED")
     service.record_pap_release_licensing(db, release.id, actor_id=1, status="AUTHORIZED")
-    service.record_pap_release_golden_vectors(db, release.id, actor_id=1, source_sha256=asset.source_content_sha256)
+    vectors, actual_outputs = _certified_golden_vectors(asset.source_content_sha256)
+    service.record_pap_release_golden_vectors(
+        db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+        vectors=vectors, actual_outputs=actual_outputs,
+    )
     # security_certified deliberately left False
     result = service.evaluate_pap_release_gate(db, release.id)
     assert "security_certified" in result.failed_gates
@@ -314,7 +420,11 @@ def test_retry_after_fixing_evidence_succeeds(db):
     service.record_pap_release_source_hash_verification(db, release.id, actor_id=1)
     service.record_pap_release_source_finality(db, release.id, actor_id=1, status="VERIFIED")
     service.record_pap_release_licensing(db, release.id, actor_id=1, status="AUTHORIZED")
-    service.record_pap_release_golden_vectors(db, release.id, actor_id=1, source_sha256=asset.source_content_sha256)
+    vectors, actual_outputs = _certified_golden_vectors(asset.source_content_sha256)
+    service.record_pap_release_golden_vectors(
+        db, release.id, actor_id=1, source_sha256=asset.source_content_sha256,
+        vectors=vectors, actual_outputs=actual_outputs,
+    )
     service.record_pap_release_security_certification(db, release.id, actor_id=1)
 
     activated = service.activate_pap_release(db, release.id, actor_id=3)
