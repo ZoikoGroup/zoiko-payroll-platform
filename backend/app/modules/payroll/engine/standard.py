@@ -93,11 +93,8 @@ _AU_MLS_RATE = _australia._AU_MLS_RATE
 _AU_SUPER_MAX_CONTRIBUTION_BASE = _australia._AU_SUPER_MAX_CONTRIBUTION_BASE
 _calc_australia = _australia.calculate
 
-_DE_GRUNDFREIBETRAG = _germany._DE_GRUNDFREIBETRAG
-_DE_CONTRIBUTION_CEILING = _germany._DE_CONTRIBUTION_CEILING
 _DE_SOLI_THRESHOLD = _germany._DE_SOLI_THRESHOLD
 _DE_SOLI_RATE = _germany._DE_SOLI_RATE
-_calculate_annual_tax_de = _germany._calculate_annual_tax_de
 _calc_germany = _germany.calculate
 
 _CA_CPP_YMPE = _canada._CA_CPP_YMPE

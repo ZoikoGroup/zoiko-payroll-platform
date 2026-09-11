@@ -1,6 +1,6 @@
 """
-modules/payroll/engine/germany_pap/adapter.py
-------------------------------------------------
+modules/payroll/engine/jurisdictions/germany/pap/adapter.py
+------------------------------------------------------------
 Phase 8C-2 — the bridge between Zoiko payroll data (EmployeeStatutoryProfile,
 resolved registries, PayrollContext) and the exact BMF PAP input/output
 contract, built against the real, independently re-verified 2026 artifact
@@ -50,13 +50,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
 
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     GermanyPapCalculationResult,
     GermanyPapInvalidError,
     PapExecutor,
     PapInputContract,
 )
-from app.modules.payroll.engine.germany_pap.interpreter import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import (
     PapExecutionContext,
     PapProgram,
     run_program,
@@ -124,6 +124,16 @@ def assert_pap_source_finality_resolved() -> None:
 # instructions require (§25), and it is the ONLY defaulting origin used
 # for VJAHR — this is NOT a "probably zero" guess.
 _VJAHR_ORDINARY_EMPLOYEE_VALUE = 0
+
+# Phase 2 architecture consolidation: the Roman-numeral tax-class label
+# (Zoiko/PapInputContract's "I".."VI") to the official numeric STKL field
+# value (1-6) is a fixed structural lookup table from the PAP's own field
+# spec (§5) — not a statutory rate/threshold, so it belongs as a plain
+# module constant, not a registry row. Previously written out twice in
+# this file (build_pap_environment() and InterpreterPapExecutor.execute()
+# each had their own identical copy); consolidated to one definition so
+# the two mappers can never silently drift apart on this lookup.
+_STKL_BY_TAX_CLASS = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -264,7 +274,7 @@ def build_pap_environment(
     broken (typo) and is therefore supplied explicitly here, and only
     here, per §B above."""
     tax_class = (getattr(profile, "de_tax_class", None) or "").upper()
-    stkl = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}.get(tax_class)
+    stkl = _STKL_BY_TAX_CLASS.get(tax_class)
     if stkl is None:
         raise GermanyPapInvalidError(f"Cannot map EmployeeStatutoryProfile.de_tax_class={tax_class!r} to an official STKL value 1-6.")
 
@@ -425,7 +435,7 @@ class InterpreterPapExecutor(PapExecutor):
         # build_pap_environment needs, just under different (snake_case)
         # names, so translate directly rather than requiring a second
         # profile object the interface doesn't have.
-        stkl = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}.get(pap_input.stkl)
+        stkl = _STKL_BY_TAX_CLASS.get(pap_input.stkl)
         if stkl is None:
             raise GermanyPapInvalidError(f"Cannot map PapInputContract.stkl={pap_input.stkl!r} to an official STKL value.")
 

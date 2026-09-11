@@ -46,21 +46,28 @@ showing exactly which branches DID resolve before the block, for
 diagnosis — see service.py's germany calculation call sites and the
 `POST /api/payroll/germany/calculation-preview` diagnostic endpoint.
 
-`_calculate_legacy_simplified()` below is the ORIGINAL pre-Phase-7
-calculator (collapsed pension+social-insurance bucket, flat-rate church
-tax off the legacy PayrollEmployee.church_tax_liable column, generic
-bracket-table Lohnsteuer). Retained verbatim, unused by `calculate()`,
-per this phase's explicit instruction not to blindly delete it — kept
-only as a documented reference / for any test that still exercises it
-directly by name.
+Phase 4 (docs/PHASE_4_GERMANY_LEGACY_PAP_ARCHITECTURE_DECISION_REPORT.md):
+the ORIGINAL pre-Phase-7 calculator (`_calculate_legacy_simplified()` —
+collapsed pension+social-insurance bucket, flat-rate church tax off the
+legacy PayrollEmployee.church_tax_liable column, generic bracket-table
+Lohnsteuer via `_calculate_annual_tax_de()`) was retired after a forensic
+audit confirmed zero production/API/migration callers, zero historical
+payroll data computed via this path (Germany has never had a real
+production employee), and that its own regression test asserted nothing
+about calculation correctness — only that the function remained
+importable. Its functionality is fully superseded by `calculate()`
+below (four independently-capped RV/ALV/GKV/PV branches, the per-Land
+CHURCH_TAX_LAND_RATES registry, and the PAP/internal-tariff wage-tax
+path), which is strictly more statutorily complete. See that report for
+the full evidence trail.
 """
 
 from decimal import Decimal
 from typing import Optional
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
-from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     GermanyCalculationError,
     GermanyCalculationTrace,
     GermanyMidijobBaseApplicationNotSpecifiedError,
@@ -89,15 +96,14 @@ from app.modules.payroll.engine.germany_pap.core import (
     validate_employment_classification_against_earnings,
     validate_employment_classification_against_vocational_training,
 )
-from app.modules.payroll.engine.germany_internal_tax import (
+from app.modules.payroll.engine.jurisdictions.germany.tax import (
     GermanyInternalTariffNotAvailableError,
     InternalGermanyWageTaxCalculator,
 )
 # Fallback constants moved to hardcoded_defaults.py — imported back under
 # their original names so nothing else needs to change.
 from app.modules.payroll.hardcoded_defaults import (
-    _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, _DE_SOLI_THRESHOLD,
-    _DE_SOLI_RATE, _DE_CHURCH_TAX_RATE,
+    _DE_SOLI_THRESHOLD, _DE_SOLI_RATE,
     _DE_RV_EMPLOYEE_RATE, _DE_RV_EMPLOYER_RATE,
     _DE_ALV_EMPLOYEE_RATE, _DE_ALV_EMPLOYER_RATE,
     _DE_GKV_GENERAL_EMPLOYEE_RATE, _DE_GKV_GENERAL_EMPLOYER_RATE,
@@ -202,22 +208,6 @@ def _trace_earning_taxability(trace, ctx) -> None:
             trace.step(
                 f"Earning taxability ({earning_type}): {cls['explanation']}."
             )
-
-
-def _calculate_annual_tax_de(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    """Retained for `_calculate_legacy_simplified` and for
-    `engine/standard.py`'s backward-compatible re-export — NOT called by
-    the production `calculate()` below, which requires the real PAP."""
-    grundfreibetrag = resolve_jurisdiction_parameter(rate_map, "grundfreibetrag", _DE_GRUNDFREIBETRAG, country="DE")
-    taxable = max(Decimal("0"), annual_gross - grundfreibetrag)
-    base_tax = _calculate_annual_tax(taxable, slabs)
-
-    soli_threshold = resolve_jurisdiction_parameter(rate_map, "soli_threshold", _DE_SOLI_THRESHOLD, country="DE")
-    soli_rate = resolve_jurisdiction_parameter(rate_map, "soli_rate", _DE_SOLI_RATE, side="employee", country="DE")
-    tax = base_tax
-    if tax > soli_threshold:
-        tax += tax * soli_rate / Decimal("100")
-    return tax, base_tax
 
 
 def _resolve_minijob_midijob_value(parameters: dict, parameter_code: str, default: Decimal) -> Decimal:
@@ -1067,55 +1057,4 @@ def calculate(ctx: PayrollContext) -> dict:
         # (see service._compute_payslip_values) without a second resolve.
         _germany_statutory_profile_id=trace.statutory_profile_id,
         _germany_calculation_snapshot=trace.to_dict(),
-    )
-
-
-def _calculate_legacy_simplified(ctx: PayrollContext) -> dict:
-    """PRE-PHASE-7 Germany calculator. Simplified: one collapsed
-    pension+social-insurance bucket, generic bracket-table Lohnsteuer
-    (not the BMF PAP), flat-rate church tax off the legacy
-    PayrollEmployee.church_tax_liable column. NOT called by `calculate()`
-    above — retained only as a reference/for any test exercising it
-    directly by name, per this phase's explicit "do not blindly delete"
-    instruction. Do not wire this back into `_COUNTRY_CALC["DE"]`."""
-    rate_map = ctx.rate_map
-    gross = ctx.gross
-    annual_gross = gross * MONTHS_PER_YEAR
-
-    contribution_ceiling = resolve_jurisdiction_parameter(rate_map, "contribution_ceiling", _DE_CONTRIBUTION_CEILING, country="DE")
-    annual_contribution_base = min(annual_gross, contribution_ceiling)
-
-    pension_rate = rate_map.get("pension")
-    employee_pf = (
-        _round2((annual_contribution_base * (pension_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if pension_rate and pension_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_pf = (
-        _round2((annual_contribution_base * (pension_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if pension_rate and pension_rate.employer_rate_pct else Decimal("0")
-    )
-
-    social_rate = rate_map.get("social-insurance")
-    employee_esi = (
-        _round2((annual_contribution_base * (social_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if social_rate and social_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_esi = (
-        _round2((annual_contribution_base * (social_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if social_rate and social_rate.employer_rate_pct else Decimal("0")
-    )
-
-    annual_tax, base_tax = _calculate_annual_tax_de(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    church_tax = Decimal("0")
-    if ctx.church_tax_liable:
-        church_tax_rate = resolve_jurisdiction_parameter(rate_map, "church_tax_rate", _DE_CHURCH_TAX_RATE, side="employee", country="DE")
-        church_tax = _round2((base_tax * church_tax_rate / Decimal("100")) / MONTHS_PER_YEAR)
-
-    return dict(
-        employee_pf=employee_pf, employer_pf=employer_pf,
-        employee_esi=employee_esi, employer_esi=employer_esi,
-        church_tax=church_tax,
-        tds=tds, annual_tax=annual_tax,
     )

@@ -1,6 +1,6 @@
 """
-modules/payroll/engine/germany_pap/golden_vector.py
------------------------------------------------------
+modules/payroll/engine/jurisdictions/germany/pap/golden_vector.py
+------------------------------------------------------------------
 Phase 8C-3 — the data model and exact-comparison mechanics used to
 certify Zoiko's mechanical reproduction of the official BMF 2026 PAP
 against BMF's own published check-table values (Programmablaufplan

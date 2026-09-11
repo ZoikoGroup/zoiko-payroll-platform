@@ -1,6 +1,6 @@
 """
-modules/payroll/engine/germany_pap/interpreter.py
-----------------------------------------------------
+modules/payroll/engine/jurisdictions/germany/pap/interpreter.py
+----------------------------------------------------------------
 Phase 8C-1 — BMF PAP XML interpreter CORE.
 
 (Relocated from `engine/countries/germany_pap_interpreter.py` in Phase
@@ -68,7 +68,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_DOWN, ROUND_UP, DivisionByZero, InvalidOperation, localcontext
 from typing import Optional, Union
 
-from app.modules.payroll.engine.germany_pap.core import GermanyPapInvalidError
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyPapInvalidError
 
 # ── EXECUTION BUDGET (defense-in-depth, Phase 8BD §14) ─────────────────
 # The PAP language is loop-free (EVAL / IF-THEN-ELSE / EXECUTE only), so a

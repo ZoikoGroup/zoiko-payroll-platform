@@ -1,4 +1,4 @@
-"""engine/germany_deuv.py
+"""engine/jurisdictions/germany/statutory/deuv.py
 ------------------------------
 DEÜV (Datenübermittlungs-Verordnung) social insurance notification boundary.
 
@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Dict, List, Optional
 
-from .germany_pap.core import GermanyCalculationError
+from ..pap.core import GermanyCalculationError
 
 
 class GermanyDeuvUnavailableError(GermanyCalculationError):

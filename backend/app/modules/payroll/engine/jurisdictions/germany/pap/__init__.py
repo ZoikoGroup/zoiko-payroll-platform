@@ -1,6 +1,6 @@
 """
-modules/payroll/engine/germany_pap
-------------------------------------
+modules/payroll/engine/jurisdictions/germany/pap
+-------------------------------------------------
 Germany BMF PAP subsystem package (Phase 8E-0A / 8BC).
 
 The shared `engine/countries/` directory holds exactly one canonical country

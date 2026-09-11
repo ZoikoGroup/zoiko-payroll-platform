@@ -1,6 +1,6 @@
 """
-modules/payroll/engine/germany_pap/core.py
-----------------------------------------------
+modules/payroll/engine/jurisdictions/germany/pap/core.py
+----------------------------------------------------------
 Phase 7 — Germany BMF PAP execution scaffolding + the real, non-PAP,
 branch-aware social-insurance (RV/ALV/GKV/PV) calculations, per
 ZP-TAX-DE-2026-001.
@@ -538,7 +538,20 @@ def build_pap_input(
     Raises GermanyStatutoryProfileMissingError-family validation errors
     (via the caller, which already resolved `profile` is not None) only
     for internally-inconsistent data; the profile's own field-level
-    validation already happened at write time (service._validate_statutory_profile_fields)."""
+    validation already happened at write time (service._validate_statutory_profile_fields).
+
+    THIS is the only production Zoiko-to-PAP mapper — `countries/germany.py`
+    calls it exclusively. `germany_pap/adapter.py::build_pap_environment()`
+    is a DIFFERENT, intentionally-separate mapper (Phase 4-reconfirmed,
+    docs/PHASE_4_GERMANY_LEGACY_PAP_ARCHITECTURE_DECISION_REPORT.md): it
+    exists solely to feed the generic `germany_pap/interpreter.py` engine
+    raw numeric PAP field values (e.g. STKL as an int 1-6) for that
+    module's own isolated correctness tests, decoupled from this
+    contract's typed, Python-consumer-facing shape (e.g. `stkl` as the
+    Roman-numeral string `germany_internal_tax.py` branches on directly).
+    Do not "deduplicate" the two — they serve different consumers and one
+    is deliberately narrower (it does not map the Phase 8N JFREIB/
+    LZZFREIB/JHINZU/LZZHINZU/PKPV/PKPVAGZ fields this one does)."""
     tax_class = (getattr(profile, "de_tax_class", None) or "").upper()
     factor = getattr(profile, "de_factor", None)
     # Phase 8K note: de_child_count is also the source resolve_pv_child_category()

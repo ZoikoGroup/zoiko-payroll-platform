@@ -1434,7 +1434,7 @@ def record_pap_release_golden_vectors(
     db: Session = Depends(get_db),
 ):
     from app.modules.payroll import service as payroll_service
-    from app.modules.payroll.engine.germany_pap.golden_vector import GermanyPapGoldenVector
+    from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import GermanyPapGoldenVector
 
     vectors = [
         GermanyPapGoldenVector(

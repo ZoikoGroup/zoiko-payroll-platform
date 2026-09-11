@@ -1,4 +1,4 @@
-"""engine/germany_elster.py
+"""engine/jurisdictions/germany/statutory/elster.py
 --------------------------------
 ELSTER (ELektronische STeuerERklärung) transmission boundary.
 
@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional
 
-from .germany_pap.core import GermanyCalculationError
+from ..pap.core import GermanyCalculationError
 
 
 class GermanyElsterUnavailableError(GermanyCalculationError):

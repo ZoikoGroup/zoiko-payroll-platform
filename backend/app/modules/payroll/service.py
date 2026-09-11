@@ -58,7 +58,7 @@ from app.modules.payroll.models import (
     GermanyChurchTaxException, PayrollYtdAccumulator, OrganizationYtdAccumulator,
     EmployeeEstablishment,
 )
-from app.modules.payroll.engine.germany_pap import production_gate as pap_production_gate
+from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
 from app.modules.payroll.employee_validation import get_employee_validation_strategy, _STRATEGIES
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
@@ -1932,7 +1932,7 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
 # has a real endpoint to read the actual values from, instead of
 # hardcoding them a second time in the frontend.
 def get_church_tax_matrix() -> dict:
-    from app.modules.payroll.engine.germany_pap.core import CHURCH_TAX_LAND_RATES
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import CHURCH_TAX_LAND_RATES
 
     return {
         "laender": [
@@ -2677,7 +2677,7 @@ def record_pap_release_golden_vectors(
     function CAN and does enforce in code is that no synthetic vector,
     and no unverified/mismatched comparison, can mechanically satisfy the
     gate."""
-    from app.modules.payroll.engine.germany_pap.golden_vector import (
+    from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import (
         AUTHORITATIVE_BMF,
         all_exact,
         compare_exact,
@@ -4940,7 +4940,7 @@ def get_germany_statutory_configuration_readiness(db: Session, as_of=None) -> di
 # (the actual calculation), not this resolver — mirrors
 # resolve_germany_pap_asset's own "absence is not an error" contract.
 def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, payroll_date) -> dict:
-    from app.modules.payroll.engine.germany_pap.core import (
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         GermanyCalculationError, resolve_pv_child_category,
     )
 
@@ -5033,7 +5033,7 @@ def preview_germany_calculation(db: Session, organization_id: int, employee_id: 
     Tax Operations/QA can see exactly what's missing before attempting a
     real payroll run for this employee."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
-    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
 
     employee = get_employee_by_id(db, employee_id, organization_id)
     payroll_date = payroll_date or date.today()
@@ -7714,7 +7714,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     are counted from attendance records. When omitted, no attendance
     deduction is applied."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
-    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
 
     country = _normalize_country(country)
     calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
@@ -8804,7 +8804,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     queries or writes PayrollYtdAccumulator itself. None (every non-CA
     calculation, and CA until the caller opts in) means no YTD wired."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
-    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
     from app.core.exceptions import GermanyCalculationBlockedException
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
@@ -9899,7 +9899,7 @@ def _attach_main_secondary_consistency_warning(row: Optional[EmployeeStatutoryPr
     buried inside a blocked PAP calculation trace. Only meaningful for
     Germany rows; a no-op (None) for every other country."""
     if row is not None and row.country_code == "DE":
-        from app.modules.payroll.engine.germany_pap.core import check_main_secondary_employment_consistency
+        from app.modules.payroll.engine.jurisdictions.germany.pap.core import check_main_secondary_employment_consistency
 
         row.main_secondary_consistency_warning = check_main_secondary_employment_consistency(
             tax_class=row.de_tax_class, is_main_employment=row.de_main_employment,
@@ -10279,7 +10279,7 @@ def classify_and_list_germany_overtime_time_segments(
     Reject the wrong sibling record via set_germany_overtime_work_record_approval
     (status="REJECTED") to resolve the ambiguity — this function never
     picks a winner itself."""
-    from app.modules.payroll.engine.germany_overtime_classifier import (
+    from app.modules.payroll.engine.jurisdictions.germany.overtime.classifier import (
         GermanyOvertimeClassificationError, classify_germany_overtime_work_record,
     )
 
@@ -10338,7 +10338,7 @@ def list_germany_overtime_time_segments(
 def calculate_and_list_germany_overtime_wage_tax(
     db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
 ) -> List[GermanyOvertimeWageTaxResult]:
-    from app.modules.payroll.engine.germany_overtime_wage_tax import (
+    from app.modules.payroll.engine.jurisdictions.germany.overtime.wage_tax import (
         GermanyOvertimeNotClassifiedError, calculate_germany_overtime_wage_tax,
     )
 
@@ -10384,7 +10384,7 @@ def list_germany_overtime_wage_tax_results(
 def calculate_and_list_germany_overtime_social_insurance(
     db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
 ) -> List[GermanyOvertimeSocialInsuranceResult]:
-    from app.modules.payroll.engine.germany_overtime_social_insurance import (
+    from app.modules.payroll.engine.jurisdictions.germany.overtime.social_insurance import (
         GermanyOvertimeSINotClassifiedError, calculate_germany_overtime_social_insurance,
     )
 
@@ -10430,7 +10430,7 @@ def list_germany_overtime_social_insurance_results(
 def build_germany_overtime_premium_components(
     db: Session, record_id: int, organization_id: int, actor_id: Optional[int] = None,
 ) -> List[GermanyOvertimePremiumComponent]:
-    from app.modules.payroll.engine.germany_overtime_premium_component import (
+    from app.modules.payroll.engine.jurisdictions.germany.overtime.premium_component import (
         GermanyOvertimePremiumComponentNoResultsError, build_premium_component_groups,
     )
 
@@ -10647,7 +10647,7 @@ from app.modules.payroll.hardcoded_defaults import (
     # own Soli used, never a second, possibly-divergent source of truth.
     _DE_SOLI_THRESHOLD, _DE_SOLI_RATE,
 )  # noqa: E402
-from app.modules.payroll.engine.germany_internal_tax import (
+from app.modules.payroll.engine.jurisdictions.germany.tax import (
     compute_tax_for_class, compute_soli, resolve_income_tax_tariff,
     GermanyInternalTariffNotAvailableError,
 )  # noqa: E402
@@ -12146,7 +12146,7 @@ def attempt_transmit_elster_transmission(db: Session, transmission_id: int, orga
     expected, auditable state, not a caller mistake. Idempotent/retry-safe:
     calling this again on an already-BLOCKED_EXTERNAL row simply re-attempts
     and re-records the same deterministic outcome."""
-    from app.modules.payroll.engine.germany_elster import (
+    from app.modules.payroll.engine.jurisdictions.germany.statutory.elster import (
         ElsterTransmissionRequest, GermanyElsterUnavailableError, resolve_elster_transmitter,
     )
 
@@ -13246,7 +13246,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
 
     # Delegate to the strategy engine (no attendance data for manual payslips)
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
-    from app.modules.payroll.engine.germany_pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
     from app.core.exceptions import GermanyCalculationBlockedException
     ctx = build_context_from_employee(
         employee, gross=gross, basic=data.basic_salary,

@@ -1,5 +1,5 @@
 """
-engine/germany_overtime_premium_component.py
+engine/jurisdictions/germany/overtime/premium_component.py
 ------------------------------------------------------------
 Phase 8AH — Germany overtime PREMIUM COMPONENT: combines the two already
 -independently-calculated GermanyOvertimeWageTaxResult (Phase 8AF) and

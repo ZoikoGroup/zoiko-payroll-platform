@@ -1,5 +1,5 @@
 """
-modules/payroll/engine/germany_internal_tax.py
+modules/payroll/engine/jurisdictions/germany/tax.py
 -------------------------------------------------
 Phase 8BR — Germany INTERNAL functional wage-tax calculator.
 
@@ -114,7 +114,7 @@ from datetime import date
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Optional
 
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     GermanyCalculationError,
     GermanyPapCalculationResult,
     PapExecutor,
