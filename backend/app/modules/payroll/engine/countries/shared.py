@@ -11,6 +11,9 @@ import ast
 import logging
 import operator
 from decimal import Decimal
+from typing import Callable
+
+from app.modules.payroll.engine.base import _round2
 
 MONTHS_PER_YEAR = Decimal("12")
 _logger = logging.getLogger("zoiko")
@@ -679,3 +682,25 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
         if taxable_in_band > 0:
             tax += taxable_in_band * (slab.rate_pct / Decimal("100"))
     return tax
+
+
+def telescope_period_amount(
+    gross: Decimal, ytd_before: Decimal, annual_amount_fn: Callable[[Decimal], Decimal],
+) -> Decimal:
+    """Generic ``annual(after) − annual(before)`` telescoping wrapper for
+    an org-level cumulative-remuneration levy, computed as this period's
+    incremental slice of the annual amount rather than recomputed from
+    scratch each period — so the per-period charges always sum to the
+    correct annual total regardless of how many pay periods occur or
+    when a rate-band/exemption/threshold boundary is crossed mid-year.
+
+    This is purely the mechanical telescoping shape (identical across
+    Canada's Ontario EHT / BC-MB-NL notch levies / Quebec HSF and the
+    UK's Apprenticeship Levy — each cross-references the others in their
+    own comments as the same reasoning). The actual statutory formula for
+    "annual amount at this cumulative total" is jurisdiction-specific and
+    stays entirely in the caller's own ``annual_amount_fn`` closure —
+    this helper knows nothing about rates, bands, or thresholds.
+    """
+    ytd_after = ytd_before + gross
+    return _round2(annual_amount_fn(ytd_after) - annual_amount_fn(ytd_before))
