@@ -97,6 +97,24 @@ class EmployeeStatus(str, enum.Enum):
     INACTIVE = "Inactive"
 
 
+class PayrollScopeStatus(str, enum.Enum):
+    """Billing Commercial Layer's BWM scope classification (blueprint §4) —
+    orthogonal to EmployeeStatus above, which governs payroll processing
+    eligibility, not billing counting. A DRAFT/FUTURE_DATED/VOIDED/TEST/DEMO
+    employee is excluded from every Billable Worker Month count outright;
+    TERMINATED_ARCHIVE counts only in a month it actually has production
+    payslip activity. Read only by billing/bwm.py (via getattr, so a
+    database that predates this column keeps working identically to every
+    ACTIVE employee) — payroll itself never branches on this value."""
+    ACTIVE             = "ACTIVE"
+    DRAFT              = "DRAFT"
+    FUTURE_DATED       = "FUTURE_DATED"
+    VOIDED             = "VOIDED"
+    TEST               = "TEST"
+    DEMO               = "DEMO"
+    TERMINATED_ARCHIVE = "TERMINATED_ARCHIVE"
+
+
 # ── Payroll Employee ─────────────────────────────────────────────────
 # Owned entirely by the payroll module. Deliberately NOT linked to
 # app.modules.employee.Employee (that model is the HR/auth login record
@@ -313,6 +331,16 @@ class PayrollEmployee(Base):
     # tax) — an opt-in surcharge on income tax. Defaults False so no
     # existing employee's calculation changes.
     church_tax_liable = Column(Boolean, default=False, nullable=False, server_default="false")
+
+    # Billing Commercial Layer (blueprint §4 BWM) scope classification —
+    # see PayrollScopeStatus above. NULL for every employee until billing's
+    # admin tooling sets it; NULL and ACTIVE both mean "ordinary in-scope
+    # employment relationship, counted normally" (see billing/bwm.py's
+    # _resolve_inclusion). Nullable String rather than a native Enum column
+    # so this stays a purely additive, non-breaking change to an existing
+    # table (see migrations/sync_schema.py) and so a value payroll doesn't
+    # recognize never raises here — only billing/bwm.py interprets it.
+    payroll_scope_status = Column(String(30), nullable=True, index=True)
 
     # Non-India statutory/bank identifiers (SSN, NINO, TFN, SIN, Steuer-ID,
     # IBAN, etc. — see employee_validation.py for the field set per
