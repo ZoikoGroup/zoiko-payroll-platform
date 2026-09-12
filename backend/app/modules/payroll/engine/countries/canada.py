@@ -132,6 +132,7 @@ from typing import Optional
 from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import (
     MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter,
+    telescope_period_amount,
     _CA_CREDIT_METHOD_ENABLED_COUNTRIES, _CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES,
     _CA_AGE_GATED_CPP_ENABLED_COUNTRIES, _CA_CPP_COMPONENT_SPLIT_ENABLED_COUNTRIES,
     _CA_CPP_EI_FEDERAL_CREDIT_ENABLED_COUNTRIES, _CA_EI_EMPLOYER_MULTIPLIER_ENABLED_COUNTRIES,
@@ -510,7 +511,6 @@ def _calculate_on_eht_period_amount(gross: Decimal, ytd_remuneration_before: Dec
     per-period amounts telescope to the same total a single year-end
     calculation would produce, the same reasoning already used for
     CPP/CPP2/EI's own real YTD accumulator (see calculate() below)."""
-    ytd_after = ytd_remuneration_before + gross
 
     def _annual_amount(total: Decimal) -> Decimal:
         eligible_exemption = exemption if total < _CA_ON_EHT_EXEMPTION_PHASEOUT_THRESHOLD else Decimal("0")
@@ -518,7 +518,7 @@ def _calculate_on_eht_period_amount(gross: Decimal, ytd_remuneration_before: Dec
         taxable = max(Decimal("0"), total - eligible_exemption)
         return taxable * rate / Decimal("100")
 
-    return _round2(_annual_amount(ytd_after) - _annual_amount(ytd_remuneration_before))
+    return telescope_period_amount(gross, ytd_remuneration_before, _annual_amount)
 
 
 def _annual_notch_levy_amount(total: Decimal, exemption_threshold, notch_rate,
@@ -556,10 +556,9 @@ def _calculate_notch_levy_period_amount(gross: Decimal, ytd_remuneration_before:
     the per-period amount always sums to the correct annual total
     regardless of how many pay periods occur or when a threshold is
     crossed mid-year."""
-    ytd_after = ytd_remuneration_before + gross
-    return _round2(
-        _annual_notch_levy_amount(ytd_after, exemption_threshold, notch_rate, upper_threshold, flat_rate)
-        - _annual_notch_levy_amount(ytd_remuneration_before, exemption_threshold, notch_rate, upper_threshold, flat_rate)
+    return telescope_period_amount(
+        gross, ytd_remuneration_before,
+        lambda total: _annual_notch_levy_amount(total, exemption_threshold, notch_rate, upper_threshold, flat_rate),
     )
 
 
@@ -617,10 +616,9 @@ def _calculate_qc_hsf_period_amount(gross: Decimal, ytd_remuneration_before: Dec
     org-banded levies — necessary here too, since the sliding rate
     itself changes as the org's cumulative Quebec payroll grows through
     the year, not just the taxable base."""
-    ytd_after = ytd_remuneration_before + gross
-    return _round2(
-        _annual_qc_hsf_amount(ytd_after, employer_category, state_rate_map)
-        - _annual_qc_hsf_amount(ytd_remuneration_before, employer_category, state_rate_map)
+    return telescope_period_amount(
+        gross, ytd_remuneration_before,
+        lambda total: _annual_qc_hsf_amount(total, employer_category, state_rate_map),
     )
 
 

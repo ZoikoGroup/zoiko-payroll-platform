@@ -24,6 +24,8 @@ const SOCIAL_SECURITY_LABELS = { CA: "Canada Pension Plan (CPP)" };
 const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
 const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)" };
+const CHURCH_TAX_LABELS = { DE: "Kirchensteuer" };
+const SOLIDARITY_SURCHARGE_LABELS = { DE: "Solidaritätszuschlag" };
 
 // US-specific: federal/state/local income tax are stored as separate
 // PayslipItem columns (federal_income_tax/state_income_tax/local_tax) —
@@ -64,6 +66,8 @@ export function getPayrollLabels(country) {
     employerSocialSecurity: EMPLOYER_SOCIAL_SECURITY_LABELS[c] || "Employer Social Security",
     medicare: MEDICARE_LABELS[c] || "Medicare",
     employerPension: EMPLOYER_PENSION_LABELS[c] || "Employer Pension",
+    churchTax: CHURCH_TAX_LABELS[c] || null,
+    solidaritySurcharge: SOLIDARITY_SURCHARGE_LABELS[c] || null,
   };
 }
 

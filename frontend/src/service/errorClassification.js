@@ -52,6 +52,8 @@ export function describeLoadError(err) {
     message: networkError
       ? "Could not reach the backend server. Check your network connection, or contact an administrator if this continues."
       : (err && err.message) || "Failed to load.",
+    errorCode: (err && err.errorCode) || null,
+    trace: (err && err.trace) || null,
     schemaUnavailable: isSchemaUnavailableError(err),
     networkError,
   };

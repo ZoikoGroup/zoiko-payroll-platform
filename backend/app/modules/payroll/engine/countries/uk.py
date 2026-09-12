@@ -18,6 +18,7 @@ from app.modules.payroll.engine.base import PayrollContext, _round2
 from app.modules.payroll.engine.countries.shared import (
     _calculate_annual_tax, resolve_jurisdiction_parameter,
     _param_text, resolve_periods_per_year, resolve_direct_period_threshold,
+    telescope_period_amount,
     _UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES, _UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES,
     _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES, _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES,
     _UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES,
@@ -686,10 +687,9 @@ def calculate_apprenticeship_levy_period_amount(gross: Decimal, org_ytd_pay_bill
         return None
     rate = rate_row.employer_rate_pct
     allowance = allowance_row.flat_amount
-    total_after = org_ytd_pay_bill_before + gross
-    return _round2(
-        _annual_apprenticeship_levy_amount(total_after, rate, allowance)
-        - _annual_apprenticeship_levy_amount(org_ytd_pay_bill_before, rate, allowance)
+    return telescope_period_amount(
+        gross, org_ytd_pay_bill_before,
+        lambda total: _annual_apprenticeship_levy_amount(total, rate, allowance),
     )
 
 

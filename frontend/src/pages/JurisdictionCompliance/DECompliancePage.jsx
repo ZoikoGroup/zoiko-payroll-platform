@@ -2,13 +2,15 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
-  Landmark, Church, RefreshCcw, FileSearch, History,
+  Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio,
 } from "lucide-react";
 import DEOverviewDashboard from "./components/germany/DEOverviewDashboard";
+import GermanyPayrollSummaryTab from "./components/germany/GermanyPayrollSummaryTab";
+import GermanyDeuvTab from "./components/germany/GermanyDeuvTab";
 import {
   PapTab, HealthFundsTab, ContributionCeilingsTab, PvConfigTab, EarningTaxabilityTab,
   OvertimePremiumCategoriesTab, OvertimeGrundlohnCapsTab, EmployerLeviesTab, ChurchTaxTab,
-  ElstamBatchesTab, SourceEvidenceTab, AuditTab,
+  ElstamBatchesTab, ElsterTab, SourceEvidenceTab, AuditTab,
 } from "./GermanyStatutoryRegistriesPage";
 
 // Germany country compliance workspace — the primary landing page for
@@ -43,6 +45,9 @@ const SECTIONS = [
   { key: "employer-levies", label: "Employer Levies (Accident Insurance)", icon: Landmark },
   { key: "church-tax", label: "Church Tax", icon: Church },
   { key: "elstam-batches", label: "ELStAM Change-List Batches", icon: RefreshCcw },
+  { key: "elster", label: "ELSTER", icon: Send },
+  { key: "deuv", label: "DEÜV", icon: Radio },
+  { key: "payroll-summary", label: "Payroll Summary", icon: BarChart3 },
   { key: "source-evidence", label: "Source Evidence", icon: FileSearch },
   { key: "audit", label: "Audit / History", icon: History },
 ];
@@ -70,8 +75,8 @@ export default function DECompliancePage() {
         <h1 className="text-lg font-bold text-foreground">Germany Payroll Compliance</h1>
         <p className="text-xs text-foreground-muted">
           Manage Germany's statutory payroll configuration — PAP, health funds, contribution ceilings, PV
-          configuration, church tax, overtime treatment, employer levies, ELStAM change-list batches, and the
-          source evidence backing each of them.
+          configuration, church tax, overtime treatment, employer levies, ELStAM change-list batches, ELSTER
+          transmission, DEÜV social insurance reporting, the source evidence backing each of them, and the Germany payroll summary.
         </p>
       </div>
 
@@ -101,6 +106,9 @@ export default function DECompliancePage() {
       {section === "employer-levies" && <EmployerLeviesTab />}
       {section === "church-tax" && <ChurchTaxTab />}
       {section === "elstam-batches" && <ElstamBatchesTab />}
+      {section === "elster" && <ElsterTab />}
+      {section === "deuv" && <GermanyDeuvTab />}
+      {section === "payroll-summary" && <GermanyPayrollSummaryTab />}
       {section === "source-evidence" && <SourceEvidenceTab />}
       {section === "audit" && <AuditTab />}
     </div>

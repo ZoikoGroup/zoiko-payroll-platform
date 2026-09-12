@@ -1,5 +1,8 @@
-import React, { useState } from "react";
-import { createEmployee, updateEmployee, EMPLOYMENT_TYPES, EMPLOYEE_STATUSES, DEPARTMENTS } from "../../../service/payrollService";
+import React, { useEffect, useState } from "react";
+import {
+  createEmployee, updateEmployee, EMPLOYMENT_TYPES, EMPLOYEE_STATUSES, DEPARTMENTS,
+  getGermanyStatutoryConfigurationReadiness,
+} from "../../../service/payrollService";
 import { COUNTRIES, COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
 function emptyCompliance() {
@@ -76,6 +79,27 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // Phase 8BF — disclosed onboarding gap closure: warn during Germany
+  // employee creation if the GLOBAL statutory registries aren't published
+  // yet, instead of the only prior signal being a fail-closed error at
+  // actual payroll-run time. Never blocks saving the employee itself —
+  // this is informational, and creating the employee record is always
+  // safe regardless (see service.get_germany_statutory_configuration_readiness).
+  const [germanyReadiness, setGermanyReadiness] = useState(null);
+  const [germanyReadinessError, setGermanyReadinessError] = useState("");
+
+  useEffect(() => {
+    if (form.countryCode !== "DE") {
+      setGermanyReadiness(null);
+      setGermanyReadinessError("");
+      return;
+    }
+    let cancelled = false;
+    getGermanyStatutoryConfigurationReadiness()
+      .then((res) => !cancelled && setGermanyReadiness(res))
+      .catch((err) => !cancelled && setGermanyReadinessError(err.message || "Could not check Germany statutory configuration readiness."));
+    return () => { cancelled = true; };
+  }, [form.countryCode]);
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -215,6 +239,23 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         <h3 className="text-[15px] font-bold text-foreground">
           Statutory details &mdash; {COUNTRIES.find((c) => c.code === form.countryCode)?.name}
         </h3>
+        {form.countryCode === "DE" && germanyReadinessError && (
+          <div className="mt-3 rounded-[10px] border border-warning/20 bg-warning/10 px-3.5 py-2.5 text-[12px] text-warning">
+            Could not check Germany statutory configuration readiness: {germanyReadinessError}
+          </div>
+        )}
+        {form.countryCode === "DE" && germanyReadiness && !germanyReadiness.ready && (
+          <div className="mt-3 rounded-[10px] border border-warning/20 bg-warning/10 px-3.5 py-2.5 text-[12px] text-warning">
+            <p className="font-bold">Germany statutory configuration is incomplete</p>
+            <p className="mt-1">
+              This employee can still be created, but Germany payroll will fail closed until a Super Admin
+              publishes the missing registries (Compliance &gt; Germany statutory registries):
+            </p>
+            <ul className="mt-1.5 list-disc pl-4">
+              {germanyReadiness.missing.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {form.countryCode === "IN" && (
             <>

@@ -83,6 +83,8 @@ export async function apiFetch(path, { method = "GET", body, params } = {}) {
     const msg = Array.isArray(detail) ? detail.map((d) => d.msg).join("; ") : detail;
     const err = new Error(msg || `Request failed (${res.status})`);
     err.status = res.status;
+    err.errorCode = data?.error || data?.error_code || null;
+    err.trace = data?.trace || null;
     throw err;
   }
   return data;

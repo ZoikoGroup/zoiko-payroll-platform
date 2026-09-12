@@ -390,6 +390,83 @@ export const updateElstamChangeListBatchStatus = async (id, payload) => {
   }
 };
 
+// Phase 8BF — read-only, org-independent (these registries are global):
+// whether Germany's statutory registries are published/effective today, so
+// the employee-creation form can warn BEFORE an org admin creates a DE
+// employee, instead of only failing closed at actual payroll-run time.
+export const getGermanyStatutoryConfigurationReadiness = async () => {
+  try {
+    return await api.get("/api/payroll/germany/statutory-configuration-readiness");
+  } catch (err) {
+    throw err;
+  }
+};
+
+// Phase 8BI — Germany statutory payroll summary, aggregated from real,
+// persisted PayslipItem/PayrollRun rows (never a fabricated figure). Optional
+// periodStart/periodEnd (YYYY-MM-DD) filter by the owning run's period.
+export const getGermanyPayrollSummaryReport = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/germany/reports/summary", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+// ── Germany ELSTER transmission boundary (Phase 8BF) ─────────────────────
+// These calls only prepare/validate GermanyElsterTransmission records and
+// certificate-config references against Zoiko's own backend — they never
+// transmit to ELSTER/BZSt (the transmitter is BLOCKED_EXTERNAL and fails
+// closed by design). No Transferticket is ever fabricated.
+
+export const getGermanyElsterCertificateConfig = async () => {
+  try {
+    return await api.get("/api/payroll/germany/elster-certificate-config");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const setGermanyElsterCertificateConfig = async (payload) => {
+  try {
+    return await api.put("/api/payroll/germany/elster-certificate-config", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createGermanyElsterTransmission = async (payload) => {
+  try {
+    return await api.post("/api/payroll/germany/elster-transmissions", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listGermanyElsterTransmissions = async () => {
+  try {
+    return await api.get("/api/payroll/germany/elster-transmissions");
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const validateGermanyElsterTransmission = async (id) => {
+  try {
+    return await api.post(`/api/payroll/germany/elster-transmissions/${id}/validate`);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transmitGermanyElsterTransmission = async (id) => {
+  try {
+    return await api.post(`/api/payroll/germany/elster-transmissions/${id}/transmit`);
+  } catch (err) {
+    throw err;
+  }
+};
+
 // ── Germany overtime/shift-premium (Phase 8AC-8AH backend; Phase 8AI
 // frontend) ──────────────────────────────────────────────────────────
 // Fact capture → statutory classification → wage-tax/SI calculation →

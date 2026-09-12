@@ -44,6 +44,12 @@ function emptyForm() {
     deFactor: "",
     deChurchTaxLiable: false,
     deChurchTaxLand: "",
+    // Master audit gap closure — these were real, live-consumed backend
+    // columns (resolve_germany_church_tax_exception's own inputs) with no
+    // schema field and no form field anywhere, making every published
+    // church-tax exception (e.g. Bad Wimpfen) permanently unreachable.
+    deChurchTaxDenomination: "",
+    deChurchTaxMunicipalityPostalCode: "",
     deChildCount: "",
     deChildless: false,
     deSaxony: false,
@@ -83,6 +89,8 @@ function formFromProfile(profile) {
     deFactor: profile.deFactor ?? "",
     deChurchTaxLiable: !!profile.deChurchTaxLiable,
     deChurchTaxLand: profile.deChurchTaxLand || "",
+    deChurchTaxDenomination: profile.deChurchTaxDenomination || "",
+    deChurchTaxMunicipalityPostalCode: profile.deChurchTaxMunicipalityPostalCode || "",
     deChildCount: profile.deChildCount ?? "",
     deChildless: !!profile.deChildless,
     deSaxony: !!profile.deSaxony,
@@ -122,6 +130,8 @@ function buildPayload(form) {
     deFactor: num(form.deFactor),
     deChurchTaxLiable: bool(form.deChurchTaxLiable),
     deChurchTaxLand: form.deChurchTaxLiable ? str(form.deChurchTaxLand) : undefined,
+    deChurchTaxDenomination: form.deChurchTaxLiable ? str(form.deChurchTaxDenomination) : undefined,
+    deChurchTaxMunicipalityPostalCode: form.deChurchTaxLiable ? str(form.deChurchTaxMunicipalityPostalCode) : undefined,
     deChildCount: num(form.deChildCount),
     deChildless: bool(form.deChildless),
     deSaxony: bool(form.deSaxony),
@@ -519,6 +529,26 @@ export default function GermanyStatutoryProfilePanel({ employee, onClose }) {
                         <option value="">Not recorded</option>
                         {CHURCH_TAX_LAENDER.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
                       </select>
+                    </Field>
+                    <Field
+                      label="Denomination (for sub-Land exceptions, e.g. Bad Wimpfen RC)"
+                      hint={!form.deChurchTaxLiable ? "Only usable when church-tax liable" : "Free text — only needed if a published church-tax exception applies to this employee"}
+                    >
+                      <input
+                        className={inputCls} disabled={!form.deChurchTaxLiable}
+                        value={form.deChurchTaxDenomination} onChange={(e) => set("deChurchTaxDenomination", e.target.value)}
+                        placeholder="e.g. ROMAN_CATHOLIC"
+                      />
+                    </Field>
+                    <Field
+                      label="Church-tax residence postal code"
+                      hint={!form.deChurchTaxLiable ? "Only usable when church-tax liable" : "The employee's residence PLZ — the exact key a sub-Land exception is matched against"}
+                    >
+                      <input
+                        className={inputCls} disabled={!form.deChurchTaxLiable}
+                        value={form.deChurchTaxMunicipalityPostalCode} onChange={(e) => set("deChurchTaxMunicipalityPostalCode", e.target.value)}
+                        placeholder="e.g. 74206"
+                      />
                     </Field>
                     <label className="flex items-center gap-2 text-[13px] text-foreground">
                       <input type="checkbox" checked={form.deVocationalTrainee} onChange={(e) => set("deVocationalTrainee", e.target.checked)} />

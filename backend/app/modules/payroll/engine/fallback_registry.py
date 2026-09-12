@@ -105,11 +105,11 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "CA", "module": "canada", "attr": "_CA_LSVCC_CREDIT_MAX", "label": "Labour-Sponsored Fund Credit Max", "resolverKey": "lsvcc_credit_max", "note": "Configured but not yet applied — no employee LSVCC-investment declaration is captured yet."},
 
     # ── Germany ──────────────────────────────────────────────────────────
-    {"country": "DE", "module": "germany", "attr": "_DE_GRUNDFREIBETRAG", "label": "Basic Tax-Free Allowance (Grundfreibetrag)", "resolverKey": "grundfreibetrag"},
-    {"country": "DE", "module": "germany", "attr": "_DE_CONTRIBUTION_CEILING", "label": "Social Insurance Contribution Ceiling", "resolverKey": "contribution_ceiling"},
+    # _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, and _DE_CHURCH_TAX_RATE
+    # were retired in Phase 4 along with the legacy calculator that was
+    # their only consumer — see hardcoded_defaults.py's Germany section.
     {"country": "DE", "module": "germany", "attr": "_DE_SOLI_THRESHOLD", "label": "Solidarity Surcharge Threshold", "resolverKey": "soli_threshold"},
     {"country": "DE", "module": "germany", "attr": "_DE_SOLI_RATE", "label": "Solidarity Surcharge Rate", "resolverKey": "soli_rate"},
-    {"country": "DE", "module": "germany", "attr": "_DE_CHURCH_TAX_RATE", "label": "Church Tax Rate (Kirchensteuer, representative default — superseded by germany_pap.CHURCH_TAX_LAND_RATES on the production path, see Phase 7 report)", "resolverKey": "church_tax_rate"},
     {"country": "DE", "module": "germany", "attr": "_DE_RV_EMPLOYEE_RATE", "label": "Pension Insurance (RV) Rate — Employee", "resolverKey": "rv_employee_rate", "side": "employee"},
     {"country": "DE", "module": "germany", "attr": "_DE_RV_EMPLOYER_RATE", "label": "Pension Insurance (RV) Rate — Employer", "resolverKey": "rv_employer_rate", "side": "employer"},
     {"country": "DE", "module": "germany", "attr": "_DE_ALV_EMPLOYEE_RATE", "label": "Unemployment Insurance (ALV) Rate — Employee", "resolverKey": "alv_employee_rate", "side": "employee"},
