@@ -523,11 +523,11 @@ _TAX_SLABS_BY_COUNTRY = {
         # Simplified bracket approximation of Germany's continuous income
         # tax formula (real Lohnsteuer uses a smooth curve, not flat bands).
         # Boundaries are expressed in TAXABLE-income terms (i.e. already
-        # net of the Grundfreibetrag) — _calculate_annual_tax_de subtracts
-        # the "grundfreibetrag" parameter (engine/standard.py) from annual
-        # gross BEFORE applying these slabs, so there is no separate 0%
-        # bracket here (that would double-count the same tax-free zone
-        # the parameter already represents).
+        # net of the Grundfreibetrag), matching how this display-only
+        # reference table has always been framed — this is a Super Admin
+        # compliance-UI reference list, not consumed by any calculation
+        # (production Germany tax uses the PAP/internal-tariff path in
+        # engine/germany_internal_tax.py, not a slab table).
         dict(min_amount=Decimal("0"),       max_amount=Decimal("5216"),     rate_pct=Decimal("14"),  rate_label="14%",  tax_formula="14% of taxable income (after Grundfreibetrag)", sort_order=1),
         dict(min_amount=Decimal("5216"),    max_amount=Decimal("54216"),    rate_pct=Decimal("30"),  rate_label="30%",  tax_formula="€730 + 30% above €5,216 taxable", sort_order=2),
         dict(min_amount=Decimal("54216"),   max_amount=Decimal("265216"),   rate_pct=Decimal("42"),  rate_label="42%",  tax_formula="€15,430 + 42% above €54,216 taxable", sort_order=3),
@@ -665,23 +665,16 @@ _AU_HELP_THRESHOLD = Decimal("54435")
 _AU_HELP_RATE = Decimal("4.5")
 
 # ── Germany (previously engine/countries/germany.py) ────────────────────
-_DE_GRUNDFREIBETRAG = Decimal("11784")
-_DE_CONTRIBUTION_CEILING = Decimal("96600")
+# _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, and _DE_CHURCH_TAX_RATE
+# (a flat representative Kirchensteuer default) were retired in Phase 4
+# (docs/PHASE_4_GERMANY_LEGACY_PAP_ARCHITECTURE_DECISION_REPORT.md) along
+# with the pre-Phase-7 legacy calculator that was their only consumer —
+# the production path uses germany_pap.CHURCH_TAX_LAND_RATES (per-Land
+# 8%/9% table) and the dedicated GermanyContributionCeiling registry
+# instead. _DE_SOLI_THRESHOLD/_DE_SOLI_RATE remain: the production
+# Regular/Midijob paths still pass them to InternalGermanyWageTaxCalculator.
 _DE_SOLI_THRESHOLD = Decimal("18130")
 _DE_SOLI_RATE = Decimal("5.5")
-# Kirchensteuer (church tax) — a % surcharge on the base income tax
-# (before Soli), only for employees who opt in (church_tax_liable). Real
-# rate varies by federal state (8% in Bavaria/Baden-Württemberg, 9%
-# elsewhere); 9% is used as the representative default.
-# NOTE (Phase 7): this legacy constant/rate model is superseded for the
-# production Germany calculation path by
-# engine/countries/germany_pap.CHURCH_TAX_LAND_RATES (per-Land 8%/9% table,
-# ZP-TAX-DE-2026-001 §8), driven by EmployeeStatutoryProfile.de_church_tax_land
-# rather than a single flat rate. Kept here only because
-# PayrollEmployee.church_tax_liable / _calculate_legacy_simplified still
-# reference it (legacy path, not called by production `calculate()` — see
-# germany.py).
-_DE_CHURCH_TAX_RATE = Decimal("9")
 
 # ── Germany — 2026 Social-Insurance Core Rates (Phase 7) ────────────────
 # ZP-TAX-DE-2026-001 §9 "2026 Social-Insurance Core Rates and Ceilings" —

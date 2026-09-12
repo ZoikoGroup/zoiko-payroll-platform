@@ -26,37 +26,52 @@ Germany production calculation path (Phase 7, ZP-TAX-DE-2026-001).
     trace warning (never a hard reject — not specified as one) when an
     employee is recorded PRIVATE health insurance below the JAEG
     compulsory-insurance threshold (spec §9, acceptance criterion #20).
-3. Attempts Lohnsteuer/Soli/Kirchensteuer via the BMF PAP (Phase 3's
-    PapAlgorithmAsset registry + this phase's germany_pap/core.py executor
-   interface) — and, because no real PAP source exists anywhere in this
-   repository (confirmed at the start of this phase — see
-   docs/PHASE_7_GERMANY_PAP_CALCULATION_INTEGRATION_REPORT.md §4),
-   deterministically raises GermanyPapNotAvailableError rather than
-   fabricating a result. This is the correct, intended behavior today,
-   not a bug — see this phase's "Absolute PAP Rule."
+3. Attempts Lohnsteuer/Soli/Kirchensteuer via the official BMF PAP (Phase
+   3's PapAlgorithmAsset registry + germany_pap/core.py's executor
+   interface) first. Because no certified PAP source exists anywhere in
+   this repository (confirmed at the start of Phase 7, re-confirmed by
+   Phase 8BR — see docs/GERMANY_PAP_8_GATE_EVIDENCE_MATRIX.md), that
+   attempt deterministically raises GermanyPapNotAvailableError — this
+   remains the correct, intended behavior for the OFFICIAL path (the
+   "Absolute PAP Rule": never fabricate a result claiming to be BMF
+   output). Phase 8BR (docs/PHASE_8BR_GERMANY_FUNCTIONAL_PAYROLL_COMPLETION_REPORT.md)
+   catches that specific exception and falls back to a clearly-separate
+   INTERNAL functional wage-tax calculator (germany_internal_tax.py,
+   real section 32a/39b EStG statutory formulas, never presented as
+   BMF-certified) so Regular/Midijob payroll is not permanently blocked
+   while the certified artifact remains unavailable/unlicensed.
 
 Every raised error carries a GermanyCalculationTrace (germany_pap/core.py)
 showing exactly which branches DID resolve before the block, for
 diagnosis — see service.py's germany calculation call sites and the
 `POST /api/payroll/germany/calculation-preview` diagnostic endpoint.
 
-`_calculate_legacy_simplified()` below is the ORIGINAL pre-Phase-7
-calculator (collapsed pension+social-insurance bucket, flat-rate church
-tax off the legacy PayrollEmployee.church_tax_liable column, generic
-bracket-table Lohnsteuer). Retained verbatim, unused by `calculate()`,
-per this phase's explicit instruction not to blindly delete it — kept
-only as a documented reference / for any test that still exercises it
-directly by name.
+Phase 4 (docs/PHASE_4_GERMANY_LEGACY_PAP_ARCHITECTURE_DECISION_REPORT.md):
+the ORIGINAL pre-Phase-7 calculator (`_calculate_legacy_simplified()` —
+collapsed pension+social-insurance bucket, flat-rate church tax off the
+legacy PayrollEmployee.church_tax_liable column, generic bracket-table
+Lohnsteuer via `_calculate_annual_tax_de()`) was retired after a forensic
+audit confirmed zero production/API/migration callers, zero historical
+payroll data computed via this path (Germany has never had a real
+production employee), and that its own regression test asserted nothing
+about calculation correctness — only that the function remained
+importable. Its functionality is fully superseded by `calculate()`
+below (four independently-capped RV/ALV/GKV/PV branches, the per-Land
+CHURCH_TAX_LAND_RATES registry, and the PAP/internal-tariff wage-tax
+path), which is strictly more statutorily complete. See that report for
+the full evidence trail.
 """
 
 from decimal import Decimal
+from typing import Optional
 
 from app.modules.payroll.engine.base import PayrollContext, _round2
-from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR, _calculate_annual_tax, resolve_jurisdiction_parameter
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.countries.shared import MONTHS_PER_YEAR
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     GermanyCalculationError,
     GermanyCalculationTrace,
     GermanyMidijobBaseApplicationNotSpecifiedError,
+    GermanyPapNotAvailableError,
     GermanyStatutoryProfileMissingError,
     build_pap_input,
     trace_tax_data_used,
@@ -77,14 +92,18 @@ from app.modules.payroll.engine.germany_pap.core import (
     resolve_employment_classification,
     resolve_pap_executor,
     resolve_pv_child_category,
+    two_sided_rate,
     validate_employment_classification_against_earnings,
     validate_employment_classification_against_vocational_training,
+)
+from app.modules.payroll.engine.jurisdictions.germany.tax import (
+    GermanyInternalTariffNotAvailableError,
+    InternalGermanyWageTaxCalculator,
 )
 # Fallback constants moved to hardcoded_defaults.py — imported back under
 # their original names so nothing else needs to change.
 from app.modules.payroll.hardcoded_defaults import (
-    _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, _DE_SOLI_THRESHOLD,
-    _DE_SOLI_RATE, _DE_CHURCH_TAX_RATE,
+    _DE_SOLI_THRESHOLD, _DE_SOLI_RATE,
     _DE_RV_EMPLOYEE_RATE, _DE_RV_EMPLOYER_RATE,
     _DE_ALV_EMPLOYEE_RATE, _DE_ALV_EMPLOYER_RATE,
     _DE_GKV_GENERAL_EMPLOYEE_RATE, _DE_GKV_GENERAL_EMPLOYER_RATE,
@@ -191,20 +210,44 @@ def _trace_earning_taxability(trace, ctx) -> None:
             )
 
 
-def _calculate_annual_tax_de(annual_gross: Decimal, slabs, rate_map: dict) -> Decimal:
-    """Retained for `_calculate_legacy_simplified` and for
-    `engine/standard.py`'s backward-compatible re-export — NOT called by
-    the production `calculate()` below, which requires the real PAP."""
-    grundfreibetrag = resolve_jurisdiction_parameter(rate_map, "grundfreibetrag", _DE_GRUNDFREIBETRAG, country="DE")
-    taxable = max(Decimal("0"), annual_gross - grundfreibetrag)
-    base_tax = _calculate_annual_tax(taxable, slabs)
+def _resolve_minijob_midijob_value(parameters: dict, parameter_code: str, default: Decimal) -> Decimal:
+    """Phase 8BK: same 'resolve from the effective-dated registry, fall
+    back to the hardcoded default' pattern as two_sided_rate
+    (germany_pap/core.py) — see
+    service.resolve_all_minijob_midijob_parameters for how `parameters`
+    (ctx.germany_minijob_midijob_parameters) is populated. A single
+    scalar (not an employee/employer pair): every Minijob/Midijob
+    parameter this registry covers is one-sided — a flat rate, a
+    threshold, or one formula coefficient — never a two-sided
+    employee/employer split the way RV/ALV/GKV are.
 
-    soli_threshold = resolve_jurisdiction_parameter(rate_map, "soli_threshold", _DE_SOLI_THRESHOLD, country="DE")
-    soli_rate = resolve_jurisdiction_parameter(rate_map, "soli_rate", _DE_SOLI_RATE, side="employee", country="DE")
-    tax = base_tax
-    if tax > soli_threshold:
-        tax += tax * soli_rate / Decimal("100")
-    return tax, base_tax
+    `parameters` is None/empty for every calculation before this phase's
+    wiring existed and for any test/context that hasn't threaded it
+    through — in both cases this returns `default` unconditionally, so
+    behavior is byte-identical to before this phase for every org that
+    hasn't published a Minijob/Midijob parameter record (i.e. every real
+    org today)."""
+    row = (parameters or {}).get(parameter_code)
+    if row is not None and row.value is not None:
+        return Decimal(row.value)
+    return default
+
+
+def _resolve_church_tax_land_rate(parameters: dict, church_tax_land: Optional[str]) -> Decimal:
+    """Phase 8BL: registry-first, hardcoded-fallback resolution for the
+    general 16-Land Kirchensteuer rate (CHURCH_TAX_LAND_RATES), same
+    pattern as _resolve_minijob_midijob_value above. `church_tax_land`
+    still goes through resolve_church_tax_rate's own validation on the
+    fallback path — an unrecognized/missing Land code is never silently
+    treated as 0% just because no registry override exists; it still
+    raises GermanyStatutoryProfileMissingError exactly as before this
+    phase."""
+    if church_tax_land:
+        parameter_code = f"church_tax_rate_{church_tax_land.lower().replace('-', '_')}"
+        row = (parameters or {}).get(parameter_code)
+        if row is not None and row.value is not None:
+            return Decimal(row.value)
+    return resolve_church_tax_rate(church_tax_land)
 
 
 def _calculate_minijob_path(ctx: PayrollContext, profile, trace: GermanyCalculationTrace, _block) -> dict:
@@ -219,12 +262,25 @@ def _calculate_minijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
     monthly_gross = ctx.gross
     trace.monthly_gross_used = str(monthly_gross)
     pension_exempt = bool(getattr(profile, "de_pension_insurance_exempt", False))
+    de_parameters = getattr(ctx, "germany_minijob_midijob_parameters", None)
 
     result = calculate_minijob(
         monthly_gross=monthly_gross, pension_insurance_exempt=pension_exempt,
-        employer_health_rate=_DE_MINIJOB_EMPLOYER_HEALTH_RATE, employer_pension_rate=_DE_MINIJOB_EMPLOYER_PENSION_RATE,
-        u1_rate=_DE_MINIJOB_U1_RATE, u2_rate=_DE_MINIJOB_U2_RATE, u3_rate=_DE_MINIJOB_U3_RATE,
-        employee_pension_topup_rate=_DE_MINIJOB_EMPLOYEE_PENSION_TOPUP_RATE, flat_tax_rate=_DE_MINIJOB_FLAT_TAX_RATE,
+        employer_health_rate=_resolve_minijob_midijob_value(
+            de_parameters, "minijob_employer_health_rate", _DE_MINIJOB_EMPLOYER_HEALTH_RATE,
+        ),
+        employer_pension_rate=_resolve_minijob_midijob_value(
+            de_parameters, "minijob_employer_pension_rate", _DE_MINIJOB_EMPLOYER_PENSION_RATE,
+        ),
+        u1_rate=_resolve_minijob_midijob_value(de_parameters, "minijob_u1_rate", _DE_MINIJOB_U1_RATE),
+        u2_rate=_resolve_minijob_midijob_value(de_parameters, "minijob_u2_rate", _DE_MINIJOB_U2_RATE),
+        u3_rate=_resolve_minijob_midijob_value(de_parameters, "minijob_u3_rate", _DE_MINIJOB_U3_RATE),
+        employee_pension_topup_rate=_resolve_minijob_midijob_value(
+            de_parameters, "minijob_employee_pension_topup_rate", _DE_MINIJOB_EMPLOYEE_PENSION_TOPUP_RATE,
+        ),
+        flat_tax_rate=_resolve_minijob_midijob_value(
+            de_parameters, "minijob_flat_tax_rate", _DE_MINIJOB_FLAT_TAX_RATE,
+        ),
         # Accident insurance is never computed as a monthly deduction from
         # this call regardless of whether an EmployerTaxProfile exists —
         # see the trace block below for why (same reasoning as the
@@ -273,6 +329,10 @@ def _calculate_minijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
         employee_esi=Decimal("0"),
         employer_esi=result.employer_health + result.employer_u1 + result.employer_u2 + result.employer_u3,
         church_tax=Decimal("0"),
+        # Minijob flat tax is employer-remitted Pauschsteuer — there is no
+        # employee Solidaritätszuschlag on the Minijob path (zero, never
+        # fabricated). Persisted via PayrollResult.soli/PayslipItem.soli.
+        soli=Decimal("0"),
         tds=Decimal("0"),
         annual_tax=result.flat_tax * MONTHS_PER_YEAR,
         _germany_statutory_profile_id=trace.statutory_profile_id,
@@ -289,21 +349,34 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
     for the full citation and Phase 8J's report for the fetched evidence).
     This resolves the gap Phase 8I explicitly, deliberately left open.
 
-    Wage tax (Lohnsteuer/Soli/Kirchensteuer) is NOT different for Midijob
-    — it still requires the real BMF PAP, exactly like REGULAR — so this
-    function still ultimately raises GermanyPapNotAvailableError, exactly
-    like the REGULAR path below, after computing and tracing every social-
-    insurance branch. Midijob social-insurance readiness is NOT the same
-    as Midijob full-payroll readiness — see Phase 8J's report §concluding
-    that distinction explicitly."""
+    Wage tax (Lohnsteuer/Soli/Kirchensteuer): tries the official BMF PAP
+    first, exactly like REGULAR; since no certified PAP asset/executor
+    exists in this codebase (unchanged fact), falls back to the internal
+    functional wage-tax calculator (germany_internal_tax.py, Phase 8BR) so
+    a Midijob employee can reach a COMPLETE calculation and a real
+    payslip, clearly labeled INTERNAL_FUNCTIONAL_REFERENCE rather than
+    BMF-certified."""
     monthly_gross = ctx.gross
     trace.monthly_gross_used = str(monthly_gross)
+    de_parameters = getattr(ctx, "germany_minijob_midijob_parameters", None)
 
     total_base = calculate_midijob_total_base(
-        monthly_gross, multiplier=_DE_MIDIJOB_TOTAL_BASE_MULTIPLIER, subtrahend=_DE_MIDIJOB_TOTAL_BASE_SUBTRAHEND,
+        monthly_gross,
+        multiplier=_resolve_minijob_midijob_value(
+            de_parameters, "midijob_total_base_multiplier", _DE_MIDIJOB_TOTAL_BASE_MULTIPLIER,
+        ),
+        subtrahend=_resolve_minijob_midijob_value(
+            de_parameters, "midijob_total_base_subtrahend", _DE_MIDIJOB_TOTAL_BASE_SUBTRAHEND,
+        ),
     )
     employee_base = calculate_midijob_employee_base(
-        monthly_gross, multiplier=_DE_MIDIJOB_EMPLOYEE_BASE_MULTIPLIER, subtrahend=_DE_MIDIJOB_EMPLOYEE_BASE_SUBTRAHEND,
+        monthly_gross,
+        multiplier=_resolve_minijob_midijob_value(
+            de_parameters, "midijob_employee_base_multiplier", _DE_MIDIJOB_EMPLOYEE_BASE_MULTIPLIER,
+        ),
+        subtrahend=_resolve_minijob_midijob_value(
+            de_parameters, "midijob_employee_base_subtrahend", _DE_MIDIJOB_EMPLOYEE_BASE_SUBTRAHEND,
+        ),
     )
     trace.midijob_total_contribution_base = str(total_base)
     trace.midijob_employee_contribution_base = str(employee_base)
@@ -311,35 +384,56 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
     trace.step(f"Computed Midijob employee contribution base: {employee_base}")
 
     # ── RV (Rentenversicherung) ──
+    # Phase 8BJ: resolves through the SAME rate_map (canonical-tax-pack-
+    # aware, effective-dated when an org has opted in — see
+    # engine/tax_resolver.py) the REGULAR path's calculate_rv() already
+    # uses, via the identical "rv_pension" component key — the statutory
+    # rate itself doesn't change based on employment classification, so
+    # REGULAR and MIDIJOB must never be able to disagree on it. Falls
+    # back to the identical hardcoded 2026 constants when no canonical
+    # override resolves, so behavior is byte-identical to before this
+    # phase for every org that hasn't opted into a canonical tax pack.
     if bool(getattr(profile, "de_pension_insurance_exempt", False)):
         rv_total = rv_employee = rv_employer = Decimal("0")
         trace.step("Midijob RV skipped — employee pension-insurance exempt.")
     else:
-        rv_combined = _DE_RV_EMPLOYEE_RATE + _DE_RV_EMPLOYER_RATE
+        rv_employee_pct, rv_employer_pct = two_sided_rate(
+            ctx.rate_map, "rv_pension", _DE_RV_EMPLOYEE_RATE, _DE_RV_EMPLOYER_RATE,
+        )
+        rv_combined = rv_employee_pct + rv_employer_pct
         rv_total, rv_employee, rv_employer = calculate_midijob_branch_contribution(
-            total_base, employee_base, combined_rate_pct=rv_combined, employee_rate_pct=_DE_RV_EMPLOYEE_RATE,
+            total_base, employee_base, combined_rate_pct=rv_combined, employee_rate_pct=rv_employee_pct,
         )
         trace.step("Computed Midijob RV (Rentenversicherung) via the official 3-step mechanism.")
     trace.resolve_ok("midijob_rv", total=rv_total, employee=rv_employee, employer=rv_employer)
 
-    # ── ALV (Arbeitslosenversicherung) ──
+    # ── ALV (Arbeitslosenversicherung) ── same rate_map consistency as RV above.
     if bool(getattr(profile, "de_unemployment_insurance_exempt", False)):
         alv_total = alv_employee = alv_employer = Decimal("0")
         trace.step("Midijob ALV skipped — employee unemployment-insurance exempt.")
     else:
-        alv_combined = _DE_ALV_EMPLOYEE_RATE + _DE_ALV_EMPLOYER_RATE
+        alv_employee_pct, alv_employer_pct = two_sided_rate(
+            ctx.rate_map, "alv_unemployment", _DE_ALV_EMPLOYEE_RATE, _DE_ALV_EMPLOYER_RATE,
+        )
+        alv_combined = alv_employee_pct + alv_employer_pct
         alv_total, alv_employee, alv_employer = calculate_midijob_branch_contribution(
-            total_base, employee_base, combined_rate_pct=alv_combined, employee_rate_pct=_DE_ALV_EMPLOYEE_RATE,
+            total_base, employee_base, combined_rate_pct=alv_combined, employee_rate_pct=alv_employee_pct,
         )
         trace.step("Computed Midijob ALV (Arbeitslosenversicherung) via the official 3-step mechanism.")
     trace.resolve_ok("midijob_alv", total=alv_total, employee=alv_employee, employer=alv_employer)
 
-    # ── GKV (Krankenversicherung) ──
+    # ── GKV (Krankenversicherung) ── same rate_map consistency as RV/ALV above
+    # for the GENERAL rate; the fund-specific supplementary rate is
+    # unaffected (already resolved from the separately effective-dated
+    # GermanyHealthFund registry inside calculate_midijob_gkv itself).
     health_insurance_status = getattr(profile, "de_health_insurance_status", None)
+    gkv_general_employee_pct, gkv_general_employer_pct = two_sided_rate(
+        ctx.rate_map, "gkv_general", _DE_GKV_GENERAL_EMPLOYEE_RATE, _DE_GKV_GENERAL_EMPLOYER_RATE,
+    )
     try:
         gkv_total, gkv_employee, gkv_employer, kvz_rate = calculate_midijob_gkv(
             total_base, employee_base, health_insurance_status=health_insurance_status, health_fund=ctx.germany_health_fund,
-            gkv_general_employee_rate=_DE_GKV_GENERAL_EMPLOYEE_RATE, gkv_general_employer_rate=_DE_GKV_GENERAL_EMPLOYER_RATE,
+            gkv_general_employee_rate=gkv_general_employee_pct, gkv_general_employer_rate=gkv_general_employer_pct,
         )
     except GermanyCalculationError as exc:
         _block(exc, "Midijob GKV (health insurance) calculation blocked.")
@@ -367,7 +461,9 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
             pv_result = calculate_midijob_pv(
                 total_base, employee_base, pv_configuration=ctx.germany_pv_configuration,
                 is_childless=(pv_child_category == "CHILDLESS"),
-                childless_surcharge_rate_pct=_DE_PV_CHILDLESS_SURCHARGE_RATE,
+                childless_surcharge_rate_pct=_resolve_minijob_midijob_value(
+                    de_parameters, "midijob_pv_childless_surcharge_rate", _DE_PV_CHILDLESS_SURCHARGE_RATE,
+                ),
             )
         except GermanyCalculationError as exc:
             _block(exc, "Midijob PV (long-term care insurance) calculation blocked.")
@@ -388,7 +484,10 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
     # calculated on" (§358 SGB III, confirmed live) — for Midijob that is
     # `total_base` (the SAME base calculate_midijob_branch_contribution
     # already uses for RV above), never raw monthly_gross.
-    employer_insolvency_levy = calculate_employer_insolvency_levy(total_base, _DE_INSOLVENCY_LEVY_RATE)
+    employer_insolvency_levy = calculate_employer_insolvency_levy(
+        total_base,
+        _resolve_minijob_midijob_value(de_parameters, "employer_insolvency_levy_rate", _DE_INSOLVENCY_LEVY_RATE),
+    )
     # Phase 8W: U1 now resolves from the employer-selected GermanyHealthFundU1Tariff,
     # falling back to the deprecated GermanyHealthFund.u1_rate_pct for backward
     # compatibility. U2 remains fund-level. Applied to monthly_gross (the employee's
@@ -441,10 +540,45 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
     trace.ceiling_gkv_pv_id = getattr(ctx.germany_ceiling_gkv_pv, "id", None)
     _trace_ceiling(trace, "gkv_pv", ctx.germany_ceiling_gkv_pv)
 
-    # ── Wage tax: still requires the real BMF PAP, exactly like REGULAR ──
+    # Phase 8BU: see the REGULAR path's identical field for the full
+    # rationale — never fabricated as zero; non-empty means the return
+    # dict below is PARTIAL, not COMPLETE.
+    unavailable_components: list = []
+
+    # ── Church tax (Kirchensteuer) — same resolution as REGULAR ──
+    church_tax_liable = bool(getattr(profile, "de_church_tax_liable", False))
+    church_tax_rate = None
+    if church_tax_liable:
+        church_tax_exception = getattr(ctx, "germany_church_tax_exception", None)
+        if church_tax_exception is not None:
+            church_tax_rate = church_tax_exception.exception_rate_pct
+            trace.step(
+                f"Resolved church tax EXCEPTION rate: {church_tax_rate}% "
+                f"(Land={getattr(profile, 'de_church_tax_land', None)}, "
+                f"denomination={getattr(profile, 'de_church_tax_denomination', None)}, "
+                f"PLZ={getattr(profile, 'de_church_tax_municipality_postal_code', None)})"
+            )
+        else:
+            try:
+                church_tax_rate = _resolve_church_tax_land_rate(de_parameters, getattr(profile, "de_church_tax_land", None))
+            except GermanyCalculationError as exc:
+                unavailable_components.append("church_tax")
+                trace.warnings.append(
+                    f"GERMANY_CHURCH_TAX_UNAVAILABLE: {exc.message} Church tax could not be computed; "
+                    "all other components (SI, employer levies, wage tax if resolvable) are unaffected."
+                )
+                trace.step(f"Midijob church tax Land-rate resolution blocked ({exc.code}) — church tax marked UNAVAILABLE, continuing.")
+                church_tax_rate = None
+            else:
+                trace.step(f"Resolved church tax Land rate: {church_tax_rate}%")
+        if church_tax_rate is not None:
+            trace.church_tax_rate_used = str(church_tax_rate)
+
+    # ── Wage tax: tries the official BMF PAP first, exactly like REGULAR;
+    # falls back to the internal functional wage-tax calculator when (as
+    # today) no certified PAP asset/executor is available — Phase 8BR.
     trace.pap_asset_id = getattr(ctx.germany_pap_asset, "id", None)
     if ctx.germany_pap_asset is not None:
-        trace.pap_version = getattr(ctx.germany_pap_asset, "pap_version", None)
         trace.pap_source_content_sha256 = getattr(ctx.germany_pap_asset, "source_content_sha256", None)
         trace.pap_build_identifier = getattr(ctx.germany_pap_asset, "build_identifier", None)
         trace.pap_tax_year = getattr(ctx.germany_pap_asset, "tax_year", None)
@@ -453,6 +587,9 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
         pay_frequency=getattr(ctx, "pay_frequency", None) or "Monthly",
         sonstb=getattr(ctx, "germany_sonstb", None),
     )
+    pap_input.vorsorgepauschale_annual_cents = int(
+        ((rv_employee + alv_employee + gkv_employee + pv_employee) * MONTHS_PER_YEAR * 100).to_integral_value()
+    )
     trace_tax_data_used(trace, profile, pap_input)
     main_secondary_warning = check_main_secondary_employment_consistency(
         tax_class=pap_input.stkl, is_main_employment=getattr(profile, "de_main_employment", None),
@@ -460,10 +597,80 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
     if main_secondary_warning:
         trace.warnings.append(main_secondary_warning)
     executor = resolve_pap_executor(ctx.germany_pap_asset)
+    pap_result = None
     try:
-        executor.execute(pap_input)
+        pap_result = executor.execute(pap_input)
+    except GermanyPapNotAvailableError as exc:
+        trace.step(
+            f"Official BMF PAP unavailable ({exc.message}) — falling back to the internal functional "
+            "wage-tax calculator (germany_internal_tax.py, INTERNAL_FUNCTIONAL_REFERENCE, not BMF-certified)."
+        )
+        try:
+            internal_executor = InternalGermanyWageTaxCalculator(
+                soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE,
+                payroll_date=getattr(ctx, "germany_payroll_date", None),
+            )
+            pap_result = internal_executor.execute(pap_input)
+        except GermanyInternalTariffNotAvailableError as tariff_exc:
+            # Phase 8BU (Part 21) — see the REGULAR path's identical branch
+            # for the full rationale: RV/ALV/GKV/PV/employer-levies above
+            # are real and already resolved; do not discard them just
+            # because wage tax specifically is unavailable for this date.
+            for component in ("wage_tax", "soli", "church_tax"):
+                if component not in unavailable_components:
+                    unavailable_components.append(component)
+            trace.warnings.append(
+                f"GERMANY_WAGE_TAX_UNAVAILABLE: {tariff_exc.message} Neither the official BMF PAP nor the "
+                "internal functional reference calculator could compute wage tax/Soli for this payroll date; "
+                "church tax is also unavailable as a consequence. SI and employer levies above are unaffected."
+            )
+            trace.step(f"Midijob internal wage-tax fallback also unavailable ({tariff_exc.code}) — wage tax/Soli/church tax marked UNAVAILABLE, continuing.")
+        else:
+            trace.warnings.extend(pap_result.warnings)
+            # Structured (not prose-only) surface for the internal calculator's
+            # own working figures and disclosed approximations — a consumer
+            # (frontend diagnostic view, audit tooling) can read
+            # snapshot.resolved.internal_wage_tax.REFERENCE_APPROXIMATION
+            # directly instead of parsing warning text.
+            if pap_result.raw_outputs:
+                trace.resolve_ok("internal_wage_tax", **pap_result.raw_outputs)
     except GermanyCalculationError as exc:
         _block(exc, "Midijob social-insurance contributions computed successfully (see trace); PAP (Lohnsteuer/Soli) execution blocked.")
+
+    if pap_result is not None:
+        trace.pap_version = pap_result.pap_version
+        trace.step("Midijob wage tax (Lohnsteuer/Soli) execution complete.")
+        monthly_lohnsteuer_soli = _round2((pap_result.lohnsteuer + pap_result.soli) / MONTHS_PER_YEAR)
+        annual_tax = pap_result.lohnsteuer + pap_result.soli
+        soli_monthly = _round2(pap_result.soli / MONTHS_PER_YEAR)
+        church_tax = (
+            _round2((pap_result.church_tax_assessment_base * church_tax_rate / Decimal("100")) / MONTHS_PER_YEAR)
+            if (church_tax_liable and church_tax_rate is not None) else Decimal("0")
+        )
+    else:
+        monthly_lohnsteuer_soli = Decimal("0")
+        annual_tax = Decimal("0")
+        soli_monthly = Decimal("0")
+        church_tax = Decimal("0")
+
+    trace.unavailable_components = list(unavailable_components)
+    if unavailable_components:
+        trace.calculation_status = "PARTIALLY_CALCULATED"
+        trace.step(f"Midijob calculation PARTIAL — unavailable components: {', '.join(unavailable_components)}.")
+    else:
+        trace.calculation_status = "COMPLETE"
+
+    return dict(
+        employee_pf=rv_employee, employer_pf=rv_employer,
+        employee_esi=alv_employee + gkv_employee + pv_employee,
+        employer_esi=alv_employer + gkv_employer + pv_employer + employer_insolvency_levy,
+        church_tax=church_tax,
+        tds=monthly_lohnsteuer_soli, annual_tax=annual_tax,
+        soli=soli_monthly,
+        _germany_unavailable_components=unavailable_components,
+        _germany_statutory_profile_id=trace.statutory_profile_id,
+        _germany_calculation_snapshot=trace.to_dict(),
+    )
 
 
 def calculate(ctx: PayrollContext) -> dict:
@@ -514,10 +721,16 @@ def calculate(ctx: PayrollContext) -> dict:
     trace.employment_classification = classification
     trace.step(f"Resolved employment classification: {classification}")
 
+    de_parameters = getattr(ctx, "germany_minijob_midijob_parameters", None)
     try:
         validate_employment_classification_against_earnings(
             classification, ctx.gross,
-            minijob_upper_threshold=_DE_MINIJOB_UPPER_THRESHOLD, midijob_upper_threshold=_DE_MIDIJOB_UPPER_THRESHOLD,
+            minijob_upper_threshold=_resolve_minijob_midijob_value(
+                de_parameters, "minijob_upper_threshold", _DE_MINIJOB_UPPER_THRESHOLD,
+            ),
+            midijob_upper_threshold=_resolve_minijob_midijob_value(
+                de_parameters, "midijob_upper_threshold", _DE_MIDIJOB_UPPER_THRESHOLD,
+            ),
         )
     except GermanyCalculationError as exc:
         _block(exc, f"Employment classification {classification} is inconsistent with this period's earnings.")
@@ -617,7 +830,10 @@ def calculate(ctx: PayrollContext) -> dict:
     # one path; Minijob's own U3 was always correctly below any
     # conceivable ceiling and needed no such cap).
     u3_assessment_base_monthly = _round2(min(annual_gross, Decimal(ctx.germany_ceiling_rv_alv.annual_ceiling)) / MONTHS_PER_YEAR)
-    employer_insolvency_levy = calculate_employer_insolvency_levy(u3_assessment_base_monthly, _DE_INSOLVENCY_LEVY_RATE)
+    employer_insolvency_levy = calculate_employer_insolvency_levy(
+        u3_assessment_base_monthly,
+        _resolve_minijob_midijob_value(de_parameters, "employer_insolvency_levy_rate", _DE_INSOLVENCY_LEVY_RATE),
+    )
     # Phase 8U: U1/U2 (health-fund-specific, spec DE-D06) now resolvable
     # when the employee's own resolved GermanyHealthFund record carries
     # published rates (new u1_rate_pct/u2_rate_pct columns) — never a
@@ -674,6 +890,12 @@ def calculate(ctx: PayrollContext) -> dict:
     if jaeg_warning:
         trace.warnings.append(jaeg_warning)
 
+    # Phase 8BU: components genuinely unavailable for THIS employee this
+    # run (never fabricated as zero) — if this list is non-empty by the
+    # time the return dict is built, the whole result is PARTIAL, not
+    # COMPLETE, even though every OTHER component below is real.
+    unavailable_components: list = []
+
     church_tax_liable = bool(getattr(profile, "de_church_tax_liable", False))
     church_tax_rate = None
     if church_tax_liable:
@@ -694,10 +916,28 @@ def calculate(ctx: PayrollContext) -> dict:
             )
         else:
             try:
-                church_tax_rate = resolve_church_tax_rate(getattr(profile, "de_church_tax_land", None))
+                church_tax_rate = _resolve_church_tax_land_rate(de_parameters, getattr(profile, "de_church_tax_land", None))
             except GermanyCalculationError as exc:
-                _block(exc, "Church tax Land-rate resolution blocked.")
-            trace.step(f"Resolved church tax Land rate: {church_tax_rate}%")
+                # Phase 8BU (Part 21 — "do not automatically block unrelated
+                # components"): a missing church-tax Land rate is UNRELATED
+                # to RV/ALV/GKV/PV/employer levies, all of which have
+                # already resolved successfully above at this point in the
+                # function. Rather than discarding those real, computed
+                # figures via _block()'s immediate raise, this is recorded
+                # as a PARTIAL-calculation condition and wage tax is still
+                # attempted below — see `unavailable_components` and the
+                # PARTIAL-result construction at the end of this function.
+                unavailable_components.append("church_tax")
+                trace.warnings.append(
+                    f"GERMANY_CHURCH_TAX_UNAVAILABLE: {exc.message} Church tax could not be computed; "
+                    "all other components (SI, employer levies, wage tax if resolvable) are unaffected."
+                )
+                trace.step(f"Church tax Land-rate resolution blocked ({exc.code}) — church tax marked UNAVAILABLE, continuing.")
+                church_tax_rate = None
+            else:
+                trace.step(f"Resolved church tax Land rate: {church_tax_rate}%")
+        if church_tax_rate is not None:
+            trace.church_tax_rate_used = str(church_tax_rate)
 
     # ── Lohnsteuer / Soli / Kirchensteuer base — requires the real BMF PAP ──
     trace.pap_asset_id = getattr(ctx.germany_pap_asset, "id", None)
@@ -712,6 +952,9 @@ def calculate(ctx: PayrollContext) -> dict:
         pay_frequency=getattr(ctx, "pay_frequency", None) or "Monthly",
         sonstb=getattr(ctx, "germany_sonstb", None),
     )
+    pap_input.vorsorgepauschale_annual_cents = int(
+        ((employee_rv + employee_alv + employee_gkv + employee_pv) * MONTHS_PER_YEAR * 100).to_integral_value()
+    )
     trace_tax_data_used(trace, profile, pap_input)
     main_secondary_warning = check_main_secondary_employment_consistency(
         tax_class=pap_input.stkl, is_main_employment=getattr(profile, "de_main_employment", None),
@@ -719,82 +962,99 @@ def calculate(ctx: PayrollContext) -> dict:
     if main_secondary_warning:
         trace.warnings.append(main_secondary_warning)
     executor = resolve_pap_executor(ctx.germany_pap_asset)
+    pap_result = None
     try:
         pap_result = executor.execute(pap_input)
+    except GermanyPapNotAvailableError as exc:
+        trace.step(
+            f"Official BMF PAP unavailable ({exc.message}) — falling back to the internal functional "
+            "wage-tax calculator (germany_internal_tax.py, INTERNAL_FUNCTIONAL_REFERENCE, not BMF-certified)."
+        )
+        try:
+            internal_executor = InternalGermanyWageTaxCalculator(
+                soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE,
+                payroll_date=getattr(ctx, "germany_payroll_date", None),
+            )
+            pap_result = internal_executor.execute(pap_input)
+        except GermanyInternalTariffNotAvailableError as tariff_exc:
+            # Phase 8BU (Part 21): the OFFICIAL PAP is unavailable AND the
+            # internal functional fallback is ALSO unavailable for this
+            # specific payroll date (e.g. a date before the internal
+            # calculator's own earliest verified tariff version). RV/ALV/
+            # GKV/PV/employer-levies above are still real and already
+            # resolved — do not discard them. Wage tax, Soli, and (since
+            # it depends on the wage-tax assessment base) church tax are
+            # all marked genuinely UNAVAILABLE, never fabricated as zero;
+            # the function falls through to the PARTIAL-result branch below.
+            for component in ("wage_tax", "soli", "church_tax"):
+                if component not in unavailable_components:
+                    unavailable_components.append(component)
+            trace.warnings.append(
+                f"GERMANY_WAGE_TAX_UNAVAILABLE: {tariff_exc.message} Neither the official BMF PAP nor the "
+                "internal functional reference calculator could compute wage tax/Soli for this payroll date; "
+                "church tax is also unavailable as a consequence (its assessment base depends on wage tax). "
+                "SI and employer levies above are unaffected."
+            )
+            trace.step(f"Internal wage-tax fallback also unavailable ({tariff_exc.code}) — wage tax/Soli/church tax marked UNAVAILABLE, continuing.")
+        else:
+            trace.warnings.extend(pap_result.warnings)
+            # Structured (not prose-only) surface for the internal calculator's
+            # own working figures and disclosed approximations — a consumer
+            # (frontend diagnostic view, audit tooling) can read
+            # snapshot.resolved.internal_wage_tax.REFERENCE_APPROXIMATION
+            # directly instead of parsing warning text.
+            if pap_result.raw_outputs:
+                trace.resolve_ok("internal_wage_tax", **pap_result.raw_outputs)
     except GermanyCalculationError as exc:
         _block(exc, "PAP (Lohnsteuer/Soli) execution blocked.")
 
-    # Unreachable with the current UnavailablePapExecutor — written
-    # correctly for the future phase that implements a real PapExecutor.
-    trace.calculation_status = "COMPLETE"
-    trace.step("PAP execution complete.")
-    monthly_lohnsteuer_soli = _round2((pap_result.lohnsteuer + pap_result.soli) / MONTHS_PER_YEAR)
-    church_tax = (
-        _round2((pap_result.church_tax_assessment_base * church_tax_rate / Decimal("100")) / MONTHS_PER_YEAR)
-        if church_tax_liable else Decimal("0")
-    )
+    if pap_result is not None:
+        trace.pap_version = pap_result.pap_version
+        trace.step("Wage tax (Lohnsteuer/Soli) execution complete.")
+        monthly_lohnsteuer_soli = _round2((pap_result.lohnsteuer + pap_result.soli) / MONTHS_PER_YEAR)
+        annual_tax = pap_result.lohnsteuer + pap_result.soli
+        soli_monthly = _round2(pap_result.soli / MONTHS_PER_YEAR)
+        church_tax = (
+            _round2((pap_result.church_tax_assessment_base * church_tax_rate / Decimal("100")) / MONTHS_PER_YEAR)
+            if (church_tax_liable and church_tax_rate is not None) else Decimal("0")
+        )
+    else:
+        # Wage tax (and therefore Soli/church tax) is genuinely
+        # UNAVAILABLE for this payroll date — see the
+        # GermanyInternalTariffNotAvailableError branch above. Never
+        # fabricated as zero-because-successful; the PARTIAL branch below
+        # is what actually communicates this to the caller/UI.
+        monthly_lohnsteuer_soli = Decimal("0")
+        annual_tax = Decimal("0")
+        soli_monthly = Decimal("0")
+        church_tax = Decimal("0")
+
+    trace.unavailable_components = list(unavailable_components)
+    if unavailable_components:
+        trace.calculation_status = "PARTIALLY_CALCULATED"
+        trace.step(f"Calculation PARTIAL — unavailable components: {', '.join(unavailable_components)}.")
+    else:
+        trace.calculation_status = "COMPLETE"
 
     return dict(
         employee_pf=employee_rv, employer_pf=employer_rv,
         employee_esi=employee_alv + employee_gkv + employee_pv,
         employer_esi=employer_alv + employer_gkv + employer_pv + employer_insolvency_levy,
         church_tax=church_tax,
-        tds=monthly_lohnsteuer_soli, annual_tax=pap_result.lohnsteuer + pap_result.soli,
+        tds=monthly_lohnsteuer_soli, annual_tax=annual_tax,
+        # Soli's monthly amount — informational, already folded into `tds`
+        # above (monthly_lohnsteuer_soli = (Lohnsteuer + Soli)/12), carried
+        # so service.py can persist it onto PayslipItem.soli without
+        # re-deriving it from the (sub-annual) PAP period outputs.
+        soli=soli_monthly,
+        # Phase 8BU: non-empty ONLY when this is a PARTIAL result (see
+        # service.py's consumer, which sets PayslipStatus.PARTIAL and
+        # skips computing a fabricated net_pay when this is present).
+        _germany_unavailable_components=unavailable_components,
         # Not part of PayrollResult's dataclass fields (read via .get() with
         # a default by engine/standard.py, so harmless to include) — carried
         # through so service.py can persist the Phase 7 statutory snapshot
         # (see service._compute_payslip_values) without a second resolve.
         _germany_statutory_profile_id=trace.statutory_profile_id,
         _germany_calculation_snapshot=trace.to_dict(),
-    )
-
-
-def _calculate_legacy_simplified(ctx: PayrollContext) -> dict:
-    """PRE-PHASE-7 Germany calculator. Simplified: one collapsed
-    pension+social-insurance bucket, generic bracket-table Lohnsteuer
-    (not the BMF PAP), flat-rate church tax off the legacy
-    PayrollEmployee.church_tax_liable column. NOT called by `calculate()`
-    above — retained only as a reference/for any test exercising it
-    directly by name, per this phase's explicit "do not blindly delete"
-    instruction. Do not wire this back into `_COUNTRY_CALC["DE"]`."""
-    rate_map = ctx.rate_map
-    gross = ctx.gross
-    annual_gross = gross * MONTHS_PER_YEAR
-
-    contribution_ceiling = resolve_jurisdiction_parameter(rate_map, "contribution_ceiling", _DE_CONTRIBUTION_CEILING, country="DE")
-    annual_contribution_base = min(annual_gross, contribution_ceiling)
-
-    pension_rate = rate_map.get("pension")
-    employee_pf = (
-        _round2((annual_contribution_base * (pension_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if pension_rate and pension_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_pf = (
-        _round2((annual_contribution_base * (pension_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if pension_rate and pension_rate.employer_rate_pct else Decimal("0")
-    )
-
-    social_rate = rate_map.get("social-insurance")
-    employee_esi = (
-        _round2((annual_contribution_base * (social_rate.employee_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if social_rate and social_rate.employee_rate_pct else Decimal("0")
-    )
-    employer_esi = (
-        _round2((annual_contribution_base * (social_rate.employer_rate_pct / 100)) / MONTHS_PER_YEAR)
-        if social_rate and social_rate.employer_rate_pct else Decimal("0")
-    )
-
-    annual_tax, base_tax = _calculate_annual_tax_de(annual_gross, ctx.slabs, rate_map)
-    tds = _round2(annual_tax / MONTHS_PER_YEAR)
-
-    church_tax = Decimal("0")
-    if ctx.church_tax_liable:
-        church_tax_rate = resolve_jurisdiction_parameter(rate_map, "church_tax_rate", _DE_CHURCH_TAX_RATE, side="employee", country="DE")
-        church_tax = _round2((base_tax * church_tax_rate / Decimal("100")) / MONTHS_PER_YEAR)
-
-    return dict(
-        employee_pf=employee_pf, employer_pf=employer_pf,
-        employee_esi=employee_esi, employer_esi=employer_esi,
-        church_tax=church_tax,
-        tds=tds, annual_tax=annual_tax,
     )

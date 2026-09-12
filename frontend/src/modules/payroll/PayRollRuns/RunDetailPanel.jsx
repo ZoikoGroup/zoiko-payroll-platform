@@ -40,6 +40,11 @@ function StatusBadge({ status }) {
     Paid: "bg-primary/10 text-primary",
     Closed: "bg-foreground-muted/10 text-foreground-muted",
     Pending: "bg-warning/10 text-warning",
+    Failed: "bg-error/10 text-error",
+    // Phase 8BU: some components genuinely calculated, at least one other
+    // (typically wage tax) genuinely unavailable — distinct from both a
+    // normal Pending payslip and a fully Failed/blocked one.
+    Partial: "bg-warning/10 text-warning",
   };
   const cls = map[status] || "bg-foreground-muted/10 text-foreground-muted";
   return (
@@ -69,8 +74,15 @@ const BREAKDOWN_COLUMNS = [
   { key: "net", label: "Net Salary" },
   { key: "bankName", label: "Bank Name" },
   { key: "account", label: "Account No." },
-  { key: "paymentStatus", label: "Payment Status" },
-  { key: "payslipStatus", label: "Payslip Status" },
+  // Phase 8BS: was two columns ("Payment Status"/"Payslip Status") both
+  // rendering the exact same <StatusBadge status={item.status} /> — a
+  // single PayslipStatus enum (Pending/Paid/Failed) has no second,
+  // genuinely distinct status dimension to show, so this was pure
+  // redundancy, not two different things. Collapsed to one; the actual
+  // block reason (for a Failed row) is now populated into `item.notes`
+  // by the backend (service.py's GermanyCalculationBlockedException
+  // handler) and shown in the Remarks column below.
+  { key: "payslipStatus", label: "Status" },
   { key: "remarks", label: "Remarks" },
 ];
 
@@ -89,6 +101,12 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
   const deductions = [
     ["LOP Deduction", item.attendanceDeduction],
     ...getIncomeTaxLines(item),
+    // Germany: Kirchensteuer/Soli are real, persisted, API-serialized
+    // figures (item.churchTax/item.soli — see _serialize_payslip) that
+    // this run-detail breakdown never rendered, even though the on-screen
+    // PayslipStub and payslip PDF both surface them.
+    ...(labels.churchTax ? [[labels.churchTax, item.churchTax]] : []),
+    ...(labels.solidaritySurcharge ? [[labels.solidaritySurcharge, item.soli]] : []),
     [labels.pf, item.pf],
     [labels.esi, item.esi],
     ["Professional Tax", item.professionalTax],
@@ -107,9 +125,23 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     [labels.employerPension, item.employerPension],
     ["Employer National Insurance", item.employerNi],
   ].filter(([, v]) => Number(v) > 0);
+  const employerContributionsTotal = employerContributions.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
+  const employerTotalCost = (Number(item.salary) || 0) + employerContributionsTotal;
+  // Phase 8BV: previously only discoverable via a truncated free-text
+  // Remarks cell (item.notes) — the structured list the backend already
+  // serializes (germanyUnavailableComponents) is now shown as its own
+  // first-class notice, matching the Germany Summary tab's own rendering.
+  const unavailableComponents = item.germanyUnavailableComponents || [];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div>
+      {unavailableComponents.length > 0 && (
+        <div className="mb-3 rounded-md bg-warning/10 border border-warning/30 px-3 py-2 text-[12px] text-foreground">
+          <span className="font-bold text-warning">Partially calculated —</span>{" "}
+          unavailable: <span className="font-mono">{unavailableComponents.join(", ")}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div>
         <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-2">Earnings</p>
         {earnings.length === 0 ? (
@@ -154,6 +186,15 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
             ))}
           </dl>
         )}
+        {/* Employer total cost = gross + employer contributions — the
+            reconciliation invariant this run detail never surfaced
+            despite every underlying figure already being on-screen
+            above. */}
+        <div className="mt-2 flex items-center justify-between border-t border-border pt-1.5 text-[12px]">
+          <dt className="font-bold text-foreground-muted">Employer Total Cost</dt>
+          <dd className="font-bold text-category-teal">{fmtCurrencyLocal(employerTotalCost, fmtCurrency)}</dd>
+        </div>
+      </div>
       </div>
     </div>
   );
@@ -258,8 +299,7 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
         <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{item.bankName || "—"}</td>
         <td className="px-3 py-3 text-xs text-foreground-muted whitespace-nowrap">{maskAccount(item.bankAccount)}</td>
         <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={item.status} /></td>
-        <td className="px-3 py-3 whitespace-nowrap"><StatusBadge status={item.status} /></td>
-        <td className="px-3 py-3 text-xs text-foreground-muted max-w-[160px] truncate">{item.notes || "—"}</td>
+        <td className="px-3 py-3 text-xs text-foreground-muted max-w-[220px] truncate" title={item.notes || ""}>{item.notes || "—"}</td>
       </tr>
       {open && (
         <tr className="bg-background">

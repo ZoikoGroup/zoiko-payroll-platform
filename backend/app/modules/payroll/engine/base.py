@@ -176,6 +176,14 @@ class PayrollContext:
     # those two are resolved. Absent/published-None means NOT_CONFIGURED —
     # the engine surfaces it in the trace and never invents a classification.
     germany_earning_taxability: dict = None     # {earning_type: rule-or-None}
+    # Phase 8BK — the resolved Minijob/Midijob statutory parameter
+    # registry (service.resolve_all_minijob_midijob_parameters), keyed by
+    # parameter_code -> GermanyMinijobMidijobParameter | None. Absent/None
+    # for a given code means "no PUBLISHED record covers this payroll
+    # date" — engine/countries/germany.py falls back to the identical
+    # hardcoded 2026 constant it always used, so no existing calculation
+    # changes just because this field now exists.
+    germany_minijob_midijob_parameters: dict = None
     # Canada TD1 federal total claim amount. None for every non-CA
     # employee, and for CA employees until explicitly set —
     # engine/countries/canada.py falls back to the dynamic income-tapered
@@ -353,6 +361,16 @@ class PayrollResult:
     # has_postgrad_loan above. Always 0 unless that flag is explicitly set.
     postgrad_loan_deduction: Decimal = Decimal("0")
     church_tax: Decimal = Decimal("0")
+    # Germany: Solidaritätszuschlag — monthly amount from an executed BMF
+    # PAP run (germany_pap adapter's SOLZLZZ output), mirrored as its own
+    # field so service.py can persist it onto PayslipItem.soli. PURELY
+    # informational like surcharge/cess above: the Lohnsteuer+Soli are
+    # already folded into `tds` for every Germany payslip (see
+    # engine/countries/germany.py), so this is NEVER re-summed into
+    # total_employee_deductions/net_pay anywhere. Zero for every
+    # country/employee until a real PUBLISHED PapAlgorithmAsset is
+    # released AND a real PapExecutor computes it.
+    soli: Decimal = Decimal("0")
     cpp2: Decimal = Decimal("0")
     # Canada: CPP/QPP first-layer BASE (4.95%) vs. FIRST-ADDITIONAL
     # (1.00%) breakdown (AC-11) — PURELY informational, like surcharge/
@@ -501,6 +519,12 @@ class PayrollResult:
     # blocked; written correctly for when that changes).
     germany_statutory_profile_id: int = None
     germany_calculation_snapshot: dict = None
+    # Phase 8BU: non-empty ONLY for a PARTIAL Germany result (RV/ALV/GKV/
+    # PV/employer-levies genuinely computed; wage_tax/soli/church_tax
+    # genuinely unavailable for this specific employee/date — never
+    # fabricated as zero-because-complete). None/empty for every
+    # COMPLETE result and every non-German calculation.
+    germany_unavailable_components: list = None
     # India: Code on Wages §8.3 aggregate-deduction cap ("authorized
     # deductions during a wage period" limited to 50% of wages, AC-18) —
     # a pure COMPLIANCE FLAG, never a recalculation: this engine must

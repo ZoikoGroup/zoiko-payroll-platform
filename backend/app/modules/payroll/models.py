@@ -68,6 +68,16 @@ class PayslipStatus(str, enum.Enum):
     PENDING = "Pending"
     PAID    = "Paid"
     FAILED  = "Failed"
+    # Phase 8BU: distinct from FAILED — some components genuinely
+    # calculated (real, persisted, non-fabricated figures) while at
+    # least one OTHER component (typically wage tax) is genuinely
+    # unavailable. Never used to imply a complete, payable result — see
+    # countries/germany.py's partial-calculation path and
+    # service.py's/the frontend's explicit "PARTIALLY CALCULATED, net
+    # pay NOT available" handling. `status = Column(String(20), ...)`
+    # (models.py) — no DB migration needed, this is a pure application-
+    # level enum addition.
+    PARTIAL = "Partial"
 
 
 class ActivityStatus(str, enum.Enum):
@@ -623,6 +633,22 @@ class GermanyElstamChangeListBatch(Base):
     created_at          = Column(DateTime(timezone=True), server_default=func.now())
     updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
 
+    __table_args__ = (
+        # Phase 8BE — idempotency guard. Before this, resubmitting the same
+        # batch_reference for the same organization silently created a
+        # second row (no dedup check existed anywhere on this path); the
+        # DB-level constraint makes a duplicate resubmission fail loudly
+        # and immediately, and create_elstam_change_list_batch() (service.py)
+        # turns that IntegrityError into a clear BadRequestException instead
+        # of a raw 500. Scoped per-organization (not global) since two
+        # different organizations may legitimately receive a change list
+        # using the same reference scheme from their own payroll provider.
+        UniqueConstraint(
+            "organization_id", "batch_reference",
+            name="uq_germany_elstam_change_list_batch_org_ref",
+        ),
+    )
+
     def __repr__(self):
         return (
             f"<GermanyElstamChangeListBatch id={self.id} ref={self.batch_reference!r} "
@@ -681,6 +707,94 @@ class GermanyElstamImportAttempt(Base):
         return (
             f"<GermanyElstamImportAttempt id={self.id} employee_id={self.employee_id} "
             f"status={self.validation_status}>"
+        )
+
+
+# ── Germany: ELSTER certificate configuration (Phase 8BF) ────────────────
+# Per-organization record of WHETHER a real ELSTER organizational
+# certificate has been configured — NEVER the certificate/private key
+# material itself. `certificate_reference` is a pointer into an external
+# secret store (the organization's own key-management system / HSM /
+# vault path) — this table's entire purpose is to answer "has a human
+# configured a real certificate reference yet", never to hold the secret.
+# Storing an actual private key or PIN in this (or any) application
+# database row would be a real security defect; this design avoids that
+# category of defect entirely by construction, mirroring how
+# PapAlgorithmAsset never stores the BMF's actual XML bytes in a way that
+# could be mistaken for a secret and how ELStAM's own boundary
+# (engine/germany_pap/elstam.py) never accepts a live BZSt credential.
+class GermanyElsterCertificateConfig(Base):
+    """Whether this organization has a configured ELSTER organizational
+    certificate reference. is_configured is the ONLY field
+    resolve_elster_transmitter() (engine/germany_elster.py) ever reads —
+    and even when True, no transmitter implementation exists yet (see that
+    module's own docstring), so configuring a reference here does not by
+    itself unblock transmission."""
+    __tablename__ = "payroll_germany_elster_certificate_configs"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+
+    is_configured        = Column(Boolean, nullable=False, default=False, server_default="false")
+    certificate_reference = Column(String(200), nullable=True)
+    reference_description  = Column(Text, nullable=True)
+
+    configured_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    configured_at    = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<GermanyElsterCertificateConfig organization_id={self.organization_id} configured={self.is_configured}>"
+
+
+# ── Germany: ELSTER transmission record (Phase 8BF) ───────────────────────
+# One attempt to prepare/transmit a Lohnsteuer-Anmeldung-shaped filing via
+# ELSTER. The state machine below is INTENTIONALLY bounded to the states
+# this codebase can actually reach today (DRAFT -> VALIDATED ->
+# BLOCKED_EXTERNAL) — REJECTED/ACKNOWLEDGED exist in the vocabulary for a
+# future phase that implements a real transmitter, but no code path in
+# this phase ever sets them; setting them without a real ELSTER response
+# would be exactly the kind of fabricated external result this project's
+# governing rules forbid. `payload_summary` deliberately holds only
+# non-sensitive structural metadata (period, transmission type, a
+# reference id) — never the actual filing content — since this table's
+# purpose is transmission-attempt audit, not a second copy of statutory
+# data that already lives on the payslip/payroll-run records it derives
+# from.
+class GermanyElsterTransmission(Base):
+    __tablename__ = "payroll_germany_elster_transmissions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # e.g. "LOHNSTEUER_ANMELDUNG" — free text, spec gives no enumerated set
+    # for this phase (same "concept named, no vocabulary given" treatment
+    # as GermanyElstamChangeListBatch.source).
+    transmission_type = Column(String(50), nullable=False)
+    period_start      = Column(Date, nullable=False)
+    period_end        = Column(Date, nullable=False)
+    payload_summary   = Column(JSON, nullable=True)
+
+    # DRAFT | VALIDATED | BLOCKED_EXTERNAL | QUEUED | TRANSMITTED |
+    # ACKNOWLEDGED | REJECTED — see class docstring: only the first three
+    # are ever reached by this phase's code.
+    status            = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    validation_errors = Column(JSON, nullable=True)
+    blocked_reason    = Column(Text, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_germany_elster_transmission_org_period", "organization_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyElsterTransmission id={self.id} organization_id={self.organization_id} "
+            f"type={self.transmission_type!r} status={self.status}>"
         )
 
 
@@ -978,6 +1092,13 @@ class PayslipItem(Base):
     # Germany: Kirchensteuer (church tax), only nonzero when the employee
     # is flagged church_tax_liable.
     church_tax        = Column(Numeric(12, 2), default=0, server_default="0")
+    # Germany: Solidaritätszuschlag (Soli) — informational, computed monthly
+    # from an executed BMF PAP run and NEVER summed into total_deductions/
+    # net_pay (it is already folded into the persisted `tds` = Lohnsteuer +
+    # Soli, exactly like Canada's cpp_base/cpp_first_additional note they're
+    # not re-summed). Zero for every non-DE payslip and for every German
+    # payslip until a real PUBLISHED PapAlgorithmAsset computes it.
+    soli              = Column(Numeric(12, 2), default=0, server_default="0")
     # Canada: CPP2, the second-tier contribution above the YMPE — its own
     # line rather than folded into social_security, matching how every
     # other country already breaks out multiple named statutory lines.
@@ -1549,10 +1670,24 @@ class GermanyOvertimePremiumComponent(Base):
     # this financial-integration status is how an operator/API caller
     # tells the two apart, never by guessing from silence.
     # NOT_INTEGRATED (default; never attached) |
-    # PARTIAL_WAGE_TAX_PENDING_PAP (gross + SI deltas applied; wage-tax
-    #   delta uncomputable while PAP is BLOCKED_EXTERNAL) |
+    # CALCULATED (gross + SI + wage-tax/Soli/Kirchensteuer deltas all
+    #   genuinely computed, via the same internal §32a/§39b calculator the
+    #   base payslip itself used) |
+    # PARTIAL (gross + SI + wage-tax/Soli genuinely computed, but this
+    #   employee's Kirchensteuer specifically is unavailable on the base
+    #   payslip — see Phase 8BU's church-tax-Land-unresolved PARTIAL path —
+    #   so only that one component's delta stays an explicit, flagged 0) |
+    # BLOCKED (gross + SI deltas applied; the base payslip's own wage tax
+    #   was never computed via the internal calculator — e.g. no
+    #   germany_calculation_snapshot at all, or it used a different/future
+    #   PAP version this delta logic doesn't know how to extend — so NO
+    #   wage-tax/Soli/Kirchensteuer delta can be safely derived) |
     # REVERSED (attached then detached — deltas nulled, PayslipItem
     #   returned to pre-attach state).
+    # Phase 8BV's PARTIAL_WAGE_TAX_PENDING_PAP is retired (no payslip was
+    # ever persisted with that historical value across a schema/data
+    # migration boundary — every attach until Phase 8BW ran through the
+    # unconditional wage_tax_delta=0 branch, so no backfill is needed).
     financial_integration_status = Column(String(40), nullable=False, default="NOT_INTEGRATED", server_default="NOT_INTEGRATED")
     # The EXACT deltas actually applied to the PayslipItem at attach time —
     # stored (never recomputed from current registries) so detach reverses
@@ -1563,12 +1698,26 @@ class GermanyOvertimePremiumComponent(Base):
     #                     delta → PayslipItem.pf.
     # applied_esi_delta = ALV + GKV employee contribution delta
     #                     → PayslipItem.esi (PV excluded — config-dependent).
-    # Wage-tax delta has no dedicated column (it is 0 while PAP is
-    # BLOCKED_EXTERNAL); it is represented by financial_integration_status
-    # plus the germany_calculation_snapshot/audit trace.
     applied_gross_delta = Column(Numeric(12, 2), nullable=True)
     applied_pf_delta    = Column(Numeric(12, 2), nullable=True)
     applied_esi_delta   = Column(Numeric(12, 2), nullable=True)
+    # Phase 8BW: previously wage tax had no dedicated column at all (always
+    # 0, represented only by financial_integration_status). Now genuinely
+    # computed via a marginal T2-T1 delta on the SAME zvE base the base
+    # payslip's own Lohnsteuer used (see _compute_overtime_financial_delta).
+    # applied_wage_tax_delta -> PayslipItem.tds (which already combines
+    # Lohnsteuer+Soli, matching the engine's own field-reuse convention).
+    # applied_soli_delta -> PayslipItem.soli (informational, separate
+    # column) AND folded into applied_wage_tax_delta's contribution to tds.
+    # applied_church_tax_delta -> PayslipItem.church_tax. All three are 0
+    # (never NULL once attached) when financial_integration_status is
+    # BLOCKED, and applied_church_tax_delta specifically is 0 when the
+    # employee isn't church-tax-liable (a real zero) OR when PARTIAL (an
+    # explicitly-flagged unavailable zero — see financial_integration_status
+    # above, never conflated with the real-zero case).
+    applied_wage_tax_delta   = Column(Numeric(12, 2), nullable=True)
+    applied_soli_delta       = Column(Numeric(12, 2), nullable=True)
+    applied_church_tax_delta = Column(Numeric(12, 2), nullable=True)
 
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
@@ -3129,6 +3278,17 @@ class GermanyHealthFundU1Tariff(Base):
 # "Compatibility" section for why the old component_key is left alone
 # rather than migrated in this phase).
 #
+# SUPERSEDED (Phase 7, re-confirmed Phase 8BE): the "germany.py does NOT
+# read from this table" sentence above was accurate at Phase 5 but is
+# now stale — Phase 7 wired both branches in for real. germany.py resolves
+# and traces RV_ALV and GKV_PV ceilings independently from THIS table
+# (see germany.py's ceiling resolution around the RV/ALV and GKV/PV
+# calculation calls, and service.py's resolve_germany_contribution_ceiling
+# branch parameter) — the "single shared ContributionRate ceiling" read
+# this paragraph describes is the pre-Phase-7 state, not current
+# behavior. Left here rather than rewritten so the phase history stays
+# legible; do not cite this paragraph alone as current production status.
+#
 # Deliberately its own table, NOT a new ContributionRate.component_key
 # value and NOT a modification to that model — a ContributionRate row is
 # one flat/percentage value per jurisdiction with no branch-applicability
@@ -3235,6 +3395,119 @@ class GermanyContributionCeiling(Base):
         return (
             f"<GermanyContributionCeiling id={self.id} branch={self.branch!r} "
             f"monthly={self.monthly_ceiling} annual={self.annual_ceiling} status={self.status}>"
+        )
+
+
+# ── Germany: Minijob / Midijob statutory parameters (Phase 8BK) ─────────
+# Phase 8BJ found that, unlike RV/ALV/GKV (which already resolve through
+# the canonical JurisdictionPack/rate_map mechanism once wired in — see
+# that phase's report) and PV (already effective-dated via
+# GermanyPvConfiguration above), Minijob's own flat statutory rates and
+# Midijob's own sliding-scale formula coefficients were, and remained,
+# plain hardcoded Python constants (hardcoded_defaults.py) with NO
+# effective dating and NO override mechanism at all — not even the
+# weaker rate_map fallback pattern RV/ALV/GKV had before Phase 8BJ.
+#
+# Deliberately NOT routed through ContributionRate/rate_map: this
+# codebase's own pre-existing comment (engine/germany_pap/core.py, the
+# "Minijob / Midijob" section header) records that Minijob/Midijob were
+# intentionally kept OFF the canonical-pack/rate_map indirection because
+# the supplied 2026 documentation gives these as fixed statutory
+# percentages/coefficients, not DB-overridable canonical rates for an
+# ORGANIZATION to opt into — introducing that indirection here would
+# invent an org-override mechanism the statute doesn't describe. That
+# reasoning is preserved, not overridden, by this table: there is no
+# organization_id column here (mirroring GermanyContributionCeiling/
+# GermanyHealthFund/GermanyPvConfiguration above, none of which have one
+# either) — every row is a global, federal statutory fact, never a
+# tenant-configurable value, and no request payload/API caller can set
+# or influence one (Super-Admin-only write path, see service.py).
+#
+# Deliberately NOT folded into GermanyPvConfiguration or a per-concept
+# table: these 13 parameters don't share a single natural keyed identity
+# the way PV's (child_category, is_saxony) pair does — they're a flat
+# list of independent federal constants (a threshold, several flat
+# rates, four formula coefficients), so a generic parameter_code + value
+# shape (mirroring the column list this phase's own brief specifies)
+# is the correct minimal shape, not one bespoke column per value.
+class GermanyMinijobMidijobParameter(Base):
+    """One effective-dated version of one Minijob/Midijob statutory
+    parameter (a threshold, a flat contribution rate, or a Midijob
+    formula coefficient) — see MINIJOB_MIDIJOB_PARAMETER_CODES in
+    service.py for the closed vocabulary of valid `parameter_code`
+    values and what each one feeds into."""
+    __tablename__ = "payroll_germany_minijob_midijob_parameters"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+
+    # Closed vocabulary, validated in the service layer (see
+    # service._GERMANY_MINIJOB_MIDIJOB_PARAMETER_CODES) — same convention
+    # as GermanyContributionCeiling.branch above, not a DB CHECK
+    # constraint.
+    parameter_code        = Column(String(50), nullable=False, index=True)
+
+    # High-precision Decimal: Midijob's own formula coefficients are
+    # published to 10 decimal places (e.g. 291.8744452399) — a coarser
+    # column would silently truncate them and drift the Midijob
+    # Übergangsbereich calculation away from the officially published
+    # coefficient. Every parameter_code, including plain percentages and
+    # the EUR threshold, uses this same column (the "value_type" column
+    # below records what the number MEANS, not a different storage
+    # shape).
+    value                  = Column(Numeric(24, 10), nullable=False)
+
+    # "PERCENTAGE" | "EUR_THRESHOLD" | "COEFFICIENT_MULTIPLIER" |
+    # "COEFFICIENT_SUBTRAHEND" — documents what `value` represents (a
+    # percentage point figure, a Euro amount, or one of the two distinct
+    # roles a Midijob formula coefficient can play) so a caller/UI never
+    # has to infer it from the parameter_code string alone.
+    value_type             = Column(String(30), nullable=False)
+
+    label                  = Column(String(150), nullable=False)
+
+    effective_from         = Column(Date, nullable=False)
+    effective_to           = Column(Date, nullable=True)   # NULL = open-ended / current
+
+    # DRAFT | VERIFIED | APPROVED | PUBLISHED | SUPERSEDED — identical
+    # vocabulary/lifecycle to every sibling Germany registry above.
+    status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    # Evidence — same SourceArtifact convention as every sibling registry.
+    # Nullable because a parameter can be entered as DRAFT before its
+    # source citation is attached, exactly like the others; PUBLISHing
+    # still requires appropriate evidence per the same service-layer gate
+    # pattern used elsewhere (see set_health_fund_status's own
+    # requirement for a bound source, mirrored here).
+    authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    previous_version_id    = Column(Integer, ForeignKey("payroll_germany_minijob_midijob_parameters.id"), nullable=True)
+
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_minijob_midijob_parameter_code_period", "parameter_code", "effective_from"),
+        # Same "at most one open-ended row per identity" guard as every
+        # sibling registry — full overlap prevention across ALL rows
+        # (open or closed) for a parameter_code is enforced at the
+        # service layer (see _validate_minijob_midijob_parameter_no_overlap),
+        # same reasoning as GermanyContributionCeiling's identical guard.
+        Index(
+            "uq_minijob_midijob_parameter_one_open_period",
+            "parameter_code",
+            unique=True,
+            postgresql_where=text("effective_to IS NULL"),
+            sqlite_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<GermanyMinijobMidijobParameter id={self.id} parameter_code={self.parameter_code!r} "
+            f"value={self.value} status={self.status}>"
         )
 
 

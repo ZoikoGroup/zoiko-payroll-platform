@@ -560,6 +560,11 @@ function PremiumComponentsSection({ employeeId, recordId }) {
 // (financialIntegrationStatus/appliedGrossDelta/appliedPfDelta/
 // appliedEsiDelta) the backend has returned since Phase 8AR but which,
 // until now, only the single-attach view (fixed in Phase 8AT) displayed.
+// Phase 8BW: wage tax/Soli/Kirchensteuer deltas are now genuinely computed
+// (CALCULATED/PARTIAL) rather than always 0 (the retired
+// PARTIAL_WAGE_TAX_PENDING_PAP) — shown alongside gross/RV/ALV+GKV, with
+// an explicit BLOCKED notice only when the base payslip's own wage tax
+// couldn't be computed at all.
 function FinancialIntegrationSummary({ component }) {
   const info = describeOvertimeFinancialIntegration(component);
   if (!info.hasData) return null;
@@ -568,11 +573,21 @@ function FinancialIntegrationSummary({ component }) {
       {!info.isReversed && (
         <p className="text-[11px] text-foreground-muted">
           Applied: gross +{info.appliedGrossDelta ?? "0.00"}, RV +{info.appliedPfDelta ?? "0.00"}, ALV/GKV +{info.appliedEsiDelta ?? "0.00"}
+          {(info.isCalculated || info.isPartial) && (
+            <>, wage tax +{info.appliedWageTaxDelta ?? "0.00"}, Soli +{info.appliedSoliDelta ?? "0.00"}
+              {info.isCalculated ? <>, Kirchensteuer +{info.appliedChurchTaxDelta ?? "0.00"}</> : null}
+            </>
+          )}
         </p>
       )}
-      {info.isPendingPap && (
-        <p className="text-[11px] text-warning" title="Social insurance is fully applied; wage tax cannot be finalized while PAP is unavailable">
-          Wage tax pending PAP
+      {info.isBlocked && (
+        <p className="text-[11px] text-warning" title="Social insurance is fully applied; this payslip's own wage tax was never computed via the internal calculator, so no wage-tax/Soli/Kirchensteuer delta could be derived for this premium">
+          Wage tax/Soli/Kirchensteuer not applied — base payslip's wage tax unavailable
+        </p>
+      )}
+      {info.isPartial && (
+        <p className="text-[11px] text-warning" title="Wage tax and Soli ARE applied; Kirchensteuer is unavailable because this employee's church-tax Land is unresolved on the base payslip">
+          Kirchensteuer not applied — church-tax Land unresolved
         </p>
       )}
       {info.isReversed && <p className="text-[11px] text-foreground-muted">Financially reversed</p>}
