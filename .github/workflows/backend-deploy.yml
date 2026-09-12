@@ -17,12 +17,32 @@ jobs:
           username: ${{ secrets.GCP_SSH_USER }}
           key: ${{ secrets.GCP_SSH_KEY }}
           script: |
-            set -e
+            set -euo pipefail
             cd /var/www/zoiko-payroll/backend
             git pull origin main
             cd backend
             source venv/bin/activate
             pip install -r requirements.txt
+
+            echo "--- Migration diagnostics (read-only) ---"
+            git rev-parse HEAD
+            alembic heads
+            alembic branches
+            alembic history | head -n 40 || true
+            alembic current
+
+            echo "--- Applying migrations ---"
             alembic upgrade head
+
+            echo "--- Post-migration verification ---"
+            ALB_REV=$(alembic current | tail -n 1)
+            ALB_HEAD=$(alembic heads | tail -n 1)
+            echo "final revision: $ALB_REV"
+            echo "expected head : $ALB_HEAD"
+            case "$ALB_HEAD" in
+              *"$ALB_REV"*) echo "Final revision matches head." ;;
+              *) echo "FATAL: final alembic revision does not match head; backend NOT restarted."; exit 1 ;;
+            esac
+
             deactivate
             sudo systemctl restart zoiko-payroll-backend
