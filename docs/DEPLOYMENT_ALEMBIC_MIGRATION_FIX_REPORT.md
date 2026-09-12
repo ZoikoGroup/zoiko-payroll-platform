@@ -140,6 +140,24 @@ none conflicts with an existing object.
   next `main` push/PR (with this commit) triggers the run that executes
   `alembic upgrade head` against production.
 
+## GitHub Actions Evidence (public API, at fix time)
+
+| Run # | head_sha | Event | Conclusion |
+|---|---|---|---|
+| 13 | `e47fc7e` (`main`, merge PR #35) | push | **failure** |
+| 12 | `5b38499` (`main`, merge PR #34) | push | **failure** |
+| 11 | `0c57e3b` (`main`, pre-Germany-chain) | push | success |
+| 10 | `0501303` (`main`) | push | **failure** |
+
+The two most recent `main` deployments fail exactly as documented (run with
+the pre-fix workflow against a `main` that contains the Germany chain but not
+the graft; production `alembic_version = f61cb4b650f4` cannot be resolved).
+Pushing `nikhil` (commit `f8174a5`) created **no** workflow run, confirming
+the trigger is `main`-only. Final deployment success therefore requires the
+user to merge this `nikhil` commit onto `main` (this repository's normal
+PR flow — see PRs #31/#34); that is an external action deliberately not
+performed here (branch `main` is off-limits for this task).
+
 ## Files Changed
 
 The changes for this fix are limited to the migration/deployment problem:
