@@ -10,12 +10,14 @@ actually blocks anything yet. Wiring these dependencies into other modules'
 routers is explicitly out of scope for this task (comes in a later prompt) —
 this module only defines them.
 
-This module reads (never writes or imports business logic from) two other
+This module reads (never writes or imports business logic from) other
 modules for read-only lookups the blueprint's own §3 sketch requires:
   - app.modules.auth.models.UserRole       — to bypass entitlement checks
                                               for Super Admin
   - app.modules.payroll.models.PayrollRun  — to check whether an approved
                                               run is in flight (P4 guard)
+  - app.modules.organizations.models.Organization — to check workspace_type
+    for EVALUATION-vs-PRODUCTION execution safety (require_production_workspace)
 Neither import writes to those modules, and nothing outside
 app/modules/billing/ imports from this module yet.
 """
@@ -136,6 +138,26 @@ def is_run_in_flight(db: Session, organization_id: int) -> bool:
     )
 
 
+def require_production_workspace(db: Session, organization_id: int) -> None:
+    """Block execution-safety-sensitive operations (ELSTER transmission,
+    future live bank disbursements) for EVALUATION workspaces.
+
+    Unlike require_entitlement/require_scope_limit, this guard does NOT
+    check ALLOW_ALL — it blocks regardless of that flag's state because
+    ALLOW_ALL is about plan *features*, not about production-vs-simulation
+    execution safety. Also unlike those guards, this is a plain function
+    (not a FastAPI dependency factory) because it is called from service
+    layer code, not from route handlers."""
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is not None and org.workspace_type == "EVALUATION":
+        raise ForbiddenException(
+            "This action requires a production workspace. "
+            "Evaluation workspaces are preview/simulation only."
+        )
+
+
 def list_entitlement_overrides(db: Session, organization_id: int) -> list:
     """Every override ever granted to this org (live or expired) — the
     super admin list view needs to see history, not just what's currently
@@ -192,6 +214,46 @@ def create_entitlement_override(
     db.commit()
     db.refresh(override)
     return override
+
+
+def require_writeable_workspace():
+    """FastAPI dependency — write-endpoint guard for the trial lifecycle.
+
+    Blocks mutations for trial orgs whose derived stage is GRACE_READONLY
+    or CLOSED (see trial_lifecycle.resolve_trial_stage). GET endpoints do
+    NOT carry this dependency, so reads stay untouched during the grace
+    window. EVALUATION orgs still inside their active trial pass through —
+    only expired/closed trials return 403. Mirrors require_entitlement's
+    signature (dependency factory returning bool) so it can be dropped into
+    an existing `dependencies=[...]` list without changing route behavior.
+    """
+    from app.modules.billing.trial_lifecycle import (
+        TRIAL_STAGE_CLOSED,
+        TRIAL_STAGE_GRACE_READONLY,
+        resolve_trial_stage,
+    )
+
+    def _check(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> bool:
+        if current_user.role == UserRole.SUPER_ADMIN:
+            return True
+
+        organization_id = current_user.organization_id
+        if is_run_in_flight(db, organization_id):
+            return True
+
+        subscription = get_active_subscription(db, organization_id)
+        stage = resolve_trial_stage(subscription)
+        if stage in (TRIAL_STAGE_GRACE_READONLY, TRIAL_STAGE_CLOSED):
+            raise ForbiddenException(
+                "This workspace is read-only: your evaluation period has ended. "
+                "Choose a plan to resume full access."
+            )
+        return True
+
+    return _check
 
 
 def require_entitlement(feature_key: str):

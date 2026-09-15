@@ -791,3 +791,60 @@ def _send_invite_email(
         reference_id=reference_id,
         organization_id=user.organization_id,
     )
+
+
+# ── Trial banner payload ────────────────────────────────────────────────────
+
+from app.modules.billing.models import SubscriptionStatus  # noqa: E402
+
+TRIAL_STATUS_BY_SUBSCRIPTION = {
+    # SubscriptionStatus value → trial_status vocabulary used by the banner.
+    # ACTIVE and TRIALING both browse->actively-in-trial; a live
+    # (production) customer has no trial at all, which we signal with null
+    # rather than a made-up value.
+    SubscriptionStatus.TRIALING.value: "ACTIVE",
+    SubscriptionStatus.ACTIVE.value: "ACTIVE",
+    SubscriptionStatus.PAST_DUE.value: "GRACE_READONLY",
+    SubscriptionStatus.SUSPENDED.value: "CLOSED",
+    SubscriptionStatus.CANCELLED.value: "CLOSED",
+}
+
+
+def get_my_trial_status(db: Session, organization_id: int):
+    """Payload for GET /auth/me/trial-status — all values derived from the
+    org's live rows, never cached/duplicated.
+
+    - workspace_type: Organization.workspace_type (defaults to
+      PRODUCTION for a missing org — safe for banner rendering).
+    - trial_status: mapped from BillingSubscription.status via
+      TRIAL_STATUS_BY_SUBSCRIPTION, or null when no subscription exists or
+      the org is not an evaluation workspace.
+    - trial_started_at: BillingSubscription.current_period_start (needed by
+      the dashboard's remaining-time bar to render elapsed-vs-remaining).
+    - trial_expires_at: BillingSubscription.current_period_end (single
+      source of truth for the expiry date — no second date field is added).
+    """
+    trial_status = None
+    trial_started_at = None
+    trial_expires_at = None
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    workspace_type = org.workspace_type if org is not None else "PRODUCTION"
+
+    if workspace_type == "EVALUATION":
+        from app.modules.billing.entitlements import get_active_subscription
+
+        subscription = get_active_subscription(db, organization_id)
+        if subscription is not None:
+            trial_status = TRIAL_STATUS_BY_SUBSCRIPTION.get(subscription.status)
+            trial_started_at = subscription.current_period_start
+            trial_expires_at = subscription.current_period_end
+
+    from app.modules.auth.schemas import TrialStatusResponse
+
+    return TrialStatusResponse(
+        workspace_type=workspace_type,
+        trial_status=trial_status,
+        trial_started_at=trial_started_at,
+        trial_expires_at=trial_expires_at,
+    )

@@ -16,7 +16,7 @@ class TXTExporter(IBankExporter):
     content_type = "text/plain"
     file_extension = "txt"
 
-    def generate(self, rows: List[BankExportRow]) -> bytes:
+    def generate(self, rows: List[BankExportRow], *, evaluation: bool = False) -> bytes:
         lines = ["|".join(_HEADERS)]
         for r in rows:
             lines.append("|".join([

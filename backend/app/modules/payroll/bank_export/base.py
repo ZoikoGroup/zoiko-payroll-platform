@@ -41,5 +41,8 @@ class IBankExporter(ABC):
     file_extension: str
 
     @abstractmethod
-    def generate(self, rows: List[BankExportRow]) -> bytes:
+    def generate(self, rows: List[BankExportRow], *, evaluation: bool = False) -> bytes:
+        """Render the batch as bytes. ``evaluation=True`` marks the output as
+        coming from an EVALUATION workspace so document-style formats (PDF)
+        can overlay a 'PREVIEW — EVALUATION ONLY' watermark (Prompt 3)."""
         ...

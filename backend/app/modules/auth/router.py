@@ -35,6 +35,7 @@ from app.modules.auth.schemas import (
     TokenPasswordRequest,
     TokenResponse,
     TrialRegisterRequest,
+    TrialStatusResponse,
     UserCreateRequest,
     UserListResponse,
     UserResponse,
@@ -133,6 +134,18 @@ def refresh_token(data: RefreshRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse, summary="Get current logged-in user")
 def get_me(current_user=Depends(get_current_user)):
     return current_user
+
+
+@router.get(
+    "/me/trial-status",
+    response_model=TrialStatusResponse,
+    summary="Trial banner status for the current user's organization",
+)
+def get_me_trial_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_my_trial_status(db, current_user.organization_id)
 
 
 @router.post("/logout", response_model=SuccessResponse, summary="Logout")

@@ -128,3 +128,23 @@ class UserUpdateRequest(BaseModel):
 class UserListResponse(BaseModel):
     users: list[UserResponse]
     total: int
+
+
+# ── Trial banner ────────────────────────────────────────────────────────────
+
+class TrialStatusResponse(BaseModel):
+    """GET /auth/me/trial-status — everything the frontend trial banner
+    needs, derived for the current user's organization.
+
+    - ``workspace_type`` is read live from Organization (never inferred from
+      the plan name — a real Professional-plan customer and an evaluation
+      one can share the same plan code, only the workspace type differs).
+    - ``trial_status`` is "ACTIVE"/"GRACE_READONLY"/"CLOSED"/None mapped from
+      the org's BillingSubscription as derived in auth.service.
+    - ``trial_expires_at`` comes from BillingSubscription.current_period_end
+      (single source of truth — no second date field exists)."""
+
+    workspace_type: str
+    trial_status: Optional[str] = None
+    trial_started_at: Optional[datetime] = None
+    trial_expires_at: Optional[datetime] = None

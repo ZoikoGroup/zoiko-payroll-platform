@@ -14,7 +14,7 @@ class CSVExporter(IBankExporter):
     content_type = "text/csv"
     file_extension = "csv"
 
-    def generate(self, rows: List[BankExportRow]) -> bytes:
+    def generate(self, rows: List[BankExportRow], *, evaluation: bool = False) -> bytes:
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(_HEADERS)

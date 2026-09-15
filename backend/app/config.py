@@ -102,6 +102,17 @@ class Settings(BaseSettings):
     # Live-toggleable via PlatformSetting, not just this startup default.
     ASSIST_KILL_SWITCH_ENABLED: bool = False
 
+    # ── Trial lifecycle (modules/billing/trial_lifecycle.py) ────────────
+    # GRACE_READONLY window length. Confirmed with product as the default;
+    # the sweep stamps grace_period_ends_at = current_period_end + this many
+    # days the first time it observes an expired trial.
+    TRIAL_GRACE_PERIOD_DAYS: int = 7
+    # Background sweep of expired trials (ACTIVE → GRACE_READONLY → CLOSED),
+    # mirroring the manual admin endpoint (POST /super-admin/billing/
+    # trial-expiry-run) on a timer — same pattern as ASSIST_SWEEP_ENABLED.
+    TRIAL_SWEEP_ENABLED: bool = True
+    TRIAL_SWEEP_INTERVAL_HOURS: int = 24
+
 
 settings = Settings()
 

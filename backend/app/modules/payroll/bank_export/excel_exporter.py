@@ -15,7 +15,7 @@ class ExcelExporter(IBankExporter):
     content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     file_extension = "xlsx"
 
-    def generate(self, rows: List[BankExportRow]) -> bytes:
+    def generate(self, rows: List[BankExportRow], *, evaluation: bool = False) -> bytes:
         wb = Workbook()
         ws = wb.active
         ws.title = "Bank Transfer"
