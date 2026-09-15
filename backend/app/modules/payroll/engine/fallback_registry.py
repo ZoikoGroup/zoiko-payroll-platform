@@ -108,8 +108,17 @@ _ENGINE_CONSTANT_REGISTRY = [
     # _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, and _DE_CHURCH_TAX_RATE
     # were retired in Phase 4 along with the legacy calculator that was
     # their only consumer — see hardcoded_defaults.py's Germany section.
-    {"country": "DE", "module": "germany", "attr": "_DE_SOLI_THRESHOLD", "label": "Solidarity Surcharge Threshold", "resolverKey": "soli_threshold"},
-    {"country": "DE", "module": "germany", "attr": "_DE_SOLI_RATE", "label": "Solidarity Surcharge Rate", "resolverKey": "soli_rate"},
+    # _DE_SOLI_THRESHOLD/_DE_SOLI_RATE are not resolved through
+    # resolve_jurisdiction_parameter, so a required-parameter check must
+    # NOT demand a seed row for them. That is not the same as "not
+    # configurable": as of Phase 8BY the Soli Freigrenze IS effective-dated
+    # through germany/tax.py's `_TARIFF_VERSIONS` (EUR 18,130 for
+    # 2023-2025, EUR 20,350 from 2026-01-01 per ZP-TAX-DE-2026-001 §7), and
+    # the module constant is only the fallback. The BMF PAP remains the
+    # statutorily-mandated Soli oracle (§7 / acceptance #10) and is still
+    # gated — see jurisdictions/germany/pap/core.py resolve_pap_executor().
+    {"country": "DE", "module": "germany", "attr": "_DE_SOLI_THRESHOLD", "label": "Solidarity Surcharge Freigrenze (effective-dated in germany/tax.py _TARIFF_VERSIONS; BMF PAP is the statutory oracle)", "resolverKey": "N/A — effective-dated by tariff version, not resolve_jurisdiction_parameter"},
+    {"country": "DE", "module": "germany", "attr": "_DE_SOLI_RATE", "label": "Solidarity Surcharge Rate (statutory SolzG 5.5% code constant — BMF PAP is the oracle)", "resolverKey": "N/A — not read via resolve_jurisdiction_parameter"},
     {"country": "DE", "module": "germany", "attr": "_DE_RV_EMPLOYEE_RATE", "label": "Pension Insurance (RV) Rate — Employee", "resolverKey": "rv_employee_rate", "side": "employee"},
     {"country": "DE", "module": "germany", "attr": "_DE_RV_EMPLOYER_RATE", "label": "Pension Insurance (RV) Rate — Employer", "resolverKey": "rv_employer_rate", "side": "employer"},
     {"country": "DE", "module": "germany", "attr": "_DE_ALV_EMPLOYEE_RATE", "label": "Unemployment Insurance (ALV) Rate — Employee", "resolverKey": "alv_employee_rate", "side": "employee"},

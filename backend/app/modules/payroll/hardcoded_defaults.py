@@ -673,6 +673,23 @@ _AU_HELP_RATE = Decimal("4.5")
 # 8%/9% table) and the dedicated GermanyContributionCeiling registry
 # instead. _DE_SOLI_THRESHOLD/_DE_SOLI_RATE remain: the production
 # Regular/Midijob paths still pass them to InternalGermanyWageTaxCalculator.
+#
+# [RESOLVED, Phase 8BY] A prior audit flagged these as money-affecting but
+# not DB-configurable. They are now EFFECTIVE-DATED rather than fixed: the
+# authoritative value applied to a payroll is the resolved tariff version's
+# own `soli_threshold_single` (germany/tax.py `_TARIFF_VERSIONS`) — EUR
+# 18,130 for payroll dates 2023-01-01..2025-12-31 and EUR 20,350 from
+# 2026-01-01 (ZP-TAX-DE-2026-001 section 7; splitting EUR 40,700 = 2x, which
+# `compute_soli` already derives). The constant below is retained ONLY as
+# the fallback for a legacy/date-less caller whose tariff dict carries no
+# `soli_threshold_single` key, and is deliberately left at the 2023-2025
+# value so such a fallback can never silently apply a 2026 threshold to a
+# pre-2026 period.
+#
+# NOT SPECIFIED IN PROVIDED GERMANY DOCUMENTATION: the documentation gives
+# the Soli exemption THRESHOLDS (section 7) but no separate "soli_rate"
+# registry key; 5.5% is the statutory SolzG rate stated in section 7 and is
+# applied as a code constant, not a tenant-configurable value.
 _DE_SOLI_THRESHOLD = Decimal("18130")
 _DE_SOLI_RATE = Decimal("5.5")
 

@@ -92,6 +92,8 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, initialize_database
+
+from scripts._local_db_guard import assert_local_database
 from app.modules.payroll.models import (
     GermanyContributionCeiling, GermanyEarningTaxabilityRule, GermanyHealthFund,
     GermanyHealthFundU1Tariff, GermanyPvConfiguration, SourceArtifact,
@@ -596,6 +598,10 @@ def seed_germany_2026_registries(db: Session) -> dict:
 
 
 def main() -> None:
+    # Phase 8BY: enforce the "isolated database only" instruction this
+    # script's docstring already carried, BEFORE initialize_database()
+    # creates an engine (and possibly create_all) against the target.
+    assert_local_database("seed_germany_2026_registries")
     initialize_database()
     db = SessionLocal()
     try:

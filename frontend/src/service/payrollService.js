@@ -90,6 +90,10 @@ const RATES_BY_COUNTRY = {
   // shown here. PV and the GKV supplementary rate are genuinely registry-
   // driven (vary by Land/Saxony/dependents/fund) — honestly labeled as
   // varying rather than flattened into one invented number (Phase 8E-2 F1).
+  // Display-only duplicates of the backend engine's certified flat rates —
+  // NOT authoritative for computation. If a registry/DB override is later added
+  // for RV/ALV/GKV these labels must be sourced from the contribution-rates API
+  // instead. (2026-09-15 registry-readiness audit marker.)
   DE: {
     rows: [
       { id: "rv", label: "Pension Insurance (Rentenversicherung)", employee: "9.30%", employer: "9.30%", total: "18.60%" },

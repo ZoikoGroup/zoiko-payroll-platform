@@ -322,6 +322,18 @@ export const approveOvertimeGrundlohnCap = (id) =>
 export const setOvertimeGrundlohnCapStatus = (id, statusValue) =>
   apiFetch(`/api/super-admin/compliance/germany/overtime-grundlohn-caps/${id}/status`, { method: "PUT", params: { status: statusValue } });
 
+// Germany Minijob/Midijob statutory parameters (Phase 8BK) — same
+// effective-dated maker-checker lifecycle as contribution ceilings/PV
+// configuration above.
+export const listMinijobMidijobParameters = (parameterCode) =>
+  apiFetch("/api/super-admin/compliance/germany/minijob-midijob-parameters", { params: parameterCode ? { parameterCode } : {} });
+export const createMinijobMidijobParameter = (payload) =>
+  apiFetch("/api/super-admin/compliance/germany/minijob-midijob-parameters", { method: "POST", body: payload });
+export const approveMinijobMidijobParameter = (id) =>
+  apiFetch(`/api/super-admin/compliance/germany/minijob-midijob-parameters/${id}/approve`, { method: "PUT" });
+export const setMinijobMidijobParameterStatus = (id, statusValue) =>
+  apiFetch(`/api/super-admin/compliance/germany/minijob-midijob-parameters/${id}/status`, { method: "PUT", params: { status: statusValue } });
+
 // ── Finance ──────────────────────────────────────────────────────────────
 
 export const getFinanceOverview = (params) => apiFetch("/api/super-admin/finance/overview", { params });

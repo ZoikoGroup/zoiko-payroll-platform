@@ -11,6 +11,7 @@ import {
   listU1Tariffs, createU1Tariff, approveU1Tariff, setU1TariffStatus,
   listContributionCeilings, createContributionCeiling, approveContributionCeiling, setContributionCeilingStatus,
   listPvConfigurations, createPvConfiguration, approvePvConfiguration, setPvConfigurationStatus,
+  listMinijobMidijobParameters, createMinijobMidijobParameter, approveMinijobMidijobParameter, setMinijobMidijobParameterStatus,
   getChurchTaxMatrix, getSourceArtifacts, createSourceArtifact, reviewSourceArtifact,
   getTaxConfigurationAudit,
   listGermanyChurchTaxExceptions, createGermanyChurchTaxException,
@@ -35,6 +36,7 @@ export const TABS = [
   { key: "health-funds", label: "Health Funds" },
   { key: "ceilings", label: "Contribution Ceilings" },
   { key: "pv", label: "PV Configuration" },
+  { key: "minijob-midijob", label: "Minijob/Midijob Parameters" },
   { key: "earning-taxability", label: "Earning Taxability" },
   { key: "overtime-premium-categories", label: "Overtime Premium Categories" },
   { key: "overtime-grundlohn-caps", label: "Overtime Grundlohn Caps" },
@@ -681,6 +683,85 @@ export function PvConfigTab() {
         employerRatePct: "", saxonyEmployeeRatePct: "", saxonyEmployerRatePct: "", effectiveFrom: "2026-01-01", authoritySourceId: "",
       }}
     />
+  );
+}
+
+// ── Minijob / Midijob statutory parameters (Phase 8BK) ──────────────────
+// Effective-dated, maker-checker-governed registry for Minijob (marginal
+// employment) and Midijob (Übergangsbereich) thresholds, flat rates, and
+// formula coefficients — previously plain hardcoded Python constants
+// (hardcoded_defaults.py) with no effective dating at all. Identical
+// CRUD/lifecycle shape as GermanyContributionCeiling (see
+// GermanyMinijobMidijobParameter in models.py and the Phase 8BK migration)
+// — a generic parameter_code/value/value_type row, same pattern already
+// used by "Overtime Grundlohn Caps" above. The migration adds no seed
+// data (deliberately, per its own docstring): every consuming calculation
+// falls back to its existing hardcoded default until a real PUBLISHED row
+// exists for that parameter_code, so an empty registry here is every
+// environment's genuine starting state, not a missing configuration.
+
+const MINIJOB_MIDIJOB_PARAMETER_CODES = [
+  "minijob_upper_threshold", "midijob_upper_threshold",
+  "minijob_employer_health_rate", "minijob_employer_pension_rate",
+  "minijob_u1_rate", "minijob_u2_rate", "minijob_u3_rate",
+  "minijob_employee_pension_topup_rate", "minijob_flat_tax_rate",
+  "midijob_total_base_multiplier", "midijob_total_base_subtrahend",
+  "midijob_employee_base_multiplier", "midijob_employee_base_subtrahend",
+  "midijob_pv_childless_surcharge_rate", "employer_insolvency_levy_rate",
+  "church_tax_rate_de_bw", "church_tax_rate_de_by", "church_tax_rate_de_be",
+  "church_tax_rate_de_bb", "church_tax_rate_de_hb", "church_tax_rate_de_hh",
+  "church_tax_rate_de_he", "church_tax_rate_de_mv", "church_tax_rate_de_ni",
+  "church_tax_rate_de_nw", "church_tax_rate_de_rp", "church_tax_rate_de_sl",
+  "church_tax_rate_de_sn", "church_tax_rate_de_st", "church_tax_rate_de_sh",
+  "church_tax_rate_de_th",
+];
+const MINIJOB_MIDIJOB_VALUE_TYPES = ["PERCENTAGE", "EUR_THRESHOLD", "COEFFICIENT_MULTIPLIER", "COEFFICIENT_SUBTRAHEND"];
+
+export function MinijobMidijobParametersTab() {
+  return (
+    <>
+      <Card title="Minijob/Midijob statutory parameters">
+        <p className="text-[11px] text-foreground-muted">
+          Effective-dated Minijob and Midijob thresholds, flat rates, and Übergangsbereich formula coefficients —
+          previously hardcoded Python constants with no effective dating. Each consuming calculation still falls
+          back to its existing hardcoded default until a real PUBLISHED row exists here for that parameter code, so
+          an empty registry reflects this environment's genuine starting state, not a missing configuration.
+        </p>
+      </Card>
+      <LifecycleRegistryTab
+        title="Minijob/Midijob parameters"
+        entityType="germany_minijob_midijob_parameter"
+        list={() => listMinijobMidijobParameters()}
+        create={(f) => createMinijobMidijobParameter({
+          parameterCode: f.parameterCode, value: f.value, valueType: f.valueType, label: f.label,
+          effectiveFrom: f.effectiveFrom, effectiveTo: f.effectiveTo || undefined,
+          authoritySourceId: f.authoritySourceId || undefined,
+        })}
+        approve={approveMinijobMidijobParameter}
+        setStatus={setMinijobMidijobParameterStatus}
+        columns={[
+          { key: "parameterCode", label: "Parameter code" },
+          { key: "label", label: "Label" },
+          { key: "value", label: "Value" },
+          { key: "valueType", label: "Value type" },
+          { key: "effectiveFrom", label: "Effective from" },
+          { key: "effectiveTo", label: "Effective to", render: (r) => r.effectiveTo || "open" },
+        ]}
+        formFields={[
+          { key: "parameterCode", label: "Parameter code", type: "select", options: MINIJOB_MIDIJOB_PARAMETER_CODES.map((v) => ({ value: v, label: v })) },
+          { key: "label", label: "Label (human-readable)", required: true, span2: true },
+          { key: "value", label: "Value", type: "number", required: true },
+          { key: "valueType", label: "Value type", type: "select", options: MINIJOB_MIDIJOB_VALUE_TYPES.map((v) => ({ value: v, label: v })) },
+          { key: "effectiveFrom", label: "Effective from", type: "date", required: true },
+          { key: "effectiveTo", label: "Effective to (leave blank if open-ended)", type: "date" },
+          { key: "authoritySourceId", label: "Source evidence artifact ID", span2: true },
+        ]}
+        defaultForm={{
+          parameterCode: MINIJOB_MIDIJOB_PARAMETER_CODES[0], label: "", value: "", valueType: "EUR_THRESHOLD",
+          effectiveFrom: "2026-01-01", effectiveTo: "", authoritySourceId: "",
+        }}
+      />
+    </>
   );
 }
 
@@ -1465,6 +1546,7 @@ export default function GermanyStatutoryRegistriesPage() {
       {tab === "health-funds" && <HealthFundsTab />}
       {tab === "ceilings" && <ContributionCeilingsTab />}
       {tab === "pv" && <PvConfigTab />}
+      {tab === "minijob-midijob" && <MinijobMidijobParametersTab />}
       {tab === "earning-taxability" && <EarningTaxabilityTab />}
       {tab === "overtime-premium-categories" && <OvertimePremiumCategoriesTab />}
       {tab === "overtime-grundlohn-caps" && <OvertimeGrundlohnCapsTab />}

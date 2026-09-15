@@ -27,7 +27,7 @@ from __future__ import annotations
 from datetime import date as date_cls
 from typing import List, Optional, Tuple
 
-from sqlalchemy import or_
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
 from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
@@ -127,7 +127,28 @@ def _find_active_tax_pack(
         ).filter(
             (JurisdictionPack.effective_to.is_(None)) | (JurisdictionPack.effective_to >= as_of),
         )
-        return q.order_by(JurisdictionPack.updated_at.desc()).first()
+        # Phase 8BY: order by EFFECTIVE DATE, not edit time. Both filters
+        # above already restrict to packs whose validity window contains
+        # `as_of`; when more than one such pack exists the applicable one
+        # is the one that most recently CAME INTO EFFECT, never merely the
+        # one most recently edited (the previous `updated_at.desc()` meant
+        # re-saving an old pack could silently take over a payroll period,
+        # and a retro payroll could bind to a pack published later). This
+        # is the same "select the row applicable to the payroll period,
+        # never just the latest row" rule every Germany statutory registry
+        # resolver in service.py already follows.
+        #
+        # A NULL effective_from means "no start bound" (open-ended/generic)
+        # and must rank BELOW any explicitly dated pack, so it is only used
+        # when nothing more specific applies. Expressed as a CASE rather
+        # than NULLS LAST so it behaves identically on SQLite and Postgres.
+        # `updated_at` is retained only as the final deterministic
+        # tiebreaker between packs sharing an identical effective_from.
+        return q.order_by(
+            case((JurisdictionPack.effective_from.is_(None), 1), else_=0).asc(),
+            JurisdictionPack.effective_from.desc(),
+            JurisdictionPack.updated_at.desc(),
+        ).first()
 
     if state:
         pack = _query(lambda q: q.filter(JurisdictionPack.jurisdiction_state == state))

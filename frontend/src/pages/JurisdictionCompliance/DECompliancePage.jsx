@@ -2,13 +2,13 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
-  Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio,
+  Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio, Banknote,
 } from "lucide-react";
 import DEOverviewDashboard from "./components/germany/DEOverviewDashboard";
 import GermanyPayrollSummaryTab from "./components/germany/GermanyPayrollSummaryTab";
 import GermanyDeuvTab from "./components/germany/GermanyDeuvTab";
 import {
-  PapTab, HealthFundsTab, ContributionCeilingsTab, PvConfigTab, EarningTaxabilityTab,
+  PapTab, HealthFundsTab, ContributionCeilingsTab, PvConfigTab, MinijobMidijobParametersTab, EarningTaxabilityTab,
   OvertimePremiumCategoriesTab, OvertimeGrundlohnCapsTab, EmployerLeviesTab, ChurchTaxTab,
   ElstamBatchesTab, ElsterTab, SourceEvidenceTab, AuditTab,
 } from "./GermanyStatutoryRegistriesPage";
@@ -39,6 +39,7 @@ const SECTIONS = [
   { key: "health-funds", label: "Health Funds", icon: HeartPulse },
   { key: "ceilings", label: "Contribution Ceilings", icon: Percent },
   { key: "pv", label: "PV Configuration", icon: ShieldCheck },
+  { key: "minijob-midijob", label: "Minijob/Midijob Parameters", icon: Banknote },
   { key: "earning-taxability", label: "Earning Taxability", icon: Layers },
   { key: "overtime-premium-categories", label: "Overtime Premium Categories", icon: Clock3 },
   { key: "overtime-grundlohn-caps", label: "Overtime Grundlohn Caps", icon: Gauge },
@@ -100,6 +101,7 @@ export default function DECompliancePage() {
       {section === "health-funds" && <HealthFundsTab />}
       {section === "ceilings" && <ContributionCeilingsTab />}
       {section === "pv" && <PvConfigTab />}
+      {section === "minijob-midijob" && <MinijobMidijobParametersTab />}
       {section === "earning-taxability" && <EarningTaxabilityTab />}
       {section === "overtime-premium-categories" && <OvertimePremiumCategoriesTab />}
       {section === "overtime-grundlohn-caps" && <OvertimeGrundlohnCapsTab />}

@@ -1919,17 +1919,22 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
     return row
 
 
-# ── Germany: Church tax (Kirchensteuer) Land matrix (Phase 8O) ──────────
+# ── Germany: Church tax (Kirchensteuer) Land matrix (Phase 8O / 8BL) ─────
 # Read-only surfacing of germany_pap.core.CHURCH_TAX_LAND_RATES — spec §8.
-# Deliberately NOT a new DB-backed registry/lifecycle: there is no
-# effective-dated, source-evidenced church-tax table anywhere in this
-# codebase (the rates are a bare Python dict, cited to spec §8 directly in
-# code), and this phase's own instruction is "if backend support is
-# missing, display NOT IMPLEMENTED rather than pretending it is
-# supported" — inventing a DRAFT/APPROVED/PUBLISHED lifecycle for data
-# that has neither a migration nor a SourceArtifact linkage would be
-# exactly that pretense. This function exists only so the Super Admin UI
-# has a real endpoint to read the actual values from, instead of
+# These 16 general-Land base rates are Tier-1-sourced (the supplied Zoiko
+# document itself) code-level certified defaults. The CALCULATION path
+# resolves them registry-first: engine/countries/germany.py's
+# _resolve_church_tax_land_rate reads a PUBLISHED per-Land overlay
+# (church_tax_rate_de_*) from the global Germany minijob/midijob parameter
+# registry when one exists for the payroll date and falls back to this
+# table otherwise; sub-Land denomination/location exceptions (Bad Wimpfen)
+# are overlaid from the separate, source-evidenced GermanyChurchTaxException
+# registry and take precedence (see models.GermanyChurchTaxException).
+# There is deliberately NOT a dedicated base-rate table/lifecycle of its
+# own — the minijob/midijob parameter registry ALREADY provides the
+# effective-dated, source-evidenced, DRAFT/APPROVED/PUBLISHED lifecycle for
+# Land overlays, and this function only exists so the Super Admin UI has a
+# real endpoint to read the certified base values from instead of
 # hardcoding them a second time in the frontend.
 def get_church_tax_matrix() -> dict:
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import CHURCH_TAX_LAND_RATES
@@ -1938,7 +1943,9 @@ def get_church_tax_matrix() -> dict:
         "laender": [
             {"code": code, "ratePct": str(rate)} for code, rate in sorted(CHURCH_TAX_LAND_RATES.items())
         ],
-        "sourceStatus": "HARDCODED_CONSTANT — no DB-backed registry/lifecycle/source-evidence linkage exists",
+        "sourceStatus": "CERTIFIED CODE DEFAULT — spec §8 base Land rates; registry-first at calc time via "
+        "church_tax_rate_de_* overlay parameters (minijob/midijob parameter registry) with sub-Land "
+        "exceptions from the GermanyChurchTaxException registry",
         "knownGaps": [
             "Bad Wimpfen (Baden-Württemberg) Roman Catholic denomination/location exception — "
             "IMPLEMENTED (Phase 8AM) as a SEPARATE, additive, source-evidenced maker-checker registry "
@@ -10812,10 +10819,20 @@ def _compute_overtime_financial_delta(
             zve_surcharges_base = Decimal(internal_wage_tax.get("ZVE_SURCHARGES", internal_wage_tax["ZVE_LOHNSTEUER"]))
             t1_surcharge_base = compute_tax_for_class(zve_surcharges_base, tax_class, tariff)
             t2_surcharge_base = compute_tax_for_class(zve_surcharges_base + wage_taxable, tax_class, tariff)
+            # Phase 8BY: the Soli Freigrenze comes from the SAME
+            # effective-dated tariff version already resolved above from
+            # run.pay_date (2023-2025: EUR 18,130; 2026: EUR 20,350 per
+            # ZP-TAX-DE-2026-001 section 7), so an overtime tax delta can
+            # never be computed against a different statutory year than
+            # the payslip it belongs to. `_DE_SOLI_THRESHOLD` remains only
+            # as the fallback for a legacy tariff dict without the key.
+            # This resolves the former "hardwired, not registry-resolved"
+            # annotation rather than merely relabelling it.
+            overtime_soli_threshold = tariff.get("soli_threshold_single") or _DE_SOLI_THRESHOLD
             soli_t1 = compute_soli(t1_surcharge_base, is_splitting=(tax_class == "III"),
-                                    soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE)
+                                    soli_threshold_single=overtime_soli_threshold, soli_rate_pct=_DE_SOLI_RATE)
             soli_t2 = compute_soli(t2_surcharge_base, is_splitting=(tax_class == "III"),
-                                    soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE)
+                                    soli_threshold_single=overtime_soli_threshold, soli_rate_pct=_DE_SOLI_RATE)
             soli_delta = _round2(soli_t2 - soli_t1)
 
             church_tax_liable = bool(snapshot.get("churchTaxLiableUsed"))
@@ -13056,6 +13073,22 @@ def advance_payroll_run_status(
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="This run has already reached its final status.")
 
     next_status = PAYROLL_STATUS_ORDER[current_idx + 1]
+    if next_status == PayrollStatus.PAID:
+        unresolved_statuses = {
+            item_status for (item_status,) in db.query(PayslipItem.status).filter(
+                PayslipItem.payroll_run_id == run.id,
+            ).all()
+            if item_status != PayslipStatus.PENDING.value
+        }
+        if unresolved_statuses:
+            statuses = ", ".join(sorted(str(value) for value in unresolved_statuses))
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=(
+                    "Cannot mark this payroll run as Paid while payslips have "
+                    f"unresolved statuses: {statuses}. Resolve or recalculate them first."
+                ),
+            )
     run.status = next_status
     if next_status == PayrollStatus.APPROVED:
         run.approved_by = approver_id
