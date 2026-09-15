@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
 
 const TOKEN_KEY = "zoiko_payroll_access";
 const REFRESH_KEY = "zoiko_payroll_refresh";
@@ -83,6 +83,8 @@ export async function apiFetch(path, { method = "GET", body, params } = {}) {
     const msg = Array.isArray(detail) ? detail.map((d) => d.msg).join("; ") : detail;
     const err = new Error(msg || `Request failed (${res.status})`);
     err.status = res.status;
+    err.errorCode = data?.error || data?.error_code || null;
+    err.trace = data?.trace || null;
     throw err;
   }
   return data;

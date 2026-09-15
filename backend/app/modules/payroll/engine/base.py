@@ -228,6 +228,69 @@ class PayrollContext:
     # calculation changes just because this field now exists.
     state_income_tax_election_pct: Decimal = None
 
+    # Germany (Phase 7) — pre-resolved statutory configuration rows,
+    # threaded through exactly like rate_map/slabs above so
+    # engine/countries/germany.py stays a pure function of its context
+    # (no DB access from the engine layer, matching every other
+    # country's calculator). None/absent for every non-German employee —
+    # existing calculations for every other country are unaffected.
+    # Resolved per-employee, per-payroll-date by service.py (see
+    # service._resolve_germany_calc_inputs) since these are
+    # employee-specific (unlike rate_map/slabs, which can be cached
+    # across employees sharing a jurisdiction).
+    germany_statutory_profile: object = None    # EmployeeStatutoryProfile | None
+    germany_pap_asset: object = None            # PapAlgorithmAsset | None (PUBLISHED, resolved by payroll date)
+    germany_health_fund: object = None          # GermanyHealthFund | None (PUBLISHED, resolved by employee's fund code + date)
+    # Phase 8W — the employer's selected U1 tariff, resolved from
+    # EmployeeStatutoryProfile.de_u1_tariff_id against the fund's available
+    # GermanyHealthFundU1Tariff records. The calculation engine now reads
+    # U1 levy rates from this object's levy_rate_pct field, NOT from the
+    # deprecated GermanyHealthFund.u1_rate_pct column.
+    germany_u1_tariff: object = None            # GermanyHealthFundU1Tariff | None
+    germany_ceiling_gkv_pv: object = None       # GermanyContributionCeiling | None (branch="GKV_PV")
+    germany_ceiling_rv_alv: object = None       # GermanyContributionCeiling | None (branch="RV_ALV")
+    germany_pv_configuration: object = None     # GermanyPvConfiguration | None
+    # Phase 8AM — a documented sub-Land church-tax exception (e.g. Bad
+    # Wimpfen's Roman Catholic 9% rate within Baden-Württemberg's general
+    # 8%), resolved by (Land, denomination, municipality postal code) +
+    # payroll date against the PUBLISHED GermanyChurchTaxException
+    # registry. None (the overwhelming common case) means "no documented
+    # exception applies — use the ordinary Land rate" exactly as before
+    # this phase; this field NEVER causes the ordinary Land-rate path to
+    # change behavior when absent.
+    germany_church_tax_exception: object = None  # GermanyChurchTaxException | None
+    # Identity/date fields, for the calculation trace only (never used to
+    # query the DB from within the engine layer).
+    germany_employee_id: int = None
+    germany_organization_id: int = None
+    germany_payroll_date: object = None
+    # Phase 8T — the "Bonus / annual bonus" portion of this period's gross
+    # (spec §15's own "Other remuneration route" row), sourced from
+    # PayrollAttendanceRecord.bonus specifically (never rewards/other_
+    # compensation, which the spec does not classify as SONSTB-routed).
+    # Zero for every non-German employee and for every German employee
+    # this period had no bonus recorded (service._sum_attendance_bonus_only).
+    # Still part of `gross` above (the employee is still paid it, and it
+    # remains RV/ALV/GKV/PV-contributory per spec's own table) — this field
+    # only tells the Germany PAP-input boundary how much of gross to route
+    # via SONSTB instead of RE4, never changes net pay by itself.
+    germany_sonstb: object = None               # Decimal | None (None treated as 0)
+    # Phase 8X — the resolved four-dimension earning taxability
+    # (spec §15) for each earning type actually present in this run,
+    # keyed by earning_type -> GermanyEarningTaxabilityRule | None.
+    # Only REGULAR_SALARY (steady RE4 wage) and BONUS_ANNUAL_BONUS
+    # (SONSTB-routed bonus) are real inputs in the current engine, so only
+    # those two are resolved. Absent/published-None means NOT_CONFIGURED —
+    # the engine surfaces it in the trace and never invents a classification.
+    germany_earning_taxability: dict = None     # {earning_type: rule-or-None}
+    # Phase 8BK — the resolved Minijob/Midijob statutory parameter
+    # registry (service.resolve_all_minijob_midijob_parameters), keyed by
+    # parameter_code -> GermanyMinijobMidijobParameter | None. Absent/None
+    # for a given code means "no PUBLISHED record covers this payroll
+    # date" — engine/countries/germany.py falls back to the identical
+    # hardcoded 2026 constant it always used, so no existing calculation
+    # changes just because this field now exists.
+    germany_minijob_midijob_parameters: dict = None
     # Canada TD1 federal total claim amount. None for every non-CA
     # employee, and for CA employees until explicitly set —
     # engine/countries/canada.py falls back to the dynamic income-tapered
@@ -444,6 +507,16 @@ class PayrollResult:
     # has_postgrad_loan above. Always 0 unless that flag is explicitly set.
     postgrad_loan_deduction: Decimal = Decimal("0")
     church_tax: Decimal = Decimal("0")
+    # Germany: Solidaritätszuschlag — monthly amount from an executed BMF
+    # PAP run (germany_pap adapter's SOLZLZZ output), mirrored as its own
+    # field so service.py can persist it onto PayslipItem.soli. PURELY
+    # informational like surcharge/cess above: the Lohnsteuer+Soli are
+    # already folded into `tds` for every Germany payslip (see
+    # engine/countries/germany.py), so this is NEVER re-summed into
+    # total_employee_deductions/net_pay anywhere. Zero for every
+    # country/employee until a real PUBLISHED PapAlgorithmAsset is
+    # released AND a real PapExecutor computes it.
+    soli: Decimal = Decimal("0")
     cpp2: Decimal = Decimal("0")
     # Canada: CPP/QPP first-layer BASE (4.95%) vs. FIRST-ADDITIONAL
     # (1.00%) breakdown (AC-11) — PURELY informational, like surcharge/
@@ -608,6 +681,21 @@ class PayrollResult:
     total_deductions: Decimal = Decimal("0")
     net_pay: Decimal = Decimal("0")
 
+    # Germany (Phase 7) — statutory calculation provenance, carried through
+    # so service.py can freeze it onto the finalized PayslipItem
+    # (employee_statutory_profile_id / germany_calculation_snapshot).
+    # None for every non-German calculation and for any German calculation
+    # that doesn't reach this point (see engine/countries/germany.py —
+    # currently it never does, since PAP execution is unconditionally
+    # blocked; written correctly for when that changes).
+    germany_statutory_profile_id: int = None
+    germany_calculation_snapshot: dict = None
+    # Phase 8BU: non-empty ONLY for a PARTIAL Germany result (RV/ALV/GKV/
+    # PV/employer-levies genuinely computed; wage_tax/soli/church_tax
+    # genuinely unavailable for this specific employee/date — never
+    # fabricated as zero-because-complete). None/empty for every
+    # COMPLETE result and every non-German calculation.
+    germany_unavailable_components: list = None
     # India: Code on Wages §8.3 aggregate-deduction cap ("authorized
     # deductions during a wage period" limited to 50% of wages, AC-18) —
     # a pure COMPLIANCE FLAG, never a recalculation: this engine must

@@ -1,5 +1,5 @@
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
 const TOKEN_KEY = "zoiko_payroll_access";
 const REFRESH_KEY = "zoiko_payroll_refresh";
 const USER_KEY = "zoiko_payroll_user";
@@ -96,9 +96,13 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
 
   if (!res.ok) {
     let detail;
+    let errorCode;
+    let trace;
     try {
       const data = await res.json();
       detail = data?.detail || data?.message;
+      errorCode = data?.error || data?.error_code || null;
+      trace = data?.trace || null;
       if (Array.isArray(detail)) {
         // Handle FastAPI 422 validation errors nicely
         detail = detail.map(err => {
@@ -111,7 +115,7 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
     } catch {
       detail = res.statusText;
     }
-    throw createApiError(detail, res.status);
+    throw createApiError(detail, res.status, { errorCode, trace });
   }
 
   if (res.status === 204) return null;

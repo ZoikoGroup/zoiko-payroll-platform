@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -23,6 +26,6 @@ jobs:
             cd backend
             source venv/bin/activate
             pip install -r requirements.txt
-            alembic upgrade head
+            bash ../scripts/deploy_migrate.sh
             deactivate
             sudo systemctl restart zoiko-payroll-backend

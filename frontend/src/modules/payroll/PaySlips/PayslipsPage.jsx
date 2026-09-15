@@ -12,6 +12,11 @@ const statusConfig = {
   Paid:     { color: "bg-primary/10 text-primary", icon: CheckCircle2 },
   Pending:  { color: "bg-warning/10 text-warning", icon: Clock       },
   Failed:   { color: "bg-error/10 text-error", icon: AlertCircle },
+  // Phase 8BV: without its own entry, a Partial payslip (real components
+  // calculated, at least one other genuinely unavailable — see Phase 8BU)
+  // fell through to statusConfig.Paid below, showing a green "fully paid"
+  // checkmark on a payslip whose net pay is explicitly NOT a real figure.
+  Partial:  { color: "bg-warning/10 text-warning", icon: AlertTriangle },
 };
 
 const tabs = [
