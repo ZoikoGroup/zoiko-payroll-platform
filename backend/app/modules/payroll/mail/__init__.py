@@ -1,9 +1,10 @@
 from app.modules.payroll.mail.models import PayrollEmailSettings
 
-def __getattr__(name):
-    if name == "mail_router":
-        from app.modules.payroll.mail.router import mail_router
-        return mail_router
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Router deliberately NOT imported here (see payroll/policy/__init__.py for
+# the full rationale): app.database imports this package's .models for table
+# registration while payroll.models may still be partially initialized, and
+# the eager router import drags in mail.service which imports ActivityStatus
+# from payroll.models too early. mail_router is mounted explicitly by
+# payroll/router.py.
 
-__all__ = ["PayrollEmailSettings", "mail_router"]
+__all__ = ["PayrollEmailSettings"]

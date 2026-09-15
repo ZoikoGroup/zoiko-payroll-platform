@@ -115,6 +115,15 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     ["National Insurance", item.niEmployee],
     ["Workplace Pension", item.employeePension],
     ["Student Loan Deduction", item.studyLoanDeduction],
+    // UK: was reaching the API response (once the schema fix landed) but
+    // still had no row here — found 2026-09-09 gap-closure Phase 3.
+    ["Postgraduate Loan Deduction", item.postgradLoanDeduction],
+    // US: State Disability Insurance / other state payroll-program employee
+    // deductions (CA SDI, NY/NJ/RI TDI, CT/MA/WA/CO/OR/etc. paid-leave
+    // employee share) — computed and persisted but never shown here until
+    // the 2026-09-15 Org Admin visibility audit.
+    ["State Disability Insurance", item.stateDisabilityInsurance],
+    ["State Payroll Programs (e.g. Paid Leave/TDI)", item.stateProgramDeductions],
   ].filter(([, v]) => Number(v) > 0);
 
   const employerContributions = [
@@ -124,6 +133,18 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     ["Employer Medicare", item.employerMedicare],
     [labels.employerPension, item.employerPension],
     ["Employer National Insurance", item.employerNi],
+    // UK: Apprenticeship Levy — computed since the 2026-09-08 commit but
+    // silently discarded before ever reaching a persisted PayslipItem;
+    // now actually persisted+serialized (Phase 3), shown here as an
+    // employer-only charge, consistent with Employer National Insurance
+    // above.
+    ["Apprenticeship Levy", item.employerApprenticeshipLevy],
+    // US: FUTA / SUI / state payroll-program employer contributions —
+    // computed and persisted but never reached this list (or any payslip
+    // API response at all) until the 2026-09-15 Org Admin visibility audit.
+    ["FUTA (Employer)", item.employerFuta],
+    ["SUI (Employer)", item.employerSui],
+    ["State Payroll Programs (Employer)", item.employerStateProgramContributions],
   ].filter(([, v]) => Number(v) > 0);
   const employerContributionsTotal = employerContributions.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
   const employerTotalCost = (Number(item.salary) || 0) + employerContributionsTotal;

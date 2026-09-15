@@ -2,12 +2,17 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, LayoutDashboard, Landmark, MapPin, Building2, Percent, ArrowLeftRight,
-  FileCheck2, Users, History, ScrollText,
+  FileCheck2, Users, History, ScrollText, Layers, CalendarClock, ShieldCheck, HeartHandshake,
 } from "lucide-react";
 import SuiEmployerRatesPanel from "../../components/jurisdiction/SuiEmployerRatesPanel";
 import ReciprocityRulesPanel from "../../components/jurisdiction/ReciprocityRulesPanel";
 import LocalityRatesPanel from "../../components/jurisdiction/LocalityRatesPanel";
+import LocalityDatasetManagerPanel from "../../components/jurisdiction/LocalityDatasetManagerPanel";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
+import TestCertificationPanel from "../../components/jurisdiction/TestCertificationPanel";
+import USASpecialProgramsPanel from "../../components/jurisdiction/usa/USASpecialProgramsPanel";
+import TaxabilityMatrixTab from "../../components/jurisdiction/TaxabilityMatrixTab";
+import USFederalDepositScheduleTab from "../../components/jurisdiction/usa/USFederalDepositScheduleTab";
 import USOverviewDashboard from "./components/usa/USOverviewDashboard";
 import USTaxPackWorkspace from "./components/usa/USTaxPackWorkspace";
 import USOrganizationsSection from "./components/usa/USOrganizationsSection";
@@ -34,8 +39,12 @@ const SECTIONS = [
   { key: "stateDistrict", label: "State / District", icon: MapPin },
   { key: "local", label: "Local", icon: Building2 },
   { key: "sui", label: "SUI Employer Rates", icon: Percent },
+  { key: "specialPrograms", label: "Special Programs", icon: HeartHandshake },
+  { key: "taxabilityMatrix", label: "Taxability Matrix", icon: Layers },
+  { key: "depositSchedule", label: "Deposit & Filing Calendar", icon: CalendarClock },
   { key: "reciprocity", label: "Reciprocity & Sourcing", icon: ArrowLeftRight },
   { key: "sourceEvidence", label: "Source Evidence", icon: FileCheck2 },
+  { key: "certification", label: "Test Certification", icon: ShieldCheck },
   { key: "organizations", label: "Organizations", icon: Users },
   { key: "versions", label: "Versions", icon: History },
   { key: "audit", label: "Audit", icon: ScrollText },
@@ -136,10 +145,32 @@ export default function USACompliancePage() {
       {section === "stateDistrict" && (
         <USTaxPackWorkspace mode="state" initialSelectedState={activeScope} onActiveScopeChange={setActiveScope} />
       )}
-      {section === "local" && <LocalityRatesPanel />}
+      {section === "local" && (
+        <div className="space-y-6">
+          <LocalityRatesPanel />
+          <LocalityDatasetManagerPanel />
+        </div>
+      )}
       {section === "sui" && <SuiEmployerRatesPanel />}
+      {section === "specialPrograms" && (
+        <USASpecialProgramsPanel
+          onNavigateToState={(state) => {
+            setActiveScope(state);
+            setSection("stateDistrict");
+            navigate(pathForScope(state, "stateDistrict"));
+          }}
+        />
+      )}
+      {section === "taxabilityMatrix" && <TaxabilityMatrixTab country="US" />}
+      {section === "depositSchedule" && <USFederalDepositScheduleTab />}
       {section === "reciprocity" && <ReciprocityRulesPanel />}
       {section === "sourceEvidence" && <SourceEvidencePanel />}
+      {section === "certification" && (
+        <TestCertificationPanel
+          jurisdiction="US" label="United States (IRS/SSA/State DOR)"
+          fixturesPath="backend/tests/fixtures/us_golden/README.md"
+        />
+      )}
       {section === "organizations" && <USOrganizationsSection initialScope={activeScope} />}
       {section === "versions" && <USVersionsSection initialScope={activeScope} />}
       {section === "audit" && <USAuditSection initialScope={activeScope} />}

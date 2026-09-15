@@ -1,0 +1,20 @@
+{
+  "description": "IN-PT-MH-001 (ZP-TAX-IN-2026-27-001 §21), non-February case — same MALE employee, same ₹12,000/month, but pay date is March (any non-February month). The ₹10,001-and-above tier's February adjustment_amount does NOT apply outside February, so professional_tax falls back to the tier's plain flat_amount of ₹200 — matching the doc's own stated 'non-Feb: PT 200' exactly.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-PT-MH-001 + §13.2 (Maharashtra PT schedule, source IN-MH-PT). Same bracket rows as the February case, only pay_date differs — demonstrates the February-only gate (india.py's _IN_PT_ADJUSTMENT_MONTH) in both directions. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "12000.00",
+    "basic": "12000.00",
+    "country": "IN",
+    "pay_date": "2026-03-15",
+    "work_state": "Maharashtra",
+    "gender": "MALE",
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "7500", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "0.00", "jurisdiction_state": "Maharashtra", "filing_status": "MALE"},
+      {"min_amount": "7501", "max_amount": "10000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "175.00", "jurisdiction_state": "Maharashtra", "filing_status": "MALE"},
+      {"min_amount": "10001", "max_amount": null, "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "200.00", "adjustment_amount": "300.00", "jurisdiction_state": "Maharashtra", "filing_status": "MALE"}
+    ]
+  },
+  "expected": {
+    "professional_tax": "200.00"
+  }
+}

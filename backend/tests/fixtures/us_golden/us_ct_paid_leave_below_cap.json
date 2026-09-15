@@ -1,0 +1,16 @@
+{
+  "description": "Connecticut Paid Leave (ZP-TAX-US-2026-001 §13, test ID US-CT-PL-001) -- covered wages $2,000, below the Social Security wage cap, employee rate 0.50%. Expected employee contribution $10.00.",
+  "source": "ZP-TAX-US-2026-001 v1.0: Section 5 (CT Paid Leave: employee 0.50%, up to Social Security cap $184,500), Section 13 test US-CT-PL-001, Appendix A (\"2026 employee contribution remains 0.50% up to the Social Security contribution and benefit base\"). Recomputed by running the real engine: 2000 * 0.50% = 10.00.",
+  "context": {
+    "gross": "2000.00",
+    "country": "US",
+    "work_state": "CT",
+    "state_rate_map": {
+      "paid_leave": {"employee_rate_pct": "0.50", "jurisdiction_state": "CT"},
+      "paid_leave_wage_cap": {"flat_amount": "184500.00"}
+    }
+  },
+  "expected": {
+    "state_program_deductions": "10.00"
+  }
+}

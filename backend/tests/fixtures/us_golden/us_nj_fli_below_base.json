@@ -1,0 +1,17 @@
+{
+  "description": "New Jersey Family Leave Insurance (ZP-TAX-US-2026-001 §13, test ID US-NJ-FLI-001) -- covered wages $10,000, below the $171,100 FLI wage base, employee rate 0.23%. Expected employee FLI $23.00. Only the FLI component is included here (not NJ's other three worker programs) to isolate this single component per the test ID's own scope.",
+  "source": "ZP-TAX-US-2026-001 v1.0: Section 5 (NJ Family Leave Insurance: employee 0.23%, $171,100 wage base, $393.53 max), Section 13 test US-NJ-FLI-001, Appendix A (\"DI/FLI $171,100. FLI max worker contribution $393.53\"). Recomputed by running the real engine: 10000 * 0.23% = 23.00 (well under both the wage base and the annual max).",
+  "context": {
+    "gross": "10000.00",
+    "country": "US",
+    "work_state": "NJ",
+    "state_rate_map": {
+      "fli": {"employee_rate_pct": "0.23", "jurisdiction_state": "NJ"},
+      "fli_wage_cap": {"flat_amount": "171100.00"},
+      "fli_annual_max": {"flat_amount": "393.53"}
+    }
+  },
+  "expected": {
+    "state_program_deductions": "23.00"
+  }
+}

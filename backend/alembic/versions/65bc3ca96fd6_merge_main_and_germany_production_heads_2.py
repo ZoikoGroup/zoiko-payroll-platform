@@ -1,6 +1,6 @@
 """merge main and germany production heads 2
 
-Revision ID: c7d8e9f0a1b2
+Revision ID: 65bc3ca96fd6
 Revises: b5c6d7e8f9a2, b6c7d8e9f0a1
 Create Date: 2026-09-08 00:00:00.000000
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'c7d8e9f0a1b2'
+revision: str = '65bc3ca96fd6'  # was c7d8e9f0a1b2 on main; renumbered — collided with an unrelated venu-branch migration id
 down_revision: Union[str, Sequence[str], None] = ('b5c6d7e8f9a2', 'b6c7d8e9f0a1')
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { X, Edit, Trash2, Landmark, Clock } from "lucide-react";
+import { X, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
+import UKStatutoryPayCalculatorModal from "./UKStatutoryPayCalculatorModal";
+import UKCourtOrdersModal from "./UKCourtOrdersModal";
+import UKNiReliefFactsModal from "./UKNiReliefFactsModal";
+import IndiaStatutoryFormsModal from "./IndiaStatutoryFormsModal";
+import CAStatutoryFormsModal from "./CAStatutoryFormsModal";
+import USStatutoryFormsModal from "./USStatutoryFormsModal";
 import GermanyStatutoryProfilePanel from "./GermanyStatutoryProfilePanel";
 import GermanyOvertimePanel from "./GermanyOvertimePanel";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
+import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
 const DEPARTMENT_STYLES = {
   Engineering: "bg-info/10 text-info",
@@ -42,6 +49,25 @@ function formatCurrency(value, info) {
   }
 }
 
+// Every US compliance field (SSN, work state/locality, W-4 details,
+// reciprocity/residency certifications, ...) is validated and persisted
+// (see employee_validation.py's USEmployeeValidation) but this panel's
+// read-only view previously showed none of them at all — only reachable
+// by entering Edit mode. Mirrors EmployeeForm's own field list/labels so
+// the view and edit modes never disagree on what a field is called.
+// Booleans are stored as the literal strings "true"/"false"/"True"/"False"
+// (see FIELD_SPECS choices) — shown as Yes/No here for readability.
+const BOOLEAN_CHOICE_SETS = [["true", "false", "True", "False"]];
+
+function formatComplianceValue(spec, raw) {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const isBoolean = spec.choices && BOOLEAN_CHOICE_SETS.some(
+    (set) => spec.choices.length === set.length && spec.choices.every((c) => set.includes(c))
+  );
+  if (isBoolean) return String(raw).toLowerCase() === "true" ? "Yes" : "No";
+  return String(raw);
+}
+
 function DetailRow({ label, value }) {
   return (
     <div className="flex justify-between gap-4 py-3">
@@ -57,6 +83,12 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [deleteError, setDeleteError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [showStatutoryPayCalculator, setShowStatutoryPayCalculator] = useState(false);
+  const [showCourtOrders, setShowCourtOrders] = useState(false);
+  const [showNiReliefFacts, setShowNiReliefFacts] = useState(false);
+  const [showIndiaStatutoryForms, setShowIndiaStatutoryForms] = useState(false);
+  const [showCaStatutoryForms, setShowCaStatutoryForms] = useState(false);
+  const [showUsStatutoryForms, setShowUsStatutoryForms] = useState(false);
   const [showGermanyStatutory, setShowGermanyStatutory] = useState(false);
   const [showGermanyOvertime, setShowGermanyOvertime] = useState(false);
 
@@ -134,6 +166,7 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                 <dl className="divide-y divide-border">
                   <DetailRow label="Email" value={employee.email} />
                   <DetailRow label="Phone" value={employee.phone} />
+                  <DetailRow label="Date of birth" value={employee.dateOfBirth} />
                   <DetailRow label="Designation" value={employee.designation} />
                   <DetailRow label="Employment type" value={employee.employmentType} />
                   <DetailRow label="Status" value={employee.status} />
@@ -155,7 +188,88 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                   <DetailRow label="Bank account" value={employee.bankAccountNumber} />
                   <DetailRow label="PAN" value={employee.panNumber} />
                 </dl>
+                {employee.countryCode === "UK" && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowStatutoryPayCalculator(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Statutory Pay Calculator (SSP / Family Pay)
+                    </button>
+                    <button
+                      onClick={() => setShowCourtOrders(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Scale size={14} />
+                      Court-Ordered Deductions
+                    </button>
+                    <button
+                      onClick={() => setShowNiReliefFacts(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <ShieldCheck size={14} />
+                      NI Category Relief Facts
+                    </button>
+                  </div>
+                )}
+                {/* countryCode defaults to IN across most of this app's
+                    existing orgs (never explicitly set) — same reasoning
+                    as _resolve_employee_country's own org-default fallback
+                    on the backend, so this is intentionally permissive
+                    rather than an exact "=== IN" match like the UK block
+                    above. */}
+                {(!employee.countryCode || employee.countryCode === "IN") && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowIndiaStatutoryForms(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Gratuity &amp; Statutory Forms (122/123/124)
+                    </button>
+                  </div>
+                )}
+                {employee.countryCode === "CA" && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowCaStatutoryForms(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Statutory Forms &amp; Special Payments (T4 / RL-1 / ROE)
+                    </button>
+                  </div>
+                )}
+                {employee.countryCode === "US" && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowUsStatutoryForms(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Supplemental Wages Calculator
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {employee.countryCode === "US" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">US Tax Details</h4>
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.US
+                      .filter((spec) => !spec.showWhen || spec.showWhen(employee.complianceFields))
+                      .map((spec) => (
+                      <DetailRow
+                        key={spec.key}
+                        label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])}
+                      />
+                    ))}
+                  </dl>
+                </div>
+              )}
 
               {employee.countryCode === "DE" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
@@ -262,6 +376,24 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
         )}
       </div>
 
+      {showStatutoryPayCalculator && (
+        <UKStatutoryPayCalculatorModal employee={employee} onClose={() => setShowStatutoryPayCalculator(false)} />
+      )}
+      {showCourtOrders && (
+        <UKCourtOrdersModal employee={employee} onClose={() => setShowCourtOrders(false)} />
+      )}
+      {showNiReliefFacts && (
+        <UKNiReliefFactsModal employee={employee} onClose={() => setShowNiReliefFacts(false)} />
+      )}
+      {showIndiaStatutoryForms && (
+        <IndiaStatutoryFormsModal employee={employee} onClose={() => setShowIndiaStatutoryForms(false)} />
+      )}
+      {showUsStatutoryForms && (
+        <USStatutoryFormsModal employee={employee} onClose={() => setShowUsStatutoryForms(false)} />
+      )}
+      {showCaStatutoryForms && (
+        <CAStatutoryFormsModal employee={employee} onClose={() => setShowCaStatutoryForms(false)} />
+      )}
       {showGermanyStatutory && (
         <GermanyStatutoryProfilePanel employee={employee} onClose={() => setShowGermanyStatutory(false)} />
       )}

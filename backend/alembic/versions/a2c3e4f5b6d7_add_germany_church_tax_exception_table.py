@@ -1,7 +1,7 @@
 """add germany church tax exception table
 
 Revision ID: a2c3e4f5b6d7
-Revises: f0a1b2c3d4e5
+Revises: b4241285b6dd
 Create Date: 2026-09-08 00:00:00.000000
 
 Phase 8BC — schema reconciliation forensics found that
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a2c3e4f5b6d7'
-down_revision: Union[str, Sequence[str], None] = 'f0a1b2c3d4e5'
+down_revision: Union[str, Sequence[str], None] = 'b4241285b6dd'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

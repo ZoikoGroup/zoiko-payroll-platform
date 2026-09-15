@@ -1,20 +1,70 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { BarChart3, FileText, History, Download, TrendingUp, Banknote } from "lucide-react";
+import { BarChart3, FileText, History, Download, TrendingUp, Banknote, Landmark } from "lucide-react";
 import { useToast } from "../ToastContext";
 import { getPayrollReports, downloadReport, downloadBankTransferFile } from "../../../service/payrollService";
 import ReportGenerationPanel from "./ReportGenerationPanel";
 import GeneratedReportPreview from "./GeneratedReportPreview";
 import GeneratedReportsHistoryTable from "./GeneratedReportsHistoryTable";
+import UKEmployerChargesPanel from "./UKEmployerChargesPanel";
+import INForm138Panel from "./INForm138Panel";
+import CAPd7aPanel from "./CAPd7aPanel";
+import CAWsdrfPanel from "./CAWsdrfPanel";
+import USForm941Panel from "./USForm941Panel";
+import USForm940Panel from "./USForm940Panel";
+import USNewHireReportingPanel from "./USNewHireReportingPanel";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
-const tabs = [
+const BASE_TABS = [
   { id: "payroll-reports", label: "Payroll Reports", icon: BarChart3 },
   { id: "generate-report",  label: "Generate Report", icon: FileText },
   { id: "report-history",   label: "Report History",  icon: History },
 ];
 
+// UK Employer Annual Charges (ZP-TAX-UK-2026-27-001 §9.3/§14 gap-closure
+// Phase 6, 2026-09-09) is a whole-tax-year, run-independent employer
+// liability, unlike everything else on this page — shown as its own tab,
+// only for a UK org, rather than forced into the per-run Generate Report
+// flow it doesn't fit.
+const UK_EMPLOYER_CHARGES_TAB = { id: "uk-employer-charges", label: "UK Employer Charges", icon: Landmark };
+// India Form 138 (§6.2/§6.3, gap-closure Phase E, 2026-09-10) is
+// quarter-level, employer-wide, and never tied to a single PayrollRun —
+// same reasoning as the UK Employer Charges tab above for its own tab
+// rather than being forced into the run-scoped Generate Report flow.
+const IN_FORM_138_TAB = { id: "in-form-138", label: "India Form 138", icon: FileText };
+// Canada PD7A (ZP-TAX-CA-2026-001, forms/reports gap-closure) is a
+// remittance-period, employer-wide statement, never tied to a single
+// PayrollRun — same reasoning as the India Form 138 tab above.
+const CA_PD7A_TAB = { id: "ca-pd7a", label: "Canada PD7A", icon: Landmark };
+// Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
+// reasoning as the PD7A tab above.
+const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark };
+// US Form 941/940 (Production-Readiness Plan Phase 5) — quarter/year-
+// level, employer-wide, never tied to a single PayrollRun, same reasoning
+// as the PD7A tab above.
+const US_941_TAB = { id: "us-941", label: "Form 941", icon: Landmark };
+const US_940_TAB = { id: "us-940", label: "Form 940", icon: Landmark };
+// New Hire Reporting is compliance TRACKING (a due-date + mark-filed
+// list), not report generation like 941/940 above — still its own tab,
+// same "doesn't fit the run-scoped Generate Report flow" reasoning.
+const US_NEW_HIRE_TAB = { id: "us-new-hire", label: "New Hire Reporting", icon: FileText };
+
 export default function ReportsPage() {
   const { addToast } = useToast();
+  const { company, currencyCode } = usePayrollSetup();
+  const jurisdictionCountry = (company?.jurisdictionCountry || company?.jurisdiction_country || "").toUpperCase();
+  const isUk = jurisdictionCountry === "UK";
+  // Permissive default-to-IN, same reasoning as EmployeeDetailPanel's own
+  // India-forms button gate — most orgs never explicitly set this field.
+  const isIndia = !jurisdictionCountry || jurisdictionCountry === "IN";
+  const isCanada = jurisdictionCountry === "CA";
+  const isUs = jurisdictionCountry === "US";
+  const tabs = [
+    ...BASE_TABS,
+    ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
+    ...(isIndia ? [IN_FORM_138_TAB] : []),
+    ...(isCanada ? [CA_PD7A_TAB, CA_WSDRF_TAB] : []),
+    ...(isUs ? [US_941_TAB, US_940_TAB, US_NEW_HIRE_TAB] : []),
+  ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +72,6 @@ export default function ReportsPage() {
   const [downloadCount, setDownloadCount] = useState(0);
   const [bankFileFormat, setBankFileFormat] = useState({});
   const [downloadingBankFileId, setDownloadingBankFileId] = useState(null);
-  const { currencyCode } = usePayrollSetup();
 
   // The most recently generated statutory report (Generate Report tab) —
   // shown as a preview until the user generates another one or leaves
@@ -252,6 +301,14 @@ export default function ReportsPage() {
           />
         </div>
       )}
+
+      {isUk && activeTab === "uk-employer-charges" && <UKEmployerChargesPanel />}
+      {isIndia && activeTab === "in-form-138" && <INForm138Panel />}
+      {isCanada && activeTab === "ca-pd7a" && <CAPd7aPanel />}
+      {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
+      {isUs && activeTab === "us-941" && <USForm941Panel />}
+      {isUs && activeTab === "us-940" && <USForm940Panel />}
+      {isUs && activeTab === "us-new-hire" && <USNewHireReportingPanel />}
     </div>
   );
 }

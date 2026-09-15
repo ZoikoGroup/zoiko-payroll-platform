@@ -1,0 +1,18 @@
+{
+  "description": "IN-PT-KA-001 (ZP-TAX-IN-2026-27-001 §21) — Karnataka Professional Tax, salary ₹30,000/month. Karnataka's real bracket schedule (source IN-KA-PT-SCHED / IN-KA-PT-2026-ACT, already seeded in hardcoded_defaults.py) is: ₹0 up to ₹24,999, ₹200 at ₹25,000 and above. ₹30,000 falls in the second tier → professional_tax = ₹200, matching the doc's own stated figure exactly.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-PT-KA-001 + §13.1 (Karnataka PT schedule, source IN-KA-PT-SCHED/IN-KA-PT-2026-ACT). Bracket rows reproduced verbatim from hardcoded_defaults.py's own Karnataka PT_FLAT rows (sort_order 34-35) rather than omitted. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "30000.00",
+    "basic": "30000.00",
+    "country": "IN",
+    "pay_date": "2026-06-15",
+    "work_state": "Karnataka",
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "24999", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "0.00", "jurisdiction_state": "Karnataka"},
+      {"min_amount": "25000", "max_amount": null, "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "200.00", "jurisdiction_state": "Karnataka"}
+    ]
+  },
+  "expected": {
+    "professional_tax": "200.00"
+  }
+}

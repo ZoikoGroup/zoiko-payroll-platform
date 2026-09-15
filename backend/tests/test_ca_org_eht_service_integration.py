@@ -91,6 +91,7 @@ def _stub_business_code_generation(monkeypatch):
 
 
 def test_employer_eht_stays_zero_when_switch_off(db, organization, monkeypatch):
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.discard("CA")  # simulate the switch OFF
     _stub_business_code_generation(monkeypatch)
     _seed_on_eht_bands(db)
     assert "CA" not in shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES

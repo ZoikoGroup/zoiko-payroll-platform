@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
-import { fetchContributionRates, fetchTaxSlabs } from "../../../service/payrollService";
+import { fetchContributionRates, fetchTaxSlabs, fetchStateTaxSlabs, fetchOrgLocalityRates } from "../../../service/payrollService";
 import { SlabsTable, PTSlabsTable, withholdingTerm } from "./TaxSlabTable";
 import { RatesTable } from "./ContributionRatesTable";
 
@@ -118,22 +118,42 @@ const COUNTRY_TAX_CONFIG = {
         ],
       },
       {
-        key: "state", label: "State Taxes",
+        key: "state", label: "State Taxes", stateAware: true,
         items: [
           {
-            key: "state-income-tax", label: "State Income Tax", source: "slabs",
-            matches: () => false,
+            // Real state bracket data (fetchStateTaxSlabs — a genuinely
+            // separate, additive lookup from Federal's fetchTaxSlabs,
+            // which deliberately excludes every state-scoped row). Was
+            // hardcoded matches:()=>false regardless of what's actually
+            // configured — found 2026-09-15 Org Admin visibility audit.
+            key: "state-income-tax", label: "State Income Tax", source: "stateSlabs",
+            matches: (state) => Boolean(state),
             filter: (rows) => rows,
-            noStatePlaceholder: "State income tax isn't broken out separately from Federal Income Tax in the current data — see Federal Taxes.",
+            noStatePlaceholder: "Set an organization state under Company Details to see state income tax.",
           },
         ],
       },
       {
+        // Real per-employee locality data (fetchOrgLocalityRates —
+        // resolved from this org's own employees' work_locality codes
+        // through the same Active-dataset lookup payroll calculation uses)
+        // — previously always matches:()=>false regardless of what's
+        // configured, since nothing fetched org-specific locality data in
+        // at all (found 2026-09-15 Org Admin visibility audit).
         key: "local", label: "Local Taxes",
         items: [
-          { key: "city-tax", label: "City Tax", source: "slabs", matches: () => false, filter: (rows) => rows, noStatePlaceholder: "City tax isn't configured for this organization yet." },
-          { key: "county-tax", label: "County Tax", source: "slabs", matches: () => false, filter: (rows) => rows, noStatePlaceholder: "County tax isn't configured for this organization yet." },
-          { key: "local-payroll-tax", label: "Local Payroll Tax", source: "slabs", matches: () => false, filter: (rows) => rows, noStatePlaceholder: "Local payroll tax isn't configured for this organization yet." },
+          {
+            key: "city-tax", label: "City Tax", source: "localityRates", matches: () => true,
+            filter: (rows) => rows.filter((r) => r.localityType === "MUNICIPAL"),
+          },
+          {
+            key: "county-tax", label: "County Tax", source: "localityRates", matches: () => true,
+            filter: (rows) => rows.filter((r) => r.localityType === "COUNTY"),
+          },
+          {
+            key: "local-payroll-tax", label: "Local Payroll Tax", source: "localityRates", matches: () => true,
+            filter: (rows) => rows.filter((r) => r.localityType !== "MUNICIPAL" && r.localityType !== "COUNTY"),
+          },
         ],
       },
     ],
@@ -153,10 +173,15 @@ const COUNTRY_TAX_CONFIG = {
             // Real bracket-calculated provincial/territorial tax (Phase 4
             // of the Canada engine build) is now consumed by the payroll
             // engine — this was a hardcoded matches:()=>false placeholder
-            // before that existed. Same real-rule-type filter IN/UK use.
-            key: "provincial-income-tax", label: "Provincial / Territorial Income Tax", source: "slabs",
+            // before that existed. Was reading the SAME country-level-only
+            // slabRows as the Federal tab (fetchTaxSlabs excludes every
+            // state-scoped row by design), so this tab was actually
+            // showing federal brackets mislabeled as provincial whenever a
+            // state was set — fixed 2026-09-15 alongside the US State
+            // Taxes gap to use the genuinely state-scoped fetch instead.
+            key: "provincial-income-tax", label: "Provincial / Territorial Income Tax", source: "stateSlabs",
             matches: (state) => Boolean(state),
-            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
+            filter: (rows) => rows,
             noStatePlaceholder: "Set an organization state under Company Details to see provincial/territorial tax.",
           },
         ],
@@ -224,6 +249,40 @@ const COUNTRY_TAX_CONFIG = {
   },
 };
 
+// Local-tax rows (LocalityRateResponse) have a different shape from a
+// bracket (min/max/rate) or a flat ContributionRate — resident/nonresident
+// %, or a flat LST-style amount — so they get their own small table
+// instead of being forced through SlabsTable/RatesTable.
+function LocalityRatesTable({ rows, caption }) {
+  return (
+    <div className="overflow-x-auto rounded-[14px] border border-border">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-surface-muted border-b border-border text-left text-foreground-muted">
+            <th className="px-3 py-2 font-bold">Locality Code</th>
+            <th className="px-3 py-2 font-bold">Name</th>
+            <th className="px-3 py-2 font-bold">Resident Rate</th>
+            <th className="px-3 py-2 font-bold">Nonresident Rate</th>
+            <th className="px-3 py-2 font-bold">Flat Amount</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/50">
+          {rows.map((r) => (
+            <tr key={r.localityCode}>
+              <td className="px-3 py-2 font-mono text-foreground">{r.localityCode}</td>
+              <td className="px-3 py-2 text-foreground-muted">{r.localityName || "—"}</td>
+              <td className="px-3 py-2 text-foreground">{r.residentRatePct != null ? `${r.residentRatePct}%` : "—"}</td>
+              <td className="px-3 py-2 text-foreground">{r.nonresidentRatePct != null ? `${r.nonresidentRatePct}%` : "—"}</td>
+              <td className="px-3 py-2 text-foreground">{r.flatAmount != null ? r.flatAmount : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {caption && <p className="px-3 py-2 text-[11px] text-foreground-disabled border-t border-border">{caption}</p>}
+    </div>
+  );
+}
+
 function Level2Tabs({ groups, active, onChange }) {
   return (
     <div className="flex gap-1 bg-surface-muted rounded-[14px] p-1 w-fit flex-wrap">
@@ -283,22 +342,31 @@ function getVisibleItems(group, jurisdictionState) {
 
 export default function TaxConfigurationTab({ documents = [], country, jurisdictionState }) {
   const [slabRows, setSlabRows] = useState([]);
+  const [stateSlabRows, setStateSlabRows] = useState([]);
   const [rateRows, setRateRows] = useState([]);
+  const [localityRateRows, setLocalityRateRows] = useState([]);
   const [loadState, setLoadState] = useState("loading");
 
   useEffect(() => {
     let cancelled = false;
     setLoadState("loading");
-    Promise.all([fetchTaxSlabs(country), fetchContributionRates(country)])
-      .then(([slabs, rates]) => {
+    Promise.all([
+      fetchTaxSlabs(country),
+      fetchContributionRates(country),
+      fetchStateTaxSlabs(country, jurisdictionState),
+      fetchOrgLocalityRates(country),
+    ])
+      .then(([slabs, rates, stateSlabs, localityRates]) => {
         if (cancelled) return;
         setSlabRows(Array.isArray(slabs) ? slabs : []);
         setRateRows(Array.isArray(rates) ? rates : []);
+        setStateSlabRows(Array.isArray(stateSlabs) ? stateSlabs : []);
+        setLocalityRateRows(Array.isArray(localityRates) ? localityRates : []);
         setLoadState("ready");
       })
       .catch(() => { if (!cancelled) setLoadState("error"); });
     return () => { cancelled = true; };
-  }, [country]);
+  }, [country, jurisdictionState]);
 
   const config = COUNTRY_TAX_CONFIG[country] || COUNTRY_TAX_CONFIG.US;
   const [activeGroupKey, setActiveGroupKey] = useState(config.groups[0].key);
@@ -380,6 +448,28 @@ export default function TaxConfigurationTab({ documents = [], country, jurisdict
             </p>
           ) : (
             <SlabsTable rows={rows} caption={`Currently applied when calculating ${activeItem.label} in this jurisdiction.`} />
+          );
+        })()}
+
+        {loadState === "ready" && itemMatches && activeItem.source === "stateSlabs" && (() => {
+          const rows = activeItem.filter(stateSlabRows);
+          return rows.length === 0 ? (
+            <p className="rounded-[18px] border border-dashed border-border-light bg-surface px-4 py-8 text-center text-[13px] text-foreground-disabled">
+              No {activeItem.label.toLowerCase()} slabs configured for this jurisdiction yet.
+            </p>
+          ) : (
+            <SlabsTable rows={rows} caption={`Currently applied when calculating ${activeItem.label} in this jurisdiction.`} />
+          );
+        })()}
+
+        {loadState === "ready" && itemMatches && activeItem.source === "localityRates" && (() => {
+          const rows = activeItem.filter(localityRateRows);
+          return rows.length === 0 ? (
+            <p className="rounded-[18px] border border-dashed border-border-light bg-surface px-4 py-8 text-center text-[13px] text-foreground-disabled">
+              No {activeItem.label.toLowerCase()} configured for this organization's employees yet.
+            </p>
+          ) : (
+            <LocalityRatesTable rows={rows} caption={`Resolved from this organization's own employees' work-locality codes — matches what their payslips actually apply.`} />
           );
         })()}
 

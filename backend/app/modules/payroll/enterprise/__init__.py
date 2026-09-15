@@ -1,9 +1,10 @@
 from app.modules.payroll.enterprise.models import EnterpriseJurisdiction
 
-def __getattr__(name):
-    if name == "enterprise_router":
-        from app.modules.payroll.enterprise.router import enterprise_router
-        return enterprise_router
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Router deliberately NOT imported here (see payroll/policy/__init__.py for
+# the full rationale): app.database imports this package's .models for table
+# registration while payroll.models may still be partially initialized, and
+# the eager router import drags in enterprise.service which imports names
+# from payroll.models too early. enterprise_router is mounted explicitly by
+# payroll/router.py.
 
-__all__ = ["EnterpriseJurisdiction", "enterprise_router"]
+__all__ = ["EnterpriseJurisdiction"]

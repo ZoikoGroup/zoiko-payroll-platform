@@ -142,6 +142,10 @@ def test_generate_payslips_for_run_reads_public_sector_category_from_compliance_
 
 
 def test_add_payslip_item_computes_qc_labour_standards_no_accumulator_needed(db, organization):
+    # Isolate from the (unrelated) QC HSF org-levy accumulator, on by
+    # default since Phase 1 completion - this test is about labour
+    # standards specifically, which genuinely needs no accumulator.
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.discard("CA")
     _seed_qc_labour_standards(db)
     employee = _make_ca_employee(db, organization.id, "QC-LS", "QC", ctc=Decimal("1200000"))  # 100,000/mo
     run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))

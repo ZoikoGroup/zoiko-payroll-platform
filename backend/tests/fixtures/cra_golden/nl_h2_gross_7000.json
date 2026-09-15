@@ -1,0 +1,41 @@
+{
+  "description": "Newfoundland & Labrador employee at $7,000/month, paid 2026-09-01 (H2) -- exercises the genuine NL H2 override (§9: BPA increased to $13,094 effective Jan 1 2026; H1's withholding asset defaulted to $11,188, H2's to a prorated $15,000, but the ANNUAL statutory value used here is the real $13,094, no proration, matching the document's own 'Use annual $13,094; no proration' Option 2 guidance). Expands §24's 'NL H2' golden-test family.",
+  "source": "ZP-TAX-CA-2026-001 v1.0: Section 6 (federal brackets/BPAF/CEA), Section 8 (NL 2026 brackets: 44,678/89,354/159,528/223,340/285,319/570,638/1,141,275 at 8.70/14.50/15.80/17.80/19.80/20.80/21.30/21.80%, NL basic amount $13,094 annual), Section 10-11 (CPP/EI). Recomputed by running the real engine, not hand-derived.",
+  "context": {
+    "gross": "7000.00",
+    "country": "CA",
+    "pay_date": "2026-09-01",
+    "work_state": "NL",
+    "rate_map": {
+      "cpp": {"employee_rate_pct": "5.95", "employer_rate_pct": "5.95"},
+      "ei": {"employee_rate_pct": "1.63", "employer_rate_pct": "2.282"}
+    },
+    "slabs": [
+      {"min_amount": "0", "max_amount": "58523", "rate_pct": "14.00"},
+      {"min_amount": "58523", "max_amount": "117045", "rate_pct": "20.50"},
+      {"min_amount": "117045", "max_amount": "181440", "rate_pct": "26.00"},
+      {"min_amount": "181440", "max_amount": "258482", "rate_pct": "29.00"},
+      {"min_amount": "258482", "max_amount": null, "rate_pct": "33.00"}
+    ],
+    "state_rate_map": {
+      "provincial_bpa": {"flat_amount": "13094"}
+    },
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "44678", "rate_pct": "8.70"},
+      {"min_amount": "44678", "max_amount": "89354", "rate_pct": "14.50"},
+      {"min_amount": "89354", "max_amount": "159528", "rate_pct": "15.80"},
+      {"min_amount": "159528", "max_amount": "223340", "rate_pct": "17.80"},
+      {"min_amount": "223340", "max_amount": "285319", "rate_pct": "19.80"},
+      {"min_amount": "285319", "max_amount": "570638", "rate_pct": "20.80"},
+      {"min_amount": "570638", "max_amount": "1141275", "rate_pct": "21.30"},
+      {"min_amount": "1141275", "max_amount": null, "rate_pct": "21.80"}
+    ]
+  },
+  "expected": {
+    "federal_income_tax": "841.70",
+    "state_income_tax": "704.12",
+    "tds": "1545.82",
+    "social_security": "352.54",
+    "employee_esi": "93.59"
+  }
+}

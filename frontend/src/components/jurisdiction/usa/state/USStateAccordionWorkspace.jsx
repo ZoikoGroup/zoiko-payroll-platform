@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, Upload } from "lucide-react";
 import { getCompliancePolicies, getCanonicalContributionRates, getCanonicalTaxSlabs } from "../../../../service/superAdminService";
 import useConfiguredUSStates from "../../../../pages/JurisdictionCompliance/components/usa/useConfiguredUSStates";
 import USANewPackModal from "../USANewPackModal";
+import USAStateTaxBulkImportModal from "../USAStateTaxBulkImportModal";
 import USStateAccordionRow from "./USStateAccordionRow";
 
 // Replaces the old two-panel (state sidebar + JurisdictionLayout) State/
@@ -36,6 +37,7 @@ export default function USStateAccordionWorkspace({ initialSelectedState = "", o
   // call — and pruned once the real hook independently reports the same
   // state (its data then takes over normally).
   const [locallyKnownPacks, setLocallyKnownPacks] = useState({}); // { [state]: JurisdictionPack }
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   const knownStates = Array.from(new Set([...states, ...Object.keys(locallyKnownPacks)]));
 
@@ -104,6 +106,21 @@ export default function USStateAccordionWorkspace({ initialSelectedState = "", o
     loadAll();
   }
 
+  // Shared by both "New State / Tax" (an empty pack) and "Bulk Import" (a
+  // pack pre-populated with its full bracket table) — same "show it
+  // immediately from the create response" reasoning either way (see
+  // locallyKnownPacks's own comment above).
+  function showPackImmediately(created) {
+    if (!created.jurisdictionState) return;
+    setLocallyKnownPacks((prev) => ({ ...prev, [created.jurisdictionState]: created }));
+    setByState((prev) => ({
+      ...prev,
+      [created.jurisdictionState]: { packs: [created], pack: created, rates: [], slabs: [] },
+    }));
+    setExpanded(created.jurisdictionState);
+    onActiveScopeChange?.(created.jurisdictionState);
+  }
+
   const filteredStates = knownStates.filter((s) => s.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
@@ -118,8 +135,14 @@ export default function USStateAccordionWorkspace({ initialSelectedState = "", o
           />
         </div>
         <button
+          onClick={() => setShowBulkImport(true)}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-foreground-secondary hover:bg-surface-muted"
+        >
+          <Upload size={14} /> New State Import
+        </button>
+        <button
           onClick={() => setShowNewPack(true)}
-          className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
         >
           <Plus size={14} /> New State / Tax
         </button>
@@ -159,18 +182,18 @@ export default function USStateAccordionWorkspace({ initialSelectedState = "", o
           onClose={() => setShowNewPack(false)}
           onCreated={(created) => {
             setShowNewPack(false);
-            if (created.jurisdictionState) {
-              // Show it immediately from the create response itself — don't
-              // wait on a re-fetch that (per the comment above) won't find
-              // a brand-new, still-empty pack until it has a real component.
-              setLocallyKnownPacks((prev) => ({ ...prev, [created.jurisdictionState]: created }));
-              setByState((prev) => ({
-                ...prev,
-                [created.jurisdictionState]: { packs: [created], pack: created, rates: [], slabs: [] },
-              }));
-              setExpanded(created.jurisdictionState);
-              onActiveScopeChange?.(created.jurisdictionState);
-            }
+            showPackImmediately(created);
+            reloadAfterStructuralChange();
+          }}
+        />
+      )}
+
+      {showBulkImport && (
+        <USAStateTaxBulkImportModal
+          onClose={() => setShowBulkImport(false)}
+          onImported={(created) => {
+            setShowBulkImport(false);
+            showPackImmediately(created);
             reloadAfterStructuralChange();
           }}
         />

@@ -1,0 +1,15 @@
+{
+  "description": "Washington WA Cares Fund (ZP-TAX-US-2026-001 §13, test ID US-WA-CARE-001) -- covered gross wages $10,000, employee rate 0.58%, no Social Security wage cap. Expected employee contribution $58.00.",
+  "source": "ZP-TAX-US-2026-001 v1.0: Section 5 (WA Cares Fund: employee 0.58%, generally gross wages, no SS wage cap), Section 13 test US-WA-CARE-001, Appendix A (\"WA Cares employee premium 0.58% and is not capped at the Social Security wage base\"). Recomputed by running the real engine: 10000 * 0.58% = 58.00.",
+  "context": {
+    "gross": "10000.00",
+    "country": "US",
+    "work_state": "WA",
+    "state_rate_map": {
+      "wa_cares": {"employee_rate_pct": "0.58", "jurisdiction_state": "WA"}
+    }
+  },
+  "expected": {
+    "state_program_deductions": "58.00"
+  }
+}
