@@ -2,7 +2,7 @@ import { useState } from "react";
 import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
-import { inputClass, labelClass, STATUS_OPTIONS } from "./constants";
+import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS } from "./constants";
 
 export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated }) {
   const { addToast } = useToast() || {};
@@ -61,7 +61,7 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
           )}
         </div>
         <div><label className={labelClass}>Version</label><input className={inputClass} value={form.version} onChange={set("version")} /></div>
-        <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+        <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{(packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
         <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026-27" /></div>
         <div><label className={labelClass}>Effective From</label><input type="date" className={inputClass} value={form.effectiveFrom} onChange={set("effectiveFrom")} /></div>
         <div><label className={labelClass}>Effective To</label><input type="date" className={inputClass} value={form.effectiveTo} onChange={set("effectiveTo")} /></div>

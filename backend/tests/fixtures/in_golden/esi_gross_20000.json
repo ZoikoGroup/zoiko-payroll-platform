@@ -1,0 +1,17 @@
+{
+  "description": "IN-ESI-001 (ZP-TAX-IN-2026-27-001 §21) — ESI wages ₹20,000/month (under the ₹21,000 ESI wage ceiling, so ESI is applicable at all). employee_esi = 20,000 × 0.75% = ₹150; employer_esi = 20,000 × 3.25% = ₹650 — matching the doc's own stated figures exactly.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-ESI-001 + §10 (ESIC employee/employer contribution rates 0.75%/3.25%, wage ceiling ₹21,000). Rate supplied explicitly in this fixture; the ceiling relies on the engine's own ESI_MONTHLY_WAGE_CEILING=21,000 default (hardcoded_defaults.py) since it isn't overridden here. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "20000.00",
+    "basic": "20000.00",
+    "country": "IN",
+    "pay_date": "2026-06-15",
+    "rate_map": {
+      "esi": {"employee_rate_pct": "0.75", "employer_rate_pct": "3.25"}
+    }
+  },
+  "expected": {
+    "employee_esi": "150.00",
+    "employer_esi": "650.00"
+  }
+}

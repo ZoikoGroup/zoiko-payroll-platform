@@ -71,6 +71,15 @@ const STATIC_MAP = {
   // ceiling figure for this (unlike EPS/EDLI's INR 15,000), only a
   // percentage. Same blank-employee-share tolerance as eps_rate/edli_rate.
   nps_employer_pct: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  // State-scoped (§15/§14.1, Phase C gap-closure 2026-09-10) — real rows
+  // live under a STATE pack, not the country-level one; these entries just
+  // give them a correct label instead of falling to the generic "Fixed
+  // Amount"/PT-labeled heuristic when viewed there.
+  lwf_employee_amt: { uiType: UI_TYPES.FIXED_AMOUNT, flatAmountLabel: "Labour Welfare Fund — Employee (Annual)" },
+  lwf_employer_amt: { uiType: UI_TYPES.FIXED_AMOUNT, flatAmountLabel: "Labour Welfare Fund — Employer (Annual)" },
+  lwf_deduct_month: { uiType: UI_TYPES.FIXED_AMOUNT, flatAmountLabel: "LWF Deduction Month (1-12)" },
+  pt_half_year_deduct_month_1: { uiType: UI_TYPES.FIXED_AMOUNT, flatAmountLabel: "Half-Year PT Collection Month 1 (1-12)" },
+  pt_half_year_deduct_month_2: { uiType: UI_TYPES.FIXED_AMOUNT, flatAmountLabel: "Half-Year PT Collection Month 2 (1-12)" },
 };
 
 export const PAYROLL_COMPONENT_CATEGORIES = {
@@ -94,6 +103,11 @@ export const PAYROLL_COMPONENT_CATALOG = [
   { componentKey: "edli_wage_ceiling", displayName: "EDLI Wage Ceiling", category: "contributions", description: "Monthly wage limit for EDLI.", parentKey: "edli_rate" },
   { componentKey: "nps_employer_pct", displayName: "Employer NPS Contribution", category: "contributions", description: "Employer-only — % of Basic. Also reduces taxable salary under the New Regime only (not Old)." },
   { componentKey: "pt", displayName: "Professional Tax (PT)", category: "incomeTax", description: "Country-level flat fallback amount. State-specific brackets are configured separately, per state." },
+  { componentKey: "lwf_employee_amt", displayName: "Labour Welfare Fund — Employee", category: "contributions", description: "State-scoped annual amount — configure on that state's own pack." },
+  { componentKey: "lwf_employer_amt", displayName: "Labour Welfare Fund — Employer", category: "contributions", description: "State-scoped annual amount — configure on that state's own pack.", parentKey: "lwf_employee_amt" },
+  { componentKey: "lwf_deduct_month", displayName: "LWF Deduction Month", category: "contributions", description: "The one payroll month (1-12) LWF is actually deducted — no fallback; leave unconfigured and LWF stays ₹0 all year." },
+  { componentKey: "pt_half_year_deduct_month_1", displayName: "Half-Year PT — Collection Month 1", category: "incomeTax", description: "For a locality assessed HALF_YEAR_INCOME (e.g. Chennai) — the first of up to two collection months (1-12). No fallback; unconfigured stays ₹0." },
+  { componentKey: "pt_half_year_deduct_month_2", displayName: "Half-Year PT — Collection Month 2", category: "incomeTax", description: "The second half-yearly PT collection month, if the locality has one.", parentKey: "pt_half_year_deduct_month_1" },
   { componentKey: "tds", displayName: "TDS / Income Tax", category: "incomeTax", description: "Progressive brackets — configured in the Tax Slabs tab.", navigatesTo: "slabs" },
   { componentKey: "__parameters", displayName: "Income Tax Parameters", category: "incomeTax", description: "Standard Deduction, Section 87A Rebate, Surcharge, and Retirement & Exemption Limits — configured in the Tax Parameters tab.", navigatesTo: "parameters", synthetic: true },
 ];
@@ -139,5 +153,9 @@ export function classifyIndiaContributionRate(rate) {
     uiType = UI_TYPES.INCOME_TAX_POINTER;
   }
 
-  return { uiType, associatedKey: staticEntry?.associatedKey, ...describeUiType(uiType) };
+  return {
+    uiType, associatedKey: staticEntry?.associatedKey,
+    ...describeUiType(uiType),
+    ...(staticEntry?.flatAmountLabel ? { flatAmountLabel: staticEntry.flatAmountLabel } : {}),
+  };
 }

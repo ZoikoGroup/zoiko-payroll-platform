@@ -1,7 +1,7 @@
 """add germany overtime financial integration fields
 
-Revision ID: f0a1b2c3d4e5
-Revises: e9f0a1b2c3d4
+Revision ID: b4241285b6dd
+Revises: 185332840016
 Create Date: 2026-09-07 00:00:00.000000
 
 Phase 8AR — docs/PHASE_8AR_GERMANY_OVERTIME_NET_PAY_INTEGRATION_REPORT.md.
@@ -31,8 +31,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'f0a1b2c3d4e5'
-down_revision: Union[str, Sequence[str], None] = 'e9f0a1b2c3d4'
+revision: str = 'b4241285b6dd'  # was f0a1b2c3d4e5 on main; renumbered — collided with an unrelated venu-branch migration id
+down_revision: Union[str, Sequence[str], None] = '185332840016'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

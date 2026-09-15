@@ -4,6 +4,7 @@ import {
   getGermanyStatutoryConfigurationReadiness,
 } from "../../../service/payrollService";
 import { COUNTRIES, COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
+import { bankFieldsFor, bankComplianceKeys, ifscWarning } from "./bankFieldsFor";
 
 function emptyCompliance() {
   return {};
@@ -18,6 +19,11 @@ const EMPTY_FORM = {
   employmentType: EMPLOYMENT_TYPES[0],
   status: "Active",
   dateOfJoining: "",
+  // Generic HR fact (not country-specific) — currently feeds Canada's
+  // CPP/QPP age 18/70 gating and (once the switch is enabled) the UK
+  // Automatic Enrolment assessment. Optional: absent for every existing
+  // employee until entered here, exactly as before this field existed.
+  dateOfBirth: "",
   ctc: "",
   bankName: "",
   bankAccountNumber: "",
@@ -26,6 +32,25 @@ const EMPTY_FORM = {
   uan: "",
   countryCode: "IN",
   complianceFields: emptyCompliance(),
+  // UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09) —
+  // real top-level PayrollEmployee columns, NOT complianceFields entries
+  // (unlike NINO/tax code above), since employee_validation.py's
+  // Strategy classes don't govern them. FPS's Employee Details section
+  // needs a home address for a new starter with no NINO match, plus the
+  // starter declaration itself.
+  addressLine1: "",
+  addressLine2: "",
+  addressTown: "",
+  addressCounty: "",
+  addressPostcode: "",
+  starterDeclaration: "",
+  // Canada TD1X (ZP-TAX-CA-2026-001 §18/§19) — real top-level
+  // PayrollEmployee columns (like UK's address fields above), not
+  // complianceFields entries, since the CRA commission formula needs
+  // typed Decimal inputs rather than employee_validation.py's generic
+  // string-pattern validation.
+  td1xEstimatedAnnualCommission: "",
+  td1xEstimatedAnnualExpenses: "",
 };
 
 function Field({ label, children, error }) {
@@ -125,12 +150,15 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
     setSubmitError("");
     try {
       const isIndia = form.countryCode === "IN";
+      const isUk = form.countryCode === "UK";
+      const isCanada = form.countryCode === "CA";
       const payload = {
         ...form,
         ctc: Number(form.ctc),
         // Basic/HRA are no longer editable columns — the backend derives
         // them from CTC (40% / 20%) whenever they're absent.
         phone: form.phone !== "" ? form.phone : null,
+        dateOfBirth: form.dateOfBirth !== "" ? form.dateOfBirth : null,
         bankName: form.bankName !== "" ? form.bankName : null,
         bankAccountNumber: form.bankAccountNumber !== "" ? form.bankAccountNumber : null,
         // pan/uan/ifsc are India's dedicated columns — keep them null for
@@ -140,6 +168,18 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         uan: isIndia && form.uan !== "" ? form.uan : null,
         panNumber: isIndia && form.panNumber ? form.panNumber.toUpperCase() : null,
         complianceFields: isIndia ? form.complianceFields : form.complianceFields,
+        // Address/starter declaration are UK's own dedicated columns —
+        // same "null for every other jurisdiction" convention as above.
+        addressLine1: isUk && form.addressLine1 !== "" ? form.addressLine1 : null,
+        addressLine2: isUk && form.addressLine2 !== "" ? form.addressLine2 : null,
+        addressTown: isUk && form.addressTown !== "" ? form.addressTown : null,
+        addressCounty: isUk && form.addressCounty !== "" ? form.addressCounty : null,
+        addressPostcode: isUk && form.addressPostcode !== "" ? form.addressPostcode : null,
+        starterDeclaration: isUk && form.starterDeclaration !== "" ? form.starterDeclaration : null,
+        // TD1X commission fields are Canada's own dedicated columns —
+        // same "null for every other jurisdiction" convention as above.
+        td1xEstimatedAnnualCommission: isCanada && form.td1xEstimatedAnnualCommission !== "" ? Number(form.td1xEstimatedAnnualCommission) : null,
+        td1xEstimatedAnnualExpenses: isCanada && form.td1xEstimatedAnnualExpenses !== "" ? Number(form.td1xEstimatedAnnualExpenses) : null,
       };
       const saved = isEdit ? await updateEmployee(employee.id, payload) : await createEmployee(payload);
       onSaved?.(saved);
@@ -151,6 +191,12 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
   }
 
   const complianceSpec = COUNTRY_FIELD_SPECS[form.countryCode] || [];
+  // Routing/banking codes for the current jurisdiction (India's IFSC, or
+  // the per-country compliance codes) render in the Bank details section
+  // below — exclude them from the generic statutory list so they never
+  // appear twice. See bankFieldsFor.js for the single source of truth.
+  const bankingKeys = bankComplianceKeys(form.countryCode);
+  const statutorySpec = complianceSpec.filter((spec) => !bankingKeys.includes(spec.key));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
@@ -165,6 +211,9 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
           </Field>
           <Field label="Phone">
             <input className={inputClass} value={form.phone} onChange={(e) => update("phone", e.target.value)} />
+          </Field>
+          <Field label="Date of birth (optional)">
+            <input type="date" className={inputClass} value={form.dateOfBirth} onChange={(e) => update("dateOfBirth", e.target.value)} />
           </Field>
         </div>
       </div>
@@ -227,11 +276,35 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
           <Field label="Bank account number">
             <input className={inputClass} value={form.bankAccountNumber} onChange={(e) => update("bankAccountNumber", e.target.value)} />
           </Field>
-          {form.countryCode === "IN" && (
-            <Field label="IFSC code">
-              <input className={inputClass} value={form.ifscCode} onChange={(e) => update("ifscCode", e.target.value.toUpperCase())} />
-            </Field>
-          )}
+          {bankFieldsFor(form.countryCode).map((field) => {
+            if (field.storage === "dedicated") {
+              const value = form[field.formKey] || "";
+              const warning = ifscWarning(value);
+              return (
+                <Field key={field.key} label={field.label}>
+                  <input
+                    className={inputClass}
+                    placeholder={field.placeholder}
+                    value={value}
+                    onChange={(e) => update(field.formKey, e.target.value.toUpperCase())}
+                  />
+                  {warning && (
+                    <span className="mt-1.5 block text-[11px] font-medium text-warning">{warning}</span>
+                  )}
+                </Field>
+              );
+            }
+            return (
+              <Field key={field.key} label={field.label}>
+                <input
+                  className={inputClass}
+                  placeholder={field.placeholder}
+                  value={form.complianceFields[field.formKey] || ""}
+                  onChange={(e) => updateCompliance(field.formKey, field.upper ? e.target.value.toUpperCase() : e.target.value)}
+                />
+              </Field>
+            );
+          })}
         </div>
       </div>
 
@@ -267,7 +340,9 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
               </Field>
             </>
           )}
-          {complianceSpec.map((spec) =>
+          {statutorySpec
+            .filter((spec) => !spec.showWhen || spec.showWhen(form.complianceFields))
+            .map((spec) =>
             spec.type === "select" ? (
               <Field key={spec.key} label={spec.label}>
                 <select
@@ -294,7 +369,74 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
             )
           )}
         </div>
+        {form.countryCode === "US" && form.complianceFields.state_tax_jurisdiction && !form.complianceFields.w4_filing_status && (
+          // Soft-required, non-blocking — some employees genuinely have no
+          // filing status on file yet, so this warns rather than blocks
+          // save. A blank filing status resolves to $0 federal withholding
+          // with no signal anywhere today (found 2026-09-15
+          // onboarding-guidance audit).
+          <div className="mt-4 rounded-[12px] bg-warning/10 border border-warning/30 px-4 py-3 text-[12px] text-warning">
+            This employee's state is set but no W-4 filing status is on file — federal (and possibly state)
+            withholding will calculate as $0 until one is entered.
+          </div>
+        )}
       </div>
+
+      {form.countryCode === "UK" && (
+        <div className="border-t border-border pt-6">
+          <h3 className="text-[15px] font-bold text-foreground">RTI details &mdash; home address &amp; starter declaration</h3>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Address line 1">
+              <input className={inputClass} value={form.addressLine1} onChange={(e) => update("addressLine1", e.target.value)} />
+            </Field>
+            <Field label="Address line 2">
+              <input className={inputClass} value={form.addressLine2} onChange={(e) => update("addressLine2", e.target.value)} />
+            </Field>
+            <Field label="Town/City">
+              <input className={inputClass} value={form.addressTown} onChange={(e) => update("addressTown", e.target.value)} />
+            </Field>
+            <Field label="County">
+              <input className={inputClass} value={form.addressCounty} onChange={(e) => update("addressCounty", e.target.value)} />
+            </Field>
+            <Field label="Postcode">
+              <input className={inputClass} value={form.addressPostcode} onChange={(e) => update("addressPostcode", e.target.value.toUpperCase())} />
+            </Field>
+            <Field label="Starter declaration">
+              <select className={selectClass} value={form.starterDeclaration} onChange={(e) => update("starterDeclaration", e.target.value)}>
+                <option value="">Not a new starter / not applicable</option>
+                <option value="A">A &mdash; First job since last 6 April</option>
+                <option value="B">B &mdash; Only job, but had another since last 6 April</option>
+                <option value="C">C &mdash; Has another job or pension</option>
+              </select>
+            </Field>
+          </div>
+        </div>
+      )}
+
+      {form.countryCode === "CA" && (
+        <div className="border-t border-border pt-6">
+          <h3 className="text-[15px] font-bold text-foreground">TD1X &mdash; commission employees</h3>
+          <p className="mt-1 text-[12px] text-foreground-muted">
+            Only applies if this employee has filed a TD1X commission declaration. Leave blank for a regular (non-commission) employee.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Estimated annual commission income">
+              <input
+                type="number" min="0" step="0.01" className={inputClass}
+                value={form.td1xEstimatedAnnualCommission}
+                onChange={(e) => update("td1xEstimatedAnnualCommission", e.target.value)}
+              />
+            </Field>
+            <Field label="Estimated annual commission expenses">
+              <input
+                type="number" min="0" step="0.01" className={inputClass}
+                value={form.td1xEstimatedAnnualExpenses}
+                onChange={(e) => update("td1xEstimatedAnnualExpenses", e.target.value)}
+              />
+            </Field>
+          </div>
+        </div>
+      )}
 
       {submitError && (
         <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">

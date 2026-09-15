@@ -30,6 +30,14 @@ class BankExportRow:
     payment_date: str
     currency: str
     company_name: str
+    # Multi-jurisdiction routing (ZP-MJR-2026-001): `ifsc` above stays
+    # populated for India (backward compatibility), while `routing_label`/
+    # `routing_value` carry the jurisdiction-correct BTF column for every
+    # country. Exporters fall back to the ifsc slot when the routing fields
+    # are unset, so a row built without them (India, or any other legacy
+    # caller) still renders exactly as before.
+    routing_label: str = "IFSC"
+    routing_value: Optional[str] = None
 
 
 class IBankExporter(ABC):

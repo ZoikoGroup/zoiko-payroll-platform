@@ -63,6 +63,17 @@ class Organization(Base):
     # read as PRODUCTION (NULL == PRODUCTION).
     workspace_type = Column(String(20), nullable=False, default="PRODUCTION")
 
+    # UK "connected employer" grouping (ZP-TAX-UK-2026-27-001 §14
+    # gap-closure Part 7B, 2026-09-09) — HMRC requires connected employers
+    # (commonly owned/controlled group companies) to share ONE £10,500
+    # Employment Allowance cap between them, not one each. Orgs sharing
+    # the same non-null code here are treated as one connected group;
+    # NULL (the default) behaves exactly as before — a lone org checked
+    # only against its own accumulator. No UI sets this yet — same
+    # disclosed "no admin surface yet" pattern as bc_eht_employer_
+    # classification/qc_hsf_employer_category on CompanyComplianceDetails.
+    connected_group_code = Column(String(50), nullable=True, index=True)
+
     # Tenant is onboarded by /auth/register and becomes active immediately
     # (no billing module in the standalone platform). Super Admin may suspend it.
     is_active = Column(Boolean, default=True, nullable=False)

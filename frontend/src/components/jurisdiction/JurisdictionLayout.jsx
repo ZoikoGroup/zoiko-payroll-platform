@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Pencil, History, ShieldCheck, Users, ScrollText } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, History, ShieldCheck, Users, ScrollText, Eye, Zap } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -12,7 +12,7 @@ import {
   getCanonicalContributionRates, upsertCanonicalContributionRate, deleteCanonicalContributionRate,
   getTaxConfigurationAudit,
 } from "../../service/superAdminService";
-import { STATUS_PILL_MAP, STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
+import { STATUS_PILL_MAP, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
 import Field from "./Field";
 import RatesTab from "./RatesTab";
 import SlabsTab from "./SlabsTab";
@@ -22,6 +22,8 @@ import EditOverviewModal from "./EditOverviewModal";
 import AssignOrgsModal from "./AssignOrgsModal";
 import RateFormModal from "./RateFormModal";
 import SlabFormModal from "./SlabFormModal";
+import ImpactPreviewModal from "./ImpactPreviewModal";
+import HotfixActivateModal from "./HotfixActivateModal";
 
 // The one shared pack-management surface every Jurisdiction Compliance
 // page renders — wires the already-built canonical JurisdictionPack/
@@ -96,6 +98,8 @@ export default function JurisdictionLayout({
   const [showNewPack, setShowNewPack] = useState(false);
   const [showEditOverview, setShowEditOverview] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
+  const [showImpactPreview, setShowImpactPreview] = useState(false);
+  const [showHotfixActivate, setShowHotfixActivate] = useState(false);
   const [assignIds, setAssignIds] = useState(new Set());
   const [showNewRate, setShowNewRate] = useState(false);
   const [editingRate, setEditingRate] = useState(null);
@@ -324,6 +328,22 @@ export default function JurisdictionLayout({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowImpactPreview(true)}
+                    title="See which organizations/employees/scheduled runs would be affected"
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                  >
+                    <Eye size={13} /> Impact Preview
+                  </button>
+                  {selectedPack.status !== "Active" && selectedPack.packType === "tax" && (
+                    <button
+                      onClick={() => setShowHotfixActivate(true)}
+                      title="Emergency activation — bypasses the distinct-approver requirement, flagged for mandatory review"
+                      className="flex items-center gap-1.5 rounded-lg border border-error/40 px-3 py-2 text-xs font-semibold text-error hover:bg-error/5"
+                    >
+                      <Zap size={13} /> Hotfix Activate
+                    </button>
+                  )}
                   {selectedPack.packType === "tax" && (
                     <>
                       <button
@@ -367,7 +387,7 @@ export default function JurisdictionLayout({
                     className={inputClass + " w-auto"} value={selectedPack.status}
                     onChange={(e) => changeStatus(e.target.value)}
                   >
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {(selectedPack.packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </div>
@@ -528,6 +548,15 @@ export default function JurisdictionLayout({
         <EditOverviewModal
           pack={selectedPack} onClose={() => setShowEditOverview(false)}
           onSaved={(updated) => { setShowEditOverview(false); setSelectedPack(updated); loadPacks(); }}
+        />
+      )}
+      {showImpactPreview && (
+        <ImpactPreviewModal pack={selectedPack} onClose={() => setShowImpactPreview(false)} />
+      )}
+      {showHotfixActivate && (
+        <HotfixActivateModal
+          pack={selectedPack} onClose={() => setShowHotfixActivate(false)}
+          onActivated={(updated) => { setShowHotfixActivate(false); setSelectedPack(updated); loadPacks(); }}
         />
       )}
       {showAssign && (

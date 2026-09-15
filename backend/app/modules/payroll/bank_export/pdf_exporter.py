@@ -6,6 +6,12 @@ from reportlab.pdfgen import canvas
 from app.modules.payroll.bank_export.base import IBankExporter, BankExportRow
 
 
+def _routing_value(r: BankExportRow) -> str:
+    """Jurisdiction routing value; falls back to the ifsc slot for rows
+    built without the routing fields (India / legacy callers)."""
+    return r.routing_value if r.routing_value is not None else (r.ifsc or "")
+
+
 class PDFExporter(IBankExporter):
     content_type = "application/pdf"
     file_extension = "pdf"
@@ -48,7 +54,8 @@ class PDFExporter(IBankExporter):
         c.drawString(120 * mm, y, f"Payment Date: {rows[0].payment_date if rows else 'N/A'}")
         y -= 6 * mm
 
-        headers = ["Name", "ID", "Bank", "Account", "IFSC", "Amount", "Currency"]
+        routing_label = rows[0].routing_label if rows else "IFSC"
+        headers = ["Name", "ID", "Bank", "Account", routing_label, "Amount", "Currency"]
         col_x = [20 * mm, 45 * mm, 65 * mm, 90 * mm, 115 * mm, 140 * mm, 165 * mm]
 
         c.setFont("Helvetica-Bold", 7)
@@ -64,7 +71,7 @@ class PDFExporter(IBankExporter):
                 c.showPage()
                 y = height - 20 * mm
                 c.setFont("Helvetica", 7)
-            vals = [r.employee_name, r.employee_id, r.bank_name, r.account_number, r.ifsc, f"{r.amount:.2f}", r.currency]
+            vals = [r.employee_name, r.employee_id, r.bank_name, r.account_number, _routing_value(r), f"{r.amount:.2f}", r.currency]
             for i, v in enumerate(vals):
                 c.drawString(col_x[i], y, str(v)[:25])
             y -= 4 * mm

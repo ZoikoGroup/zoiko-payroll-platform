@@ -151,6 +151,16 @@ def resolve_tax_configuration(
     whatever they did before this resolver existed (org's own rows /
     the hardcoded per-country defaults), never raise, so a jurisdiction
     with no canonical data yet keeps working exactly as today.
+
+    Row-level effective dating (ZP-TAX-UK-2026-27-001 §3.2 gap-closure
+    Part 1A, 2026-09-09): a ContributionRate/TaxSlab row's own
+    effective_from/effective_to (both NULL on every existing row) lets
+    ONE rule family inside an already-Active pack carry a different
+    effective window than the pack's own — e.g. a rate that changes
+    1 June while the pack itself is effective from 6 April. A row with
+    both fields NULL is unaffected by this filter and is governed
+    entirely by the pack's own window (already checked above) —
+    completely additive to every rate/slab that exists today.
     """
     as_of = payroll_date or date_cls.today()
     pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
@@ -159,13 +169,21 @@ def resolve_tax_configuration(
 
     rates = (
         db.query(ContributionRate)
-        .filter(ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack.id)
+        .filter(
+            ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack.id,
+            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
+            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of),
+        )
         .order_by(ContributionRate.sort_order)
         .all()
     )
     slabs = (
         db.query(TaxSlab)
-        .filter(TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == pack.id)
+        .filter(
+            TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == pack.id,
+            or_(TaxSlab.effective_from.is_(None), TaxSlab.effective_from <= as_of),
+            or_(TaxSlab.effective_to.is_(None), TaxSlab.effective_to >= as_of),
+        )
         .order_by(TaxSlab.sort_order, TaxSlab.min_amount)
         .all()
     )

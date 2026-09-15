@@ -1,0 +1,25 @@
+{
+  "description": "IN-TAX-001 (ZP-TAX-IN-2026-27-001 §21) — New Regime, monthly gross ₹106,250 (→ annual ₹1,275,000). Standard deduction ₹75,000 → taxable ₹1,200,000. Bracket sum: 0 (0-4L) + 20,000 (4-8L @5%) + 40,000 (8-12L @10%) = ₹60,000 slab tax — matches the doc's own stated ‘slab tax 60,000’ exactly. Taxable (1,200,000) sits exactly AT the §3.2 rebate-87A income limit, so rebate = min(tax, rebate_max) = min(60,000, 60,000) = ₹60,000 — matches the doc's own stated ‘rebate 60,000’ — leaving final tax/surcharge/cess all ₹0, matching the doc's own stated ‘final tax/cess 0’.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-TAX-001; New Regime bracket table + §3.2 rebate limit/max are the engine's own hardcoded_defaults.py defaults (_TAX_SLABS_BY_COUNTRY['IN'] sort_order 1-7; _IN_REBATE_87A_LIMIT=1,200,000, _IN_REBATE_87A_MAX=60,000, _IN_STANDARD_DEDUCTION=75,000) — reproduced verbatim below rather than omitted, so this fixture doesn't silently depend on those defaults ever staying the same. Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "106250.00",
+    "country": "IN",
+    "pay_date": "2026-06-15",
+    "tax_regime": "New",
+    "slabs": [
+      {"min_amount": "0", "max_amount": "400000", "rate_pct": "0"},
+      {"min_amount": "400000", "max_amount": "800000", "rate_pct": "5"},
+      {"min_amount": "800000", "max_amount": "1200000", "rate_pct": "10"},
+      {"min_amount": "1200000", "max_amount": "1600000", "rate_pct": "15"},
+      {"min_amount": "1600000", "max_amount": "2000000", "rate_pct": "20"},
+      {"min_amount": "2000000", "max_amount": "2400000", "rate_pct": "25"},
+      {"min_amount": "2400000", "max_amount": null, "rate_pct": "30"}
+    ]
+  },
+  "expected": {
+    "annual_tax": "0.00",
+    "surcharge": "0.00",
+    "cess": "0.00",
+    "tds": "0.00"
+  }
+}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Globe2, ChevronRight, Eye } from "lucide-react";
+import { Globe2, ChevronRight, Eye, FileText, ShieldCheck, Zap } from "lucide-react";
 import { getComplianceJurisdictions } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
@@ -35,12 +35,32 @@ export default function CompliancePage() {
             Select a jurisdiction to manage its tax and policy packs — versions, canonical rates/slabs, organization assignment, and audit history.
           </p>
         </div>
-        <Link
-          to="/super-admin/compliance/engine-defaults"
-          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
-        >
-          <Eye size={14} /> View Engine Fallback Defaults
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/super-admin/compliance/engine-defaults"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <Eye size={14} /> View Engine Fallback Defaults
+          </Link>
+          <Link
+            to="/super-admin/compliance/rti-forms"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <FileText size={14} /> RTI & Statutory Forms
+          </Link>
+          <Link
+            to="/super-admin/compliance/test-certification"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <ShieldCheck size={14} /> Test Certification
+          </Link>
+          <Link
+            to="/super-admin/compliance/hotfix-activations"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <Zap size={14} /> Hotfix Activations
+          </Link>
+        </div>
       </div>
 
       {loading ? (

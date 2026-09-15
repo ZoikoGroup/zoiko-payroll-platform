@@ -92,6 +92,21 @@ class EmployeeValidationStrategy:
             if pattern and not pattern.match(raw):
                 errors.append(spec.get("error", f"{key} format is invalid.") + f" (got {raw!r})")
                 continue
+            # Generic numeric-range bound — opt-in via "min"/"max" on a
+            # FIELD_SPEC entry (e.g. Arizona's employee-elected withholding
+            # percentage, statutory range 0.5-3.5). No existing field
+            # defines either key, so this is a no-op for every spec that
+            # predates it.
+            min_val, max_val = spec.get("min"), spec.get("max")
+            if min_val is not None or max_val is not None:
+                try:
+                    numeric = Decimal(raw)
+                except Exception:
+                    errors.append(spec.get("error", f"{key} must be a number.") + f" (got {raw!r})")
+                    continue
+                if (min_val is not None and numeric < min_val) or (max_val is not None and numeric > max_val):
+                    errors.append(spec.get("error", f"{key} must be between {min_val} and {max_val}.") + f" (got {raw!r})")
+                    continue
             cleaned[key] = raw
         if errors:
             raise BadRequestException("; ".join(errors))
@@ -170,6 +185,46 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         "w4_filing_status": {
             "choices": ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"],
         },
+        # Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox (ZP-TAX-
+        # US-2026-001 §3.3) — optional; unset/false means the standard
+        # bracket table applies exactly as before this field existed.
+        "w4_step2_checkbox": {"choices": ["true", "false", "True", "False"]},
+        # Which Form W-4 vintage this employee actually filed — real column
+        # (models.py's w4_form_vintage), read by us.py to pick the correct
+        # pre-2020-allowance path AND North Dakota's two different bracket
+        # tables. Previously collected nowhere in the org-facing form at
+        # all (found 2026-09-15 Org Admin onboarding-guidance audit); unset
+        # defaults to the current post-2020 table, same as before this
+        # field had any UI path.
+        "w4_form_vintage": {"choices": ["2020 or later (current form)", "Pre-2020 (legacy form)"]},
+        # Federal W-4 §3.4 controls (ZP-TAX-US-2026-001, gap-closure Plan
+        # Phase 2d) — all optional; unset means each is a complete no-op
+        # in engine/countries/us.py, never a guessed value.
+        "w4_allowances_claimed": {
+            "min": Decimal("0"),
+            "error": "W-4 allowances claimed must be zero or a positive whole number.",
+        },
+        "is_nonresident_alien": {"choices": ["true", "false", "True", "False"]},
+        "w4_dependents_credit_annual": {
+            "min": Decimal("0"),
+            "error": "W-4 Step 3 dependents credit must be zero or positive.",
+        },
+        "w4_other_income_annual": {
+            "min": Decimal("0"),
+            "error": "W-4 Step 4(a) other income must be zero or positive.",
+        },
+        "w4_extra_withholding_per_period": {
+            "min": Decimal("0"),
+            "error": "W-4 Step 4(c) extra withholding must be zero or positive.",
+        },
+        # Connecticut CT-W4 Withholding Code — only meaningful for CT
+        # employees; optional (unset means $0 CT withholding, same as
+        # today, never a guessed code).
+        "ct_withholding_code": {"upper": True, "choices": ["A", "B", "C", "D", "F"]},
+        # New Jersey NJ-W4 Rate Table letter — only meaningful for NJ
+        # employees; optional (unset means $0 NJ withholding, never a
+        # guessed table).
+        "nj_rate_table": {"upper": True, "choices": ["A", "B", "C", "D", "E"]},
         "aba_routing_number": {
             "pattern": re.compile(r"^\d{9}$"),
             "error": "ABA routing number must be exactly 9 digits.",
@@ -189,10 +244,23 @@ class USEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Z]{2}$"),
             "error": "Residence state must be a 2-letter state code (e.g. PA).",
         },
+        # City/local-level residence (currently only meaningful for New
+        # York's Yonkers resident surcharge, see us.py) — optional, free
+        # text like work_locality above, since no employee has a value
+        # today and unset means "no city-level residence on file," never
+        # a guess.
+        "residence_locality": {},
         "reciprocity_certificate_on_file": {"choices": ["true", "false", "True", "False"]},
         "reciprocity_certificate_expiry": {
             "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
             "error": "Certificate expiry must be in YYYY-MM-DD format.",
+        },
+        # Pennsylvania Act 32 Residency Certification Form (DCED-CLGS-32-6)
+        # — pure recordkeeping, optional; never read by any calculation.
+        "residency_certification_on_file": {"choices": ["true", "false", "True", "False"]},
+        "residency_certification_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Residency certification date must be in YYYY-MM-DD format.",
         },
         # Optional — only meaningful once Tax Ops has entered a matching
         # LocalityRate for this code (see service.py's get_locality_rate /
@@ -201,6 +269,18 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         # short codes, PSD codes) — free text, same convention as
         # employeeCertificate on ReciprocityRule.
         "work_locality": {},
+        # Arizona Form A-4 employee election (ZP-TAX-US-2026-001 §4
+        # Matrix) — statutory range 0.5%-3.5%. Optional: unset means "no
+        # A-4 on file," and engine/countries/us.py falls back to the
+        # document's own 2.0% no-form default, exactly as before this
+        # field existed. Only meaningful for AZ employees, but not
+        # restricted to work_state=="AZ" here — a value entered for a
+        # non-AZ employee is simply never read (us.py only consults it
+        # for states whose canonical slab is a single FLAT_RATE row).
+        "state_income_tax_election_pct": {
+            "min": Decimal("0.5"), "max": Decimal("3.5"),
+            "error": "Arizona Form A-4 withholding election must be between 0.5% and 3.5%.",
+        },
     }
     duplicate_field = "ssn"
 
@@ -216,6 +296,17 @@ class USEmployeeValidation(EmployeeValidationStrategy):
     FIELD_COLUMN_MAP = {
         "state_tax_jurisdiction": "work_state",
         "w4_filing_status": "w4_filing_status",
+        "w4_step2_checkbox": "w4_step2_checkbox",
+        "w4_form_vintage": "w4_form_vintage",
+        "w4_allowances_claimed": "w4_allowances_claimed",
+        "is_nonresident_alien": "is_nonresident_alien",
+        "w4_dependents_credit_annual": "w4_dependents_credit_annual",
+        "w4_other_income_annual": "w4_other_income_annual",
+        "w4_extra_withholding_per_period": "w4_extra_withholding_per_period",
+        "residency_certification_on_file": "residency_certification_on_file",
+        "residency_certification_date": "residency_certification_date",
+        "ct_withholding_code": "ct_withholding_code",
+        "nj_rate_table": "nj_rate_table",
         # Without these three, the reciprocity engine (fully built and
         # tested — see service.py:_resolve_us_reciprocity, resolve_reciprocity)
         # had no way to ever actually activate for a real employee: Super
@@ -224,6 +315,7 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         # commuter or record their certificate — the exact same class of
         # dead-plumbing gap as state_tax_jurisdiction/w4_filing_status above.
         "residence_state": "residence_state",
+        "residence_locality": "residence_locality",
         "reciprocity_certificate_on_file": "reciprocity_certificate_on_file",
         "reciprocity_certificate_expiry": "reciprocity_certificate_expiry",
         # Same dead-plumbing gap, for Locality: PayrollEmployee.work_locality
@@ -231,6 +323,11 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         # and add_payslip_item actually read) previously had no path to be
         # set from an org admin's compliance_fields entry.
         "work_locality": "work_locality",
+        # Same dead-plumbing shape: PayrollEmployee.state_income_tax_election_pct
+        # (the column engine/countries/us.py's AZ-election override actually
+        # reads) previously didn't exist at all — see that column's own
+        # docstring in models.py.
+        "state_income_tax_election_pct": "state_income_tax_election_pct",
     }
     FIELD_VALUE_MAP = {
         # Compact codes matching what engine/countries/us.py and
@@ -248,6 +345,16 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         # study_loan_balance below.
         "reciprocity_certificate_on_file": lambda v: str(v).lower() == "true",
         "reciprocity_certificate_expiry": lambda v: date.fromisoformat(v) if v else None,
+        "state_income_tax_election_pct": lambda v: Decimal(v) if v else None,
+        "w4_step2_checkbox": lambda v: str(v).lower() == "true",
+        # Compact codes matching what us.py's `ctx.w4_form_vintage ==
+        # "PRE_2020"` check literally compares against — same
+        # human-readable-in-compliance_fields/compact-in-column split as
+        # w4_filing_status above.
+        "w4_form_vintage": {
+            "2020 or later (current form)": "2020_PLUS",
+            "Pre-2020 (legacy form)": "PRE_2020",
+        },
     }
 
 

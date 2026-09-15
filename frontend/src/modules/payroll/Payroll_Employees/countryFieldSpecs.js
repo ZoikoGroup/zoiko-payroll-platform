@@ -23,6 +23,34 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "ssn", label: "SSN", type: "text", placeholder: "123-45-6789", required: true, strip: " ", pattern: /^\d{3}-\d{2}-\d{4}$/, error: "SSN must be in the format 123-45-6789." },
     { key: "flsa_status", label: "FLSA status", type: "select", required: true, choices: ["Exempt", "Non-Exempt"] },
     { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"] },
+    // Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox — a real,
+    // higher-withholding bracket table (backend: hardcoded_defaults.py's
+    // "_STEP2"-tagged federal TaxSlab rows), not cosmetic. Optional:
+    // leaving unset/false uses the standard table exactly as before.
+    { key: "w4_step2_checkbox", label: "W-4 Step 2 checked (multiple jobs / spouse works)", type: "select", choices: ["true", "false", "True", "False"] },
+    // Which Form W-4 vintage this employee actually filed (backend:
+    // models.py's w4_form_vintage) — selects the pre-2020-allowance path
+    // and North Dakota's two different bracket tables in us.py. Existed
+    // in the engine/DB since gap-closure Phase 2d, but had no Org Admin
+    // UI path at all until this fix (2026-09-15 onboarding-guidance
+    // audit). Unset defaults to the current post-2020 form, same as
+    // before this field had a UI.
+    { key: "w4_form_vintage", label: "W-4 form vintage", type: "select", choices: ["2020 or later (current form)", "Pre-2020 (legacy form)"] },
+    // Federal W-4 §3.4 controls — all optional, each a no-op until set.
+    // w4_allowances_claimed only matters on the legacy (pre-2020) form path.
+    { key: "w4_allowances_claimed", label: "W-4 allowances claimed (pre-2020 form only)", type: "number", min: 0 },
+    { key: "is_nonresident_alien", label: "Nonresident alien (Form W-4 NRA adjustment)", type: "select", choices: ["true", "false", "True", "False"] },
+    { key: "w4_dependents_credit_annual", label: "W-4 Step 3: dependents credit (annual $)", type: "number", min: 0 },
+    { key: "w4_other_income_annual", label: "W-4 Step 4(a): other income (annual $)", type: "number", min: 0 },
+    { key: "w4_extra_withholding_per_period", label: "W-4 Step 4(c): extra withholding (per pay period $)", type: "number", min: 0 },
+    // Connecticut CT-W4 Withholding Code — only meaningful for CT employees.
+    // showWhen: previously shown unconditionally for every US employee
+    // regardless of work state (found 2026-09-15 onboarding-guidance
+    // audit) — now hidden unless the employee's own work state actually
+    // matches, same as EmployeeForm's existing country-conditional
+    // sections (UK RTI / CA TD1X).
+    { key: "ct_withholding_code", label: "CT Withholding Code (CT employees only)", type: "select", choices: ["A", "B", "C", "D", "F"], showWhen: (cf) => (cf?.state_tax_jurisdiction || "").toUpperCase() === "CT" },
+    { key: "nj_rate_table", label: "NJ-W4 Rate Table (NJ employees only)", type: "select", choices: ["A", "B", "C", "D", "E"], showWhen: (cf) => (cf?.state_tax_jurisdiction || "").toUpperCase() === "NJ" },
     { key: "aba_routing_number", label: "ABA routing number", type: "text", placeholder: "9 digits", pattern: /^\d{9}$/, error: "ABA routing number must be exactly 9 digits." },
     { key: "state_tax_jurisdiction", label: "State tax jurisdiction", type: "text", placeholder: "e.g. CA", required: true, upper: true, pattern: /^[A-Z]{2}$/, error: "State tax jurisdiction must be a 2-letter state code (e.g. CA, NY)." },
     // Reciprocity (backend: service.py's _resolve_us_reciprocity) — only
@@ -31,14 +59,31 @@ export const COUNTRY_FIELD_SPECS = {
     // optional: leaving these blank is the same as today's behavior for
     // every employee whose residence and work state match.
     { key: "residence_state", label: "Residence state (if different from work state)", type: "text", placeholder: "e.g. PA", upper: true, pattern: /^[A-Z]{2}$/, error: "Residence state must be a 2-letter state code (e.g. PA)." },
+    // City/local-level residence (backend: models.py's residence_locality) —
+    // New York's Yonkers resident surcharge, and (once real PA PSD-code
+    // data exists) Pennsylvania's own resident-locality side of the Act
+    // 32 "higher of" comparison. Optional free text, same convention as
+    // work_locality below.
+    { key: "residence_locality", label: "Residence locality (e.g. YONKERS, or a PA PSD code)", type: "text", placeholder: "e.g. YONKERS" },
     { key: "reciprocity_certificate_on_file", label: "Reciprocity certificate on file", type: "select", choices: ["true", "false", "True", "False"] },
     { key: "reciprocity_certificate_expiry", label: "Reciprocity certificate expiry", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Certificate expiry must be in YYYY-MM-DD format." },
+    // Pennsylvania Act 32 Residency Certification Form (DCED-CLGS-32-6) —
+    // pure recordkeeping, optional; never read by any calculation.
+    { key: "residency_certification_on_file", label: "PA Residency Certification on file", type: "select", choices: ["true", "false", "True", "False"] },
+    { key: "residency_certification_date", label: "PA Residency Certification date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Residency certification date must be in YYYY-MM-DD format." },
     // Locality (backend: service.py's get_locality_rate) — only meaningful
     // once Tax Ops has entered a matching rate in Super Admin > Compliance >
     // United States > Locality Rates. Optional free text: no format is
     // enforced since real-world locality codes vary (county FIPS, municipal
     // short codes, PSD codes).
     { key: "work_locality", label: "Work locality code (county/municipal/school-district)", type: "text", placeholder: "e.g. PHILADELPHIA" },
+    // Arizona Form A-4 employee election (ZP-TAX-US-2026-001 §4 Matrix) —
+    // statutory range 0.5%-3.5%. Only meaningful for AZ employees; leaving
+    // it blank falls back to the document's own 2.0% no-form default,
+    // exactly as before this field existed. The server is authoritative on
+    // the 0.5-3.5 bound (employee_validation.py) — no client-side pattern
+    // here, same as every other numeric-range field in this list.
+    { key: "state_income_tax_election_pct", label: "Arizona A-4 withholding election % (0.5–3.5, AZ only)", type: "text", placeholder: "e.g. 2.0", showWhen: (cf) => (cf?.state_tax_jurisdiction || "").toUpperCase() === "AZ" },
   ],
   UK: [
     // NOTE: the first/second letter exclusions (D,F,I,Q,U,V) are real — a
@@ -59,6 +104,8 @@ export const COUNTRY_FIELD_SPECS = {
   CA: [
     { key: "sin", label: "SIN", type: "text", placeholder: "9 digits", required: true, strip: "- ", pattern: /^\d{9}$/, error: "SIN must be 9 digits (e.g. 123-456-789)." },
     { key: "td1_claim_amount", label: "TD1 claim amount", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TD1 claim amount must be a number." },
+    { key: "provincial_td1_claim_amount", label: "Provincial/territorial TD1 claim amount", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "Provincial TD1 claim amount must be a number." },
+    { key: "qc_tp1015_claim_amount", label: "TP-1015.3-V claim amount (Quebec)", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TP-1015.3-V claim amount must be a number." },
     { key: "td1_additional_tax", label: "TD1X additional tax per pay period", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "TD1X additional tax must be a number." },
     { key: "province", label: "Province of employment", type: "select", required: true, upper: true, choices: ["ON", "QC", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"] },
     { key: "transit_number", label: "Bank transit number", type: "text", placeholder: "5 digits", pattern: /^\d{5}$/, error: "Transit number must be 5 digits." },

@@ -1,7 +1,7 @@
 """add germany overtime work record overlap status
 
-Revision ID: e9f0a1b2c3d4
-Revises: d8e9f0a1b2c3
+Revision ID: 185332840016
+Revises: 0800e995078f
 Create Date: 2026-09-07 00:00:00.000000
 
 Phase 8AQ — docs/PHASE_8AQ_GERMANY_OVERTIME_REVERSAL_AND_SOURCE_PRECEDENCE_HARDENING_REPORT.md.
@@ -25,8 +25,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e9f0a1b2c3d4'
-down_revision: Union[str, Sequence[str], None] = 'd8e9f0a1b2c3'
+revision: str = '185332840016'  # was e9f0a1b2c3d4 on main; renumbered — collided with an unrelated venu-branch migration id
+down_revision: Union[str, Sequence[str], None] = '0800e995078f'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

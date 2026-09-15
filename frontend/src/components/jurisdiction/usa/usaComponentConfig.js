@@ -77,6 +77,15 @@ const STATIC_MAP = {
   // row is CONCEPTUALLY employer-side just because only employerRatePct
   // happens to be populated on this particular state's row).
   paid_leave: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  // Delaware Paid Leave's SECOND tier row (gap-closure Plan Phase 4,
+  // 2026-09-14) — a genuinely, permanently employer-only rate (unlike
+  // the shared "paid_leave" key above, which spans states where either
+  // side can be populated), so EMPLOYER_ASSIGNED_RATE (a real, correctly
+  // labeled "Employer Rate %" field) is more honest than showing an
+  // always-empty Employee Rate % input. Previously unmapped entirely —
+  // the exact same class of bug already fixed for DC's own paid_leave
+  // row (see the comment above), just never ported to this sibling key.
+  paid_leave_parental: { uiType: UI_TYPES.EMPLOYER_ASSIGNED_RATE, associatedKey: "paid_leave_parental_wage_cap" },
   sdi: { uiType: UI_TYPES.PERCENTAGE },
   tdi: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "tdi_wage_cap" },
   wa_cares: { uiType: UI_TYPES.PERCENTAGE },
@@ -85,6 +94,19 @@ const STATIC_MAP = {
   workforce_dev: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "workforce_dev_wage_cap" },
   fli: { uiType: UI_TYPES.PERCENTAGE, associatedKey: "fli_wage_cap" },
   state_standard_deduction: { uiType: UI_TYPES.DEDUCTION_AMOUNT },
+  // Headcount-conditional state programs (ZP-TAX-US-2026-001 §5 Phase 3C)
+  // — real employee AND employer sides, same shape as "paid_leave" above.
+  // Previously unmapped (gap-closure Plan Phase 4, 2026-09-14) — fell
+  // through to the generic heuristic, which happens to classify these
+  // correctly today (both sides are always populated for these three)
+  // but only by coincidence, not by design; explicit entries make that
+  // guaranteed rather than accidental.
+  famli: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE, associatedKey: "famli_wage_cap" },
+  ma_pfml: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE },
+  pfml: { uiType: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE, associatedKey: "pfml_wage_cap" },
+  // Vermont Child Care Contribution (Batch 6, 2026-09-13) — permanently
+  // employer-only, same reasoning as paid_leave_parental above.
+  vt_ccc: { uiType: UI_TYPES.EMPLOYER_ASSIGNED_RATE },
 };
 
 // Business-language catalog for the "+ Add Component" picker — the admin

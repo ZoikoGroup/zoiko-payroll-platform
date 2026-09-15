@@ -1,0 +1,20 @@
+{
+  "description": "IN-PT-MH-001 (ZP-TAX-IN-2026-27-001 §21), February case — Maharashtra Professional Tax, MALE employee, ₹12,000/month, pay date IN February. Maharashtra's real gender-differentiated schedule (source IN-MH-PT, already seeded in hardcoded_defaults.py) puts ₹12,000 in the MALE ₹10,001-and-above tier: flat ₹200/month, but ₹300 in February (TaxSlab.adjustment_amount) — matching the doc's own stated 'Feb: PT 300' exactly.",
+  "source": "ZP-TAX-IN-2026-27-001 §21 IN-PT-MH-001 + §13.2 (Maharashtra PT schedule, source IN-MH-PT; gender-differentiated brackets, February adjustment). Bracket rows reproduced verbatim from hardcoded_defaults.py's own Maharashtra MALE PT_FLAT rows (sort_order 36-38). Run through the real production engine (calculate_payroll) at authoring time.",
+  "context": {
+    "gross": "12000.00",
+    "basic": "12000.00",
+    "country": "IN",
+    "pay_date": "2026-02-15",
+    "work_state": "Maharashtra",
+    "gender": "MALE",
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "7500", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "0.00", "jurisdiction_state": "Maharashtra", "filing_status": "MALE"},
+      {"min_amount": "7501", "max_amount": "10000", "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "175.00", "jurisdiction_state": "Maharashtra", "filing_status": "MALE"},
+      {"min_amount": "10001", "max_amount": null, "rate_pct": "0", "rule_type": "PT_FLAT", "flat_amount": "200.00", "adjustment_amount": "300.00", "jurisdiction_state": "Maharashtra", "filing_status": "MALE"}
+    ]
+  },
+  "expected": {
+    "professional_tax": "300.00"
+  }
+}

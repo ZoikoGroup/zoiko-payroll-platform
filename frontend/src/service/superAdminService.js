@@ -55,6 +55,44 @@ export const assignCompliancePolicy = (id, organizationIds) =>
 // setCompliancePolicyStatus(id, "Retired") for normal lifecycle
 // retirement instead (see JurisdictionLayout.jsx's status dropdown).
 
+// ── Super Admin UI completion (§19 gap-closure Part 11, 2026-09-09) ──────
+
+export const getPackImpactPreview = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/impact-preview`);
+
+// Tax Year/Release Manager (gap-closure Plan Phase 4) — rate-level diff
+// between two versions of the same pack.
+export const getPackVersionDiff = (fromId, toId) =>
+  apiFetch(`/api/super-admin/compliance/policies/${fromId}/compare/${toId}`);
+
+// Emergency hotfix activation — bypasses the distinct-approver gate,
+// requires incident_id + justification, always flagged for mandatory
+// retrospective review (see HotfixActivateModal.jsx).
+export const hotfixActivatePack = (id, payload) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/hotfix-activate`, { method: "PUT", body: payload });
+
+export const getHotfixActivations = (params) =>
+  apiFetch("/api/super-admin/compliance/hotfix-activations", { params });
+
+export const reviewHotfixActivation = (id, payload) =>
+  apiFetch(`/api/super-admin/compliance/hotfix-activations/${id}/review`, { method: "PUT", body: payload });
+
+// Cross-org UK RTI filing summary (FPS/EPS/P45/P60) with submission
+// tracking status.
+export const getRtiFormsSummary = (params) =>
+  apiFetch("/api/super-admin/compliance/rti-forms", { params });
+
+// Golden-test certification (Part 10's harness, generalized to Canada
+// gap-closure Phase 8) — trigger a run for a jurisdiction, and read run
+// history. jurisdictionCountry defaults to "UK" for back-compat.
+export const runTestCertification = (jurisdictionCountry = "UK") =>
+  apiFetch("/api/super-admin/compliance/test-certification/run", {
+    method: "POST", body: { jurisdiction_country: jurisdictionCountry },
+  });
+
+export const getTestCertificationRuns = (params) =>
+  apiFetch("/api/super-admin/compliance/test-certification/runs", { params });
+
 // Every organization's ACTUAL, currently-configured compliance setup (as
 // opposed to the abstract policy templates above) — used by the Compliance
 // page's "Organization Compliance" view to promote real configs into
@@ -135,6 +173,44 @@ export const upsertLocalityRate = (payload) =>
 export const deleteLocalityRate = (id) =>
   apiFetch(`/api/super-admin/compliance/locality-rates/${id}`, { method: "DELETE" });
 
+// ── Locality Dataset Manager (ZP-TAX-US-2026-001 §10/§11.1) ────────────────
+// The full Draft/Staged/Active/Retired import/diff/stage/approve/activate/
+// rollback workflow, alongside (not replacing) the manual-entry endpoints
+// above — both operate on the same underlying LocalityDataset/LocalityRate
+// tables.
+
+export const getLocalityDatasets = (params) =>
+  apiFetch("/api/super-admin/compliance/locality-datasets", { params });
+
+export const getLocalityDatasetRates = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/rates`);
+
+export const importLocalityDataset = (payload) =>
+  apiFetch("/api/super-admin/compliance/locality-datasets/import", { method: "POST", body: payload });
+
+// "New State Import" bulk tooling (Production-Readiness Plan Phase 3) —
+// creates a brand-new Draft JurisdictionPack for a state, pre-populated
+// with its full bracket table + standard deduction, in one call instead
+// of hand-entering each row through USStateAccordionRow's one-at-a-time
+// component editor.
+export const bulkImportStateTaxPack = (payload) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/state-import", { method: "POST", body: payload });
+
+export const diffLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/diff`);
+
+export const stageLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/stage`, { method: "PUT" });
+
+export const approveLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/approve`, { method: "PUT" });
+
+export const activateLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/activate`, { method: "PUT" });
+
+export const rollbackLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/rollback`, { method: "PUT" });
+
 // ── Source Evidence ────────────────────────────────────────────────────────
 
 export const getSourceArtifacts = () =>
@@ -143,8 +219,83 @@ export const getSourceArtifacts = () =>
 export const createSourceArtifact = (payload) =>
   apiFetch("/api/super-admin/compliance/source-artifacts", { method: "POST", body: payload });
 
+// Real preserved-file storage (ZP-TAX-US-2026-001 §14.2, gap-closure Plan
+// Phase 4) — `apiFetch` above always JSON-encodes its body, so a real file
+// upload/binary download needs its own raw fetch call, same pattern
+// payrollService.js's downloadPayslip/downloadRunPayslips already use.
+export const uploadSourceArtifactFile = async (id, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/source-artifacts/${id}/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    let detail;
+    try { detail = (await res.json()).detail; } catch { /* ignore */ }
+    throw new Error(detail || "Upload failed.");
+  }
+  return res.json();
+};
+
+export const downloadSourceArtifactFile = async (id, filenameHint) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/source-artifacts/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("Failed to download file.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filenameHint || `source_artifact_${id}`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
+// ── India: state/local statutory readiness registry (§16) ─────────────────
+// One row per (state/UT, optional local authority, program) — informational
+// only, no calculation/onboarding path enforces it yet.
+
+export const getStateLocalReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/state-local-readiness", { params });
+
+export const upsertStateLocalReadiness = (payload) =>
+  apiFetch("/api/super-admin/compliance/state-local-readiness", { method: "POST", body: payload });
+
+// ── Taxability rules (India Code Wages classification, §7/§8) ─────────────
+// Backs engine/countries/india.py's _calculate_code_wages — which of an
+// employee's own named salary components count as "core included wages" vs.
+// "excluded, subject to the 50%-cap add-back test." Had NO admin UI at all
+// before this (only a read-only backend resolver existed).
+
+export const getTaxabilityRules = (params) =>
+  apiFetch("/api/super-admin/compliance/taxability-rules", { params });
+
+export const upsertTaxabilityRule = (payload) =>
+  apiFetch("/api/super-admin/compliance/taxability-rules", { method: "POST", body: payload });
+
+export const deleteTaxabilityRule = (id) =>
+  apiFetch(`/api/super-admin/compliance/taxability-rules/${id}`, { method: "DELETE" });
+
+// ── India: Salary TDS / Forms cross-org status (gap-closure Phase F) ──────
+// A Super Admin token has no organization_id of its own, so these call
+// dedicated cross-org endpoints (organizationId required) rather than the
+// org-facing payrollService.js versions of the same underlying data.
+
+export const getIndiaSalaryTdsDeclarationsForOrg = (organizationId, taxYear) =>
+  apiFetch("/api/super-admin/india/salary-tds-declarations", { params: { organizationId, taxYear } });
+
+export const getIndiaSalaryTdsClaimsForOrg = (organizationId, taxYear) =>
+  apiFetch("/api/super-admin/india/salary-tds-claims", { params: { organizationId, taxYear } });
+
+export const getIndiaFormsForOrg = (organizationId, reportType) =>
+  apiFetch("/api/super-admin/india/forms", { params: { organizationId, reportType } });
 
 // ── Germany statutory registries (Phase 8O) ─────────────────────────────
 // Every function below is a thin wrapper over a pre-existing Super-Admin-

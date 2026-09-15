@@ -32,7 +32,11 @@ def _restore_org_levy_switch():
 
 
 def test_load_uk_org_levy_ytd_empty_when_switch_off(db, organization):
-    assert "UK" not in shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES
+    # Phase 3 (2026-09-09) flipped the default to {"UK"} — the OLD,
+    # superseded off-state remains reachable only by explicitly
+    # discarding "UK", same pattern as every other UK rollout switch's
+    # "_if_explicitly_reverted" test.
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.discard("UK")
     result = service._load_uk_org_levy_ytd(db, organization.id, date(2026, 6, 1))
     assert result == {}
 
@@ -128,3 +132,84 @@ def test_employer_ni_accumulator_increments_across_periods(db, organization):
     assert loaded["employer_ni_ytd_before"] == Decimal("5000")
     # The levy pay-bill component was never touched — stays at 0.
     assert loaded["appr_levy_ytd_pay_bill_before"] == Decimal("0")
+
+
+# ── Connected-employer Apprenticeship Levy pay-bill sharing ──────────────
+# (ZP-TAX-UK-2026-27-001 §14/AC-24 — "Apprenticeship Levy annual
+# allowance... Connected employers share one allowance under connection
+# rules", found on a fresh document re-read 2026-09-10; a real gap this
+# session's earlier Part 7B only closed for Employment Allowance, not
+# the Levy specifically).
+
+def _make_connected_org(db, code, org_code="LEVYGRP2"):
+    from app.modules.organizations.models import Organization
+    org = Organization(organization_name="Levy Group Org", organization_code=org_code, connected_group_code=code)
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+def test_levy_pay_bill_ungrouped_org_unaffected(db, organization):
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.add("UK")
+    service._upsert_uk_org_levy_ytd(db, organization.id, date(2026, 5, 1), gross_increment=Decimal("500000"))
+    db.commit()
+    loaded = service._load_uk_org_levy_ytd(db, organization.id, date(2026, 6, 1))
+    assert loaded["appr_levy_ytd_pay_bill_before"] == Decimal("500000")
+
+
+def test_levy_pay_bill_summed_across_connected_group(db, organization):
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.add("UK")
+    other = _make_connected_org(db, "LEVY-GROUP-A")
+    organization.connected_group_code = "LEVY-GROUP-A"
+    db.commit()
+
+    service._upsert_uk_org_levy_ytd(db, organization.id, date(2026, 5, 1), gross_increment=Decimal("2000000"))
+    service._upsert_uk_org_levy_ytd(db, other.id, date(2026, 5, 1), gross_increment=Decimal("1500000"))
+    db.commit()
+
+    # Both members must see the SAME combined group total, not just
+    # their own contribution.
+    loaded_a = service._load_uk_org_levy_ytd(db, organization.id, date(2026, 6, 1))
+    loaded_b = service._load_uk_org_levy_ytd(db, other.id, date(2026, 6, 1))
+    assert loaded_a["appr_levy_ytd_pay_bill_before"] == Decimal("3500000")
+    assert loaded_b["appr_levy_ytd_pay_bill_before"] == Decimal("3500000")
+
+
+def test_levy_pay_bill_group_sharing_produces_correct_shared_allowance_exhaustion(db, organization):
+    """The real-world bug §14/AC-24 exists to prevent: two connected
+    £2M-pay-bill employers, each checked only against their OWN £15,000
+    allowance, would each show a levy well below the group's true
+    combined liability. With group-aware pay-bill tracking, the SECOND
+    org's payslip correctly sees the group already close to/past the
+    shared allowance."""
+    from app.modules.payroll.engine.countries import uk as uk_country
+
+    shared._ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES.add("UK")
+    other = _make_connected_org(db, "LEVY-GROUP-B", org_code="LEVYGRP3")
+    organization.connected_group_code = "LEVY-GROUP-B"
+    db.commit()
+
+    rate_map = {
+        "appr_levy_rate": type("R", (), {"employer_rate_pct": Decimal("0.5"), "flat_amount": None})(),
+        "appr_levy_allowance": type("R", (), {"employer_rate_pct": None, "flat_amount": Decimal("15000")})(),
+    }
+
+    # Org A's own payroll already pushed the GROUP pay bill to £3,000,000
+    # (exactly the allowance-exhaustion point: 0.5% x 3,000,000 = 15,000).
+    service._upsert_uk_org_levy_ytd(db, organization.id, date(2026, 5, 1), gross_increment=Decimal("3000000"))
+    db.commit()
+
+    # Org B's own accumulator has never had a single payslip — under the
+    # OLD (pre-fix) per-org-only logic it would see org_ytd_pay_bill_before=0
+    # and compute levy as if starting completely fresh, wrongly getting a
+    # full new allowance. With group-aware tracking, it correctly sees
+    # the group is already at the exhaustion point.
+    group_before = service._load_uk_org_levy_ytd(db, other.id, date(2026, 6, 1))["appr_levy_ytd_pay_bill_before"]
+    assert group_before == Decimal("3000000")
+
+    levy_on_next_payslip = uk_country.calculate_apprenticeship_levy_period_amount(Decimal("100000"), group_before, rate_map)
+    # Group total after this payslip: 3,100,000. Levy already fully due
+    # (allowance already exhausted at 3,000,000) -> the whole further
+    # 100,000 x 0.5% = 500 is now payable, not zero.
+    assert levy_on_next_payslip == Decimal("500.00")

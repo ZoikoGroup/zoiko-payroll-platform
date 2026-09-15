@@ -5,10 +5,14 @@
 // how frontend/src/config/jurisdictions/*.jsx already does this for the Tax
 // side. Every export here is unchanged in behavior from policyFormShared.jsx
 // — this file is a relocation, not a rewrite.
-export const STATUS_OPTIONS = ["Draft", "In Review", "QA", "Approved", "Active", "Deprecated", "Retired"];
+// Policy packs use a two-state lifecycle only: a policy is either being
+// drafted or it is live. There is no review/approval stage (unlike Tax
+// packs, which keep Draft/In Review/QA/Approved/Active/Deprecated/Retired)
+// — the backend enforces the same two values server-side
+// (set_jurisdiction_pack_status / upsert_jurisdiction_pack).
+export const STATUS_OPTIONS = ["Draft", "Active"];
 export const STATUS_PILL_MAP = {
-  Active: "active", Approved: "approved", Draft: "pending", "In Review": "pending",
-  QA: "pending", Deprecated: "inactive", Retired: "suspended",
+  Active: "active", Draft: "pending",
 };
 
 export const inputClass =
