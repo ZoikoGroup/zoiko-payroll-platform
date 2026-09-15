@@ -6,6 +6,7 @@ import PayrollShell from "./components/PayrollShell";
 import SuperAdminShell from "./components/SuperAdminShell";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import TrialSignupPage from "./pages/TrialSignupPage";
 import RegistrationSuccessPage from "./pages/RegistrationSuccessPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
@@ -51,6 +52,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/trial-register" element={<TrialSignupPage />} />
       <Route path="/register/success" element={<RegistrationSuccessPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />

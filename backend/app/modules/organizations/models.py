@@ -57,6 +57,12 @@ class Organization(Base):
     # payroll currency doesn't match its jurisdiction's default.
     currency = Column(String(3), nullable=True)
 
+    # Workspace flavor: "PRODUCTION" (regular tenant onboarded via
+    # /auth/register) or "EVALUATION" (30-day free evaluation onboarded via
+    # /auth/register-trial). Existing rows created before this column existed
+    # read as PRODUCTION (NULL == PRODUCTION).
+    workspace_type = Column(String(20), nullable=False, default="PRODUCTION")
+
     # Tenant is onboarded by /auth/register and becomes active immediately
     # (no billing module in the standalone platform). Super Admin may suspend it.
     is_active = Column(Boolean, default=True, nullable=False)

@@ -40,6 +40,22 @@ class RegisterRequest(BaseModel):
     tax_identifiers: Optional[dict] = None
 
 
+class TrialRegisterRequest(BaseModel):
+    """Minimal payload for the 30-day Professional Evaluation signup
+    (/auth/register-trial). Deliberately has no tax fields, and extra fields
+    are forbidden — a client sending tax_no / tax_identifiers / address data
+    is rejected at the schema level (422) rather than silently discarded, so
+    the evaluation path can never persist compliance data it does not own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    organization: str = Field(..., min_length=1, max_length=200)
+    name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    country: str = Field(..., min_length=1, max_length=100)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 

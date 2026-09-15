@@ -431,3 +431,14 @@ class BillingMySubscriptionResponse(BaseModel):
 
     subscription: BillingSubscriptionResponse
     entitlement_flags: dict = {}
+
+
+class BillingTrialStatusResponse(BaseModel):
+    """GET /billing/trial-status — lightweight banner payload. Null/absent
+    when the org has no subscription, so the frontend trial banner simply
+    doesn't render instead of erroring."""
+
+    status: str
+    current_period_start: datetime
+    current_period_end: datetime
+    plan_code: Optional[str] = None

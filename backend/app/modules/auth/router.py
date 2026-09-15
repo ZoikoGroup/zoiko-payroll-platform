@@ -34,6 +34,7 @@ from app.modules.auth.schemas import (
     SuccessResponse,
     TokenPasswordRequest,
     TokenResponse,
+    TrialRegisterRequest,
     UserCreateRequest,
     UserListResponse,
     UserResponse,
@@ -116,6 +117,12 @@ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
 @limiter.limit("5/minute")
 def register(request: Request, data: RegisterRequest, db: Session = Depends(get_db)):
     return service.register_enterprise(db, data)
+
+
+@router.post("/register-trial", response_model=TokenResponse, summary="Register a 30-day Professional Evaluation workspace")
+@limiter.limit("5/minute")
+def register_trial(request: Request, data: TrialRegisterRequest, db: Session = Depends(get_db)):
+    return service.register_trial(db, data)
 
 
 @router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
