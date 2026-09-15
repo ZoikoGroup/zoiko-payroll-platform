@@ -30,7 +30,7 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.auth.models import SecurityActionPurpose, SecurityActionToken, User, UserRole
-from app.modules.auth.schemas import RegisterRequest
+from app.modules.auth.schemas import RegisterRequest, TrialRegisterRequest
 from app.modules.organizations.models import Organization
 
 logger = logging.getLogger("zoiko_payroll.auth")
@@ -451,6 +451,150 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
     }
 
 
+def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
+    """30-day Professional Evaluation signup (/auth/register-trial).
+
+    Same JWT + email pipeline as register_enterprise, but the evaluation path
+    is exempt from the production jurisdiction readiness gate — it may onboard
+    into any REGISTRATION_COUNTRIES country even when no Active canonical
+    compliance pack exists yet. Tax/registration identifiers are not collected
+    at all (TrialRegisterRequest forbids them at the schema level), so nothing
+    here can persist compliance data by mistake.
+
+    The org is also wired into the billing layer in the same transaction: a
+    BillingSubscription (TRIALING, 30 days) is attached to the latest
+    PUBLISHED PROFESSIONAL plan version and a TRIAL_SUBSCRIPTION_CREATED
+    billing_commercial_audit_events row is recorded. If no PUBLISHED
+    PROFESSIONAL version exists the signup fails loudly rather than
+    committing an org with no commercial relationship.
+    """
+    from app.core.jurisdiction import REGISTRATION_COUNTRIES
+
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        raise AlreadyExistsException("User", "email")
+
+    if data.country not in REGISTRATION_COUNTRIES:
+        raise BadRequestException(
+            f"'{data.country}' is not supported for a Zoiko Payroll evaluation yet — "
+            "please select a supported country."
+        )
+
+    org_code = generate_organization_code(data.organization, db)
+
+    org = Organization(
+        organization_name=data.organization,
+        organization_code=org_code,
+        country=data.country,
+        email=data.email,
+        is_active=True,
+        workspace_type="EVALUATION",
+    )
+    db.add(org)
+    db.flush()
+
+    name_parts = data.name.strip().split(" ", 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) > 1 else "Admin"
+
+    admin = User(
+        email=data.email,
+        hashed_password=hash_password(data.password),
+        role=UserRole.ORG_ADMIN,
+        organization_id=org.id,
+        first_name=first_name,
+        last_name=last_name,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(admin)
+    db.flush()
+
+    from app.modules.billing.models import (
+        BillingAuthority,
+        BillingCommercialAuditEvent,
+        BillingSubscription,
+        SubscriptionStatus,
+    )
+    from app.modules.billing.plan_catalog import get_published_plan_version
+
+    plan_version = get_published_plan_version(db, "PROFESSIONAL")
+    if plan_version is None:
+        db.rollback()
+        raise BadRequestException(
+            "The Professional plan is not available for evaluation yet — "
+            "please try again later."
+        )
+
+    trial_start = datetime.utcnow()
+    trial_end = trial_start + timedelta(days=30)
+    subscription = BillingSubscription(
+        organization_id=org.id,
+        plan_version_id=plan_version.id,
+        billing_authority=BillingAuthority.STANDALONE.value,
+        status=SubscriptionStatus.TRIALING.value,
+        current_period_start=trial_start,
+        current_period_end=trial_end,
+    )
+    db.add(subscription)
+    db.flush()
+
+    db.add(
+        BillingCommercialAuditEvent(
+            organization_id=org.id,
+            actor_user_id=admin.id,
+            event_type="TRIAL_SUBSCRIPTION_CREATED",
+            payload={
+                "subscription_id": subscription.id,
+                "plan_code": "PROFESSIONAL",
+                "plan_version_id": plan_version.id,
+                "trial_days": 30,
+                "current_period_end": trial_end.isoformat(),
+            },
+        )
+    )
+    db.commit()
+    db.refresh(admin)
+    db.refresh(org)
+
+    logger.info("New evaluation organization %s registered by %s", org.organization_code, data.email)
+
+    try:
+        from app.services.email_service import send_trial_organization_created_email
+
+        evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
+        ref_id = f"TRIAL-{org.id:04d}-INIT"
+        send_trial_organization_created_email(
+            email=admin.email,
+            recipient_first_name=first_name,
+            organization_name=org.organization_name,
+            reference_id=ref_id,
+            evaluation_days=30,
+            evaluation_end_date=evaluation_end,
+            organization_id=org.id,
+            db=db,
+        )
+        logger.info(
+            "email_audit event=commercial.evaluation_created template_id=COM-003 recipient=%s org_id=%s reference_id=%s",
+            admin.email, org.id, ref_id,
+        )
+    except Exception as exc:
+        logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
+
+    token_payload = {
+        "sub": admin.email,
+        "role": admin.role.value,
+        "user_id": admin.id,
+        "organization_id": admin.organization_id,
+    }
+    return {
+        "access_token": create_access_token(data=token_payload),
+        "refresh_token": create_refresh_token(data=token_payload),
+        "token_type": "bearer",
+        "user": admin,
+    }
+
+
 # ── Password flows ──────────────────────────────────────────────────────────
 
 def request_password_reset(db: Session, email: str) -> dict:
@@ -646,4 +790,61 @@ def _send_invite_email(
         expires_at_local=expires_at_local,
         reference_id=reference_id,
         organization_id=user.organization_id,
+    )
+
+
+# ── Trial banner payload ────────────────────────────────────────────────────
+
+from app.modules.billing.models import SubscriptionStatus  # noqa: E402
+
+TRIAL_STATUS_BY_SUBSCRIPTION = {
+    # SubscriptionStatus value → trial_status vocabulary used by the banner.
+    # ACTIVE and TRIALING both browse->actively-in-trial; a live
+    # (production) customer has no trial at all, which we signal with null
+    # rather than a made-up value.
+    SubscriptionStatus.TRIALING.value: "ACTIVE",
+    SubscriptionStatus.ACTIVE.value: "ACTIVE",
+    SubscriptionStatus.PAST_DUE.value: "GRACE_READONLY",
+    SubscriptionStatus.SUSPENDED.value: "CLOSED",
+    SubscriptionStatus.CANCELLED.value: "CLOSED",
+}
+
+
+def get_my_trial_status(db: Session, organization_id: int):
+    """Payload for GET /auth/me/trial-status — all values derived from the
+    org's live rows, never cached/duplicated.
+
+    - workspace_type: Organization.workspace_type (defaults to
+      PRODUCTION for a missing org — safe for banner rendering).
+    - trial_status: mapped from BillingSubscription.status via
+      TRIAL_STATUS_BY_SUBSCRIPTION, or null when no subscription exists or
+      the org is not an evaluation workspace.
+    - trial_started_at: BillingSubscription.current_period_start (needed by
+      the dashboard's remaining-time bar to render elapsed-vs-remaining).
+    - trial_expires_at: BillingSubscription.current_period_end (single
+      source of truth for the expiry date — no second date field is added).
+    """
+    trial_status = None
+    trial_started_at = None
+    trial_expires_at = None
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    workspace_type = org.workspace_type if org is not None else "PRODUCTION"
+
+    if workspace_type == "EVALUATION":
+        from app.modules.billing.entitlements import get_active_subscription
+
+        subscription = get_active_subscription(db, organization_id)
+        if subscription is not None:
+            trial_status = TRIAL_STATUS_BY_SUBSCRIPTION.get(subscription.status)
+            trial_started_at = subscription.current_period_start
+            trial_expires_at = subscription.current_period_end
+
+    from app.modules.auth.schemas import TrialStatusResponse
+
+    return TrialStatusResponse(
+        workspace_type=workspace_type,
+        trial_status=trial_status,
+        trial_started_at=trial_started_at,
+        trial_expires_at=trial_expires_at,
     )

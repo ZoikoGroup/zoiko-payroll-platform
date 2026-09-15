@@ -104,6 +104,7 @@ def db():
     import app.modules.organizations.models  # noqa: F401
     import app.modules.auth.models  # noqa: F401
     import app.modules.payroll.models  # noqa: F401
+    import app.modules.billing.models  # noqa: F401
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -129,3 +130,42 @@ def organization(db):
     db.commit()
     db.refresh(org)
     return org
+
+
+@pytest.fixture()
+def published_professional_plan(db):
+    """A PUBLISHED PROFESSIONAL plan version, so register_trial can attach a
+    TRIALING BillingSubscription to it. Mirrors scripts/seed_professional_plan.py
+    using the same service-layer functions."""
+    from app.core.security import hash_password
+    from app.modules.auth.models import User, UserRole
+    from app.modules.billing import plan_catalog
+
+    actor = User(
+        email="super-admin@example.com",
+        hashed_password=hash_password("a-strong-password-1"),
+        role=UserRole.SUPER_ADMIN,
+        first_name="Super",
+        last_name="Admin",
+        phone="",
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(actor)
+    db.flush()
+
+    plan = plan_catalog.create_plan(db, "PROFESSIONAL", "Professional", actor_user_id=actor.id)
+    version = plan_catalog.create_plan_version(
+        db,
+        plan_id=plan.id,
+        feature_set={"features": ["payroll_runs", "multi_entity"]},
+        scale_limits={"max_entities": 1},
+        actor_user_id=actor.id,
+    )
+    plan_catalog.add_entitlement_flag(
+        db, plan_version_id=version.id, feature_key="max_entities", limit_value=1, actor_user_id=actor.id
+    )
+    plan_catalog.approve_plan_version(db, version.id, actor_user_id=actor.id)
+    plan_catalog.publish_plan_version(db, version.id, published_by_user_id=actor.id)
+    db.refresh(version)
+    return version

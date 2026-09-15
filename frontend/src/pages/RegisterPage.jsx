@@ -514,9 +514,9 @@ export default function RegisterPage() {
             </form>
 
             <p style={{ textAlign: "center", fontSize: "13px", color: "#6B7280", marginTop: "20px", marginBottom: 0 }}>
-              Already have an account?{" "}
-              <Link to="/login" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
-                Sign in
+              Not ready to commit?{" "}
+              <Link to="/trial-register" style={{ color: "#087CC1", fontWeight: "600", textDecoration: "none" }}>
+                Try Zoiko Payroll free for 30 days
               </Link>
             </p>
           </div>

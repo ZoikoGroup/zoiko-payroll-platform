@@ -22,7 +22,7 @@ class TXTExporter(IBankExporter):
     content_type = "text/plain"
     file_extension = "txt"
 
-    def generate(self, rows: List[BankExportRow]) -> bytes:
+    def generate(self, rows: List[BankExportRow], *, evaluation: bool = False) -> bytes:
         routing_label = rows[0].routing_label if rows else "IFSC"
         headers = list(_HEADERS)
         headers[4] = routing_label.upper()

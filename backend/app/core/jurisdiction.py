@@ -19,6 +19,20 @@ existing payroll footers / reports keep working unchanged.
 
 from typing import Optional
 
+# Countries available on the public registration forms. Mirrors the frontend
+# dropdown (frontend/src/utils/registrationRegions.js). Both registration
+# flows gate on this allow-list: /auth/register (production, additionally
+# requires an Active canonical compliance pack) and /auth/register-trial
+# (30-day evaluation, no compliance-pack requirement).
+REGISTRATION_COUNTRIES = [
+    "India",
+    "Germany",
+    "Canada",
+    "United States",
+    "United Kingdom",
+    "Australia",
+]
+
 # Keyed by the 2-letter code the rest of the payroll module uses
 # ("IN"/"US"/"UK"/"DE"/"AU"). Matches REGISTRATION_COUNTRIES / payroll
 # COMPLIANCE_COUNTRIES so a country name and a code always resolve the same.

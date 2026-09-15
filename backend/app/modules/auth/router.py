@@ -34,6 +34,8 @@ from app.modules.auth.schemas import (
     SuccessResponse,
     TokenPasswordRequest,
     TokenResponse,
+    TrialRegisterRequest,
+    TrialStatusResponse,
     UserCreateRequest,
     UserListResponse,
     UserResponse,
@@ -118,6 +120,12 @@ def register(request: Request, data: RegisterRequest, db: Session = Depends(get_
     return service.register_enterprise(db, data)
 
 
+@router.post("/register-trial", response_model=TokenResponse, summary="Register a 30-day Professional Evaluation workspace")
+@limiter.limit("5/minute")
+def register_trial(request: Request, data: TrialRegisterRequest, db: Session = Depends(get_db)):
+    return service.register_trial(db, data)
+
+
 @router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")
 def refresh_token(data: RefreshRequest, db: Session = Depends(get_db)):
     return service.refresh_user_token(db, data.refresh_token)
@@ -126,6 +134,18 @@ def refresh_token(data: RefreshRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse, summary="Get current logged-in user")
 def get_me(current_user=Depends(get_current_user)):
     return current_user
+
+
+@router.get(
+    "/me/trial-status",
+    response_model=TrialStatusResponse,
+    summary="Trial banner status for the current user's organization",
+)
+def get_me_trial_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_my_trial_status(db, current_user.organization_id)
 
 
 @router.post("/logout", response_model=SuccessResponse, summary="Logout")

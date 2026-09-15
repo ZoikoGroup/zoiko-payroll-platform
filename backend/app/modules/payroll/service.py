@@ -10782,6 +10782,9 @@ def generate_report_certificate_pdf_bytes(db: Session, organization_id: int, gen
     c.drawCentredString(col_mid, 11 * mm, "This is a system-generated statutory report. It does not require a signature.")
     c.drawCentredString(col_mid, 8 * mm, f"{company_name} | Confidential | Generated {report.generated_at.strftime('%d-%b-%Y') if report.generated_at else '-'}")
 
+    if _is_evaluation_workspace(db, organization_id):
+        _draw_evaluation_watermark(c, width, height, F)
+
     c.showPage()
     c.save()
     return buf.getvalue()
@@ -17003,9 +17006,15 @@ def attempt_transmit_elster_transmission(db: Session, transmission_id: int, orga
     expected, auditable state, not a caller mistake. Idempotent/retry-safe:
     calling this again on an already-BLOCKED_EXTERNAL row simply re-attempts
     and re-records the same deterministic outcome."""
+    from app.modules.billing.entitlements import require_production_workspace
     from app.modules.payroll.engine.jurisdictions.germany.statutory.elster import (
         ElsterTransmissionRequest, GermanyElsterUnavailableError, resolve_elster_transmitter,
     )
+
+    # Prompt 3: block ELSTER transmission for EVALUATION workspaces —
+    # execution-safety guard reads workspace_type live, so converting to
+    # PRODUCTION later unblocks automatically.
+    require_production_workspace(db, organization_id)
 
     row = get_elster_transmission_by_id(db, transmission_id, organization_id)
     if row.status not in ("VALIDATED", "BLOCKED_EXTERNAL"):
@@ -18518,7 +18527,12 @@ def generate_bank_transfer_file(db: Session, run_id: int, organization_id: int =
         exporter = get_exporter(export_format)
     except ValueError as exc:
         raise BadRequestException(str(exc))
-    file_bytes = exporter.generate(rows)
+    # Prompt 3: EVALUATION workspaces are marked 'PREVIEW — EVALUATION ONLY'
+    # on document exports (PDF). CSV/TXT/XLSX carry no visible document, but
+    # the flag is still threaded through so a future live-transfer exporter
+    # can't miss it (per the bank_export/factory.py guard comment).
+    evaluation = bool(org_row) and org_row.workspace_type == "EVALUATION"
+    file_bytes = exporter.generate(rows, evaluation=evaluation)
 
     log_activity(
         db, organization_id,
@@ -18907,6 +18921,47 @@ def _payslip_identity_rows(country: str, data: dict) -> list:
     return rows_by_country.get(country, [("Tax ID", None), ("Reference", None), ("Routing", None)])
 
 
+def _is_evaluation_workspace(db: Session, organization_id: int = None) -> bool:
+    """True when the given org's live workspace_type is EVALUATION — payslip/
+    report PDF renderers then overlay a 'PREVIEW — EVALUATION ONLY' watermark
+    (Prompt 3). Reads Organization live (same row the ELSTER guard reads), so
+    converting the workspace to PRODUCTION later automatically removes the
+    watermark — no expiry/flag dance."""
+    if not organization_id:
+        return False
+    from app.modules.organizations.models import Organization
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    return bool(org) and org.workspace_type == "EVALUATION"
+
+
+def _draw_evaluation_watermark(c, width: float, height: float, font_name: str = "Helvetica-Bold") -> None:
+    """Overlays a centred, rotated 'PREVIEW — EVALUATION ONLY' watermark on
+    the current reportlab page. Call once AFTER all page content has been
+    drawn and BEFORE c.showPage()/c.save(), and (for multi-page documents)
+    immediately after every interior c.showPage() so each page gets stamped.
+    Self-contained — imports what it needs internally so callers don't have
+    to."""
+    from reportlab.lib import colors
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    text = "PREVIEW — EVALUATION ONLY"
+    size = 38
+    c.saveState()
+    c.setFillColor(colors.HexColor("#1E3A8A"))
+    c.setStrokeColor(colors.HexColor("#1E3A8A"))
+    c.setFont(font_name, size)
+    try:
+        c.setFillAlpha(0.25)
+        c.setStrokeAlpha(0.25)
+    except Exception:
+        pass
+    c.translate(width / 2, height / 2)
+    c.rotate(45)
+    tw = stringWidth(text, font_name, size)
+    c.drawCentredString(0, 0, text)
+    c.restoreState()
+
+
 def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:
     """Renders a professional PDF payslip document styled after the Nova Tech
     Solutions template: navy blue header, bordered grid tables, side-by-side
@@ -18926,6 +18981,11 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     company_name = getattr(company, "name", None) or "Company Name"
     company_address = getattr(company, "address", None) or ""
 
+    # Prompt 3: EVALUATION workspaces get a 'PREVIEW — EVALUATION ONLY'
+    # watermark (read live from Organization, so converting to PRODUCTION
+    # removes it automatically).
+    evaluation = _is_evaluation_workspace(db, organization_id)
+
     # A statutorily-blocked payslip (PayslipStatus.FAILED — today: Germany
     # PAP unavailable / no effective EmployeeStatutoryProfile, recorded as
     # Phase 8BI's FAILED sentinel) carries ZERO monetary figures. Rendering
@@ -18933,7 +18993,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # explicitly forbidden (§25: never fabricate zero). Render the explicit
     # blocked-state document instead, which contains NO monetary amounts.
     if item.status == PayslipStatus.FAILED:
-        return _render_blocked_payslip_pdf_bytes(data, item, run, company_name, company_address)
+        return _render_blocked_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
 
     # Phase 8BU: a PARTIALLY_CALCULATED Germany payslip (Part 21 — "remove
     # unnecessary internal blocking") DOES carry real, non-fabricated
@@ -18945,7 +19005,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # shows the real figures plainly and marks only the actually-unavailable
     # ones as "UNAVAILABLE" text, never as a numeric zero.
     if item.status == PayslipStatus.PARTIAL:
-        return _render_partial_payslip_pdf_bytes(data, item, run, company_name, company_address)
+        return _render_partial_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
 
     # data["country"] is get_payslip_by_id()'s already-resolved country —
     # the payslip's own snapshotted jurisdiction (its employee's country at
@@ -19439,13 +19499,17 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     c.setLineWidth(0.8)
     c.rect(card_x, card_bottom, card_w, card_top - card_bottom, fill=0, stroke=1)
 
+    if evaluation:
+        _draw_evaluation_watermark(c, width, height, F)
+
     c.showPage()
     c.save()
     return buf.getvalue()
 
 
 def _render_blocked_payslip_pdf_bytes(data: dict, item: PayslipItem, run: PayrollRun,
-                                      company_name: str, company_address: str) -> bytes:
+                                       company_name: str, company_address: str,
+                                       *, evaluation: bool = False) -> bytes:
     """Renders the explicit blocked-state document for a statutorily-blocked
     payslip (PayslipStatus.FAILED — e.g. Germany PAP unavailable or no
     effective EmployeeStatutoryProfile, recorded as Phase 8BI's FAILED
@@ -19622,6 +19686,9 @@ def _render_blocked_payslip_pdf_bytes(data: dict, item: PayslipItem, run: Payrol
     c.setLineWidth(0.8)
     c.rect(card_x, card_bottom, card_w, y + card_margin - card_bottom, fill=0, stroke=1)
 
+    if evaluation:
+        _draw_evaluation_watermark(c, width, height, F)
+
     c.showPage()
     c.save()
     return buf.getvalue()
@@ -19635,7 +19702,8 @@ _GERMANY_COMPONENT_LABELS = {
 
 
 def _render_partial_payslip_pdf_bytes(data: dict, item: PayslipItem, run: PayrollRun,
-                                       company_name: str, company_address: str) -> bytes:
+                                        company_name: str, company_address: str,
+                                        *, evaluation: bool = False) -> bytes:
     """Renders a Germany PARTIALLY_CALCULATED payslip (PayslipStatus.PARTIAL
     — Phase 8BU, Part 21 "remove unnecessary internal blocking").
 
@@ -19828,6 +19896,9 @@ def _render_partial_payslip_pdf_bytes(data: dict, item: PayslipItem, run: Payrol
     c.setStrokeColor(gray_300)
     c.setLineWidth(0.8)
     c.rect(card_x, card_bottom, card_w, y + card_margin - card_bottom, fill=0, stroke=1)
+
+    if evaluation:
+        _draw_evaluation_watermark(c, width, height, F)
 
     c.showPage()
     c.save()
@@ -21810,6 +21881,7 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
         org_row = db.query(Organization).filter(Organization.id == organization_id).first()
         org_currency_code = org_row.currency if org_row else None
     sym = _get_currency_symbol(org_currency_code or country)
+    evaluation = _is_evaluation_workspace(db, organization_id)
 
     def fmt(val):
         v = float(val or 0)
@@ -22044,6 +22116,8 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
         row_idx = 0
         for item in items:
             if y < bottom_limit:
+                if evaluation:
+                    _draw_evaluation_watermark(c, width, height, F)
                 c.showPage()
                 y = height - 18 * mm
                 y = _draw_table_header(c, col_x, y)
@@ -22155,6 +22229,9 @@ def generate_report_pdf_bytes(db: Session, report_id: int, organization_id: int 
     c.setFillColor(slate_400)
     c.setFont(F, 5)
     c.drawCentredString(width / 2, 6 * mm, "Confidential — For Internal Use Only")
+
+    if evaluation:
+        _draw_evaluation_watermark(c, width, height, F)
 
     c.save()
     return buf.getvalue()

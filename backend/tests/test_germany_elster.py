@@ -15,7 +15,8 @@ from datetime import date
 
 import pytest
 
-from app.core.exceptions import BadRequestException, NotFoundException
+from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
+from app.modules.billing.entitlements import require_production_workspace
 from app.modules.payroll import service
 from app.modules.payroll.engine.germany_elster import (
     ElsterTransmissionRequest, GermanyElsterUnavailableError, resolve_elster_transmitter,
@@ -237,3 +238,64 @@ def test_get_transmission_by_id_reflects_blocked_state(db, organization):
     fetched = service.get_elster_transmission_by_id(db, row.id, organization.id)
     assert fetched.status == "BLOCKED_EXTERNAL"
     assert fetched.blocked_reason
+
+
+# ── Prompt 3: EVALUATION workspaces are blocked from real transmission ─────
+
+def test_require_production_workspace_blocks_evaluation_org(db, organization):
+    """The execution-safety guard refuses EVALUATION workspaces regardless
+    of ALLOW_ALL (that flag governs plan *features*, not production-vs-
+    simulation safety), and reads Organization.workspace_type live."""
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization.id).first()
+    assert org.workspace_type == "PRODUCTION"
+    require_production_workspace(db, organization.id)  # must not raise
+
+    org.workspace_type = "EVALUATION"
+    db.commit()
+
+    with pytest.raises(ForbiddenException) as exc_info:
+        require_production_workspace(db, organization.id)
+    assert "production workspace" in str(exc_info.value)
+
+    # Conversion back to PRODUCTION unblocks automatically — no separate
+    # revocation/expiry step (the value is read live each call).
+    org.workspace_type = "PRODUCTION"
+    db.commit()
+    require_production_workspace(db, organization.id)
+
+
+def test_transmit_is_blocked_before_transmitter_resolution_for_evaluation(db, organization):
+    """The guard must fire inside attempt_transmit_elster_transmission BEFORE
+    the transmitter is ever resolved — i.e. an EVALUATION org can never
+    progress to the (future) real ELSTER client, even on a VALIDATED row."""
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization.id).first()
+    org.workspace_type = "EVALUATION"
+    db.commit()
+
+    row = service.create_elster_transmission(
+        db, organization.id,
+        GermanyElsterTransmissionCreate(
+            transmission_type="LOHNSTEUER_ANMELDUNG",
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+        ),
+        actor_id=1,
+    )
+    service.validate_elster_transmission(db, row.id, organization.id, actor_id=1)
+
+    with pytest.raises(ForbiddenException) as exc_info:
+        service.attempt_transmit_elster_transmission(db, row.id, organization.id, actor_id=1)
+    assert "production workspace" in str(exc_info.value)
+
+    # No outcome was recorded and the row was not mutated by the guard.
+    db.refresh(row)
+    assert row.status == "VALIDATED"
+
+    # Same VALIDATED row transmits fine after the workspace converts.
+    org.workspace_type = "PRODUCTION"
+    db.commit()
+    attempted = service.attempt_transmit_elster_transmission(db, row.id, organization.id, actor_id=1)
+    assert attempted.status == "BLOCKED_EXTERNAL"

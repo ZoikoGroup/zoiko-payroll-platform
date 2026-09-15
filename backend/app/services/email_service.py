@@ -528,6 +528,47 @@ def send_organization_created_email(
     )
 
 
+def send_trial_organization_created_email(
+    email: str,
+    recipient_first_name: str,
+    organization_name: str,
+    reference_id: str = "",
+    evaluation_days: int = 30,
+    evaluation_end_date: str = "",
+    setup_link: str = "",
+    organization_id=None,
+    db=None,
+) -> bool:
+    """COM-003 (Class P1): 30-day Professional Evaluation workspace created.
+    Sent only to the primary administrator upon evaluation signup
+    (/auth/register-trial). States the evaluation terms explicitly."""
+    from app.config import settings
+    if not reference_id:
+        import uuid
+        reference_id = f"TRIAL-{uuid.uuid4().hex[:4].upper()}-INIT"
+    if not setup_link:
+        frontend_base = os.environ.get("ACTION_BASE_URL", "").rstrip("/") or settings.FRONTEND_URL.rstrip("/")
+        setup_link = f"{frontend_base}/login"
+
+    return send_approval_email(
+        email,
+        "trial_org_created.html",
+        {
+            "subject": "Your Zoiko Payroll 30-Day Evaluation has been created",
+            "preheader": "Explore Zoiko Payroll free for 30 days.",
+            "recipient_first_name": recipient_first_name or "Admin",
+            "organization_name": organization_name,
+            "evaluation_days": evaluation_days,
+            "evaluation_end_date": evaluation_end_date,
+            "reference_id": reference_id,
+            "action_url": setup_link,
+        },
+        db=db,
+        organization_id=organization_id,
+        from_display_name_override=SECURITY_SENDER,
+    )
+
+
 def send_super_admin_org_created_notification_email(
     org: object,
     admin_user: object = None,

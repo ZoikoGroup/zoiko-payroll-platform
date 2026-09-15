@@ -20,6 +20,12 @@ export default function LandingHeader() {
             Sign In
           </Link>
           <Link
+            to="/trial-register"
+            className="text-foreground no-underline whitespace-nowrap rounded-full px-4 py-2.5 border border-border-light transition-colors duration-150 hover:bg-brand-navy/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          >
+            Try free
+          </Link>
+          <Link
             to="/register"
             className="inline-flex items-center gap-1 bg-primary hover:bg-primary-hover text-white rounded-full px-5 py-2.5 shadow-md shadow-primary/20 transition-all duration-200 no-underline whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-navy"
           >

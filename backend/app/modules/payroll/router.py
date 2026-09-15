@@ -64,6 +64,7 @@ from app.core.dependencies import (
     require_active_subscription,
 )
 from app.core.exceptions import ForbiddenException, NotFoundException
+from app.modules.billing.entitlements import require_writeable_workspace
 from app.modules.payroll import service
 from app.modules.payroll.policy.router import policy_router
 from app.modules.payroll.enterprise.router import enterprise_router
@@ -176,7 +177,7 @@ def get_employee(
 
 @payroll_router.post(
     "/employees", response_model=EmployeeResponse, response_model_by_alias=True,
-    summary="Create an employee", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Create an employee", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def create_employee(
     data: EmployeeCreate,
@@ -189,7 +190,7 @@ def create_employee(
 @payroll_router.post(
     "/employees/bulk", response_model=BulkUpsertResponse,
     summary="Bulk create employees from imported data",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def bulk_create_employees(
     data: BulkEmployeeRequest,
@@ -208,7 +209,7 @@ def bulk_create_employees(
 @payroll_router.post(
     "/employees/bulk-update", response_model=BulkUpdateResponse,
     summary="Bulk partial-update employees from imported data, keyed by employee ID",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def bulk_update_employees(
     data: BulkEmployeeRequest,
@@ -227,7 +228,7 @@ def bulk_update_employees(
 @payroll_router.post(
     "/employees/bulk-delete",
     summary="Bulk delete employees",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def bulk_delete_employees(
     data: BulkDeleteRequest,
@@ -243,7 +244,7 @@ def bulk_delete_employees(
 
 @payroll_router.put(
     "/employees/{employee_id}", response_model=EmployeeResponse, response_model_by_alias=True,
-    summary="Update an employee", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Update an employee", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def update_employee(
     employee_id: int,
@@ -256,7 +257,7 @@ def update_employee(
 
 @payroll_router.delete(
     "/employees/{employee_id}", response_model=SuccessResponse,
-    summary="Delete an employee", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Delete an employee", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def delete_employee(
     employee_id: int,
@@ -301,7 +302,7 @@ def get_employee_statutory_profile_history(
 @payroll_router.post(
     "/employees/{employee_id}/statutory-profile", response_model=EmployeeStatutoryProfileResponse,
     response_model_by_alias=True, summary="Record a new effective-dated statutory profile version for an employee",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def create_employee_statutory_profile(
     employee_id: int,
@@ -356,7 +357,7 @@ def get_germany_overtime_work_record(
     "/employees/{employee_id}/germany-overtime-work-records",
     response_model=GermanyOvertimeWorkRecordResponse, response_model_by_alias=True,
     summary="Record a Germany overtime/shift-premium work-time fact (attendance-derived or manual)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def create_germany_overtime_work_record(
     employee_id: int,
@@ -373,7 +374,7 @@ def create_germany_overtime_work_record(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/approval",
     response_model=GermanyOvertimeWorkRecordResponse, response_model_by_alias=True,
     summary="Set the HR approval status of a Germany overtime/shift-premium work record",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def set_germany_overtime_work_record_approval(
     employee_id: int,
@@ -400,7 +401,7 @@ def set_germany_overtime_work_record_approval(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/classification",
     response_model=List[GermanyOvertimeTimeSegmentResponse], response_model_by_alias=True,
     summary="Classify a Germany overtime work record's §3b EStG time-window categories (no money calculated)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def classify_germany_overtime_work_record(
     employee_id: int,
@@ -441,7 +442,7 @@ def get_germany_overtime_work_record_classification(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/wage-tax-calculation",
     response_model=List[GermanyOvertimeWageTaxResultResponse], response_model_by_alias=True,
     summary="Calculate a Germany overtime work record's §3b EStG WAGE-TAX tax-free/taxable split (no social insurance)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def calculate_germany_overtime_wage_tax(
     employee_id: int,
@@ -482,7 +483,7 @@ def get_germany_overtime_wage_tax_result(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/social-insurance-calculation",
     response_model=List[GermanyOvertimeSocialInsuranceResultResponse], response_model_by_alias=True,
     summary="Calculate a Germany overtime work record's §1 SvEV SOCIAL-INSURANCE-free/contributory split (no wage tax)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def calculate_germany_overtime_social_insurance(
     employee_id: int,
@@ -524,7 +525,7 @@ def get_germany_overtime_social_insurance_result(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components",
     response_model=List[GermanyOvertimePremiumComponentResponse], response_model_by_alias=True,
     summary="Build/rebuild a Germany overtime work record's premium components (combines wage-tax + social-insurance results)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def build_germany_overtime_premium_components(
     employee_id: int,
@@ -561,7 +562,7 @@ def get_germany_overtime_premium_components(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components/{component_id}/attach-to-payslip",
     response_model=GermanyOvertimePremiumComponentResponse, response_model_by_alias=True,
     summary="Explicitly attach one COMPLETE, HR-approved premium component to a real payslip line",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def attach_germany_overtime_premium_component_to_payslip(
     employee_id: int,
@@ -583,7 +584,7 @@ def attach_germany_overtime_premium_component_to_payslip(
     "/employees/{employee_id}/germany-overtime-work-records/{record_id}/premium-components/{component_id}/detach-from-payslip",
     response_model=GermanyOvertimePremiumComponentResponse, response_model_by_alias=True,
     summary="Explicitly detach a previously-attached premium component from its payslip line (reverses attach; never deletes history)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def detach_germany_overtime_premium_component_from_payslip(
     employee_id: int,
@@ -630,7 +631,7 @@ def list_germany_overtime_premium_components_for_batch_attach(
     "/germany-overtime-premium-components/batch-attach",
     response_model=GermanyOvertimePremiumComponentBatchAttachResponse, response_model_by_alias=True,
     summary="Explicitly attach a caller-selected batch of COMPLETE, HR-approved premium components to real payslip lines",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def batch_attach_germany_overtime_premium_components_to_payslips(
     payload: GermanyOvertimePremiumComponentBatchAttachRequest,
@@ -654,7 +655,7 @@ def batch_attach_germany_overtime_premium_components_to_payslips(
     "/employees/{employee_id}/elstam-import", response_model=GermanyElstamImportAttemptResponse,
     response_model_by_alias=True,
     summary="Import a structured ELStAM payload for one employee (never a live ELSTER/BZSt call)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def import_employee_elstam_payload(
     employee_id: int,
@@ -684,7 +685,7 @@ def get_employee_elstam_import_attempts(
 @payroll_router.post(
     "/germany/elstam-change-list-batches", response_model=GermanyElstamChangeListBatchResponse,
     response_model_by_alias=True, summary="Record that a monthly ELStAM change-list batch was received",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def create_elstam_change_list_batch(
     data: GermanyElstamChangeListBatchCreate,
@@ -720,7 +721,7 @@ def get_elstam_change_list_batch(
 @payroll_router.patch(
     "/germany/elstam-change-list-batches/{batch_id}/status", response_model=GermanyElstamChangeListBatchResponse,
     response_model_by_alias=True, summary="Advance an ELStAM change-list batch's processing status",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def update_elstam_change_list_batch_status(
     batch_id: int,
@@ -734,7 +735,7 @@ def update_elstam_change_list_batch_status(
 @payroll_router.post(
     "/germany/calculation-preview", summary="Phase 7 QA diagnostic: preview a Germany employee's calculation "
     "against currently-published registries, without writing anything",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def germany_calculation_preview(
     data: GermanyCalculationPreviewRequest,
@@ -819,7 +820,7 @@ def get_germany_elster_certificate_config(
 @payroll_router.put(
     "/germany/elster-certificate-config", response_model=GermanyElsterCertificateConfigResponse,
     response_model_by_alias=True, summary="Record an ELSTER certificate reference (never the certificate/key itself)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def put_germany_elster_certificate_config(
     data: GermanyElsterCertificateConfigSet,
@@ -834,7 +835,7 @@ def put_germany_elster_certificate_config(
 @payroll_router.post(
     "/germany/elster-transmissions", response_model=GermanyElsterTransmissionResponse,
     response_model_by_alias=True, summary="Record a DRAFT ELSTER transmission attempt",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def create_germany_elster_transmission(
     data: GermanyElsterTransmissionCreate,
@@ -874,7 +875,7 @@ def get_germany_elster_transmission(
 @payroll_router.post(
     "/germany/elster-transmissions/{transmission_id}/validate", response_model=GermanyElsterTransmissionResponse,
     response_model_by_alias=True, summary="Structurally validate a DRAFT ELSTER transmission",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def validate_germany_elster_transmission(
     transmission_id: int,
@@ -888,7 +889,7 @@ def validate_germany_elster_transmission(
     "/germany/elster-transmissions/{transmission_id}/transmit", response_model=GermanyElsterTransmissionResponse,
     response_model_by_alias=True,
     summary="Attempt transmission — today ALWAYS records BLOCKED_EXTERNAL (no real ELSTER connector exists)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def transmit_germany_elster_transmission(
     transmission_id: int,
@@ -902,7 +903,7 @@ def transmit_germany_elster_transmission(
 
 @payroll_router.post(
     "/runs", response_model=PayrollRunResponse, response_model_by_alias=True,
-    summary="Create a payroll run", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Create a payroll run", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def create_run(
     data: PayrollRunCreate,
@@ -915,7 +916,7 @@ def create_run(
 @payroll_router.post(
     "/runs/preview", response_model=PayrollRunPreviewResponse, response_model_by_alias=True,
     summary="Dry-run payroll calculation (no DB writes)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def preview_run(
     data: PayrollRunPreviewRequest,
@@ -957,7 +958,7 @@ def get_run(
 
 @payroll_router.put(
     "/runs/{run_id}", response_model=PayrollRunResponse, response_model_by_alias=True,
-    summary="Update payroll run details (Draft only)", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Update payroll run details (Draft only)", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def update_run(
     run_id: int,
@@ -971,7 +972,7 @@ def update_run(
 @payroll_router.put(
     "/runs/{run_id}/approve", response_model=PayrollRunResponse, response_model_by_alias=True,
     summary="Advance a payroll run to its next lifecycle status",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def approve_run(
     run_id: int,
@@ -987,7 +988,7 @@ def approve_run(
 @payroll_router.put(
     "/runs/{run_id}/employees/{employee_id}/recalculate", response_model=PayrollRunResponse, response_model_by_alias=True,
     summary="Recalculate one employee's payslip within a run (Draft/Review only)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def recalculate_employee_payslip(
     run_id: int,
@@ -1000,7 +1001,7 @@ def recalculate_employee_payslip(
 
 @payroll_router.delete(
     "/runs/{run_id}", response_model=SuccessResponse,
-    summary="Delete a Draft payroll run", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Delete a Draft payroll run", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def delete_run(
     run_id: int,
@@ -1014,7 +1015,7 @@ def delete_run(
 @payroll_router.post(
     "/runs/{run_id}/items", response_model=PayslipItemResponse, response_model_by_alias=True,
     summary="Manually add/override an employee payslip in a run",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def add_item(
     run_id: int,
@@ -1679,7 +1680,7 @@ def download_payslip(
     # get_current_user, allowing ANY authenticated org role to delete a
     # payslip. Fixed to match the established sibling pattern (no new
     # authorization concept introduced).
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def delete_payslip(
     payslip_id: int,
@@ -1708,7 +1709,7 @@ def list_leaves(
     "/leaves/bulk", response_model=List[LeaveAllocationResponse],
     response_model_by_alias=True,
     summary="Bulk save leave allocations",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def bulk_save_leaves(
     data: BulkLeaveRequest,
@@ -1721,7 +1722,7 @@ def bulk_save_leaves(
 @payroll_router.delete(
     "/leaves/reset", response_model=SuccessResponse,
     summary="Reset all leave allocations and clear leave attendance records",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def reset_leave_allocations(
     db: Session = Depends(get_db),
@@ -1760,6 +1761,7 @@ def list_leave_requests(
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
     summary="Submit a leave request",
+    dependencies=[Depends(require_writeable_workspace())],
 )
 def create_leave_request(
     data: PayrollLeaveRequestCreate,
@@ -1773,7 +1775,7 @@ def create_leave_request(
     "/leave-requests/{request_id}/review", response_model=PayrollLeaveRequestResponse,
     response_model_by_alias=True,
     summary="Approve or reject a leave request",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def review_leave_request(
     request_id: int,
@@ -1804,7 +1806,7 @@ def list_holidays(
 @payroll_router.post(
     "/holidays/bulk", response_model=List[HolidayResponse], response_model_by_alias=True,
     summary="Upsert company holidays (create or update by date)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def bulk_upsert_holidays(
     data: BulkHolidayRequest,
@@ -1817,7 +1819,7 @@ def bulk_upsert_holidays(
 @payroll_router.delete(
     "/holidays/{holiday_id}", response_model=SuccessResponse,
     summary="Delete a company holiday",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def delete_holiday(
     holiday_id: int,
@@ -1834,7 +1836,7 @@ def delete_holiday(
     "/attendance/bulk", response_model=BulkAttendanceResponse,
     response_model_by_alias=True,
     summary="Bulk save attendance & compensation records",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def bulk_save_attendance(
     data: BulkAttendanceRequest,
@@ -1865,7 +1867,7 @@ def list_attendance(
 @payroll_router.delete(
     "/attendance", response_model=SuccessResponse,
     summary="Delete all attendance records for the organization",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def clear_attendance(
     startDate: Optional[str] = Query(None, alias="startDate"),
@@ -1967,7 +1969,7 @@ def get_org_locality_rates(
     # sync_org_rates_from_canonical, Milestone 2); once that sync ships,
     # this endpoint's UI should become view-only for Org Admin (Milestone 6)
     # rather than being cut off here with no replacement flow.
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def apply_extracted_rate(
     payload: ApplyExtractedRateRequest,
@@ -1995,7 +1997,7 @@ def list_jurisdiction_packs(
 @payroll_router.put(
     "/compliance/jurisdiction-packs", response_model=JurisdictionPackResponse, response_model_by_alias=True,
     summary="Create or update a jurisdiction compliance pack's identity/metadata (policy packs only — tax packs are Super Admin-only)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def upsert_jurisdiction_pack(
     payload: JurisdictionPackUpsert,
@@ -2015,7 +2017,7 @@ def upsert_jurisdiction_pack(
 
 @payroll_router.put(
     "/compliance/company-details", response_model=SuccessResponse,
-    summary="Update company compliance details", dependencies=[Depends(get_current_payroll_operator)],
+    summary="Update company compliance details", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def update_company_details(
     data: CompanyDetailsUpdate,
@@ -2042,6 +2044,7 @@ def list_compliance_documents(
 @payroll_router.delete(
     "/compliance/documents/{document_id}", response_model=SuccessResponse,
     summary="Delete a compliance document",
+    dependencies=[Depends(require_writeable_workspace())],
 )
 def delete_compliance_document(
     document_id: int,
@@ -2057,6 +2060,7 @@ def delete_compliance_document(
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
     summary="Upload a compliance document",
+    dependencies=[Depends(require_writeable_workspace())],
 )
 async def upload_compliance_document(
     db: Session = Depends(get_db),
@@ -2170,7 +2174,7 @@ def get_applicable_report_template(
 @payroll_router.post(
     "/generated-reports", response_model=GeneratedReportResponse, response_model_by_alias=True,
     summary="Generate an actual report from a published template + a finalized payroll run",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_report(
     payload: GenerateReportRequest,
@@ -2227,7 +2231,7 @@ def get_generated_report_reconciliation(
 @payroll_router.post(
     "/generated-reports/{generated_report_id}/void", response_model=GeneratedReportResponse, response_model_by_alias=True,
     summary="Void a generated report (kept for history, never deleted)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def void_generated_report(
     generated_report_id: int,
