@@ -1703,3 +1703,567 @@ def test_generate_ca_pd7a_regenerating_supersedes_prior(db, organization):
     db.refresh(first)
     assert first.status == "Superseded"
     assert second.status == "Generated"
+
+
+# ── US: Form W-2 (Production-Readiness Plan Phase 5, 2026-09-15) ────────
+# A bespoke generator (not the widened generate_uk_employee_report) — Box 3
+# needs a wage-base cap and Box 15-20 are genuinely repeatable per-state/
+# per-locality groups, neither of which the generic field mapper expresses.
+
+def _build_us_w2_template(db, creator, approver, key="US-W2-GEN-TEST"):
+    template = service.upsert_report_template(
+        db, ReportTemplateUpsert(
+            templateKey=key, name="W-2", reportType="W2",
+            jurisdictionCountry="US", reportingYear="2026",
+            documentScope="PER_EMPLOYEE",
+        ), actor_id=creator.id,
+    )
+    # Real components/fields (same shape as scripts/seed_statutory_report_
+    # templates.py's US-W2 entry) — generate_us_w2 walks these to build
+    # component_snapshots/values, exactly like generate_india_form_123/
+    # generate_ca_pd7a do, so the shared per-employee certificate PDF
+    # renderer has real fieldKey/label pairs to render.
+    employer_info = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="employer_info", label="Employer Information"),
+        actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("employer_name", "Employer Name", "name"),
+        ("employer_ein", "Employer Identification Number (EIN)", "employer_id"),
+        ("employer_address", "Employer Address", "address"),
+    ):
+        service.upsert_report_field(
+            db, employer_info.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="text",
+                dataSourceKind="EMPLOYER_PROFILE", sourceColumn=source_column,
+            ), actor_id=creator.id,
+        )
+    employee_info = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="employee_info", label="Employee Information"),
+        actor_id=creator.id,
+    )
+    service.upsert_report_field(
+        db, employee_info.id, ReportTemplateFieldUpsert(
+            fieldKey="employee_name", label="Employee Name", fieldType="text",
+            dataSourceKind="PAYROLL_EMPLOYEE", sourceColumn="name",
+        ), actor_id=creator.id,
+    )
+    wages = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="wages", label="Wages & Federal Tax"), actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("box1_wages", "Box 1 - Wages, Tips, Other Compensation", "gross_pay"),
+        ("box2_federal_tax", "Box 2 - Federal Income Tax Withheld", "federal_income_tax"),
+    ):
+        service.upsert_report_field(
+            db, wages.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn=source_column, aggregation="SUM_YTD",
+            ), actor_id=creator.id,
+        )
+    ss_medicare = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="ss_medicare", label="Social Security & Medicare"),
+        actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("box3_ss_wages", "Box 3 - Social Security Wages", "gross_pay"),
+        ("box4_ss_tax", "Box 4 - Social Security Tax Withheld", "social_security"),
+        ("box5_medicare_wages", "Box 5 - Medicare Wages and Tips", "gross_pay"),
+        ("box6_medicare_tax", "Box 6 - Medicare Tax Withheld", "medicare"),
+    ):
+        service.upsert_report_field(
+            db, ss_medicare.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn=source_column, aggregation="SUM_YTD",
+            ), actor_id=creator.id,
+        )
+    state_local = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="state_local", label="State & Local"), actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("box14_sdi", "Box 14 - State Disability Insurance", "state_disability_insurance"),
+        ("box14_state_program", "Box 14 - State Payroll Programs (e.g. Paid Leave/TDI)", "state_program_deductions"),
+        ("box16_state_wages", "Box 16 - State Wages, Tips, etc.", "gross_pay"),
+        ("box17_state_tax", "Box 17 - State Income Tax", "state_income_tax"),
+        ("box18_local_wages", "Box 18 - Local Wages, Tips, etc.", "gross_pay"),
+        ("box19_local_tax", "Box 19 - Local Income Tax", "local_tax"),
+    ):
+        service.upsert_report_field(
+            db, state_local.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn=source_column, aggregation="SUM_YTD",
+            ), actor_id=creator.id,
+        )
+    service.set_report_template_approver(db, template.id, actor_id=approver.id)
+    service.set_report_template_status(db, template.id, "Published", actor_id=creator.id)
+    service.set_report_template_status(db, template.id, "Active", actor_id=creator.id)
+    return template
+
+
+def _make_us_run_with_payslip(db, organization_id, employee_id, pay_date, *, status="Approved", **overrides):
+    from app.modules.payroll.models import PayrollRun, PayslipItem
+
+    run = PayrollRun(
+        organization_id=organization_id, period_label=str(pay_date),
+        period_start=pay_date.replace(day=1), period_end=pay_date, pay_date=pay_date,
+        status=status,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    fields = dict(
+        gross_pay=8000, federal_income_tax=800, social_security=496, medicare=116,
+        employer_social_security=496, employer_medicare=116,
+        state_income_tax=200, local_tax=0, state_disability_insurance=0, state_program_deductions=0,
+        work_state="CA", work_locality=None, total_deductions=0, net_pay=8000,
+    )
+    fields.update(overrides)
+    item = PayslipItem(
+        payroll_run_id=run.id, employee_id=employee_id, organization_id=organization_id,
+        employee_name="W-2 Employee", country_code="US", **fields,
+    )
+    db.add(item)
+    db.commit()
+    return run, item
+
+
+def _make_us_employee(db, organization_id, code="EUSW2"):
+    from app.modules.payroll.models import PayrollEmployee
+
+    employee = PayrollEmployee(
+        organization_id=organization_id, employee_code=code, name="W-2 Employee",
+        compliance_fields={"ssn": "123-45-6789"},
+    )
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+    return employee
+
+
+def test_generate_us_w2_computes_boxes_from_ytd_payslips(db, organization):
+    creator = _make_user(db, "creator_w2a@test.com")
+    approver = _make_user(db, "approver_w2a@test.com")
+    company = _make_company(db, organization.id, country="US")
+    company.employer_id = "12-3456789"
+    db.commit()
+    employee = _make_us_employee(db, organization.id)
+
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 1, 31))
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 2, 28))
+
+    template = _build_us_w2_template(db, creator, approver)
+    generated = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+
+    assert generated.report_type == "W2"
+    assert generated.payroll_run_id is None
+    assert generated.employee_id == employee.id
+    assert generated.scope_key == f"EMPLOYEE:{employee.id}:2026"
+    values = generated.rendered_data["employees"][0]["values"]
+    assert values["employee_name"] == employee.name
+    assert values["employer_name"] == "Acme India Pvt Ltd"
+    assert values["employer_ein"] == "12-3456789"
+    assert values["box1_wages"] == 16000.0
+    assert values["box2_federal_tax"] == 1600.0
+    assert values["box3_ss_wages"] == 16000.0  # well under the wage base
+    assert values["box4_ss_tax"] == 992.0
+    assert values["box5_medicare_wages"] == 16000.0
+    assert values["box6_medicare_tax"] == 232.0
+    assert values["box17_state_tax"] == 400.0
+    assert values["stateLines"] == [{"state": "CA", "stateWages": 16000.0, "stateIncomeTax": 400.0}]
+    assert values["localityLines"] == []
+
+
+def test_generate_us_w2_caps_box3_at_social_security_wage_base(db, organization):
+    from app.modules.payroll.hardcoded_defaults import _US_SOCIAL_SECURITY_WAGE_BASE
+
+    creator = _make_user(db, "creator_w2b@test.com")
+    approver = _make_user(db, "approver_w2b@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2B")
+
+    high_gross = _US_SOCIAL_SECURITY_WAGE_BASE + Decimal("50000")
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 12, 31), gross_pay=high_gross)
+
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-CAP-TEST")
+    generated = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+    values = generated.rendered_data["employees"][0]["values"]
+    assert values["box3_ss_wages"] == float(_US_SOCIAL_SECURITY_WAGE_BASE)
+    assert values["box5_medicare_wages"] == float(high_gross)  # Medicare has no wage-base ceiling
+
+
+def test_generate_us_w2_handles_multiple_states_as_repeating_groups(db, organization):
+    creator = _make_user(db, "creator_w2c@test.com")
+    approver = _make_user(db, "approver_w2c@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2C")
+
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 3, 31), work_state="CA", gross_pay=6000, state_income_tax=300)
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 9, 30), work_state="NY", gross_pay=7000, state_income_tax=350)
+
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-MULTISTATE-TEST")
+    generated = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+    values = generated.rendered_data["employees"][0]["values"]
+    assert values["stateLines"] == [
+        {"state": "CA", "stateWages": 6000.0, "stateIncomeTax": 300.0},
+        {"state": "NY", "stateWages": 7000.0, "stateIncomeTax": 350.0},
+    ]
+
+
+def test_generate_us_w2_includes_local_and_box14_lines(db, organization):
+    creator = _make_user(db, "creator_w2d@test.com")
+    approver = _make_user(db, "approver_w2d@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2D")
+
+    _make_us_run_with_payslip(
+        db, organization.id, employee.id, date(2026, 6, 30),
+        work_locality="PHILADELPHIA", local_tax=50, state_disability_insurance=120, state_program_deductions=30,
+    )
+
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-LOCAL-TEST")
+    generated = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+    values = generated.rendered_data["employees"][0]["values"]
+    assert values["localityLines"] == [{"locality": "PHILADELPHIA", "localWages": 8000.0, "localIncomeTax": 50.0}]
+    assert values["box14_sdi"] == 120.0
+    assert values["box14_state_program"] == 30.0
+
+
+def test_generate_us_w2_excludes_other_years_non_us_and_unfinalized_runs(db, organization):
+    creator = _make_user(db, "creator_w2e@test.com")
+    approver = _make_user(db, "approver_w2e@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2E")
+
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 6, 30), gross_pay=8000)
+    # Outside the tax year — must NOT be summed in.
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2027, 1, 15), gross_pay=9999)
+    # Still Draft — must NOT be summed in.
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 7, 31), gross_pay=9999, status="Draft")
+    # Wrong country_code snapshot — must NOT be summed in.
+    _, other_country_item = _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 8, 31), gross_pay=9999)
+    other_country_item.country_code = "IN"
+    db.commit()
+
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-EXCLUDE-TEST")
+    generated = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+    values = generated.rendered_data["employees"][0]["values"]
+    assert values["box1_wages"] == 8000.0
+
+
+def test_generate_us_w2_rejects_wrong_report_type(db, organization):
+    creator = _make_user(db, "creator_w2f@test.com")
+    approver = _make_user(db, "approver_w2f@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2F")
+    template = _build_template(db, creator, approver, country="US", version="w2-neg")  # TDS, not W2
+    with pytest.raises(BadRequestException):
+        service.generate_us_w2(db, organization.id, template.id, employee.id, "2026")
+
+
+def test_generate_us_w2_rejects_invalid_tax_year(db, organization):
+    creator = _make_user(db, "creator_w2g@test.com")
+    approver = _make_user(db, "approver_w2g@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2G")
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-BADYEAR-TEST")
+    with pytest.raises(BadRequestException):
+        service.generate_us_w2(db, organization.id, template.id, employee.id, "not-a-year")
+
+
+def test_us_w2_certificate_pdf_renders_via_shared_renderer(db, organization):
+    # The shared per-employee certificate renderer (generate_report_
+    # certificate_pdf_bytes) reads templateSnapshot.components/fields to
+    # know what to print — this confirms generate_us_w2 actually populates
+    # that structure (not just a flat values dict the renderer can't see).
+    creator = _make_user(db, "creator_w2i@test.com")
+    approver = _make_user(db, "approver_w2i@test.com")
+    company = _make_company(db, organization.id, country="US")
+    company.employer_id = "98-7654321"
+    db.commit()
+    employee = _make_us_employee(db, organization.id, code="EUSW2I")
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 4, 30))
+
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-PDF-TEST")
+    generated = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+
+    pdf_bytes = service.generate_report_certificate_pdf_bytes(db, organization.id, generated.id, employee.id)
+    assert isinstance(pdf_bytes, (bytes, bytearray))
+    assert pdf_bytes[:4] == b"%PDF"
+    assert len(pdf_bytes) > 1000
+
+
+def test_generate_us_w2_regenerating_supersedes_prior(db, organization):
+    creator = _make_user(db, "creator_w2h@test.com")
+    approver = _make_user(db, "approver_w2h@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="EUSW2H")
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 5, 31))
+
+    template = _build_us_w2_template(db, creator, approver, key="US-W2-SUPERSEDE-TEST")
+    first = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+    second = service.generate_us_w2(db, organization.id, template.id, employee.id, "2026", actor_id=creator.id)
+    db.refresh(first)
+    assert first.status == "Superseded"
+    assert second.status == "Generated"
+
+
+# ── US: Form 941 (Employer's Quarterly Federal Tax Return, 2026-09-15) ──
+# Aggregate/employer-level, a fixed IRS calendar quarter — bespoke
+# generator, same reasoning as generate_us_w2.
+
+def _build_us_941_template(db, creator, approver, key="US-941-GEN-TEST"):
+    template = service.upsert_report_template(
+        db, ReportTemplateUpsert(
+            templateKey=key, name="Form 941", reportType="941",
+            jurisdictionCountry="US", reportingYear="2026",
+            documentScope="AGGREGATE",
+        ), actor_id=creator.id,
+    )
+    employer_info = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="employer_info", label="Employer Information"),
+        actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("employer_name", "Employer Name", "name"),
+        ("employer_ein", "EIN", "employer_id"),
+    ):
+        service.upsert_report_field(
+            db, employer_info.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="text",
+                dataSourceKind="EMPLOYER_PROFILE", sourceColumn=source_column,
+            ), actor_id=creator.id,
+        )
+    wages_tax = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="wages_tax", label="Wages & Federal Tax"), actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("line1_employee_count", "Line 1", "gross_pay"),  # placeholder — value is bespoke-computed, not mapped
+        ("line2_wages", "Line 2", "gross_pay"),
+        ("line3_federal_tax_withheld", "Line 3", "federal_income_tax"),
+    ):
+        service.upsert_report_field(
+            db, wages_tax.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn=source_column, aggregation="SUM_RUN",
+            ), actor_id=creator.id,
+        )
+    ss_medicare = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="ss_medicare", label="SS & Medicare"), actor_id=creator.id,
+    )
+    for field_key in ("line5a_ss_wages", "line5a_ss_tax", "line5c_medicare_wages", "line5c_medicare_tax"):
+        service.upsert_report_field(
+            db, ss_medicare.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=field_key, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn="social_security", aggregation="SUM_RUN",
+            ), actor_id=creator.id,
+        )
+    totals = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="totals", label="Totals"), actor_id=creator.id,
+    )
+    for field_key in ("line6_total_taxes_before_adjustments", "line12_total_taxes_after_adjustments_and_credits"):
+        service.upsert_report_field(
+            db, totals.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=field_key, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn="tds", aggregation="SUM_RUN",
+            ), actor_id=creator.id,
+        )
+    service.set_report_template_approver(db, template.id, actor_id=approver.id)
+    service.set_report_template_status(db, template.id, "Published", actor_id=creator.id)
+    service.set_report_template_status(db, template.id, "Active", actor_id=creator.id)
+    return template
+
+
+def test_generate_us_941_sums_quarter_wages_and_taxes(db, organization):
+    creator = _make_user(db, "creator_941a@test.com")
+    approver = _make_user(db, "approver_941a@test.com")
+    company = _make_company(db, organization.id, country="US")
+    company.employer_id = "11-2223334"
+    db.commit()
+    employee = _make_us_employee(db, organization.id, code="E941A")
+
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 1, 31))
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 2, 28))
+
+    template = _build_us_941_template(db, creator, approver)
+    generated = service.generate_us_941(db, organization.id, template.id, 2026, 1, actor_id=creator.id)
+
+    assert generated.report_type == "941"
+    assert generated.payroll_run_id is None
+    assert generated.employee_id is None
+    assert generated.scope_key == "PERIOD:2026-01-01:2026-03-31"
+    assert generated.reporting_period == "Q1"
+    values = generated.rendered_data["employer"]
+    assert values["employer_ein"] == "11-2223334"
+    assert values["line1_employee_count"] == 1
+    assert values["line2_wages"] == 16000.0
+    assert values["line3_federal_tax_withheld"] == 1600.0
+    assert values["line5a_ss_wages"] == 16000.0  # derived from tax/rate, well under the wage base
+    assert values["line5a_ss_tax"] == 992.0 + 992.0  # employee + employer (6.2% each on the same base)
+    assert values["line5c_medicare_wages"] == 16000.0
+    assert generated.rendered_data["employeeCount"] == 1
+
+
+def test_generate_us_941_excludes_other_quarters_and_unfinalized_runs(db, organization):
+    creator = _make_user(db, "creator_941b@test.com")
+    approver = _make_user(db, "approver_941b@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="E941B")
+
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 2, 15), gross_pay=8000)
+    # Outside Q1 — must NOT be summed in.
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 4, 15), gross_pay=9999)
+    # Still Draft — must NOT be summed in.
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 3, 1), gross_pay=9999, status="Draft")
+
+    template = _build_us_941_template(db, creator, approver, key="US-941-EXCLUDE-TEST")
+    generated = service.generate_us_941(db, organization.id, template.id, 2026, 1, actor_id=creator.id)
+    assert generated.rendered_data["employer"]["line2_wages"] == 8000.0
+
+
+def test_generate_us_941_rejects_wrong_report_type(db, organization):
+    creator = _make_user(db, "creator_941c@test.com")
+    approver = _make_user(db, "approver_941c@test.com")
+    _make_company(db, organization.id, country="US")
+    template = _build_template(db, creator, approver, country="US", version="941-neg")  # TDS, not 941
+    with pytest.raises(BadRequestException):
+        service.generate_us_941(db, organization.id, template.id, 2026, 1)
+
+
+def test_generate_us_941_rejects_invalid_quarter(db, organization):
+    creator = _make_user(db, "creator_941d@test.com")
+    approver = _make_user(db, "approver_941d@test.com")
+    _make_company(db, organization.id, country="US")
+    template = _build_us_941_template(db, creator, approver, key="US-941-BADQ-TEST")
+    with pytest.raises(BadRequestException):
+        service.generate_us_941(db, organization.id, template.id, 2026, 5)
+
+
+def test_generate_us_941_regenerating_supersedes_prior(db, organization):
+    creator = _make_user(db, "creator_941e@test.com")
+    approver = _make_user(db, "approver_941e@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="E941E")
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 1, 15))
+
+    template = _build_us_941_template(db, creator, approver, key="US-941-SUPERSEDE-TEST")
+    first = service.generate_us_941(db, organization.id, template.id, 2026, 1, actor_id=creator.id)
+    second = service.generate_us_941(db, organization.id, template.id, 2026, 1, actor_id=creator.id)
+    db.refresh(first)
+    assert first.status == "Superseded"
+    assert second.status == "Generated"
+
+
+# ── US: Form 940 (Employer's Annual FUTA Tax Return, 2026-09-15) ────────
+# Aggregate/employer-level, calendar year — bespoke generator; the
+# taxable-wages figure independently recomputes the real $7,000/employee/
+# year FUTA wage-base cap rather than deriving it from tax (see
+# generate_us_940's own docstring for why).
+
+def _build_us_940_template(db, creator, approver, key="US-940-GEN-TEST"):
+    template = service.upsert_report_template(
+        db, ReportTemplateUpsert(
+            templateKey=key, name="Form 940", reportType="940",
+            jurisdictionCountry="US", reportingYear="2026",
+            documentScope="AGGREGATE",
+        ), actor_id=creator.id,
+    )
+    employer_info = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="employer_info", label="Employer Information"),
+        actor_id=creator.id,
+    )
+    for field_key, label, source_column in (
+        ("employer_name", "Employer Name", "name"),
+        ("employer_ein", "EIN", "employer_id"),
+    ):
+        service.upsert_report_field(
+            db, employer_info.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=label, fieldType="text",
+                dataSourceKind="EMPLOYER_PROFILE", sourceColumn=source_column,
+            ), actor_id=creator.id,
+        )
+    futa = service.upsert_report_component(
+        db, template.id, ReportTemplateComponentUpsert(componentKey="futa", label="FUTA Wages & Tax"), actor_id=creator.id,
+    )
+    for field_key in ("total_payments", "futa_taxable_wages", "futa_tax_due", "employee_count"):
+        service.upsert_report_field(
+            db, futa.id, ReportTemplateFieldUpsert(
+                fieldKey=field_key, label=field_key, fieldType="currency",
+                dataSourceKind="PAYSLIP_ITEM", sourceColumn="gross_pay", aggregation="SUM_RUN",
+            ), actor_id=creator.id,
+        )
+    service.set_report_template_approver(db, template.id, actor_id=approver.id)
+    service.set_report_template_status(db, template.id, "Published", actor_id=creator.id)
+    service.set_report_template_status(db, template.id, "Active", actor_id=creator.id)
+    return template
+
+
+def test_generate_us_940_caps_futa_wages_per_employee(db, organization):
+    from app.modules.payroll.hardcoded_defaults import _US_FUTA_WAGE_BASE
+
+    creator = _make_user(db, "creator_940a@test.com")
+    approver = _make_user(db, "approver_940a@test.com")
+    company = _make_company(db, organization.id, country="US")
+    company.employer_id = "22-3334445"
+    db.commit()
+    employee = _make_us_employee(db, organization.id, code="E940A")
+
+    high_gross = _US_FUTA_WAGE_BASE + Decimal("3000")
+    _make_us_run_with_payslip(
+        db, organization.id, employee.id, date(2026, 3, 31),
+        gross_pay=high_gross, employer_futa=float(_US_FUTA_WAGE_BASE * Decimal("0.006")),
+    )
+
+    template = _build_us_940_template(db, creator, approver)
+    generated = service.generate_us_940(db, organization.id, template.id, 2026, actor_id=creator.id)
+
+    assert generated.report_type == "940"
+    assert generated.payroll_run_id is None
+    assert generated.employee_id is None
+    assert generated.scope_key == "PERIOD:2026-01-01:2026-12-31"
+    values = generated.rendered_data["employer"]
+    assert values["employer_ein"] == "22-3334445"
+    assert values["total_payments"] == float(high_gross)
+    assert values["futa_taxable_wages"] == float(_US_FUTA_WAGE_BASE)  # capped, not the full high_gross
+    assert values["employee_count"] == 1
+
+
+def test_generate_us_940_sums_multiple_employees(db, organization):
+    creator = _make_user(db, "creator_940b@test.com")
+    approver = _make_user(db, "approver_940b@test.com")
+    _make_company(db, organization.id, country="US")
+    emp1 = _make_us_employee(db, organization.id, code="E940B1")
+    emp2 = _make_us_employee(db, organization.id, code="E940B2")
+
+    _make_us_run_with_payslip(db, organization.id, emp1.id, date(2026, 6, 30), gross_pay=5000, employer_futa=30)
+    _make_us_run_with_payslip(db, organization.id, emp2.id, date(2026, 6, 30), gross_pay=6000, employer_futa=36)
+
+    template = _build_us_940_template(db, creator, approver, key="US-940-MULTI-TEST")
+    generated = service.generate_us_940(db, organization.id, template.id, 2026, actor_id=creator.id)
+    values = generated.rendered_data["employer"]
+    assert values["total_payments"] == 11000.0
+    assert values["futa_tax_due"] == 66.0
+    assert values["employee_count"] == 2
+
+
+def test_generate_us_940_rejects_wrong_report_type(db, organization):
+    creator = _make_user(db, "creator_940c@test.com")
+    approver = _make_user(db, "approver_940c@test.com")
+    _make_company(db, organization.id, country="US")
+    template = _build_template(db, creator, approver, country="US", version="940-neg")  # TDS, not 940
+    with pytest.raises(BadRequestException):
+        service.generate_us_940(db, organization.id, template.id, 2026)
+
+
+def test_generate_us_940_regenerating_supersedes_prior(db, organization):
+    creator = _make_user(db, "creator_940d@test.com")
+    approver = _make_user(db, "approver_940d@test.com")
+    _make_company(db, organization.id, country="US")
+    employee = _make_us_employee(db, organization.id, code="E940D")
+    _make_us_run_with_payslip(db, organization.id, employee.id, date(2026, 5, 31), employer_futa=48)
+
+    template = _build_us_940_template(db, creator, approver, key="US-940-SUPERSEDE-TEST")
+    first = service.generate_us_940(db, organization.id, template.id, 2026, actor_id=creator.id)
+    second = service.generate_us_940(db, organization.id, template.id, 2026, actor_id=creator.id)
+    db.refresh(first)
+    assert first.status == "Superseded"
+    assert second.status == "Generated"

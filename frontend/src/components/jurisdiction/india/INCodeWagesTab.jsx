@@ -15,7 +15,7 @@ import { inputClass, labelClass } from "../constants";
 // SAME TaxabilityRule model (tax_component="code_wages"/"epf_base"/
 // "esi_base"/"pt_base" respectively), so this is one tab with a program
 // selector rather than four near-identical tabs — same shape Canada's
-// CATaxabilityMatrixTab.jsx already established for its own 4 programs.
+// TaxabilityMatrixTab.jsx already established for Canada/US's programs.
 //
 // Defaults (india.py's _resolve_code_wages_classification /
 // _classify_wage_base) differ per program, exactly matching each

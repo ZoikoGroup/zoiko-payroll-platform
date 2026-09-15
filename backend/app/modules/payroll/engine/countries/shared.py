@@ -83,9 +83,16 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 #      boundary (Jan 1) for orgs with existing CA payslips; a CA org
 #      onboarding fresh can be enabled immediately.
 # US — Social Security wage base / FUTA wage base / Additional Medicare
-#      threshold share the identical current-period-annualized bug (see
-#      engine/countries/us.py) and are designed to reuse this exact
-#      mechanism — not enabled here, tracked as a separate follow-up.
+#      threshold shared the identical current-period-annualized bug (see
+#      engine/countries/us.py) and were designed to reuse this exact
+#      mechanism. Enabled 2026-09-13 (gap-closure Plan Phase 2a): unlike
+#      CA, zero real US employees existed in the live DB at enable time
+#      (verified immediately before), so there is no existing-payslip
+#      partial-year gap to worry about — safe to enable immediately,
+#      same reasoning as UK's own enable note below. service.py's
+#      _load_us_ytd/_upsert_us_ytd_accumulator are the read/write sides;
+#      us.py's own `ctx.ytd_ss_wages_before is not None` (etc.) checks
+#      are the second, independent calculation-layer dormancy gate.
 # UK — enabled 2026-09-09 gap-closure Phase 3. This switch is the ONLY
 #      gate on _load_uk_director_ytd/_upsert_uk_director_ytd_accumulator
 #      (service.py) — the plumbing was built and tested 2026-09-08 but
@@ -95,7 +102,7 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 #      once enabled this only produces a nonzero effect for an employee
 #      with is_director=True (a field nobody has set, default False) —
 #      every non-director UK payslip is completely unaffected.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK"}
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -319,6 +326,22 @@ _CA_BC_TAX_REDUCTION_ENABLED_COUNTRIES: set[str] = {"CA"}
 #      included) — this only changes a payslip once an admin has entered
 #      an actual TaxabilityRule override row, which none has today.
 _CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"CA"}
+
+# Per-country rollout switch for the US Taxability Matrix (ZP-TAX-US-2026-
+# 001 §9.1, gap-closure Phase 7) — per-program (federal income tax/Social
+# Security/Medicare/FUTA/state income tax) earning-component
+# classification via TaxabilityRule, same mechanism/contract as CA's
+# switch immediately above: OFF changes nothing; ON with zero configured
+# TaxabilityRule rows (every org today) ALSO changes nothing (us.py's
+# _resolve_us_taxability defaults every component to included, matching
+# today's single-ctx.gross behavior for every wage base) — this only
+# affects a real payslip once an admin enters an actual override row,
+# which none has today.
+#
+# US — enabled 2026-09-12 (gap-closure Phase 7, Venu's explicit go-ahead;
+#      same "enable now, zero live effect until configured" reasoning CA
+#      used for its own switch above).
+_US_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"US"}
 
 # Per-country rollout switch for Canada's associated-employer-group
 # exemption sharing (ZP-TAX-CA-2026-001 §15, gap-closure Phase 6,
@@ -631,7 +654,114 @@ _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES: set[str] = {"UK"}
 # MI 4.25%, PA 3.07%) with no state standard deduction, so seeding a single
 # FLAT_RATE TaxSlab and enabling each here is fully determined by the
 # document with no invented numbers.
-_US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY", "AZ", "IL", "MA", "MI", "PA"}
+#
+# CA/DC/DE/GA/HI/IA — enabled 2026-09-12 (gap-closure Level 2, genuine
+# primary-source batch — real government citations, not the earlier
+# untrustworthy tracking sheet). Zero live US employees existed with any
+# of these six as work_state at enable time (verified immediately before
+# enabling). GA's rate here (4.99%) CORRECTS this same session's own
+# earlier provisional 5.19% entry — see
+# hardcoded_defaults._US_STATE_TAX_RATES_PROVISIONAL's comment on exactly
+# how that was caught before it ever reached a real payslip. See
+# hardcoded_defaults._US_STATE_GRADUATED_TAX_RATES's own module comment
+# for the documented simplifications shared by CA/DC/DE/HI (no per-
+# employee allowance/dependent-count field exists anywhere in this engine
+# yet, so every count-dependent credit/allowance in the source batch is
+# omitted — always in the over-withholding, never under-withholding,
+# direction).
+#
+# AL — enabled 2026-09-12, same session, same batch. Complete literal
+# bracket table; only Alabama's own separate graduated standard
+# deduction/dependent exemption/federal-tax-liability deduction are
+# unmodeled (again strictly over-withholding-direction gaps — see
+# _US_STATE_GRADUATED_TAX_RATES["AL"]'s own comment). Zero live US
+# employees existed with work_state="AL" at enable time.
+#
+# AR/MN — enabled 2026-09-12, same session, a follow-up batch resolving
+# each state's previously-named gap (AR's exact bracket thresholds; MN's
+# withholding-formula clarification — no phase-out exists at the
+# withholding level at all). See _US_STATE_GRADUATED_TAX_RATES["AR"]/
+# ["MN"]'s own comments for the documented simplifications each still
+# carries. Zero live US employees existed with either as work_state at
+# enable time.
+#
+# CT — enabled 2026-09-12, same session, a fully-resolved batch (all 5
+# tables A-E given literally, not the earlier prose-pattern summaries).
+# Genuinely different architecture from every other state here — see
+# engine/countries/us.py's _calculate_ct_annual_tax and
+# hardcoded_defaults._US_CT_WITHHOLDING_TABLES's own comments. Verified
+# against the source batch's own worked example (Code A, $60,000
+# annualized -> $2,650.00/year) before enabling — matched exactly. Zero
+# live US employees existed with work_state="CT" at enable time. An
+# employee with work_state="CT" but no ct_withholding_code on file
+# resolves to $0, same as every other missing-election case.
+# MS/MT/NE/NJ/NM/ND/NC/OK/RI/SC/UT — enabled 2026-09-13, gap-closure
+# Level 2 Batches 4/5, genuine primary-source data across 11 states in
+# one pass. Two required real engine work, not just data: New Jersey's
+# NJ-W4 Rate Table (models.PayrollEmployee.nj_rate_table, a new field —
+# an employee with none on file resolves to $0) and North Dakota's Form
+# W-4 vintage-dependent bracket selection (the first real consumer of
+# models.PayrollEmployee.w4_form_vintage, previously collected but never
+# read anywhere in this engine). See hardcoded_defaults.
+# _US_STATE_GRADUATED_TAX_RATES's own per-state comments for every
+# documented simplification (MS/MT/NE/NM/ND/NJ/OK/RI/SC/UT all share the
+# same "no per-employee allowance/dependent-count field exists" gap
+# class already used throughout this build-out, always over- never
+# under-withholding). Zero live US employees existed with any of these
+# eleven as work_state at enable time (verified immediately before
+# enabling).
+#
+# VT/VA/WI/WV — added 2026-09-13 (Batch 6, ZP-TAX-US-2026-001 primary-source
+# data): completes "Group A" (every single-layer-only state on the user's
+# tracking list) plus West Virginia. VT/VA/WV use the generic graduated
+# TaxSlab bracket path (same documented allowance/exemption-count gap as
+# the states above); WI does not use TaxSlab rows at all — it is a bespoke
+# continuous-deduction calculation (_calculate_wi_annual_tax in us.py)
+# reading _US_WI_WITHHOLDING_PARAMS directly, verified against both of the
+# source's own worked examples. WV's One-Earner/Two-Earner table choice
+# isn't tracked per-employee, so MFJ defaults to the Two-Earner table (the
+# source's own deliberately-higher, safer-direction table). Zero live US
+# employees existed with any of these four as work_state at enable time
+# (verified immediately before enabling).
+#
+# MO/OH/NY — added 2026-09-13 (Batch 7 "Group B", ZP-TAX-US-2026-001
+# primary-source data): completes every jurisdiction on the user's
+# original consolidated list. MO uses the generic graduated bracket path
+# (one bracket table for every filing status; the MFJ standard deduction
+# defaults to the smaller "spouse works" amount absent a dedicated
+# checkbox field — same documented-gap convention as WV above). OH's
+# table is filing-status-agnostic (only the August 1, 2026-onward table
+# is seeded, per the same "current rate only" precedent already used for
+# Utah) — its own local municipal/school-district layer is deliberately
+# NOT built (ODT's own guidance says to query "The Finder" per address
+# rather than maintain a static table — a live lookup-tool integration,
+# not data this engine's dormant/live switch pattern applies to). NY uses
+# the generic bracket path for its ordinary table plus a bespoke Method
+# III override in us.py for wages above $1,077,550; NY's HOH/MFS
+# brackets conservatively fall back to its Single table (no HOH/MFS
+# table was given); NYC's own resident tax is NOT implemented (the
+# source batch didn't give complete bracket breakpoints, only 4 rates and
+# one threshold) but Yonkers (both directions) is fully implemented. PA's
+# own Act 32 EIT/LST local layer is likewise NOT built — the source
+# itself confirms it's a genuine PSD-code registry-scale problem (560+
+# collectors) requiring a real DCED/munstats.pa.gov file import via the
+# existing LocalityDataset mechanism, not hand-typed data. Zero live US
+# employees existed with MO/OH/NY as work_state at enable time (verified
+# immediately before enabling).
+_US_STATE_TAX_ENABLED_STATES: set[str] = {
+    "CO", "KY", "AZ", "IL", "MA", "MI", "PA", "CA", "DC", "DE", "GA", "HI", "IA", "AL", "AR", "MN", "CT",
+    "MS", "MT", "NE", "NJ", "NM", "ND", "NC", "OK", "RI", "SC", "UT", "VT", "VA", "WI", "WV",
+    "MO", "OH", "NY",
+    # Production-Readiness Plan Phase 4, 2026-09-15 — real statutory data
+    # independently verified against each state's own primary source (see
+    # _US_OR_WITHHOLDING_PARAMS/_US_ME_WITHHOLDING_PARAMS's own docstrings
+    # for OR/ME's bespoke logic; MD/LA's real bracket data is entered as
+    # ordinary canonical TaxSlab/ContributionRate rows, no bespoke code
+    # needed). Kansas is NOT enabled yet — its DOR site was unreachable
+    # this session, so no real figures were ever verified or entered;
+    # do not add "KS" here until real data backs it.
+    "OR", "ME", "MD", "LA",
+}
 
 # Per-state rollout switch for a state's own statutory payroll programs
 # (SDI/PFML/Paid Leave/TDI/etc., ZP-TAX-US-2026-001 §5) beyond plain income
@@ -651,8 +781,11 @@ _US_STATE_TAX_ENABLED_STATES: set[str] = {"CO", "KY", "AZ", "IL", "MA", "MI", "P
 # the flat-state build-out — the document's MA PFML split (EE 0.44% / ER
 # 0.44% at 25+ covered) is complete. Minnesota/Oregon are deliberately NOT
 # added — the source document doesn't give a complete numeric threshold
-# and/or employee/employer split for those two.
-_US_STATE_PROGRAM_ENABLED_STATES: set[str] = {"CA", "CT", "DC", "NY", "RI", "WA", "NJ", "CO", "DE", "ME", "MA"}
+# and/or employee/employer split for those two. Vermont added 2026-09-13
+# (Batch 6) for its Child Care Contribution (employer-only 0.44%, no wage
+# cap) — zero live US employees existed with VT as work_state at enable
+# time.
+_US_STATE_PROGRAM_ENABLED_STATES: set[str] = {"CA", "CT", "DC", "NY", "RI", "WA", "NJ", "CO", "DE", "ME", "MA", "VT"}
 
 # ── Pay frequency (generic — any country's calculator may use this) ────────
 # PayrollContext.pay_frequency defaults to "Monthly", so

@@ -62,17 +62,17 @@ from app.core.dependencies import (
 )
 from app.core.exceptions import ForbiddenException
 from app.modules.payroll import service
-from app.modules.payroll.policy import policy_router
-from app.modules.payroll.enterprise import enterprise_router
-from app.modules.payroll.mail import mail_router
-from app.modules.payroll.forms import forms_router
+from app.modules.payroll.policy.router import policy_router
+from app.modules.payroll.enterprise.router import enterprise_router
+from app.modules.payroll.mail.router import mail_router
+from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,
     PayslipItemCreate, PayslipItemResponse,
     CompanyDetailsUpdate, ComplianceDataResponse,
     ComplianceDocumentResponse,
-    ContributionRateResponse, TaxSlabResponse,
+    ContributionRateResponse, TaxSlabResponse, LocalityRateResponse,
     ApplyExtractedRateRequest, ApplyExtractedRateResponse,
     JurisdictionPackResponse, JurisdictionPackUpsert,
     DashboardSummaryResponse, DashboardTrendPoint, RecentActivityItem,
@@ -93,13 +93,17 @@ from app.modules.payroll.schemas import (
     UKCourtOrderCreate, UKCourtOrderStatusUpdate, UKCourtOrderResponse,
     UKCourtOrderCalculateRequest, UKCourtOrderCalculateResponse,
     GratuityCalculateRequest, GratuityCalculateResponse,
-    IndiaForm138GenerateRequest, IndiaForm123GenerateRequest,
+    IndiaForm138GenerateRequest, IndiaForm123GenerateRequest, USW2GenerateRequest,
+    USForm941GenerateRequest, USForm940GenerateRequest,
+    NewHireReportCreate, NewHireReportMarkFiledRequest, NewHireReportResponse,
     SalaryTdsDeclarationCreate, SalaryTdsDeclarationResponse,
     SalaryTdsClaimCreate, SalaryTdsClaimResponse, SalaryTdsClaimRejectRequest,
     EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
     CAPd7aGenerateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
+    USSupplementalWageCalculateRequest, USSupplementalWageCalculateResponse,
+    USFederalDepositScheduleRequest, USFederalDepositScheduleResponse,
     CARetiringAllowanceCalculateRequest, CARetiringAllowanceCalculateResponse,
     CATd1xCommissionCalculateRequest, CATd1xCommissionCalculateResponse,
     CAWsdrfCalculateRequest, CAWsdrfCalculateResponse,
@@ -626,6 +630,39 @@ def calculate_ca_special_payment(
     return service.calculate_ca_special_payment_withholding(
         db, current_user.organization_id, data.employee_id,
         data.regular_annual_pay, data.special_payment_amount, payroll_date=data.payroll_date,
+    )
+
+
+@payroll_router.post(
+    "/us/supplemental-wages/calculate", response_model=USSupplementalWageCalculateResponse, response_model_by_alias=True,
+    summary="Calculate US federal withholding on a supplemental wage payment (IRS Pub. 15 flat-rate method: 22%, mandatory 37% above $1,000,000 CYTD)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_us_supplemental_wages(
+    data: USSupplementalWageCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_us_supplemental_wage_withholding(
+        db, current_user.organization_id, data.employee_id,
+        data.supplemental_wage_amount, cytd_supplemental_wages_before=data.cytd_supplemental_wages_before,
+    )
+
+
+@payroll_router.post(
+    "/us/federal-deposit-schedule/calculate", response_model=USFederalDepositScheduleResponse, response_model_by_alias=True,
+    summary="Calculate US federal depositor status (Monthly/Semiweekly), deposit due date, $100,000 next-day rule, FUTA deposit trigger, and Form W-2/W-3 deadline",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_us_federal_deposit_schedule(
+    data: USFederalDepositScheduleRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_us_federal_deposit_schedule(
+        db, current_user.organization_id, data.lookback_period_liability, data.payroll_date,
+        accumulated_undeposited_liability=data.accumulated_undeposited_liability,
+        quarterly_futa_liability=data.quarterly_futa_liability,
     )
 
 
@@ -1240,6 +1277,31 @@ def get_tax_slabs(
     return service.get_tax_slabs(db, current_user.organization_id, country=country)
 
 
+@payroll_router.get(
+    "/compliance/tax-slabs/state", response_model=List[TaxSlabResponse], response_model_by_alias=True,
+    summary="Get a state/province's own income tax slabs (e.g. US state tax, CA provincial tax)",
+)
+def get_state_tax_slabs(
+    country: str = Query("IN", description="Jurisdiction country code (IN, US, UK, …)"),
+    state: Optional[str] = Query(None, description="State/province/region code, e.g. CA, ON"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_state_tax_slabs(db, country=country, state=state)
+
+
+@payroll_router.get(
+    "/compliance/locality-rates", response_model=List[LocalityRateResponse], response_model_by_alias=True,
+    summary="Get local tax rates for this org's own employees' work localities",
+)
+def get_org_locality_rates(
+    country: str = Query("US", description="Jurisdiction country code (US today)"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_org_locality_rates(db, current_user.organization_id, country=country)
+
+
 @payroll_router.post(
     "/compliance/apply-extracted-rate", response_model=ApplyExtractedRateResponse,
     summary="Promote a document-extracted rate/slab row into the org's active configuration",
@@ -1659,6 +1721,104 @@ def generate_india_form_123(
     return service.generate_india_form_123(
         db, current_user.organization_id, data.report_template_id, data.employee_id, data.tax_year,
         actor_id=current_user.id,
+    )
+
+
+# ── US: Form W-2 (Production-Readiness Plan Phase 5) ────────────────────
+
+@payroll_router.post(
+    "/us/reports/w2", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a US Form W-2 (Wage and Tax Statement) for one employee for a calendar tax year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_us_w2(
+    data: USW2GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_us_w2(
+        db, current_user.organization_id, data.report_template_id, data.employee_id, data.tax_year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/us/reports/941", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a US Form 941 (Employer's Quarterly Federal Tax Return) for one IRS calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_us_941(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_us_941(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/us/reports/940", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a US Form 940 (Employer's Annual Federal Unemployment (FUTA) Tax Return) for one calendar year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_us_940(
+    data: USForm940GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_us_940(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+# ── US: New Hire Reporting (Production-Readiness Plan Phase 5) ──────────
+
+@payroll_router.get(
+    "/us/new-hire-reports", response_model=List[NewHireReportResponse], response_model_by_alias=True,
+    summary="List US New Hire Reporting tracking rows for this org (optionally filtered by status)",
+)
+def list_us_new_hire_reports(
+    status: Optional[str] = Query(None, description="Pending | Filed"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_new_hire_reports(db, current_user.organization_id, status=status)
+
+
+@payroll_router.post(
+    "/us/new-hire-reports", response_model=NewHireReportResponse, response_model_by_alias=True,
+    summary="Manually create a New Hire Reporting tracking row (e.g. for a pre-existing employee or a rehire)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_us_new_hire_report(
+    data: NewHireReportCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_new_hire_report(
+        db, current_user.organization_id, data.employeeId,
+        hire_date=data.hireDate, work_state=data.workState, due_date_days=data.dueDateDays,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/us/new-hire-reports/{report_id}/mark-filed", response_model=NewHireReportResponse, response_model_by_alias=True,
+    summary="Mark a New Hire Reporting tracking row as Filed",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def mark_us_new_hire_report_filed(
+    report_id: int,
+    data: NewHireReportMarkFiledRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.mark_new_hire_report_filed(
+        db, current_user.organization_id, report_id,
+        filed_date=data.filedDate, notes=data.notes, actor_id=current_user.id,
     )
 
 

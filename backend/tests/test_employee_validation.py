@@ -11,7 +11,7 @@ double-deduct the same loan via two separate mechanisms).
 import pytest
 
 from app.core.exceptions import BadRequestException
-from app.modules.payroll.employee_validation import UKEmployeeValidation
+from app.modules.payroll.employee_validation import UKEmployeeValidation, USEmployeeValidation
 
 # nino/paye_tax_code/sort_code are required for every UK employee —
 # included in every payload below so each test isolates the ONE thing
@@ -81,3 +81,45 @@ def test_undergraduate_plan_with_postgrad_flag_is_a_valid_combination():
     columns = UKEmployeeValidation.sync_to_columns(cleaned)
     assert columns["study_loan_plan"] == "UK_PLAN5"
     assert columns["has_postgrad_loan"] is True
+
+
+# ── US: w4_form_vintage (2026-09-15 onboarding-guidance audit) ────────────
+# Real column (models.py's w4_form_vintage, read by us.py to pick the
+# pre-2020-allowance path and North Dakota's two bracket tables) previously
+# had no FIELD_SPECS/FIELD_COLUMN_MAP entry at all — collected nowhere.
+
+_US_REQUIRED_BASE = {
+    "ssn": "123-45-6789",
+    "flsa_status": "Exempt",
+    "state_tax_jurisdiction": "CA",
+}
+
+
+def _us_payload(**extra):
+    return {**_US_REQUIRED_BASE, **extra}
+
+
+def test_w4_form_vintage_accepts_valid_choices():
+    cleaned = USEmployeeValidation.validate(_us_payload(w4_form_vintage="Pre-2020 (legacy form)"))
+    assert cleaned["w4_form_vintage"] == "Pre-2020 (legacy form)"
+
+
+def test_w4_form_vintage_rejects_invalid_choice():
+    with pytest.raises(BadRequestException):
+        USEmployeeValidation.validate(_us_payload(w4_form_vintage="sometime"))
+
+
+def test_w4_form_vintage_syncs_to_compact_column_codes():
+    cleaned = USEmployeeValidation.validate(_us_payload(w4_form_vintage="Pre-2020 (legacy form)"))
+    columns = USEmployeeValidation.sync_to_columns(cleaned)
+    assert columns["w4_form_vintage"] == "PRE_2020"
+
+    cleaned_current = USEmployeeValidation.validate(_us_payload(w4_form_vintage="2020 or later (current form)"))
+    columns_current = USEmployeeValidation.sync_to_columns(cleaned_current)
+    assert columns_current["w4_form_vintage"] == "2020_PLUS"
+
+
+def test_w4_form_vintage_absent_when_not_submitted():
+    cleaned = USEmployeeValidation.validate(_us_payload())
+    columns = USEmployeeValidation.sync_to_columns(cleaned)
+    assert "w4_form_vintage" not in columns

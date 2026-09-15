@@ -211,3 +211,175 @@ def test_list_test_certification_runs_orders_newest_first(db, organization):
     runs = service.list_test_certification_runs(db)
     assert runs[0].id == run2.id
     assert runs[1].id == run1.id
+
+
+# ── US publish gates: source artifact + effective date (ZP-TAX-US-2026-001
+# §11.2, gap-closure Plan Phase 4) ──────────────────────────────────────────
+
+def test_us_pack_activation_blocked_without_source_artifact(db, organization):
+    pack = JurisdictionPack(
+        pack_id="US-GATE-TEST1", jurisdiction_country="US", jurisdiction_state="ZZ",
+        pack_type="tax", version="1.0", status="Approved",
+        effective_from=date(2026, 1, 1), approved_by_id=2, updated_by_id=1,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    with pytest.raises(BadRequestException, match="Source Evidence"):
+        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+
+
+def test_us_pack_activation_blocked_without_effective_date(db, organization):
+    from app.modules.payroll.models import SourceArtifact
+
+    source = SourceArtifact(agency="Test Agency", title="Test Source")
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    pack = JurisdictionPack(
+        pack_id="US-GATE-TEST2", jurisdiction_country="US", jurisdiction_state="ZZ",
+        pack_type="tax", version="1.0", status="Approved",
+        source_document_id=source.id, approved_by_id=2, updated_by_id=1,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    with pytest.raises(BadRequestException, match="Effective From"):
+        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+
+
+def test_us_pack_activation_succeeds_with_both_source_and_effective_date(db, organization):
+    from app.modules.payroll.models import SourceArtifact
+
+    source = SourceArtifact(agency="Test Agency", title="Test Source")
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    pack = JurisdictionPack(
+        pack_id="US-GATE-TEST3", jurisdiction_country="US", jurisdiction_state="ZZ",
+        pack_type="tax", version="1.0", status="Approved",
+        source_document_id=source.id, effective_from=date(2026, 1, 1),
+        approved_by_id=2, updated_by_id=1,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"
+
+
+def _us_gate_ready_pack(db, pack_id):
+    from app.modules.payroll.models import SourceArtifact
+
+    source = SourceArtifact(agency="Test Agency", title="Test Source")
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    pack = JurisdictionPack(
+        pack_id=pack_id, jurisdiction_country="US", jurisdiction_state="ZZ",
+        pack_type="tax", version="1.0", status="Approved",
+        source_document_id=source.id, effective_from=date(2026, 1, 1),
+        approved_by_id=2, updated_by_id=1,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    return pack
+
+
+def test_us_pack_activation_blocked_by_unresolved_golden_test_failure(db, organization):
+    from app.modules.payroll.models import TestCertificationRun
+
+    db.add(TestCertificationRun(
+        jurisdiction_country="US", real_case_count=5, total_cases=5, passed_cases=3, failed_cases=2, status="FAIL",
+    ))
+    db.commit()
+    pack = _us_gate_ready_pack(db, "US-GATE-TEST4")
+    with pytest.raises(BadRequestException, match="unresolved failure"):
+        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+
+
+def test_us_pack_activation_not_blocked_by_no_real_cases_run(db, organization):
+    """NO_REAL_CASES (no real golden fixtures exist yet, a disclosed
+    coverage gap) must NOT block activation — only a genuine FAIL does."""
+    from app.modules.payroll.models import TestCertificationRun
+
+    db.add(TestCertificationRun(
+        jurisdiction_country="US", real_case_count=0, total_cases=0, passed_cases=0, failed_cases=0, status="NO_REAL_CASES",
+    ))
+    db.commit()
+    pack = _us_gate_ready_pack(db, "US-GATE-TEST5")
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"
+
+
+def test_us_pack_activation_not_blocked_when_latest_run_passed(db, organization):
+    from app.modules.payroll.models import TestCertificationRun
+
+    db.add(TestCertificationRun(
+        jurisdiction_country="US", real_case_count=5, total_cases=5, passed_cases=5, failed_cases=0, status="PASS",
+    ))
+    db.commit()
+    pack = _us_gate_ready_pack(db, "US-GATE-TEST6")
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"
+
+
+def test_diff_jurisdiction_pack_versions_shows_added_removed_changed(db, organization):
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    v1 = _make_tax_pack(db, "US-DIFF-V1", country="US", state="ZZ", status="Draft")
+    v2 = _make_tax_pack(db, "US-DIFF-V2", country="US", state="ZZ", status="Draft")
+
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="ZZ",
+        jurisdiction_pack_id=v1.id, component_key="sdi", label="SDI",
+        employee_share="—", employer_share="—", total="—", employee_rate_pct=Decimal("1.00"),
+    ))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="ZZ",
+        jurisdiction_pack_id=v1.id, component_key="removed_component", label="Removed",
+        employee_share="—", employer_share="—", total="—", employee_rate_pct=Decimal("5.00"),
+    ))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="ZZ",
+        jurisdiction_pack_id=v2.id, component_key="sdi", label="SDI",
+        employee_share="—", employer_share="—", total="—", employee_rate_pct=Decimal("2.00"),
+    ))
+    db.add(ContributionRate(
+        organization_id=None, jurisdiction_country="US", jurisdiction_state="ZZ",
+        jurisdiction_pack_id=v2.id, component_key="added_component", label="Added",
+        employee_share="—", employer_share="—", total="—", employee_rate_pct=Decimal("3.00"),
+    ))
+    db.commit()
+
+    diff = service.diff_jurisdiction_pack_versions(db, v1.id, v2.id)
+    rate_diff = diff["contributionRates"]
+    added_keys = [a["key"][0] for a in rate_diff["added"]]
+    removed_keys = [r["key"][0] for r in rate_diff["removed"]]
+    assert added_keys == ["added_component"]
+    assert removed_keys == ["removed_component"]
+    assert len(rate_diff["changed"]) == 1
+    assert rate_diff["changed"][0]["key"][0] == "sdi"
+    # ContributionRate.employee_rate_pct is Numeric(7,4) — round-trips at
+    # that fixed precision, not the input's own string form.
+    assert rate_diff["changed"][0]["changes"]["employeeRatePct"] == {"before": "1.0000", "after": "2.0000"}
+    assert diff["taxSlabs"] == {"added": [], "removed": [], "changed": []}
+
+
+def test_non_us_pack_activation_unaffected_by_new_gates(db, organization):
+    """The new source-artifact/effective-date gates are deliberately
+    scoped to US only — a UK pack with neither must still activate
+    exactly as it always has, since this same function governs every
+    country's tax-pack lifecycle and other countries' existing Draft
+    packs were never required to carry one."""
+    pack = JurisdictionPack(
+        pack_id="UK-GATE-TEST1", jurisdiction_country="UK",
+        pack_type="tax", version="1.0", status="Approved",
+        approved_by_id=2, updated_by_id=1,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"

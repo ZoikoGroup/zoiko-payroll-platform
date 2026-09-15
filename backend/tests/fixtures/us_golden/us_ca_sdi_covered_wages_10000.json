@@ -1,0 +1,15 @@
+{
+  "description": "California State Disability Insurance (ZP-TAX-US-2026-001 §13, test ID US-CA-SDI-001) -- covered wages $10,000, employee rate 1.30%, no SDI wage cap. Expected employee SDI $130.00.",
+  "source": "ZP-TAX-US-2026-001 v1.0: Section 5 (CA SDI: employee 1.30%, all annual gross taxable wages, no wage cap), Section 13 test US-CA-SDI-001, Appendix A (\"2026 employee contribution rate is 1.30% of annual gross taxable wages\"). Recomputed by running the real engine: 10000 * 1.30% = 130.00.",
+  "context": {
+    "gross": "10000.00",
+    "country": "US",
+    "work_state": "CA",
+    "state_rate_map": {
+      "sdi": {"employee_rate_pct": "1.30"}
+    }
+  },
+  "expected": {
+    "state_disability_insurance": "130.00"
+  }
+}

@@ -18,6 +18,7 @@ import pytest
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.standard import StandardStrategy, evaluate_tax_formula
 from app.modules.payroll.engine.countries import canada as _canada
+from app.modules.payroll.engine.countries import us as _us
 from app.modules.payroll.engine.countries.canada import _resolve_ca_bpaf
 from app.modules.payroll.engine.countries.india import calculate_gratuity
 from app.modules.payroll.engine.countries.uk import calculate_ssp, calculate_class_1a_1b_charge, calculate_apprenticeship_levy_period_amount, calculate_employment_allowance_net_liability, calculate_statutory_family_pay, calculate_family_pay_employer_recovery
@@ -75,6 +76,9 @@ class LocalityRateStub:
     resident_rate_pct: Optional[Decimal] = None
     nonresident_rate_pct: Optional[Decimal] = None
     flat_amount: Optional[Decimal] = None
+    locality_code: Optional[str] = None
+    locality_type: Optional[str] = None
+    bracket_schedule: Optional[dict] = None
 
 
 STRATEGY = StandardStrategy()
@@ -96,7 +100,12 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          ytd_director_ni_gross=None, ytd_director_ni_employee_paid=None,
          ytd_director_ni_employer_paid=None, tax_residency_status=None,
          option2_cumulative_gross_before=None, option2_periods_elapsed_before=None,
-         option2_federal_tax_withheld_before=None, option2_provincial_tax_withheld_before=None):
+         option2_federal_tax_withheld_before=None, option2_provincial_tax_withheld_before=None,
+         state_income_tax_election_pct=None, w4_step2_checkbox=False, ct_withholding_code=None,
+         nj_rate_table=None, w4_form_vintage=None, residence_locality=None,
+         ytd_ss_wages_before=None, ytd_futa_wages_before=None, ytd_medicare_wages_before=None,
+         w4_allowances_claimed=None, is_nonresident_alien=False, w4_dependents_credit_annual=None,
+         w4_other_income_annual=None, w4_extra_withholding_per_period=None, residence_locality_rate=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -132,6 +141,17 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         option2_periods_elapsed_before=option2_periods_elapsed_before,
         option2_federal_tax_withheld_before=option2_federal_tax_withheld_before,
         option2_provincial_tax_withheld_before=option2_provincial_tax_withheld_before,
+        state_income_tax_election_pct=state_income_tax_election_pct,
+        w4_step2_checkbox=w4_step2_checkbox,
+        ct_withholding_code=ct_withholding_code,
+        nj_rate_table=nj_rate_table, w4_form_vintage=w4_form_vintage,
+        residence_locality=residence_locality,
+        ytd_ss_wages_before=ytd_ss_wages_before, ytd_futa_wages_before=ytd_futa_wages_before,
+        ytd_medicare_wages_before=ytd_medicare_wages_before,
+        w4_allowances_claimed=w4_allowances_claimed, is_nonresident_alien=is_nonresident_alien,
+        w4_dependents_credit_annual=w4_dependents_credit_annual, w4_other_income_annual=w4_other_income_annual,
+        w4_extra_withholding_per_period=w4_extra_withholding_per_period,
+        residence_locality_rate=residence_locality_rate,
     )
     return STRATEGY.calculate(ctx)
 
@@ -826,7 +846,7 @@ US_SLABS = [
 
 
 def test_us_social_security_below_wage_base():
-    result = calc("US", 5000, US_RATES, US_SLABS)  # $60k/yr, under $176,100 base
+    result = calc("US", 5000, US_RATES, US_SLABS)  # $60k/yr, under $184,500 base
     assert result.social_security == pytest.approx(Decimal("310.00"), abs=Decimal("0.01"))
 
 
@@ -834,6 +854,22 @@ def test_us_social_security_capped_at_wage_base():
     result = calc("US", 30000, US_RATES, US_SLABS)  # $360k/yr, well above the wage base
     annual_ss = result.social_security * 12
     assert annual_ss < Decimal("360000") * Decimal("0.062")  # capped, not linear
+
+
+def test_us_social_security_wage_base_is_2026_184500_not_stale_176100():
+    """Regression test (ZP-TAX-US-2026-001 §3.1 gap-closure audit,
+    2026-09-13): _US_SOCIAL_SECURITY_WAGE_BASE had been left at 2025's
+    $176,100 SSA figure instead of 2026's $184,500 — this is the exact
+    engine-level fallback constant hit whenever no org-scoped
+    ss_wage_base ContributionRate row is configured (US_RATES here has
+    none, so this test exercises that fallback path directly, same as
+    every other test above using US_RATES). At $250,000/yr, well above
+    both the stale and correct wage base, the max annual employee SS tax
+    must be $11,439.00 (184,500 x 6.2%) -- $10,918.20 (176,100 x 6.2%)
+    would be the wrong, stale answer."""
+    result = calc("US", Decimal("250000") / 12, US_RATES, US_SLABS)
+    annual_ss = result.social_security * 12
+    assert annual_ss == pytest.approx(Decimal("11439.00"), abs=Decimal("0.05"))
 
 
 def test_us_medicare_additional_above_threshold():
@@ -849,6 +885,235 @@ def test_us_wage_base_override_via_rate_map():
     result = calc("US", 10000, rates, US_SLABS)  # $120k/yr, over the overridden $50k base
     default_result = calc("US", 10000, US_RATES, US_SLABS)
     assert result.social_security < default_result.social_security
+
+
+def test_us_ytd_ss_wage_base_room_mid_period_crossing():
+    """ZP-TAX-US-2026-001 §3.1, gap-closure Plan Phase 2a: employee
+    already has $180,000 YTD SS-taxable wages (room: $4,500 left to the
+    $184,500 wage base). A $10,000 gross period fills only that
+    remaining room, not the whole period gross — same "room = cap -
+    ytd_before" shape as Canada's own CPP first-layer test above."""
+    result = calc(
+        "US", 10000, US_RATES, US_SLABS,
+        ytd_ss_wages_before=Decimal("180000"),
+    )
+    assert result.social_security == Decimal("279.00")   # 4500 * 6.2%
+    assert result.employer_social_security == Decimal("279.00")
+    assert result.ytd_ss_wages_after == Decimal("184500.00")  # 180000 + 4500, exactly the cap
+
+
+def test_us_ytd_ss_wage_base_already_maxed_stays_zero():
+    """Room already fully consumed (ytd_before == wage base) — this
+    period's SS must be exactly $0, not a guessed partial amount, and
+    ytd_after must stay pinned at the cap, not grow further."""
+    result = calc(
+        "US", 10000, US_RATES, US_SLABS,
+        ytd_ss_wages_before=Decimal("184500"),
+    )
+    assert result.social_security == Decimal("0.00")
+    assert result.employer_social_security == Decimal("0.00")
+    assert result.ytd_ss_wages_after == Decimal("184500.00")
+
+
+def test_us_ytd_futa_wage_base_room_mid_period_crossing():
+    """Same room-based cap shape as Social Security above, for FUTA's
+    $7,000 wage base: $6,500 YTD before (room $500), $2,000 period gross
+    -> only $500 subject."""
+    result = calc(
+        "US", 2000, US_RATES, US_SLABS,
+        ytd_futa_wages_before=Decimal("6500"),
+    )
+    # Full 6.0% statutory rate applies (no SUI profile configured in this
+    # test, same convention as every other FUTA test in this file).
+    assert result.employer_futa == Decimal("30.00")   # 500 * 6.0%
+    assert result.ytd_futa_wages_after == Decimal("7000.00")
+
+
+def test_us_ytd_medicare_additional_threshold_crossed_mid_period():
+    """Additional Medicare is a THRESHOLD, not a cap — once cumulative
+    Medicare wages cross $200,000, every dollar above stays taxed at the
+    extra 0.9% for the rest of the year. $195,000 YTD before (room
+    $5,000 before the threshold), $10,000 period gross -> $5,000 below
+    the line (regular 1.45% only) and $5,000 above it (1.45% + 0.9%)."""
+    result = calc(
+        "US", 10000, US_RATES, US_SLABS,
+        ytd_medicare_wages_before=Decimal("195000"),
+    )
+    # 10000 * 1.45% (regular, applies to the whole period regardless) +
+    # 5000 * 0.9% (only the portion above the threshold).
+    assert result.medicare == Decimal("190.00")  # 145.00 + 45.00
+    assert result.ytd_medicare_wages_after == Decimal("205000.00")  # 195000 + 10000
+
+
+def test_us_ytd_dormant_by_default_matches_prior_annualized_behavior():
+    """No ytd_*_before supplied (every employee before this phase, and
+    every employee until a real accumulator row exists) — byte-for-byte
+    identical to the pre-YTD current-period-annualized estimate, and
+    ytd_*_after all resolve to None (not 0), the same "not applicable"
+    convention every other YTD field in this engine uses."""
+    result = calc("US", 5000, US_RATES, US_SLABS)  # $60k/yr, well under any cap
+    assert result.social_security == pytest.approx(Decimal("310.00"), abs=Decimal("0.01"))
+    assert result.ytd_ss_wages_after is None
+    assert result.ytd_futa_wages_after is None
+    assert result.ytd_medicare_wages_after is None
+
+
+def test_us_weekly_pay_frequency_annualizes_correctly_not_as_monthly():
+    """Regression test (ZP-TAX-US-2026-001, gap-closure Plan Phase 2c):
+    us.py previously hardcoded MONTHS_PER_YEAR regardless of
+    ctx.pay_frequency, so a Weekly employee's gross was wrongly
+    annualized as if paid monthly (x12 instead of x52) — a $4,000/week
+    employee ($208,000/yr at the correct x52 annualization, above the
+    $184,500 SS wage base) would instead have been annualized to only
+    $48,000/yr (4000*12), never crossing the cap at all, so this
+    employee's SS would have been charged on the full uncapped gross
+    every single week (a much larger error, compounding week after week)
+    instead of correctly capping ONCE at the true $184,500 annual figure
+    and spreading that capped amount evenly: $184,500 * 6.2% = $11,439.00
+    (the same 2026 annual max proven in the SS-wage-base regression test
+    above) / 52 weeks = $219.98/week."""
+    result = calc("US", Decimal("4000"), US_RATES, US_SLABS, pay_frequency="Weekly")
+    assert result.social_security == pytest.approx(Decimal("219.98"), abs=Decimal("0.01"))
+
+
+def test_us_monthly_pay_frequency_is_the_default_unaffected_by_phase_2c():
+    """No pay_frequency supplied (every employee before this field existed,
+    and every employee who hasn't explicitly set one) must remain
+    byte-for-byte the same Monthly/12 annualization as always."""
+    result = calc("US", Decimal("5000"), US_RATES, US_SLABS)
+    assert result.social_security == pytest.approx(Decimal("310.00"), abs=Decimal("0.01"))
+
+
+def test_us_w4_pre_2020_allowance_reduces_taxable_wages():
+    """ZP-TAX-US-2026-001 §3.4, gap-closure Plan Phase 2d: the legacy
+    (pre-2020) allowance amount ($4,300/allowance, Pub. 15-T 2026) only
+    applies when w4_form_vintage is genuinely "PRE_2020" AND a real
+    allowance count is on file — 3 allowances x $4,300 = $12,900 off
+    $60,000/yr taxable wages."""
+    with_allowances = calc(
+        "US", 5000, US_RATES, US_SLABS, w4_form_vintage="PRE_2020", w4_allowances_claimed=3,
+    )
+    without = calc("US", 5000, US_RATES, US_SLABS, w4_form_vintage="PRE_2020")
+    assert with_allowances.federal_income_tax < without.federal_income_tax
+
+
+def test_us_w4_pre_2020_allowance_ignored_on_2020_plus_form():
+    """The SAME allowance count on file must be a complete no-op for a
+    2020+ (or unset) W-4 vintage — never read outside the legacy path."""
+    result_2020plus = calc(
+        "US", 5000, US_RATES, US_SLABS, w4_form_vintage="2020_PLUS", w4_allowances_claimed=3,
+    )
+    result_unset = calc("US", 5000, US_RATES, US_SLABS, w4_allowances_claimed=3)
+    assert result_2020plus.federal_income_tax == result_unset.federal_income_tax
+
+
+def test_us_w4_nra_additional_wage_amount_defaults_to_zero_no_op():
+    """The NRA additional-wage amount has no literal figure in the
+    source document at all (only "configure by vintage/frequency") — it
+    must default to $0/no-op until Tax Ops explicitly configures
+    "w4_nra_addl_wage_amount", never guessed. is_nonresident_alien=True
+    with no rate_map entry must be byte-for-byte identical to False."""
+    flagged = calc("US", 5000, US_RATES, US_SLABS, is_nonresident_alien=True)
+    unflagged = calc("US", 5000, US_RATES, US_SLABS, is_nonresident_alien=False)
+    assert flagged.federal_income_tax == unflagged.federal_income_tax
+
+
+def test_us_w4_nra_additional_wage_amount_applied_when_configured():
+    """Once Tax Ops configures a real w4_nra_addl_wage_amount, an
+    is_nonresident_alien employee's taxable wages increase by that
+    amount, raising their federal tax versus an otherwise-identical
+    employee without the flag."""
+    rates = dict(US_RATES, w4_nra_addl_wage_amount=Rate(flat_amount=Decimal("10000")))
+    flagged = calc("US", 5000, rates, US_SLABS, is_nonresident_alien=True)
+    unflagged = calc("US", 5000, rates, US_SLABS, is_nonresident_alien=False)
+    assert flagged.federal_income_tax > unflagged.federal_income_tax
+
+
+def test_us_w4_step3_dependents_credit_reduces_tax_never_below_zero():
+    """Step 3's certified annual credit is subtracted directly from the
+    computed annual tax (not a wage adjustment) — a large enough credit
+    must floor federal tax at exactly $0, never negative."""
+    small_credit = calc("US", 5000, US_RATES, US_SLABS, w4_dependents_credit_annual=Decimal("500"))
+    baseline = calc("US", 5000, US_RATES, US_SLABS)
+    assert small_credit.federal_income_tax < baseline.federal_income_tax
+    huge_credit = calc("US", 5000, US_RATES, US_SLABS, w4_dependents_credit_annual=Decimal("999999"))
+    assert huge_credit.federal_income_tax == Decimal("0.00")
+
+
+def test_us_w4_step4a_other_income_increases_taxable_wages():
+    """Step 4(a) other income is added directly to annual taxable wages
+    (already an annual figure per the employee's own certification)."""
+    with_other_income = calc("US", 5000, US_RATES, US_SLABS, w4_other_income_annual=Decimal("20000"))
+    baseline = calc("US", 5000, US_RATES, US_SLABS)
+    assert with_other_income.federal_income_tax > baseline.federal_income_tax
+
+
+def test_us_w4_step4c_extra_withholding_added_flat_per_period():
+    """Step 4(c) is a flat PER-PAY-PERIOD dollar amount added directly to
+    withholding — never annualized/de-annualized, so the increase must
+    be EXACTLY the entered amount, not scaled by periods_per_year."""
+    result = calc("US", 5000, US_RATES, US_SLABS, w4_extra_withholding_per_period=Decimal("100"))
+    baseline = calc("US", 5000, US_RATES, US_SLABS)
+    assert result.federal_income_tax - baseline.federal_income_tax == Decimal("100.00")
+
+
+def test_us_locality_higher_of_uses_work_rate_when_work_rate_is_higher():
+    """ZP-TAX-US-2026-001 §7.1, gap-closure Plan Phase 3: a generic
+    "higher of resident vs. work locality rate" mechanism for
+    locality_type="PSD_EIT_LST" rows (PA Act 32's own motivating
+    example, but nothing here is PA-specific) — when the WORK locality's
+    nonresident rate (2.5%) is higher than the RESIDENCE locality's
+    resident rate (1.0%), the work rate wins, applied against the
+    employee's full annual gross ($60,000/yr): $60,000 x 2.5% / 12 =
+    $125.00/mo."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("2.5"), locality_type="PSD_EIT_LST")
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("1.0"), locality_type="PSD_EIT_LST")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    assert result.local_tax == pytest.approx(Decimal("125.00"), abs=Decimal("0.01"))
+
+
+def test_us_locality_higher_of_uses_resident_rate_when_resident_rate_is_higher():
+    """Same mechanism, reversed: RESIDENCE locality's resident rate
+    (3.0%) is higher than the WORK locality's nonresident rate (1.0%) —
+    the resident rate wins: $60,000 x 3.0% / 12 = $150.00/mo."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("1.0"), locality_type="PSD_EIT_LST")
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("3.0"), locality_type="PSD_EIT_LST")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    assert result.local_tax == pytest.approx(Decimal("150.00"), abs=Decimal("0.01"))
+
+
+def test_us_locality_higher_of_does_not_activate_for_ordinary_municipal_type():
+    """The comparison is gated on BOTH sides genuinely being
+    locality_type="PSD_EIT_LST" — an ordinary MUNICIPAL row (Detroit-
+    style) must fall through to the plain single-row lookup instead,
+    completely unaffected by this mechanism, even with a residence rate
+    also configured."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("1.2"), locality_type="MUNICIPAL")
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("9.9"), locality_type="PSD_EIT_LST")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    # Plain lookup on the work row alone: resident_rate_pct is None on
+    # it, so falls back to its own nonresident_rate_pct (1.2%), NOT the
+    # much larger 9.9% residence rate.
+    assert result.local_tax == pytest.approx(Decimal("60.00"), abs=Decimal("0.01"))  # 60000 * 1.2% / 12
+
+
+def test_us_locality_higher_of_no_residence_locality_falls_back_to_generic():
+    """No residence_locality_rate configured at all (the common case —
+    zero PSD_EIT_LST data is seeded anywhere yet) — must not crash, and
+    must fall back to the plain generic lookup on the work locality row
+    alone."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("2.0"), locality_type="PSD_EIT_LST")
+    result = calc("US", 5000, US_RATES, US_SLABS, locality_rate=work_locality)
+    assert result.local_tax == pytest.approx(Decimal("100.00"), abs=Decimal("0.01"))  # 60000 * 2.0% / 12
 
 
 def test_us_zero_income():
@@ -894,6 +1159,48 @@ def test_us_filing_status_selects_matching_bracket_table():
     # income: the MFJ table's tax should be exactly 22/10 = 2.2x the Single
     # table's, up to rounding.
     assert mfj_result.federal_income_tax == pytest.approx(single_result.federal_income_tax * Decimal("2.2"), abs=Decimal("0.02"))
+
+
+def test_us_w4_step2_checkbox_false_is_a_no_op():
+    """w4_step2_checkbox unset/False (every employee before this field
+    existed) must produce IDENTICAL federal tax to omitting it entirely —
+    even when a "_STEP2"-tagged slab exists in the table (it must simply
+    never be selected)."""
+    slabs = [
+        Slab(Decimal("0"), None, Decimal("10"), filing_status="SINGLE"),
+        Slab(Decimal("0"), None, Decimal("22"), filing_status="SINGLE_STEP2"),
+    ]
+    without_field = calc("US", 10000, US_RATES, slabs, w4_filing_status="SINGLE")
+    with_false = calc("US", 10000, US_RATES, slabs, w4_filing_status="SINGLE", w4_step2_checkbox=False)
+    assert with_false.federal_income_tax == without_field.federal_income_tax
+
+
+def test_us_w4_step2_checkbox_true_selects_the_step2_table():
+    """A genuinely different bracket table (higher rate here for clarity)
+    is selected when the checkbox is True — proving this isn't just a flag
+    that gets ignored, it changes which slab set is actually used."""
+    slabs = [
+        Slab(Decimal("0"), None, Decimal("10"), filing_status="SINGLE"),
+        Slab(Decimal("0"), None, Decimal("22"), filing_status="SINGLE_STEP2"),
+    ]
+    unchecked = calc("US", 10000, US_RATES, slabs, w4_filing_status="SINGLE", w4_step2_checkbox=False)
+    checked = calc("US", 10000, US_RATES, slabs, w4_filing_status="SINGLE", w4_step2_checkbox=True)
+    assert checked.federal_income_tax == pytest.approx(unchecked.federal_income_tax * Decimal("2.2"), abs=Decimal("0.02"))
+
+
+def test_us_w4_step2_checkbox_true_with_no_filing_status_is_ignored():
+    """An employee with the Step 2 box checked but NO filing status on
+    file has no "<status>_STEP2" tag to build (there's no status to
+    suffix) — the checkbox is silently ignored, same permissive
+    convention every other missing-election field in this engine uses,
+    rather than raising or guessing a filing status."""
+    slabs = [
+        Slab(Decimal("0"), None, Decimal("10"), filing_status="SINGLE"),
+        Slab(Decimal("0"), None, Decimal("22"), filing_status="SINGLE_STEP2"),
+    ]
+    no_status_unchecked = calc("US", 10000, US_RATES, slabs, w4_step2_checkbox=False)
+    no_status_checked = calc("US", 10000, US_RATES, slabs, w4_step2_checkbox=True)
+    assert no_status_checked.federal_income_tax == no_status_unchecked.federal_income_tax
 
 
 def test_us_futa_full_rate_when_no_sui_profile_configured():
@@ -1231,13 +1538,661 @@ def test_us_flat_rate_state_massachusetts_5_0():
     assert result.state_income_tax == pytest.approx(Decimal("500.00"), abs=Decimal("0.01"))
 
 
+def test_us_provisional_states_remain_dormant_despite_seeded_taxslab_rows():
+    """ID/MS/NC/UT (gap-closure Level 2, 2026-09-12) have real, Active
+    TaxSlab rows seeded in the live DB — but their numbers came from an
+    unverified secondary tracking sheet, not a confirmed primary source,
+    so they must NEVER compute real tax until a human explicitly adds
+    them to _US_STATE_TAX_ENABLED_STATES. This proves the engine ignores
+    a real, well-formed FLAT_RATE slab for any state not in that set —
+    the same dormancy guarantee every other unconfigured state already
+    relies on. (GA started in this same provisional batch but was
+    promoted to confirmed/enabled later the same session — see
+    _US_STATE_TAX_ENABLED_STATES' own comment — so it's no longer a
+    dormancy example; ID is used here instead.)"""
+    id_slabs = [Slab(Decimal("0"), None, Decimal("5.30"), rule_type="FLAT_RATE", jurisdiction_state="ID")]
+    assert "ID" not in shared._US_STATE_TAX_ENABLED_STATES
+    result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=id_slabs)
+    assert result.state_income_tax == Decimal("0.00")
+
+
+def test_us_ct_withholding_code_a_matches_documented_worked_example():
+    """The exact worked example this state's own source batch gave:
+    Withholding Code A, annualized salary $60,000 -> Table A exemption
+    $0 (above $35,000 phase-out ceiling) -> Table B base tax $2,550
+    ($2,000 + 5.5% x $10,000) -> Table C add-back $100 (>$57,750-$60,250
+    band) -> Table D recapture $0 (<=$105,000) -> subtotal $2,650 ->
+    Table E credit decimal 0.00 (>$52,500) -> final $2,650.00/year."""
+    was_enabled = "CT" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("CT")
+    try:
+        result = calc("US", Decimal("5000"), US_RATES, US_SLABS, work_state="CT", ct_withholding_code="A")
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("CT")
+    assert result.state_income_tax == pytest.approx(Decimal("220.83"), abs=Decimal("0.01"))  # 2650.00 / 12
+
+
+def test_us_ct_withholding_code_none_on_file_is_a_no_op():
+    """An employee with work_state="CT" but no ct_withholding_code on
+    file resolves to $0 CT withholding — never a guessed code, same
+    convention as every other missing-election field in this engine."""
+    was_enabled = "CT" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("CT")
+    try:
+        result = calc("US", Decimal("5000"), US_RATES, US_SLABS, work_state="CT", ct_withholding_code=None)
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("CT")
+    assert result.state_income_tax == Decimal("0.00")
+
+
+def test_us_ct_withholding_code_d_has_zero_exemption_and_zero_credit():
+    """Code D: $0 exemption at every income level, $0.00 credit at every
+    income level (per the source's own footnote) — full Table B tax
+    applies with no reduction at all, at any income."""
+    was_enabled = "CT" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("CT")
+    try:
+        result = calc("US", Decimal("2000"), US_RATES, US_SLABS, work_state="CT", ct_withholding_code="D")
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("CT")
+    # Annual salary $24,000: Table B (same as A/D/F) = $200 + 4.5% x
+    # ($24,000-$10,000) = $200 + $630 = $830/yr = $69.17/mo, no
+    # exemption/credit reduction at all.
+    assert result.state_income_tax == pytest.approx(Decimal("69.17"), abs=Decimal("0.01"))
+
+
+def test_us_ct_withholding_code_a_low_income_gets_75_pct_credit_reduction():
+    """A low-income Code A employee (annualized salary $14,000, under
+    the $24,000 exemption phase-out start) gets a $12,000 exemption
+    (Table A) leaving $2,000 taxable, taxed at Table B's first 2.00%
+    band ($40.00), no add-back/recapture (both $0 below their
+    thresholds), then reduced by Table E's 0.75 credit — $14,000 falls
+    directly in Table E's own first real band ($12,000-$15,000: 0.75):
+    $40.00 x (1 - 0.75) = $10.00/year. Proves the credit's large
+    magnitude is genuinely applied, not accidentally skipped."""
+    was_enabled = "CT" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("CT")
+    try:
+        result = calc("US", Decimal("14000") / 12, US_RATES, US_SLABS, work_state="CT", ct_withholding_code="A")
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("CT")
+    assert result.state_income_tax == pytest.approx(Decimal("0.83"), abs=Decimal("0.01"))  # 10.00 / 12
+
+
+def test_us_wi_single_worked_example_matches_source():
+    """Wisconsin's own worked example: Single, $18,200/yr. Deduction
+    phases out linearly from $6,702 starting at $17,780 (slope 0.12):
+    $6,702 - 0.12 x ($18,200-$17,780) = $6,651.60. Taxable = $18,200 -
+    $6,651.60 = $11,548.40, entirely inside the first bracket (0-$12,760
+    @ 3.54%): $11,548.40 x 3.54% = $408.81/yr = $34.07/mo."""
+    was_enabled = "WI" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("WI")
+    try:
+        result = calc("US", Decimal("18200") / 12, US_RATES, US_SLABS, work_state="WI", w4_filing_status="SINGLE")
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("WI")
+    assert result.state_income_tax == pytest.approx(Decimal("34.07"), abs=Decimal("0.01"))
+
+
+def test_us_wi_married_worked_example_matches_source():
+    """Wisconsin's own worked example: Married, biweekly $1,000 ->
+    annualized $26,000/yr. Deduction phases out linearly from $9,461
+    starting at $25,727 (slope 0.20): $9,461 - 0.20 x ($26,000-$25,727)
+    = $9,406.40. Taxable = $26,000 - $9,406.40 = $16,593.60, inside the
+    second bracket ($12,760-$25,520 @ 4.65%, base $451.70): $451.70 +
+    4.65% x ($16,593.60-$12,760) = $629.96/yr = $52.50/mo."""
+    was_enabled = "WI" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("WI")
+    try:
+        result = calc("US", Decimal("26000") / 12, US_RATES, US_SLABS, work_state="WI", w4_filing_status="MFJ")
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("WI")
+    assert result.state_income_tax == pytest.approx(Decimal("52.50"), abs=Decimal("0.01"))
+
+
+def test_us_wi_no_filing_status_on_file_is_a_no_op():
+    """An employee with work_state="WI" but no w4_filing_status on file
+    resolves to $0 WI withholding — never a guessed filing status, same
+    convention as CT's ct_withholding_code and every other missing-
+    election field in this engine."""
+    was_enabled = "WI" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("WI")
+    try:
+        result = calc("US", Decimal("5000"), US_RATES, US_SLABS, work_state="WI", w4_filing_status=None)
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("WI")
+    assert result.state_income_tax == Decimal("0.00")
+
+
+def test_us_wi_scalar_parameters_are_db_overridable():
+    """DB-editable (gap-closure Plan Phase 3, 2026-09-14): a Super-Admin-
+    configured "wi_single_ded_max" ContributionRate row must override
+    the literal 2026 W-166 figure — same governed-like-everything-else
+    contract as every other US parameter. Zeroing out the deduction
+    entirely (vs. the $6,651.60 default at this income) must raise the
+    result versus the unconfigured baseline."""
+    was_enabled = "WI" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("WI")
+    try:
+        baseline = calc("US", Decimal("18200") / 12, US_RATES, US_SLABS, work_state="WI", w4_filing_status="SINGLE")
+        overridden = calc(
+            "US", Decimal("18200") / 12, US_RATES, US_SLABS, work_state="WI", w4_filing_status="SINGLE",
+            state_rate_map={"wi_single_ded_max": Rate("wi_single_ded_max", flat_amount=Decimal("0"))},
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("WI")
+    assert overridden.state_income_tax > baseline.state_income_tax
+
+
+# ── Oregon (Production-Readiness Plan Phase 4, 2026-09-15) ──────────────
+# Oregon's formula needs a controlled "federal tax withheld" input the
+# full calc() engine can't cleanly supply (it computes federal tax itself
+# from real brackets) — tested directly against _calculate_or_annual_tax,
+# using Oregon's OWN published worked example verbatim (Pub. 150-206-436,
+# page 5, Example 1).
+
+def test_us_or_single_worked_example_matches_source():
+    """Oregon's own Example 1: Single, $25,000/yr wage, 0 allowances,
+    federal withholding $1,000. BASE = $25,000 - $1,000 - $2,910 =
+    $21,090 (the source's own prose says $21,165, a typo it doesn't
+    propagate into the actual worked steps — see this module's own
+    params docstring). WH = $941 + [($21,090-$11,400) x 0.0875] =
+    $941 + $848 = $1,789."""
+    tax = _us._calculate_or_annual_tax(Decimal("25000"), Decimal("1000"), "SINGLE")
+    assert tax == pytest.approx(Decimal("1789"), abs=Decimal("0.5"))
+
+
+def test_us_or_federal_subtraction_is_capped_and_phased_out():
+    """A Single employee with wages just over $145,000 gets ZERO federal-
+    tax subtraction (phase-out table's last tier) — even a huge federal
+    withholding figure must not reduce BASE at all above that point."""
+    tax_at_threshold = _us._calculate_or_annual_tax(Decimal("150000"), Decimal("30000"), "SINGLE")
+    tax_with_no_fed_tax = _us._calculate_or_annual_tax(Decimal("150000"), Decimal("0"), "SINGLE")
+    assert tax_at_threshold == tax_with_no_fed_tax
+
+
+def test_us_or_married_uses_married_standard_deduction_and_brackets():
+    """A Married employee's standard deduction ($5,820) and bracket set
+    differ from Single's — same wages/federal-tax inputs must produce a
+    different (lower) tax than the Single calculation above."""
+    single_tax = _us._calculate_or_annual_tax(Decimal("25000"), Decimal("1000"), "SINGLE")
+    married_tax = _us._calculate_or_annual_tax(Decimal("25000"), Decimal("1000"), "MFJ")
+    assert married_tax < single_tax
+
+
+def test_us_or_dispatches_through_full_engine_when_enabled():
+    """End-to-end: work_state="OR" with a real filing status on file must
+    actually reach the Oregon-specific path (nonzero withholding for a
+    real wage), not silently fall through to $0."""
+    result = calc("US", Decimal("25000") / 12, US_RATES, US_SLABS, work_state="OR", w4_filing_status="SINGLE")
+    assert result.state_income_tax > Decimal("0")
+
+
+def test_us_or_no_filing_status_on_file_is_a_no_op():
+    result = calc("US", Decimal("5000"), US_RATES, US_SLABS, work_state="OR", w4_filing_status=None)
+    assert result.state_income_tax == Decimal("0.00")
+
+
+# ── Maine (Production-Readiness Plan Phase 4, 2026-09-15) ───────────────
+# Maine's brackets are real, DB-editable TaxSlab rows (unlike Oregon) —
+# only the standard-deduction PHASE-OUT is bespoke. Tested directly
+# against _me_standard_deduction_for_status using Maine's own published
+# thresholds, plus one full-engine test confirming the phased-out figure
+# (not the flat $15,300/$30,600 general figure) actually reaches the
+# bracket calculation.
+
+def test_us_me_standard_deduction_full_below_ceiling():
+    assert _us._me_standard_deduction_for_status(Decimal("50000"), "SINGLE") == Decimal("12450.00")
+    assert _us._me_standard_deduction_for_status(Decimal("150000"), "MFJ") == Decimal("27750.00")
+
+
+def test_us_me_standard_deduction_zero_above_floor():
+    assert _us._me_standard_deduction_for_status(Decimal("200000"), "SINGLE") == Decimal("0")
+    assert _us._me_standard_deduction_for_status(Decimal("400000"), "MFJ") == Decimal("0")
+
+
+def test_us_me_standard_deduction_phases_out_linearly():
+    """Single, $150,000/yr (between the $102,250 full-deduction ceiling
+    and the $177,250 zero floor): $12,450 x ($177,250-$150,000) / $75,000
+    = $12,450 x 0.363333... = $4,523.50."""
+    deduction = _us._me_standard_deduction_for_status(Decimal("150000"), "SINGLE")
+    assert deduction == pytest.approx(Decimal("4523.50"), abs=Decimal("0.01"))
+
+
+def test_us_me_dispatches_phaseout_through_full_engine():
+    """A high-earning ME employee (above the full-deduction ceiling) must
+    get LESS deduction (and therefore MORE tax) than a flat $15,300
+    figure would give — confirms the phase-out, not the general "basic
+    standard deduction," is what actually reaches the bracket calc."""
+    was_enabled = "ME" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("ME")
+    me_slabs = [
+        Slab(Decimal("0"), Decimal("27400"), Decimal("5.80"), jurisdiction_state="ME"),
+        Slab(Decimal("27400"), Decimal("64850"), Decimal("6.75"), jurisdiction_state="ME"),
+        Slab(Decimal("64850"), None, Decimal("7.15"), jurisdiction_state="ME"),
+    ]
+    try:
+        result = calc(
+            "US", Decimal("150000") / 12, US_RATES, US_SLABS, work_state="ME",
+            w4_filing_status="SINGLE", state_slabs=me_slabs,
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("ME")
+    # Taxable income using the REAL phased-out deduction ($4,523.50) is
+    # $145,476.50 — meaningfully more than the $134,700 a flat $15,300
+    # deduction would leave, so annual state tax must exceed what the
+    # (wrong) flat-deduction figure would produce at the top 7.15% rate.
+    taxable_with_flat_wrong_deduction = Decimal("150000") - Decimal("15300")
+    tax_with_wrong_deduction = Decimal("4117") + (taxable_with_flat_wrong_deduction - Decimal("64850")) * Decimal("7.15") / 100
+    assert result.state_income_tax * 12 > tax_with_wrong_deduction
+
+
+# ── Tiered/progressive local tax (Production-Readiness Plan Phase 4,
+# 2026-09-15) ─────────────────────────────────────────────────────────
+# Maryland's Anne Arundel/Frederick counties (min/max/rate only, no
+# published base — genuine from-scratch marginal sum) and New York City
+# (real published "base" cumulative figures — honored exactly).
+
+_MD_ANNE_ARUNDEL_SCHEDULE = {
+    "SINGLE": {"deduction": 0, "brackets": [
+        {"min": 0, "max": 50000, "rate": 2.70},
+        {"min": 50000, "max": 400000, "rate": 2.94},
+        {"min": 400000, "max": None, "rate": 3.20},
+    ]},
+    "MFJ": {"deduction": 0, "brackets": [
+        {"min": 0, "max": 75000, "rate": 2.70},
+        {"min": 75000, "max": 480000, "rate": 2.94},
+        {"min": 480000, "max": None, "rate": 3.20},
+    ]},
+}
+
+_NYC_SCHEDULE = {
+    "SINGLE": {"deduction": 5000, "brackets": [
+        {"min": 0, "max": 8000, "rate": 2.05, "base": 0},
+        {"min": 8000, "max": 8700, "rate": 2.80, "base": 164.00},
+        {"min": 8700, "max": 15000, "rate": 3.25, "base": 184.00},
+        {"min": 15000, "max": 25000, "rate": 3.95, "base": 388.00},
+        {"min": 25000, "max": 60000, "rate": 4.15, "base": 783.00},
+        {"min": 60000, "max": None, "rate": 4.25, "base": 2236.00},
+    ]},
+    "MFJ": {"deduction": 5500, "brackets": [
+        {"min": 0, "max": 8000, "rate": 2.05, "base": 0},
+        {"min": 8000, "max": 8700, "rate": 2.80, "base": 164.00},
+        {"min": 8700, "max": 15000, "rate": 3.25, "base": 184.00},
+        {"min": 15000, "max": 25000, "rate": 3.95, "base": 388.00},
+        {"min": 25000, "max": 60000, "rate": 4.15, "base": 783.00},
+        {"min": 60000, "max": None, "rate": 4.25, "base": 2236.00},
+    ]},
+}
+
+
+def test_tiered_locality_tax_maryland_anne_arundel_single():
+    """$300,000 wages: 2.70% on $0-50,000 ($1,350) + 2.94% on
+    $50,000-$300,000 ($7,350) = $8,700 (still under the $400,000 top tier,
+    no published base figures — from-scratch marginal sum)."""
+    tax = _us._tiered_locality_tax(Decimal("300000"), "SINGLE", _MD_ANNE_ARUNDEL_SCHEDULE)
+    assert tax == pytest.approx(Decimal("8700"), abs=Decimal("0.01"))
+
+
+def test_tiered_locality_tax_maryland_anne_arundel_mfj_different_thresholds():
+    """MFJ's own thresholds ($75,000/$480,000) differ from Single's
+    ($50,000/$400,000) — same wages must produce a different tax."""
+    single_tax = _us._tiered_locality_tax(Decimal("300000"), "SINGLE", _MD_ANNE_ARUNDEL_SCHEDULE)
+    mfj_tax = _us._tiered_locality_tax(Decimal("300000"), "MFJ", _MD_ANNE_ARUNDEL_SCHEDULE)
+    assert mfj_tax != single_tax
+
+
+def test_tiered_locality_tax_nyc_uses_published_base_exactly():
+    """Single, $50,000 wages: Table A deduction $5,000 -> taxable $45,000,
+    which falls in the $25,000-$60,000 bracket. Uses NYS-50-T-NYC's own
+    published base ($783.00) + 4.15% x ($45,000-$25,000) = $783 + $830 =
+    $1,613 — NOT the $1,613.35 a from-scratch cumulative sum would give,
+    confirming the published base is honored exactly."""
+    tax = _us._tiered_locality_tax(Decimal("50000"), "SINGLE", _NYC_SCHEDULE)
+    assert tax == Decimal("1613.00")
+
+
+def test_tiered_locality_tax_nyc_married_uses_higher_deduction():
+    """Married's Table A deduction ($5,500) is $500 more than Single's
+    ($5,000) — same gross wages must leave less taxable, hence less tax."""
+    single_tax = _us._tiered_locality_tax(Decimal("50000"), "SINGLE", _NYC_SCHEDULE)
+    married_tax = _us._tiered_locality_tax(Decimal("50000"), "MFJ", _NYC_SCHEDULE)
+    assert married_tax < single_tax
+
+
+def test_tiered_locality_dispatches_through_full_engine():
+    """A locality with a real bracket_schedule must take priority over
+    its own flat resident_rate_pct column — confirms the generic engine
+    dispatch (not just the standalone function) actually reaches it."""
+    locality = LocalityRateStub(resident_rate_pct=Decimal("99.00"), bracket_schedule=_NYC_SCHEDULE)
+    result = calc(
+        "US", Decimal("50000") / 12, US_RATES, US_SLABS,
+        w4_filing_status="SINGLE", locality_rate=locality,
+    )
+    # $99/100 flat would be an absurd $49,500/yr — confirms the bracket
+    # path fired instead of the flat resident_rate_pct column.
+    assert result.local_tax * 12 == pytest.approx(Decimal("1613.00"), abs=Decimal("1"))
+
+
+MO_SLABS = [
+    Slab(Decimal("0"), Decimal("1348"), Decimal("0.00"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("1348"), Decimal("2696"), Decimal("2.00"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("2696"), Decimal("4044"), Decimal("2.50"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("4044"), Decimal("5392"), Decimal("3.00"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("5392"), Decimal("6740"), Decimal("3.50"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("6740"), Decimal("8088"), Decimal("4.00"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("8088"), Decimal("9436"), Decimal("4.50"), filing_status="MFJ", jurisdiction_state="MO"),
+    Slab(Decimal("9436"), None, Decimal("4.70"), filing_status="MFJ", jurisdiction_state="MO"),
+]
+
+
+def test_us_mo_married_worked_example_matches_source_within_rounding():
+    """Missouri's own worked example: Married (spouse works), annual
+    gross $35,000, standard deduction $16,100 -> taxable $18,900 ->
+    published cumulative tax through $9,436 of $263.00 + 4.70% x
+    ($18,900-$9,436) = $444.81 -> published total $707.81/yr ->
+    published $59.00/mo. This engine sums the exact literal bracket
+    rates/thresholds decimal-for-decimal rather than using MO's own
+    published (whole-dollar-rounded) cumulative "base tax" column, which
+    is why the exact result here ($707.668/yr, $58.97/mo) differs from
+    the source's own rounded figure by about 3 cents/month — the same
+    small, expected rounding-artifact gap already documented for NY's
+    bracket table, not a transcription error (every rate and threshold
+    below is copied verbatim from MO DOR's own table)."""
+    was_enabled = "MO" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("MO")
+    try:
+        result = calc(
+            "US", Decimal("35000") / 12, US_RATES, US_SLABS, work_state="MO", w4_filing_status="MFJ",
+            state_slabs=MO_SLABS,
+            state_rate_map={"state_standard_deduction": Rate("state_standard_deduction", flat_amount=Decimal("16100.00"))},
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("MO")
+    assert result.state_income_tax == pytest.approx(Decimal("58.97"), abs=Decimal("0.05"))
+
+
+OH_SLABS = [
+    Slab(Decimal("0"), Decimal("26050"), Decimal("0.00"), jurisdiction_state="OH"),
+    Slab(Decimal("26050"), None, Decimal("2.75"), jurisdiction_state="OH"),
+]
+
+
+def test_us_oh_percentage_method_august_2026_table():
+    """Ohio's own Percentage Method table (effective August 1, 2026, the
+    only table this build seeds — see shared.py's own comment for why the
+    superseded pre-August table isn't reproduced), which is genuinely
+    filing-status-agnostic (untagged slabs, same convention RI/SC already
+    use): $50,000/yr -> ($50,000-$26,050) x 2.75% = $658.625/yr ->
+    $54.89/mo."""
+    was_enabled = "OH" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("OH")
+    try:
+        result = calc("US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="OH", state_slabs=OH_SLABS)
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("OH")
+    assert result.state_income_tax == pytest.approx(Decimal("54.89"), abs=Decimal("0.01"))
+
+
+NY_SINGLE_SLABS = [
+    Slab(Decimal("0"), Decimal("8500"), Decimal("3.90"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("8500"), Decimal("11700"), Decimal("4.40"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("11700"), Decimal("13900"), Decimal("5.15"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("13900"), Decimal("80650"), Decimal("5.40"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("80650"), Decimal("96800"), Decimal("5.90"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("96800"), Decimal("107650"), Decimal("7.03"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("107650"), Decimal("157650"), Decimal("7.53"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("157650"), Decimal("215400"), Decimal("6.40"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("215400"), Decimal("265400"), Decimal("11.44"), filing_status="SINGLE", jurisdiction_state="NY"),
+    Slab(Decimal("265400"), Decimal("1077550"), Decimal("7.35"), filing_status="SINGLE", jurisdiction_state="NY"),
+]
+NY_STATE_RATE_MAP = {"state_standard_deduction": Rate("state_standard_deduction", flat_amount=Decimal("7400.00"))}
+
+
+def test_us_ny_single_bracket_sum_matches_stored_table():
+    """Sanity check (no independent worked example was given for NY's
+    own bracket table, unlike CT/WI/MO above) that this engine correctly
+    reproduces NY's own literal Single bracket table: $50,000/yr - $7,400
+    deduction = $42,600 taxable, entirely inside the $13,900-$80,650 @
+    5.40% band with $585.60 of cumulative tax below it (NY's own
+    published base-tax figure at $13,900 is $586.00 — the same
+    whole-dollar cumulative-rounding gap as MO/VT above): $585.60 +
+    5.40% x ($42,600-$13,900) = $2,135.40/yr = $177.95/mo."""
+    was_enabled = "NY" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("NY")
+    try:
+        result = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="NY", w4_filing_status="SINGLE",
+            state_slabs=NY_SINGLE_SLABS, state_rate_map=NY_STATE_RATE_MAP,
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("NY")
+    assert result.state_income_tax == pytest.approx(Decimal("177.95"), abs=Decimal("0.01"))
+
+
+def test_us_ny_method_iii_overrides_bracket_sum_above_1077550():
+    """NY's own "Method III": above $1,077,550 of total annualized wages,
+    NY's published table itself shows "—" instead of a base-tax number
+    for every higher row — a flat rate on TOTAL wages REPLACES the
+    marginal bracket sum entirely, rather than continuing it. $2,000,000
+    annual falls in the >$1,077,550-to-$5,000,000 tier (10.45% flat):
+    $2,000,000 x 10.45% = $209,000/yr = $17,416.67/mo — proves the
+    override actually fires and replaces (not adds to) the ordinary
+    bracket-sum result, which would have been a much smaller number."""
+    was_enabled = "NY" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("NY")
+    try:
+        result = calc(
+            "US", Decimal("2000000") / 12, US_RATES, US_SLABS, work_state="NY", w4_filing_status="SINGLE",
+            state_slabs=NY_SINGLE_SLABS, state_rate_map=NY_STATE_RATE_MAP,
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("NY")
+    assert result.state_income_tax == pytest.approx(Decimal("17416.67"), abs=Decimal("0.01"))
+
+
+def test_us_yonkers_resident_surcharge_is_16_75_pct_of_nys_tax_not_wages():
+    """A Yonkers RESIDENT (ctx.residence_locality — new field) owes a
+    surcharge of 16.75% of their OWN already-computed NY State tax
+    liability, never a wage-based rate. Using the same $50,000 Single
+    scenario as the bracket-sum test above (NY state tax $2,135.40/yr):
+    $2,135.40 x 16.75% = $357.6795/yr = $29.81/mo local tax, with no
+    work_locality/locality_rate configured at all — proving this is
+    driven entirely by residence, not work location."""
+    was_enabled = "NY" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("NY")
+    try:
+        result = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="NY", w4_filing_status="SINGLE",
+            state_slabs=NY_SINGLE_SLABS, state_rate_map=NY_STATE_RATE_MAP, residence_locality="YONKERS",
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("NY")
+    assert result.local_tax == pytest.approx(Decimal("29.81"), abs=Decimal("0.01"))
+
+
+def test_us_yonkers_resident_who_also_works_there_gets_surcharge_not_double_tax():
+    """A Yonkers resident who ALSO works in Yonkers (locality_rate
+    resolves to the YONKERS nonresident-earnings-tax row) must owe ONLY
+    the 16.75% resident surcharge, never both — this is the specific
+    cancellation this engine's Yonkers code performs, checked against
+    the resolved locality_rate's own locality_code rather than a
+    work_locality field this context doesn't carry."""
+    was_enabled = "NY" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("NY")
+    try:
+        result = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="NY", w4_filing_status="SINGLE",
+            state_slabs=NY_SINGLE_SLABS, state_rate_map=NY_STATE_RATE_MAP, residence_locality="YONKERS",
+            locality_rate=LocalityRateStub(nonresident_rate_pct=Decimal("0.50"), locality_code="YONKERS"),
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("NY")
+    assert result.local_tax == pytest.approx(Decimal("29.81"), abs=Decimal("0.01"))
+
+
+def test_us_yonkers_nonresident_worker_gets_flat_half_percent():
+    """A Yonkers NONresident who works there (no residence_locality set)
+    is handled entirely by the generic locality_rate_pct mechanism — the
+    seeded YONKERS LocalityRate row has only nonresident_rate_pct=0.50
+    set: $50,000/yr x 0.50% = $250/yr = $20.83/mo, and NO resident
+    surcharge applies since residence_locality is unset."""
+    was_enabled = "NY" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("NY")
+    try:
+        result = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="NY", w4_filing_status="SINGLE",
+            state_slabs=NY_SINGLE_SLABS, state_rate_map=NY_STATE_RATE_MAP,
+            locality_rate=LocalityRateStub(nonresident_rate_pct=Decimal("0.50"), locality_code="YONKERS"),
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("NY")
+    assert result.local_tax == pytest.approx(Decimal("20.83"), abs=Decimal("0.01"))
+
+
 def test_us_flat_rate_state_arizona_default_percentage():
     """Arizona flat 2.0% (the no-A-4 default the document specifies):
     $120,000/yr * 2.0% / 12 = $200.00/mo."""
-    az_slabs = [Slab(Decimal("0"), None, Decimal("2.00"), jurisdiction_state="AZ")]
+    az_slabs = [Slab(Decimal("0"), None, Decimal("2.00"), rule_type="FLAT_RATE", jurisdiction_state="AZ")]
     shared._US_STATE_TAX_ENABLED_STATES.add("AZ")
     result = calc("US", 10000, US_RATES, US_SLABS, state_slabs=az_slabs)
     assert result.state_income_tax == pytest.approx(Decimal("200.00"), abs=Decimal("0.01"))
+
+
+def test_us_arizona_employee_election_overrides_default_percentage():
+    """Arizona employee has filed an A-4 electing 3.5% (the statutory
+    maximum) instead of the 2.0% no-form default: $120,000/yr * 3.5% / 12
+    = $350.00/mo — proves the real seeded rule_type="FLAT_RATE" row is
+    overridden by the employee's own election, not silently ignored."""
+    az_slabs = [Slab(Decimal("0"), None, Decimal("2.00"), rule_type="FLAT_RATE", jurisdiction_state="AZ")]
+    shared._US_STATE_TAX_ENABLED_STATES.add("AZ")
+    result = calc(
+        "US", 10000, US_RATES, US_SLABS, state_slabs=az_slabs,
+        state_income_tax_election_pct=Decimal("3.5"),
+    )
+    assert result.state_income_tax == pytest.approx(Decimal("350.00"), abs=Decimal("0.01"))
+
+
+def test_us_state_election_pct_ignored_for_marginal_bracket_states():
+    """An employee election percentage must never replace a real
+    multi-bracket (MARGINAL_RATE) state's own table — the override is
+    scoped to the single-FLAT_RATE-slab shape only. A stray/misassigned
+    election value on a bracketed state's employee is a no-op here."""
+    ca_slabs = [
+        Slab(Decimal("0"), Decimal("50000"), Decimal("1.00"), jurisdiction_state="CA"),
+        Slab(Decimal("50000"), None, Decimal("9.00"), jurisdiction_state="CA"),
+    ]
+    shared._US_STATE_TAX_ENABLED_STATES.add("CA")
+    result_without = calc("US", 10000, US_RATES, US_SLABS, state_slabs=ca_slabs)
+    result_with_stray_election = calc(
+        "US", 10000, US_RATES, US_SLABS, state_slabs=ca_slabs,
+        state_income_tax_election_pct=Decimal("3.5"),
+    )
+    assert result_with_stray_election.state_income_tax == result_without.state_income_tax
+
+
+# ── Taxability Matrix — per-program earning-component classification ────
+# (ZP-TAX-US-2026-001 §9.1, gap-closure Phase 7, 2026-09-12). Same
+# TaxabilityRule-backed mechanism/contract as Canada's own Phase 5 tests
+# above — see us.py's _calculate_us_program_wages for the "every
+# component counts unless excluded" default that makes an unconfigured
+# org's numbers identical whether the switch is on or off.
+
+def test_us_taxability_matrix_dormant_switch_off_ignores_us_taxability_rules():
+    shared._US_TAXABILITY_MATRIX_ENABLED_COUNTRIES.discard("US")  # simulate the switch OFF
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="US", rate_map=US_RATES, slabs=US_SLABS,
+    )
+    baseline = STRATEGY.calculate(PayrollContext(**common))
+    # Switch OFF — an excluding rule must have zero effect, exactly as if
+    # us_taxability_rules were never passed at all.
+    excluded = STRATEGY.calculate(PayrollContext(
+        **common, us_taxability_rules={"social_security": {"special_allowance": False}},
+    ))
+    assert excluded.social_security == baseline.social_security
+    shared._US_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("US")  # restore for later tests
+
+
+def test_us_taxability_matrix_unconfigured_program_defaults_to_everything_included():
+    shared._US_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("US")
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="US", rate_map=US_RATES, slabs=US_SLABS,
+    )
+    switch_off = STRATEGY.calculate(PayrollContext(**common))
+    switch_on_unconfigured = STRATEGY.calculate(PayrollContext(**common, us_taxability_rules={}))
+    assert switch_on_unconfigured.social_security == switch_off.social_security
+    assert switch_on_unconfigured.federal_income_tax == switch_off.federal_income_tax
+    assert switch_on_unconfigured.medicare == switch_off.medicare
+
+
+def test_us_taxability_matrix_excludes_component_from_social_security_only():
+    shared._US_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("US")
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="US", rate_map=US_RATES, slabs=US_SLABS,
+    )
+    baseline = STRATEGY.calculate(PayrollContext(**common))
+    excluded = STRATEGY.calculate(PayrollContext(
+        **common, us_taxability_rules={"social_security": {"special_allowance": False}},
+    ))
+    # $3,000/mo * 12 = $36,000/yr excluded from SS wages, well under the
+    # wage base either way, so the drop is EXACTLY special_allowance * 6.2%.
+    assert baseline.social_security - excluded.social_security == pytest.approx(Decimal("186.00"), abs=Decimal("0.01"))  # 3000 * 6.2%
+    # Federal tax and Medicare must be COMPLETELY unaffected — this is a
+    # Social-Security-only exclusion, proving the programs are genuinely
+    # independent (§9.1: each wage base is its own taxability flag).
+    assert excluded.federal_income_tax == baseline.federal_income_tax
+    assert excluded.medicare == baseline.medicare
+
+
+def test_us_taxability_matrix_excludes_component_from_federal_tax_only():
+    shared._US_TAXABILITY_MATRIX_ENABLED_COUNTRIES.add("US")
+    common = dict(
+        gross=Decimal("4000"), basic=Decimal("1000"), special_allowance=Decimal("3000"),
+        country="US", rate_map=US_RATES, slabs=US_SLABS,
+    )
+    baseline = STRATEGY.calculate(PayrollContext(**common))
+    excluded = STRATEGY.calculate(PayrollContext(
+        **common, us_taxability_rules={"federal_income_tax": {"special_allowance": False}},
+    ))
+    assert excluded.federal_income_tax < baseline.federal_income_tax
+    # Social Security and Medicare untouched — this is a federal-tax-only exclusion.
+    assert excluded.social_security == baseline.social_security
+    assert excluded.medicare == baseline.medicare
+
+
+def test_us_calculate_program_wages_named_allowances_is_the_remainder():
+    # Direct unit coverage of _calculate_us_program_wages: gross minus the
+    # five named components always lands in "named_allowances" — every
+    # dollar in exactly one bucket, same contract canada.py's
+    # _calculate_ca_program_wages already documents for its own version.
+    ctx = PayrollContext(
+        gross=Decimal("10000"), basic=Decimal("4000"), hra=Decimal("1000"),
+        special_allowance=Decimal("2000"), overtime=Decimal("500"), additional_compensation=Decimal("500"),
+        country="US", us_taxability_rules={"federal_income_tax": {"named_allowances": False}},
+    )
+    # named_allowances = 10000 - 4000 - 1000 - 2000 - 500 - 500 = 2000,
+    # excluded here -> included total = gross - named_allowances = 8000.
+    included = _us._calculate_us_program_wages(ctx, "federal_income_tax")
+    assert included == Decimal("8000")
 
 
 def test_us_ma_pfml_headcount_gate_below_threshold():
@@ -1269,6 +2224,28 @@ def test_us_ma_pfml_headcount_gate_at_or_above_threshold():
     result = calc("US", 10000, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
     assert result.state_program_deductions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
     assert result.employer_state_program_contributions == pytest.approx(Decimal("44.00"), abs=Decimal("0.01"))
+
+
+def test_us_wa_pfml_wage_cap_limits_taxable():
+    """Regression test (ZP-TAX-US-2026-001 §5 gap-closure audit,
+    2026-09-13): WA PFML was missing its $184,500 wage cap entirely
+    (every sibling capped program — CO FAMLI, CT Paid Leave, MN Paid
+    Leave, DE Paid Leave — already had one). At $250,000/yr, both the
+    employee (0.8069%) and employer (0.3228%, gated at 50+) shares must
+    compute on the CAPPED $184,500, not the uncapped $250,000 — before
+    this fix, both shares would have been ~35% too high."""
+    rate_map = dict(
+        US_RATES,
+        pfml=Rate(employee_rate_pct=Decimal("0.8069"), employer_rate_pct=Decimal("0.3228"), jurisdiction_state="WA"),
+        pfml_employer_headcount_min=Rate(flat_amount=Decimal("50")),
+        pfml_wage_cap=Rate(flat_amount=Decimal("184500")),
+    )
+    shared._US_STATE_PROGRAM_ENABLED_STATES.add("WA")
+    profiles = {"PFML": EmployerTaxProfileStub(covered_employee_count=60)}
+    result = calc("US", Decimal("250000") / 12, rate_map, US_SLABS, state_rate_map=rate_map, employer_tax_profiles=profiles)
+    # $184,500 * 0.8069% / 12 = $124.06/mo (employee); $184,500 * 0.3228% / 12 = $49.63/mo (employer).
+    assert result.state_program_deductions == pytest.approx(Decimal("124.06"), abs=Decimal("0.01"))
+    assert result.employer_state_program_contributions == pytest.approx(Decimal("49.63"), abs=Decimal("0.01"))
 
 
 def test_us_co_famli_wage_cap_limits_taxable():

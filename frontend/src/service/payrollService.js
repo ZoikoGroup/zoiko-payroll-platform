@@ -685,6 +685,31 @@ export const fetchTaxSlabs = async (countryCode = DEFAULT_COUNTRY) => {
   return Array.isArray(res) ? res : res?.data || res?.items || [];
 };
 
+// A state/province's own canonical MARGINAL_RATE brackets (US state tax,
+// CA provincial/territorial tax) — deliberately a SEPARATE fetch from
+// fetchTaxSlabs above, which excludes every state-scoped row by design
+// (2026-09-11 fix, keeps them out of federal bracket calculation). Returns
+// [] (not an error) when state is falsy, matching the backend's own
+// falsy-state short-circuit.
+export const fetchStateTaxSlabs = async (countryCode = DEFAULT_COUNTRY, state) => {
+  if (!state) return [];
+  const res = await api.get("/api/payroll/compliance/tax-slabs/state", {
+    params: { country: countryCode, state },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
+};
+
+// Real local-tax rates for THIS org's own employees' work_locality codes
+// (US City/County/Local Payroll Tax in TaxConfigurationTab.jsx) — resolves
+// through the same Active-dataset lookup payroll calculation itself uses,
+// so what's shown here is exactly what an employee's paycheck applies.
+export const fetchOrgLocalityRates = async (countryCode = DEFAULT_COUNTRY) => {
+  const res = await api.get("/api/payroll/compliance/locality-rates", {
+    params: { country: countryCode },
+  });
+  return Array.isArray(res) ? res : res?.data || res?.items || [];
+};
+
 export const updateCompanyDetails = async (payload) => {
   try {
     return await api.put("/api/payroll/compliance/company-details", payload);
@@ -1608,6 +1633,57 @@ export const generateIndiaForm123 = async (payload) => {
   });
 };
 
+// ── US: Form W-2 (Production-Readiness Plan Phase 5) ───────────────────
+// Same shape as India's Form 123 above (report_template_id/employee_id/
+// tax_year) — a calendar-year "2026", not India's fiscal-year "2026-27".
+export const generateUsW2 = async (payload) => {
+  return await api.post("/api/payroll/us/reports/w2", {
+    report_template_id: payload.reportTemplateId,
+    employee_id: payload.employeeId,
+    tax_year: payload.taxYear,
+  });
+};
+
+// ── US: Form 941/940 (Production-Readiness Plan Phase 5) ───────────────
+// Aggregate, employer-level — no employeeId, same footing as CA's PD7A.
+export const generateUs941 = async (payload) => {
+  return await api.post("/api/payroll/us/reports/941", {
+    report_template_id: payload.reportTemplateId,
+    year: payload.year,
+    quarter: payload.quarter,
+  });
+};
+
+export const generateUs940 = async (payload) => {
+  return await api.post("/api/payroll/us/reports/940", {
+    report_template_id: payload.reportTemplateId,
+    year: payload.year,
+  });
+};
+
+// ── US: New Hire Reporting (Production-Readiness Plan Phase 5) ─────────
+// Compliance tracking (due-date + mark-filed), not report generation —
+// a Pending row is auto-created for every new US employee server-side.
+export const getUsNewHireReports = async (status) => {
+  return await api.get("/api/payroll/us/new-hire-reports", { params: status ? { status } : {} });
+};
+
+export const createUsNewHireReport = async (payload) => {
+  return await api.post("/api/payroll/us/new-hire-reports", {
+    employeeId: payload.employeeId,
+    hireDate: payload.hireDate || null,
+    workState: payload.workState || null,
+    dueDateDays: payload.dueDateDays || null,
+  });
+};
+
+export const markUsNewHireReportFiled = async (reportId, payload = {}) => {
+  return await api.post(`/api/payroll/us/new-hire-reports/${reportId}/mark-filed`, {
+    filedDate: payload.filedDate || null,
+    notes: payload.notes || null,
+  });
+};
+
 // ── Canada: T4/RL-1/ROE (per-employee) + PD7A (per-period) generation ──
 // (ZP-TAX-CA-2026-001, forms/reports gap-closure). T4/RL-1/ROE share the
 // same shape as India's Form 130 above (report_template_id/employee_id/
@@ -1654,6 +1730,31 @@ export const calculateCaSpecialPayment = async (payload) => {
     regular_annual_pay: payload.regularAnnualPay,
     special_payment_amount: payload.specialPaymentAmount,
     payroll_date: payload.payrollDate || null,
+  });
+};
+
+// US supplemental wages flat-rate method (ZP-TAX-US-2026-001 §3.1, IRS
+// Pub. 15) — a standalone calculator, same footing as
+// calculateCaSpecialPayment: 22% flat, mandatory 37% on cumulative
+// calendar-year supplemental wages above $1,000,000.
+export const calculateUsSupplementalWages = async (payload) => {
+  return await api.post("/api/payroll/us/supplemental-wages/calculate", {
+    employee_id: payload.employeeId,
+    supplemental_wage_amount: payload.supplementalWageAmount,
+    cytd_supplemental_wages_before: payload.cytdSupplementalWagesBefore || 0,
+  });
+};
+
+// US federal deposit/filing calendar (ZP-TAX-US-2026-001 §3.5) — org-
+// scoped (no employee), a standalone calculator: depositor status,
+// deposit due date, $100,000 next-day rule, $500 FUTA deposit trigger,
+// Form W-2/W-3 January 31 deadline.
+export const calculateUsFederalDepositSchedule = async (payload) => {
+  return await api.post("/api/payroll/us/federal-deposit-schedule/calculate", {
+    lookback_period_liability: payload.lookbackPeriodLiability,
+    payroll_date: payload.payrollDate,
+    accumulated_undeposited_liability: payload.accumulatedUndepositedLiability || null,
+    quarterly_futa_liability: payload.quarterlyFutaLiability || null,
   });
 };
 

@@ -60,6 +60,11 @@ export const assignCompliancePolicy = (id, organizationIds) =>
 export const getPackImpactPreview = (id) =>
   apiFetch(`/api/super-admin/compliance/policies/${id}/impact-preview`);
 
+// Tax Year/Release Manager (gap-closure Plan Phase 4) — rate-level diff
+// between two versions of the same pack.
+export const getPackVersionDiff = (fromId, toId) =>
+  apiFetch(`/api/super-admin/compliance/policies/${fromId}/compare/${toId}`);
+
 // Emergency hotfix activation — bypasses the distinct-approver gate,
 // requires incident_id + justification, always flagged for mandatory
 // retrospective review (see HotfixActivateModal.jsx).
@@ -161,6 +166,44 @@ export const upsertLocalityRate = (payload) =>
 export const deleteLocalityRate = (id) =>
   apiFetch(`/api/super-admin/compliance/locality-rates/${id}`, { method: "DELETE" });
 
+// ── Locality Dataset Manager (ZP-TAX-US-2026-001 §10/§11.1) ────────────────
+// The full Draft/Staged/Active/Retired import/diff/stage/approve/activate/
+// rollback workflow, alongside (not replacing) the manual-entry endpoints
+// above — both operate on the same underlying LocalityDataset/LocalityRate
+// tables.
+
+export const getLocalityDatasets = (params) =>
+  apiFetch("/api/super-admin/compliance/locality-datasets", { params });
+
+export const getLocalityDatasetRates = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/rates`);
+
+export const importLocalityDataset = (payload) =>
+  apiFetch("/api/super-admin/compliance/locality-datasets/import", { method: "POST", body: payload });
+
+// "New State Import" bulk tooling (Production-Readiness Plan Phase 3) —
+// creates a brand-new Draft JurisdictionPack for a state, pre-populated
+// with its full bracket table + standard deduction, in one call instead
+// of hand-entering each row through USStateAccordionRow's one-at-a-time
+// component editor.
+export const bulkImportStateTaxPack = (payload) =>
+  apiFetch("/api/super-admin/compliance/tax-configuration/state-import", { method: "POST", body: payload });
+
+export const diffLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/diff`);
+
+export const stageLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/stage`, { method: "PUT" });
+
+export const approveLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/approve`, { method: "PUT" });
+
+export const activateLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/activate`, { method: "PUT" });
+
+export const rollbackLocalityDataset = (id) =>
+  apiFetch(`/api/super-admin/compliance/locality-datasets/${id}/rollback`, { method: "PUT" });
+
 // ── Source Evidence ────────────────────────────────────────────────────────
 
 export const getSourceArtifacts = () =>
@@ -168,6 +211,42 @@ export const getSourceArtifacts = () =>
 
 export const createSourceArtifact = (payload) =>
   apiFetch("/api/super-admin/compliance/source-artifacts", { method: "POST", body: payload });
+
+// Real preserved-file storage (ZP-TAX-US-2026-001 §14.2, gap-closure Plan
+// Phase 4) — `apiFetch` above always JSON-encodes its body, so a real file
+// upload/binary download needs its own raw fetch call, same pattern
+// payrollService.js's downloadPayslip/downloadRunPayslips already use.
+export const uploadSourceArtifactFile = async (id, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/source-artifacts/${id}/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    let detail;
+    try { detail = (await res.json()).detail; } catch { /* ignore */ }
+    throw new Error(detail || "Upload failed.");
+  }
+  return res.json();
+};
+
+export const downloadSourceArtifactFile = async (id, filenameHint) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}/api/super-admin/compliance/source-artifacts/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("Failed to download file.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filenameHint || `source_artifact_${id}`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });

@@ -93,6 +93,40 @@ export const STATE_COMPONENT_CATALOG = [
     description: "State paid family/medical leave program (e.g. Connecticut Paid Leave, DC Universal Paid Leave, New York Paid Family Leave) — employee, employer, or both, depending on the state.",
     uiTypeHint: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE,
   },
+  // Previously reachable only via "Custom Component" (gap-closure Plan
+  // Phase 4, 2026-09-14) — same engine component_keys as
+  // usaComponentConfig.js's STATIC_MAP, just missing from this
+  // business-language picker.
+  {
+    componentKey: "paid_leave_parental", displayName: "Paid Leave (Parental Tier)",
+    category: "familyDisability",
+    description: "A state's own SEPARATE parental-only coverage tier (e.g. Delaware Paid Leave's 10-24 employee tier) — employer-only, distinct from the state's full-coverage \"Paid Leave\" entry above.",
+    uiTypeHint: UI_TYPES.EMPLOYER_ASSIGNED_RATE,
+  },
+  {
+    componentKey: "famli", displayName: "Family & Medical Leave Insurance (FAMLI)",
+    category: "familyDisability",
+    description: "Headcount-conditional paid-leave program (e.g. Colorado FAMLI) — employee share always applies, employer share only once the employer's own covered headcount is on file.",
+    uiTypeHint: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE,
+  },
+  {
+    componentKey: "ma_pfml", displayName: "Paid Family & Medical Leave (MA PFML)",
+    category: "familyDisability",
+    description: "Massachusetts PFML — employee share always applies, employer share only at 25+ covered individuals.",
+    uiTypeHint: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE,
+  },
+  {
+    componentKey: "pfml", displayName: "Paid Family & Medical Leave (WA PFML)",
+    category: "familyDisability",
+    description: "Washington Paid Family & Medical Leave — employee share always applies, employer share only at 50+ employees.",
+    uiTypeHint: UI_TYPES.EMPLOYEE_EMPLOYER_PERCENTAGE,
+  },
+  {
+    componentKey: "vt_ccc", displayName: "Child Care Contribution",
+    category: "familyDisability",
+    description: "Vermont Child Care Contribution — permanently employer-only, no employee share exists under the statute.",
+    uiTypeHint: UI_TYPES.EMPLOYER_ASSIGNED_RATE,
+  },
   {
     componentKey: "tdi", displayName: "Temporary Disability Insurance (TDI)",
     category: "familyDisability",

@@ -6,11 +6,12 @@ management (org admins / payroll admins / employees), admin-initiated
 password resets, and PlatformSetting configuration.
 """
 
+import io
 import logging
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Body
+from fastapi import APIRouter, Depends, Query, Body, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -46,12 +47,14 @@ from app.modules.payroll.schemas import (
     StateLocalProgramReadinessResponse, StateLocalProgramReadinessUpsert,
     TaxabilityRuleResponse, TaxabilityRuleUpsert,
     LocalityRateResponse, LocalityRateUpsert,
+    LocalityDatasetResponse, LocalityDatasetImportRequest, LocalityDatasetDiffResponse,
+    BulkStateTaxImportRequest,
     ReportTemplateResponse, ReportTemplateUpsert, ReportTemplateStatusUpdate,
     ReportTemplateComponentResponse, ReportTemplateComponentUpsert,
     ReportTemplateFieldResponse, ReportTemplateFieldUpsert,
     AvailableComponentItem, AvailableDataFieldItem,
     FilingCalendarResponse, FilingCalendarUpsert, FilingCalendarStatusUpdate,
-    JurisdictionPackImpactPreviewResponse,
+    JurisdictionPackImpactPreviewResponse, JurisdictionPackDiffResponse,
     PackHotfixActivateRequest, PackHotfixReviewRequest, PackHotfixActivationResponse,
     RtiFormsSummaryEntry, TestCertificationRunResponse, TestCertificationRunRequest,
     SalaryTdsDeclarationResponse, SalaryTdsClaimResponse, GeneratedReportResponse,
@@ -460,6 +463,21 @@ def get_compliance_policy_impact_preview(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.get_jurisdiction_pack_impact_preview(db, id)
+
+
+@router.get(
+    "/compliance/policies/{id}/compare/{other_id}", response_model=JurisdictionPackDiffResponse, response_model_by_alias=True,
+    summary="Rate-level diff between two versions of the same pack (Tax Year/Release Manager, gap-closure Plan Phase 4)",
+)
+def compare_compliance_policy_versions(
+    id: int,
+    other_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.diff_jurisdiction_pack_versions(db, id, other_id)
 
 
 @router.put(
@@ -1011,6 +1029,30 @@ def delete_canonical_contribution_rate(
     return {"message": "Contribution rate deleted."}
 
 
+@router.post(
+    "/compliance/tax-configuration/state-import", response_model=JurisdictionPackResponse, response_model_by_alias=True,
+    summary="Bulk-import a brand-new US state's full bracket table + standard deduction as a new Draft pack (Super Admin only)",
+)
+def bulk_import_state_tax_pack(
+    payload: BulkStateTaxImportRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.bulk_import_state_tax_pack(
+        db,
+        jurisdiction_state=payload.jurisdictionState,
+        version=payload.version,
+        pack_id=payload.packId,
+        effective_from=payload.effectiveFrom,
+        source_document_id=payload.sourceDocumentId,
+        bracket_rows=[r.model_dump() for r in payload.bracketRows],
+        standard_deduction_rows=[r.model_dump() for r in payload.standardDeductionRows],
+        actor_id=current_user.id,
+    )
+
+
 @router.get(
     "/compliance/tax-configuration/audit", response_model=List[TaxConfigurationAuditResponse], response_model_by_alias=True,
     summary="Audit trail for canonical tax configuration changes",
@@ -1186,6 +1228,139 @@ def delete_locality_rate(
     return {"message": "Locality rate deleted."}
 
 
+# ── US: Locality Dataset Manager (gap-closure Plan Phase 3, 2026-09-14) ──
+# The full Draft/Staged/Active/Retired import/diff/stage/approve/activate/
+# rollback workflow ZP-TAX-US-2026-001 §10/§11.1 requires, alongside (not
+# replacing) the manual-entry endpoints just above.
+
+def _dataset_to_response(dataset, rate_count: int = None) -> dict:
+    resp = LocalityDatasetResponse.model_validate(dataset)
+    if rate_count is not None:
+        resp = resp.model_copy(update={"rateCount": rate_count})
+    return resp
+
+
+@router.get(
+    "/compliance/locality-datasets", response_model=List[LocalityDatasetResponse], response_model_by_alias=True,
+    summary="List all locality datasets (any status) for a country/state",
+)
+def list_locality_datasets(
+    country: str = Query("US"),
+    state: str = Query(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    datasets = payroll_service.list_locality_datasets(db, country, state)
+    return [_dataset_to_response(d, rate_count=len(payroll_service.list_locality_dataset_rates(db, d.id))) for d in datasets]
+
+
+@router.get(
+    "/compliance/locality-datasets/{id}/rates", response_model=List[LocalityRateResponse], response_model_by_alias=True,
+    summary="Inspect the rate rows within one locality dataset",
+)
+def get_locality_dataset_rates(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.get_locality_dataset(db, id)  # 404s if not found
+    return payroll_service.list_locality_dataset_rates(db, id)
+
+
+@router.post(
+    "/compliance/locality-datasets/import", response_model=LocalityDatasetResponse, response_model_by_alias=True,
+    summary="Bulk-import a new Draft locality dataset (Super Admin only)",
+)
+def import_locality_dataset(
+    payload: LocalityDatasetImportRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    dataset = payroll_service.import_locality_dataset(
+        db, payload.jurisdictionCountry, payload.jurisdictionState, payload.version,
+        [r.model_dump() for r in payload.rows],
+        effective_from=payload.effectiveFrom, source_document_id=payload.sourceDocumentId,
+        actor_id=current_user.id,
+    )
+    return _dataset_to_response(dataset, rate_count=len(payload.rows))
+
+
+@router.get(
+    "/compliance/locality-datasets/{id}/diff", response_model=LocalityDatasetDiffResponse, response_model_by_alias=True,
+    summary="Diff a dataset's rows against the currently Active dataset for its jurisdiction",
+)
+def diff_locality_dataset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.diff_locality_dataset(db, id)
+
+
+@router.put(
+    "/compliance/locality-datasets/{id}/stage", response_model=LocalityDatasetResponse, response_model_by_alias=True,
+    summary="Draft -> Staged (Super Admin only)",
+)
+def stage_locality_dataset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.stage_locality_dataset(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/locality-datasets/{id}/approve", response_model=LocalityDatasetResponse, response_model_by_alias=True,
+    summary="Record the calling Super Admin as this dataset's approver (maker-checker: must differ from whoever imported it)",
+)
+def approve_locality_dataset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.approve_locality_dataset(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/locality-datasets/{id}/activate", response_model=LocalityDatasetResponse, response_model_by_alias=True,
+    summary="Staged -> Active, retiring the jurisdiction's previous Active dataset (Super Admin only)",
+)
+def activate_locality_dataset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.activate_locality_dataset(db, id, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/locality-datasets/{id}/rollback", response_model=LocalityDatasetResponse, response_model_by_alias=True,
+    summary="Reactivate a Retired dataset, retiring whatever is currently Active (Super Admin only)",
+)
+def rollback_locality_dataset(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.rollback_locality_dataset(db, id, actor_id=current_user.id)
+
+
 # ── Source Evidence (ZP-TAX-US-2026-001 §14) ──────────────────────────────
 # Platform-wide, not US-only — one row per official publication a
 # statutory value was taken from.
@@ -1200,7 +1375,11 @@ def list_source_artifacts(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_source_artifacts(db)
+    rows = payroll_service.list_source_artifacts(db)
+    return [
+        SourceArtifactResponse.model_validate(r).model_copy(update={"hasFile": bool(r.file_path)})
+        for r in rows
+    ]
 
 
 @router.post(
@@ -1228,7 +1407,46 @@ def review_source_artifact(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
+    row = payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.post(
+    "/compliance/source-artifacts/{id}/upload", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Upload the preserved source document and compute its real SHA-256 checksum (gap-closure Plan Phase 4)",
+)
+async def upload_source_artifact_file(
+    id: int,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    contents = await file.read()
+    row = payroll_service.upload_source_artifact_file(
+        db, id, file.filename, file.content_type, contents, actor_id=current_user.id,
+    )
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": True})
+
+
+@router.get(
+    "/compliance/source-artifacts/{id}/download",
+    summary="Download the preserved source document",
+)
+def download_source_artifact_file(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    data, content_type, filename = payroll_service.download_source_artifact_file(db, id)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Taxability rules (India Code Wages classification, §7/§8) ────────────

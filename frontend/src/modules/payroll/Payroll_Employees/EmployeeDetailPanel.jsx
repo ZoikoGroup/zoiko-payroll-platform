@@ -6,7 +6,9 @@ import UKCourtOrdersModal from "./UKCourtOrdersModal";
 import UKNiReliefFactsModal from "./UKNiReliefFactsModal";
 import IndiaStatutoryFormsModal from "./IndiaStatutoryFormsModal";
 import CAStatutoryFormsModal from "./CAStatutoryFormsModal";
+import USStatutoryFormsModal from "./USStatutoryFormsModal";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
+import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
 const DEPARTMENT_STYLES = {
   Engineering: "bg-info/10 text-info",
@@ -45,6 +47,25 @@ function formatCurrency(value, info) {
   }
 }
 
+// Every US compliance field (SSN, work state/locality, W-4 details,
+// reciprocity/residency certifications, ...) is validated and persisted
+// (see employee_validation.py's USEmployeeValidation) but this panel's
+// read-only view previously showed none of them at all — only reachable
+// by entering Edit mode. Mirrors EmployeeForm's own field list/labels so
+// the view and edit modes never disagree on what a field is called.
+// Booleans are stored as the literal strings "true"/"false"/"True"/"False"
+// (see FIELD_SPECS choices) — shown as Yes/No here for readability.
+const BOOLEAN_CHOICE_SETS = [["true", "false", "True", "False"]];
+
+function formatComplianceValue(spec, raw) {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const isBoolean = spec.choices && BOOLEAN_CHOICE_SETS.some(
+    (set) => spec.choices.length === set.length && spec.choices.every((c) => set.includes(c))
+  );
+  if (isBoolean) return String(raw).toLowerCase() === "true" ? "Yes" : "No";
+  return String(raw);
+}
+
 function DetailRow({ label, value }) {
   return (
     <div className="flex justify-between gap-4 py-3">
@@ -65,6 +86,7 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [showNiReliefFacts, setShowNiReliefFacts] = useState(false);
   const [showIndiaStatutoryForms, setShowIndiaStatutoryForms] = useState(false);
   const [showCaStatutoryForms, setShowCaStatutoryForms] = useState(false);
+  const [showUsStatutoryForms, setShowUsStatutoryForms] = useState(false);
 
   useEffect(() => {
     getCustomFields().then(setCustomFieldDefs).catch(() => {});
@@ -215,7 +237,35 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                     </button>
                   </div>
                 )}
+                {employee.countryCode === "US" && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => setShowUsStatutoryForms(true)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-foreground-secondary transition-all duration-200 hover:border-primary hover:text-primary"
+                    >
+                      <Calculator size={14} />
+                      Supplemental Wages Calculator
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {employee.countryCode === "US" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">US Tax Details</h4>
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.US
+                      .filter((spec) => !spec.showWhen || spec.showWhen(employee.complianceFields))
+                      .map((spec) => (
+                      <DetailRow
+                        key={spec.key}
+                        label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])}
+                      />
+                    ))}
+                  </dl>
+                </div>
+              )}
 
               {customFieldEntries.length > 0 && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
@@ -291,6 +341,9 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
       )}
       {showIndiaStatutoryForms && (
         <IndiaStatutoryFormsModal employee={employee} onClose={() => setShowIndiaStatutoryForms(false)} />
+      )}
+      {showUsStatutoryForms && (
+        <USStatutoryFormsModal employee={employee} onClose={() => setShowUsStatutoryForms(false)} />
       )}
       {showCaStatutoryForms && (
         <CAStatutoryFormsModal employee={employee} onClose={() => setShowCaStatutoryForms(false)} />

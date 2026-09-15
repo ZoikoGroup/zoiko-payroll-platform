@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { createEmployee, updateEmployee, EMPLOYMENT_TYPES, EMPLOYEE_STATUSES, DEPARTMENTS } from "../../../service/payrollService";
 import { COUNTRIES, COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
+import { bankFieldsFor, bankComplianceKeys, ifscWarning } from "./bankFieldsFor";
 
 function emptyCompliance() {
   return {};
@@ -166,6 +167,12 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
   }
 
   const complianceSpec = COUNTRY_FIELD_SPECS[form.countryCode] || [];
+  // Routing/banking codes for the current jurisdiction (India's IFSC, or
+  // the per-country compliance codes) render in the Bank details section
+  // below — exclude them from the generic statutory list so they never
+  // appear twice. See bankFieldsFor.js for the single source of truth.
+  const bankingKeys = bankComplianceKeys(form.countryCode);
+  const statutorySpec = complianceSpec.filter((spec) => !bankingKeys.includes(spec.key));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
@@ -245,11 +252,35 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
           <Field label="Bank account number">
             <input className={inputClass} value={form.bankAccountNumber} onChange={(e) => update("bankAccountNumber", e.target.value)} />
           </Field>
-          {form.countryCode === "IN" && (
-            <Field label="IFSC code">
-              <input className={inputClass} value={form.ifscCode} onChange={(e) => update("ifscCode", e.target.value.toUpperCase())} />
-            </Field>
-          )}
+          {bankFieldsFor(form.countryCode).map((field) => {
+            if (field.storage === "dedicated") {
+              const value = form[field.formKey] || "";
+              const warning = ifscWarning(value);
+              return (
+                <Field key={field.key} label={field.label}>
+                  <input
+                    className={inputClass}
+                    placeholder={field.placeholder}
+                    value={value}
+                    onChange={(e) => update(field.formKey, e.target.value.toUpperCase())}
+                  />
+                  {warning && (
+                    <span className="mt-1.5 block text-[11px] font-medium text-warning">{warning}</span>
+                  )}
+                </Field>
+              );
+            }
+            return (
+              <Field key={field.key} label={field.label}>
+                <input
+                  className={inputClass}
+                  placeholder={field.placeholder}
+                  value={form.complianceFields[field.formKey] || ""}
+                  onChange={(e) => updateCompliance(field.formKey, field.upper ? e.target.value.toUpperCase() : e.target.value)}
+                />
+              </Field>
+            );
+          })}
         </div>
       </div>
 
@@ -268,7 +299,9 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
               </Field>
             </>
           )}
-          {complianceSpec.map((spec) =>
+          {statutorySpec
+            .filter((spec) => !spec.showWhen || spec.showWhen(form.complianceFields))
+            .map((spec) =>
             spec.type === "select" ? (
               <Field key={spec.key} label={spec.label}>
                 <select
@@ -295,6 +328,17 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
             )
           )}
         </div>
+        {form.countryCode === "US" && form.complianceFields.state_tax_jurisdiction && !form.complianceFields.w4_filing_status && (
+          // Soft-required, non-blocking — some employees genuinely have no
+          // filing status on file yet, so this warns rather than blocks
+          // save. A blank filing status resolves to $0 federal withholding
+          // with no signal anywhere today (found 2026-09-15
+          // onboarding-guidance audit).
+          <div className="mt-4 rounded-[12px] bg-warning/10 border border-warning/30 px-4 py-3 text-[12px] text-warning">
+            This employee's state is set but no W-4 filing status is on file — federal (and possibly state)
+            withholding will calculate as $0 until one is entered.
+          </div>
+        )}
       </div>
 
       {form.countryCode === "UK" && (

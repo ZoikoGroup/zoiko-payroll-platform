@@ -27,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.modules.payroll.bank_routing import resolve_routing
 
 
 # ── Enums ──────────────────────────────────────────────────────────────
@@ -197,6 +198,57 @@ class PayrollEmployee(Base):
     # mapping that keeps the two in sync going forward).
     w4_filing_status = Column(String(20), nullable=True)
     w4_form_vintage  = Column(String(10), nullable=True)
+    # US-specific: Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox
+    # (ZP-TAX-US-2026-001 §3.3, gap-closure Phase 8, 2026-09-12). False for
+    # every employee today — engine/countries/us.py falls back to the
+    # existing standard (§3.2) bracket table exactly as before this column
+    # existed. True switches that employee to the genuinely different,
+    # narrower-banded §3.3 table (see hardcoded_defaults.py's
+    # "_STEP2"-tagged TaxSlab rows) — a real, higher-withholding
+    # calculation, not a cosmetic flag.
+    w4_step2_checkbox = Column(Boolean, default=False, nullable=False, server_default="false")
+
+    # US Form W-4 §3.4 controls (ZP-TAX-US-2026-001, gap-closure Plan
+    # Phase 2d) — each nullable/False by default and a complete no-op
+    # until explicitly entered, same convention as every other field
+    # above. w4_allowances_claimed only means anything on the LEGACY
+    # (pre-2020) calculation path (see w4_form_vintage above) — a 2020+
+    # employee's value here, if any, is simply never read.
+    w4_allowances_claimed = Column(Integer, nullable=True)
+    is_nonresident_alien = Column(Boolean, default=False, nullable=False, server_default="false")
+    # Steps 3/4(c) of the 2020+ Form W-4 — the employee's OWN certified
+    # dollar figures, preserved and applied exactly as given, never
+    # derived/estimated. Step 3 (dependents credit) is annual and
+    # subtracted from the computed annual tax; Step 4(a) (other income)
+    # is annual and added to taxable wages; Step 4(c) (extra withholding)
+    # is a flat PER-PAY-PERIOD amount added directly to withholding, not
+    # annualized.
+    w4_dependents_credit_annual = Column(Numeric(12, 2), nullable=True)
+    w4_other_income_annual = Column(Numeric(12, 2), nullable=True)
+    w4_extra_withholding_per_period = Column(Numeric(12, 2), nullable=True)
+
+    # Connecticut-specific: CT-W4 Withholding Code ("A"/"B"/"C"/"D"/"F") —
+    # a genuinely different concept from federal filing status/w4_filing_
+    # status above (ZP-TAX-US-2026-001 §4/CT DRS TPG-211, gap-closure
+    # Phase 8, 2026-09-12). CT eliminated traditional allowances entirely
+    # in favor of this employee-selected code, which drives its own
+    # 5-table calculation (exemption/base-tax/phase-out/recapture/credit)
+    # — see engine/countries/us.py's _calculate_ct_annual_tax. NULL for
+    # every employee today (and for every non-CT employee always) — a CT
+    # employee with no code on file resolves to $0 CT withholding,
+    # exactly as before this column existed, never a guessed code.
+    ct_withholding_code = Column(String(2), nullable=True)
+
+    # New Jersey-specific: NJ-W4 Rate Table letter ("A"/"B"/"C"/"D"/"E") —
+    # selected on Form NJ-W4, a genuinely different election from federal
+    # filing status (ZP-TAX-US-2026-001 §4/NJ Division of Taxation
+    # Tables for Percentage Method of Withholding, gap-closure Phase 8,
+    # 2026-09-13). Read directly by engine/countries/us.py's own NJ-
+    # specific branch as the bracket-lookup key (see
+    # hardcoded_defaults._US_STATE_GRADUATED_TAX_RATES["NJ"]'s own
+    # comment). NULL for every employee today — an NJ employee with no
+    # rate table on file resolves to $0, never a guessed table.
+    nj_rate_table = Column(String(2), nullable=True)
 
     # Canada-specific: TD1 federal total claim amount. NULL for every
     # non-CA employee, and for CA employees until explicitly set — the
@@ -282,12 +334,51 @@ class PayrollEmployee(Base):
     # work_state for a genuine multi-state commuter (see reciprocity fields
     # below).
     residence_state  = Column(String(100), nullable=True)
+    # City/local-level residence, distinct from residence_state above —
+    # gap-closure Level 2 Batch 7, 2026-09-13, added for New York's Yonkers
+    # resident surcharge (a city-level resident tax where residence_state
+    # alone can't distinguish a Yonkers resident from any other NY
+    # resident, since Yonkers is inside NY like every other NY city). NULL
+    # for every employee before this existed and for every non-Yonkers
+    # employee today — completely additive, no existing calculation reads
+    # this until an employee's own value is explicitly set.
+    residence_locality = Column(String(100), nullable=True)
     # Whether a reciprocity certificate (e.g. NJ-165) is on file for this
     # employee's resident/work state pair, and when it expires. False/NULL
     # for every employee today — reciprocity suppression only ever applies
     # when this is explicitly set. See reciprocity_resolver.py.
     reciprocity_certificate_on_file   = Column(Boolean, default=False, nullable=False, server_default="false")
     reciprocity_certificate_expiry    = Column(Date, nullable=True)
+
+    # Pennsylvania Act 32 Residency Certification Form (DCED-CLGS-32-6,
+    # ZP-TAX-US-2026-001 §7.1, gap-closure Plan Phase 3) — pure
+    # recordkeeping, mirroring reciprocity_certificate_on_file/expiry
+    # above exactly. Deliberately NOT read anywhere in
+    # engine/countries/us.py: unlike reciprocity, PA's own EIT
+    # withholding obligation (the "higher of" comparison, see
+    # residence_locality/residence_locality_rate) applies regardless of
+    # whether this form is on file — the form verifies the employee's
+    # address, it does not gate the calculation. False/None for every
+    # employee today; the actual PSD-code addresses already live in the
+    # existing generic residence_locality/work_locality fields above —
+    # this only tracks whether the certification itself was collected.
+    residency_certification_on_file  = Column(Boolean, default=False, nullable=False, server_default="false")
+    residency_certification_date     = Column(Date, nullable=True)
+
+    # Named generically in case another jurisdiction ever needs the same
+    # "employee elects their own withholding percentage" shape (same
+    # naming precedent as residence_state above). First consumer: Arizona
+    # Form A-4 (ZP-TAX-US-2026-001 §4 Matrix) — AZ's statutory range is
+    # 0.5%-3.5%, employee-elected; the engine previously always applied
+    # the document's own no-A-4-on-file default of 2.0% to every AZ
+    # employee regardless of what they actually elected. NULL (every
+    # employee today) means "no election on file" — engine/countries/
+    # us.py falls back to the existing 2.0% AZ default exactly as before
+    # this column existed, so no existing calculation changes just
+    # because this field now exists. Range validation (0.5-3.5 for AZ)
+    # lives in employee_validation.py, not here, same pattern as every
+    # other jurisdiction-specific field's validation.
+    state_income_tax_election_pct = Column(Numeric(5, 2), nullable=True)
 
     # Generic across every country (not UK-only) — "Monthly"/"Weekly"/
     # "Fortnightly"/"FourWeekly". Defaults to "Monthly" so every existing
@@ -360,6 +451,16 @@ class PayrollEmployee(Base):
 
     def __repr__(self):
         return f"<PayrollEmployee id={self.id} code={self.employee_code} status={self.status}>"
+
+    @property
+    def routing(self) -> list:
+        """Multi-jurisdiction routing block (ZP-MJR-2026-001): the
+        jurisdiction-correct list of [{key,label,value}] for this employee,
+        consumed by the additive EmployeeResponse.routing field. India reads
+        the dedicated `ifsc` column; every other country reads its codes
+        from compliance_fields (the same source the payslip snapshot uses).
+        Returns [] when the employee's country is unknown."""
+        return resolve_routing(self)
 
 
 class EmployeeEstablishment(Base):
@@ -1218,7 +1319,11 @@ class JurisdictionPack(Base):
 
     version              = Column(String(20), nullable=False, default="1.0")
     status               = Column(String(20), nullable=False, default="Draft")
-    # Draft | In Review | QA | Approved | Active | Deprecated | Retired — per spec Section 5/17.
+    # Tax packs: Draft | In Review | QA | Approved | Active | Deprecated |
+    # Retired — per spec Section 5/17. POLICY packs use only "Draft" |
+    # "Active" (see set_jurisdiction_pack_status: any other status on a
+    # policy pack is rejected) — policy lifecycle intentionally has no
+    # approval/review stage.
 
     effective_from       = Column(Date, nullable=True)
     effective_to         = Column(Date, nullable=True)
@@ -2031,6 +2136,29 @@ class SourceArtifact(Base):
     reviewer_approved_at  = Column(DateTime(timezone=True), nullable=True)
     superseded_by_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
     created_at            = Column(DateTime(timezone=True), server_default=func.now())
+    # Reviewer independence (ZP-TAX-US-2026-001 §14.2 "independent
+    # reviewer", gap-closure Plan Phase 4) — unlike JurisdictionPack
+    # (which already has created_by_id/updated_by_id and a real
+    # maker!=checker gate), this table previously had NO way to even
+    # detect the same person creating and "reviewing" their own source
+    # artifact. Nullable — every artifact created before this field
+    # existed has no creator on record, so mark_source_artifact_reviewed
+    # only enforces the independence check when this IS set.
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Real preserved-file storage (ZP-TAX-US-2026-001 §14.2's "source URL
+    # and/or preserved file", gap-closure Plan Phase 4) — reuses the SAME
+    # app.core.object_storage abstraction org logos already use (local
+    # disk by default; transparently switches to GCS if
+    # PAYROLL_GCS_BUCKET is ever configured, no code change needed here).
+    # `file_path` is the storage REFERENCE (a local path or a gs:// URI),
+    # never a web-servable URL directly — see the dedicated download
+    # endpoint. checksum_sha256 above is computed FROM this file's actual
+    # bytes at upload time (service.upload_source_artifact_file) — real
+    # and verifiable, unlike a hand-typed value.
+    file_path             = Column(String(500), nullable=True)
+    original_filename     = Column(String(255), nullable=True)
+    content_type          = Column(String(100), nullable=True)
+    file_size_bytes       = Column(Integer, nullable=True)
 
     def __repr__(self):
         return f"<SourceArtifact id={self.id} agency={self.agency} title={self.title!r}>"
@@ -2082,6 +2210,17 @@ class LocalityRate(Base):
     nonresident_rate_pct  = Column(Numeric(6, 4), nullable=True)
     flat_amount           = Column(Numeric(12, 2), nullable=True)   # for LST-style flat local taxes
     tax_collector_id      = Column(String(100), nullable=True)      # remittance routing destination
+    # Tiered/progressive local tax (Production-Readiness Plan Phase 4,
+    # 2026-09-15) — for the handful of localities (Maryland's Anne
+    # Arundel/Frederick counties, New York City) whose own published rate
+    # is a real marginal bracket table, not a single flat percentage.
+    # {"SINGLE": {"deduction": N, "brackets": [{"min","max","rate"}, ...]},
+    # "MFJ": {...}} — see engine/countries/us.py's _tiered_locality_tax
+    # for how this is consumed; None (every locality before this column
+    # existed, and every ordinary flat-rate locality since) is a complete
+    # no-op, resident_rate_pct/nonresident_rate_pct/flat_amount still
+    # drive calculation exactly as before.
+    bracket_schedule      = Column(JSON, nullable=True)
 
     dataset = relationship("LocalityDataset", back_populates="rates")
 
@@ -2591,3 +2730,40 @@ class OrganizationYtdAccumulator(Base):
 
     def __repr__(self):
         return f"<OrganizationYtdAccumulator org={self.organization_id} year={self.tax_year} comp={self.tax_component}>"
+
+
+class NewHireReport(Base):
+    """US New Hire Reporting compliance tracking (Production-Readiness
+    Plan Phase 5) — the one genuinely NEW concept in that phase, unlike
+    W-2/941/940 which are all report-GENERATION against payroll already
+    run. Every state requires an employer to report a new hire to a state
+    registry within a short window (commonly ~20 days, but this genuinely
+    varies by state — some states count from hire date, others from first
+    day of work, and the exact number of days is not modeled per state
+    here). One row per employee hire event, auto-created for every new US
+    employee (see service.create_employee) — NOT backfilled for employees
+    that existed before this feature shipped, since guessing whether an
+    old hire was already reported would be worse than simply not tracking
+    it. `due_date` is a SUGGESTED deadline (hire_date + a configurable
+    default of 20 days), deliberately editable by an Org Admin who knows
+    their state's actual requirement — never presented as an authoritative
+    legal deadline."""
+    __tablename__ = "payroll_new_hire_reports"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    work_state       = Column(String(100), nullable=True)   # snapshot at creation — the employee's own work_state may change later
+    hire_date        = Column(Date, nullable=False)
+    due_date         = Column(Date, nullable=False)
+    status           = Column(String(20), nullable=False, default="Pending", server_default="Pending")   # Pending | Filed
+    filed_date       = Column(Date, nullable=True)
+    filed_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes            = Column(Text, nullable=True)
+
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<NewHireReport employee={self.employee_id} due={self.due_date} status={self.status}>"

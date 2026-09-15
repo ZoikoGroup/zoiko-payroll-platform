@@ -89,6 +89,13 @@ class GoldenRate:
     employee_rate_pct: Optional[Decimal] = None
     employer_rate_pct: Optional[Decimal] = None
     flat_amount: Optional[Decimal] = None
+    # US state-program gating (ZP-TAX-US-2026-001 §5, gap-closure Phase 8):
+    # engine/countries/us.py's state-program loop checks THIS row's own
+    # jurisdiction_state against _US_STATE_PROGRAM_ENABLED_STATES, not
+    # ctx.work_state — same convention TaxSlab/GoldenSlab already uses.
+    # None (every existing UK/CA/India case) is unaffected; only a case
+    # that explicitly sets it activates a state program.
+    jurisdiction_state: Optional[str] = None
 
 
 @dataclass
@@ -134,6 +141,7 @@ def _build_rate_map(raw: Optional[dict]) -> dict:
             employee_rate_pct=_to_decimal(spec.get("employee_rate_pct")),
             employer_rate_pct=_to_decimal(spec.get("employer_rate_pct")),
             flat_amount=_to_decimal(spec.get("flat_amount")),
+            jurisdiction_state=spec.get("jurisdiction_state"),
         )
     return rate_map
 

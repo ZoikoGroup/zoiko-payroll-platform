@@ -85,6 +85,18 @@ class PayrollContext:
     # COUNTRIES for the rollout switch this is additionally gated on.
     ca_taxability_rules: dict = field(default_factory=dict)
 
+    # US: per-program (federal income tax/Social Security/Medicare/FUTA/
+    # state income tax) earning-component taxability (ZP-TAX-US-2026-001
+    # §9.1, gap-closure Phase 7) — same {tax_component: {earning_type:
+    # is_taxable}} shape as ca_taxability_rules above, resolved by
+    # service.get_us_taxability_rules_bundle, backed by the identical
+    # TaxabilityRule model. Empty dict (every jurisdiction/org today)
+    # means us.py's _resolve_us_taxability falls back to "every component
+    # counts," unchanged from before this field existed — see shared.py's
+    # _US_TAXABILITY_MATRIX_ENABLED_COUNTRIES for the rollout switch this
+    # is additionally gated on.
+    us_taxability_rules: dict = field(default_factory=dict)
+
     # India Forms 122/123/124 (§6.1/§6.2, gap-closure Phase E) — resolved
     # by service.py's get_india_salary_tds_inputs from the employee's own
     # Approved/Issued form rows. All default to 0, meaning india.py's
@@ -131,6 +143,17 @@ class PayrollContext:
     # work_locality set through any admin-facing UI... until now — see
     # countryFieldSpecs.js's new "Work Locality Code" field).
     locality_rate: object = None
+    # US: the SAME kind of resolved LocalityRate object as locality_rate
+    # above, but for the employee's OWN residence_locality code instead
+    # of work_locality (gap-closure Plan Phase 3, ZP-TAX-US-2026-001
+    # §7.1) — a second, independent get_locality_rate lookup. Powers the
+    # generic "higher of resident vs. work locality rate" comparison for
+    # LocalityRate rows tagged locality_type="PSD_EIT_LST" (see
+    # engine/countries/us.py). None for every employee today (no
+    # residence-locality-scoped LocalityRate data is seeded anywhere
+    # yet — this is deliberately a mechanism-only build, real PSD data
+    # requires a source file that hasn't been supplied).
+    residence_locality_rate: object = None
 
     # Employee tax-profile fields — all opt-in (None/False means "not
     # set," never inferred), threaded from PayrollEmployee so a country
@@ -165,6 +188,45 @@ class PayrollContext:
     # now exist.
     w4_filing_status: str = None
     w4_form_vintage: str = None
+    # US Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox
+    # (ZP-TAX-US-2026-001 §3.3). False for every employee today —
+    # engine/countries/us.py falls back to the existing standard bracket
+    # table when False, so no existing calculation changes just because
+    # this field now exists.
+    w4_step2_checkbox: bool = False
+    # Federal W-4 §3.4 controls (ZP-TAX-US-2026-001, gap-closure Plan
+    # Phase 2d) — see models.PayrollEmployee's matching fields for the
+    # full docstring. All None/False for every employee today — each is
+    # an independent no-op in engine/countries/us.py until explicitly set.
+    w4_allowances_claimed: int = None
+    is_nonresident_alien: bool = False
+    w4_dependents_credit_annual: Decimal = None
+    w4_other_income_annual: Decimal = None
+    w4_extra_withholding_per_period: Decimal = None
+    # Connecticut CT-W4 Withholding Code ("A"/"B"/"C"/"D"/"F") — see
+    # models.PayrollEmployee.ct_withholding_code's own docstring. None for
+    # every employee today — engine/countries/us.py's CT-specific path
+    # only activates when this is set, resolving to $0 otherwise.
+    ct_withholding_code: str = None
+    # New Jersey NJ-W4 Rate Table letter ("A"/"B"/"C"/"D"/"E") — see
+    # models.PayrollEmployee.nj_rate_table's own docstring. None for
+    # every employee today — engine/countries/us.py's NJ-specific
+    # bracket lookup only activates when this is set, resolving to $0
+    # otherwise.
+    nj_rate_table: str = None
+    # City/local-level residence — see models.PayrollEmployee.residence_locality's
+    # own docstring. None for every employee today — engine/countries/us.py's
+    # Yonkers resident-surcharge path only activates when this equals
+    # "YONKERS"; every other value/None is a complete no-op.
+    residence_locality: str = None
+
+    # Employee's own elected state withholding percentage (currently only
+    # meaningful for Arizona Form A-4, ZP-TAX-US-2026-001 §4 Matrix — AZ's
+    # statutory range is 0.5%-3.5%, employee-elected). None for every
+    # employee today — engine/countries/us.py falls back to the existing
+    # hardcoded 2.0% AZ no-A-4-on-file default when None, so no existing
+    # calculation changes just because this field now exists.
+    state_income_tax_election_pct: Decimal = None
 
     # Canada TD1 federal total claim amount. None for every non-CA
     # employee, and for CA employees until explicitly set —
@@ -218,6 +280,19 @@ class PayrollContext:
     ytd_cpp2_pensionable_earnings: Decimal = None  # CPP2/QPP2
     ytd_insurable_earnings: Decimal = None         # EI/QPIP
     ytd_basic_exemption_used: Decimal = None       # CPP/QPP $3,500 exemption, YTD-consumed
+
+    # US Social Security wage base / FUTA wage base / Additional Medicare
+    # threshold (ZP-TAX-US-2026-001 §3.1, gap-closure Phase 2) — same
+    # "as of BEFORE this pay period, None means not wired" contract as
+    # Canada's ytd_pensionable_earnings etc. above: read from
+    # PayrollYtdAccumulator by service.py's _load_us_ytd, gated on
+    # shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES. engine/countries/us.py
+    # MUST fall back to its existing current-period-annualized estimate
+    # when any of these is None, never treat None as 0 — identical
+    # dormancy discipline to every other YTD field in this file.
+    ytd_ss_wages_before: Decimal = None
+    ytd_futa_wages_before: Decimal = None
+    ytd_medicare_wages_before: Decimal = None      # tracks cumulative Medicare wages for the Additional Medicare threshold, not a cap
 
     # Canada Option 2 cumulative-averaging income tax withholding
     # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9) — this employee's
@@ -388,6 +463,12 @@ class PayrollResult:
     ytd_cpp2_pensionable_earnings: Decimal = None
     ytd_insurable_earnings: Decimal = None
     ytd_basic_exemption_used: Decimal = None
+    # US: cumulative figures AFTER this period, same None-means-"not
+    # applicable" contract as the Canada fields above — see
+    # PayrollContext's matching ytd_*_before fields.
+    ytd_ss_wages_after: Decimal = None
+    ytd_futa_wages_after: Decimal = None
+    ytd_medicare_wages_after: Decimal = None
     # Canada Option 2 cumulative-averaging income tax withholding —
     # cumulative figures AFTER this period, same None-means-"not
     # applicable" contract as the ytd_* fields above. See PayrollContext's

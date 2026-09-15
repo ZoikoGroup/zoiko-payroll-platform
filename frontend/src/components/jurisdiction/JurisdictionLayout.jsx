@@ -12,7 +12,7 @@ import {
   getCanonicalContributionRates, upsertCanonicalContributionRate, deleteCanonicalContributionRate,
   getTaxConfigurationAudit,
 } from "../../service/superAdminService";
-import { STATUS_PILL_MAP, STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
+import { STATUS_PILL_MAP, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
 import Field from "./Field";
 import RatesTab from "./RatesTab";
 import SlabsTab from "./SlabsTab";
@@ -335,7 +335,7 @@ export default function JurisdictionLayout({
                   >
                     <Eye size={13} /> Impact Preview
                   </button>
-                  {selectedPack.status !== "Active" && (
+                  {selectedPack.status !== "Active" && selectedPack.packType === "tax" && (
                     <button
                       onClick={() => setShowHotfixActivate(true)}
                       title="Emergency activation — bypasses the distinct-approver requirement, flagged for mandatory review"
@@ -387,7 +387,7 @@ export default function JurisdictionLayout({
                     className={inputClass + " w-auto"} value={selectedPack.status}
                     onChange={(e) => changeStatus(e.target.value)}
                   >
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    {(selectedPack.packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </div>

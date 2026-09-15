@@ -1,25 +1,38 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import Modal from "../../Modal";
-import { getTaxabilityRules, upsertTaxabilityRule, deleteTaxabilityRule } from "../../../service/superAdminService";
-import { inputClass, labelClass } from "../constants";
+import Modal from "../Modal";
+import { getTaxabilityRules, upsertTaxabilityRule, deleteTaxabilityRule } from "../../service/superAdminService";
+import { inputClass, labelClass } from "./constants";
 
-// Canada Taxability Matrix (ZP-TAX-CA-2026-001 §17/AC-17, gap-closure
-// Phase 5) — per-program (federal tax/provincial tax/CPP/EI) earning-
-// component classification. Mirrors INCodeWagesTab.jsx's structure
-// exactly (same TaxabilityRule model/CRUD), but Canada has FOUR
-// tax_components instead of India's one ("code_wages"), so this adds a
-// program selector; and the default here is the OPPOSITE of India's —
+// Taxability Matrix — per-program earning-component classification,
+// backed by the same TaxabilityRule model/CRUD for every country that
+// uses it. Originally Canada-only (ZP-TAX-CA-2026-001 §17/AC-17,
+// gap-closure Phase 5) as CATaxabilityMatrixTab; generalized here with a
+// `country` prop (ZP-TAX-US-2026-001 §9.1, gap-closure Phase 7) — same
+// move SuiEmployerRatesPanel.jsx already made for its own CA/US split.
+// `country` defaults to "CA" so CACompliancePage.jsx's existing usage is
+// completely unaffected; USACompliancePage.jsx is the first caller to
+// pass "US". The default here is the OPPOSITE of India's Code Wages tab:
 // every component counts (is_taxable=True) unless explicitly excluded,
-// matching today's single-ctx.gross behavior. Dormant behind
-// shared._CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES until enabled.
+// matching today's single-gross-figure behavior. Dormant behind each
+// country's own shared._{CA,US}_TAXABILITY_MATRIX_ENABLED_COUNTRIES
+// switch until enabled.
 
-const PROGRAMS = [
-  { value: "income_tax_federal", label: "Federal Income Tax" },
-  { value: "income_tax_provincial", label: "Provincial / Quebec Income Tax" },
-  { value: "cpp_pensionable", label: "CPP / QPP Pensionable Earnings" },
-  { value: "ei_insurable", label: "EI / QPIP Insurable Earnings" },
-];
+const PROGRAMS_BY_COUNTRY = {
+  CA: [
+    { value: "income_tax_federal", label: "Federal Income Tax" },
+    { value: "income_tax_provincial", label: "Provincial / Quebec Income Tax" },
+    { value: "cpp_pensionable", label: "CPP / QPP Pensionable Earnings" },
+    { value: "ei_insurable", label: "EI / QPIP Insurable Earnings" },
+  ],
+  US: [
+    { value: "federal_income_tax", label: "Federal Income Tax" },
+    { value: "social_security", label: "Social Security Wages" },
+    { value: "medicare", label: "Medicare Wages" },
+    { value: "futa", label: "FUTA Wages" },
+    { value: "state_income_tax", label: "State Income Tax" },
+  ],
+};
 
 const COMPONENTS = [
   { value: "basic", label: "Basic" },
@@ -30,7 +43,7 @@ const COMPONENTS = [
   { value: "named_allowances", label: "Named Allowances (policy-defined)" },
 ];
 
-function RuleFormModal({ taxComponent, onClose, onSaved, addToast }) {
+function RuleFormModal({ country, taxComponent, onClose, onSaved, addToast }) {
   const [earningType, setEarningType] = useState("additional_compensation");
   const [isTaxable, setIsTaxable] = useState(false);
   const [state, setState] = useState("");
@@ -40,7 +53,7 @@ function RuleFormModal({ taxComponent, onClose, onSaved, addToast }) {
     setSaving(true);
     try {
       await upsertTaxabilityRule({
-        jurisdictionCountry: "CA", jurisdictionState: state.trim() || null,
+        jurisdictionCountry: country, jurisdictionState: state.trim() || null,
         taxComponent, earningType, isTaxable,
       });
       addToast?.("Classification saved.", "success");
@@ -70,7 +83,7 @@ function RuleFormModal({ taxComponent, onClose, onSaved, addToast }) {
         </div>
         <div>
           <label className={labelClass}>State <span className="font-normal normal-case tracking-normal text-foreground-disabled">(optional — leave blank for country-wide)</span></label>
-          <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} placeholder="e.g. ON" />
+          <input className={inputClass} value={state} onChange={(e) => setState(e.target.value)} placeholder={country === "US" ? "e.g. CA" : "e.g. ON"} />
         </div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
@@ -81,8 +94,9 @@ function RuleFormModal({ taxComponent, onClose, onSaved, addToast }) {
   );
 }
 
-export default function CATaxabilityMatrixTab() {
-  const [program, setProgram] = useState("income_tax_federal");
+export default function TaxabilityMatrixTab({ country = "CA" }) {
+  const programs = PROGRAMS_BY_COUNTRY[country] || PROGRAMS_BY_COUNTRY.CA;
+  const [program, setProgram] = useState(programs[0].value);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -96,14 +110,14 @@ export default function CATaxabilityMatrixTab() {
   async function refresh() {
     setLoading(true);
     try {
-      const data = await getTaxabilityRules({ country: "CA", taxComponent: program });
+      const data = await getTaxabilityRules({ country, taxComponent: program });
       setRows(Array.isArray(data) ? data : []);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { refresh(); }, [program]);
+  useEffect(() => { refresh(); }, [program, country]);
 
   async function handleDelete(id) {
     try {
@@ -122,7 +136,7 @@ export default function CATaxabilityMatrixTab() {
         </div>
       )}
       <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-muted p-1 flex-wrap">
-        {PROGRAMS.map((p) => (
+        {programs.map((p) => (
           <button
             key={p.value} onClick={() => setProgram(p.value)}
             className={`rounded-md px-3 py-1.5 text-xs font-semibold ${program === p.value ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"}`}
@@ -133,7 +147,7 @@ export default function CATaxabilityMatrixTab() {
       </div>
       <div className="rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-[11px] text-foreground-secondary">
         With no row configured for a component, it counts toward every program by default (today's existing
-        behavior — one gross figure feeds all of CPP/EI/federal/provincial tax). Add a row below only to EXCLUDE a
+        behavior — one gross figure feeds every wage base). Add a row below only to EXCLUDE a
         component from this specific program. Dormant until a Super Admin enables the Taxability Matrix rollout
         switch — configuring rows here has no effect on live payroll until then.
       </div>
@@ -178,7 +192,7 @@ export default function CATaxabilityMatrixTab() {
         </div>
       )}
       {showForm && (
-        <RuleFormModal taxComponent={program} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); refresh(); }} addToast={addToast} />
+        <RuleFormModal country={country} taxComponent={program} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); refresh(); }} addToast={addToast} />
       )}
     </div>
   );

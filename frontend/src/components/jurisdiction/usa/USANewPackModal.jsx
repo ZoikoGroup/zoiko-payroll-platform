@@ -2,7 +2,7 @@ import { useState } from "react";
 import Modal from "../../Modal";
 import { useToast } from "../../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../../service/superAdminService";
-import { inputClass, labelClass, STATUS_OPTIONS } from "../constants";
+import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS } from "../constants";
 
 // USA-only replacement for the generic NewPackModal (every other country
 // keeps using that one untouched — see JurisdictionLayout's
@@ -61,7 +61,7 @@ export default function USANewPackModal({ country, state, packType, onClose, onC
             <div className="col-span-2"><label className={labelClass}>Pack ID</label><input className={inputClass} value={form.packId} onChange={set("packId")} placeholder="e.g. US-PAYROLL-2026-V1" /></div>
             <div><label className={labelClass}>State (optional)</label><input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder="e.g. California" /></div>
             <div><label className={labelClass}>Version</label><input className={inputClass} value={form.version} onChange={set("version")} /></div>
-            <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+            <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{(packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
             <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026" /></div>
           </div>
         </FormSection>

@@ -100,6 +100,12 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     // UK: was reaching the API response (once the schema fix landed) but
     // still had no row here — found 2026-09-09 gap-closure Phase 3.
     ["Postgraduate Loan Deduction", item.postgradLoanDeduction],
+    // US: State Disability Insurance / other state payroll-program employee
+    // deductions (CA SDI, NY/NJ/RI TDI, CT/MA/WA/CO/OR/etc. paid-leave
+    // employee share) — computed and persisted but never shown here until
+    // the 2026-09-15 Org Admin visibility audit.
+    ["State Disability Insurance", item.stateDisabilityInsurance],
+    ["State Payroll Programs (e.g. Paid Leave/TDI)", item.stateProgramDeductions],
   ].filter(([, v]) => Number(v) > 0);
 
   const employerContributions = [
@@ -115,6 +121,12 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     // employer-only charge, consistent with Employer National Insurance
     // above.
     ["Apprenticeship Levy", item.employerApprenticeshipLevy],
+    // US: FUTA / SUI / state payroll-program employer contributions —
+    // computed and persisted but never reached this list (or any payslip
+    // API response at all) until the 2026-09-15 Org Admin visibility audit.
+    ["FUTA (Employer)", item.employerFuta],
+    ["SUI (Employer)", item.employerSui],
+    ["State Payroll Programs (Employer)", item.employerStateProgramContributions],
   ].filter(([, v]) => Number(v) > 0);
 
   return (

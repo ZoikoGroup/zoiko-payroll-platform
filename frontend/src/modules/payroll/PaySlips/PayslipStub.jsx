@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
+import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
 
 const printStyles = `
 @media print {
@@ -78,6 +79,13 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     // UK: was reaching the API response (once the schema fix landed) but
     // still had no row here — found 2026-09-09 gap-closure Phase 3.
     { label: "Postgraduate Loan Deduction", amount: payslip.postgradLoanDeduction || 0 },
+    // US: State Disability Insurance / other state payroll-program employee
+    // deductions (CA SDI, NY/NJ/RI TDI, CT/MA/WA/CO/OR/etc. paid-leave
+    // employee share) — computed and persisted but never shown here until
+    // the 2026-09-15 Org Admin visibility audit (schema was silently
+    // stripping them from the API response before this fix too).
+    { label: "State Disability Insurance", amount: payslip.stateDisabilityInsurance || 0 },
+    { label: "State Payroll Programs (e.g. Paid Leave/TDI)", amount: payslip.stateProgramDeductions || 0 },
   ].filter((r) => Number(r.amount) > 0);
 
   // Employer-side contributions (PF/ESI/Social Security/Medicare/Pension/NI)
@@ -101,6 +109,13 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     ["Pay Date", payslip.payDate],
     ["Bank Name", payslip.bankName || null],
     ["Bank Account", payslip.bankAccount],
+    // Jurisdiction-correct routing code (IFSC / Sort Code / ABA / Transit /
+    // IBAN / BSB) from the payslip snapshot — falls back to the legacy ifsc
+    // field for payslips generated before the `routing` block existed.
+    [bankBtfLabel(payslip.country),
+      payslip.routing?.length
+        ? combineRoutingValue(payslip.country, (key) => payslip.routing.find((r) => r.key === key)?.value)
+        : payslip.ifsc || null],
     [identity.label, identity.value],
     ["Payable Days", payslip.payableDays != null && payslip.totalWorkingDays != null
       ? `${payslip.payableDays} / ${payslip.totalWorkingDays}` : null],
@@ -239,7 +254,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                 <div className="px-4 py-3 text-[12px] font-bold text-foreground-muted uppercase tracking-wider">Salary Credit Date</div>
               </div>
               <div className="grid grid-cols-2">
-                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">Bank Transfer (NEFT)</div>
+                <div className="px-4 py-3 text-[13px] font-medium text-foreground border-r border-border">Bank Transfer ({bankPaymentModeLabel(payslip.country)})</div>
                 <div className="px-4 py-3 text-[13px] font-medium text-foreground">{payslip.payDate || "\u2014"}</div>
               </div>
             </div>

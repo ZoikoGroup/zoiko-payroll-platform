@@ -9,6 +9,9 @@ import UKEmployerChargesPanel from "./UKEmployerChargesPanel";
 import INForm138Panel from "./INForm138Panel";
 import CAPd7aPanel from "./CAPd7aPanel";
 import CAWsdrfPanel from "./CAWsdrfPanel";
+import USForm941Panel from "./USForm941Panel";
+import USForm940Panel from "./USForm940Panel";
+import USNewHireReportingPanel from "./USNewHireReportingPanel";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const BASE_TABS = [
@@ -35,6 +38,15 @@ const CA_PD7A_TAB = { id: "ca-pd7a", label: "Canada PD7A", icon: Landmark };
 // Quebec WSDRF (gap-closure Phase 7) — same employer-wide, non-run-based
 // reasoning as the PD7A tab above.
 const CA_WSDRF_TAB = { id: "ca-wsdrf", label: "Quebec WSDRF", icon: Landmark };
+// US Form 941/940 (Production-Readiness Plan Phase 5) — quarter/year-
+// level, employer-wide, never tied to a single PayrollRun, same reasoning
+// as the PD7A tab above.
+const US_941_TAB = { id: "us-941", label: "Form 941", icon: Landmark };
+const US_940_TAB = { id: "us-940", label: "Form 940", icon: Landmark };
+// New Hire Reporting is compliance TRACKING (a due-date + mark-filed
+// list), not report generation like 941/940 above — still its own tab,
+// same "doesn't fit the run-scoped Generate Report flow" reasoning.
+const US_NEW_HIRE_TAB = { id: "us-new-hire", label: "New Hire Reporting", icon: FileText };
 
 export default function ReportsPage() {
   const { addToast } = useToast();
@@ -45,11 +57,13 @@ export default function ReportsPage() {
   // India-forms button gate — most orgs never explicitly set this field.
   const isIndia = !jurisdictionCountry || jurisdictionCountry === "IN";
   const isCanada = jurisdictionCountry === "CA";
+  const isUs = jurisdictionCountry === "US";
   const tabs = [
     ...BASE_TABS,
     ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
     ...(isIndia ? [IN_FORM_138_TAB] : []),
     ...(isCanada ? [CA_PD7A_TAB, CA_WSDRF_TAB] : []),
+    ...(isUs ? [US_941_TAB, US_940_TAB, US_NEW_HIRE_TAB] : []),
   ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
@@ -292,6 +306,9 @@ export default function ReportsPage() {
       {isIndia && activeTab === "in-form-138" && <INForm138Panel />}
       {isCanada && activeTab === "ca-pd7a" && <CAPd7aPanel />}
       {isCanada && activeTab === "ca-wsdrf" && <CAWsdrfPanel />}
+      {isUs && activeTab === "us-941" && <USForm941Panel />}
+      {isUs && activeTab === "us-940" && <USForm940Panel />}
+      {isUs && activeTab === "us-new-hire" && <USNewHireReportingPanel />}
     </div>
   );
 }

@@ -82,7 +82,15 @@ def _resolve_policy_lock(db: Session, organization_id: int) -> dict:
     if not details or not details.active_pack_id:
         return {}
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == details.active_pack_id).first()
-    return (pack.policy_defaults or {}) if pack else {}
+    # Only an ACTIVE policy pack governs an organization's locks/inherited
+    # values. Since the policy lifecycle is now Draft | Active only, a pack
+    # that has been flipped back to Draft (unpublished) must stop governing
+    # immediately — otherwise an org assigned a demoted pack would stay
+    # bound by values that are no longer live. No-op for a non-policy pack
+    # ever being pointed at by active_pack_id.
+    if not pack or pack.pack_type != "policy" or pack.status != "Active":
+        return {}
+    return (pack.policy_defaults or {})
 
 
 def _check_field_lock(locks: dict, path: tuple, value) -> None:

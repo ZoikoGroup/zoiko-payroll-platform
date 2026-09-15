@@ -661,6 +661,65 @@ _TAX_SLABS_BY_COUNTRY = {
         dict(min_amount=Decimal("217300"),  max_amount=Decimal("271750"),   rate_pct=Decimal("32"),  rate_label="32%",  tax_formula="$39,207 + 32% over $217,300", filing_status="HOH", sort_order=37),
         dict(min_amount=Decimal("271750"),  max_amount=Decimal("656150"),   rate_pct=Decimal("35"),  rate_label="35%",  tax_formula="$56,631 + 35% over $271,750", filing_status="HOH", sort_order=38),
         dict(min_amount=Decimal("656150"),  max_amount=None,                rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="$191,171 + 37% over $656,150", filing_status="HOH", sort_order=39),
+
+        # Form W-4 Step 2 checkbox schedule (ZP-TAX-US-2026-001 §3.3,
+        # gap-closure Phase 8, 2026-09-12) — a genuinely DIFFERENT bracket
+        # table (narrower bands, taxes sooner) from the standard §3.2
+        # table above, used directly when the employee has checked the
+        # "Multiple Jobs or Spouse Works" box in Form W-4 Step 2. Tagged
+        # with a distinct filing_status suffix ("_STEP2") rather than a
+        # new column, matching _calculate_annual_tax's existing exact-
+        # match-on-filing_status mechanism — us.py appends this suffix to
+        # the employee's own filing_status only when
+        # ctx.w4_step2_checkbox is True, so every existing employee
+        # (checkbox unset/False) is completely unaffected.
+        #
+        # Deliberately NOT implemented here: §3.4's separate "2020+
+        # standard adjustment" ($12,900 MFJ/$8,600 otherwise, added to
+        # wages before applying the STANDARD table when Step 2 is NOT
+        # checked) — the real IRS Pub. 15-T Worksheet 1A mechanism for
+        # exactly how/where that figure combines with the existing
+        # standard_deduction ContributionRate rows already in production
+        # use isn't something this implementation is confident enough
+        # of to risk silently mis-calculating every US employee's
+        # existing federal withholding. This Step 2 table has no such
+        # ambiguity — it's applied directly, on its own, with zero
+        # interaction with any other adjustment.
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("8050"),     rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="No withholding up to $8,050 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=200),
+        dict(min_amount=Decimal("8050"),    max_amount=Decimal("14250"),    rate_pct=Decimal("10"),  rate_label="10%",  tax_formula="10% of income over $8,050 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=201),
+        dict(min_amount=Decimal("14250"),   max_amount=Decimal("33250"),    rate_pct=Decimal("12"),  rate_label="12%",  tax_formula="$620 + 12% over $14,250 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=202),
+        dict(min_amount=Decimal("33250"),   max_amount=Decimal("60900"),    rate_pct=Decimal("22"),  rate_label="22%",  tax_formula="$2,900 + 22% over $33,250 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=203),
+        dict(min_amount=Decimal("60900"),   max_amount=Decimal("108938"),   rate_pct=Decimal("24"),  rate_label="24%",  tax_formula="$8,983 + 24% over $60,900 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=204),
+        dict(min_amount=Decimal("108938"),  max_amount=Decimal("136163"),   rate_pct=Decimal("32"),  rate_label="32%",  tax_formula="$20,512 + 32% over $108,938 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=205),
+        dict(min_amount=Decimal("136163"),  max_amount=Decimal("328350"),   rate_pct=Decimal("35"),  rate_label="35%",  tax_formula="$29,224 + 35% over $136,163 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=206),
+        dict(min_amount=Decimal("328350"),  max_amount=None,                rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="$96,489.63 + 37% over $328,350 (Step 2 checked)", filing_status="SINGLE_STEP2", sort_order=207),
+        # MFS shares the exact same "Single/MFS" combined table as SINGLE
+        # above — same duplication convention the base §3.2 table already
+        # uses for these two statuses.
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("8050"),     rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="No withholding up to $8,050 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=208),
+        dict(min_amount=Decimal("8050"),    max_amount=Decimal("14250"),    rate_pct=Decimal("10"),  rate_label="10%",  tax_formula="10% of income over $8,050 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=209),
+        dict(min_amount=Decimal("14250"),   max_amount=Decimal("33250"),    rate_pct=Decimal("12"),  rate_label="12%",  tax_formula="$620 + 12% over $14,250 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=210),
+        dict(min_amount=Decimal("33250"),   max_amount=Decimal("60900"),    rate_pct=Decimal("22"),  rate_label="22%",  tax_formula="$2,900 + 22% over $33,250 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=211),
+        dict(min_amount=Decimal("60900"),   max_amount=Decimal("108938"),   rate_pct=Decimal("24"),  rate_label="24%",  tax_formula="$8,983 + 24% over $60,900 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=212),
+        dict(min_amount=Decimal("108938"),  max_amount=Decimal("136163"),   rate_pct=Decimal("32"),  rate_label="32%",  tax_formula="$20,512 + 32% over $108,938 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=213),
+        dict(min_amount=Decimal("136163"),  max_amount=Decimal("328350"),   rate_pct=Decimal("35"),  rate_label="35%",  tax_formula="$29,224 + 35% over $136,163 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=214),
+        dict(min_amount=Decimal("328350"),  max_amount=None,                rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="$96,489.63 + 37% over $328,350 (Step 2 checked)", filing_status="MFS_STEP2", sort_order=215),
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("16100"),    rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="No withholding up to $16,100 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=216),
+        dict(min_amount=Decimal("16100"),   max_amount=Decimal("28500"),    rate_pct=Decimal("10"),  rate_label="10%",  tax_formula="10% of income over $16,100 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=217),
+        dict(min_amount=Decimal("28500"),   max_amount=Decimal("66500"),    rate_pct=Decimal("12"),  rate_label="12%",  tax_formula="$1,240 + 12% over $28,500 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=218),
+        dict(min_amount=Decimal("66500"),   max_amount=Decimal("121800"),   rate_pct=Decimal("22"),  rate_label="22%",  tax_formula="$5,800 + 22% over $66,500 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=219),
+        dict(min_amount=Decimal("121800"),  max_amount=Decimal("217875"),   rate_pct=Decimal("24"),  rate_label="24%",  tax_formula="$17,966 + 24% over $121,800 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=220),
+        dict(min_amount=Decimal("217875"),  max_amount=Decimal("272325"),   rate_pct=Decimal("32"),  rate_label="32%",  tax_formula="$41,024 + 32% over $217,875 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=221),
+        dict(min_amount=Decimal("272325"),  max_amount=Decimal("400450"),   rate_pct=Decimal("35"),  rate_label="35%",  tax_formula="$58,448 + 35% over $272,325 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=222),
+        dict(min_amount=Decimal("400450"),  max_amount=None,                rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="$103,291.75 + 37% over $400,450 (Step 2 checked)", filing_status="MFJ_STEP2", sort_order=223),
+        dict(min_amount=Decimal("0"),       max_amount=Decimal("12075"),    rate_pct=Decimal("0"),   rate_label="0%",   tax_formula="No withholding up to $12,075 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=224),
+        dict(min_amount=Decimal("12075"),   max_amount=Decimal("20925"),    rate_pct=Decimal("10"),  rate_label="10%",  tax_formula="10% of income over $12,075 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=225),
+        dict(min_amount=Decimal("20925"),   max_amount=Decimal("45800"),    rate_pct=Decimal("12"),  rate_label="12%",  tax_formula="$885 + 12% over $20,925 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=226),
+        dict(min_amount=Decimal("45800"),   max_amount=Decimal("64925"),    rate_pct=Decimal("22"),  rate_label="22%",  tax_formula="$3,870 + 22% over $45,800 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=227),
+        dict(min_amount=Decimal("64925"),   max_amount=Decimal("112950"),   rate_pct=Decimal("24"),  rate_label="24%",  tax_formula="$8,077.50 + 24% over $64,925 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=228),
+        dict(min_amount=Decimal("112950"),  max_amount=Decimal("140175"),   rate_pct=Decimal("32"),  rate_label="32%",  tax_formula="$19,603.50 + 32% over $112,950 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=229),
+        dict(min_amount=Decimal("140175"),  max_amount=Decimal("332375"),   rate_pct=Decimal("35"),  rate_label="35%",  tax_formula="$28,315.50 + 35% over $140,175 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=230),
+        dict(min_amount=Decimal("332375"),  max_amount=None,                rate_pct=Decimal("37"),  rate_label="37%",  tax_formula="$95,585.50 + 37% over $332,375 (Step 2 checked)", filing_status="HOH_STEP2", sort_order=231),
     ],
     "UK": [
         # Tax Year 2025-26. Personal allowance £12,570 (tapered above
@@ -814,7 +873,15 @@ _IN_PF_WAGE_CEILING = Decimal("15000")
 
 # ── United States (previously engine/countries/us.py) ──────────────────
 _US_STANDARD_DEDUCTION = Decimal("15000")
-_US_SOCIAL_SECURITY_WAGE_BASE = Decimal("176100")
+# Fixed 2026-09-13 (ZP-TAX-US-2026-001 §3.1 gap-closure audit): this was
+# still 2025's SSA wage base ($176,100). The canonical DB row and the
+# sibling seed dict a few hundred lines below (used by
+# scripts/populate_us_state_tax_v1.py's Phase 1) were already correct at
+# 184,500 — only this engine-level fallback constant, read directly by
+# engine/countries/us.py whenever no org-scoped ContributionRate row is
+# configured, was stale. This is the exact constant that produced the
+# `using hardcoded default 176100` log line caught live this session.
+_US_SOCIAL_SECURITY_WAGE_BASE = Decimal("184500")
 _US_SOCIAL_SECURITY_RATE = Decimal("6.2")
 _US_MEDICARE_RATE = Decimal("1.45")
 _US_MEDICARE_ADDITIONAL_RATE = Decimal("0.9")
@@ -840,6 +907,56 @@ _US_FUTA_WAGE_BASE = Decimal("7000")
 # unemployment tax — a stable, Congress-set number (IRC §3302). Applied
 # only when an employer_tax_profiles["SUI"] entry exists.
 _US_FUTA_CREDIT_PCT = Decimal("5.4")
+
+# Supplemental wages (ZP-TAX-US-2026-001 §3.1, IRS Pub. 15 (2026)) — a
+# standalone calculator (service.calculate_us_supplemental_wage_withholding),
+# same "not woven into the regular per-period calculate() path" pattern as
+# Canada's own special-payment/retiring-allowance calculators, since this
+# only applies when an employer has separately identified a payment as a
+# supplemental wage (bonus, commission, severance, etc.), not to every
+# payslip. 22% applies to qualifying supplemental wages; the 37% rate is
+# mandatory (not elective) on the portion of an employee's CUMULATIVE
+# calendar-year supplemental wages that exceeds $1,000,000 — regardless of
+# which method the employer otherwise elected for amounts under that
+# threshold.
+_US_SUPPLEMENTAL_FLAT_RATE = Decimal("22.0")
+_US_SUPPLEMENTAL_HIGH_RATE = Decimal("37.0")
+_US_SUPPLEMENTAL_HIGH_THRESHOLD = Decimal("1000000.00")
+
+# Federal W-4 legacy (pre-2020) allowance amount (ZP-TAX-US-2026-001
+# §3.4, gap-closure Plan Phase 2d): "2026 Pub. 15-T uses $4,300 for each
+# withholding allowance in the legacy-form calculation path" — a real,
+# literal figure the document gives directly, only ever applied when
+# ctx.w4_form_vintage == "PRE_2020" AND the employee has a real
+# w4_allowances_claimed count on file (None/0 is a complete no-op).
+# The NRA (nonresident alien) additional-wage amount the same section
+# also requires is deliberately NOT a hardcoded constant here — the
+# document only specifies it must be "a configuration value by W-4
+# vintage and pay frequency," giving no literal dollar figure at all, so
+# it is resolved purely from rate_map (component_key
+# "w4_nra_addl_wage_amount", country="US") via the same
+# resolve_jurisdiction_parameter mechanism every other Super-Admin-
+# configurable US parameter uses, defaulting to $0 (no-op) until Tax Ops
+# enters the real current Pub. 15-T figure — never guessed.
+_US_W4_PRE_2020_ALLOWANCE_AMOUNT = Decimal("4300.00")
+
+# Federal deposit/filing calendar (ZP-TAX-US-2026-001 §3.5, gap-closure
+# Phase 8, 2026-09-12) — a standalone calculator
+# (service.calculate_us_federal_deposit_schedule), org-scoped rather than
+# employee-scoped (this is an employer obligation, not a per-employee
+# calculation). Only the figures §3.5 gives literally are implemented:
+# the $50,000 monthly/semiweekly lookback threshold, the $100,000
+# next-day rule, the $500 FUTA quarterly deposit trigger, and the
+# Form W-2/W-3 January 31 statutory deadline. Form 941's quarterly due
+# date is deliberately NOT computed here — §3.5 names the obligation
+# ("Quarterly employer federal tax return") but gives no literal day-of-
+# month, and the real-world "last day of the month following the
+# quarter" figure is general knowledge, not something this document
+# sources — consistent with every other place this build has refused to
+# assert a number the governing document itself doesn't give.
+_US_MONTHLY_SEMIWEEKLY_THRESHOLD = Decimal("50000.00")
+_US_NEXT_DAY_DEPOSIT_THRESHOLD = Decimal("100000.00")
+_US_FUTA_DEPOSIT_THRESHOLD = Decimal("500.00")
 
 # ── United Kingdom (previously engine/countries/uk.py) ──────────────────
 _UK_PERSONAL_ALLOWANCE = Decimal("12570")
@@ -1099,6 +1216,1104 @@ _US_STATE_TAX_RATES = {
         rate_pct=Decimal("3.07"),
         allowance_by_filing_status={},
     ),
+    # Gap-closure Level 2 batch (2026-09-12): genuine primary-source data
+    # (real government URLs, explicit refusal to estimate missing figures)
+    # — a materially higher trust tier than the earlier internal tracking
+    # sheet these two states were first drafted from.
+    #
+    # GA supersedes and CORRECTS this state's own earlier PROVISIONAL entry
+    # (5.19%, from the untrustworthy tracking sheet — see
+    # _US_STATE_TAX_RATES_PROVISIONAL's own comment). The batch's own GA
+    # DOR citation (2026 Employer's Tax Guide, revised June 2026,
+    # incorporating HB 1199) explicitly flags that competing secondary
+    # aggregators showed 5.09%/5.19%/5.29% and resolves the conflict in
+    # favor of the actual DOR document's 4.99%. Dependent deduction
+    # ($5,000/dependent) is NOT applied here — this engine has no
+    # per-employee "number of dependents" field for any US state, so this
+    # is a documented simplification (results in slightly MORE withholding
+    # than an employee with dependents actually owes — the safe direction,
+    # not an under-withholding risk).
+    "GA": dict(
+        agency="Georgia DOR",
+        source_title="2026 Employer's Tax Guide (Revised June 2026, HB 1199) — flat 4.99%",
+        rate_pct=Decimal("4.99"),
+        allowance_by_filing_status={"MFJ": Decimal("30000.00"), None: Decimal("15000.00")},
+    ),
+    # Iowa Senate File 2442 completed the state's transition to a flat tax
+    # for 2026 — no brackets. Deduction varies by IA W-4 marital-status
+    # selection, a concept this engine doesn't track separately from the
+    # generic w4_filing_status; MFJ is mapped to the "spouse has earned
+    # income" $26,000 figure (the more common two-earner-household case)
+    # rather than the $19,500 "spouse has no earned income" alternative —
+    # a documented simplification, not a sourced MFJ-specific figure. MFS
+    # has no deduction figure in this batch at all (not mentioned in the
+    # source) and is left unconfigured (falls back to $0 — over-withholds
+    # an MFS filer until sourced). The $40/allowance figure for legacy
+    # (pre-2024) IA W-4 filers is NOT applied — no per-employee allowance-
+    # count field exists for Iowa.
+    "IA": dict(
+        agency="Iowa Department of Revenue",
+        source_title="Iowa Individual Income Tax Withholding Formula, effective 2026-01-01 (Senate File 2442 flat tax)",
+        rate_pct=Decimal("3.80"),
+        allowance_by_filing_status={"SINGLE": Decimal("13000.00"), "HOH": Decimal("26000.00"), "MFJ": Decimal("26000.00")},
+    ),
+    # Gap-closure Level 2, Batch 4/5 (2026-09-13), genuine primary-source
+    # data (real government URLs). North Carolina: NCDOR's own NC-30
+    # deliberately withholds at 4.09%, not the 3.99% statutory filing
+    # rate — a documented 0.1-point buffer built into the withholding
+    # tables themselves (confirmed by NC-30's own worked example), NOT a
+    # transcription error. MFS standard deduction ($6,375) is half of
+    # MFJ's $12,750 per NC-30's own stated convention ("half of MFJ,
+    # consistent with NC convention") — not this build's own inference.
+    "NC": dict(
+        agency="North Carolina Department of Revenue",
+        source_title="NCDOR NC-30, Income Tax Withholding Tables and Instructions for Employers, effective 2026-01-01",
+        rate_pct=Decimal("4.09"),
+        allowance_by_filing_status={
+            "SINGLE": Decimal("12750.00"), "MFJ": Decimal("12750.00"),
+            "HOH": Decimal("19125.00"), "MFS": Decimal("6375.00"),
+        },
+    ),
+    # Utah: flat rate DROPPED mid-2026 (S.B. 60) from 4.50% to 4.45%
+    # effective pay periods on/after 2026-06-01. Only the CURRENT
+    # (post-2026-06-01) rate/allowance is modeled — this session's own
+    # date is already past that transition, and this engine's TaxSlab
+    # lookup for this state has no effective-dating support to represent
+    # two packages within one calendar year, so the now-historical
+    # Jan-May figures (4.50%, $450/$900 allowances) are deliberately not
+    # seeded. Base allowance amounts are FLAT per-filing-status constants
+    # per Publication 14's own statement ("no subtraction is made for
+    # personal or other withholding allowances... on the federal W-4") —
+    # not an allowance-count-dependent figure like every other skipped
+    # allowance in this file, so this one genuinely IS fully modeled, not
+    # a documented gap. HOH/MFS (not named in the source) mapped to the
+    # Single figure ($485) as the conservative default.
+    "UT": dict(
+        agency="Utah State Tax Commission",
+        source_title="Utah Publication 14, Withholding Tax Guide, Rev. 4/26 — 4.45% effective 2026-06-01 (S.B. 60)",
+        rate_pct=Decimal("4.45"),
+        allowance_by_filing_status={"MFJ": Decimal("970.00"), None: Decimal("485.00")},
+    ),
+}
+
+# PROVISIONAL / UNVERIFIED — gap-closure Level 2, 2026-09-12. These
+# figures come from a SEPARATE internal tracking document
+# ("US_2026_State_Local_Tax_Structured_Tracking.pdf") that names
+# ZP-TAX-US-2026-001 as its source but does NOT actually match that
+# document's own §4 Matrix for any of these states (which gives only
+# a calculation-method classification, no literal rate) — meaning these
+# numbers were not independently verified against a primary state DOR
+# publication the way every other row in _US_STATE_TAX_RATES above was.
+# Seeded as real, Active JurisdictionPack/TaxSlab data (so Super Admin
+# can see, review and stage them) but DELIBERATELY KEPT OUT of
+# _US_STATE_TAX_ENABLED_STATES (shared.py) — zero live-payroll effect
+# until a human confirms each figure against that state's own official
+# withholding form/publication and someone explicitly adds the state to
+# that switch. Do not add a state here to the enabled-states set without
+# that confirmation having actually happened.
+#
+# GA was REMOVED from this dict (2026-09-12, same session): a later batch
+# of genuine primary-source data (real GA DOR citation, June-2026-revised
+# Employer's Tax Guide, HB 1199) proved this dict's own 5.19% figure
+# WRONG — the confirmed rate is 4.99%, now live in _US_STATE_TAX_RATES
+# above. This is the exact failure mode provisional/dormant seeding
+# exists to catch before it reaches a real payslip.
+_US_STATE_TAX_RATES_PROVISIONAL = {
+    "ID": dict(
+        agency="Idaho State Tax Commission (UNVERIFIED)",
+        source_title="Provisional — flat 5.30% per internal tracking sheet; NOT yet confirmed against an Idaho State Tax Commission publication",
+        rate_pct=Decimal("5.30"),
+        allowance_by_filing_status={},
+    ),
+    "MS": dict(
+        agency="Mississippi DOR (UNVERIFIED)",
+        source_title="Provisional — flat 4.00% per internal tracking sheet; NOT yet confirmed against an MS DOR publication",
+        rate_pct=Decimal("4.00"),
+        allowance_by_filing_status={},
+    ),
+    "NC": dict(
+        agency="North Carolina DOR (UNVERIFIED)",
+        source_title="Provisional — flat 3.99% per internal tracking sheet; NOT yet confirmed against an NC DOR publication",
+        rate_pct=Decimal("3.99"),
+        allowance_by_filing_status={},
+    ),
+    "UT": dict(
+        agency="Utah State Tax Commission (UNVERIFIED)",
+        source_title="Provisional — flat 4.50% per internal tracking sheet; NOT yet confirmed against a Utah State Tax Commission publication",
+        rate_pct=Decimal("4.50"),
+        allowance_by_filing_status={},
+    ),
+}
+
+# Graduated (multi-bracket) state PIT — gap-closure Level 2 batch
+# (2026-09-12), genuine primary-source data (real government URLs,
+# explicit refusal to estimate missing figures — the same batch that
+# corrected GA's rate above). Structurally different from
+# _US_STATE_TAX_RATES (one flat rate) — each state here is a real list of
+# MARGINAL_RATE brackets per filing status, seeded by
+# scripts/populate_us_state_graduated_tax_v1.py, gated by the SAME
+# _US_STATE_TAX_ENABLED_STATES switch as every other state.
+#
+# Known, documented simplifications shared across this whole dict (none
+# of these require a NEW data model this engine doesn't have — each is a
+# real per-employee fact this engine has no field for anywhere, for any
+# US state, so implementing it correctly requires that field to exist
+# first, not just this batch of data):
+#   - No per-employee "number of dependents"/"number of allowances
+#     claimed" field exists for any state. Every credit/allowance/
+#     dependent-deduction figure in the source batch that depends on a
+#     COUNT (CA's $168.30/allowance credit, DC's $4,150/dependent
+#     allowance, HI's $1,144/allowance + $4,350 lump sum, DE's
+#     $110/exemption credit) is NOT applied here. This is a strictly
+#     OVER-withholding simplification (an employee who has claimed
+#     allowances/dependents will see MORE withheld than their real
+#     liability, never less) — the safe direction, not an under-
+#     withholding risk.
+#   - CA's Table 1 "Low Income Exemption" (a hard $0-withholding cliff
+#     below a gross-wage threshold, separate from and in addition to the
+#     standard deduction) is NOT implemented — this engine's bracket/
+#     standard-deduction mechanism has no "exemption gate" concept at
+#     all; adding one is real new engine architecture, not a data-entry
+#     task, and is out of scope for this batch. A CA employee at/just
+#     above the exemption threshold will be over-withheld a small,
+#     bounded amount until this gate exists.
+#   - CA's Married-filing-status standard deduction genuinely depends on
+#     NUMBER OF ALLOWANCES claimed (0-1 vs 2+), which this engine has no
+#     field for; MFJ is mapped to the 2+-allowances figure ($11,412) as
+#     the more common default — a documented approximation, not the
+#     $5,706 that a true 0-1-allowance MFJ filer should get.
+#   - DE's standard deduction has no HOH figure in this batch at all (not
+#     captured from the source) — left unconfigured (defaults to $0,
+#     over-withholds a DE HOH filer) rather than guessed.
+_US_STATE_GRADUATED_TAX_RATES = {
+    "CA": dict(
+        agency="California EDD",
+        source_title="California Withholding Schedules for 2026, Method B (Exact Calculation) — 26methb.pdf",
+        # Table 5 (Single/Dual-Income Married/Multiple Employers) is
+        # mapped to both SINGLE and MFS (the closest analog for a
+        # separate-filing status); Table 6 (Married) to MFJ; Table 7
+        # (Unmarried/HOH) to HOH.
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("5706.00"), "MFS": Decimal("5706.00"),
+            "MFJ": Decimal("11412.00"), "HOH": Decimal("11412.00"),
+        },
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("11079"), Decimal("1.10")),
+                (Decimal("11079"), Decimal("26264"), Decimal("2.20")),
+                (Decimal("26264"), Decimal("41452"), Decimal("4.40")),
+                (Decimal("41452"), Decimal("57542"), Decimal("6.60")),
+                (Decimal("57542"), Decimal("72724"), Decimal("8.80")),
+                (Decimal("72724"), Decimal("371479"), Decimal("10.23")),
+                (Decimal("371479"), Decimal("445771"), Decimal("11.33")),
+                (Decimal("445771"), Decimal("742953"), Decimal("12.43")),
+                (Decimal("742953"), Decimal("1000000"), Decimal("13.53")),
+                (Decimal("1000000"), None, Decimal("14.63")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("22158"), Decimal("1.10")),
+                (Decimal("22158"), Decimal("52528"), Decimal("2.20")),
+                (Decimal("52528"), Decimal("82904"), Decimal("4.40")),
+                (Decimal("82904"), Decimal("115084"), Decimal("6.60")),
+                (Decimal("115084"), Decimal("145448"), Decimal("8.80")),
+                (Decimal("145448"), Decimal("742958"), Decimal("10.23")),
+                (Decimal("742958"), Decimal("891542"), Decimal("11.33")),
+                (Decimal("891542"), Decimal("1000000"), Decimal("12.43")),
+                (Decimal("1000000"), Decimal("1485906"), Decimal("13.53")),
+                (Decimal("1485906"), None, Decimal("14.63")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("22173"), Decimal("1.10")),
+                (Decimal("22173"), Decimal("52530"), Decimal("2.20")),
+                (Decimal("52530"), Decimal("67716"), Decimal("4.40")),
+                (Decimal("67716"), Decimal("83805"), Decimal("6.60")),
+                (Decimal("83805"), Decimal("98990"), Decimal("8.80")),
+                (Decimal("98990"), Decimal("505208"), Decimal("10.23")),
+                (Decimal("505208"), Decimal("606251"), Decimal("11.33")),
+                (Decimal("606251"), Decimal("1000000"), Decimal("12.43")),
+                (Decimal("1000000"), Decimal("1010417"), Decimal("13.53")),
+                (Decimal("1010417"), None, Decimal("14.63")),
+            ],
+        },
+    ),
+    "DC": dict(
+        agency="DC Office of Tax and Revenue",
+        source_title="DC OTR Individual and Fiduciary Income Tax Rates; 2026 D-40ES booklet (standard deduction)",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("16100.00"), "MFS": Decimal("16100.00"),
+            "HOH": Decimal("24150.00"), "MFJ": Decimal("32200.00"),
+        },
+        # DC uses ONE bracket table regardless of filing status (unlike
+        # every other jurisdiction in this batch) — seeded with
+        # filing_status=None so it applies uniformly (see
+        # _calculate_annual_tax's own untagged-row convention).
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("10000"), Decimal("4.00")),
+                (Decimal("10000"), Decimal("40000"), Decimal("6.00")),
+                (Decimal("40000"), Decimal("60000"), Decimal("6.50")),
+                (Decimal("60000"), Decimal("250000"), Decimal("8.50")),
+                (Decimal("250000"), Decimal("500000"), Decimal("9.25")),
+                (Decimal("500000"), Decimal("1000000"), Decimal("9.75")),
+                (Decimal("1000000"), None, Decimal("10.75")),
+            ],
+        },
+    ),
+    "DE": dict(
+        agency="Delaware Division of Revenue",
+        source_title="DE Division of Revenue Employer's Guide §17, Tax Computation Table effective 2025-01-01 (unchanged into 2026)",
+        # Bracket thresholds are identical regardless of filing status per
+        # the source; HOH has no standard-deduction figure in this batch
+        # (not captured) and is deliberately left unconfigured.
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("3250.00"), "MFS": Decimal("3250.00"), "MFJ": Decimal("6500.00"),
+        },
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("2000"), Decimal("0.00")),
+                (Decimal("2000"), Decimal("5000"), Decimal("2.20")),
+                (Decimal("5000"), Decimal("10000"), Decimal("3.90")),
+                (Decimal("10000"), Decimal("20000"), Decimal("4.80")),
+                (Decimal("20000"), Decimal("25000"), Decimal("5.20")),
+                (Decimal("25000"), Decimal("60000"), Decimal("5.55")),
+                (Decimal("60000"), None, Decimal("6.60")),
+            ],
+        },
+    ),
+    "HI": dict(
+        agency="Hawaii Department of Taxation",
+        source_title="Appendix 2: Income Tax Withholding Tables for Taxable Years Beginning After 2025-12-31 (Announcement 2025-07, Act 46)",
+        # No separate standard-deduction figure in this batch — HI's own
+        # deduction mechanism is the per-allowance/lump-sum amounts
+        # (skipped per this dict's own "no allowance-count field" note
+        # above), not a flat standard deduction on top of that.
+        standard_deduction_by_filing_status={},
+        # "Single Persons – Including Unmarried Heads of Household" is one
+        # combined table (SINGLE + HOH); "Married Persons" is mapped to
+        # both MFJ and MFS (the source names only one "Married" table,
+        # not split by Joint/Separate).
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("9600"), Decimal("1.40")),
+                (Decimal("9600"), Decimal("14400"), Decimal("3.20")),
+                (Decimal("14400"), Decimal("19200"), Decimal("5.50")),
+                (Decimal("19200"), Decimal("24000"), Decimal("6.40")),
+                (Decimal("24000"), Decimal("36000"), Decimal("6.80")),
+                (Decimal("36000"), Decimal("48000"), Decimal("7.20")),
+                (Decimal("48000"), Decimal("125000"), Decimal("7.60")),
+                (Decimal("125000"), None, Decimal("7.90")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("9600"), Decimal("1.40")),
+                (Decimal("9600"), Decimal("14400"), Decimal("3.20")),
+                (Decimal("14400"), Decimal("19200"), Decimal("5.50")),
+                (Decimal("19200"), Decimal("24000"), Decimal("6.40")),
+                (Decimal("24000"), Decimal("36000"), Decimal("6.80")),
+                (Decimal("36000"), Decimal("48000"), Decimal("7.20")),
+                (Decimal("48000"), Decimal("125000"), Decimal("7.60")),
+                (Decimal("125000"), None, Decimal("7.90")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("19200"), Decimal("1.40")),
+                (Decimal("19200"), Decimal("28800"), Decimal("3.20")),
+                (Decimal("28800"), Decimal("38400"), Decimal("5.50")),
+                (Decimal("38400"), Decimal("48000"), Decimal("6.40")),
+                (Decimal("48000"), Decimal("72000"), Decimal("6.80")),
+                (Decimal("72000"), Decimal("96000"), Decimal("7.20")),
+                (Decimal("96000"), Decimal("250000"), Decimal("7.60")),
+                (Decimal("250000"), None, Decimal("7.90")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("19200"), Decimal("1.40")),
+                (Decimal("19200"), Decimal("28800"), Decimal("3.20")),
+                (Decimal("28800"), Decimal("38400"), Decimal("5.50")),
+                (Decimal("38400"), Decimal("48000"), Decimal("6.40")),
+                (Decimal("48000"), Decimal("72000"), Decimal("6.80")),
+                (Decimal("72000"), Decimal("96000"), Decimal("7.20")),
+                (Decimal("96000"), Decimal("250000"), Decimal("7.60")),
+                (Decimal("250000"), None, Decimal("7.90")),
+            ],
+        },
+    ),
+    # Alabama (gap-closure Level 2 batch, primary source: ALDOR Withholding
+    # Tax Tables and Instructions, revised January 2026). The bracket
+    # table itself is COMPLETE and literal — only the SEPARATE graduated
+    # standard-deduction schedule, the graduated dependent exemption, and
+    # AL's own unique "deduct your federal tax liability" mechanism are
+    # incomplete/unsupported and deliberately NOT modeled here (all three
+    # would REDUCE Alabama taxable income further, so omitting them is an
+    # over-withholding-direction simplification, not an under-withholding
+    # risk). What IS modeled as state_standard_deduction is ONLY Alabama's
+    # flat personal exemption ($1,500 Single/MFS, $3,000 Married Joint/
+    # Head of Family) — a real, complete, literal figure, just a smaller
+    # deduction than an actual AL employee's full entitlement.
+    #
+    # Structural quirk, modeled deliberately: Head of Family shares the
+    # SAME rate brackets as Single/MFS (a 3-band $500/$3,000 schedule) but
+    # gets the LARGER $3,000 exemption that Married Joint gets — these are
+    # two independently-tagged lookups (TaxSlab.filing_status vs
+    # ContributionRate.filing_status), so HOH is tagged into the Single/
+    # MFS bracket group while separately getting the MFJ-level exemption
+    # amount.
+    "AL": dict(
+        agency="Alabama Department of Revenue",
+        source_title="ALDOR Withholding Tax Tables and Instructions for Employers and Withholding Agents, Revised January 2026",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("1500.00"), "MFS": Decimal("1500.00"),
+            "HOH": Decimal("3000.00"), "MFJ": Decimal("3000.00"),
+        },
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("500"), Decimal("2.00")),
+                (Decimal("500"), Decimal("3000"), Decimal("4.00")),
+                (Decimal("3000"), None, Decimal("5.00")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("500"), Decimal("2.00")),
+                (Decimal("500"), Decimal("3000"), Decimal("4.00")),
+                (Decimal("3000"), None, Decimal("5.00")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("500"), Decimal("2.00")),
+                (Decimal("500"), Decimal("3000"), Decimal("4.00")),
+                (Decimal("3000"), None, Decimal("5.00")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("1000"), Decimal("2.00")),
+                (Decimal("1000"), Decimal("6000"), Decimal("4.00")),
+                (Decimal("6000"), None, Decimal("5.00")),
+            ],
+        },
+    ),
+    # Arkansas (gap-closure Level 2, resolved batch, primary source: AR
+    # DFA Withholding Tax Formula, effective 2026-01-01). The source's own
+    # "rate × income − adjustment" presentation is algebraically
+    # equivalent to a marginal bracket sum (verified by hand against the
+    # DFA's own worked example: monthly $2,127/2 exemptions -> this
+    # engine's marginal conversion produces $495.84 vs. the source's own
+    # $495.73 before its final $50-rounding step — a one-cent-scale
+    # rounding difference, not a real discrepancy). One unified schedule
+    # for every filing status (filing_status=None, applies uniformly).
+    #
+    # Two deliberate simplifications, both DOCUMENTED, both in the
+    # over-withholding (never under-withholding) direction:
+    #   - The source's own $50-midrange rounding of taxable income below
+    #     $100,001 is NOT applied — this engine computes on the exact
+    #     dollar amount instead. Effect is at most a few cents either way,
+    #     not worth new bracket-independent rounding logic for.
+    #   - The $29.00-per-exemption tax CREDIT (subtracted from computed
+    #     tax, not from income) is NOT applied — no per-employee
+    #     "number of AR exemptions" field exists in this engine.
+    #   - The source's own "$94,701 and over, fine-grained $100 bands,
+    #     adjustment decreasing by $10 per band" tier was NOT
+    #     reconstructed — that description is internally inconsistent
+    #     (starts at $94,701 but references "$97,701+"/"$97,601+") and a
+    #     decreasing adjustment at ever-higher income doesn't fit a
+    #     normal progressive schedule; treated instead as a continuation
+    #     of the prior 3.70%/$367.16 band, which is the FTA table's own
+    #     published top marginal rate anyway — only the exact cent-level
+    #     transition in that narrow ~$3,000 band is approximated.
+    "AR": dict(
+        agency="Arkansas Department of Finance and Administration",
+        source_title="State of Arkansas Withholding Tax Formula Method, effective 2026-01-01",
+        standard_deduction_by_filing_status={None: Decimal("2470.00")},
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("5600"), Decimal("0.00")),
+                (Decimal("5600"), Decimal("11200"), Decimal("2.00")),
+                (Decimal("11200"), Decimal("16000"), Decimal("3.00")),
+                (Decimal("16000"), Decimal("26400"), Decimal("3.40")),
+                (Decimal("26400"), None, Decimal("3.70")),
+            ],
+        },
+    ),
+    # Minnesota (gap-closure Level 2, resolved batch, primary source: MN
+    # DOR 2026 Withholding Tax Instructions and Tables, p.34 Computer
+    # Formula). IMPORTANT: this is the WITHHOLDING-specific chart, a
+    # genuinely different, independently-calibrated table from the
+    # annual-filing brackets MN DOR's own press release gives (which this
+    # engine does NOT use for payroll withholding — using those would be
+    # wrong, per the source's own explicit clarification). No standard-
+    # deduction phase-out exists at the withholding-formula level at all
+    # (resolves the earlier open question from Batch 1).
+    #
+    # The chart only names "Single" and "Married" — mapped SINGLE->Single,
+    # MFJ and MFS both ->Married (the source gives no separate MFS
+    # withholding chart, and state W-4 elections are commonly this
+    # coarse). HOH has NO row in this withholding-specific chart (unlike
+    # the annual-filing brackets, which do have one) — mapped to the
+    # Single table here as the more common real-world default when a
+    # state withholding certificate has no distinct HOH option, rather
+    # than left at $0 (which would UNDER-withhold, the wrong-direction
+    # risk for an unconfigured mapping, unlike every other gap in this
+    # batch).
+    #
+    # The formula's own Step 3 ($5,300 × number of W-4MN allowances,
+    # subtracted from wages) is NOT applied — no per-employee "number of
+    # MN allowances" field exists in this engine; an unconfigured
+    # state_standard_deduction (this dict leaves it empty for MN,
+    # correctly, since MN's real formula has no separate flat deduction
+    # component at all beyond that allowance subtraction) means every MN
+    # employee is over-withheld by whatever their real allowance count
+    # would have saved them — the safe direction.
+    "MN": dict(
+        agency="Minnesota Department of Revenue",
+        source_title="2026 Minnesota Withholding Tax Instructions and Tables, p.34 Computer Formula (effective 2026-01-01)",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("4700"), Decimal("0.00")),
+                (Decimal("4700"), Decimal("38010"), Decimal("5.35")),
+                (Decimal("38010"), Decimal("114130"), Decimal("6.80")),
+                (Decimal("114130"), Decimal("207850"), Decimal("7.85")),
+                (Decimal("207850"), None, Decimal("9.85")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("4700"), Decimal("0.00")),
+                (Decimal("4700"), Decimal("38010"), Decimal("5.35")),
+                (Decimal("38010"), Decimal("114130"), Decimal("6.80")),
+                (Decimal("114130"), Decimal("207850"), Decimal("7.85")),
+                (Decimal("207850"), None, Decimal("9.85")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("14700"), Decimal("0.00")),
+                (Decimal("14700"), Decimal("63400"), Decimal("5.35")),
+                (Decimal("63400"), Decimal("208180"), Decimal("6.80")),
+                (Decimal("208180"), Decimal("352630"), Decimal("7.85")),
+                (Decimal("352630"), None, Decimal("9.85")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("14700"), Decimal("0.00")),
+                (Decimal("14700"), Decimal("63400"), Decimal("5.35")),
+                (Decimal("63400"), Decimal("208180"), Decimal("6.80")),
+                (Decimal("208180"), Decimal("352630"), Decimal("7.85")),
+                (Decimal("352630"), None, Decimal("9.85")),
+            ],
+        },
+    ),
+    # Mississippi (gap-closure Level 2, Batch 4, 2026-09-13). Rate
+    # conflict resolved in favor of MS DOR's own Jan-2026 publication
+    # (4.0%, continuing MS's legislated phase-down). ONE unified bracket
+    # (filing_status=None) — only the exemption+deduction combination
+    # differs by status. MFS not separately given (the source only notes
+    # the $12,000 joint exemption "may be split... in multiples of $500"
+    # between spouses with no stated default split) — mapped to Single's
+    # combined figure ($8,300) as the conservative default. Dependent/
+    # age/blind add-ons ($1,500 each) NOT applied — no per-employee count
+    # field for any of the three exists in this engine.
+    "MS": dict(
+        agency="Mississippi Department of Revenue",
+        source_title="MS DOR Pub 89-700-25-1 (Rev. 1/13/2026), Withholding Income Tax Tables and Employer Instructions",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("8300.00"), "MFS": Decimal("8300.00"),
+            "HOH": Decimal("12900.00"), "MFJ": Decimal("16600.00"),
+        },
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("10000"), Decimal("0.00")),
+                (Decimal("10000"), None, Decimal("4.00")),
+            ],
+        },
+    ),
+    # Montana (gap-closure Level 2, Batch 4, 2026-09-13). Genuinely
+    # different mechanic confirmed from primary source: MT eliminated its
+    # own exemption/deduction system for 2026 (HB 337) and now uses the
+    # FEDERAL standard deduction amount by federal filing status directly
+    # — so the figures below are NOT Montana-specific numbers, they are
+    # this engine's own already-live federal standard_deduction values
+    # (see hardcoded_defaults._US_STANDARD_DEDUCTION callers / the
+    # federal ContributionRate rows fixed earlier this session),
+    # reused here per MT DOR's own explicit instruction. MFS mapped to
+    # the "all other statuses" bracket group per MT's own grouping.
+    "MT": dict(
+        agency="Montana Department of Revenue",
+        source_title="MT DOR 2026 Withholding Updates (2025-12-08) / Montana Employer and Information Agent Guide (HB 337)",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("16100.00"), "MFS": Decimal("16100.00"),
+            "HOH": Decimal("24150.00"), "MFJ": Decimal("32200.00"),
+        },
+        brackets_by_filing_status={
+            "SINGLE": [(Decimal("0"), Decimal("47500"), Decimal("4.70")), (Decimal("47500"), None, Decimal("5.65"))],
+            "MFS": [(Decimal("0"), Decimal("47500"), Decimal("4.70")), (Decimal("47500"), None, Decimal("5.65"))],
+            "HOH": [(Decimal("0"), Decimal("71250"), Decimal("4.70")), (Decimal("71250"), None, Decimal("5.65"))],
+            "MFJ": [(Decimal("0"), Decimal("95000"), Decimal("4.70")), (Decimal("95000"), None, Decimal("5.65"))],
+        },
+    ),
+    # Nebraska (gap-closure Level 2, Batch 4, 2026-09-13). "Single
+    # (including Head of Household)" per the source's own table naming
+    # — SINGLE and HOH share one table. MFS not separately given —
+    # mapped to the Single/HOH table (narrower thresholds, the
+    # conservative/over-withholding default used throughout this batch
+    # for any status the source doesn't name). The $2,440/allowance
+    # figure is NOT applied — the source itself flags it as only
+    # "per secondary corroboration," not primary-confirmed, and even if
+    # it were, no per-employee NE allowance-count field exists anyway.
+    "NE": dict(
+        agency="Nebraska Department of Revenue",
+        source_title="NE DOR 2026 Nebraska Circular EN, Percentage Method Tables, Table 7 (Annual), effective 2026-01-01",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("3430"), Decimal("0.00")),
+                (Decimal("3430"), Decimal("6710"), Decimal("2.26")),
+                (Decimal("6710"), Decimal("21810"), Decimal("3.22")),
+                (Decimal("21810"), Decimal("31610"), Decimal("4.21")),
+                (Decimal("31610"), Decimal("40130"), Decimal("4.35")),
+                (Decimal("40130"), Decimal("75370"), Decimal("4.48")),
+                (Decimal("75370"), None, Decimal("4.60")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("3430"), Decimal("0.00")),
+                (Decimal("3430"), Decimal("6710"), Decimal("2.26")),
+                (Decimal("6710"), Decimal("21810"), Decimal("3.22")),
+                (Decimal("21810"), Decimal("31610"), Decimal("4.21")),
+                (Decimal("31610"), Decimal("40130"), Decimal("4.35")),
+                (Decimal("40130"), Decimal("75370"), Decimal("4.48")),
+                (Decimal("75370"), None, Decimal("4.60")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("3430"), Decimal("0.00")),
+                (Decimal("3430"), Decimal("6710"), Decimal("2.26")),
+                (Decimal("6710"), Decimal("21810"), Decimal("3.22")),
+                (Decimal("21810"), Decimal("31610"), Decimal("4.21")),
+                (Decimal("31610"), Decimal("40130"), Decimal("4.35")),
+                (Decimal("40130"), Decimal("75370"), Decimal("4.48")),
+                (Decimal("75370"), None, Decimal("4.60")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("8190"), Decimal("0.00")),
+                (Decimal("8190"), Decimal("13010"), Decimal("2.26")),
+                (Decimal("13010"), Decimal("32400"), Decimal("3.22")),
+                (Decimal("32400"), Decimal("50400"), Decimal("4.21")),
+                (Decimal("50400"), Decimal("62530"), Decimal("4.35")),
+                (Decimal("62530"), Decimal("82920"), Decimal("4.48")),
+                (Decimal("82920"), None, Decimal("4.60")),
+            ],
+        },
+    ),
+    # New Mexico (gap-closure Level 2, Batch 4, 2026-09-13). Single, MFJ,
+    # HOH all given explicitly; MFS not named — mapped to Single (the
+    # conservative default). No standard deduction beyond the bracket's
+    # own 0% floor (NM's percentage method has no separate flat
+    # deduction figure in this source).
+    "NM": dict(
+        agency="New Mexico Taxation and Revenue Department",
+        source_title="NM TRD FYI-104, New Mexico Withholding Tax (Rev. 11/2024, rates continuing per Rev. 11/2025 edition)",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("7500"), Decimal("0.00")),
+                (Decimal("7500"), Decimal("13000"), Decimal("1.50")),
+                (Decimal("13000"), Decimal("24000"), Decimal("3.20")),
+                (Decimal("24000"), Decimal("41000"), Decimal("4.30")),
+                (Decimal("41000"), Decimal("74000"), Decimal("4.70")),
+                (Decimal("74000"), Decimal("217500"), Decimal("4.90")),
+                (Decimal("217500"), None, Decimal("5.90")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("7500"), Decimal("0.00")),
+                (Decimal("7500"), Decimal("13000"), Decimal("1.50")),
+                (Decimal("13000"), Decimal("24000"), Decimal("3.20")),
+                (Decimal("24000"), Decimal("41000"), Decimal("4.30")),
+                (Decimal("41000"), Decimal("74000"), Decimal("4.70")),
+                (Decimal("74000"), Decimal("217500"), Decimal("4.90")),
+                (Decimal("217500"), None, Decimal("5.90")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("15000"), Decimal("0.00")),
+                (Decimal("15000"), Decimal("23000"), Decimal("1.50")),
+                (Decimal("23000"), Decimal("40000"), Decimal("3.20")),
+                (Decimal("40000"), Decimal("65000"), Decimal("4.30")),
+                (Decimal("65000"), Decimal("101000"), Decimal("4.70")),
+                (Decimal("101000"), Decimal("330000"), Decimal("4.90")),
+                (Decimal("330000"), None, Decimal("5.90")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("11250"), Decimal("0.00")),
+                (Decimal("11250"), Decimal("19250"), Decimal("1.50")),
+                (Decimal("19250"), Decimal("36250"), Decimal("3.20")),
+                (Decimal("36250"), Decimal("61250"), Decimal("4.30")),
+                (Decimal("61250"), Decimal("97250"), Decimal("4.70")),
+                (Decimal("97250"), Decimal("326250"), Decimal("4.90")),
+                (Decimal("326250"), None, Decimal("5.90")),
+            ],
+        },
+    ),
+    # North Dakota (gap-closure Level 2, Batch 4, 2026-09-13). Genuinely
+    # different tables depending on the employee's OWN Form W-4 vintage
+    # (a real, live-but-previously-unused field, models.PayrollEmployee.
+    # w4_form_vintage — the first state this batch's own logic actually
+    # consumes it for). Tagged as composite keys ("SINGLE_ND2020"/
+    # "SINGLE_NDPRE2020"/etc) built by engine/countries/us.py's own
+    # ND-specific branch, NOT a plain filing_status — see that file's
+    # own comment. MFS not given for either vintage; mapped to the
+    # narrower Single/HOH-equivalent table for that same vintage.
+    "ND": dict(
+        agency="ND Office of State Tax Commissioner",
+        source_title="ND Withholding Rates & Instructions for wages paid in 2026",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            # 2020+ Form W-4 (annual percentage method, by federal filing status)
+            "SINGLE_ND2020": [
+                (Decimal("0"), Decimal("57625"), Decimal("0.00")),
+                (Decimal("57625"), Decimal("258450"), Decimal("1.95")),
+                (Decimal("258450"), None, Decimal("2.50")),
+            ],
+            "MFS_ND2020": [
+                (Decimal("0"), Decimal("57625"), Decimal("0.00")),
+                (Decimal("57625"), Decimal("258450"), Decimal("1.95")),
+                (Decimal("258450"), None, Decimal("2.50")),
+            ],
+            "MFJ_ND2020": [
+                (Decimal("0"), Decimal("57500"), Decimal("0.00")),
+                (Decimal("57500"), Decimal("168525"), Decimal("1.95")),
+                (Decimal("168525"), None, Decimal("2.50")),
+            ],
+            "HOH_ND2020": [
+                (Decimal("0"), Decimal("78475"), Decimal("0.00")),
+                (Decimal("78475"), Decimal("289675"), Decimal("1.95")),
+                (Decimal("289675"), None, Decimal("2.50")),
+            ],
+            # Pre-2020 Form W-4 (allowance already subtracted before this
+            # table applies per the source's own note — but no per-
+            # employee ND allowance-count field exists in this engine, so
+            # this path is only reachable via an employee explicitly
+            # flagged w4_form_vintage="PRE_2020" with NO allowance
+            # subtraction applied, i.e. taxed on full annual wages against
+            # these lower (already-allowance-adjusted-in-the-source)
+            # thresholds — a documented over-withholding-direction gap
+            # for any pre-2020-vintage ND employee who'd have claimed a
+            # real allowance.
+            "SINGLE_NDPRE2020": [
+                (Decimal("0"), Decimal("14406"), Decimal("0.00")),
+                (Decimal("14406"), Decimal("64613"), Decimal("1.95")),
+                (Decimal("64613"), None, Decimal("2.50")),
+            ],
+            "HOH_NDPRE2020": [
+                (Decimal("0"), Decimal("14406"), Decimal("0.00")),
+                (Decimal("14406"), Decimal("64613"), Decimal("1.95")),
+                (Decimal("64613"), None, Decimal("2.50")),
+            ],
+            "MFS_NDPRE2020": [
+                (Decimal("0"), Decimal("14375"), Decimal("0.00")),
+                (Decimal("14375"), Decimal("42131"), Decimal("1.95")),
+                (Decimal("42131"), None, Decimal("2.50")),
+            ],
+            "MFJ_NDPRE2020": [
+                (Decimal("0"), Decimal("14375"), Decimal("0.00")),
+                (Decimal("14375"), Decimal("42131"), Decimal("1.95")),
+                (Decimal("42131"), None, Decimal("2.50")),
+            ],
+        },
+    ),
+    # New Jersey (gap-closure Level 2, Batch 4, 2026-09-13). NJ selects
+    # one of FIVE Rate Tables (A-E) via Form NJ-W4 — a genuinely
+    # different election from federal filing status (models.
+    # PayrollEmployee.nj_rate_table). Tagged directly as "A"/"B"/"C"/"D"/
+    # "E" (not composited with filing status) and selected by engine/
+    # countries/us.py's own NJ-specific branch. The $1,000/year allowance
+    # (same figure for every table) is NOT applied — no per-employee NJ
+    # allowance-count field exists. An employee with work_state="NJ" but
+    # no nj_rate_table on file resolves to $0, never a guessed table.
+    "NJ": dict(
+        agency="NJ Division of Taxation",
+        source_title="NJ Division of Taxation, Tables for Percentage Method of Withholding (effective for wages paid on/after 2020-10-01, unchanged into 2026)",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "A": [
+                (Decimal("0"), Decimal("20000"), Decimal("1.5")),
+                (Decimal("20000"), Decimal("35000"), Decimal("2.0")),
+                (Decimal("35000"), Decimal("40000"), Decimal("3.9")),
+                (Decimal("40000"), Decimal("75000"), Decimal("6.1")),
+                (Decimal("75000"), Decimal("500000"), Decimal("7.0")),
+                (Decimal("500000"), Decimal("1000000"), Decimal("9.9")),
+                (Decimal("1000000"), None, Decimal("11.8")),
+            ],
+            "B": [
+                (Decimal("0"), Decimal("20000"), Decimal("1.5")),
+                (Decimal("20000"), Decimal("50000"), Decimal("2.0")),
+                (Decimal("50000"), Decimal("70000"), Decimal("2.7")),
+                (Decimal("70000"), Decimal("80000"), Decimal("3.9")),
+                (Decimal("80000"), Decimal("150000"), Decimal("6.1")),
+                (Decimal("150000"), Decimal("500000"), Decimal("7.0")),
+                (Decimal("500000"), Decimal("1000000"), Decimal("9.9")),
+                (Decimal("1000000"), None, Decimal("11.8")),
+            ],
+            "C": [
+                (Decimal("0"), Decimal("20000"), Decimal("1.5")),
+                (Decimal("20000"), Decimal("40000"), Decimal("2.3")),
+                (Decimal("40000"), Decimal("50000"), Decimal("2.8")),
+                (Decimal("50000"), Decimal("60000"), Decimal("3.5")),
+                (Decimal("60000"), Decimal("150000"), Decimal("5.6")),
+                (Decimal("150000"), Decimal("500000"), Decimal("6.6")),
+                (Decimal("500000"), Decimal("1000000"), Decimal("9.9")),
+                (Decimal("1000000"), None, Decimal("11.8")),
+            ],
+            "D": [
+                (Decimal("0"), Decimal("20000"), Decimal("1.5")),
+                (Decimal("20000"), Decimal("40000"), Decimal("2.7")),
+                (Decimal("40000"), Decimal("50000"), Decimal("3.4")),
+                (Decimal("50000"), Decimal("60000"), Decimal("4.3")),
+                (Decimal("60000"), Decimal("150000"), Decimal("5.6")),
+                (Decimal("150000"), Decimal("500000"), Decimal("6.5")),
+                (Decimal("500000"), Decimal("1000000"), Decimal("9.9")),
+                (Decimal("1000000"), None, Decimal("11.8")),
+            ],
+            "E": [
+                (Decimal("0"), Decimal("20000"), Decimal("1.5")),
+                (Decimal("20000"), Decimal("35000"), Decimal("2.0")),
+                (Decimal("35000"), Decimal("100000"), Decimal("5.8")),
+                (Decimal("100000"), Decimal("500000"), Decimal("6.5")),
+                (Decimal("500000"), Decimal("1000000"), Decimal("9.9")),
+                (Decimal("1000000"), None, Decimal("11.8")),
+            ],
+        },
+    ),
+    # Oklahoma (gap-closure Level 2, Batch 5, 2026-09-13). Brackets given
+    # AFTER allowance subtraction, which is NOT applied here (no per-
+    # employee OK allowance-count field) — brackets applied directly to
+    # gross, an over-withholding-direction gap same as everywhere else.
+    # HOH/MFS not named — mapped to Single (conservative default).
+    "OK": dict(
+        agency="Oklahoma Tax Commission",
+        source_title="OTC Packet OW-2, 2026 Oklahoma Income Tax Withholding Tables (Rev. 11-2025), Table 7 (Annual)",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("7500"), Decimal("0.00")),
+                (Decimal("7500"), Decimal("8350"), Decimal("2.5")),
+                (Decimal("8350"), Decimal("10050"), Decimal("3.5")),
+                (Decimal("10050"), None, Decimal("4.5")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("7500"), Decimal("0.00")),
+                (Decimal("7500"), Decimal("8350"), Decimal("2.5")),
+                (Decimal("8350"), Decimal("10050"), Decimal("3.5")),
+                (Decimal("10050"), None, Decimal("4.5")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("7500"), Decimal("0.00")),
+                (Decimal("7500"), Decimal("8350"), Decimal("2.5")),
+                (Decimal("8350"), Decimal("10050"), Decimal("3.5")),
+                (Decimal("10050"), None, Decimal("4.5")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("15000"), Decimal("0.00")),
+                (Decimal("15000"), Decimal("16700"), Decimal("2.5")),
+                (Decimal("16700"), Decimal("20100"), Decimal("3.5")),
+                (Decimal("20100"), None, Decimal("4.5")),
+            ],
+        },
+    ),
+    # Rhode Island (gap-closure Level 2, Batch 5, 2026-09-13). ONE
+    # bracket table for every filing status (filing_status=None,
+    # confirmed explicitly: "Rhode Island's brackets are uniform across
+    # all filing statuses"). The $1,000/year exemption is NOT applied —
+    # no per-employee RI exemption-count field exists.
+    "RI": dict(
+        agency="RI Division of Taxation",
+        source_title="RI Division of Taxation, 2026 Employer's Income Tax Withholding Tables (Draft 11/07/2025), effective 2026-01-01",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("82050"), Decimal("3.75")),
+                (Decimal("82050"), Decimal("186450"), Decimal("4.75")),
+                (Decimal("186450"), None, Decimal("5.99")),
+            ],
+        },
+    ),
+    # South Carolina (gap-closure Level 2, Batch 5, 2026-09-13). Brackets
+    # applied to gross wages directly — SC's own formula additionally
+    # subtracts a $5,000/allowance personal allowance AND a "10% of
+    # gross, capped at $7,500" standard deduction, but ONLY when the
+    # employee has claimed 1+ allowances; an employee with ZERO
+    # allowances claimed gets $0 for both per the source's own formula.
+    # This engine has no per-employee SC allowance-count field, so what's
+    # implemented here is EXACTLY SC's own "zero allowances claimed"
+    # case — not an approximation of it. An employee who has actually
+    # claimed allowances will be over-withheld relative to their real SC
+    # liability (documented, same-direction gap as everywhere else).
+    # ONE bracket table for every filing status (SC's formula doesn't
+    # vary by filing status at all, only by allowances/income).
+    "SC": dict(
+        agency="South Carolina Department of Revenue",
+        source_title="SCDOR WH-1603F, Formula for Computing South Carolina 2026 Withholding Tax (Rev. 11/4/25)",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("3640"), Decimal("0.00")),
+                (Decimal("3640"), Decimal("18230"), Decimal("3.00")),
+                (Decimal("18230"), None, Decimal("6.00")),
+            ],
+        },
+    ),
+    # Vermont (gap-closure Level 2, Batch 6, 2026-09-13). Single and
+    # Married tables given explicitly; HOH/MFS not named — mapped to
+    # Single (the conservative default used throughout this build-out
+    # for any status a source doesn't name). The $5,400/year allowance
+    # is NOT applied — no per-employee VT allowance-count field exists.
+    # Vermont's own Child Care Contribution (0.44% employer-only, same
+    # wage base) is modeled separately as a state program, not here —
+    # see _US_STATE_PROGRAMS["VT"].
+    "VT": dict(
+        agency="Vermont Department of Taxes",
+        source_title="VT GB-1210, 2026 Income Tax Withholding Instructions, Tables, and Charts",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("3925"), Decimal("0.00")),
+                (Decimal("3925"), Decimal("54675"), Decimal("3.35")),
+                (Decimal("54675"), Decimal("126775"), Decimal("6.60")),
+                (Decimal("126775"), Decimal("260225"), Decimal("7.60")),
+                (Decimal("260225"), None, Decimal("8.75")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("3925"), Decimal("0.00")),
+                (Decimal("3925"), Decimal("54675"), Decimal("3.35")),
+                (Decimal("54675"), Decimal("126775"), Decimal("6.60")),
+                (Decimal("126775"), Decimal("260225"), Decimal("7.60")),
+                (Decimal("260225"), None, Decimal("8.75")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("3925"), Decimal("0.00")),
+                (Decimal("3925"), Decimal("54675"), Decimal("3.35")),
+                (Decimal("54675"), Decimal("126775"), Decimal("6.60")),
+                (Decimal("126775"), Decimal("260225"), Decimal("7.60")),
+                (Decimal("260225"), None, Decimal("8.75")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("11775"), Decimal("0.00")),
+                (Decimal("11775"), Decimal("96475"), Decimal("3.35")),
+                (Decimal("96475"), Decimal("216525"), Decimal("6.60")),
+                (Decimal("216525"), Decimal("323825"), Decimal("7.60")),
+                (Decimal("323825"), None, Decimal("8.75")),
+            ],
+        },
+    ),
+    # Virginia (gap-closure Level 2, Batch 6, 2026-09-13). ONE bracket
+    # table for every filing status (VA's own source: "the same bracket
+    # thresholds regardless of filing status — only the standard
+    # deduction... differ"). Standard deduction uses the CURRENT (2026)
+    # temporarily-increased figures ($8,750/$17,500) — the source itself
+    # flags these as scheduled to sunset after Taxable Year 2026 back to
+    # $3,000/$6,000; this engine has no effective-dating support for this
+    # lookup, so only the figure applicable for all of TY2026 (the year
+    # this whole build targets) is modeled — revisit for TY2027. The
+    # additional $930/exemption and $800/age-blind-exemption reductions
+    # are NOT applied — no per-employee VA exemption-count field exists.
+    # HOH/MFS not named — mapped to Single's deduction figure.
+    "VA": dict(
+        agency="Virginia Department of Taxation",
+        source_title="VA Income Tax Withholding Guide for Employers, Rev. 05/25 (wages paid after 2025-07-01, continuing through 2026)",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("8750.00"), "HOH": Decimal("8750.00"), "MFS": Decimal("8750.00"),
+            "MFJ": Decimal("17500.00"),
+        },
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("3000"), Decimal("2.00")),
+                (Decimal("3000"), Decimal("5000"), Decimal("3.00")),
+                (Decimal("5000"), Decimal("17000"), Decimal("5.00")),
+                (Decimal("17000"), None, Decimal("5.75")),
+            ],
+        },
+    ),
+    # West Virginia (gap-closure Level 2, Batch 6, 2026-09-13). WV
+    # selects between "Two Earner/Two or More Jobs" and "Optional One
+    # Earner/One Job" tables based on a real fact this engine doesn't
+    # track for any employee (whether a MFJ employee's spouse also
+    # works, or the employee holds multiple jobs) — NOT simply filing
+    # status. Mapped: SINGLE/HOH/MFS -> One-Earner (matches the source's
+    # own grouping exactly); MFJ -> Two-Earner, the CONSERVATIVE default
+    # (WV's own source notes the Two-Earner table is deliberately higher
+    # at each income level specifically "to reduce under-withholding
+    # risk for dual-income households" — and dual-income marriages are
+    # also the more common real-world case) rather than guessing every
+    # WV MFJ employee has a nonworking spouse. The
+    # $2,000/exemption allowance is NOT applied — no per-employee WV
+    # allowance-count field exists.
+    "WV": dict(
+        agency="WV State Tax Division",
+        source_title="WV IT-100.2A, Tables for Percentage Method of Withholding, March 2026",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("10000"), Decimal("2.11")),
+                (Decimal("10000"), Decimal("25000"), Decimal("2.81")),
+                (Decimal("25000"), Decimal("40000"), Decimal("3.16")),
+                (Decimal("40000"), Decimal("60000"), Decimal("4.22")),
+                (Decimal("60000"), None, Decimal("4.58")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("10000"), Decimal("2.11")),
+                (Decimal("10000"), Decimal("25000"), Decimal("2.81")),
+                (Decimal("25000"), Decimal("40000"), Decimal("3.16")),
+                (Decimal("40000"), Decimal("60000"), Decimal("4.22")),
+                (Decimal("60000"), None, Decimal("4.58")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("10000"), Decimal("2.11")),
+                (Decimal("10000"), Decimal("25000"), Decimal("2.81")),
+                (Decimal("25000"), Decimal("40000"), Decimal("3.16")),
+                (Decimal("40000"), Decimal("60000"), Decimal("4.22")),
+                (Decimal("60000"), None, Decimal("4.58")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("7500"), Decimal("2.11")),
+                (Decimal("7500"), Decimal("18750"), Decimal("2.81")),
+                (Decimal("18750"), Decimal("30000"), Decimal("3.16")),
+                (Decimal("30000"), Decimal("45000"), Decimal("4.22")),
+                (Decimal("45000"), None, Decimal("4.58")),
+            ],
+        },
+    ),
+    # Missouri (gap-closure Level 2, Batch 7 "Group B", 2026-09-13): one
+    # bracket table applies to every filing status per MO DOR's own
+    # formula — only the standard deduction differs. MO's MFJ standard
+    # deduction genuinely depends on a "spouse works" checkbox on MO's own
+    # W-4 (Form MO W-4), a fact this engine has no dedicated field for
+    # (same class of gap as WV's One-Earner/Two-Earner table selection) —
+    # defaults to the SPOUSE-WORKS amount ($16,100, same as Single/MFS),
+    # the smaller deduction and therefore the conservative, over- (never
+    # under-) withholding choice versus the $32,200 spouse-does-not-work
+    # amount. MO's own "Federal Tax Deduction" subtraction step was
+    # eliminated from the 2026 formula per the source's explicit note —
+    # deliberately not carried forward from any older logic.
+    "MO": dict(
+        agency="Missouri Department of Revenue",
+        source_title="MO DOR, 2026 Missouri Withholding Tax Formula; Form 4282 (Rev. 03-2026)",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("16100.00"), "MFS": Decimal("16100.00"),
+            "MFJ": Decimal("16100.00"), "HOH": Decimal("24150.00"),
+        },
+        brackets_by_filing_status={
+            fs: [
+                (Decimal("0"), Decimal("1348"), Decimal("0.00")),
+                (Decimal("1348"), Decimal("2696"), Decimal("2.00")),
+                (Decimal("2696"), Decimal("4044"), Decimal("2.50")),
+                (Decimal("4044"), Decimal("5392"), Decimal("3.00")),
+                (Decimal("5392"), Decimal("6740"), Decimal("3.50")),
+                (Decimal("6740"), Decimal("8088"), Decimal("4.00")),
+                (Decimal("8088"), Decimal("9436"), Decimal("4.50")),
+                (Decimal("9436"), None, Decimal("4.70")),
+            ]
+            for fs in ("SINGLE", "MFS", "MFJ", "HOH")
+        },
+    ),
+    # Ohio (gap-closure Level 2, Batch 7 "Group B", 2026-09-13): ODT's
+    # percentage-method table does NOT differentiate by filing status at
+    # all (a single unified table) — filing_status key is None, same
+    # convention RI/SC already use for their own filing-status-agnostic
+    # tables. Genuine mid-year 2026 table transition (per House Bill 96):
+    # only the August 1, 2026-onward table is seeded here, matching the
+    # already-established Utah precedent (populate the CURRENT rate only
+    # rather than building a second, earlier-2026 package) — this
+    # platform is used for current/future payroll, not a historical
+    # replay of pre-August-2026 Ohio pay periods, so the superseded
+    # Oct-2025-Jul-2026 table is deliberately not reproduced. The
+    # $12.50/week ($650.00/year) per-allowance value is NOT applied — it
+    # depends on the employee's own claimed allowance COUNT, the same
+    # "no per-employee allowance-count field" gap documented everywhere
+    # else in this build (skipping it only ever over-withholds).
+    "OH": dict(
+        agency="Ohio Department of Taxation",
+        source_title="ODT, Employer Withholding Taxes — Percentage Method, effective August 1, 2026 (HB 96)",
+        standard_deduction_by_filing_status={},
+        brackets_by_filing_status={
+            None: [
+                (Decimal("0"), Decimal("26050"), Decimal("0.00")),
+                (Decimal("26050"), Decimal("100000"), Decimal("2.75")),
+            ],
+        },
+    ),
+    # New York (gap-closure Level 2, Batch 7 "Group B", 2026-09-13): the
+    # source batch only fully specified Single and Married bracket
+    # tables — Head of Household and Married Filing Separately tables
+    # were not given. Rather than leave HOH/MFS employees resolving to
+    # $0 (silently under-withholding, by far the worse failure mode),
+    # both conservatively fall back to the SINGLE table, documented here
+    # exactly like every other approximate filing-status mapping in this
+    # build (e.g. NC's MFS=half-of-MFJ) — to be corrected once NY's own
+    # HOH/MFS tables are sourced. The deduction/exemption allowance used
+    # is the 0-exemptions figure per filing status (Single $7,400 /
+    # Married $7,950) — the SMALLEST allowance NY's own Table A gives,
+    # since the actual number of exemptions claimed isn't tracked (same
+    # gap class as every other state's allowance/dependent-count figure,
+    # always the conservative/over-withholding choice). The ultra-high-
+    # earner "Method III" tiers (>$1,077,550: a FLAT rate on TOTAL
+    # annualized wages, not a marginal continuation of the table below —
+    # note every one of those rows' own "Base tax (Plus)" column is "—",
+    # not a number) cannot be expressed as ordinary MARGINAL_RATE slab
+    # rows at all; see us.py's post-processing override right after this
+    # table's generic bracket-sum result. NYC's own resident tax is
+    # DELIBERATELY NOT implemented — the source batch gave only 4 rate
+    # figures and a single ($50,000 single-filer top-rate) threshold, not
+    # the complete set of bracket breakpoints NYC's own NYS-50-T-NYC
+    # table actually uses, and inventing the missing thresholds would be
+    # exactly the fabrication this whole build has refused to do
+    # everywhere else — flagged as needing that complete table before
+    # implementation. Yonkers (both the resident 16.75%-of-NYS-liability
+    # surcharge and the nonresident 0.50% flat earnings tax) IS fully
+    # specified and implemented — see us.py.
+    "NY": dict(
+        agency="NYS Department of Taxation and Finance",
+        source_title="NYS-50-T-NYS (1/26), Method II Exact Calculation",
+        standard_deduction_by_filing_status={
+            "SINGLE": Decimal("7400.00"), "MFS": Decimal("7400.00"), "HOH": Decimal("7400.00"),
+            "MFJ": Decimal("7950.00"),
+        },
+        brackets_by_filing_status={
+            "SINGLE": [
+                (Decimal("0"), Decimal("8500"), Decimal("3.90")),
+                (Decimal("8500"), Decimal("11700"), Decimal("4.40")),
+                (Decimal("11700"), Decimal("13900"), Decimal("5.15")),
+                (Decimal("13900"), Decimal("80650"), Decimal("5.40")),
+                (Decimal("80650"), Decimal("96800"), Decimal("5.90")),
+                (Decimal("96800"), Decimal("107650"), Decimal("7.03")),
+                (Decimal("107650"), Decimal("157650"), Decimal("7.53")),
+                (Decimal("157650"), Decimal("215400"), Decimal("6.40")),
+                (Decimal("215400"), Decimal("265400"), Decimal("11.44")),
+                (Decimal("265400"), Decimal("1077550"), Decimal("7.35")),
+            ],
+            "MFS": [
+                (Decimal("0"), Decimal("8500"), Decimal("3.90")),
+                (Decimal("8500"), Decimal("11700"), Decimal("4.40")),
+                (Decimal("11700"), Decimal("13900"), Decimal("5.15")),
+                (Decimal("13900"), Decimal("80650"), Decimal("5.40")),
+                (Decimal("80650"), Decimal("96800"), Decimal("5.90")),
+                (Decimal("96800"), Decimal("107650"), Decimal("7.03")),
+                (Decimal("107650"), Decimal("157650"), Decimal("7.53")),
+                (Decimal("157650"), Decimal("215400"), Decimal("6.40")),
+                (Decimal("215400"), Decimal("265400"), Decimal("11.44")),
+                (Decimal("265400"), Decimal("1077550"), Decimal("7.35")),
+            ],
+            "HOH": [
+                (Decimal("0"), Decimal("8500"), Decimal("3.90")),
+                (Decimal("8500"), Decimal("11700"), Decimal("4.40")),
+                (Decimal("11700"), Decimal("13900"), Decimal("5.15")),
+                (Decimal("13900"), Decimal("80650"), Decimal("5.40")),
+                (Decimal("80650"), Decimal("96800"), Decimal("5.90")),
+                (Decimal("96800"), Decimal("107650"), Decimal("7.03")),
+                (Decimal("107650"), Decimal("157650"), Decimal("7.53")),
+                (Decimal("157650"), Decimal("215400"), Decimal("6.40")),
+                (Decimal("215400"), Decimal("265400"), Decimal("11.44")),
+                (Decimal("265400"), Decimal("1077550"), Decimal("7.35")),
+            ],
+            "MFJ": [
+                (Decimal("0"), Decimal("8500"), Decimal("3.90")),
+                (Decimal("8500"), Decimal("11700"), Decimal("4.40")),
+                (Decimal("11700"), Decimal("13900"), Decimal("5.15")),
+                (Decimal("13900"), Decimal("80650"), Decimal("5.40")),
+                (Decimal("80650"), Decimal("96800"), Decimal("5.90")),
+                (Decimal("96800"), Decimal("107650"), Decimal("6.57")),
+                (Decimal("107650"), Decimal("157650"), Decimal("7.07")),
+                (Decimal("157650"), Decimal("211550"), Decimal("8.01")),
+                (Decimal("211550"), Decimal("323200"), Decimal("6.40")),
+                (Decimal("323200"), Decimal("373200"), Decimal("13.49")),
+                (Decimal("373200"), Decimal("1077550"), Decimal("7.35")),
+            ],
+        },
+    ),
 }
 
 # Phase 3 (ZP-TAX-US-2026-001 §5): state-level statutory payroll programs
@@ -1119,6 +2334,16 @@ _US_STATE_TAX_RATES = {
 # a distinct concept from wage_cap (see NY PFL, which has no wage_cap but
 # does have a $411.91 annual dollar maximum).
 _US_STATE_PROGRAMS = {
+    # Vermont Child Care Contribution (gap-closure Level 2, Batch 6,
+    # 2026-09-13) — a real, distinct, employer-only payroll tax on the
+    # SAME wage base as VT income tax withholding, effective since
+    # 2024-07-01, fully literal (0.44%, no wage cap given in source).
+    "VT": {
+        "vt_ccc": dict(
+            agency="Vermont Department of Taxes", source_title="VT GB-1210, 2026 Income Tax Withholding Instructions — Child Care Contribution",
+            employee_rate_pct=None, employer_rate_pct=Decimal("0.44"), wage_cap=None, annual_max=None,
+        ),
+    },
     "CA": {
         "sdi": dict(
             agency="California EDD", source_title="EDD 2026 SDI contribution rate release",
@@ -1229,11 +2454,18 @@ _US_STATE_HEADCOUNT_PROGRAMS = {
         # employees. 1.13 * 71.43% = 0.8069% (employee, unconditional);
         # 1.13 * 28.57% = 0.3228% (employer, only at 50+ — "generally no
         # employer premium obligation" below 50, employee share still
-        # remitted regardless).
+        # remitted regardless). wage_cap added 2026-09-13 (ZP-TAX-US-2026-001
+        # §5 gap-closure audit) — the document's own $184,500 (SS) cap for
+        # this program was never carried over when this entry was first
+        # seeded, unlike every sibling capped program (CO/CT/MN above)
+        # which already had one; without it this program was being applied
+        # to uncapped annual gross, over-withholding any WA employee above
+        # the cap on both the employee and employer side.
         "pfml": dict(
             agency="Employment Security Department (WA)", source_title="Washington programs — 2026 Paid Leave total premium",
             employee_rate_pct=Decimal("0.8069"), employer_rate_pct=Decimal("0.3228"),
             employer_headcount_min=50, employer_component_code="PFML",
+            wage_cap=Decimal("184500.00"),
         ),
     },
     # Massachusetts PFML (ZP-TAX-US-2026-001 §5) — added 2026-09-11 with
@@ -1414,6 +2646,476 @@ _CA_QUEBEC_PARAMS = dict(
     qc_hsf_public_rate="4.26",
 )
 
+# Connecticut withholding (gap-closure Level 2, fully resolved batch,
+# primary source: CT DRS TPG-211, 2026 Withholding Calculation Rules,
+# pages 2/4/5/6). Structurally unlike every other US state in this file —
+# CT eliminated allowances entirely in favor of an employee-selected
+# CT-W4 "Withholding Code" (A/B/C/D/F, models.PayrollEmployee.
+# ct_withholding_code), and its own calculation is a genuinely different
+# shape (exemption subtraction, THEN a base tax + two additive add-backs,
+# THEN a multiplicative credit reduction) — not a plain marginal bracket
+# sum, so it is NOT modeled via TaxSlab/_US_STATE_GRADUATED_TAX_RATES at
+# all. Consumed by engine/countries/us.py's own dedicated
+# _calculate_ct_annual_tax, gated by the SAME _US_STATE_TAX_ENABLED_STATES
+# switch as every other state (a CT employee with no
+# ct_withholding_code on file resolves to $0, same as an employee in any
+# other unconfigured state).
+#
+# Every band below is read as (more-than-floor, less-than-or-equal-to-
+# ceiling, value) per the source document's own column headers — a None
+# ceiling means "and up" (the last, open-ended band). Table A (exemption)
+# is transcribed as the literal step table given, NOT the "smooth linear"
+# formula the source batch also suggested — that formula does not
+# actually match its own literal table (it produces a continuously
+# declining exemption within each $1,000 band, e.g. $11,999 at an
+# annualized salary of $24,001, where the literal table requires a FLAT
+# $11,000 for the entire $24,000-$25,000 band) — the literal table is
+# authoritative here, consistent with this file's own "no estimation"
+# discipline. Table D's own Table-B base-tax figures are used directly
+# (floor/ceiling/rate/base) rather than re-derived via marginal-bracket
+# summing from $0, since the literal base-tax figures are already given.
+# Wisconsin withholding (gap-closure Level 2, Batch 6, 2026-09-13,
+# primary source: WI DOR Publication W-166, 1/26). Genuinely NOT a plain
+# marginal bracket sum on its own — WI's Alternate Method first computes
+# a CONTINUOUS, income-dependent deduction (linearly phasing from a
+# maximum down to $0 as earnings rise), unlike every other state's flat
+# per-status deduction in this file. Unlike Connecticut's Table A (whose
+# source ALSO suggested a formula but whose own literal table proved
+# that formula wrong), this batch gives the formula directly and backs
+# it with two full worked examples — both independently verified by hand
+# against engine/countries/us.py's own _calculate_wi_annual_tax before
+# enabling (see that function's docstring). Consumed by a dedicated
+# function, not the generic TaxSlab bracket path, since the deduction
+# step has no bracket-table representation at all.
+#
+# The $400/exemption reduction (step 3 of the source's own formula) is
+# NOT applied — no per-employee WI exemption-count field exists; this is
+# the one documented gap in an otherwise fully-modeled state. MFS/HOH
+# (not named by the source, which only gives "Single"/"Married") use the
+# Single-group deduction — the conservative default this whole build-out
+# uses for any status a source doesn't name.
+_US_WI_WITHHOLDING_PARAMS = dict(
+    agency="Wisconsin Department of Revenue",
+    source_title="WI DOR Publication W-166, Withholding Tax Guide (1/26), Alternate Method",
+    single_deduction_max=Decimal("6702.00"), single_threshold=Decimal("17780.00"),
+    single_zero_point=Decimal("73630.00"), single_slope=Decimal("0.12"),
+    married_deduction_max=Decimal("9461.00"), married_threshold=Decimal("25727.00"),
+    married_zero_point=Decimal("73032.00"), married_slope=Decimal("0.20"),
+    brackets=[
+        (Decimal("0"), Decimal("12760"), Decimal("3.54"), Decimal("0")),
+        (Decimal("12760"), Decimal("25520"), Decimal("4.65"), Decimal("451.70")),
+        (Decimal("25520"), Decimal("280950"), Decimal("5.30"), Decimal("1045.04")),
+        (Decimal("280950"), None, Decimal("7.65"), Decimal("14582.83")),
+    ],
+)
+
+_US_CT_WITHHOLDING_TABLES = {
+    "A": dict(
+        exemption=[
+            (Decimal("0"), Decimal("24000"), Decimal("12000")), (Decimal("24000"), Decimal("25000"), Decimal("11000")),
+            (Decimal("25000"), Decimal("26000"), Decimal("10000")), (Decimal("26000"), Decimal("27000"), Decimal("9000")),
+            (Decimal("27000"), Decimal("28000"), Decimal("8000")), (Decimal("28000"), Decimal("29000"), Decimal("7000")),
+            (Decimal("29000"), Decimal("30000"), Decimal("6000")), (Decimal("30000"), Decimal("31000"), Decimal("5000")),
+            (Decimal("31000"), Decimal("32000"), Decimal("4000")), (Decimal("32000"), Decimal("33000"), Decimal("3000")),
+            (Decimal("33000"), Decimal("34000"), Decimal("2000")), (Decimal("34000"), Decimal("35000"), Decimal("1000")),
+            (Decimal("35000"), None, Decimal("0")),
+        ],
+        table_b=[
+            (Decimal("0"), Decimal("10000"), Decimal("2.00"), Decimal("0")),
+            (Decimal("10000"), Decimal("50000"), Decimal("4.50"), Decimal("200")),
+            (Decimal("50000"), Decimal("100000"), Decimal("5.50"), Decimal("2000")),
+            (Decimal("100000"), Decimal("200000"), Decimal("6.00"), Decimal("4750")),
+            (Decimal("200000"), Decimal("250000"), Decimal("6.50"), Decimal("10750")),
+            (Decimal("250000"), Decimal("500000"), Decimal("6.90"), Decimal("14000")),
+            (Decimal("500000"), None, Decimal("6.99"), Decimal("31250")),
+        ],
+        table_c=[
+            (Decimal("0"), Decimal("50250"), Decimal("0")), (Decimal("50250"), Decimal("52750"), Decimal("25")),
+            (Decimal("52750"), Decimal("55250"), Decimal("50")), (Decimal("55250"), Decimal("57750"), Decimal("75")),
+            (Decimal("57750"), Decimal("60250"), Decimal("100")), (Decimal("60250"), Decimal("62750"), Decimal("125")),
+            (Decimal("62750"), Decimal("65250"), Decimal("150")), (Decimal("65250"), Decimal("67750"), Decimal("175")),
+            (Decimal("67750"), Decimal("70250"), Decimal("200")), (Decimal("70250"), Decimal("72750"), Decimal("225")),
+            (Decimal("72750"), None, Decimal("250")),
+        ],
+        table_d=[
+            (Decimal("0"), Decimal("105000"), Decimal("0")), (Decimal("105000"), Decimal("110000"), Decimal("25")),
+            (Decimal("110000"), Decimal("115000"), Decimal("50")), (Decimal("115000"), Decimal("120000"), Decimal("75")),
+            (Decimal("120000"), Decimal("125000"), Decimal("100")), (Decimal("125000"), Decimal("130000"), Decimal("125")),
+            (Decimal("130000"), Decimal("135000"), Decimal("150")), (Decimal("135000"), Decimal("140000"), Decimal("175")),
+            (Decimal("140000"), Decimal("145000"), Decimal("200")), (Decimal("145000"), Decimal("150000"), Decimal("225")),
+            (Decimal("150000"), Decimal("200000"), Decimal("250")), (Decimal("200000"), Decimal("205000"), Decimal("340")),
+            (Decimal("205000"), Decimal("210000"), Decimal("430")), (Decimal("210000"), Decimal("215000"), Decimal("520")),
+            (Decimal("215000"), Decimal("220000"), Decimal("610")), (Decimal("220000"), Decimal("225000"), Decimal("700")),
+            (Decimal("225000"), Decimal("230000"), Decimal("790")), (Decimal("230000"), Decimal("235000"), Decimal("880")),
+            (Decimal("235000"), Decimal("240000"), Decimal("970")), (Decimal("240000"), Decimal("245000"), Decimal("1060")),
+            (Decimal("245000"), Decimal("250000"), Decimal("1150")), (Decimal("250000"), Decimal("255000"), Decimal("1240")),
+            (Decimal("255000"), Decimal("260000"), Decimal("1330")), (Decimal("260000"), Decimal("265000"), Decimal("1420")),
+            (Decimal("265000"), Decimal("270000"), Decimal("1510")), (Decimal("270000"), Decimal("275000"), Decimal("1600")),
+            (Decimal("275000"), Decimal("280000"), Decimal("1690")), (Decimal("280000"), Decimal("285000"), Decimal("1780")),
+            (Decimal("285000"), Decimal("290000"), Decimal("1870")), (Decimal("290000"), Decimal("295000"), Decimal("1960")),
+            (Decimal("295000"), Decimal("300000"), Decimal("2050")), (Decimal("300000"), Decimal("305000"), Decimal("2140")),
+            (Decimal("305000"), Decimal("310000"), Decimal("2230")), (Decimal("310000"), Decimal("315000"), Decimal("2320")),
+            (Decimal("315000"), Decimal("320000"), Decimal("2410")), (Decimal("320000"), Decimal("325000"), Decimal("2500")),
+            (Decimal("325000"), Decimal("330000"), Decimal("2590")), (Decimal("330000"), Decimal("335000"), Decimal("2680")),
+            (Decimal("335000"), Decimal("340000"), Decimal("2770")), (Decimal("340000"), Decimal("345000"), Decimal("2860")),
+            (Decimal("345000"), Decimal("500000"), Decimal("2950")), (Decimal("500000"), Decimal("505000"), Decimal("3000")),
+            (Decimal("505000"), Decimal("510000"), Decimal("3050")), (Decimal("510000"), Decimal("515000"), Decimal("3100")),
+            (Decimal("515000"), Decimal("520000"), Decimal("3150")), (Decimal("520000"), Decimal("525000"), Decimal("3200")),
+            (Decimal("525000"), Decimal("530000"), Decimal("3250")), (Decimal("530000"), Decimal("535000"), Decimal("3300")),
+            (Decimal("535000"), Decimal("540000"), Decimal("3350")), (Decimal("540000"), None, Decimal("3400")),
+        ],
+        table_e=[
+            (Decimal("12000"), Decimal("15000"), Decimal("0.75")), (Decimal("15000"), Decimal("15500"), Decimal("0.70")),
+            (Decimal("15500"), Decimal("16000"), Decimal("0.65")), (Decimal("16000"), Decimal("16500"), Decimal("0.60")),
+            (Decimal("16500"), Decimal("17000"), Decimal("0.55")), (Decimal("17000"), Decimal("17500"), Decimal("0.50")),
+            (Decimal("17500"), Decimal("18000"), Decimal("0.45")), (Decimal("18000"), Decimal("18500"), Decimal("0.40")),
+            (Decimal("18500"), Decimal("20000"), Decimal("0.35")), (Decimal("20000"), Decimal("20500"), Decimal("0.30")),
+            (Decimal("20500"), Decimal("21000"), Decimal("0.25")), (Decimal("21000"), Decimal("21500"), Decimal("0.20")),
+            (Decimal("21500"), Decimal("25000"), Decimal("0.15")), (Decimal("25000"), Decimal("25500"), Decimal("0.14")),
+            (Decimal("25500"), Decimal("26000"), Decimal("0.13")), (Decimal("26000"), Decimal("26500"), Decimal("0.12")),
+            (Decimal("26500"), Decimal("27000"), Decimal("0.11")), (Decimal("27000"), Decimal("48000"), Decimal("0.10")),
+            (Decimal("48000"), Decimal("48500"), Decimal("0.09")), (Decimal("48500"), Decimal("49000"), Decimal("0.08")),
+            (Decimal("49000"), Decimal("49500"), Decimal("0.07")), (Decimal("49500"), Decimal("50000"), Decimal("0.06")),
+            (Decimal("50000"), Decimal("50500"), Decimal("0.05")), (Decimal("50500"), Decimal("51000"), Decimal("0.04")),
+            (Decimal("51000"), Decimal("51500"), Decimal("0.03")), (Decimal("51500"), Decimal("52000"), Decimal("0.02")),
+            (Decimal("52000"), Decimal("52500"), Decimal("0.01")), (Decimal("52500"), None, Decimal("0.00")),
+        ],
+    ),
+    "B": dict(
+        exemption=[
+            (Decimal("0"), Decimal("38000"), Decimal("19000")), (Decimal("38000"), Decimal("39000"), Decimal("18000")),
+            (Decimal("39000"), Decimal("40000"), Decimal("17000")), (Decimal("40000"), Decimal("41000"), Decimal("16000")),
+            (Decimal("41000"), Decimal("42000"), Decimal("15000")), (Decimal("42000"), Decimal("43000"), Decimal("14000")),
+            (Decimal("43000"), Decimal("44000"), Decimal("13000")), (Decimal("44000"), Decimal("45000"), Decimal("12000")),
+            (Decimal("45000"), Decimal("46000"), Decimal("11000")), (Decimal("46000"), Decimal("47000"), Decimal("10000")),
+            (Decimal("47000"), Decimal("48000"), Decimal("9000")), (Decimal("48000"), Decimal("49000"), Decimal("8000")),
+            (Decimal("49000"), Decimal("50000"), Decimal("7000")), (Decimal("50000"), Decimal("51000"), Decimal("6000")),
+            (Decimal("51000"), Decimal("52000"), Decimal("5000")), (Decimal("52000"), Decimal("53000"), Decimal("4000")),
+            (Decimal("53000"), Decimal("54000"), Decimal("3000")), (Decimal("54000"), Decimal("55000"), Decimal("2000")),
+            (Decimal("55000"), Decimal("56000"), Decimal("1000")), (Decimal("56000"), None, Decimal("0")),
+        ],
+        table_b=[
+            (Decimal("0"), Decimal("16000"), Decimal("2.00"), Decimal("0")),
+            (Decimal("16000"), Decimal("80000"), Decimal("4.50"), Decimal("320")),
+            (Decimal("80000"), Decimal("160000"), Decimal("5.50"), Decimal("3200")),
+            (Decimal("160000"), Decimal("320000"), Decimal("6.00"), Decimal("7600")),
+            (Decimal("320000"), Decimal("400000"), Decimal("6.50"), Decimal("17200")),
+            (Decimal("400000"), Decimal("800000"), Decimal("6.90"), Decimal("22400")),
+            (Decimal("800000"), None, Decimal("6.99"), Decimal("50000")),
+        ],
+        table_c=[
+            (Decimal("0"), Decimal("78500"), Decimal("0")), (Decimal("78500"), Decimal("82500"), Decimal("40")),
+            (Decimal("82500"), Decimal("86500"), Decimal("80")), (Decimal("86500"), Decimal("90500"), Decimal("120")),
+            (Decimal("90500"), Decimal("94500"), Decimal("160")), (Decimal("94500"), Decimal("98500"), Decimal("200")),
+            (Decimal("98500"), Decimal("102500"), Decimal("240")), (Decimal("102500"), Decimal("106500"), Decimal("280")),
+            (Decimal("106500"), Decimal("110500"), Decimal("320")), (Decimal("110500"), Decimal("114500"), Decimal("360")),
+            (Decimal("114500"), None, Decimal("400")),
+        ],
+        table_d=[
+            (Decimal("0"), Decimal("168000"), Decimal("0")), (Decimal("168000"), Decimal("176000"), Decimal("40")),
+            (Decimal("176000"), Decimal("184000"), Decimal("80")), (Decimal("184000"), Decimal("192000"), Decimal("120")),
+            (Decimal("192000"), Decimal("200000"), Decimal("160")), (Decimal("200000"), Decimal("208000"), Decimal("200")),
+            (Decimal("208000"), Decimal("216000"), Decimal("240")), (Decimal("216000"), Decimal("224000"), Decimal("280")),
+            (Decimal("224000"), Decimal("232000"), Decimal("320")), (Decimal("232000"), Decimal("240000"), Decimal("360")),
+            (Decimal("240000"), Decimal("320000"), Decimal("400")), (Decimal("320000"), Decimal("328000"), Decimal("540")),
+            (Decimal("328000"), Decimal("336000"), Decimal("680")), (Decimal("336000"), Decimal("344000"), Decimal("820")),
+            (Decimal("344000"), Decimal("352000"), Decimal("960")), (Decimal("352000"), Decimal("360000"), Decimal("1100")),
+            (Decimal("360000"), Decimal("368000"), Decimal("1240")), (Decimal("368000"), Decimal("376000"), Decimal("1380")),
+            (Decimal("376000"), Decimal("384000"), Decimal("1520")), (Decimal("384000"), Decimal("392000"), Decimal("1660")),
+            (Decimal("392000"), Decimal("400000"), Decimal("1800")), (Decimal("400000"), Decimal("408000"), Decimal("1940")),
+            (Decimal("408000"), Decimal("416000"), Decimal("2080")), (Decimal("416000"), Decimal("424000"), Decimal("2220")),
+            (Decimal("424000"), Decimal("432000"), Decimal("2360")), (Decimal("432000"), Decimal("440000"), Decimal("2500")),
+            (Decimal("440000"), Decimal("448000"), Decimal("2640")), (Decimal("448000"), Decimal("456000"), Decimal("2780")),
+            (Decimal("456000"), Decimal("464000"), Decimal("2920")), (Decimal("464000"), Decimal("472000"), Decimal("3060")),
+            (Decimal("472000"), Decimal("480000"), Decimal("3200")), (Decimal("480000"), Decimal("488000"), Decimal("3340")),
+            (Decimal("488000"), Decimal("496000"), Decimal("3480")), (Decimal("496000"), Decimal("504000"), Decimal("3620")),
+            (Decimal("504000"), Decimal("512000"), Decimal("3760")), (Decimal("512000"), Decimal("520000"), Decimal("3900")),
+            (Decimal("520000"), Decimal("528000"), Decimal("4040")), (Decimal("528000"), Decimal("536000"), Decimal("4180")),
+            (Decimal("536000"), Decimal("544000"), Decimal("4320")), (Decimal("544000"), Decimal("552000"), Decimal("4460")),
+            (Decimal("552000"), Decimal("800000"), Decimal("4600")), (Decimal("800000"), Decimal("808000"), Decimal("4680")),
+            (Decimal("808000"), Decimal("816000"), Decimal("4760")), (Decimal("816000"), Decimal("824000"), Decimal("4840")),
+            (Decimal("824000"), Decimal("832000"), Decimal("4920")), (Decimal("832000"), Decimal("840000"), Decimal("5000")),
+            (Decimal("840000"), Decimal("848000"), Decimal("5080")), (Decimal("848000"), Decimal("856000"), Decimal("5160")),
+            (Decimal("856000"), Decimal("864000"), Decimal("5240")), (Decimal("864000"), None, Decimal("5320")),
+        ],
+        table_e=[
+            (Decimal("19000"), Decimal("24000"), Decimal("0.75")), (Decimal("24000"), Decimal("24500"), Decimal("0.70")),
+            (Decimal("24500"), Decimal("25000"), Decimal("0.65")), (Decimal("25000"), Decimal("25500"), Decimal("0.60")),
+            (Decimal("25500"), Decimal("26000"), Decimal("0.55")), (Decimal("26000"), Decimal("26500"), Decimal("0.50")),
+            (Decimal("26500"), Decimal("27000"), Decimal("0.45")), (Decimal("27000"), Decimal("27500"), Decimal("0.40")),
+            (Decimal("27500"), Decimal("34000"), Decimal("0.35")), (Decimal("34000"), Decimal("34500"), Decimal("0.30")),
+            (Decimal("34500"), Decimal("35000"), Decimal("0.25")), (Decimal("35000"), Decimal("35500"), Decimal("0.20")),
+            (Decimal("35500"), Decimal("44000"), Decimal("0.15")), (Decimal("44000"), Decimal("44500"), Decimal("0.14")),
+            (Decimal("44500"), Decimal("45000"), Decimal("0.13")), (Decimal("45000"), Decimal("45500"), Decimal("0.12")),
+            (Decimal("45500"), Decimal("46000"), Decimal("0.11")), (Decimal("46000"), Decimal("74000"), Decimal("0.10")),
+            (Decimal("74000"), Decimal("74500"), Decimal("0.09")), (Decimal("74500"), Decimal("75000"), Decimal("0.08")),
+            (Decimal("75000"), Decimal("75500"), Decimal("0.07")), (Decimal("75500"), Decimal("76000"), Decimal("0.06")),
+            (Decimal("76000"), Decimal("76500"), Decimal("0.05")), (Decimal("76500"), Decimal("77000"), Decimal("0.04")),
+            (Decimal("77000"), Decimal("77500"), Decimal("0.03")), (Decimal("77500"), Decimal("78000"), Decimal("0.02")),
+            (Decimal("78000"), Decimal("78500"), Decimal("0.01")), (Decimal("78500"), None, Decimal("0.00")),
+        ],
+    ),
+    "C": dict(
+        exemption=[
+            (Decimal("0"), Decimal("48000"), Decimal("24000")), (Decimal("48000"), Decimal("49000"), Decimal("23000")),
+            (Decimal("49000"), Decimal("50000"), Decimal("22000")), (Decimal("50000"), Decimal("51000"), Decimal("21000")),
+            (Decimal("51000"), Decimal("52000"), Decimal("20000")), (Decimal("52000"), Decimal("53000"), Decimal("19000")),
+            (Decimal("53000"), Decimal("54000"), Decimal("18000")), (Decimal("54000"), Decimal("55000"), Decimal("17000")),
+            (Decimal("55000"), Decimal("56000"), Decimal("16000")), (Decimal("56000"), Decimal("57000"), Decimal("15000")),
+            (Decimal("57000"), Decimal("58000"), Decimal("14000")), (Decimal("58000"), Decimal("59000"), Decimal("13000")),
+            (Decimal("59000"), Decimal("60000"), Decimal("12000")), (Decimal("60000"), Decimal("61000"), Decimal("11000")),
+            (Decimal("61000"), Decimal("62000"), Decimal("10000")), (Decimal("62000"), Decimal("63000"), Decimal("9000")),
+            (Decimal("63000"), Decimal("64000"), Decimal("8000")), (Decimal("64000"), Decimal("65000"), Decimal("7000")),
+            (Decimal("65000"), Decimal("66000"), Decimal("6000")), (Decimal("66000"), Decimal("67000"), Decimal("5000")),
+            (Decimal("67000"), Decimal("68000"), Decimal("4000")), (Decimal("68000"), Decimal("69000"), Decimal("3000")),
+            (Decimal("69000"), Decimal("70000"), Decimal("2000")), (Decimal("70000"), Decimal("71000"), Decimal("1000")),
+            (Decimal("71000"), None, Decimal("0")),
+        ],
+        table_b=[
+            (Decimal("0"), Decimal("20000"), Decimal("2.00"), Decimal("0")),
+            (Decimal("20000"), Decimal("100000"), Decimal("4.50"), Decimal("400")),
+            (Decimal("100000"), Decimal("200000"), Decimal("5.50"), Decimal("4000")),
+            (Decimal("200000"), Decimal("400000"), Decimal("6.00"), Decimal("9500")),
+            (Decimal("400000"), Decimal("500000"), Decimal("6.50"), Decimal("21500")),
+            (Decimal("500000"), Decimal("1000000"), Decimal("6.90"), Decimal("28000")),
+            (Decimal("1000000"), None, Decimal("6.99"), Decimal("62500")),
+        ],
+        table_c=[
+            (Decimal("0"), Decimal("100500"), Decimal("0")), (Decimal("100500"), Decimal("105500"), Decimal("50")),
+            (Decimal("105500"), Decimal("110500"), Decimal("100")), (Decimal("110500"), Decimal("115500"), Decimal("150")),
+            (Decimal("115500"), Decimal("120500"), Decimal("200")), (Decimal("120500"), Decimal("125500"), Decimal("250")),
+            (Decimal("125500"), Decimal("130500"), Decimal("300")), (Decimal("130500"), Decimal("135500"), Decimal("350")),
+            (Decimal("135500"), Decimal("140500"), Decimal("400")), (Decimal("140500"), Decimal("145500"), Decimal("450")),
+            (Decimal("145500"), None, Decimal("500")),
+        ],
+        table_d=[
+            (Decimal("0"), Decimal("210000"), Decimal("0")), (Decimal("210000"), Decimal("220000"), Decimal("50")),
+            (Decimal("220000"), Decimal("230000"), Decimal("100")), (Decimal("230000"), Decimal("240000"), Decimal("150")),
+            (Decimal("240000"), Decimal("250000"), Decimal("200")), (Decimal("250000"), Decimal("260000"), Decimal("250")),
+            (Decimal("260000"), Decimal("270000"), Decimal("300")), (Decimal("270000"), Decimal("280000"), Decimal("350")),
+            (Decimal("280000"), Decimal("290000"), Decimal("400")), (Decimal("290000"), Decimal("300000"), Decimal("450")),
+            (Decimal("300000"), Decimal("400000"), Decimal("500")), (Decimal("400000"), Decimal("410000"), Decimal("680")),
+            (Decimal("410000"), Decimal("420000"), Decimal("860")), (Decimal("420000"), Decimal("430000"), Decimal("1040")),
+            (Decimal("430000"), Decimal("440000"), Decimal("1220")), (Decimal("440000"), Decimal("450000"), Decimal("1400")),
+            (Decimal("450000"), Decimal("460000"), Decimal("1580")), (Decimal("460000"), Decimal("470000"), Decimal("1760")),
+            (Decimal("470000"), Decimal("480000"), Decimal("1940")), (Decimal("480000"), Decimal("490000"), Decimal("2120")),
+            (Decimal("490000"), Decimal("500000"), Decimal("2300")), (Decimal("500000"), Decimal("510000"), Decimal("2480")),
+            (Decimal("510000"), Decimal("520000"), Decimal("2660")), (Decimal("520000"), Decimal("530000"), Decimal("2840")),
+            (Decimal("530000"), Decimal("540000"), Decimal("3020")), (Decimal("540000"), Decimal("550000"), Decimal("3200")),
+            (Decimal("550000"), Decimal("560000"), Decimal("3380")), (Decimal("560000"), Decimal("570000"), Decimal("3560")),
+            (Decimal("570000"), Decimal("580000"), Decimal("3740")), (Decimal("580000"), Decimal("590000"), Decimal("3920")),
+            (Decimal("590000"), Decimal("600000"), Decimal("4100")), (Decimal("600000"), Decimal("610000"), Decimal("4280")),
+            (Decimal("610000"), Decimal("620000"), Decimal("4460")), (Decimal("620000"), Decimal("630000"), Decimal("4640")),
+            (Decimal("630000"), Decimal("640000"), Decimal("4820")), (Decimal("640000"), Decimal("650000"), Decimal("5000")),
+            (Decimal("650000"), Decimal("660000"), Decimal("5180")), (Decimal("660000"), Decimal("670000"), Decimal("5360")),
+            (Decimal("670000"), Decimal("680000"), Decimal("5540")), (Decimal("680000"), Decimal("690000"), Decimal("5720")),
+            (Decimal("690000"), Decimal("1000000"), Decimal("5900")), (Decimal("1000000"), Decimal("1010000"), Decimal("6000")),
+            (Decimal("1010000"), Decimal("1020000"), Decimal("6100")), (Decimal("1020000"), Decimal("1030000"), Decimal("6200")),
+            (Decimal("1030000"), Decimal("1040000"), Decimal("6300")), (Decimal("1040000"), Decimal("1050000"), Decimal("6400")),
+            (Decimal("1050000"), Decimal("1060000"), Decimal("6500")), (Decimal("1060000"), Decimal("1070000"), Decimal("6600")),
+            (Decimal("1070000"), Decimal("1080000"), Decimal("6700")), (Decimal("1080000"), None, Decimal("6800")),
+        ],
+        table_e=[
+            (Decimal("24000"), Decimal("30000"), Decimal("0.75")), (Decimal("30000"), Decimal("30500"), Decimal("0.70")),
+            (Decimal("30500"), Decimal("31000"), Decimal("0.65")), (Decimal("31000"), Decimal("31500"), Decimal("0.60")),
+            (Decimal("31500"), Decimal("32000"), Decimal("0.55")), (Decimal("32000"), Decimal("32500"), Decimal("0.50")),
+            (Decimal("32500"), Decimal("33000"), Decimal("0.45")), (Decimal("33000"), Decimal("33500"), Decimal("0.40")),
+            (Decimal("33500"), Decimal("40000"), Decimal("0.35")), (Decimal("40000"), Decimal("40500"), Decimal("0.30")),
+            (Decimal("40500"), Decimal("41000"), Decimal("0.25")), (Decimal("41000"), Decimal("41500"), Decimal("0.20")),
+            (Decimal("41500"), Decimal("50000"), Decimal("0.15")), (Decimal("50000"), Decimal("50500"), Decimal("0.14")),
+            (Decimal("50500"), Decimal("51000"), Decimal("0.13")), (Decimal("51000"), Decimal("51500"), Decimal("0.12")),
+            (Decimal("51500"), Decimal("52000"), Decimal("0.11")), (Decimal("52000"), Decimal("96000"), Decimal("0.10")),
+            (Decimal("96000"), Decimal("96500"), Decimal("0.09")), (Decimal("96500"), Decimal("97000"), Decimal("0.08")),
+            (Decimal("97000"), Decimal("97500"), Decimal("0.07")), (Decimal("97500"), Decimal("98000"), Decimal("0.06")),
+            (Decimal("98000"), Decimal("98500"), Decimal("0.05")), (Decimal("98500"), Decimal("99000"), Decimal("0.04")),
+            (Decimal("99000"), Decimal("99500"), Decimal("0.03")), (Decimal("99500"), Decimal("100000"), Decimal("0.02")),
+            (Decimal("100000"), Decimal("100500"), Decimal("0.01")), (Decimal("100500"), None, Decimal("0.00")),
+        ],
+    ),
+    "F": dict(
+        exemption=[
+            (Decimal("0"), Decimal("30000"), Decimal("15000")), (Decimal("30000"), Decimal("31000"), Decimal("14000")),
+            (Decimal("31000"), Decimal("32000"), Decimal("13000")), (Decimal("32000"), Decimal("33000"), Decimal("12000")),
+            (Decimal("33000"), Decimal("34000"), Decimal("11000")), (Decimal("34000"), Decimal("35000"), Decimal("10000")),
+            (Decimal("35000"), Decimal("36000"), Decimal("9000")), (Decimal("36000"), Decimal("37000"), Decimal("8000")),
+            (Decimal("37000"), Decimal("38000"), Decimal("7000")), (Decimal("38000"), Decimal("39000"), Decimal("6000")),
+            (Decimal("39000"), Decimal("40000"), Decimal("5000")), (Decimal("40000"), Decimal("41000"), Decimal("4000")),
+            (Decimal("41000"), Decimal("42000"), Decimal("3000")), (Decimal("42000"), Decimal("43000"), Decimal("2000")),
+            (Decimal("43000"), Decimal("44000"), Decimal("1000")), (Decimal("44000"), None, Decimal("0")),
+        ],
+        table_b=[
+            (Decimal("0"), Decimal("10000"), Decimal("2.00"), Decimal("0")),
+            (Decimal("10000"), Decimal("50000"), Decimal("4.50"), Decimal("200")),
+            (Decimal("50000"), Decimal("100000"), Decimal("5.50"), Decimal("2000")),
+            (Decimal("100000"), Decimal("200000"), Decimal("6.00"), Decimal("4750")),
+            (Decimal("200000"), Decimal("250000"), Decimal("6.50"), Decimal("10750")),
+            (Decimal("250000"), Decimal("500000"), Decimal("6.90"), Decimal("14000")),
+            (Decimal("500000"), None, Decimal("6.99"), Decimal("31250")),
+        ],
+        table_c=[
+            (Decimal("0"), Decimal("56500"), Decimal("0")), (Decimal("56500"), Decimal("61500"), Decimal("25")),
+            (Decimal("61500"), Decimal("66500"), Decimal("50")), (Decimal("66500"), Decimal("71500"), Decimal("75")),
+            (Decimal("71500"), Decimal("76500"), Decimal("100")), (Decimal("76500"), Decimal("81500"), Decimal("125")),
+            (Decimal("81500"), Decimal("86500"), Decimal("150")), (Decimal("86500"), Decimal("91500"), Decimal("175")),
+            (Decimal("91500"), Decimal("96500"), Decimal("200")), (Decimal("96500"), Decimal("101500"), Decimal("225")),
+            (Decimal("101500"), None, Decimal("250")),
+        ],
+        # Table D for Code F is the SAME table as Code A/D (per the
+        # source's own "Withholding Code A, D, or F" header) — reused
+        # here rather than duplicated verbatim.
+        table_d="SAME_AS_A",
+        table_e=[
+            (Decimal("15000"), Decimal("18800"), Decimal("0.75")), (Decimal("18800"), Decimal("19300"), Decimal("0.70")),
+            (Decimal("19300"), Decimal("19800"), Decimal("0.65")), (Decimal("19800"), Decimal("20300"), Decimal("0.60")),
+            (Decimal("20300"), Decimal("20800"), Decimal("0.55")), (Decimal("20800"), Decimal("21300"), Decimal("0.50")),
+            (Decimal("21300"), Decimal("21800"), Decimal("0.45")), (Decimal("21800"), Decimal("22300"), Decimal("0.40")),
+            (Decimal("22300"), Decimal("25000"), Decimal("0.35")), (Decimal("25000"), Decimal("25500"), Decimal("0.30")),
+            (Decimal("25500"), Decimal("26000"), Decimal("0.25")), (Decimal("26000"), Decimal("26500"), Decimal("0.20")),
+            (Decimal("26500"), Decimal("31300"), Decimal("0.15")), (Decimal("31300"), Decimal("31800"), Decimal("0.14")),
+            (Decimal("31800"), Decimal("32300"), Decimal("0.13")), (Decimal("32300"), Decimal("32800"), Decimal("0.12")),
+            (Decimal("32800"), Decimal("33300"), Decimal("0.11")), (Decimal("33300"), Decimal("60000"), Decimal("0.10")),
+            (Decimal("60000"), Decimal("60500"), Decimal("0.09")), (Decimal("60500"), Decimal("61000"), Decimal("0.08")),
+            (Decimal("61000"), Decimal("61500"), Decimal("0.07")), (Decimal("61500"), Decimal("62000"), Decimal("0.06")),
+            (Decimal("62000"), Decimal("62500"), Decimal("0.05")), (Decimal("62500"), Decimal("63000"), Decimal("0.04")),
+            (Decimal("63000"), Decimal("63500"), Decimal("0.03")), (Decimal("63500"), Decimal("64000"), Decimal("0.02")),
+            (Decimal("64000"), Decimal("64500"), Decimal("0.01")), (Decimal("64500"), None, Decimal("0.00")),
+        ],
+    ),
+    "D": dict(
+        exemption=[(Decimal("0"), None, Decimal("0"))],
+        table_b=[
+            (Decimal("0"), Decimal("10000"), Decimal("2.00"), Decimal("0")),
+            (Decimal("10000"), Decimal("50000"), Decimal("4.50"), Decimal("200")),
+            (Decimal("50000"), Decimal("100000"), Decimal("5.50"), Decimal("2000")),
+            (Decimal("100000"), Decimal("200000"), Decimal("6.00"), Decimal("4750")),
+            (Decimal("200000"), Decimal("250000"), Decimal("6.50"), Decimal("10750")),
+            (Decimal("250000"), Decimal("500000"), Decimal("6.90"), Decimal("14000")),
+            (Decimal("500000"), None, Decimal("6.99"), Decimal("31250")),
+        ],
+        # Table C isn't separately given for Code D — the source states
+        # Code D's Personal Exemption AND Personal Tax Credit are both
+        # fixed at $0/0.00, and Code D shares Table B/D with Code A per
+        # the source's own "A, D, or F" headers. Table C's own header
+        # only lists "A or D" for the SAME table as Code A, so reused here.
+        table_c="SAME_AS_A",
+        table_d="SAME_AS_A",
+        table_e=[(Decimal("0"), None, Decimal("0.00"))],
+    ),
+}
+
+# ── Oregon: computer formula method (Production-Readiness Plan Phase 4,
+# 2026-09-15) ─────────────────────────────────────────────────────────
+# Oregon DOR Pub. 150-206-436, "Oregon Withholding Tax Formulas, Effective
+# January 1, 2026" — independently fetched and extracted (pypdf, all 8
+# pages) directly from oregon.gov, not transcribed from a secondary
+# source. Every figure below was cross-checked against the PDF's own
+# literal formula tables (pages 6-7), not its narrative text or worked
+# examples, because the source document itself contains THREE internal
+# inconsistencies the formula tables resolve authoritatively:
+#   - The federal-tax-subtraction cap is stated as "$8,500... in 2025" in
+#     the narrative (page 5) and FAQ Q3, but the actual formula box and
+#     phase-out table (pages 6-7) and FAQ Q11 both use $8,750 for 2026 —
+#     used here, since it's what the computational formula runs on.
+#   - The page 5 worked example states "the base is $21,165" in its
+#     prose, then computes with BASE=$21,090 in every subsequent step —
+#     $21,090 is arithmetically correct ($25,000-$1,000-$2,910); not
+#     propagated.
+#   - Step 9 of that same example computes "$256 × allowances" but the
+#     formula tables (pages 6-7) and FAQ both give $263/allowance —
+#     $263 used here, matching the operative formula.
+# Oregon is NOT a marginal-bracket state in the TaxSlab sense — BASE
+# (wages minus a capped/phased-out federal-withholding subtraction minus
+# a flat standard deduction) feeds a 4-band table that differs by BOTH
+# filing status AND whether annual wages are under/over $50,000, with the
+# personal exemption credit subtracted AFTER the bracket lookup, not
+# folded into the deduction. Allowances are NOT modeled — no Oregon-
+# specific allowance field exists (Form OR-W-4 allowances are a genuinely
+# separate concept from federal W-4 allowances per the source's own
+# "Oregon Employer Update" section) — same documented limitation
+# _US_WI_WITHHOLDING_PARAMS already has for its own per-exemption count.
+# Every OR employee is therefore treated as 0 allowances: always uses the
+# "fewer than 3 allowances" bracket set (correct, since 0 < 3), never
+# gets the $263/allowance credit, and the allowance-zeroing rule at
+# $100k/$200k is a no-op (there are never any allowances to zero).
+_US_OR_WITHHOLDING_PARAMS = dict(
+    agency="Oregon Department of Revenue",
+    source_title="Oregon Withholding Tax Formulas, Pub. 150-206-436 (Rev. 12-31-25), effective 1/1/2026",
+    single_standard_deduction=Decimal("2910.00"),
+    married_standard_deduction=Decimal("5820.00"),
+    exemption_credit_per_allowance=Decimal("263.00"),
+    fed_subtraction_cap_default=Decimal("8750.00"),
+    # (floor inclusive, ceiling exclusive or None, capped subtraction) —
+    # identical structure for wages under $50,000 (flat $8,750 cap, no
+    # phase-out row needed since the under-$50k formula itself already
+    # says "not to exceed $8,750").
+    single_fed_subtraction_phaseout=[
+        (Decimal("0"), Decimal("125000"), Decimal("8750.00")),
+        (Decimal("125000"), Decimal("130000"), Decimal("7000.00")),
+        (Decimal("130000"), Decimal("135000"), Decimal("5250.00")),
+        (Decimal("135000"), Decimal("140000"), Decimal("3500.00")),
+        (Decimal("140000"), Decimal("145000"), Decimal("1750.00")),
+        (Decimal("145000"), None, Decimal("0.00")),
+    ],
+    married_fed_subtraction_phaseout=[
+        (Decimal("0"), Decimal("250000"), Decimal("8750.00")),
+        (Decimal("250000"), Decimal("260000"), Decimal("7000.00")),
+        (Decimal("260000"), Decimal("270000"), Decimal("5250.00")),
+        (Decimal("270000"), Decimal("280000"), Decimal("3500.00")),
+        (Decimal("280000"), Decimal("290000"), Decimal("1750.00")),
+        (Decimal("290000"), None, Decimal("0.00")),
+    ],
+    # (floor, ceiling, rate%, base-tax-at-floor) — same 4-tuple shape
+    # _ct_table_b_tax already reads. "Single, fewer than 3 allowances" set
+    # doubles as the only Single set used here (allowances always 0).
+    single_brackets_under_50k=[
+        (Decimal("0"), Decimal("4550"), Decimal("4.75"), Decimal("263")),
+        (Decimal("4550"), Decimal("11400"), Decimal("6.75"), Decimal("479")),
+        (Decimal("11400"), Decimal("50000"), Decimal("8.75"), Decimal("941")),
+    ],
+    single_brackets_50k_plus=[
+        (Decimal("38340"), Decimal("125000"), Decimal("8.75"), Decimal("678")),
+        (Decimal("125000"), None, Decimal("9.90"), Decimal("10618")),
+    ],
+    married_brackets_under_50k=[
+        (Decimal("0"), Decimal("9100"), Decimal("4.75"), Decimal("263")),
+        (Decimal("9100"), Decimal("22800"), Decimal("6.75"), Decimal("695")),
+        (Decimal("22800"), Decimal("50000"), Decimal("8.75"), Decimal("1620")),
+    ],
+    married_brackets_50k_plus=[
+        (Decimal("35430"), Decimal("250000"), Decimal("8.75"), Decimal("1357")),
+        (Decimal("250000"), None, Decimal("9.90"), Decimal("21237")),
+    ],
+    # HB 2119 (2019): flat rate when no OR-W-4/exemption certificate is on
+    # file. Also the alternative flat rate for supplemental wages.
+    no_certificate_flat_rate=Decimal("8.00"),
+)
+
+# ── Maine: percentage method with a phased-out standard deduction
+# (Production-Readiness Plan Phase 4, 2026-09-15) ───────────────────────
+# Maine Revenue Services 2026 withholding tables, independently fetched
+# and extracted from maine.gov. Bracket rates/thresholds match a plain
+# marginal TaxSlab table (5.80% / 6.75% / 7.15%) and ARE entered that way
+# via the Bulk State Tax Import tool — only the STANDARD DEDUCTION needs
+# bespoke logic here, since it is NOT the flat $15,300 (single) / $30,600
+# (married) figure MRS publishes as its general "basic standard
+# deduction" (a different, income-tax-return concept) — the WITHHOLDING
+# formula's own Step 3 uses a lower, separately-phased-out figure:
+# $12,450 (single) / $27,750 (married) flat below a threshold, phasing
+# linearly to $0 by a second threshold. Entering the general $15,300/
+# $30,600 figure as a flat state_standard_deduction would under-withhold
+# every Maine employee, more so as income rises — this function is what
+# makes that NOT happen.
+_US_ME_WITHHOLDING_PARAMS = dict(
+    agency="Maine Revenue Services",
+    source_title="Maine Income Tax Withholding — Percentage Method — 2026 (26_wh_tab_instr.pdf)",
+    personal_exemption_per_allowance=Decimal("5300.00"),
+    single_deduction_full=Decimal("12450.00"), single_deduction_full_ceiling=Decimal("102250.00"),
+    single_deduction_zero_floor=Decimal("177250.00"), single_deduction_phaseout_span=Decimal("75000.00"),
+    married_deduction_full=Decimal("27750.00"), married_deduction_full_ceiling=Decimal("204550.00"),
+    married_deduction_zero_floor=Decimal("354550.00"), married_deduction_phaseout_span=Decimal("150000.00"),
+    backup_withholding_flat_rate=Decimal("5.00"),
+)
+
 _US_LOCALITY_DATA = {
     "MI": dict(
         agency="Michigan Treasury", source_title="2026 City of Detroit Income Tax Withholding Guide",
@@ -1425,6 +3127,51 @@ _US_LOCALITY_DATA = {
     "IN": dict(
         agency="Indiana DOR", source_title="Departmental Notice #1 (2026)",
         rates=[],
+    ),
+    # Missouri (gap-closure Level 2, Batch 7, 2026-09-13): Kansas City and
+    # St. Louis Earnings Tax — a genuinely SEPARATE municipal filing from
+    # MO DOR's own state withholding (St. Louis Form E-1/W-10, Kansas City
+    # Form RD-109/RD-113), but structurally a plain flat-rate local tax
+    # this engine's existing LocalityRate mechanism already models exactly
+    # (see MI/Detroit above) — no engine change needed. Both cities' 1%
+    # rate applies identically to residents (regardless of work location)
+    # and nonresidents who work there; since resident_rate_pct and
+    # nonresident_rate_pct are equal here, an employee whose work_locality
+    # is set to one of these codes is taxed correctly regardless of which
+    # of the two groups they're in. The one gap this does NOT cover: a
+    # city resident who works OUTSIDE the city (elsewhere in MO, or out of
+    # state) still owes this tax but has no locality-residence field to
+    # trigger it from — the same pre-existing "this module does not yet
+    # track locality-level residence" limitation us.py's own local-tax
+    # comment already documents, not something newly introduced here.
+    "MO": dict(
+        agency="St. Louis Collector of Revenue / Kansas City, MO Finance Department",
+        source_title="St. Louis Earnings Tax (Form E-1/W-10) and Kansas City Earnings Tax (Form RD-109/RD-113), current-year rate confirmation",
+        rates=[
+            dict(locality_code="STLOUIS", locality_type="MUNICIPAL", locality_name="St. Louis",
+                 resident_rate_pct=Decimal("1.00"), nonresident_rate_pct=Decimal("1.00")),
+            dict(locality_code="KANSASCITY", locality_type="MUNICIPAL", locality_name="Kansas City",
+                 resident_rate_pct=Decimal("1.00"), nonresident_rate_pct=Decimal("1.00")),
+        ],
+    ),
+    # New York (gap-closure Level 2, Batch 7, 2026-09-13): Yonkers'
+    # NONRESIDENT earnings tax only (flat 0.50% of Yonkers-source wages,
+    # Form Y-203) — modeled as an ordinary work-locality LocalityRate row
+    # with only nonresident_rate_pct set (no resident_rate_pct at all),
+    # since the RESIDENT side of Yonkers tax is fundamentally NOT a
+    # wage-based rate (it's 16.75% of the employee's own NYS tax
+    # liability, a completely different calculation) and is instead
+    # handled by dedicated bespoke code in us.py, gated on the new
+    # ctx.residence_locality field — see that code's own comment for how
+    # the two are kept mutually exclusive for a Yonkers resident who also
+    # works in Yonkers.
+    "NY": dict(
+        agency="NYS Department of Taxation and Finance",
+        source_title="NYS-50-T-Y (1/26)",
+        rates=[
+            dict(locality_code="YONKERS", locality_type="MUNICIPAL", locality_name="Yonkers",
+                 resident_rate_pct=None, nonresident_rate_pct=Decimal("0.50")),
+        ],
     ),
 }
 

@@ -229,11 +229,17 @@ def test_us_state_income_tax_adds_to_federal():
     from app.modules.payroll.engine.countries import shared as shared_module
     federal_only = calc("US", 8000, US_RATES, US_SLABS)
     state_slabs = [Slab(Decimal("0"), None, Decimal("9.3"), jurisdiction_state="CA")]
+    # CA is now permanently enabled (gap-closure Level 2, 2026-09-12) —
+    # save/restore its actual prior membership rather than unconditionally
+    # discarding, so this test doesn't disable CA for every test that runs
+    # after it in the same session.
+    was_enabled = "CA" in shared_module._US_STATE_TAX_ENABLED_STATES
     shared_module._US_STATE_TAX_ENABLED_STATES.add("CA")
     try:
         with_state = calc("US", 8000, US_RATES, US_SLABS, work_state="California", state_slabs=state_slabs)
     finally:
-        shared_module._US_STATE_TAX_ENABLED_STATES.discard("CA")
+        if not was_enabled:
+            shared_module._US_STATE_TAX_ENABLED_STATES.discard("CA")
     assert with_state.tds > federal_only.tds
 
 

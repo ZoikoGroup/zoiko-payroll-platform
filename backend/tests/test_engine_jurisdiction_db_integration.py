@@ -2002,11 +2002,13 @@ def test_upsert_jurisdiction_pack_rejects_direct_active_on_edit(db, organization
     assert pack.status == "Draft"  # unchanged
 
 
-def test_upsert_jurisdiction_pack_allows_direct_active_for_policy_pack(db, organization):
-    # The danger is specific to TAX packs (set_jurisdiction_pack_status's
-    # overlap/date/approver machinery only ever runs for pack_type=="tax")
-    # — a policy pack going Active directly via plain edit is unchanged
-    # behavior, not a bypass of anything that exists.
+def test_upsert_jurisdiction_pack_forces_new_policy_pack_to_draft(db, organization):
+    # Policy packs are Draft | Active only — no review/approval stage. A new
+    # policy pack always enters life as Draft regardless of any status passed
+    # to the plain upsert endpoint; it is promoted to Active only through the
+    # deliberate set_jurisdiction_pack_status transition (which for policy
+    # packs is a plain toggle, no maker-checker/overlap machinery — that
+    # machinery only ever runs for pack_type=="tax").
     from app.modules.payroll.schemas import JurisdictionPackUpsert
     result = service.upsert_jurisdiction_pack(
         db,
@@ -2015,7 +2017,10 @@ def test_upsert_jurisdiction_pack_allows_direct_active_for_policy_pack(db, organ
             packType="policy", status="Active",
         ),
     )
-    assert result.status == "Active"
+    assert result.status == "Draft"
+    # The explicit Draft -> Active transition still works.
+    activated = service.set_jurisdiction_pack_status(db, result.id, "Active", actor_id=1)
+    assert activated.status == "Active"
 
 
 def test_approved_by_id_not_settable_via_plain_upsert(db, organization):
@@ -2195,8 +2200,18 @@ def test_sui_and_futa_credit_flow_through_real_payslip_generation(db, organizati
 
     item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
     assert item.employer_sui == pytest.approx(Decimal("19.83"), abs=Decimal("0.01"))
-    # FUTA credited down to ~0.6% effective rate because a real SUI profile exists.
-    assert item.employer_futa == pytest.approx(Decimal("3.50"), abs=Decimal("0.01"))
+    # FUTA credited down to ~0.6% effective rate because a real SUI profile
+    # exists. This is the FIRST payslip of the year for this employee (real
+    # YTD accumulation now wired for US, gap-closure Plan Phase 2a — see
+    # shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES), so the true statutory
+    # answer is 0.6% on the FULL $5,000 (cumulative wages of $5,000 are
+    # still under the $7,000 annual FUTA wage base): $30.00 — NOT the old
+    # current-period-annualized estimate's $3.50/mo (which assumed this
+    # same $5,000 recurred all 12 months, then capped the ANNUAL total at
+    # $7,000 and divided back down). SUI's own wage cap is untouched by
+    # this change (still the annualized estimate) — only SS/FUTA/
+    # Additional Medicare were in scope for true YTD tracking.
+    assert item.employer_futa == pytest.approx(Decimal("30.00"), abs=Decimal("0.01"))
 
 
 # ── Section 13: US cross-state reciprocity ────────────────────────────────
@@ -2275,13 +2290,21 @@ def test_reciprocity_flows_through_real_payslip_generation(db, organization, mon
     db.commit()
 
     from app.modules.payroll.engine.countries import shared as shared_module
+    # PA has been permanently enabled since 2026-09-11 (predating this test's
+    # own toggle) — save/restore each state's ACTUAL prior membership rather
+    # than unconditionally discarding both, so this test doesn't silently
+    # disable PA for every test that runs after it in the same session (a
+    # pre-existing latent bug, found and fixed alongside this session's own
+    # CA/DC/DE/GA/HI/IA enablement work).
+    previously_enabled = {s for s in ("NJ", "PA") if s in shared_module._US_STATE_TAX_ENABLED_STATES}
     shared_module._US_STATE_TAX_ENABLED_STATES.update({"NJ", "PA"})
     try:
         run = _make_run(db, organization.id, date(2026, 1, 1), date(2026, 1, 31), date(2026, 2, 1))
         service.generate_payslips_for_run(db, run, organization.id)
     finally:
-        shared_module._US_STATE_TAX_ENABLED_STATES.discard("NJ")
-        shared_module._US_STATE_TAX_ENABLED_STATES.discard("PA")
+        for s in ("NJ", "PA"):
+            if s not in previously_enabled:
+                shared_module._US_STATE_TAX_ENABLED_STATES.discard(s)
 
     item = db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id).first()
     # PA's 3% of $60,000/yr / 12 = $150.00 — NOT NJ's 8% ($400.00).
@@ -2462,6 +2485,7 @@ def test_locality_rate_upsert_and_delete_are_audited(db, organization):
 
 def test_source_artifact_create_and_review_are_audited(db, organization):
     actor_id = 42
+    reviewer_id = 43  # deliberately distinct — see reviewer-independence gate below
     artifact = service.create_source_artifact(
         db,
         SourceArtifactCreate(agency="IRS", title="2026 Publication 15-T"),
@@ -2472,11 +2496,71 @@ def test_source_artifact_create_and_review_are_audited(db, organization):
     assert created.actor_id == actor_id
     assert created.new_value["title"] == "2026 Publication 15-T"
 
-    service.mark_source_artifact_reviewed(db, artifact.id, reviewer_id=actor_id)
+    service.mark_source_artifact_reviewed(db, artifact.id, reviewer_id=reviewer_id)
     reviewed = _last_audit(db, "source_artifact", artifact.id)
     assert reviewed.action == "review"
-    assert reviewed.actor_id == actor_id
-    assert reviewed.new_value["reviewerId"] == actor_id
+    assert reviewed.actor_id == reviewer_id
+    assert reviewed.new_value["reviewerId"] == reviewer_id
+
+
+def test_source_artifact_review_requires_distinct_reviewer_from_creator(db, organization):
+    """Reviewer independence (ZP-TAX-US-2026-001 §14.2, gap-closure Plan
+    Phase 4): the same person who created a source artifact cannot also
+    review it."""
+    actor_id = 44
+    artifact = service.create_source_artifact(
+        db, SourceArtifactCreate(agency="IRS", title="2026 Publication 15"), actor_id=actor_id,
+    )
+    with pytest.raises(BadRequestException, match="reviewer different from whoever created it"):
+        service.mark_source_artifact_reviewed(db, artifact.id, reviewer_id=actor_id)
+
+
+def test_upload_source_artifact_file_computes_real_checksum_and_is_downloadable(db, organization):
+    """Real preserved-file storage (ZP-TAX-US-2026-001 §14.2, gap-closure
+    Plan Phase 4) — checksum_sha256 must be computed FROM THE ACTUAL
+    BYTES, not accepted as a hand-typed string, and the file must be
+    readable back byte-for-byte."""
+    import hashlib
+
+    from app.core import object_storage
+
+    artifact = service.create_source_artifact(
+        db, SourceArtifactCreate(agency="IRS", title="2026 Publication 15-T"), actor_id=1,
+    )
+    content = b"this is a fake PDF's worth of bytes for testing"
+    expected_checksum = hashlib.sha256(content).hexdigest()
+
+    uploaded = service.upload_source_artifact_file(
+        db, artifact.id, "pub15t.pdf", "application/pdf", content, actor_id=2,
+    )
+    assert uploaded.checksum_sha256 == expected_checksum
+    assert uploaded.original_filename == "pub15t.pdf"
+    assert uploaded.content_type == "application/pdf"
+    assert uploaded.file_size_bytes == len(content)
+    assert uploaded.file_path is not None
+
+    data, content_type, filename = service.download_source_artifact_file(db, artifact.id)
+    assert data == content
+    assert content_type == "application/pdf"
+    assert filename == "pub15t.pdf"
+
+    object_storage.delete_ref(uploaded.file_path)  # test cleanup — don't litter /tmp/uploads
+
+
+def test_upload_source_artifact_file_rejects_empty_file(db, organization):
+    artifact = service.create_source_artifact(
+        db, SourceArtifactCreate(agency="IRS", title="2026 Publication 15"), actor_id=1,
+    )
+    with pytest.raises(BadRequestException, match="empty"):
+        service.upload_source_artifact_file(db, artifact.id, "empty.pdf", "application/pdf", b"", actor_id=1)
+
+
+def test_download_source_artifact_file_404_when_no_file_uploaded(db, organization):
+    artifact = service.create_source_artifact(
+        db, SourceArtifactCreate(agency="IRS", title="2026 Publication 15"), actor_id=1,
+    )
+    with pytest.raises(NotFoundException):
+        service.download_source_artifact_file(db, artifact.id)
 
 
 # ── ZP-TAX-CA-2026-001 §18/AC-25: provincial TD1 / TP-1015.3-V ──────────

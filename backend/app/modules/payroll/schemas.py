@@ -159,6 +159,12 @@ class EmployeeResponse(BaseModel):
     td1xEstimatedAnnualExpenses:   Optional[Decimal] = Field(None, validation_alias="td1x_estimated_annual_expenses", serialization_alias="td1xEstimatedAnnualExpenses")
     complianceFields: Optional[dict] = Field(None, validation_alias="compliance_fields", serialization_alias="complianceFields")
     customFields:    Optional[dict] = Field(None, validation_alias="custom_fields", serialization_alias="customFields")
+    # Multi-jurisdiction routing (ZP-MJR-2026-001) — additive: ifscCode/
+    # complianceFields above are unchanged, `routing` adds the
+    # jurisdiction-correct [{key,label,value}] list resolved from the
+    # employee's own country (India -> IFSC from the dedicated column;
+    # every other country -> its compliance_fields routing codes).
+    routing:         Optional[List[dict]] = None
     addressLine1:    Optional[str] = Field(None, validation_alias="address_line1", serialization_alias="addressLine1")
     addressLine2:    Optional[str] = Field(None, validation_alias="address_line2", serialization_alias="addressLine2")
     addressTown:     Optional[str] = Field(None, validation_alias="address_town", serialization_alias="addressTown")
@@ -424,6 +430,14 @@ class PayslipItemResponse(BaseModel):
     federalIncomeTax:   Decimal = Decimal("0")
     stateIncomeTax:     Decimal = Decimal("0")
     localTax:           Decimal = Decimal("0")
+    # US: State Disability Insurance / other state payroll-program employee
+    # deductions (e.g. CA SDI, NY/NJ/RI TDI, CT/MA/WA/CO/OR/etc. paid-leave
+    # employee share) — computed and persisted since 2026-09 gap-closure but
+    # never declared here, so response_model filtering silently stripped
+    # them from every payslip API response despite _serialize_payslip
+    # already including them (found 2026-09-15 Org Admin visibility audit).
+    stateDisabilityInsurance: Decimal = Decimal("0")
+    stateProgramDeductions: Decimal = Decimal("0")
     pf:                 Decimal
     esi:                Decimal
     professionalTax:    Decimal
@@ -460,6 +474,14 @@ class PayslipItemResponse(BaseModel):
     # Phase 3 alongside the fix that made this value actually get
     # persisted at all (see _compute_payslip_values).
     employerApprenticeshipLevy: Decimal = Decimal("0")
+    # US: employer-side FUTA / SUI / state payroll-program contributions —
+    # same "computed+persisted but never declared/serialized" gap as the
+    # employee-side fields above; RunDetailPanel's register view is the
+    # only place these are meant to surface (never on the employee's own
+    # payslip, same policy as employerPf/employerNi/etc.).
+    employerFuta:       Decimal = Decimal("0")
+    employerSui:        Decimal = Decimal("0")
+    employerStateProgramContributions: Decimal = Decimal("0")
     # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
     # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
     # amount; informational only, never affects employeePension/
@@ -476,6 +498,13 @@ class PayslipItemResponse(BaseModel):
     pan:                Optional[str] = None
     uan:                Optional[str] = None
     ifsc:               Optional[str] = None
+    # Multi-jurisdiction routing (ZP-MJR-2026-001) — additive: ifsc/
+    # complianceFields are unchanged, `routing` adds the
+    # jurisdiction-correct [{key,label,value}] list read from the payslip's
+    # own snapshot (India -> IFSC; other countries -> their compliance
+    # fields), so the frontend can render the correct payment rail and
+    # routing code per payslip even for historical runs.
+    routing:            Optional[List[dict]] = None
     complianceFields:   Optional[dict] = None
     status:             PayslipStatus
     notes:              Optional[str] = None
@@ -721,6 +750,56 @@ class CASpecialPaymentCalculateRequest(BaseModel):
     regular_annual_pay: Decimal
     special_payment_amount: Decimal
     payroll_date: Optional[date] = None
+
+
+# ── US: supplemental wages flat-rate method ───────────────────────────────
+# (ZP-TAX-US-2026-001 §3.1, gap-closure 2026-09-12) — see service.
+# calculate_us_supplemental_wage_withholding's own docstring for why
+# cytd_supplemental_wages_before is required rather than assumed zero.
+class USSupplementalWageCalculateRequest(BaseModel):
+    employee_id: int
+    supplemental_wage_amount: Decimal
+    cytd_supplemental_wages_before: Decimal = Decimal("0")
+
+
+class USSupplementalWageCalculateResponse(BaseModel):
+    supplementalWageAmount: Decimal = Field(validation_alias="supplemental_wage_amount", serialization_alias="supplementalWageAmount")
+    cytdSupplementalWagesBefore: Decimal = Field(validation_alias="cytd_supplemental_wages_before", serialization_alias="cytdSupplementalWagesBefore")
+    cytdSupplementalWagesAfter: Decimal = Field(validation_alias="cytd_supplemental_wages_after", serialization_alias="cytdSupplementalWagesAfter")
+    amountAtFlatRate: Decimal = Field(validation_alias="amount_at_flat_rate", serialization_alias="amountAtFlatRate")
+    flatRatePct: Decimal = Field(validation_alias="flat_rate_pct", serialization_alias="flatRatePct")
+    amountAtHighRate: Decimal = Field(validation_alias="amount_at_high_rate", serialization_alias="amountAtHighRate")
+    highRatePct: Decimal = Field(validation_alias="high_rate_pct", serialization_alias="highRatePct")
+    withholdingAtFlatRate: Decimal = Field(validation_alias="withholding_at_flat_rate", serialization_alias="withholdingAtFlatRate")
+    withholdingAtHighRate: Decimal = Field(validation_alias="withholding_at_high_rate", serialization_alias="withholdingAtHighRate")
+    totalWithholding: Decimal = Field(validation_alias="total_withholding", serialization_alias="totalWithholding")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── US: federal deposit/filing calendar ───────────────────────────────────
+# (ZP-TAX-US-2026-001 §3.5, gap-closure 2026-09-12) — org-scoped, no
+# employee_id (a federal deposit obligation is the employer's). See
+# service.calculate_us_federal_deposit_schedule's own docstring for why
+# the three liability figures are required rather than assumed.
+class USFederalDepositScheduleRequest(BaseModel):
+    lookback_period_liability: Decimal
+    payroll_date: date
+    accumulated_undeposited_liability: Optional[Decimal] = None
+    quarterly_futa_liability: Optional[Decimal] = None
+
+
+class USFederalDepositScheduleResponse(BaseModel):
+    depositorStatus: str = Field(validation_alias="depositor_status", serialization_alias="depositorStatus")
+    lookbackPeriodLiability: Decimal = Field(validation_alias="lookback_period_liability", serialization_alias="lookbackPeriodLiability")
+    monthlySemiweeklyThreshold: Decimal = Field(validation_alias="monthly_semiweekly_threshold", serialization_alias="monthlySemiweeklyThreshold")
+    depositDueDate: date = Field(validation_alias="deposit_due_date", serialization_alias="depositDueDate")
+    nextDayRuleTriggered: bool = Field(validation_alias="next_day_rule_triggered", serialization_alias="nextDayRuleTriggered")
+    nextDayDepositThreshold: Decimal = Field(validation_alias="next_day_deposit_threshold", serialization_alias="nextDayDepositThreshold")
+    nextDayDepositDueDate: Optional[date] = Field(default=None, validation_alias="next_day_deposit_due_date", serialization_alias="nextDayDepositDueDate")
+    futaDepositRequired: Optional[bool] = Field(default=None, validation_alias="futa_deposit_required", serialization_alias="futaDepositRequired")
+    futaDepositThreshold: Decimal = Field(validation_alias="futa_deposit_threshold", serialization_alias="futaDepositThreshold")
+    formW2W3Deadline: date = Field(validation_alias="form_w2_w3_deadline", serialization_alias="formW2W3Deadline")
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CARetiringAllowanceCalculateRequest(BaseModel):
@@ -1052,6 +1131,14 @@ class TaxSlabResponse(BaseModel):
     # labeled "Nil" was indistinguishable from a flat-amount PT_FLAT bracket
     # without this field.
     ruleType: str = Field(validation_alias="rule_type", serialization_alias="ruleType")
+    # Federal (country-level) vs. state-level rows share the same ruleType
+    # (MARGINAL_RATE) with nothing else to tell them apart client-side —
+    # added so TaxConfigurationTab.jsx's US "State Taxes" item can actually
+    # filter to the org's own state instead of being hardcoded to show
+    # nothing (found 2026-09-15 Org Admin visibility audit). None = a
+    # country-level row (e.g. US Federal, India Central), same convention
+    # as the model column itself.
+    jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
     # Raw numeric bounds, additive alongside the pre-formatted min/max/rate
     # strings above. Needed so PT_FLAT rows (state Professional Tax — a
     # fixed monthly amount per gross-income bracket, not a percentage) can
@@ -1211,6 +1298,15 @@ class JurisdictionPackImpactPreviewResponse(BaseModel):
     totalOrganizationsGenuinelyAffected: int
     totalActiveEmployeesAffected: int
     totalUnfinalizedRunsAffected: int
+
+
+class JurisdictionPackDiffResponse(BaseModel):
+    fromPackRowId: int
+    fromVersion: str
+    toPackRowId: int
+    toVersion: str
+    contributionRates: dict
+    taxSlabs: dict
 
 
 class PackHotfixActivateRequest(BaseModel):
@@ -1568,6 +1664,59 @@ class IndiaForm123GenerateRequest(BaseModel):
     tax_year: str  # e.g. "2026-27"
 
 
+# ── US: Form W-2 (Production-Readiness Plan Phase 5) ────────────────────
+class USW2GenerateRequest(BaseModel):
+    report_template_id: int
+    employee_id: int
+    tax_year: str  # e.g. "2026" — a plain calendar year, unlike India's "2026-27"
+
+
+# ── US: Form 941/940 (Production-Readiness Plan Phase 5) ────────────────
+class USForm941GenerateRequest(BaseModel):
+    report_template_id: int
+    year: int
+    quarter: int  # 1-4, standard IRS calendar quarter
+
+
+class USForm940GenerateRequest(BaseModel):
+    report_template_id: int
+    year: int
+
+
+# ── US: New Hire Reporting (Production-Readiness Plan Phase 5) ──────────
+# The one genuinely new concept in this phase — compliance TRACKING, not
+# report generation against already-run payroll. See NewHireReport's own
+# model docstring for the full "due_date is a suggestion, not a legal
+# deadline" reasoning.
+class NewHireReportCreate(BaseModel):
+    employeeId: int
+    hireDate: Optional[date] = None   # defaults to the employee's own date_of_joining, or today
+    workState: Optional[str] = None   # defaults to the employee's own work_state
+    dueDateDays: Optional[int] = None  # defaults to the platform's 20-day suggestion
+
+
+class NewHireReportMarkFiledRequest(BaseModel):
+    filedDate: Optional[date] = None  # defaults to today
+    notes: Optional[str] = None
+
+
+class NewHireReportResponse(BaseModel):
+    id: int
+    organizationId: int = Field(validation_alias="organization_id", serialization_alias="organizationId")
+    employeeId: int = Field(validation_alias="employee_id", serialization_alias="employeeId")
+    employeeName: Optional[str] = None
+    workState: Optional[str] = Field(None, validation_alias="work_state", serialization_alias="workState")
+    hireDate: date = Field(validation_alias="hire_date", serialization_alias="hireDate")
+    dueDate: date = Field(validation_alias="due_date", serialization_alias="dueDate")
+    status: str
+    filedDate: Optional[date] = Field(None, validation_alias="filed_date", serialization_alias="filedDate")
+    filedById: Optional[int] = Field(None, validation_alias="filed_by_id", serialization_alias="filedById")
+    notes: Optional[str] = None
+    createdAt: Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 # ── Canada: T4/RL-1/ROE (per-employee) + PD7A (per-period) generation ───
 # (ZP-TAX-CA-2026-001 gap-closure, forms/reports phase). T4/RL-1/ROE reuse
 # UKEmployeeReportGenerateRequest as-is (report_template_id/employee_id/
@@ -1849,6 +1998,10 @@ class SourceArtifactResponse(BaseModel):
     checksumSha256: Optional[str] = Field(None, validation_alias="checksum_sha256", serialization_alias="checksumSha256")
     reviewerId: Optional[int] = Field(None, validation_alias="reviewer_id", serialization_alias="reviewerId")
     reviewerApprovedAt: Optional[datetime] = Field(None, validation_alias="reviewer_approved_at", serialization_alias="reviewerApprovedAt")
+    originalFilename: Optional[str] = Field(None, validation_alias="original_filename", serialization_alias="originalFilename")
+    contentType: Optional[str] = Field(None, validation_alias="content_type", serialization_alias="contentType")
+    fileSizeBytes: Optional[int] = Field(None, validation_alias="file_size_bytes", serialization_alias="fileSizeBytes")
+    hasFile: bool = False
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -1991,6 +2144,11 @@ class LocalityRateUpsert(BaseModel):
     nonresidentRatePct: Optional[Decimal] = None
     flatAmount: Optional[Decimal] = None
     taxCollectorId: Optional[str] = None
+    # Tiered/progressive local tax (Production-Readiness Plan Phase 4) —
+    # {"SINGLE": {"deduction": N, "brackets": [{"min","max","rate"}, ...]},
+    # "MFJ": {...}}. None (every locality before this field existed, and
+    # every ordinary flat-rate locality since) is a complete no-op.
+    bracketSchedule: Optional[dict] = None
     effectiveFrom: Optional[date] = None
     effectiveTo: Optional[date] = None
     sourceDocumentId: Optional[int] = None
@@ -2006,8 +2164,93 @@ class LocalityRateResponse(BaseModel):
     nonresidentRatePct: Optional[Decimal] = Field(None, validation_alias="nonresident_rate_pct", serialization_alias="nonresidentRatePct")
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     taxCollectorId: Optional[str] = Field(None, validation_alias="tax_collector_id", serialization_alias="taxCollectorId")
+    bracketSchedule: Optional[dict] = Field(None, validation_alias="bracket_schedule", serialization_alias="bracketSchedule")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── US: Locality Dataset Manager (gap-closure Plan Phase 3) ─────────────
+
+class LocalityDatasetRateRow(BaseModel):
+    """One row within a bulk locality-dataset import — same shape as
+    LocalityRateUpsert minus the dataset-identifying fields, which the
+    import endpoint supplies once for the whole batch."""
+    localityCode: str
+    localityType: str = "MUNICIPAL"
+    localityName: Optional[str] = None
+    residentRatePct: Optional[Decimal] = None
+    nonresidentRatePct: Optional[Decimal] = None
+    flatAmount: Optional[Decimal] = None
+    taxCollectorId: Optional[str] = None
+    bracketSchedule: Optional[dict] = None
+
+
+class LocalityDatasetImportRequest(BaseModel):
+    jurisdictionCountry: str = "US"
+    jurisdictionState: str
+    version: str
+    effectiveFrom: Optional[date] = None
+    sourceDocumentId: Optional[int] = None
+    rows: List[LocalityDatasetRateRow]
+
+
+class StateTaxBracketRow(BaseModel):
+    """One row within a bulk state-tax import — a single MARGINAL_RATE
+    bracket for one filing status. Same shape as the relevant subset of
+    CanonicalTaxSlabUpsert, minus the fields the import endpoint supplies
+    once for the whole batch (jurisdictionPackId/jurisdictionState/ruleType)."""
+    filingStatus: Optional[str] = None
+    minAmount: Decimal
+    maxAmount: Optional[Decimal] = None
+    ratePct: Decimal
+    rateLabel: Optional[str] = None
+    taxFormula: Optional[str] = None
+
+
+class StateStandardDeductionRow(BaseModel):
+    """One row within a bulk state-tax import — a flat standard-deduction
+    amount for one filing status (ContributionRate component_key=
+    "state_standard_deduction")."""
+    filingStatus: Optional[str] = None
+    label: Optional[str] = None
+    flatAmount: Decimal
+
+
+class BulkStateTaxImportRequest(BaseModel):
+    jurisdictionState: str
+    version: str
+    packId: Optional[str] = None
+    effectiveFrom: Optional[date] = None
+    sourceDocumentId: Optional[int] = None
+    bracketRows: List[StateTaxBracketRow]
+    standardDeductionRows: List[StateStandardDeductionRow] = Field(default_factory=list)
+
+
+class LocalityDatasetResponse(BaseModel):
+    id: int
+    jurisdictionCountry: str = Field(validation_alias="jurisdiction_country", serialization_alias="jurisdictionCountry")
+    jurisdictionState: str = Field(validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    version: str
+    status: str
+    checksumSha256: Optional[str] = Field(None, validation_alias="checksum_sha256", serialization_alias="checksumSha256")
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
+    importedById: Optional[int] = Field(None, validation_alias="imported_by_id", serialization_alias="importedById")
+    approvedById: Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
+    createdAt: Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    rateCount: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class LocalityDatasetDiffResponse(BaseModel):
+    datasetId: int
+    comparedAgainstDatasetId: Optional[int] = None
+    comparedAgainstVersion: Optional[str] = None
+    added: List[str]
+    removed: List[str]
+    changed: List[dict]
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────
