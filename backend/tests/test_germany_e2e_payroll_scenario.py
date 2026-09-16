@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.modules.payroll import service
 from app.modules.payroll.engine.countries import germany
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     calculate_midijob_branch_contribution,
     calculate_midijob_employee_base,
     calculate_midijob_total_base,

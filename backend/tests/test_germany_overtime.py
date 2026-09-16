@@ -36,7 +36,7 @@ import pytest
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_overtime_classifier import (
+from app.modules.payroll.engine.jurisdictions.germany.overtime.classifier import (
     GermanyOvertimeInvalidIntervalError,
     GermanyOvertimeTimezoneFoundationRequiredError,
     build_time_segments,
@@ -258,7 +258,7 @@ def test_overlapping_manual_records_are_marked_ambiguous_and_block_classificatio
     # would already carry it, then exercise the real classifier directly
     # (the same function classify_and_list_germany_overtime_time_segments
     # calls once the overlap gate is clear).
-    from app.modules.payroll.engine.germany_overtime_classifier import classify_germany_overtime_work_record
+    from app.modules.payroll.engine.jurisdictions.germany.overtime.classifier import classify_germany_overtime_work_record
 
     first.start_datetime = first.start_datetime.replace(tzinfo=timezone.utc)
     first.end_datetime = first.end_datetime.replace(tzinfo=timezone.utc)
@@ -519,7 +519,7 @@ def test_calculate_overtime_wage_tax_writes_central_audit_entry(db, organization
     def _fake_calculate(db, work_record, persist=True, actor_id=None):
         return ["result-a", "result-b"]
 
-    import app.modules.payroll.engine.germany_overtime_wage_tax as wage_tax_module
+    import app.modules.payroll.engine.jurisdictions.germany.overtime.wage_tax as wage_tax_module
     monkeypatch.setattr(wage_tax_module, "calculate_germany_overtime_wage_tax", _fake_calculate)
 
     results = service.calculate_and_list_germany_overtime_wage_tax(db, record.id, organization.id, actor_id=9)
@@ -550,7 +550,7 @@ def test_calculate_overtime_social_insurance_writes_central_audit_entry(db, orga
     def _fake_calculate(db, work_record, persist=True, actor_id=None):
         return ["si-result"]
 
-    import app.modules.payroll.engine.germany_overtime_social_insurance as si_module
+    import app.modules.payroll.engine.jurisdictions.germany.overtime.social_insurance as si_module
     monkeypatch.setattr(si_module, "calculate_germany_overtime_social_insurance", _fake_calculate)
 
     results = service.calculate_and_list_germany_overtime_social_insurance(db, record.id, organization.id, actor_id=11)
@@ -593,7 +593,7 @@ def test_build_overtime_premium_components_writes_central_audit_entry(db, organi
                 "si_contributory_amount": Decimal("50.00"),
             }
 
-    import app.modules.payroll.engine.germany_overtime_premium_component as premium_module
+    import app.modules.payroll.engine.jurisdictions.germany.overtime.premium_component as premium_module
     monkeypatch.setattr(premium_module, "build_premium_component_groups", lambda db, work_record: [_FakeGroup()])
 
     rows = service.build_germany_overtime_premium_components(db, record.id, organization.id, actor_id=13)

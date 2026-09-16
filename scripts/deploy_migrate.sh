@@ -71,11 +71,17 @@ for column in sync_schema():
 PY
 }
 
+check_model_drift() {
+  echo "==> Checking for model/schema drift against declared SQLAlchemy models..."
+  python -m scripts.check_schema_drift
+}
+
 # --- Migration steps -------------------------------------------------------
 
 echo "==> alembic upgrade head"
 if upgrade_output="$(alembic upgrade head 2>&1)"; then
   printf '%s\n' "$upgrade_output"
+  check_model_drift
   echo "==> Up to date. Running sync_schema drift safety-net..."
   python -m migrations.sync_schema
   exit 0
@@ -128,6 +134,7 @@ fi
 alembic stamp "$HEAD_REV"
 echo "==> Re-stamped to '${HEAD_REV}'. Re-running upgrade..."
 alembic upgrade head
+check_model_drift
 echo "==> Running sync_schema drift safety-net..."
 python -m migrations.sync_schema
 echo "==> Migration step complete."

@@ -372,7 +372,7 @@ def test_midijob_rv_consistent_with_regular_canonical_override(db, organization,
     # The Midijob 3-step Übergangsbereich mechanism uses the SAME 10.00%
     # combined rate, not the 9.30%+9.30% hardcoded default — proving RV
     # resolves identically for Midijob and Regular from the same override.
-    from app.modules.payroll.engine.germany_pap.core import (
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         calculate_midijob_branch_contribution, calculate_midijob_employee_base, calculate_midijob_total_base,
     )
     from app.modules.payroll.hardcoded_defaults import (

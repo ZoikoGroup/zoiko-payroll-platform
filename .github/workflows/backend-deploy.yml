@@ -29,3 +29,14 @@ jobs:
             bash ../scripts/deploy_migrate.sh
             deactivate
             sudo systemctl restart zoiko-payroll-backend
+      - name: Check for model/schema drift
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/zoiko-payroll/backend/backend
+            source venv/bin/activate
+            python -m scripts.check_schema_drift

@@ -3641,7 +3641,7 @@ def resolve_germany_pap_asset(
 # Nothing here changes resolve_pap_executor()'s behavior — germany_pap/
 # core.py is never imported by this section, and this section never
 # imports from it either, beyond the pure, DB-free
-# engine.germany_pap.production_gate module.
+# engine.jurisdictions.germany.pap.production_gate module.
 
 _PAP_RELEASE_VALID_STATUSES = (
     "NOT_READY", "READY_FOR_RELEASE", "RELEASE_APPROVED",
@@ -4037,7 +4037,7 @@ def reject_pap_release(db: Session, release_id: int, actor_id: Optional[int], re
 
 
 def _pap_release_gate_snapshot(db: Session, row: GermanyPapRelease) -> dict:
-    """Builds the input the pure engine.germany_pap.production_gate module
+    """Builds the input the pure engine.jurisdictions.germany.pap.production_gate module
     evaluates. Every derived value re-checks LIVE state (the asset's
     current status/hash) rather than trusting anything cached on the
     release row — fail-closed by construction, per Phase 8G-1 §6/§18."""
@@ -15121,7 +15121,7 @@ def set_germany_overtime_work_record_approval(
 
 # ── Germany: overtime time-window CLASSIFICATION (Phase 8AE) ────────────
 # Statutory/calendar classification only — see
-# engine/germany_overtime_classifier.py for the full algorithm and its own
+# engine/jurisdictions/germany/overtime/classifier.py for the full algorithm and its own
 # extensive STATUTORY FACT / ENGINEERING DESIGN / UNRESOLVED QUESTION
 # documentation. No money is calculated by anything in this section.
 
@@ -15282,7 +15282,7 @@ def list_germany_overtime_social_insurance_results(
 
 # ── Germany overtime PREMIUM COMPONENT (Phase 8AH) ──────────────────────
 # Combines Phase 8AF (wage-tax) + Phase 8AG (social-insurance) results —
-# see engine/germany_overtime_premium_component.py's own module docstring
+# see engine/jurisdictions/germany/overtime/premium_component.py's own module docstring
 # for the full combination/reconciliation design. Building/rebuilding a
 # component NEVER touches an already-attached one (payslip_allowance_item_id
 # IS NOT NULL) — those are frozen once attached, matching every other
@@ -15590,7 +15590,7 @@ def _compute_overtime_financial_delta(
            germany_calculation_snapshot (never re-derived/guessed), so the
            delta is computed on the identical base the payslip's own
            Lohnsteuer used — reusing compute_tax_for_class/compute_soli
-           from engine/germany_internal_tax.py directly, NOT a second tax
+           from engine/jurisdictions/germany/tax.py directly, NOT a second tax
            engine.
 
     PV (Pflegeversicherung) is deliberately excluded from employee_esi_delta
@@ -16714,7 +16714,7 @@ def batch_attach_germany_overtime_premium_components_to_payslips(
 # Spec §6 "Change lists" / §7 (this phase's own Step 7/8). Neither function
 # below calls ELSTER/BZSt or fabricates ELStAM content — both operate
 # exclusively on caller-supplied structured data, exactly like every other
-# write path in this module. See engine/germany_pap/elstam.py for the
+# write path in this module. See engine/jurisdictions/germany/pap/elstam.py for the
 # still-unimplemented (by design) LIVE connector boundary; this is the
 # separate IMPORT/audit boundary for data someone has already obtained and
 # validated by hand.
@@ -16884,7 +16884,7 @@ def list_elstam_import_attempts_for_employee(
 
 
 # ── Germany ELSTER transmission boundary (Phase 8BF) ─────────────────────
-# See engine/germany_elster.py's own module docstring for the full
+# See engine/jurisdictions/germany/statutory/elster.py's own module docstring for the full
 # fail-closed design. Nothing below ever calls a real ELSTER endpoint —
 # these functions only prepare, validate, and record the deterministic
 # BLOCKED_EXTERNAL outcome of attempting to resolve a transmitter. No
@@ -17002,7 +17002,7 @@ def validate_elster_transmission(db: Session, transmission_id: int, organization
 
 def attempt_transmit_elster_transmission(db: Session, transmission_id: int, organization_id: int, actor_id: Optional[int] = None) -> GermanyElsterTransmission:
     """Attempts to resolve and use a real ElsterTransmitter. Today this
-    ALWAYS lands on BLOCKED_EXTERNAL (see engine/germany_elster.py) —
+    ALWAYS lands on BLOCKED_EXTERNAL (see engine/jurisdictions/germany/statutory/elster.py) —
     returned as a normal, successfully-recorded result (not an HTTP
     error), since being blocked on a missing external certificate is an
     expected, auditable state, not a caller mistake. Idempotent/retry-safe:
@@ -21758,7 +21758,7 @@ def get_germany_payroll_summary_report(
         # Phase 8BS: never let a CALCULATED figure be mistaken for an
         # official BMF-certified one. Every real Regular/Midijob wage-tax
         # figure today reads INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023
-        # (engine/germany_internal_tax.py) — a future real PAP executor
+        # (engine/jurisdictions/germany/tax.py) — a future real PAP executor
         # would report a different, genuinely BMF-certified pap_version
         # string here instead, distinguishable at a glance.
         "calculationModes": calculation_modes_seen,
