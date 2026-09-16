@@ -1858,6 +1858,7 @@ def upsert_locality_rate(db: Session, data: LocalityRateUpsert, actor_id: Option
         locality_name=data.localityName, resident_rate_pct=data.residentRatePct,
         nonresident_rate_pct=data.nonresidentRatePct, flat_amount=data.flatAmount,
         tax_collector_id=data.taxCollectorId, bracket_schedule=data.bracketSchedule,
+        lst_exemption_threshold=data.lstExemptionThreshold,
     )
     action = "update" if data.id else "create"
     old_value = None
@@ -1982,6 +1983,7 @@ def import_locality_dataset(
             locality_name=r.get("localityName"), resident_rate_pct=r.get("residentRatePct"),
             nonresident_rate_pct=r.get("nonresidentRatePct"), flat_amount=r.get("flatAmount"),
             tax_collector_id=r.get("taxCollectorId"), bracket_schedule=r.get("bracketSchedule"),
+            lst_exemption_threshold=r.get("lstExemptionThreshold"),
         ))
     db.commit()
     db.refresh(dataset)

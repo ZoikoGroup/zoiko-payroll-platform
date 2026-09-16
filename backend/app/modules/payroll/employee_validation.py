@@ -225,6 +225,13 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         # employees; optional (unset means $0 NJ withholding, never a
         # guessed table).
         "nj_rate_table": {"upper": True, "choices": ["A", "B", "C", "D", "E"]},
+        # Kansas Form K-4 certified dependent count — only meaningful for
+        # KS employees; optional (unset means 0 dependents, never a
+        # guessed count — see models.PayrollEmployee.ks_k4_dependents).
+        "ks_k4_dependents": {
+            "min": Decimal("0"),
+            "error": "Kansas K-4 dependent count must be zero or a positive whole number.",
+        },
         "aba_routing_number": {
             "pattern": re.compile(r"^\d{9}$"),
             "error": "ABA routing number must be exactly 9 digits.",
@@ -307,6 +314,7 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         "residency_certification_date": "residency_certification_date",
         "ct_withholding_code": "ct_withholding_code",
         "nj_rate_table": "nj_rate_table",
+        "ks_k4_dependents": "ks_k4_dependents",
         # Without these three, the reciprocity engine (fully built and
         # tested — see service.py:_resolve_us_reciprocity, resolve_reciprocity)
         # had no way to ever actually activate for a real employee: Super

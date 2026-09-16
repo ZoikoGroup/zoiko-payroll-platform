@@ -760,10 +760,15 @@ _US_STATE_TAX_ENABLED_STATES: set[str] = {
     # _US_OR_WITHHOLDING_PARAMS/_US_ME_WITHHOLDING_PARAMS's own docstrings
     # for OR/ME's bespoke logic; MD/LA's real bracket data is entered as
     # ordinary canonical TaxSlab/ContributionRate rows, no bespoke code
-    # needed). Kansas is NOT enabled yet — its DOR site was unreachable
-    # this session, so no real figures were ever verified or entered;
-    # do not add "KS" here until real data backs it.
+    # needed).
     "OR", "ME", "MD", "LA",
+    # Kansas — added 2026-09-16 once KW-100 (Rev. 10-24) was actually
+    # obtained and independently verified (every published per-pay-period
+    # bracket row checked arithmetically consistent; see
+    # _US_KS_WITHHOLDING_PARAMS's own docstring). Not enabled earlier this
+    # session because KDOR's site was unreachable and no real figures had
+    # been confirmed yet.
+    "KS",
 }
 
 # Per-state rollout switch for a state's own statutory payroll programs

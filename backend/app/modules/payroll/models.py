@@ -288,6 +288,20 @@ class PayrollEmployee(Base):
     # rate table on file resolves to $0, never a guessed table.
     nj_rate_table = Column(String(2), nullable=True)
 
+    # Kansas-specific: Form K-4 certified dependent count (Production-
+    # Readiness Plan Phase 4, 2026-09-16, KW-100 Rev. 10-24). KW-100's own
+    # withholding-allowance formula is: $9,160 (Single/HOH/MFS) or $18,320
+    # (MFJ) personal exemption, PLUS $2,320 per this dependent count, PLUS
+    # a further flat $2,320 if w4_filing_status == "HOH" — the HOH add-on
+    # needs no separate column since w4_filing_status already carries it;
+    # only the per-dependent count is a genuinely new fact with no
+    # existing home (w4_dependents_credit_annual is a federal Step-3
+    # DOLLAR credit subtracted from computed tax, not a headcount, and
+    # means something structurally different). NULL for every employee
+    # today — engine/countries/us.py's KS-specific deduction function
+    # treats NULL as 0 dependents, never a guess.
+    ks_k4_dependents = Column(Integer, nullable=True)
+
     # Canada-specific: TD1 federal total claim amount. NULL for every
     # non-CA employee, and for CA employees until explicitly set — the
     # engine falls back to the standard income-tapered BPAF (Phase 2)
@@ -4307,7 +4321,7 @@ class LocalityRate(Base):
     id                    = Column(Integer, primary_key=True, index=True)
     locality_dataset_id   = Column(Integer, ForeignKey("payroll_locality_datasets.id"), nullable=False, index=True)
     locality_code         = Column(String(20), nullable=False)   # PA 6-digit PSD code, OH municipality ID, IN county code
-    locality_type         = Column(String(30), nullable=False)   # COUNTY | MUNICIPAL | SCHOOL_DISTRICT | PSD_EIT_LST
+    locality_type         = Column(String(30), nullable=False)   # COUNTY | MUNICIPAL | SCHOOL_DISTRICT | PSD_EIT_LST | OH_MUNI_CREDIT
     locality_name         = Column(String(200), nullable=True)
     resident_rate_pct     = Column(Numeric(6, 4), nullable=True)
     nonresident_rate_pct  = Column(Numeric(6, 4), nullable=True)
@@ -4324,6 +4338,17 @@ class LocalityRate(Base):
     # no-op, resident_rate_pct/nonresident_rate_pct/flat_amount still
     # drive calculation exactly as before.
     bracket_schedule      = Column(JSON, nullable=True)
+    # PA Local Services Tax (LST) low-income exemption threshold —
+    # Production-Readiness Plan Phase 4, 2026-09-16. Only meaningful when
+    # locality_type == "PSD_EIT_LST" and flat_amount is also set (flat_amount
+    # there means the LST annual fee, not a replacement for the EIT rate —
+    # see engine/countries/us.py's own local-tax block). An employee whose
+    # annual gross is below this threshold owes $0 LST; None means no
+    # exemption is configured (LST applies to every income level), never a
+    # guessed default. Real published examples: Pittsburgh/Allentown use
+    # $12,000 (PA's statewide-default floor for any LST over $10/year),
+    # Harrisburg uses $24,500 (an Act 47 distressed-city exception).
+    lst_exemption_threshold = Column(Numeric(12, 2), nullable=True)
 
     dataset = relationship("LocalityDataset", back_populates="rates")
 

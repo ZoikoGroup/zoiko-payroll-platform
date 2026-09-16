@@ -22,7 +22,7 @@ from app.modules.payroll.hardcoded_defaults import (
     _US_MEDICARE_RATE, _US_MEDICARE_ADDITIONAL_RATE, _US_MEDICARE_ADDL_THRESHOLD_DEFAULTS,
     _US_MEDICARE_ADDITIONAL_THRESHOLD, _US_FUTA_RATE, _US_FUTA_WAGE_BASE, _US_FUTA_CREDIT_PCT,
     _US_CT_WITHHOLDING_TABLES, _US_WI_WITHHOLDING_PARAMS, _US_W4_PRE_2020_ALLOWANCE_AMOUNT,
-    _US_OR_WITHHOLDING_PARAMS, _US_ME_WITHHOLDING_PARAMS,
+    _US_OR_WITHHOLDING_PARAMS, _US_ME_WITHHOLDING_PARAMS, _US_KS_WITHHOLDING_PARAMS,
 )
 
 
@@ -147,6 +147,27 @@ def _me_standard_deduction_for_status(annual_wages, filing_status):
     # Linear phase-out — MRS's own formula, e.g. married:
     # $27,750 * (354,550 - wages) / 150,000, rounded to 4 decimals.
     return (full * (zero_floor - annual_wages) / span).quantize(Decimal("0.0001"))
+
+
+# ── Kansas: personal exemption + dependent/HOH allowance ────────────────
+# (Production-Readiness Plan Phase 4, 2026-09-16 — KW-100 Rev. 10-24, see
+# _US_KS_WITHHOLDING_PARAMS's own docstring for the source verification).
+# KS's bracket rates (5.2% / 5.58%) are a plain marginal table — real,
+# DB-editable TaxSlab rows consumed by the generic `elif state_slabs:`
+# path exactly like any other state. Only the DEDUCTION needs this bespoke
+# function: it is not a single flat per-status figure (the generic
+# resolve_jurisdiction_parameter this file uses for every other plain
+# state would silently ignore the HOH/dependent add-ons) — it's the
+# $9,160/$18,320 personal exemption, PLUS a further $2,320 if the employee
+# files as HOH, PLUS $2,320 per dependent certified on Form K-4
+# (ks_k4_dependents — None/unset means 0 dependents, never a guess).
+def _ks_personal_exemption_for_status(filing_status, dependents):
+    p = _US_KS_WITHHOLDING_PARAMS
+    base = p["personal_exemption_mfj"] if filing_status == "MFJ" else p["personal_exemption_single"]
+    if filing_status == "HOH":
+        base += p["hoh_additional_allowance"]
+    base += p["dependent_allowance"] * Decimal(dependents or 0)
+    return base
 
 
 # ── Tiered/progressive LOCAL tax ─────────────────────────────────────────
@@ -640,6 +661,13 @@ def calculate(ctx: PayrollContext) -> dict:
         # normally by _calculate_annual_tax just below.
         if "ME" in _US_STATE_TAX_ENABLED_STATES and ctx.work_state == "ME" and ctx.w4_filing_status:
             state_standard_deduction = _me_standard_deduction_for_status(annual_state_taxable_gross, ctx.w4_filing_status)
+        # Kansas (KW-100 Rev. 10-24): the ONLY state whose deduction
+        # depends on a per-dependent count on top of filing status — see
+        # _ks_personal_exemption_for_status's own docstring. The bracket
+        # table itself (5.2% / 5.58%) is a real, DB-editable TaxSlab
+        # table, consumed normally by _calculate_annual_tax just below.
+        elif "KS" in _US_STATE_TAX_ENABLED_STATES and ctx.work_state == "KS" and ctx.w4_filing_status:
+            state_standard_deduction = _ks_personal_exemption_for_status(ctx.w4_filing_status, ctx.ks_k4_dependents)
         else:
             state_standard_deduction = resolve_jurisdiction_parameter(
                 ctx.state_rate_map, "state_standard_deduction", Decimal("0"), country="US",
@@ -720,10 +748,18 @@ def calculate(ctx: PayrollContext) -> dict:
         # dataclass test doubles used elsewhere in this codebase, which
         # don't define this newer attribute.
         bracket_schedule = getattr(locality, "bracket_schedule", None)
+        # PSD_EIT_LST rows (Pennsylvania Act 32) use flat_amount to mean
+        # the LST annual fee — a SEPARATE tax that stacks on top of the
+        # EIT rate below, not a replacement for it (see the LST add-on
+        # block further down). Excluding them here so a PA locality with
+        # both an EIT rate AND an LST fee still gets its EIT computed via
+        # the rate_pct branch instead of flat_amount silently winning and
+        # discarding the rate entirely — the bug this comment fixes.
+        is_psd_eit_lst = getattr(locality, "locality_type", None) == "PSD_EIT_LST"
         if bracket_schedule:
             annual_local_tax = _tiered_locality_tax(annual_state_taxable_gross, ctx.w4_filing_status or "SINGLE", bracket_schedule)
             local_tax = _round2(annual_local_tax / periods_per_year)
-        elif locality.flat_amount is not None:
+        elif locality.flat_amount is not None and not is_psd_eit_lst:
             local_tax = _round2(locality.flat_amount)
         else:
             locality_rate_pct = locality.resident_rate_pct if locality.resident_rate_pct is not None else locality.nonresident_rate_pct
@@ -731,32 +767,70 @@ def calculate(ctx: PayrollContext) -> dict:
                 local_tax = _round2((annual_gross * locality_rate_pct / Decimal("100")) / periods_per_year)
 
     # "Higher of" resident-vs-work locality comparison (ZP-TAX-US-2026-001
-    # §7.1, gap-closure Plan Phase 3) — a GENERIC mechanism (not
-    # PA-specific in code, even though PA's own Act 32 EIT is the
-    # motivating example) for LocalityRate rows tagged
-    # locality_type="PSD_EIT_LST": when an employee has BOTH a real
-    # work-locality rate AND a real residence-locality rate of this
-    # type, the plain "one row, resident-else-nonresident" lookup above
-    # is WRONG — the correct answer is the higher of the two, comparing
-    # the WORK locality's own nonresident rate against the RESIDENCE
-    # locality's own resident rate (two DIFFERENT LocalityRate rows, not
-    # one row read two ways). Gated on both sides genuinely being
-    # PSD_EIT_LST so ordinary municipal/county taxes (Detroit, Kansas
-    # City, Yonkers) are completely unaffected — this REPLACES the
-    # generic result above rather than adding to it. Currently 100%
-    # dormant: zero PSD_EIT_LST LocalityRate rows are seeded anywhere
-    # (PA's own real PSD-code registry hasn't been supplied) — this is
-    # deliberately a mechanism-only build, proven correct with synthetic
-    # data in tests, ready the moment real data arrives.
+    # §7.1, gap-closure Plan Phase 3) — a GENERIC mechanism for LocalityRate
+    # rows tagged locality_type="PSD_EIT_LST" (Pennsylvania Act 32) OR
+    # "OH_MUNI_CREDIT" (Ohio municipal income tax, Production-Readiness
+    # Plan follow-up, 2026-09-16): when an employee has BOTH a real
+    # work-locality rate AND a real residence-locality rate of the SAME one
+    # of these two types, the plain "one row, resident-else-nonresident"
+    # lookup above is WRONG — the correct answer is the higher of the two,
+    # comparing the WORK locality's own nonresident rate against the
+    # RESIDENCE locality's own resident rate (two DIFFERENT LocalityRate
+    # rows, not one row read two ways).
+    #
+    # PA and OH reach this same "higher of" formula from two DIFFERENT
+    # real-world rules, not by coincidence being force-fit together: PA's
+    # Act 32 literally defines the answer as whichever locality's rate is
+    # higher. Ohio's real rule is "pay the work city's tax, then pay your
+    # RESIDENCE city only the amount by which its own rate exceeds the
+    # work city's rate" (a 100%-credit-for-tax-paid-elsewhere, capped at
+    # your own city's rate) — verified this nets out to the exact same
+    # total as max(work_rate, resident_rate) for every case (work < resident,
+    # work > resident, work == resident): the two cities just split that
+    # same total differently between themselves, which this engine's single
+    # local_tax figure has no need to itemize (remittance routing is a
+    # separate downstream concern, not modeled here). This equivalence
+    # holds specifically for Columbus/Cleveland/Cincinnati's own verified
+    # "100% credit up to my own rate" convention — a future Ohio
+    # municipality with a LOWER credit percentage would need its own
+    # distinct handling, not silently assumed to fit this same formula.
+    #
+    # Gated on BOTH sides genuinely being the SAME one of these two types
+    # so ordinary municipal/county taxes (Detroit, Kansas City, Yonkers)
+    # are completely unaffected, and so a PA locality can never combine
+    # with an OH locality — this REPLACES the generic result above rather
+    # than adding to it.
+    _HIGHER_OF_LOCALITY_TYPES = ("PSD_EIT_LST", "OH_MUNI_CREDIT")
     if (
-        locality is not None and getattr(locality, "locality_type", None) == "PSD_EIT_LST"
+        locality is not None and getattr(locality, "locality_type", None) in _HIGHER_OF_LOCALITY_TYPES
         and ctx.residence_locality_rate is not None
-        and getattr(ctx.residence_locality_rate, "locality_type", None) == "PSD_EIT_LST"
+        and getattr(ctx.residence_locality_rate, "locality_type", None) == getattr(locality, "locality_type", None)
     ):
         work_locality_rate_pct = locality.nonresident_rate_pct or Decimal("0")
         resident_locality_rate_pct = ctx.residence_locality_rate.resident_rate_pct or Decimal("0")
         higher_locality_rate_pct = max(work_locality_rate_pct, resident_locality_rate_pct)
         local_tax = _round2((annual_gross * higher_locality_rate_pct / Decimal("100")) / periods_per_year)
+
+    # PA Local Services Tax (LST) — Production-Readiness Plan Phase 4,
+    # 2026-09-16. A SEPARATE flat annual fee (work-locality only, not
+    # residence-based) that STACKS on top of whichever EIT result was
+    # computed above — not a replacement (see LocalityRate.flat_amount's
+    # own docstring, and the "excluding them here" comment further up for
+    # the bug this fixes: flat_amount used to silently win over the rate_pct
+    # branch and discard the EIT entirely). Runs independently of whether
+    # the "higher of" override above fired, since LST applies whenever the
+    # employee WORKS in a PSD_EIT_LST locality with a real flat_amount, with
+    # or without a configured residence locality. Exempt below
+    # lst_exemption_threshold when configured (real Pittsburgh/Allentown use
+    # $12,000, Harrisburg's Act 47 exception uses $24,500); None means no
+    # exemption is configured, never a guessed default.
+    if (
+        locality is not None and getattr(locality, "locality_type", None) == "PSD_EIT_LST"
+        and locality.flat_amount is not None
+    ):
+        lst_threshold = getattr(locality, "lst_exemption_threshold", None)
+        if lst_threshold is None or annual_gross >= lst_threshold:
+            local_tax += _round2(locality.flat_amount / periods_per_year)
 
     # Yonkers (ZP-TAX-US-2026-001/NYS-50-T-Y, gap-closure Level 2 Batch 7):
     # two mutually-exclusive taxes, NEITHER of which fits the generic

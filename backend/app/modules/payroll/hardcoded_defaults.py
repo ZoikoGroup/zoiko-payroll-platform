@@ -3269,6 +3269,29 @@ _US_ME_WITHHOLDING_PARAMS = dict(
     backup_withholding_flat_rate=Decimal("5.00"),
 )
 
+# Kansas (Production-Readiness Plan Phase 4, KW-100 Rev. 10-24,
+# independently verified against the source PDF's own text 2026-09-16 —
+# every one of the 16 published per-pay-period bracket rows checks out
+# arithmetically (bracket-width * 5.2% == published base-tax figure) and
+# the Monthly table x12 cross-validates the annualized structure below to
+# within a few cents/dollars of rounding). KW-100's own formula is genuinely
+# two separate layers, not one: (1) a personal-exemption-style deduction —
+# $9,160 (Single/HOH/MFS) or $18,320 (MFJ), plus a further flat $2,320 if
+# Head of Household, plus $2,320 per dependent certified on Form K-4 — see
+# _ks_personal_exemption_for_status; and (2) an ordinary 2-bracket marginal
+# table applied to what's left, which — because it needs no bespoke
+# phase-out/subtraction math of its own — is entered as real DB TaxSlab
+# rows (see scripts/seed_us_phase4_kansas_2026.py) and consumed by the
+# existing generic _calculate_annual_tax path, not a bespoke function.
+_US_KS_WITHHOLDING_PARAMS = dict(
+    agency="Kansas Department of Revenue",
+    source_title="KW-100 Kansas Withholding Tax Guide (Rev. 10-24)",
+    personal_exemption_single=Decimal("9160.00"),
+    personal_exemption_mfj=Decimal("18320.00"),
+    hoh_additional_allowance=Decimal("2320.00"),
+    dependent_allowance=Decimal("2320.00"),
+)
+
 _US_LOCALITY_DATA = {
     "MI": dict(
         agency="Michigan Treasury", source_title="2026 City of Detroit Income Tax Withholding Guide",
