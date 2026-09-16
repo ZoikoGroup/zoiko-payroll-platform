@@ -7,8 +7,8 @@ Production-Readiness Plan Phase 4 (2026-09-15) — Louisiana, Maryland
 transcribed from a secondary source. Oregon is NOT seeded here — its
 entire formula is bespoke (engine/countries/us.py's
 _calculate_or_annual_tax), not TaxSlab-representable, and needs no DB
-rows to function. Kansas is NOT seeded — its DOR site was unreachable
-this session; no real figures were ever obtained.
+rows to function. Kansas is seeded separately, once real KW-100 data was
+obtained on 2026-09-16 — see scripts/seed_us_phase4_kansas_2026.py.
 
 This is NOT a bypass of the governance lifecycle: every pack this script
 creates lands in Draft status via service.bulk_import_state_tax_pack
@@ -246,7 +246,7 @@ def run():
             "review, link Source Evidence, set an Effective From date, Approve (a different Super "
             "Admin), and Activate each one before any organization's payroll actually uses it. "
             "Oregon needs no DB rows (its formula is fully in engine/countries/us.py). Kansas is "
-            "not seeded — no real data was obtained this session."
+            "seeded separately — see scripts/seed_us_phase4_kansas_2026.py."
         )
     finally:
         db.close()

@@ -3107,7 +3107,7 @@ class LocalityRateUpsert(BaseModel):
     jurisdictionCountry: str = "US"
     jurisdictionState: str
     localityCode: str
-    localityType: str = "MUNICIPAL"   # COUNTY | MUNICIPAL | SCHOOL_DISTRICT | PSD_EIT_LST
+    localityType: str = "MUNICIPAL"   # COUNTY | MUNICIPAL | SCHOOL_DISTRICT | PSD_EIT_LST | OH_MUNI_CREDIT
     localityName: Optional[str] = None
     residentRatePct: Optional[Decimal] = None
     nonresidentRatePct: Optional[Decimal] = None
@@ -3118,6 +3118,11 @@ class LocalityRateUpsert(BaseModel):
     # "MFJ": {...}}. None (every locality before this field existed, and
     # every ordinary flat-rate locality since) is a complete no-op.
     bracketSchedule: Optional[dict] = None
+    # PA Local Services Tax (LST) low-income exemption threshold —
+    # Production-Readiness Plan Phase 4. Only meaningful when localityType
+    # == "PSD_EIT_LST" and flatAmount (the LST fee) is also set. None is a
+    # complete no-op (LST applies at every income level).
+    lstExemptionThreshold: Optional[Decimal] = None
     effectiveFrom: Optional[date] = None
     effectiveTo: Optional[date] = None
     sourceDocumentId: Optional[int] = None
@@ -3134,6 +3139,7 @@ class LocalityRateResponse(BaseModel):
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     taxCollectorId: Optional[str] = Field(None, validation_alias="tax_collector_id", serialization_alias="taxCollectorId")
     bracketSchedule: Optional[dict] = Field(None, validation_alias="bracket_schedule", serialization_alias="bracketSchedule")
+    lstExemptionThreshold: Optional[Decimal] = Field(None, validation_alias="lst_exemption_threshold", serialization_alias="lstExemptionThreshold")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -3152,6 +3158,7 @@ class LocalityDatasetRateRow(BaseModel):
     flatAmount: Optional[Decimal] = None
     taxCollectorId: Optional[str] = None
     bracketSchedule: Optional[dict] = None
+    lstExemptionThreshold: Optional[Decimal] = None
 
 
 class LocalityDatasetImportRequest(BaseModel):

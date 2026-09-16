@@ -214,6 +214,11 @@ class PayrollContext:
     # bracket lookup only activates when this is set, resolving to $0
     # otherwise.
     nj_rate_table: str = None
+    # Kansas Form K-4 certified dependent count — see
+    # models.PayrollEmployee.ks_k4_dependents' own docstring. None for
+    # every employee today — engine/countries/us.py's KS-specific
+    # deduction function treats None as 0 dependents, never a guess.
+    ks_k4_dependents: int = None
     # City/local-level residence — see models.PayrollEmployee.residence_locality's
     # own docstring. None for every employee today — engine/countries/us.py's
     # Yonkers resident-surcharge path only activates when this equals
