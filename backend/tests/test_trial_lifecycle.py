@@ -38,6 +38,18 @@ os.environ["TRIAL_SWEEP_ENABLED"] = "false"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ``app.database`` builds its global engine the first time anything under the
+# ``app`` package is imported — and that import may already have happened during
+# collection of an earlier test file (each hermetic file sets its OWN
+# PAYROLL_DATABASE_URL, so the cached engine would point at the wrong database:
+# most commonly the real .env Postgres URL). Drop every already-imported
+# ``app.*`` module so the import below re-evaluates against the sqlite URL set
+# above. conftest holds a direct reference to the shared rollout module it
+# imported, so its autouse fixture keeps working after the cache purge.
+for _mod in list(sys.modules):
+    if _mod == "app" or _mod.startswith("app."):
+        del sys.modules[_mod]
+
 from datetime import datetime, timedelta  # noqa: E402
 
 import pytest  # noqa: E402
@@ -56,6 +68,15 @@ from app.modules.billing.models import (  # noqa: E402
     SubscriptionStatus,
 )
 from app.modules.organizations.models import Organization  # noqa: E402
+
+# Guard: this suite runs against its own throwaway SQLite file, never against
+# the live development Postgres. If the engine URL isn't sqlite this module is
+# imported into the wrong state — fail loudly instead of writing Postgres rows.
+from sqlalchemy.engine import make_url as _make_url  # noqa: E402
+
+assert _make_url(engine.url).get_backend_name() == "sqlite", (
+    f"test_trial_lifecycle must run on its own sqlite DB, got {engine.url}"
+)
 
 Base.metadata.create_all(bind=engine)
 initialize_database()
