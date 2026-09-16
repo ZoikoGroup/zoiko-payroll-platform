@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     TRIAL_SWEEP_ENABLED: bool = True
     TRIAL_SWEEP_INTERVAL_HOURS: int = 24
 
+    # ── Self-service checkout (Stripe) ──────────────────────────────────
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_CHECKOUT_SUCCESS_URL: str = ""   # frontend route, e.g. .../checkout/success
+    STRIPE_CHECKOUT_CANCEL_URL: str = ""    # frontend route, e.g. .../checkout/cancelled
 
 settings = Settings()
 

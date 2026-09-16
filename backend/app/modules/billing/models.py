@@ -137,6 +137,7 @@ class BillingPlanVersion(Base):
     published_at = Column(DateTime, nullable=True)
     feature_set = Column(JSON, nullable=True)
     scale_limits = Column(JSON, nullable=True)
+    stripe_price_id = Column(String(100), nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -399,6 +400,7 @@ class BillingCommercialAuditEvent(Base):
     actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     event_type = Column(String(80), nullable=False, index=True)
     payload = Column(JSON, nullable=True)
+    stripe_event_id = Column(String(100), nullable=True, unique=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 

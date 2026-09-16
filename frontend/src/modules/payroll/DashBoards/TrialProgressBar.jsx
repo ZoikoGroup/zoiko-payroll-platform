@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Hourglass } from "lucide-react";
 
 import { apiFetch } from "../../../api/client";
@@ -35,10 +36,12 @@ export default function TrialProgressBar() {
     };
   }, []);
 
-  if (!trial || !trial.trial_started_at || !trial.trial_expires_at) return null;
+  if (!trial || !trial.trial_expires_at) return null;
 
-  const start = new Date(trial.trial_started_at).getTime();
   const end = new Date(trial.trial_expires_at).getTime();
+  const start = trial.trial_started_at
+    ? new Date(trial.trial_started_at).getTime()
+    : end - 30 * DAY_MS;
   const now = Date.now();
   const totalMs = end - start;
   if (Number.isNaN(start) || Number.isNaN(end) || totalMs <= 0) return null;
@@ -110,7 +113,15 @@ export default function TrialProgressBar() {
         />
       </div>
 
-      <p className="mt-2 text-[11px] font-medium text-foreground-muted">{subtitle}</p>
+      <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px] font-medium text-foreground-muted">
+        <p>{subtitle}</p>
+        <Link
+          to="/billing/plans"
+          className="shrink-0 font-bold text-primary hover:underline"
+        >
+          Choose Plan →
+        </Link>
+      </div>
     </div>
   );
 }

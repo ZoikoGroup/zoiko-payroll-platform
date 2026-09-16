@@ -19,6 +19,7 @@ import {
   ChevronsRight,
   ChevronRight,
   Bell,
+  CreditCard,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useOrganization } from "../context/OrganizationContext";
@@ -49,6 +50,11 @@ function buildNavGroups(role) {
   if (role === ROLES.ORG_ADMIN) {
     overviewItems.push({ label: "Team", href: "/organization-admin/team", icon: Users, end: true });
   }
+  overviewItems.push({
+    label: "Subscription",
+    href: role === ROLES.PAYROLL_ADMIN ? "/hr-admin/subscription" : "/organization-admin/subscription",
+    icon: CreditCard,
+  });
   const groups = [
     {
       title: "Overview",

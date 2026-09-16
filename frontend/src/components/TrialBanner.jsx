@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { TriangleAlert } from "lucide-react";
-
+import { Link } from "react-router-dom";
+import { Clock, AlertTriangle, ArrowRight, ShieldAlert, Sparkles } from "lucide-react";
 import { apiFetch } from "../api/client";
 
 const DAY_MS = 86400000;
-const ESCALATE_BELOW_DAYS = 7;
+const WARN_BELOW_DAYS = 7;
 
 function daysRemaining(iso) {
   if (!iso) return null;
@@ -21,7 +21,9 @@ export default function TrialBanner() {
     apiFetch("/api/auth/me/trial-status")
       .then((data) => {
         if (cancelled) return;
-        if (data && data.workspace_type === "EVALUATION") setTrial(data);
+        if (data && (data.workspace_type === "EVALUATION" || data.status)) {
+          setTrial(data);
+        }
       })
       .catch(() => {
         if (!cancelled) setTrial(null);
@@ -33,60 +35,172 @@ export default function TrialBanner() {
 
   if (!trial) return null;
 
-  const remaining = daysRemaining(trial.trial_expires_at);
-  const escalated =
-    trial.trial_status !== "ACTIVE" ||
-    (remaining !== null && remaining < ESCALATE_BELOW_DAYS);
+  // Flexible field extraction supporting multiple backend payload structures
+  const expiresIso = trial.trial_expires_at || trial.current_period_end || trial.expires_at;
+  const startedIso = trial.trial_started_at || trial.current_period_start || trial.started_at;
+  const statusStr = trial.trial_status || trial.status;
 
-  const summary = trial.trial_status === "GRACE_READONLY"
-    ? "Your Zoiko Payroll evaluation period has ended — this workspace is now read-only."
-    : trial.trial_status === "CLOSED"
-      ? "Your Zoiko Payroll evaluation is closed."
-      : "You're on a 30-day Zoiko Payroll evaluation (Professional plan).";
+  const rawRemaining = daysRemaining(expiresIso);
+  const displayDays = rawRemaining !== null ? Math.max(0, rawRemaining) : 30;
 
-  const expiry = trial.trial_expires_at
-    ? new Date(trial.trial_expires_at).toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "long",
+  const isGrace = statusStr === "GRACE_READONLY";
+  const isClosed = statusStr === "CLOSED";
+  const isWarning = displayDays <= WARN_BELOW_DAYS && !isGrace && !isClosed;
+
+  // Calculate progress percentage
+  let percentRemaining = 100;
+  if (expiresIso) {
+    const endMs = new Date(expiresIso).getTime();
+    const startMs = startedIso
+      ? new Date(startedIso).getTime()
+      : endMs - 30 * DAY_MS;
+    const totalMs = Math.max(1, endMs - startMs);
+    const remainingMs = Math.max(0, endMs - Date.now());
+    percentRemaining = isGrace || isClosed ? 0 : Math.min(100, Math.max(0, (remainingMs / totalMs) * 100));
+  } else {
+    percentRemaining = Math.min(100, Math.max(0, (displayDays / 30) * 100));
+  }
+
+  // Format expiry date string
+  const expiryFormatted = expiresIso
+    ? new Date(expiresIso).toLocaleDateString(undefined, {
+        month: "short",
         day: "numeric",
+        year: "numeric",
       })
-    : "";
+    : null;
 
-  const palette = escalated
-    ? { bg: "var(--color-error-light)", color: "var(--color-error)", border: "var(--color-error)" }
-    : { bg: "var(--color-warning-light)", color: "var(--color-warning)", border: "var(--color-warning)" };
+  // Theme styling based on urgency
+  const theme = (isGrace || isClosed)
+    ? {
+        bg: "linear-gradient(90deg, #FEF2F2 0%, #FFF1F2 100%)",
+        border: "#FCA5A5",
+        text: "#991B1B",
+        badgeBg: "#FEE2E2",
+        badgeText: "#991B1B",
+        barTrack: "#FECDD3",
+        barFill: "#E11D48",
+        btnBg: "linear-gradient(135deg, #E11D48, #BE123C)",
+        btnText: "#FFFFFF",
+      }
+    : isWarning
+    ? {
+        bg: "linear-gradient(90deg, #FFFBEB 0%, #FEF3C7 100%)",
+        border: "#FDE68A",
+        text: "#92400E",
+        badgeBg: "#FEF3C7",
+        badgeText: "#B45309",
+        barTrack: "#FDE68A",
+        barFill: "#D97706",
+        btnBg: "linear-gradient(135deg, #D97706, #B45309)",
+        btnText: "#FFFFFF",
+      }
+    : {
+        bg: "linear-gradient(90deg, #F0F9FF 0%, #E0F2FE 100%)",
+        border: "#BAE6FD",
+        text: "#075985",
+        badgeBg: "#E0F2FE",
+        badgeText: "#0369A1",
+        barTrack: "#BAE6FD",
+        barFill: "#0EA5E9",
+        btnBg: "linear-gradient(135deg, #0EA5E9, #0284C7)",
+        btnText: "#FFFFFF",
+      };
 
   return (
     <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 text-sm"
-      style={{ backgroundColor: palette.bg, color: palette.color, borderColor: palette.border }}
       role="region"
-      aria-label="Evaluation workspace notice"
+      aria-label="Evaluation workspace status"
+      style={{
+        background: theme.bg,
+        borderBottom: `1px solid ${theme.border}`,
+        color: theme.text,
+        padding: "12px 24px",
+        fontFamily: "'Inter', system-ui, sans-serif",
+      }}
+      className="w-full transition-colors duration-200 shadow-sm"
     >
-      <TriangleAlert size={16} className="shrink-0" aria-hidden="true" />
-      <span>
-        {summary}
-        {remaining !== null && remaining >= 0 ? (
-          <>
-            {" "}
-            Your evaluation ends in <strong>{remaining} days</strong>
-            {expiry ? ` (${expiry})` : ""}.
-          </>
-        ) : null}
-      </span>
-      <span className="hidden text-xs opacity-80 sm:inline">
-        Preview only — no live payments, filings, or remittances are processed in this workspace.
-        Your evaluation will not automatically convert to a paid subscription or charge you.
-      </span>
-      <a
-        href="https://zoikoone.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="ml-auto whitespace-nowrap font-semibold underline-offset-2 hover:underline"
-        style={{ color: palette.color }}
-      >
-        Choose a plan
-      </a>
+      <div className="mx-auto flex max-w-7xl flex-col gap-2.5">
+        {/* Top Row: Badge, Summary Message & Upgrade CTA Button */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider shadow-sm"
+              style={{ backgroundColor: theme.badgeBg, color: theme.badgeText }}
+            >
+              {isGrace || isClosed ? (
+                <ShieldAlert size={14} className="shrink-0" />
+              ) : isWarning ? (
+                <AlertTriangle size={14} className="shrink-0" />
+              ) : (
+                <Sparkles size={14} className="shrink-0" />
+              )}
+              <span>{isGrace ? "Read-Only Mode" : isClosed ? "Trial Closed" : "Evaluation"}</span>
+            </div>
+
+            <div className="text-xs sm:text-sm font-medium">
+              {isGrace ? (
+                <span>Your evaluation period has ended — workspace is now read-only.</span>
+              ) : isClosed ? (
+                <span>Your evaluation workspace has closed. Upgrade to restore access.</span>
+              ) : (
+                <span>
+                  You are on a 30-day evaluation of <strong>Zoiko Payroll</strong>.
+                </span>
+              )}
+            </div>
+          </div>
+
+          <Link
+            to="/billing/plans"
+            style={{
+              background: theme.btnBg,
+              color: theme.btnText,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+            }}
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-bold transition-all hover:opacity-95 hover:shadow-md active:scale-95"
+          >
+            <span>Choose Plan</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {/* Progress Bar Component directly below the banner text */}
+        <div className="flex flex-col gap-1 pt-1">
+          <div className="flex items-center justify-between text-xs font-semibold">
+            <span className="flex items-center gap-1.5">
+              <Clock size={14} className="opacity-80 shrink-0" />
+              {isGrace || isClosed ? (
+                <span className="font-bold">Evaluation Expired</span>
+              ) : (
+                <span>
+                  <strong className="text-sm font-black" style={{ color: theme.text }}>
+                    {displayDays} day{displayDays === 1 ? "" : "s"}
+                  </strong>{" "}
+                  remaining{expiryFormatted ? ` (ends ${expiryFormatted})` : ""}
+                </span>
+              )}
+            </span>
+            <span className="font-extrabold text-xs">
+              {isGrace || isClosed ? "0 Days Left" : `${displayDays} Days Left (${Math.round(percentRemaining)}%)`}
+            </span>
+          </div>
+
+          {/* Full-width clean Progress Bar */}
+          <div
+            className="h-2.5 w-full overflow-hidden rounded-full shadow-inner"
+            style={{ backgroundColor: theme.barTrack }}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${percentRemaining}%`,
+                backgroundColor: theme.barFill,
+              }}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

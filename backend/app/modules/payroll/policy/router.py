@@ -18,8 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.core.dependencies import (
-    get_current_user, get_current_payroll_operator, get_organization_id, require_active_subscription,
+    get_current_user, get_current_payroll_operator, get_organization_id,
 )
+from app.modules.billing.entitlements import require_active_subscription
 from app.modules.payroll.policy import service
 from app.modules.payroll.policy.schemas import (
     PayrollPolicyResponse, PayrollPolicyUpdate, IntegrationResponse, SuccessResponse,
@@ -28,7 +29,7 @@ from app.modules.payroll.policy.schemas import (
 policy_router = APIRouter(
     prefix="/policy",
     tags=["Payroll Policy Management"],
-    dependencies=[Depends(require_active_subscription("payroll"))],
+    dependencies=[Depends(require_active_subscription)],
 )
 
 

@@ -424,6 +424,7 @@ class BillingPublishedPlanResponse(BaseModel):
     feature_set: Optional[dict] = None
     scale_limits: Optional[dict] = None
     entitlement_flags: dict = {}
+    monthly_price_usd: float = 0.0
 
 
 class BillingMySubscriptionResponse(BaseModel):
@@ -462,3 +463,13 @@ class ConvertTrialRequest(BaseModel):
     accepted in the body."""
 
     plan_version_id: int = Field(..., gt=0)
+
+
+class BillingCheckoutRequest(BaseModel):
+    """POST /billing/checkout — tenant-facing checkout request."""
+    plan_code: str = Field(..., min_length=1, max_length=30)
+
+
+class BillingCheckoutResponse(BaseModel):
+    """POST /billing/checkout — response containing Stripe checkout URL."""
+    checkout_url: str

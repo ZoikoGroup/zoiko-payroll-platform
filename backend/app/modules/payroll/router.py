@@ -61,10 +61,9 @@ from app.database import get_db
 from app.core import object_storage
 from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
-    require_active_subscription,
 )
 from app.core.exceptions import ForbiddenException, NotFoundException
-from app.modules.billing.entitlements import require_writeable_workspace
+from app.modules.billing.entitlements import require_writeable_workspace, require_active_subscription
 from app.modules.payroll import service
 from app.modules.payroll.policy.router import policy_router
 from app.modules.payroll.enterprise.router import enterprise_router
@@ -132,7 +131,7 @@ from app.modules.payroll.schemas import (
 payroll_router = APIRouter(
     prefix="/payroll",
     tags=["Payroll Module"],
-    dependencies=[Depends(require_active_subscription("payroll"))],
+    dependencies=[Depends(require_active_subscription)],
 )
 
 payroll_router.include_router(policy_router)
