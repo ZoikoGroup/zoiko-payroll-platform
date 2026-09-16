@@ -40,7 +40,7 @@ from decimal import Decimal
 
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
+from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
 from app.modules.payroll.models import GermanyPapRelease
 
 

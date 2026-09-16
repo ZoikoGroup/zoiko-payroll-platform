@@ -25,7 +25,7 @@ from decimal import Decimal
 import pytest
 
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_internal_tax import compute_grundtarif_annual_tax
+from app.modules.payroll.engine.jurisdictions.germany.tax import compute_grundtarif_annual_tax
 from app.modules.payroll.hardcoded_defaults import _DE_RV_EMPLOYEE_RATE
 from app.modules.payroll.models import (
     GermanyContributionCeiling, GermanyHealthFund, GermanyPvConfiguration,

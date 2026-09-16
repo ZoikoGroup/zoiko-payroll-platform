@@ -27,14 +27,14 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     GermanyPapCalculationResult,
     GermanyPapInvalidError,
     PapInputContract,
     UnavailablePapExecutor,
     resolve_pap_executor,
 )
-from app.modules.payroll.engine.germany_pap.adapter import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.adapter import (
     PAP_INPUT_CLASSIFICATION,
     PAP_OUTPUT_CLASSIFICATION,
     PAP_SOURCE_FINALITY,
@@ -45,7 +45,7 @@ from app.modules.payroll.engine.germany_pap.adapter import (
     map_pap_outputs,
     validate_pap_environment,
 )
-from app.modules.payroll.engine.germany_pap.interpreter import load_pap_program, run_program
+from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import load_pap_program, run_program
 
 
 @pytest.fixture
@@ -496,7 +496,7 @@ def test_resolve_pap_executor_still_returns_unavailable():
 def test_no_eval_exec_in_adapter_source():
     import ast
     import inspect
-    import app.modules.payroll.engine.germany_pap.adapter as mod
+    import app.modules.payroll.engine.jurisdictions.germany.pap.adapter as mod
 
     tree = ast.parse(inspect.getsource(mod))
     for node in ast.walk(tree):

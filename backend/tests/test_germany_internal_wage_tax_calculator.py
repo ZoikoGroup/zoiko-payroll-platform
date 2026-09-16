@@ -15,7 +15,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.payroll.engine.germany_internal_tax import (
+from app.modules.payroll.engine.jurisdictions.germany.tax import (
     ARBEITNEHMER_PAUSCHBETRAG,
     ENTLASTUNGSBETRAG_ALLEINERZIEHENDE_BASE,
     ENTLASTUNGSBETRAG_ALLEINERZIEHENDE_PER_ADDITIONAL_CHILD,
@@ -30,7 +30,7 @@ from app.modules.payroll.engine.germany_internal_tax import (
     calculate_internal_wage_tax,
     resolve_income_tax_tariff,
 )
-from app.modules.payroll.engine.germany_pap.core import PapInputContract
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import PapInputContract
 
 SOLI_THRESHOLD = Decimal("18130")
 SOLI_RATE = Decimal("5.5")

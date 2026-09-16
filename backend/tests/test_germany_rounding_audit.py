@@ -35,7 +35,7 @@ Summary of the audit itself (Phase 8BT):
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 
 from app.modules.payroll.engine.base import _round2
-from app.modules.payroll.engine.germany_internal_tax import (
+from app.modules.payroll.engine.jurisdictions.germany.tax import (
     _floor_euro as internal_tax_floor_euro,
     _round_cents as internal_tax_round_cents,
     compute_grundtarif_annual_tax,

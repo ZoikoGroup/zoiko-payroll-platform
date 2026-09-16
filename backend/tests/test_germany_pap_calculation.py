@@ -34,7 +34,7 @@ from app.core.exceptions import BadRequestException, GermanyCalculationBlockedEx
 from app.modules.payroll import service
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries import germany
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     CHURCH_TAX_LAND_RATES,
     GermanyCalculationTrace,
     GermanyCeilingNotAvailableError,
@@ -804,16 +804,14 @@ def test_calculate_rv_alv_exempt_flags_honored_end_to_end():
     assert snap["resolved"]["alv"]["employee"] == "0"
 
 
-def test_legacy_simplified_calculator_still_importable_and_unused_by_production_path():
-    """Confirms _calculate_legacy_simplified was retained (not deleted)
-    and confirms `calculate` (the production entry point actually
-    registered in engine/standard.py's _COUNTRY_CALC) is a different
-    function object."""
-    assert germany._calculate_legacy_simplified is not germany.calculate
-    ctx = PayrollContext(gross=Decimal("5000"), basic=Decimal("5000"), country="DE", rate_map={}, slabs=[])
-    result = germany._calculate_legacy_simplified(ctx)
-    assert isinstance(result, dict)
-    assert "employee_pf" in result
+def test_legacy_simplified_calculator_retired_and_not_exposed_on_country_module():
+    """Phase-7 normalized the Germany calculator; the pre-Phase-7
+    `_calculate_legacy_simplified` entry point was retired along with the
+    module relocation (the newer jurisdictional tests import the renamed
+    `jurisdictions.germany.pap.core` location instead). Guard that it stays
+    retired and that `calculate` remains the production entry point."""
+    assert not hasattr(germany, "_calculate_legacy_simplified")
+    assert callable(germany.calculate)
 
 
 # ── DB-integration: full orchestration via real registries ──────────────

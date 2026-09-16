@@ -38,7 +38,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_pap.core import _r2
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import _r2
 from app.modules.payroll.hardcoded_defaults import (
     _DE_ALV_EMPLOYEE_RATE,
     _DE_ALV_EMPLOYER_RATE,

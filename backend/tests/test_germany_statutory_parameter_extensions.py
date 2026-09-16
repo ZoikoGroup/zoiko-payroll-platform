@@ -31,7 +31,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_pap.core import CHURCH_TAX_LAND_RATES
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import CHURCH_TAX_LAND_RATES
 from app.modules.payroll.hardcoded_defaults import _DE_INSOLVENCY_LEVY_RATE
 from app.modules.payroll.models import (
     GermanyContributionCeiling, GermanyHealthFund, GermanyPvConfiguration,
