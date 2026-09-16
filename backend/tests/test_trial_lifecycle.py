@@ -44,11 +44,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # PAYROLL_DATABASE_URL, so the cached engine would point at the wrong database:
 # most commonly the real .env Postgres URL). Drop every already-imported
 # ``app.*`` module so the import below re-evaluates against the sqlite URL set
-# above. conftest holds a direct reference to the shared rollout module it
+# above — but remember what we dropped, because module objects are shared by
+# identity across this whole pytest session: sibling test files collected
+# BEFORE this one already hold direct references to the pre-purge ``app.*``
+# classes (exceptions, enums, models). The fresh modules are re-installed into
+# ``sys.modules`` for this file's own module-level setup below, then the
+# originals are put back immediately afterwards (see _RESTORE at the bottom) so
+# no later-run import in another test file observes a reloaded class of the
+# same name. conftest holds a direct reference to the shared rollout module it
 # imported, so its autouse fixture keeps working after the cache purge.
-for _mod in list(sys.modules):
-    if _mod == "app" or _mod.startswith("app."):
-        del sys.modules[_mod]
+_saved_app_modules = {
+    _mod: _module
+    for _mod, _module in sys.modules.items()
+    if _mod == "app" or _mod.startswith("app.")
+}
+for _mod in list(_saved_app_modules):
+    del sys.modules[_mod]
 
 from datetime import datetime, timedelta  # noqa: E402
 
@@ -147,6 +158,23 @@ def _trial_org(code, name, period_end):
 _now = datetime.utcnow()
 _grace_org = _trial_org("EVALGRACE", "Eval Grace", _now - timedelta(days=1))          # expired, grace not yet stamped
 _db.commit()
+
+# Restore the pre-purge ``app.*`` module objects into sys.modules now that this
+# file's own module-level setup is done. This file's test functions (and the
+# TestClient ``app``, ``_db``, model classes, engine) keep their held references
+# to the FRESH sqlite-bound modules above, so their isolation is unaffected. The
+# restored originals make every later fresh import — the conftest ``db`` fixture's
+# lazy ``from app.database import ...``, sibling files' lazy imports, anything the
+# shared app code pulls in at request time — resolve to the same class objects the
+# rest of the session already holds, instead of stale reloaded doubles. Without
+# this, pytest.raises(SomeException) in an earlier-collected file would stop
+# matching a same-named, different-identity exception class raised by application
+# code re-imported fresh here (the observed 29-file regression).
+for _mod in list(sys.modules):
+    if _mod == "app" or _mod.startswith("app."):
+        del sys.modules[_mod]
+sys.modules.update(_saved_app_modules)
+del _saved_app_modules
 
 
 @pytest.fixture(scope="module")
