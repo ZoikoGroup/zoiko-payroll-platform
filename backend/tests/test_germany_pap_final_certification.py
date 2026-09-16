@@ -26,7 +26,7 @@ import pytest
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
+from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
 from app.modules.payroll.models import GermanyPapRelease
 
 
@@ -136,7 +136,7 @@ def test_production_gate_module_has_zero_dependencies_on_db_or_network():
     """production_gate.py must remain pure — no SQLAlchemy, no requests/
     httpx, no filesystem access — confirming it cannot itself become a
     channel for bypassing the gate via I/O side effects."""
-    from app.modules.payroll.engine.germany_pap import production_gate
+    from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate
 
     src = inspect.getsource(production_gate)
     for forbidden in ("import requests", "import httpx", "sqlalchemy", "open(", "urlopen"):

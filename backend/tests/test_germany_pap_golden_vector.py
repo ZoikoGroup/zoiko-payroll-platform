@@ -21,7 +21,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.payroll.engine.germany_pap.golden_vector import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import (
     AUTHORITATIVE_BMF,
     SYNTHETIC,
     GermanyPapGoldenVector,
@@ -150,7 +150,7 @@ def test_module_is_not_imported_by_production_calculation_path():
     import inspect
 
     from app.modules.payroll.engine.countries import germany
-    from app.modules.payroll.engine.germany_pap import core
+    from app.modules.payroll.engine.jurisdictions.germany.pap import core
 
     assert "germany_pap_golden_vector" not in inspect.getsource(germany)
     assert "germany_pap_golden_vector" not in inspect.getsource(core)

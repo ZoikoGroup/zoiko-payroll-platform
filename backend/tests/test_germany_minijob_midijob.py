@@ -19,7 +19,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import pytest
 
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     GermanyCalculationError,
     GermanyHealthFundNotAvailableError,
     GermanyInvalidEmploymentClassificationError,

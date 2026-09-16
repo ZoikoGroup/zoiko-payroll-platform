@@ -22,9 +22,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('payroll_employees', sa.Column('ks_k4_dependents', sa.Integer(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("payroll_employees")}
+    if "ks_k4_dependents" not in existing_columns:
+        op.add_column('payroll_employees', sa.Column('ks_k4_dependents', sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_column('payroll_employees', 'ks_k4_dependents')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("payroll_employees")}
+    if "ks_k4_dependents" in existing_columns:
+        op.drop_column('payroll_employees', 'ks_k4_dependents')

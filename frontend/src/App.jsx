@@ -10,7 +10,6 @@ import TrialSignupPage from "./pages/TrialSignupPage";
 import RegistrationSuccessPage from "./pages/RegistrationSuccessPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
-import OrgPortalPage from "./pages/OrgPortalPage";
 import DashboardPage from "./pages/DashboardPage";
 import UsersPage from "./pages/UsersPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
@@ -39,6 +38,10 @@ import ZoikoPayrollModule from "./modules/payroll";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
 import AssistAdminPage from "./modules/assist/AssistAdminPage";
 import TeamPage from "./modules/organization-admin/TeamPage";
+import SubscriptionPage from "./modules/organization-admin/SubscriptionPage";
+import PlanSelectionPage from "./pages/PlanSelectionPage";
+import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
+import CheckoutCancelPage from "./pages/CheckoutCancelPage";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "./config/roles";
 
 function LandingRedirect() {
@@ -59,8 +62,11 @@ export default function App() {
       <Route path="/register/success" element={<RegistrationSuccessPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route element={<ProtectedRoute />}>
-        <Route path="/portal" element={<OrgPortalPage />} />
+<Route element={<ProtectedRoute />}>
+          {/* Billing — plan selection & Stripe Checkout landing pages */}
+        <Route path="/billing/plans" element={<PlanSelectionPage />} />
+        <Route path="/billing/checkout/success" element={<CheckoutSuccessPage />} />
+        <Route path="/billing/checkout/cancel" element={<CheckoutCancelPage />} />
 
         {/* Super Admin console — canonical routes */}
         <Route
@@ -268,6 +274,22 @@ export default function App() {
           element={
             <PayrollShell>
               <TeamPage />
+            </PayrollShell>
+          }
+        />
+        <Route
+          path="/organization-admin/subscription"
+          element={
+            <PayrollShell>
+              <SubscriptionPage />
+            </PayrollShell>
+          }
+        />
+        <Route
+          path="/hr-admin/subscription"
+          element={
+            <PayrollShell>
+              <SubscriptionPage />
             </PayrollShell>
           }
         />

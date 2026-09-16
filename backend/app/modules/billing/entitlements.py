@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BadRequestException, ForbiddenException
 from app.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_organization_id
 from app.modules.auth.models import UserRole
 from app.modules.billing.models import (
     BillingCommercialAuditEvent,
@@ -42,7 +42,7 @@ from app.modules.billing.models import (
 # Phase 0 permissive mode — no plan data exists yet; flip to False once
 # Prompt 3's admin CRUD has been used to publish at least one real plan
 # version, per blueprint Phase 0.
-ALLOW_ALL = True
+ALLOW_ALL = False
 
 
 def get_active_subscription(db: Session, organization_id: int) -> Optional[BillingSubscription]:
@@ -156,6 +156,31 @@ def require_production_workspace(db: Session, organization_id: int) -> None:
             "This action requires a production workspace. "
             "Evaluation workspaces are preview/simulation only."
         )
+
+
+def require_active_subscription(
+    organization_id: int = Depends(get_organization_id),
+    db: Session = Depends(get_db)
+) -> None:
+    """Blocks access for PRODUCTION-workspace orgs with no ACTIVE subscription.
+    EVALUATION-workspace orgs are exempt — their access comes from the trial
+    subscription (SubscriptionStatus.TRIALING), not this gate. Ignores
+    ALLOW_ALL for the same reason require_production_workspace does: this is
+    about whether a commercial relationship exists at all, not about which
+    plan-tier features are enabled."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import SubscriptionStatus
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        return
+
+    if org.workspace_type == "EVALUATION":
+        return
+
+    subscription = get_active_subscription(db, organization_id)
+    if subscription is None or subscription.status != SubscriptionStatus.ACTIVE.value:
+        raise ForbiddenException("An ACTIVE subscription is required for production workspaces.")
 
 
 def list_entitlement_overrides(db: Session, organization_id: int) -> list:

@@ -29,7 +29,7 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries import germany
-from app.modules.payroll.engine.germany_internal_tax import compute_soli, compute_tax_for_class, resolve_income_tax_tariff
+from app.modules.payroll.engine.jurisdictions.germany.tax import compute_soli, compute_tax_for_class, resolve_income_tax_tariff
 from app.modules.payroll.hardcoded_defaults import _DE_SOLI_RATE, _DE_SOLI_THRESHOLD
 from app.modules.payroll.models import (
     GermanyOvertimePremiumComponent, GermanyOvertimeWorkRecord,

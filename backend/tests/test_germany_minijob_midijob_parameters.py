@@ -461,7 +461,7 @@ def test_regular_payroll_unaffected_by_minijob_midijob_parameters(db, organizati
 def test_pap_resolver_still_unavailable_regardless_of_registry(db):
     """Confirms this phase made no change whatsoever to PAP's own
     fail-closed resolver."""
-    from app.modules.payroll.engine.germany_pap.core import resolve_pap_executor, UnavailablePapExecutor
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import resolve_pap_executor, UnavailablePapExecutor
 
     executor = resolve_pap_executor(None)
     assert isinstance(executor, UnavailablePapExecutor)

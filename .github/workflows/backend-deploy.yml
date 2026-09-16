@@ -13,6 +13,18 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Verify single Alembic head, no duplicate revision IDs
+        run: |
+          python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; import sys; cfg = Config('backend/alembic.ini'); script = ScriptDirectory.from_config(cfg); heads = script.get_heads();
+          if len(heads) != 1:
+              print(f'FAIL: expected exactly one alembic head, found {len(heads)}: {heads}'); sys.exit(1)
+          print(f'OK: single head {heads[0]}')"
       - name: SSH and deploy backend
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -29,3 +41,21 @@ jobs:
             bash ../scripts/deploy_migrate.sh
             deactivate
             sudo systemctl restart zoiko-payroll-backend
+            git pull origin main
+            cd backend
+            source venv/bin/activate
+            pip install -r requirements.txt
+            bash ../scripts/deploy_migrate.sh
+            deactivate
+            sudo systemctl restart zoiko-payroll-backend
+      - name: Check for model/schema drift
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/zoiko-payroll/backend/backend
+            source venv/bin/activate
+            python -m scripts.check_schema_drift
