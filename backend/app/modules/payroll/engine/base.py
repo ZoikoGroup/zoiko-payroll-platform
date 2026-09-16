@@ -97,6 +97,18 @@ class PayrollContext:
     # is additionally gated on.
     us_taxability_rules: dict = field(default_factory=dict)
 
+    # Australia: per-program (PAYG withholding/SG qualifying earnings)
+    # earning-component taxability (ZP-TAX-AU-2026-27-001 §11, Payday
+    # Super Phase 2) — same {tax_component: {earning_type: is_taxable}}
+    # shape as ca_taxability_rules/us_taxability_rules above, resolved by
+    # service.get_au_taxability_rules_bundle, backed by the identical
+    # TaxabilityRule model. Empty dict (every jurisdiction/org today) means
+    # engine/countries/australia.py's _resolve_au_taxability falls back to
+    # "every component counts," reproducing today's single-ctx.gross
+    # behavior exactly — see shared.py's _AU_TAXABILITY_MATRIX_ENABLED_
+    # COUNTRIES for the rollout switch this is additionally gated on.
+    au_taxability_rules: dict = field(default_factory=dict)
+
     # India Forms 122/123/124 (§6.1/§6.2, gap-closure Phase E) — resolved
     # by service.py's get_india_salary_tds_inputs from the employee's own
     # Approved/Issued form rows. All default to 0, meaning india.py's
@@ -179,6 +191,18 @@ class PayrollContext:
     # so no existing calculation changes. Only engine/countries/uk.py
     # currently reads this.
     pay_frequency: str = "Monthly"
+
+    # Australia declarations driving ATO Schedule 1/8 scale selection
+    # (ZP-TAX-AU-2026-27-001 §5.1/§14) — mirrors
+    # models.PayrollEmployee.au_* columns' own docstrings verbatim. None
+    # for every non-AU employee, and for AU employees until explicitly
+    # entered — engine/countries/australia.py treats an unset value as
+    # the most conservative assumption, never a guess.
+    au_tfn_status: str = None                    # "PROVIDED" | "NOT_PROVIDED" | "EXEMPTION"
+    au_residency_status: str = None               # "RESIDENT" | "FOREIGN_RESIDENT" | "WORKING_HOLIDAY_MAKER"
+    au_tax_free_threshold_claimed: bool = None
+    au_medicare_levy_exemption: str = None        # "FULL" | "HALF" | None (standard)
+    au_withholding_variation_pct: Decimal = None
 
     # US Form W-4: filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and form
     # vintage ("PRE_2020"/"2020_PLUS"). None for every non-US employee, and
@@ -362,6 +386,18 @@ class PayrollContext:
     ytd_futa_wages_before: Decimal = None
     ytd_medicare_wages_before: Decimal = None      # tracks cumulative Medicare wages for the Additional Medicare threshold, not a cap
 
+    # Australia Superannuation Guarantee Maximum Contribution Base tracking
+    # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2) — this employee's
+    # cumulative SG-qualifying-earnings for the current Australian
+    # financial year, as of BEFORE this pay period. None (every employee
+    # until Phase 2 engine wiring reads/writes it) means "not wired" —
+    # engine/countries/australia.py MUST fall back to its existing
+    # current-period-annualized MCB estimate when this is None, never
+    # treat None as 0 — identical dormancy discipline to every other YTD
+    # field in this file. Read from PayrollYtdAccumulator by service.py's
+    # _load_au_sg_ytd, gated on shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.
+    ytd_sg_qualifying_earnings_before: Decimal = None
+
     # Canada Option 2 cumulative-averaging income tax withholding
     # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9) — this employee's
     # own income-tax-specific YTD state, as of BEFORE this pay period,
@@ -418,6 +454,35 @@ class PayrollContext:
     # this yet, same disclosed gap as BC's classification) is treated as
     # GENERAL, the most common case.
     qc_hsf_employer_category: str = None
+
+    # Australia state/territory employer payroll tax (ZP-TAX-AU-2026-27-001
+    # §14-18, Phase 4) — the ORG's (not this employee's own) aggregate
+    # taxable-wages YTD for whichever state ctx.work_state resolves to, as
+    # of BEFORE this pay period. Same "None means not wired, must resolve
+    # to $0" contract as on_eht_ytd_remuneration_before above — ONE shared
+    # field across all 8 states (unlike CA's one-field-per-province
+    # pattern) because exactly one state applies per employee via
+    # ctx.work_state, and the org-level accumulator's own tax_component
+    # key (e.g. "au_payroll_tax_nsw") already disambiguates which state a
+    # given value belongs to — a per-state field set would just be 8
+    # fields that are never simultaneously non-None for the same org.
+    au_state_payroll_tax_ytd_remuneration_before: Decimal = None
+    # VIC regional-employer / QLD regional-discount eligibility — read
+    # from CompanyComplianceDetails.au_payroll_tax_regional_status.
+    # "REGIONAL" selects the reduced rate; anything else (including None,
+    # the default for every org today — no UI sets this yet) is treated
+    # as ordinary/metropolitan.
+    au_payroll_tax_regional_status: str = None
+    # Australia statutory deductions — child support/garnishee (§19,
+    # Phase 5). Raw, DB-free list of dicts (id/order_type/
+    # fixed_deduction_rate_pct/fixed_deduction_amount/
+    # protected_earnings_amount), already filtered to this employee's
+    # ACTIVE orders and sorted by priority by service.py's
+    # _load_au_active_court_orders — this engine module has zero DB
+    # access by design (see tax_resolver.py's own docstring on why), so
+    # the raw order facts must arrive pre-resolved. Empty list (every
+    # employee until an order exists) is a complete no-op.
+    au_statutory_deduction_orders: list = field(default_factory=list)
 
     # Canada CPP/QPP age-gating (§10: "Age 18"/"Age 70" controls) — the
     # employee's own date of birth, and the pay date to compute their
@@ -547,6 +612,18 @@ class PayrollResult:
     ytd_ss_wages_after: Decimal = None
     ytd_futa_wages_after: Decimal = None
     ytd_medicare_wages_after: Decimal = None
+    # Australia: cumulative SG-qualifying-earnings AFTER this period, same
+    # None-means-"not applicable" contract as the US fields above — see
+    # PayrollContext's matching ytd_sg_qualifying_earnings_before field.
+    ytd_sg_qualifying_earnings_after: Decimal = None
+    # Australia Payday Super (§10) — service.create_au_sg_liability's own
+    # inputs, computed once here (where the MCB cap/rate are already
+    # resolved) rather than re-derived in service.py from raw numbers.
+    # None whenever ytd_sg_qualifying_earnings_after is None (dormant) —
+    # same contract as every other YTD-adjacent field in this file.
+    sg_qualifying_earnings_period: Decimal = None
+    sg_rate_pct: Decimal = None
+    sg_mcb_reached: bool = None
     # Canada Option 2 cumulative-averaging income tax withholding —
     # cumulative figures AFTER this period, same None-means-"not
     # applicable" contract as the ytd_* fields above. See PayrollContext's
@@ -574,6 +651,11 @@ class PayrollResult:
     # Canada: the same after-period contract as on_eht_ytd_remuneration_after
     # above, for BC EHT, Manitoba HE Levy and NL HAPSET respectively.
     bc_eht_ytd_remuneration_after: Decimal = None
+    # Australia state/territory employer payroll tax — same after-period
+    # contract as on_eht_ytd_remuneration_after above. See
+    # PayrollContext.au_state_payroll_tax_ytd_remuneration_before for why
+    # this is one shared field across all 8 states.
+    au_state_payroll_tax_ytd_remuneration_after: Decimal = None
     mb_he_levy_ytd_remuneration_after: Decimal = None
     nl_hapset_ytd_remuneration_after: Decimal = None
     qc_hsf_ytd_remuneration_after: Decimal = None
@@ -628,6 +710,23 @@ class PayrollResult:
     # is wired for this calculation (on_eht_ytd_remuneration_before is
     # None otherwise) — see engine/countries/canada.py's calculate().
     employer_eht: Decimal = Decimal("0")
+    # Australia state/territory employer payroll tax (ZP-TAX-AU-2026-27-001
+    # §14-18) — banded on the ORG's aggregate taxable wages for whichever
+    # state applies, not this employee's own pay. AU-D05: "must not reduce
+    # employee net pay" — an employer-liability field only, never summed
+    # into total_employee_deductions (see engine/standard.py). Zero until
+    # the org-level accumulator is wired (au_state_payroll_tax_ytd_
+    # remuneration_before is None otherwise).
+    employer_payroll_tax: Decimal = Decimal("0")
+    # Australia statutory deductions — child support/garnishee (§19,
+    # Phase 5). A real EMPLOYEE deduction (unlike employer_payroll_tax
+    # above) — summed into total_employee_deductions in engine/
+    # standard.py. `au_statutory_deductions_detail` is the per-order
+    # breakdown (order_id/eligible/reason/deduction_amount), purely
+    # informational for the calculation trace/payslip note, never
+    # re-summed independently of the total.
+    au_statutory_deductions_total: Decimal = Decimal("0")
+    au_statutory_deductions_detail: list = field(default_factory=list)
     # UK: Apprenticeship Levy — same org-level-accumulator-banded contract
     # as employer_eht above (ZP-TAX-UK-2026-27-001 §14). Zero until the
     # org-level accumulator is wired (appr_levy_ytd_pay_bill_before is

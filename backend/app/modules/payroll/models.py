@@ -438,6 +438,38 @@ class PayrollEmployee(Base):
     # uk.py currently varies its calculation by this field.
     pay_frequency    = Column(String(20), nullable=False, default="Monthly", server_default="Monthly")
 
+    # Australia-specific declarations driving ATO Schedule 1/8 scale
+    # selection (ZP-TAX-AU-2026-27-001 §5.1/§14). NULL for every non-AU
+    # employee, and for AU employees until explicitly entered. Unset
+    # au_tfn_status resolves through the ORDINARY Scale 1/2 path (as if a
+    # TFN were on file) — same "unset means the standard path, not the
+    # most punitive edge case" convention UK's unset tax_code (falls back
+    # to standard personal allowance, not an emergency code) already
+    # uses. Scale 4's drastic 47%/45% flat withholding applies ONLY when
+    # this is EXPLICITLY set to "NOT_PROVIDED" — a real recorded fact,
+    # never inferred from absence. au_tax_free_threshold_claimed below is
+    # the one field that DOES default conservatively (unclaimed = higher
+    # withholding) since that mirrors the TFN declaration form's own
+    # default position.
+    au_tfn_status = Column(String(20), nullable=True)  # "PROVIDED" | "NOT_PROVIDED" | "EXEMPTION"
+    # "RESIDENT" | "FOREIGN_RESIDENT" | "WORKING_HOLIDAY_MAKER" — selects
+    # Schedule 1 Scale 2/1 vs Scale 3 vs the WHM schedule, and Schedule 8's
+    # RESIDENT/FOREIGN coefficient family. Distinct from the generic
+    # tax_residency_status column above (India old-regime age bands only).
+    au_residency_status = Column(String(25), nullable=True)
+    # Scale 1 (not claimed) vs Scale 2 (claimed) — also doubles as
+    # Schedule 8's own threshold_claim_state per §8's STSL contract
+    # ("Tax-free threshold claimed OR foreign resident" is one coefficient
+    # family, driven by this same flag together with au_residency_status).
+    au_tax_free_threshold_claimed = Column(Boolean, nullable=True)
+    # "FULL" | "HALF" — selects Schedule 1 Scale 5/6 in place of the
+    # ordinary Scale 1/2. NULL = standard Medicare Levy (no exemption).
+    au_medicare_levy_exemption = Column(String(10), nullable=True)
+    # ATO-authorised upward/downward withholding variation (§14's
+    # "Withholding declaration"), applied only where the variation is on
+    # file — never inferred. NULL means no variation.
+    au_withholding_variation_pct = Column(Numeric(5, 2), nullable=True)
+
     # Government study-loan repayment, deducted via payroll above an
     # income threshold — the SAME mechanism under different names in the
     # UK (Student/Postgraduate Loan, e.g. "UK_PLAN1".."UK_PLAN5",
@@ -1349,6 +1381,23 @@ class PayslipItem(Base):
     # accumulator) — see engine/countries/canada.py's module docstring.
     employer_qc_hsf               = Column(Numeric(12, 2), default=0, server_default="0")
     employer_qc_labour_standards  = Column(Numeric(12, 2), default=0, server_default="0")
+    # Australia: state/territory employer payroll tax (ZP-TAX-AU-2026-27-001
+    # §14-18, Phase 4) — same org-level-accumulator-banded contract as
+    # employer_eht above, one column across all 8 jurisdictions (an
+    # employee has at most one work_state, same reasoning as
+    # PayrollContext.au_state_payroll_tax_ytd_remuneration_before's own
+    # single-shared-field docstring). AU-D05: an employer-liability figure
+    # only, never subtracted from net_pay.
+    employer_payroll_tax          = Column(Numeric(12, 2), default=0, server_default="0")
+    # Australia: child support/garnishee statutory deductions (§19,
+    # Phase 5) — a real EMPLOYEE deduction, summed into
+    # total_employee_deductions/net_pay (unlike employer_payroll_tax
+    # above). Per-order breakdown is NOT separately persisted here —
+    # available live via the /au/court-orders/calculate endpoint and
+    # CourtOrderedDeduction.total_amount_collected's own running total,
+    # same "total only, no frozen snapshot" scope as every other
+    # non-YTD-accumulator-backed deduction on this table.
+    au_statutory_deductions_total = Column(Numeric(12, 2), default=0, server_default="0")
     # India: EPS diversion + residual — purely-informational breakdown of
     # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
     # employer_pf_residual == employer_pf always, never additional to it.
@@ -2152,14 +2201,31 @@ class TaxSlab(Base):
     filing_status         = Column(String(20), nullable=True)
 
     # MARGINAL_RATE (default, existing brackets) | FLAT_RATE | FIXED_PLUS_MARGINAL
-    # | FORMULA | TABLE_LOOKUP | CONTRIBUTION | PT_FLAT. Only FORMULA rows use
-    # formula_expression instead of min/max/rate_pct — e.g. Germany's
-    # Lohnsteuer, which isn't a clean bracket table. Existing bracket rows
-    # for every country default to MARGINAL_RATE, so no calculator changes
-    # are required until a row actually opts into FORMULA. PT_FLAT rows
-    # (India's state-level Professional Tax, bracketed by gross salary, not
-    # a percentage) use flat_amount instead of rate_pct — rate_pct stays
-    # 0.00 (still NOT NULL) on those rows, simply unread by the engine.
+    # | FORMULA | TABLE_LOOKUP | CONTRIBUTION | PT_FLAT | AU_PAYG_COEFFICIENT |
+    # AU_STSL_COEFFICIENT. Only FORMULA rows use formula_expression instead
+    # of min/max/rate_pct — e.g. Germany's Lohnsteuer, which isn't a clean
+    # bracket table. Existing bracket rows for every country default to
+    # MARGINAL_RATE, so no calculator changes are required until a row
+    # actually opts into FORMULA. PT_FLAT rows (India's state-level
+    # Professional Tax, bracketed by gross salary, not a percentage) use
+    # flat_amount instead of rate_pct — rate_pct stays 0.00 (still NOT
+    # NULL) on those rows, simply unread by the engine.
+    # AU_PAYG_COEFFICIENT/AU_STSL_COEFFICIENT (ZP-TAX-AU-2026-27-001 §5/§8):
+    # a genuinely different shape from every other rule_type — the ATO's
+    # Schedule 1/8 formula is y = a·x − b evaluated against a
+    # PERIOD-frequency weekly-equivalent x (not annual income), selected by
+    # BAND (not a cumulative marginal-bracket sum). Reuses this table's
+    # existing columns for the two coefficients rather than a new table:
+    # min_amount/max_amount hold the weekly-x band boundaries (exactly like
+    # every other bracket row), rate_pct holds coefficient `a`, flat_amount
+    # holds coefficient `b` (the same column PT_FLAT uses, mutually
+    # exclusive rule_types so no conflict), and filing_status holds the
+    # Scale identifier ("SCALE_1".."SCALE_6") for AU_PAYG_COEFFICIENT or the
+    # declaration-state family ("STSL_CLAIMED_OR_FOREIGN"/"STSL_NOT_CLAIMED")
+    # for AU_STSL_COEFFICIENT — the same "repurpose an existing generic
+    # column per rule_type" convention India's PT_FLAT/gender and US's
+    # filing_status already use. See engine/countries/australia.py's
+    # _resolve_au_coefficient_band.
     rule_type             = Column(String(20), nullable=False, default="MARGINAL_RATE", server_default="MARGINAL_RATE")
     formula_expression    = Column(Text, nullable=True)
     # PT_FLAT only: the fixed monthly deduction for this gross-income
@@ -2263,6 +2329,17 @@ class CompanyComplianceDetails(Base):
     # gap as bc_eht_employer_classification above; NULL is treated as
     # GENERAL, the most common case.
     qc_hsf_employer_category = Column(String(30), nullable=True)
+
+    # Australia regional-employer payroll-tax eligibility (VIC regional
+    # rate, QLD regional discount, ZP-TAX-AU-2026-27-001 §17) — same
+    # disclosed "no UI yet" gap as bc_eht_employer_classification/
+    # qc_hsf_employer_category above; NULL is treated as ordinary
+    # (metropolitan) status. Cross-org grouping/DGE aggregation for state
+    # payroll-tax thresholds reuses Organization.connected_group_code
+    # (the same field UK's Apprenticeship Levy sharing and Canada's
+    # associated-employer-group mechanism already use) rather than a new
+    # AU-specific group column.
+    au_payroll_tax_regional_status = Column(String(20), nullable=True)
 
     # Which JurisdictionPack this org is currently using, if any. Nullable —
     # orgs created before this table existed, or orgs in a jurisdiction
@@ -5082,3 +5159,69 @@ class NewHireReport(Base):
 
     def __repr__(self):
         return f"<NewHireReport employee={self.employee_id} due={self.due_date} status={self.status}>"
+
+
+class SuperGuaranteeLiability(Base):
+    """Australia Payday Super (ZP-TAX-AU-2026-27-001 §10, Payday Super
+    Phase 2, 2026-09-16) — the one genuinely NEW concept that phase
+    introduces: from 1 July 2026, Superannuation Guarantee is a discrete
+    PER-PAYDAY payment obligation with its own fund-receipt deadline and
+    exception state, not merely a payslip line item. Deliberately NOT a
+    retrofit of RtiSubmission (a report-SUBMISSION tracker keyed to a
+    GeneratedReport, with no deadline/SLA concept at all) or
+    EmployerTaxProfile/PayrollYtdAccumulator (rates and running totals,
+    not discrete payment events) — this is the first table in the schema
+    that models "one payment obligation per payday, with an external
+    fund-receipt deadline and retry/exception state."
+
+    One row per (employee, payslip) — created only for a REAL persisted
+    payslip (see service.create_au_sg_liability), never for a preview,
+    mirroring PayrollYtdAccumulator's own "written only by real payslip
+    generation" discipline. `fund_receipt_deadline` is pay_date + 7
+    business days per §10's own control table, unless a statutory
+    extension applies (`deadline_extended_to`, NULL by default). This
+    table is a status tracker only — like RtiSubmission, it never
+    actually transmits a SuperStream contribution message; when a real
+    SuperStream/clearing-house integration exists, the only new work
+    should be wiring a real API call into the SUBMITTED transition below,
+    not a redesign of this table."""
+    __tablename__ = "payroll_super_guarantee_liabilities"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    payslip_item_id       = Column(Integer, ForeignKey("payslip_items.id"), nullable=True, index=True)
+
+    pay_date              = Column(Date, nullable=False)
+    qualifying_earnings   = Column(Numeric(14, 2), nullable=False)
+    sg_rate_pct           = Column(Numeric(6, 4), nullable=False)
+    sg_amount             = Column(Numeric(12, 2), nullable=False)
+    # Snapshot of this employee's cumulative AU-financial-year qualifying
+    # earnings AFTER this payday (see PayrollYtdAccumulator's
+    # "au_sg_qualifying_earnings" component) — preserved here even though
+    # it is also the accumulator's own running value, so a later
+    # accumulator correction can never silently rewrite what THIS
+    # liability event actually reported at the time.
+    ytd_qualifying_earnings_after = Column(Numeric(14, 2), nullable=True)
+    mcb_reached           = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # PENDING -> SUBMITTED -> RECEIVED | FAILED | EXCEPTION. PENDING is the
+    # state a fresh row starts in (liability recorded, no payment/
+    # transport action taken yet — see class docstring on why this stays
+    # a status tracker); RECEIVED/FAILED/EXCEPTION are set only by a human
+    # recording what a real clearing-house/fund confirmed, never inferred.
+    status                = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    fund_receipt_deadline = Column(Date, nullable=False)
+    # Statutory extension per §10's own "unless an extended timeframe
+    # applies" — NULL means the ordinary 7-business-day deadline above
+    # stands unmodified.
+    deadline_extended_to  = Column(Date, nullable=True)
+    submitted_at          = Column(DateTime(timezone=True), nullable=True)
+    received_at           = Column(DateTime(timezone=True), nullable=True)
+    exception_reason      = Column(Text, nullable=True)
+
+    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<SuperGuaranteeLiability employee={self.employee_id} pay_date={self.pay_date} status={self.status}>"

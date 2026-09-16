@@ -1197,6 +1197,18 @@ class UKCourtOrderCalculateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# Australia child support/garnishee (§19, Phase 5) — reuses UKCourtOrder
+# Create/Response/StatusUpdate/DeductionEntry/CalculateResponse directly
+# (jurisdiction/order_type were always free-text, not UK-only) rather than
+# duplicating them; only the calculate REQUEST differs, since AU has no
+# frequency-dependent band table at all and therefore no pay_frequency
+# field to require.
+class AUCourtOrderCalculateRequest(BaseModel):
+    employee_id: int
+    attachable_earnings: Decimal
+    as_of: Optional[date] = None
+
+
 # ── India: Gratuity (ZP-TAX-IN-2026-27-001 §11) ─────────────────────────
 
 class GratuityCalculateRequest(BaseModel):

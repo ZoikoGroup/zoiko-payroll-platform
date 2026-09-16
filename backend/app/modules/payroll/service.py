@@ -48,7 +48,7 @@ from app.modules.payroll.models import (
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate, NewHireReport,
     ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
     StatutoryFilingCalendar, PayrollYtdAccumulator, OrganizationYtdAccumulator,
-    EmployeeEstablishment, PayrollNiReliefFact, CourtOrderedDeduction, RtiSubmission,
+    EmployeeEstablishment, PayrollNiReliefFact, CourtOrderedDeduction, RtiSubmission, SuperGuaranteeLiability,
     PackHotfixActivation, TestCertificationRun, TaxabilityRule, StateLocalProgramReadiness,
     SalaryTdsDeclaration, SalaryTdsClaim, EmployeeBenefitValuation,
     EmployeeStatutoryProfile, PapAlgorithmAsset, GermanyHealthFund,
@@ -1747,6 +1747,28 @@ def get_us_taxability_rules_bundle(db: Session, organization_id: int = None, as_
     return {
         component: get_taxability_classification(db, "US", component, organization_id, as_of)
         for component in _US_TAXABILITY_COMPONENTS
+    }
+
+
+# ── Australia: PAYG withholding / SG qualifying-earnings taxability
+# (ZP-TAX-AU-2026-27-001 §11, Payday Super Phase 2). Same
+# TaxabilityRule model/get_taxability_classification primitive as CA/US's
+# bundles above.
+_AU_TAXABILITY_COMPONENTS = ("payg_withholding", "sg_qualifying_earnings")
+
+
+def get_au_taxability_rules_bundle(db: Session, organization_id: int = None, as_of=None) -> dict:
+    """Returns {tax_component: {earning_type: is_taxable}} for AU's two
+    independently-configurable wage bases (§11: PAYG taxability and SG/QE
+    are explicitly NOT the same flag — "never infer SG/QE from taxable
+    earnings"). Empty per-component dicts (every jurisdiction/org today)
+    mean australia.py's _resolve_au_taxability falls back to "every
+    component counts," reproducing today's single-ctx.gross behavior
+    exactly — see _AU_TAXABILITY_MATRIX_ENABLED_COUNTRIES in
+    engine/countries/shared.py for the rollout switch this is gated on."""
+    return {
+        component: get_taxability_classification(db, "AU", component, organization_id, as_of)
+        for component in _AU_TAXABILITY_COMPONENTS
     }
 
 
@@ -11130,7 +11152,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_uk_director_ytd(db, emp.id, period_end or date.today())
             if emp_country == "UK" else
             _load_us_ytd(db, emp.id, period_end or date.today())
-            if emp_country == "US" else {}
+            if emp_country == "US" else
+            _load_au_sg_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "AU" else {}
         )
         option2_inputs = (
             _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if emp_country == "CA" else {}
@@ -11144,7 +11168,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _ca_org_levy_read_inputs(db, organization_id, period_end or date.today(), work_state)
             if emp_country == "CA" else
             _load_uk_org_levy_ytd(db, organization_id, period_end or date.today())
-            if emp_country == "UK" else {}
+            if emp_country == "UK" else
+            _au_org_payroll_tax_read_inputs(db, organization_id, period_end or date.today(), work_state)
+            if emp_country == "AU" else {}
         )
 
         ni_category_override = (
@@ -11175,6 +11201,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             get_us_taxability_rules_bundle(db, organization_id, as_of=period_end or date.today())
             if emp_country == "US" else {}
         )
+        au_taxability_rules = (
+            get_au_taxability_rules_bundle(db, organization_id, as_of=period_end or date.today())
+            if emp_country == "AU" else {}
+        )
+        au_statutory_deduction_orders = (
+            _load_au_active_court_orders(db, emp.id, organization_id, period_end or date.today())
+            if emp_country == "AU" else []
+        )
         salary_tds_inputs = (
             get_india_salary_tds_inputs(db, organization_id, emp.id, india_tax_year_for_date(period_end or date.today()))
             if emp_country == "IN" else {}
@@ -11192,6 +11226,8 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
             ca_taxability_rules=ca_taxability_rules,
             us_taxability_rules=us_taxability_rules,
+            au_taxability_rules=au_taxability_rules,
+            au_statutory_deduction_orders=au_statutory_deduction_orders,
             other_income_for_tds=salary_tds_inputs.get("other_income_for_tds", Decimal("0")),
             tds_already_deducted=salary_tds_inputs.get("tds_already_deducted", Decimal("0")),
             annual_claims_total=salary_tds_inputs.get("claims_total", Decimal("0")),
@@ -11837,6 +11873,117 @@ def _upsert_us_ytd_accumulator(db: Session, employee_id: int, pay_date, result, 
     db.flush()
 
 
+# ── Australia: Superannuation Guarantee Maximum Contribution Base YTD ───
+# (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2, 2026-09-16) — same
+# read/write/tax-year-key shape as _load_us_ytd/_upsert_us_ytd_accumulator
+# above, reusing the SAME PayrollYtdAccumulator table. Keyed by the
+# AUSTRALIAN financial year (1 July - 30 June), not a calendar year —
+# genuinely its own concept, not a display label, same reasoning as
+# _us_ytd_tax_year's own docstring.
+_AU_SG_YTD_COMPONENT = "au_sg_qualifying_earnings"
+
+
+def _au_ytd_tax_year(pay_date) -> str:
+    """Australian financial year accumulator key — "AU-FY-2026-27" for
+    any date from 2026-07-01 through 2027-06-30."""
+    start_year = pay_date.year if pay_date.month >= 7 else pay_date.year - 1
+    return f"AU-FY-{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _load_au_sg_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    ytd_sg_qualifying_earnings_before param — empty dict (today, for
+    every employee) when AU hasn't opted into the rollout switch, or when
+    no accumulator row exists yet for this employee/financial-year (a
+    brand-new AU employee's first payslip of the year). Never guesses/
+    backfills a starting value."""
+    if "AU" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _au_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _AU_SG_YTD_COMPONENT,
+        )
+        .first()
+    )
+    return dict(ytd_sg_qualifying_earnings_before=row.ytd_taxable_wages if row else Decimal("0"))
+
+
+def _upsert_au_sg_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative SG-qualifying-
+    earnings back to PayrollYtdAccumulator — get-or-create per (employee,
+    financial_year, component), flush (not commit; caller's own
+    transaction boundary still governs). No-op if the result carries no
+    YTD figure (i.e. the calculation ran dormant —
+    result.ytd_sg_qualifying_earnings_after is None), so calling this
+    unconditionally from every persisting entry point is safe even while
+    the rollout switch is off."""
+    if result.ytd_sg_qualifying_earnings_after is None:
+        return
+    tax_year = _au_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _AU_SG_YTD_COMPONENT,
+        )
+        .first()
+    )
+    if row is None:
+        row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_AU_SG_YTD_COMPONENT)
+        db.add(row)
+    row.ytd_taxable_wages = result.ytd_sg_qualifying_earnings_after
+    row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+def _add_business_days(d: date, n: int) -> date:
+    """Adds `n` weekday-only business days to `d` — Saturday/Sunday never
+    count, no federal/state holiday calendar is sourced anywhere in
+    ZP-TAX-AU-2026-27-001 §10 either, same disclosed weekend-only
+    simplification as _next_business_day's own docstring above (US
+    deposit schedules)."""
+    remaining = n
+    current = d
+    while remaining > 0:
+        current += timedelta(days=1)
+        if current.weekday() < 5:  # Monday=0 .. Friday=4
+            remaining -= 1
+    return current
+
+
+def create_au_sg_liability(
+    db: Session, organization_id: int, employee_id: int, pay_date, qualifying_earnings: Decimal,
+    sg_rate_pct: Decimal, sg_amount: Decimal, ytd_qualifying_earnings_after: Decimal = None,
+    mcb_reached: bool = False, payslip_item_id: int = None,
+) -> "SuperGuaranteeLiability":
+    """Payday Super (§10): "each payday creates a traceable SG liability."
+    One row per real, persisted payslip — never for a preview, mirroring
+    PayrollYtdAccumulator's own "written only by real payslip generation"
+    discipline (callers are responsible for only invoking this from a
+    real-persist path). Deliberately a pure record-creation helper, same
+    "status tracker only, never a live transmission pipeline" scope as
+    RtiSubmission (see models.SuperGuaranteeLiability's own docstring) —
+    a real SuperStream/clearing-house integration would only need to wire
+    a call into the PENDING -> SUBMITTED transition, not a redesign here.
+    `mcb_reached` is computed by the engine (australia.py's
+    sg_mcb_reached, where the MCB cap is already resolved), not
+    re-derived from raw numbers here."""
+    liability = SuperGuaranteeLiability(
+        organization_id=organization_id, employee_id=employee_id, payslip_item_id=payslip_item_id,
+        pay_date=pay_date, qualifying_earnings=qualifying_earnings, sg_rate_pct=sg_rate_pct, sg_amount=sg_amount,
+        ytd_qualifying_earnings_after=ytd_qualifying_earnings_after, mcb_reached=bool(mcb_reached),
+        fund_receipt_deadline=_add_business_days(pay_date, 7),
+    )
+    db.add(liability)
+    db.flush()
+    return liability
+
+
 # ── Canada: Option 2 cumulative-averaging income tax withholding ────────
 # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9, 2026-09-11). A
 # genuinely different income-tax methodology from Option 1 annualization
@@ -12017,12 +12164,17 @@ def delete_uk_ni_relief_fact(db: Session, organization_id: int, employee_id: int
     db.commit()
 
 
-# ── UK Court-Ordered Deductions (§17 gap-closure Part 8, 2026-09-09) ────
-# England & Wales Attachment of Earnings Orders, Scottish arrestments,
-# Northern Ireland's own orders — see engine/countries/uk.py's own
-# module comment for why these are three deliberately-separate
-# calculation functions and why no band data is seeded yet.
-_UK_COURT_ORDER_JURISDICTIONS = {"ENGLAND_WALES", "SCOTLAND", "NORTHERN_IRELAND"}
+# ── Court-Ordered Deductions ─────────────────────────────────────────────
+# UK (§17 gap-closure Part 8, 2026-09-09): England & Wales Attachment of
+# Earnings Orders, Scottish arrestments, Northern Ireland's own orders —
+# see engine/countries/uk.py's own module comment for why these are three
+# deliberately-separate calculation functions and why no band data is
+# seeded yet. "AUSTRALIA" added (ZP-TAX-AU-2026-27-001 §19, Phase 5,
+# 2026-09-16) for Services Australia child support deductions and other
+# statutory garnishee orders — CourtOrderedDeduction's own `jurisdiction`
+# column was already free-text with no UK-only constraint; this is the
+# one validation gate that needed widening, not a new mechanism.
+_UK_COURT_ORDER_JURISDICTIONS = {"ENGLAND_WALES", "SCOTLAND", "NORTHERN_IRELAND", "AUSTRALIA"}
 
 
 def create_court_ordered_deduction(
@@ -12136,6 +12288,100 @@ def calculate_uk_court_ordered_deductions(
         db, organization_id, "UK", as_of, org_opted_in,
     )
     return uk_country.calculate_court_ordered_deductions(order_dicts, attachable_earnings, pay_frequency, slabs)
+
+
+# ── Australia: Child Support / Garnishee (§19, Phase 5, 2026-09-16) ─────
+# Unlike UK's own court orders (deliberately left standalone/on-demand
+# only, since real published band data wasn't available), Australia's
+# orders normally carry their own fixed amount/rate (§19's own arrears/
+# fixed/percentage modes are facts recorded FROM the order itself, not a
+# generic band lookup) — so this IS wired into calculate()'s real
+# per-payslip flow via ctx.au_statutory_deduction_orders, in addition to
+# staying available on-demand below.
+
+def _load_au_active_court_orders(db: Session, employee_id: int, organization_id: int, as_of=None) -> list:
+    """Every ACTIVE AUSTRALIA-jurisdiction court order for this employee
+    (highest priority — lowest priority number, NULL last — first),
+    converted to the plain-dict shape engine/countries/australia.py's
+    calculate_au_statutory_deductions expects. Same query shape as UK's
+    own order-loading block in calculate_uk_court_ordered_deductions."""
+    as_of = as_of or date.today()
+    orders = (
+        db.query(CourtOrderedDeduction)
+        .filter(
+            CourtOrderedDeduction.employee_id == employee_id,
+            CourtOrderedDeduction.organization_id == organization_id,
+            CourtOrderedDeduction.jurisdiction == "AUSTRALIA",
+            CourtOrderedDeduction.status == "active",
+            CourtOrderedDeduction.start_date <= as_of,
+            (CourtOrderedDeduction.end_date.is_(None)) | (CourtOrderedDeduction.end_date >= as_of),
+        )
+        .all()
+    )
+    ordered = sorted(orders, key=lambda o: (o.priority is None, o.priority if o.priority is not None else 0, o.id))
+    return [
+        {
+            "id": o.id, "order_type": o.order_type,
+            "fixed_deduction_rate_pct": o.fixed_deduction_rate_pct,
+            "fixed_deduction_amount": o.fixed_deduction_amount,
+            "protected_earnings_amount": o.protected_earnings_amount,
+        }
+        for o in ordered
+    ]
+
+
+def calculate_au_court_ordered_deductions(
+    db: Session, organization_id: int, employee_id: int, attachable_earnings: Decimal, as_of=None,
+) -> dict:
+    """On-demand preview — same shape as calculate_uk_court_ordered_
+    deductions, minus pay_frequency (no AU band table is frequency-
+    specific, since none exists at all — see australia.py's own
+    calculate_au_statutory_deduction docstring). This is a PREVIEW only:
+    it never writes to CourtOrderedDeduction.total_amount_collected — see
+    _apply_au_statutory_deduction_collections for the real-payslip write
+    path."""
+    from app.modules.payroll.engine.countries import australia as au_country
+
+    employee = db.query(PayrollEmployee).filter(
+        PayrollEmployee.id == employee_id, PayrollEmployee.organization_id == organization_id,
+    ).first()
+    if not employee:
+        raise NotFoundException(f"Employee {employee_id} not found.")
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "AU":
+        raise BadRequestException("This endpoint only applies to Australian employees.")
+
+    orders = _load_au_active_court_orders(db, employee_id, organization_id, as_of)
+    return au_country.calculate_au_statutory_deductions(orders, attachable_earnings)
+
+
+def _apply_au_statutory_deduction_collections(db: Session, order_detail: list):
+    """Writes this period's ACTUAL deduction back onto each contributing
+    order's own total_amount_collected, and marks it 'completed' once a
+    capped order's total_amount_to_collect is reached — called ONLY from
+    a real persisted payslip (see _generate_single_payslip/
+    add_payslip_item), never from preview or regenerate_employee_payslip
+    (recalculation must not double-collect against an order that was
+    already collected against by the ORIGINAL run — same "never write
+    from a correction path" discipline as every YTD accumulator in this
+    file). No-op for an ineligible order (deduction_amount is 0) or one
+    with no total_amount_to_collect cap (open-ended orders, e.g. ongoing
+    maintenance, simply keep accumulating with no completion trigger).
+    CourtOrderedDeduction has no last_updated_payslip_id-style column
+    (unlike PayrollYtdAccumulator), so no payslip_id is recorded here —
+    only the running total/status."""
+    if not order_detail:
+        return
+    for entry in order_detail:
+        if not entry.get("eligible") or not entry.get("deduction_amount"):
+            continue
+        order = db.query(CourtOrderedDeduction).filter(CourtOrderedDeduction.id == entry["order_id"]).first()
+        if order is None:
+            continue
+        order.total_amount_collected = (order.total_amount_collected or Decimal("0")) + entry["deduction_amount"]
+        if order.total_amount_to_collect is not None and order.total_amount_collected >= order.total_amount_to_collect:
+            order.status = "completed"
+    db.flush()
 
 
 # ── India: Gratuity (ZP-TAX-IN-2026-27-001 §11, gap-closure Phase D) ────
@@ -12818,16 +13064,24 @@ def _org_ytd_tax_year(pay_date, country: str = "CA") -> str:
     return f"{country}-CY-{pay_date.year}"
 
 
-def _load_ca_org_levy_ytd(db: Session, organization_id: int, pay_date, components: tuple) -> dict:
+def _load_ca_org_levy_ytd(db: Session, organization_id: int, pay_date, components: tuple, tax_year: str = None, country: str = "CA") -> dict:
     """Generic org-level aggregate-remuneration YTD reader — the org-level
     counterpart to _load_ca_ytd. Returns {} when the rollout switch is
-    off (every org today); once enabled, returns {component:
+    off for `country` (every org today); once enabled, returns {component:
     ytd_taxable_wages} for every requested component, defaulting an
     unconfigured component to Decimal("0") rather than omitting it, so a
-    caller can always safely read every key it asked for."""
-    if "CA" not in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
+    caller can always safely read every key it asked for.
+
+    `tax_year`/`country`: override the default CA calendar-year key and
+    gating country — e.g. AU's own state payroll tax (§14-18, Phase 4)
+    reuses this same generic reader/writer pair with its own
+    "AU-FY-2026-27" financial-year key and "AU" gate (see
+    _au_org_payroll_tax_read_inputs) rather than duplicating this
+    mechanism a second time; every existing CA caller omits both and gets
+    the exact same behavior as before."""
+    if country not in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
         return {}
-    tax_year = _org_ytd_tax_year(pay_date)
+    tax_year = tax_year or _org_ytd_tax_year(pay_date)
     rows = (
         db.query(OrganizationYtdAccumulator)
         .filter(
@@ -12841,7 +13095,7 @@ def _load_ca_org_levy_ytd(db: Session, organization_id: int, pay_date, component
     return {c: by_component.get(c, Decimal("0")) for c in components}
 
 
-def _upsert_ca_org_levy_ytd(db: Session, organization_id: int, pay_date, increments: dict, payslip_id: int = None):
+def _upsert_ca_org_levy_ytd(db: Session, organization_id: int, pay_date, increments: dict, payslip_id: int = None, tax_year: str = None):
     """Adds this period's taxable-wage contribution to the org's running
     total per component — get-or-create per (org, tax_year, component),
     flush (not commit; caller's transaction boundary governs), safe under
@@ -12857,10 +13111,14 @@ def _upsert_ca_org_levy_ytd(db: Session, organization_id: int, pay_date, increme
     truth for the aggregate. `increments` maps component -> this
     employee's own contribution this period (typically their period
     gross, or whatever subset of it is levy-subject); a falsy/zero
-    increment for a component is skipped, not written as a no-op update."""
+    increment for a component is skipped, not written as a no-op update.
+
+    `tax_year`: override the default CA calendar-year key — see
+    _load_ca_org_levy_ytd's matching docstring (AU's state payroll tax
+    reuses this same writer with its own financial-year key)."""
     if not increments:
         return
-    tax_year = _org_ytd_tax_year(pay_date)
+    tax_year = tax_year or _org_ytd_tax_year(pay_date)
     for component, increment in increments.items():
         if not increment:
             continue
@@ -12945,6 +13203,49 @@ def _ca_org_levy_read_inputs(db: Session, organization_id: int, pay_date, work_s
         ).first()
         inputs[classification_field] = getattr(compliance, classification_field, None)
     return inputs
+
+
+# Australia state/territory employer payroll tax (ZP-TAX-AU-2026-27-001
+# §14-18, Phase 4) — one raw work_state maps to at most one of these 8
+# org-banded jurisdictions, same shape as CA's own 5-jurisdiction map
+# above. Reuses _load_ca_org_levy_ytd/_upsert_ca_org_levy_ytd directly
+# (both now accept an explicit tax_year/country override) rather than a
+# second near-duplicate reader/writer pair — this mechanism was already
+# fully generic except for its CA-only calendar-year key.
+_AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE = {
+    "NSW": "au_payroll_tax_nsw", "VIC": "au_payroll_tax_vic", "QLD": "au_payroll_tax_qld",
+    "WA": "au_payroll_tax_wa", "SA": "au_payroll_tax_sa", "TAS": "au_payroll_tax_tas",
+    "ACT": "au_payroll_tax_act", "NT": "au_payroll_tax_nt",
+}
+
+
+def _au_org_payroll_tax_read_inputs(db: Session, organization_id: int, pay_date, work_state: str) -> dict:
+    """Resolve the org-level payroll-tax accumulator READ + VIC/QLD
+    regional-employer classification for whichever single AU jurisdiction
+    this employee's work_state maps to, if any — shared by
+    generate_payslips_for_run, add_payslip_item and preview_payroll_run,
+    same "all three entry points resolve this identically" contract as
+    _ca_org_levy_read_inputs. Returns {} when the employee isn't in one
+    of the 8 supported jurisdictions, or when the rollout switch is off.
+
+    Cross-employer group/interstate wage aggregation (§AU-D07) is NOT
+    wired here yet — a documented Phase 4 follow-on, same as
+    engine/countries/australia.py's own module-level disclosure — so
+    this always reads this org's own total in isolation, never a group's."""
+    component = _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE.get((work_state or "").strip().upper())
+    if not component:
+        return {}
+    tax_year = _au_ytd_tax_year(pay_date)
+    org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, (component,), tax_year=tax_year, country="AU")
+    if not org_levy_ytd:
+        return {}
+    compliance = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == organization_id,
+    ).first()
+    return {
+        "au_state_payroll_tax_ytd_remuneration_before": org_levy_ytd[component],
+        "au_payroll_tax_regional_status": getattr(compliance, "au_payroll_tax_regional_status", None),
+    }
 
 
 # ── UK org-level accumulators: Apprenticeship Levy pay bill (§14) AND ───
@@ -13586,6 +13887,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     us_taxability_rules = (
         get_us_taxability_rules_bundle(db, run.organization_id, as_of=run.pay_date) if country == "US" else {}
     )
+    au_taxability_rules = (
+        get_au_taxability_rules_bundle(db, run.organization_id, as_of=run.pay_date) if country == "AU" else {}
+    )
+    au_statutory_deduction_orders = (
+        _load_au_active_court_orders(db, employee.id, run.organization_id, run.pay_date) if country == "AU" else []
+    )
     salary_tds_inputs = (
         get_india_salary_tds_inputs(db, run.organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
@@ -13621,6 +13928,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
         ca_taxability_rules=ca_taxability_rules,
         us_taxability_rules=us_taxability_rules,
+        au_taxability_rules=au_taxability_rules,
+        au_statutory_deduction_orders=au_statutory_deduction_orders,
         other_income_for_tds=salary_tds_inputs.get("other_income_for_tds", Decimal("0")),
         tds_already_deducted=salary_tds_inputs.get("tds_already_deducted", Decimal("0")),
         annual_claims_total=salary_tds_inputs.get("claims_total", Decimal("0")),
@@ -13743,6 +14052,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "employer_nl_hapset": result.employer_nl_hapset,
         "employer_qc_hsf": result.employer_qc_hsf,
         "employer_qc_labour_standards": result.employer_qc_labour_standards,
+        "employer_payroll_tax": result.employer_payroll_tax,
+        "au_statutory_deductions_total": result.au_statutory_deductions_total,
+        # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
+        # same splat-then-pop contract as "_org_levy_result" above. Only
+        # ever non-empty when a real order actually contributed a
+        # deduction this period; carries the per-order breakdown for
+        # _generate_single_payslip's write-back (incrementing each
+        # contributing order's own total_amount_collected).
+        "_au_statutory_deductions_detail": result.au_statutory_deductions_detail or None,
         "net_pay": result.net_pay,
         "unpaid_leave_days": result.unpaid_leave_days,
         "attendance_deduction": result.attendance_deduction,
@@ -13780,7 +14098,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                 "social_security": {"ytd_before": str(ctx.ytd_ss_wages_before), "ytd_after": str(result.ytd_ss_wages_after)},
                 "futa": {"ytd_before": str(ctx.ytd_futa_wages_before), "ytd_after": str(result.ytd_futa_wages_after)},
                 "medicare_additional": {"ytd_before": str(ctx.ytd_medicare_wages_before), "ytd_after": str(result.ytd_medicare_wages_after)},
-            } if result.ytd_ss_wages_after is not None else None
+            } if result.ytd_ss_wages_after is not None else
+            {
+                "sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(result.ytd_sg_qualifying_earnings_after)},
+            } if result.ytd_sg_qualifying_earnings_after is not None else None
         ),
         "_ytd_result": result if result.ytd_pensionable_earnings is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for UK
@@ -13792,6 +14113,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # §3.1, gap-closure Plan Phase 2a) — a separate key since it's
         # gated on ITS OWN result field.
         "_us_ytd_result": result if result.ytd_ss_wages_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for
+        # Australia Superannuation Guarantee MCB tracking
+        # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2) — a separate
+        # key since it's gated on ITS OWN result field.
+        "_au_sg_ytd_result": result if result.ytd_sg_qualifying_earnings_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for Canada
         # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
         # — a separate key since it's gated on ITS OWN result field,
@@ -13824,6 +14150,17 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                if result.nl_hapset_ytd_remuneration_after is not None else {}),
             **({"qc_hsf": result.qc_hsf_ytd_remuneration_after - ctx.qc_hsf_ytd_remuneration_before}
                if result.qc_hsf_ytd_remuneration_after is not None else {}),
+            # Australia state/territory payroll tax (§14-18, Phase 4) —
+            # component name is resolved from work_state, not a fixed
+            # key, since exactly one of the 8 jurisdictions ever applies
+            # per employee (see _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE).
+            **(
+                {
+                    _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE[(getattr(employee, "work_state", None) or "").strip().upper()]:
+                        result.au_state_payroll_tax_ytd_remuneration_after - ctx.au_state_payroll_tax_ytd_remuneration_before
+                }
+                if result.au_state_payroll_tax_ytd_remuneration_after is not None else {}
+            ),
         } or None),
         # UK Apprenticeship Levy pay-bill increment + Employment
         # Allowance's employer_ni-total increment — (gross_increment,
@@ -13890,6 +14227,8 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     ytd_result = values.pop("_ytd_result", None)
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
     us_ytd_result = values.pop("_us_ytd_result", None)
+    au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
+    au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
     uk_org_levy_increment = values.pop("_uk_org_levy_increment", None)
@@ -13923,6 +14262,22 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if us_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_us_ytd_accumulator(db, employee.id, run.pay_date, us_ytd_result, payslip_id=item.id)
+    if au_sg_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id/payslip_item_id
+        _upsert_au_sg_ytd_accumulator(db, employee.id, run.pay_date, au_sg_ytd_result, payslip_id=item.id)
+        # Payday Super (§10): "each payday creates a traceable SG
+        # liability" — one row per real, persisted payslip, mirroring the
+        # accumulator write immediately above (both gated on the exact
+        # same dormancy check).
+        create_au_sg_liability(
+            db, run.organization_id, employee.id, run.pay_date,
+            qualifying_earnings=au_sg_ytd_result.sg_qualifying_earnings_period,
+            sg_rate_pct=au_sg_ytd_result.sg_rate_pct, sg_amount=au_sg_ytd_result.employer_pension,
+            ytd_qualifying_earnings_after=au_sg_ytd_result.ytd_sg_qualifying_earnings_after,
+            mcb_reached=au_sg_ytd_result.sg_mcb_reached, payslip_item_id=item.id,
+        )
+    if au_statutory_deductions_detail is not None:
+        _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
     if option2_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         work_state = getattr(employee, "work_state", None)
@@ -13932,7 +14287,10 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         _upsert_uk_director_ytd_accumulator(db, employee.id, run.pay_date, uk_director_ytd_result, payslip_id=item.id)
     if org_levy_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_ca_org_levy_ytd(db, run.organization_id, run.pay_date, org_levy_result, payslip_id=item.id)
+        _upsert_ca_org_levy_ytd(
+            db, run.organization_id, run.pay_date, org_levy_result, payslip_id=item.id,
+            tax_year=_au_ytd_tax_year(run.pay_date) if country == "AU" else None,
+        )
     uk_gross_increment, uk_employer_ni_increment = uk_org_levy_increment or (None, None)
     if uk_gross_increment is not None or uk_employer_ni_increment is not None:
         db.flush()  # need item.id for last_updated_payslip_id
@@ -14244,7 +14602,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_uk_director_ytd(db, emp.id, run.pay_date)
             if country == "UK" else
             _load_us_ytd(db, emp.id, run.pay_date)
-            if country == "US" else None
+            if country == "US" else
+            _load_au_sg_ytd(db, emp.id, run.pay_date)
+            if country == "AU" else None
         )
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
         # persisted into the calculation snapshot, not just used to pick
@@ -14263,7 +14623,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _ca_org_levy_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
             if country == "CA" else
             _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
-            if country == "UK" else {}
+            if country == "UK" else
+            _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
+            if country == "AU" else {}
         )
         # Phase 8BI (P0): a statutorily-blocked employee (today, only
         # Germany — GermanyCalculationBlockedException, e.g. no PUBLISHED
@@ -14461,6 +14823,13 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             before = (existing_snapshot.get(component) or {}).get("ytd_before")
             if before is not None:
                 ytd_inputs[field_name] = Decimal(before)
+    # Same recalculate-from-frozen-snapshot, never-write contract as
+    # Canada/US above, for Australia's SG qualifying-earnings MCB tracking
+    # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2).
+    if country == "AU" and existing_snapshot:
+        before = (existing_snapshot.get("sg_qualifying_earnings") or {}).get("ytd_before")
+        if before is not None:
+            ytd_inputs["ytd_sg_qualifying_earnings_before"] = Decimal(before)
 
     values = _compute_payslip_values(
         db, run, employee, rate_map, slabs, country, calculation_mode,
@@ -14472,6 +14841,11 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     ytd_result = values.pop("_ytd_result", None)
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
     us_ytd_result = values.pop("_us_ytd_result", None)  # never written from this correction path — same reasoning as _ytd_result above
+    values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
+    # Same never-write-from-a-correction-path reasoning for AU statutory
+    # deductions — recalculation must not double-collect against an order
+    # the ORIGINAL run already collected against.
+    values.pop("_au_statutory_deductions_detail", None)
     # org_levy_inputs is deliberately never passed above (see the Canada
     # YTD comment) — recalculation must not re-read/re-increment the org's
     # running total, so this always resolves to None (dormant EHT on
@@ -18115,6 +18489,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _load_ca_ytd(db, employee.id, run.pay_date, work_state) if country == "CA"
         else _load_uk_director_ytd(db, employee.id, run.pay_date) if country == "UK"
         else _load_us_ytd(db, employee.id, run.pay_date) if country == "US"
+        else _load_au_sg_ytd(db, employee.id, run.pay_date) if country == "AU"
         else {}
     )
 
@@ -18126,6 +18501,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     org_levy_inputs = (
         _ca_org_levy_read_inputs(db, organization_id, run.pay_date, work_state) if country == "CA"
         else _load_uk_org_levy_ytd(db, organization_id, run.pay_date) if country == "UK"
+        else _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, work_state) if country == "AU"
         else {}
     )
     option2_inputs = (
@@ -18157,6 +18533,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     us_taxability_rules = (
         get_us_taxability_rules_bundle(db, organization_id, as_of=run.pay_date) if country == "US" else {}
     )
+    au_taxability_rules = (
+        get_au_taxability_rules_bundle(db, organization_id, as_of=run.pay_date) if country == "AU" else {}
+    )
+    au_statutory_deduction_orders = (
+        _load_au_active_court_orders(db, employee.id, organization_id, run.pay_date) if country == "AU" else []
+    )
     salary_tds_inputs = (
         get_india_salary_tds_inputs(db, organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
@@ -18171,6 +18553,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
         ca_taxability_rules=ca_taxability_rules,
         us_taxability_rules=us_taxability_rules,
+        au_taxability_rules=au_taxability_rules,
+        au_statutory_deduction_orders=au_statutory_deduction_orders,
         other_income_for_tds=salary_tds_inputs.get("other_income_for_tds", Decimal("0")),
         tds_already_deducted=salary_tds_inputs.get("tds_already_deducted", Decimal("0")),
         annual_claims_total=salary_tds_inputs.get("claims_total", Decimal("0")),
@@ -18307,6 +18691,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         employer_nl_hapset=calc.employer_nl_hapset,
         employer_qc_hsf=calc.employer_qc_hsf,
         employer_qc_labour_standards=calc.employer_qc_labour_standards,
+        employer_payroll_tax=calc.employer_payroll_tax,
+        au_statutory_deductions_total=calc.au_statutory_deductions_total,
         net_pay=calc.net_pay,
         unpaid_leave_days=calc.unpaid_leave_days,
         attendance_deduction=calc.attendance_deduction,
@@ -18333,7 +18719,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                 "social_security": {"ytd_before": str(ctx.ytd_ss_wages_before), "ytd_after": str(calc.ytd_ss_wages_after)},
                 "futa": {"ytd_before": str(ctx.ytd_futa_wages_before), "ytd_after": str(calc.ytd_futa_wages_after)},
                 "medicare_additional": {"ytd_before": str(ctx.ytd_medicare_wages_before), "ytd_after": str(calc.ytd_medicare_wages_after)},
-            } if calc.ytd_ss_wages_after is not None else None
+            } if calc.ytd_ss_wages_after is not None else
+            {
+                "sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(calc.ytd_sg_qualifying_earnings_after)},
+            } if calc.ytd_sg_qualifying_earnings_after is not None else None
         ),
         poe_snapshot=poe_snapshot,
     )
@@ -18347,6 +18736,21 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_ss_wages_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_us_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_sg_qualifying_earnings_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id/payslip_item_id
+        _upsert_au_sg_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+        # Payday Super (§10): manually-added payslip path — the "easy to
+        # miss" case _upsert_ca_ytd_accumulator's own comment above warns
+        # about applies identically here.
+        create_au_sg_liability(
+            db, organization_id, employee.id, run.pay_date,
+            qualifying_earnings=calc.sg_qualifying_earnings_period,
+            sg_rate_pct=calc.sg_rate_pct, sg_amount=calc.employer_pension,
+            ytd_qualifying_earnings_after=calc.ytd_sg_qualifying_earnings_after,
+            mcb_reached=calc.sg_mcb_reached, payslip_item_id=item.id,
+        )
+    if calc.au_statutory_deductions_detail:
+        _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, calc, payslip_id=item.id)
@@ -18361,10 +18765,23 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
            if calc.nl_hapset_ytd_remuneration_after is not None else {}),
         **({"qc_hsf": calc.qc_hsf_ytd_remuneration_after - ctx.qc_hsf_ytd_remuneration_before}
            if calc.qc_hsf_ytd_remuneration_after is not None else {}),
+        # Australia state/territory payroll tax — same "component name
+        # resolved from work_state" shape as _compute_payslip_values's
+        # own _org_levy_result construction above.
+        **(
+            {
+                _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE[(work_state or "").strip().upper()]:
+                    calc.au_state_payroll_tax_ytd_remuneration_after - ctx.au_state_payroll_tax_ytd_remuneration_before
+            }
+            if calc.au_state_payroll_tax_ytd_remuneration_after is not None else {}
+        ),
     }
     if org_levy_increments:
         db.flush()  # need item.id for last_updated_payslip_id
-        _upsert_ca_org_levy_ytd(db, organization_id, run.pay_date, org_levy_increments, payslip_id=item.id)
+        _upsert_ca_org_levy_ytd(
+            db, organization_id, run.pay_date, org_levy_increments, payslip_id=item.id,
+            tax_year=_au_ytd_tax_year(run.pay_date) if country == "AU" else None,
+        )
     if calc.appr_levy_ytd_pay_bill_after is not None or calc.employer_ni_ytd_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         uk_levy_increment = (

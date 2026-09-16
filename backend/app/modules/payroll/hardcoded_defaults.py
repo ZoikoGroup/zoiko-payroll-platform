@@ -368,12 +368,9 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="super", label="Superannuation Guarantee",
              employee_share="—", employer_share="11.5%", total="11.5%",
              employer_rate_pct=Decimal("11.50"), sort_order=1),
-        dict(component_key="medicare-levy", label="Medicare Levy",
-             employee_share="2.0%", employer_share="—", total="2.0%",
-             employee_rate_pct=Decimal("2.00"), sort_order=2),
         dict(component_key="income-tax", label="Income Tax (PAYG)",
-             employee_share="As per income slab", employer_share="—", total="As per slab",
-             sort_order=3),
+             employee_share="As per ATO Schedule 1", employer_share="—", total="See Tax Slabs",
+             sort_order=2),
         # componentKey max 20 chars (payroll_contribution_rates.component_key
         # is VARCHAR(20)) — the original 27/34-char keys always 500'd on
         # insert, meaning any AU org whose first-ever seed hit this path
@@ -381,24 +378,54 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         # this whole country, not just these two rows (_seed_contribution_rates
         # commits the batch once at the end). Also renamed in australia.py's
         # resolve_jurisdiction_parameter() calls and fallback_registry.py.
+        #
+        # ZP-TAX-AU-2026-27-001 build (2026-09-16): the old "medicare-levy"
+        # (flat 2.0% employee rate), "medicare_low_inc_thr", "help_threshold"
+        # and "help_rate" rows are REMOVED, not merely unused — Medicare
+        # Levy proper is now embedded in the Schedule 1 Scale coefficient
+        # bands and HELP/HECS now runs on the real Schedule 8 coefficient
+        # mechanism (engine/countries/australia.py); neither old flat
+        # approximation is read by the engine any more, so seeding them
+        # into a new org's own rates would be actively misleading, not
+        # just dead weight. super_max_contrib corrected to the real
+        # 2026-27 figure ($270,830, §10) — the old $260,280 predates this
+        # document and was simply wrong for this income year.
         dict(component_key="super_max_contrib", label="Superannuation Max Contribution Base",
-             employee_share="—", employer_share="—", total="A$260,280",
-             flat_amount=Decimal("260280.00"), sort_order=4),
-        dict(component_key="medicare_low_inc_thr", label="Medicare Levy Low-Income Threshold",
-             employee_share="—", employer_share="—", total="A$24,276",
-             flat_amount=Decimal("24276.00"), sort_order=5),
+             employee_share="—", employer_share="—", total="A$270,830",
+             flat_amount=Decimal("270830.00"), sort_order=3),
         dict(component_key="mls_threshold", label="Medicare Levy Surcharge Threshold",
              employee_share="—", employer_share="—", total="A$97,000",
-             flat_amount=Decimal("97000.00"), sort_order=6),
+             flat_amount=Decimal("97000.00"), sort_order=4),
         dict(component_key="mls_rate", label="Medicare Levy Surcharge Rate",
              employee_share="1.0%", employer_share="—", total="1.0%",
-             employee_rate_pct=Decimal("1.00"), sort_order=7),
-        dict(component_key="help_threshold", label="HELP/HECS Repayment Threshold",
-             employee_share="—", employer_share="—", total="A$54,435",
-             flat_amount=Decimal("54435.00"), sort_order=8),
-        dict(component_key="help_rate", label="HELP/HECS Repayment Rate",
-             employee_share="4.5%", employer_share="—", total="4.5%",
-             employee_rate_pct=Decimal("4.50"), sort_order=9),
+             employee_rate_pct=Decimal("1.00"), sort_order=5),
+        # Special Payments (Phase 3, §13) — real, document-given caps/
+        # formula parameters, not fabricated. The ETP/lump-sum/income-
+        # stream WITHHOLDING rate itself is not given anywhere in the
+        # source document, so these are classification/reference inputs
+        # only — see engine/countries/australia.py's own module docstring
+        # for exactly what is and isn't computed from them.
+        dict(component_key="etp_life_cap", label="ETP Life Benefit Cap",
+             employee_share="—", employer_share="—", total="A$270,000",
+             flat_amount=Decimal("270000.00"), sort_order=6),
+        dict(component_key="etp_death_cap", label="ETP Death Benefit Cap",
+             employee_share="—", employer_share="—", total="A$270,000",
+             flat_amount=Decimal("270000.00"), sort_order=7),
+        dict(component_key="redundancy_base", label="Genuine Redundancy Tax-Free Base",
+             employee_share="—", employer_share="—", total="A$13,598",
+             flat_amount=Decimal("13598.00"), sort_order=8),
+        dict(component_key="redundancy_per_yr", label="Genuine Redundancy Tax-Free Per Year",
+             employee_share="—", employer_share="—", total="A$6,801",
+             flat_amount=Decimal("6801.00"), sort_order=9),
+        dict(component_key="untaxed_plan_cap", label="Untaxed Plan Cap",
+             employee_share="—", employer_share="—", total="A$1,935,000",
+             flat_amount=Decimal("1935000.00"), sort_order=10),
+        dict(component_key="transfer_balance_cap", label="General Transfer Balance Cap",
+             employee_share="—", employer_share="—", total="A$2,100,000",
+             flat_amount=Decimal("2100000.00"), sort_order=11),
+        dict(component_key="db_income_cap", label="Defined Benefit Income Cap",
+             employee_share="—", employer_share="—", total="A$131,250",
+             flat_amount=Decimal("131250.00"), sort_order=12),
     ],
     "DE": [
         dict(component_key="pension", label="Pension Insurance (Rentenversicherung)",
@@ -1035,21 +1062,91 @@ _UK_NI_SECONDARY_THRESHOLD_BY_FREQUENCY = {"Weekly": Decimal("96"), "Monthly": D
 # simplification: the real UK State Pension age is a phased schedule that
 # varies by birth cohort (and historically by gender), not one flat
 # number — this engine uses a single configurable age rather than
-# modeling that full schedule, same class of disclosed simplification as
-# Australia's HELP/HECS single-band approximation elsewhere in this file.
+# modeling that full schedule.
 _UK_STATE_PENSION_AGE = Decimal("66")
 
 # ── Australia (previously engine/countries/australia.py) ────────────────
-_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = Decimal("24276")
+# ZP-TAX-AU-2026-27-001 build: Medicare Levy PROPER is embedded directly
+# in the Schedule 1 Scale 1/2/5/6 coefficient bands themselves (that's
+# what distinguishes Scale 5/6 "Medicare-exempt" from Scale 1/2 "standard"
+# — see engine/countries/australia.py's _calculate_au_payg_schedule1) —
+# the old flat-threshold "_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD" approach
+# this constant backed is superseded, not merely unused, so it is removed
+# rather than left as a stale, demonstrably-wrong fallback. MLS (Medicare
+# Levy SURCHARGE) is a genuinely separate, still-flat-threshold annual
+# calculation and keeps its own constants below.
 _AU_MLS_THRESHOLD = Decimal("97000")
 _AU_MLS_RATE = Decimal("1.0")
-_AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("260280")
-# HELP/HECS is a real multi-band repayment schedule (0% up to ~10% as
-# income rises); simplified here to its lowest real band as a single
-# threshold+rate — a genuine multi-band HELP schedule is a larger
-# follow-on, not this pass's scope.
-_AU_HELP_THRESHOLD = Decimal("54435")
-_AU_HELP_RATE = Decimal("4.5")
+# Corrected to the real ZP-TAX-AU-2026-27-001 §10 2026-27 figure
+# ($270,830) — the original pre-document stub's $260,280 was simply
+# wrong for this income year, not a deliberate simplification like the
+# HELP/HECS one below. A code-constant fix, not a live-data-entry action
+# (that stays gated to Phase 8's real Super Admin configuration).
+_AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("270830")
+# HELP/HECS's old flat single-threshold-and-rate approximation
+# (_AU_HELP_THRESHOLD/_AU_HELP_RATE) is REMOVED, not merely unused —
+# superseded by the real ATO Schedule 8 (NAT 3539) coefficient-band
+# mechanism (engine/countries/australia.py's _calculate_au_stsl_schedule8),
+# which has no single scalar fallback the way a threshold/rate pair does
+# (there is no sensible flat-rate substitute for a whole coefficient
+# table, same reasoning as Medicare Levy proper above).
+# ATO Schedule 1 Scale 4 (no TFN provided) — the ONE genuinely flat,
+# non-bracketed PAYG rate in the whole schedule (§6's own table gives it
+# as a fixed rate + cents-treatment rule, not a coefficient band), so it
+# keeps a simple resolve_jurisdiction_parameter fallback like MLS/Super/
+# HELP above rather than needing a TaxSlab coefficient-band row.
+_AU_PAYG_SCALE4_RESIDENT_RATE = Decimal("47.0")
+_AU_PAYG_SCALE4_NONRESIDENT_RATE = Decimal("45.0")
+
+# Special Payments (ZP-TAX-AU-2026-27-001 §13, Phase 3, 2026-09-16) —
+# real, document-given caps and the genuine-redundancy tax-free formula
+# parameters. The ETP/lump-sum/income-stream WITHHOLDING rate itself is
+# NOT given anywhere in the source document, so these back only the
+# classification/reference calculators in engine/countries/australia.py
+# (calculate_au_etp_cap_classification, calculate_au_genuine_redundancy_
+# tax_free_component) — never a fabricated withholding-tax rate.
+_AU_ETP_LIFE_CAP = Decimal("270000")
+_AU_ETP_DEATH_CAP = Decimal("270000")
+_AU_GENUINE_REDUNDANCY_BASE = Decimal("13598")
+_AU_GENUINE_REDUNDANCY_PER_YEAR = Decimal("6801")
+_AU_UNTAXED_PLAN_CAP = Decimal("1935000")
+_AU_TRANSFER_BALANCE_CAP = Decimal("2100000")
+_AU_DEFINED_BENEFIT_INCOME_CAP = Decimal("131250")
+
+# State/territory employer payroll tax (ZP-TAX-AU-2026-27-001 §15/§17,
+# Phase 4, 2026-09-16) — real, document-given thresholds/rates for the
+# four states whose formula is a "deduction that varies with total
+# wages" shape (WA/QLD/VIC/NT), so a scalar resolve_jurisdiction_parameter
+# fallback is meaningful the same way it already is for e.g. Canada's
+# BPAF taper. NSW/TAS/ACT are modeled as ordinary MARGINAL_RATE TaxSlab
+# bracket rows instead (their formulas ARE plain bracket tables once
+# expressed as ranges) and deliberately have NO Python-constant fallback
+# here — same "genuinely statutory data, no hardcoded fallback" precedent
+# already established for Canada's ON_EHT_BAND rows (see canada.py's
+# _on_eht_rate_for_total). SA's $1.5m-$1.7m reduced-rate band has no
+# fallback of any kind — the source document explicitly forbids inferring/
+# approximating it at runtime (§17: "Load RevenueSA's reduced-rate asset
+# ... do not infer/approximate a rate at runtime").
+_AU_WA_PT_THRESHOLD = Decimal("1000000")
+_AU_WA_PT_UPPER_THRESHOLD = Decimal("7500000")
+_AU_WA_PT_RATE = Decimal("5.5")
+_AU_QLD_PT_THRESHOLD = Decimal("1300000")
+_AU_QLD_PT_UPPER_THRESHOLD = Decimal("10400000")
+_AU_QLD_PT_RATE_LOW = Decimal("4.75")
+_AU_QLD_PT_RATE_HIGH = Decimal("4.95")
+_AU_QLD_PT_RATE_SWITCH = Decimal("6500000")
+_AU_VIC_PT_PHASE_START = Decimal("3000000")
+_AU_VIC_PT_PHASE_END = Decimal("5000000")
+_AU_VIC_PT_BASE_DEDUCTION = Decimal("1000000")
+_AU_VIC_PT_RATE = Decimal("4.85")
+_AU_VIC_PT_REGIONAL_RATE = Decimal("1.2125")
+_AU_NT_PT_THRESHOLD = Decimal("2500000")
+_AU_NT_PT_RATE = Decimal("5.5")
+_AU_NT_PT_RATE_HIGH = Decimal("6.5")
+_AU_NT_PT_RATE_SWITCH = Decimal("100000000")
+_AU_SA_PT_LOWER_THRESHOLD = Decimal("1500000")
+_AU_SA_PT_UPPER_THRESHOLD = Decimal("1700000")
+_AU_SA_PT_RATE = Decimal("4.95")
 
 # ── Germany (previously engine/countries/germany.py) ────────────────────
 # _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, and _DE_CHURCH_TAX_RATE

@@ -107,6 +107,7 @@ from app.modules.payroll.schemas import (
     UKNmwComplianceRequest, UKNmwComplianceResponse,
     UKCourtOrderCreate, UKCourtOrderStatusUpdate, UKCourtOrderResponse,
     UKCourtOrderCalculateRequest, UKCourtOrderCalculateResponse,
+    AUCourtOrderCalculateRequest,
     GratuityCalculateRequest, GratuityCalculateResponse,
     IndiaForm138GenerateRequest, IndiaForm123GenerateRequest, USW2GenerateRequest,
     USForm941GenerateRequest, USForm940GenerateRequest,
@@ -1242,6 +1243,80 @@ def calculate_uk_court_ordered_deductions(
     return service.calculate_uk_court_ordered_deductions(
         db, current_user.organization_id, data.employee_id,
         data.attachable_earnings, data.pay_frequency, data.as_of,
+    )
+
+
+# Australia child support/garnishee (§19, Phase 5) — reuses UK's own
+# Create/Response/StatusUpdate schemas and the generic
+# create_court_ordered_deduction/list_court_ordered_deductions/
+# set_court_ordered_deduction_status service functions directly (they
+# were never UK-only); only the route prefix and the calculate wrapper
+# are AU-specific, same per-country route-namespacing convention every
+# other jurisdiction in this router already uses.
+
+@payroll_router.post(
+    "/au/employees/{employee_id}/court-orders", response_model=UKCourtOrderResponse, response_model_by_alias=True,
+    summary="Record an Australia statutory deduction order (child support/garnishee) for an employee",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_au_court_ordered_deduction(
+    employee_id: int,
+    data: UKCourtOrderCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_court_ordered_deduction(
+        db, current_user.organization_id, employee_id,
+        "AUSTRALIA", data.order_type, data.start_date,
+        court_reference=data.court_reference, issue_date=data.issue_date, end_date=data.end_date,
+        priority=data.priority,
+        fixed_deduction_rate_pct=data.fixed_deduction_rate_pct, fixed_deduction_amount=data.fixed_deduction_amount,
+        protected_earnings_amount=data.protected_earnings_amount, total_amount_to_collect=data.total_amount_to_collect,
+        created_by_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/au/employees/{employee_id}/court-orders", response_model=list[UKCourtOrderResponse], response_model_by_alias=True,
+    summary="List an employee's Australia statutory deduction orders",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_au_court_ordered_deductions(
+    employee_id: int,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_court_ordered_deductions(db, current_user.organization_id, employee_id, status)
+
+
+@payroll_router.put(
+    "/au/employees/{employee_id}/court-orders/{order_id}/status", response_model=UKCourtOrderResponse, response_model_by_alias=True,
+    summary="Cancel/complete an Australia statutory deduction order (no hard delete — a legal instrument stays in the record)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def set_au_court_ordered_deduction_status(
+    employee_id: int,
+    order_id: int,
+    data: UKCourtOrderStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.set_court_ordered_deduction_status(db, current_user.organization_id, employee_id, order_id, data.status)
+
+
+@payroll_router.post(
+    "/au/court-orders/calculate", response_model=UKCourtOrderCalculateResponse, response_model_by_alias=True,
+    summary="Preview this period's Australia statutory deductions for an employee (does not write to total_amount_collected)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_au_court_ordered_deductions(
+    data: AUCourtOrderCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_au_court_ordered_deductions(
+        db, current_user.organization_id, data.employee_id, data.attachable_earnings, data.as_of,
     )
 
 

@@ -22,6 +22,12 @@ from app.modules.payroll.engine.countries import us as _us
 from app.modules.payroll.engine.countries.canada import _resolve_ca_bpaf
 from app.modules.payroll.engine.countries.india import calculate_gratuity
 from app.modules.payroll.engine.countries.uk import calculate_ssp, calculate_class_1a_1b_charge, calculate_apprenticeship_levy_period_amount, calculate_employment_allowance_net_liability, calculate_statutory_family_pay, calculate_family_pay_employer_recovery
+from app.modules.payroll.engine.countries.australia import (
+    AuScheduleNotYetImplementedError, resolve_au_special_payment_schedule,
+    calculate_au_special_payment_withholding, calculate_au_etp_cap_classification,
+    calculate_au_genuine_redundancy_tax_free_component,
+    calculate_au_statutory_deduction, calculate_au_statutory_deductions,
+)
 import app.modules.payroll.engine.countries.shared as shared
 
 
@@ -107,7 +113,11 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          ytd_ss_wages_before=None, ytd_futa_wages_before=None, ytd_medicare_wages_before=None,
          w4_allowances_claimed=None, is_nonresident_alien=False, w4_dependents_credit_annual=None,
          w4_other_income_annual=None, w4_extra_withholding_per_period=None, residence_locality_rate=None,
-         ks_k4_dependents=None):
+         ks_k4_dependents=None, au_tfn_status=None, au_residency_status=None,
+         au_tax_free_threshold_claimed=None, au_medicare_levy_exemption=None,
+         au_withholding_variation_pct=None, study_loan_plan=None, study_loan_balance=None,
+         ytd_sg_qualifying_earnings_before=None, au_taxability_rules=None,
+         au_state_payroll_tax_ytd_remuneration_before=None, au_payroll_tax_regional_status=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -155,6 +165,15 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         w4_extra_withholding_per_period=w4_extra_withholding_per_period,
         residence_locality_rate=residence_locality_rate,
         ks_k4_dependents=ks_k4_dependents,
+        au_tfn_status=au_tfn_status, au_residency_status=au_residency_status,
+        au_tax_free_threshold_claimed=au_tax_free_threshold_claimed,
+        au_medicare_levy_exemption=au_medicare_levy_exemption,
+        au_withholding_variation_pct=au_withholding_variation_pct,
+        study_loan_plan=study_loan_plan, study_loan_balance=study_loan_balance,
+        ytd_sg_qualifying_earnings_before=ytd_sg_qualifying_earnings_before,
+        au_taxability_rules=au_taxability_rules or {},
+        au_state_payroll_tax_ytd_remuneration_before=au_state_payroll_tax_ytd_remuneration_before,
+        au_payroll_tax_regional_status=au_payroll_tax_regional_status,
     )
     return STRATEGY.calculate(ctx)
 
@@ -2999,15 +3018,16 @@ def test_employment_allowance_fails_closed_when_cap_unconfigured():
 
 # ── Australia / Germany / Canada ─────────────────────────────────────────
 
-def test_australia_super_and_medicare_levy():
-    rates = {
-        "super": Rate("super", employer_rate_pct=Decimal("11.50")),
-        "medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00")),
-    }
-    slabs = [Slab(Decimal("0"), Decimal("18200"), Decimal("0")), Slab(Decimal("18200"), None, Decimal("16"))]
-    result = calc("AU", 5000, rates, slabs)
+def test_australia_super_guarantee_calculates():
+    # Medicare Levy proper is embedded in the Schedule 1 Scale
+    # coefficient bands (see engine/countries/australia.py's own module
+    # docstring) — with none configured here, tds correctly comes back 0
+    # (no guessed fallback), so this test only exercises Superannuation
+    # Guarantee, which has its own independent scalar rate.
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 5000, rates, [])
     assert result.employer_pension > 0
-    assert result.medicare > 0
+    assert result.tds == 0
 
 
 def test_germany_pension_and_social_insurance():
@@ -3033,9 +3053,8 @@ def test_canada_cpp_and_ei():
 
 
 # ── Australia / Germany / Canada named scalar parameters ────────────────
-# Fallback-default thresholds (no override rows): AU medicare_low_inc_thr
-# =24276, mls_threshold=97000/mls_rate=1.0%,
-# super_max_contrib=260280; DE contribution_ceiling=96600;
+# Fallback-default thresholds (no override rows): AU mls_threshold=97000/
+# mls_rate=1.0%, super_max_contrib=260280; DE contribution_ceiling=96600;
 # CA cpp_ympe=74600/cpp_basic_exemption=3500/ei_mie=68900 (2026 values,
 # ZP-TAX-CA-2026-001). Flat 10% slab used throughout so income-tax math
 # never obscures the contribution assertions being tested.
@@ -3043,31 +3062,484 @@ def test_canada_cpp_and_ei():
 _FLAT_10_SLAB = [Slab(Decimal("0"), None, Decimal("10"))]
 
 
-def test_australia_medicare_levy_exempt_below_low_income_threshold():
-    rates = {"medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00"))}
-    result = calc("AU", 1500, rates, _FLAT_10_SLAB)  # annual 18,000 < 24,276 threshold
+def test_australia_mls_below_threshold_is_zero():
+    # `medicare` is Medicare Levy SURCHARGE only for Australia — Medicare
+    # Levy proper lives in the Schedule 1 Scale coefficient result (see
+    # the dedicated Schedule 1 tests below), not this field.
+    result = calc("AU", 5000, {}, _FLAT_10_SLAB)  # annual 60,000 < 97,000 MLS threshold
     assert result.medicare == 0
 
 
-def test_australia_medicare_levy_applies_above_low_income_threshold():
-    rates = {"medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00"))}
-    result = calc("AU", 2100, rates, _FLAT_10_SLAB)  # annual 25,200 > 24,276 threshold
-    assert result.medicare == Decimal("42.00")  # 2100 * 2%
+def test_australia_mls_above_threshold():
+    result = calc("AU", 10000, {}, _FLAT_10_SLAB)  # annual 120,000 > 97,000 MLS threshold
+    assert result.medicare == Decimal("100.00")  # 1.0% of annual/12
 
 
-def test_australia_medicare_levy_surcharge_above_mls_threshold():
-    rates = {"medicare-levy": Rate("medicare-levy", employee_rate_pct=Decimal("2.00"))}
-    result = calc("AU", 10000, rates, _FLAT_10_SLAB)  # annual 120,000 > 97,000 MLS threshold
-    # base levy 10000*2% = 200.00, + MLS 1% of annual/12 = 100.00
-    assert result.medicare == Decimal("300.00")
+# ── Australia: ATO Schedule 1 (NAT 1004) PAYG coefficient-band engine ────
+# Real coefficients from ZP-TAX-AU-2026-27-001 §6, trimmed to the bands
+# these tests actually exercise. Band boundaries are read as [min, max)
+# per engine/countries/australia.py's _resolve_au_coefficient_band.
+
+_AU_PAYG_SCALE1_SLABS = [
+    Slab(Decimal("0"), Decimal("188"), Decimal("0.15"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_1", flat_amount=Decimal("0.15")),
+    Slab(Decimal("188"), Decimal("371"), Decimal("0.2084"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_1", flat_amount=Decimal("11.0185")),
+    Slab(Decimal("371"), Decimal("515"), Decimal("0.179"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_1", flat_amount=Decimal("0.1066")),
+    Slab(Decimal("515"), Decimal("932"), Decimal("0.3227"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_1", flat_amount=Decimal("74.1674")),
+    Slab(Decimal("932"), None, Decimal("0.32"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_1", flat_amount=Decimal("71.6508")),
+]
+_AU_PAYG_SCALE2_SLABS = [
+    Slab(Decimal("0"), Decimal("362"), Decimal("0"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_2", flat_amount=Decimal("0")),
+    Slab(Decimal("362"), Decimal("538"), Decimal("0.15"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_2", flat_amount=Decimal("54.3462")),
+    Slab(Decimal("538"), Decimal("673"), Decimal("0.25"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_2", flat_amount=Decimal("108.2135")),
+    Slab(Decimal("673"), None, Decimal("0.17"), rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_2", flat_amount=Decimal("54.3473")),
+]
+
+
+def test_australia_payg_schedule1_scale1_weekly():
+    # $500 weekly, threshold NOT claimed -> Scale 1. x = floor(500)+0.99 =
+    # 500.99, band [371,515): y = 0.179*500.99 - 0.1066 = 89.5704 -> $90.
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+    )
+    assert result.tds == Decimal("90")
+
+
+def test_australia_payg_schedule1_scale2_monthly():
+    # $2600/month, threshold claimed -> Scale 2. x = floor(2600*3/13)+0.99
+    # = 600.99, band [538,673): y = 0.25*600.99 - 108.2135 = 42.034 -> $42
+    # weekly, converted back to Monthly (*13/3) = $182.
+    result = calc(
+        "AU", 2600, {}, _AU_PAYG_SCALE2_SLABS,
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+    )
+    assert result.tds == Decimal("182")
+
+
+def test_australia_payg_schedule1_unset_threshold_claim_defaults_to_scale1():
+    # au_tax_free_threshold_claimed unset (None) resolves through Scale 1
+    # (the conservative default), not a guessed Scale 2 — same inputs as
+    # the Scale 1 test above, without explicitly setting the flag.
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT",
+    )
+    assert result.tds == Decimal("90")
+
+
+def test_australia_payg_schedule1_scale4_no_tfn():
+    # No TFN on file -> Scale 4 flat rate on actual earnings, no
+    # coefficient band at all. Resident default fallback rate is 47%.
+    result = calc("AU", 1000, {}, [], pay_frequency="Weekly", au_tfn_status="NOT_PROVIDED", au_residency_status="RESIDENT")
+    assert result.tds == Decimal("470")
+
+
+def test_australia_payg_unconfigured_scale_returns_zero_not_a_guess():
+    result = calc(
+        "AU", 500, {}, [], pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+    )
+    assert result.tds == 0
+
+
+def test_australia_payg_working_holiday_maker_raises_not_yet_implemented():
+    # §9: WHM must route to its own dedicated schedule, never an ordinary
+    # resident/foreign-resident Scale — Phase 3, not yet built. Must fail
+    # loudly, never silently compute an incorrect ordinary-scale amount.
+    with pytest.raises(AuScheduleNotYetImplementedError):
+        calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER")
+
+
+# ── Australia: ATO Schedule 8 (NAT 3539) STSL coefficient-band engine ────
+
+_AU_STSL_CLAIMED_SLABS = [
+    Slab(Decimal("0"), Decimal("1337"), Decimal("0"), rule_type="AU_STSL_COEFFICIENT", filing_status="STSL_CLAIMED_OR_FOREIGN", flat_amount=Decimal("0")),
+    Slab(Decimal("1337"), Decimal("2494"), Decimal("0.15"), rule_type="AU_STSL_COEFFICIENT", filing_status="STSL_CLAIMED_OR_FOREIGN", flat_amount=Decimal("200.5615")),
+]
+
+
+def test_australia_stsl_schedule8_claimed_threshold():
+    # $6000/month HELP debt holder. x = floor(6000*3/13)+0.99 = 1384.99,
+    # band [1337,2494): y = 0.15*1384.99 - 200.5615 = 7.187 -> $7 weekly,
+    # converted back to Monthly (*13/3) = 30.33 -> $30.
+    result = calc(
+        "AU", 6000, {}, _AU_STSL_CLAIMED_SLABS,
+        au_tax_free_threshold_claimed=True, au_residency_status="RESIDENT",
+        study_loan_plan="AU_HELP", study_loan_balance=Decimal("5000"),
+    )
+    assert result.study_loan_deduction == Decimal("30")
+
+
+def test_australia_stsl_schedule8_no_outstanding_loan_is_zero():
+    result = calc("AU", 6000, {}, _AU_STSL_CLAIMED_SLABS, au_tax_free_threshold_claimed=True)
+    assert result.study_loan_deduction == Decimal("0")
+
+
+# ── Australia: Payday Super — YTD-based Maximum Contribution Base (§10) ──
+
+def test_australia_sg_uses_real_ytd_when_wired():
+    # Fallback MCB (unconfigured): 260280. Well under cap -> SG computed
+    # directly on this period's qualifying earnings, no annualize/divide.
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 10000, rates, [], ytd_sg_qualifying_earnings_before=Decimal("50000"))
+    assert result.employer_pension == Decimal("1150.00")
+    assert result.ytd_sg_qualifying_earnings_after == Decimal("60000")
+
+
+def test_australia_sg_capped_at_mcb_room_when_ytd_wired():
+    # room = 270830 - 269000 = 1830; SG = 1830 * 11.5% = 210.45, not the
+    # uncapped 10000 * 11.5% = 1150.00 — the MCB genuinely bites.
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 10000, rates, [], ytd_sg_qualifying_earnings_before=Decimal("269000"))
+    assert result.employer_pension == Decimal("210.45")
+    assert result.ytd_sg_qualifying_earnings_after == Decimal("279000")
+
+
+def test_australia_sg_ytd_after_is_none_when_dormant():
+    # No ytd_sg_qualifying_earnings_before wired -> dormant fallback path,
+    # same pre-Phase-2 annualized-estimate behavior, and no YTD figure
+    # reported (never a guessed 0).
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 10000, rates, [])
+    assert result.ytd_sg_qualifying_earnings_after is None
+    assert result.employer_pension > 0
+
+
+# ── Australia: §11 PAYG/SG qualifying-earnings taxability matrix ────────
+
+def test_australia_sg_taxability_matrix_excludes_marked_component():
+    # basic == gross by default in this test helper (hra/special/overtime/
+    # additional_compensation all 0), so excluding "basic" from SG/QE
+    # zeroes the whole qualifying wage base.
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 5000, rates, [], au_taxability_rules={"sg_qualifying_earnings": {"basic": False}})
+    assert result.employer_pension == Decimal("0")
+
+
+def test_australia_sg_taxability_matrix_default_includes_everything():
+    rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
+    result = calc("AU", 5000, rates, [], au_taxability_rules={"sg_qualifying_earnings": {}})
+    assert result.employer_pension > 0
+
+
+# ── Australia: Special PAYG Schedules routing + real §13 caps (Phase 3) ──
+
+def _au_ctx(rate_map=None):
+    return PayrollContext(gross=Decimal("0"), basic=Decimal("0"), country="AU", rate_map=rate_map or {})
+
+
+def test_au_special_payment_routing_matches_section9_table():
+    assert resolve_au_special_payment_schedule("UNUSED_LEAVE") == "SCHEDULE_2"
+    assert resolve_au_special_payment_schedule("ENTERTAINER") == "SCHEDULE_3"
+    assert resolve_au_special_payment_schedule("RETURN_TO_WORK") == "SCHEDULE_4"
+    assert resolve_au_special_payment_schedule("BACK_PAYMENT") == "SCHEDULE_5"
+    assert resolve_au_special_payment_schedule("COMMISSION") == "SCHEDULE_5"
+    assert resolve_au_special_payment_schedule("BONUS") == "SCHEDULE_5"
+    assert resolve_au_special_payment_schedule("NON_RESIDENT_SPECIAL_CASE") == "SCHEDULE_6"
+    assert resolve_au_special_payment_schedule("ETP") == "SCHEDULE_11"
+    assert resolve_au_special_payment_schedule("SUPER_LUMP_SUM") == "SCHEDULE_12"
+    assert resolve_au_special_payment_schedule("SUPER_INCOME_STREAM") == "SCHEDULE_13"
+
+
+def test_au_special_payment_routing_rejects_unknown_type():
+    with pytest.raises(ValueError):
+        resolve_au_special_payment_schedule("NOT_A_REAL_TYPE")
+
+
+def test_au_special_payment_withholding_never_guesses_an_amount():
+    # No schedule has a real rate table in the source document yet — every
+    # one must fail loudly, never silently fall back to ordinary Scale 1/2.
+    for payment_type in ["UNUSED_LEAVE", "BONUS", "ETP", "SUPER_LUMP_SUM"]:
+        with pytest.raises(AuScheduleNotYetImplementedError):
+            calculate_au_special_payment_withholding(payment_type, Decimal("5000"))
+
+
+def test_au_etp_cap_classification_within_life_cap():
+    result = calculate_au_etp_cap_classification(_au_ctx(), Decimal("200000"), is_death_benefit=False)
+    assert result == {
+        "cap_type": "LIFE_BENEFIT", "cap_applied": Decimal("270000"),
+        "amount_within_cap": Decimal("200000"), "amount_above_cap": Decimal("0"),
+    }
+
+
+def test_au_etp_cap_classification_above_life_cap():
+    result = calculate_au_etp_cap_classification(_au_ctx(), Decimal("300000"), is_death_benefit=False)
+    assert result["amount_within_cap"] == Decimal("270000")
+    assert result["amount_above_cap"] == Decimal("30000")
+
+
+def test_au_etp_cap_classification_uses_death_cap_when_flagged():
+    rates = {"etp_death_cap": Rate("etp_death_cap", flat_amount=Decimal("270000"))}
+    result = calculate_au_etp_cap_classification(_au_ctx(rates), Decimal("500000"), is_death_benefit=True)
+    assert result["cap_type"] == "DEATH_BENEFIT"
+    assert result["amount_above_cap"] == Decimal("230000")
+
+
+def test_au_genuine_redundancy_tax_free_component_formula():
+    # $13,598 + $6,801 * 5 complete years = $47,603.00
+    result = calculate_au_genuine_redundancy_tax_free_component(_au_ctx(), 5)
+    assert result == Decimal("47603.00")
+
+
+def test_au_genuine_redundancy_zero_years_is_just_the_base():
+    assert calculate_au_genuine_redundancy_tax_free_component(_au_ctx(), 0) == Decimal("13598.00")
+
+
+def test_au_genuine_redundancy_rejects_negative_years():
+    with pytest.raises(ValueError):
+        calculate_au_genuine_redundancy_tax_free_component(_au_ctx(), -1)
+
+
+# ── Australia: child support / garnishee (§19, Phase 5) ──────────────────
+
+def test_au_statutory_deduction_fixed_amount_respects_protected_earnings():
+    result = calculate_au_statutory_deduction(
+        Decimal("1000"), "CHILD_SUPPORT_DEDUCTION_NOTICE",
+        fixed_deduction_rate_pct=None, fixed_deduction_amount=Decimal("400"),
+        protected_earnings_amount=Decimal("700"),
+    )
+    # headroom = 1000 - 700 = 300, capped below the order's own $400
+    assert result == {"eligible": True, "reason": "", "deduction_amount": Decimal("300")}
+
+
+def test_au_statutory_deduction_fixed_rate():
+    result = calculate_au_statutory_deduction(
+        Decimal("1000"), "CHILD_SUPPORT_DEDUCTION_NOTICE",
+        fixed_deduction_rate_pct=Decimal("10"), fixed_deduction_amount=None,
+        protected_earnings_amount=None,
+    )
+    assert result == {"eligible": True, "reason": "", "deduction_amount": Decimal("100.00")}
+
+
+def test_au_statutory_deduction_section_72a_ignores_protected_earnings():
+    # §19: "Allow order types where protected earnings does not apply."
+    with_notice = calculate_au_statutory_deduction(
+        Decimal("1000"), "SECTION_72A_NOTICE",
+        fixed_deduction_rate_pct=None, fixed_deduction_amount=Decimal("900"),
+        protected_earnings_amount=Decimal("700"),
+    )
+    assert with_notice["deduction_amount"] == Decimal("900")  # not capped to 300
+
+
+def test_au_statutory_deduction_ineligible_without_any_rate_or_amount():
+    result = calculate_au_statutory_deduction(
+        Decimal("1000"), "CHILD_SUPPORT_DEDUCTION_NOTICE",
+        fixed_deduction_rate_pct=None, fixed_deduction_amount=None, protected_earnings_amount=None,
+    )
+    assert result["eligible"] is False
+    assert result["deduction_amount"] == Decimal("0")
+
+
+def test_au_statutory_deductions_priority_ordering():
+    # Order 1 (priority 1) takes $400 first; order 2 (priority 2) then
+    # only has $600 of headroom left, not the full $1000.
+    orders = [
+        {"id": 1, "order_type": "CHILD_SUPPORT_DEDUCTION_NOTICE", "fixed_deduction_amount": Decimal("400")},
+        {"id": 2, "order_type": "CHILD_SUPPORT_DEDUCTION_NOTICE", "fixed_deduction_amount": Decimal("800")},
+    ]
+    result = calculate_au_statutory_deductions(orders, Decimal("1000"))
+    assert result["total_deduction"] == Decimal("1000.00")  # 400 + min(800, 600)
+    assert result["orders"][0]["deduction_amount"] == Decimal("400")
+    assert result["orders"][1]["deduction_amount"] == Decimal("600")
+
+
+def test_australia_statutory_deductions_reduce_net_pay():
+    # Wired into calculate()'s real per-payslip flow — unlike UK's own
+    # court orders (deliberately left standalone), an AU order with its
+    # own fixed amount is a genuine, automatic per-payslip deduction.
+    orders = [{"id": 1, "order_type": "CHILD_SUPPORT_DEDUCTION_NOTICE", "fixed_deduction_amount": Decimal("500")}]
+    ctx = PayrollContext(
+        gross=Decimal("5000"), basic=Decimal("5000"), country="AU", rate_map={}, slabs=[],
+        au_statutory_deduction_orders=orders,
+    )
+    result = STRATEGY.calculate(ctx)
+    assert result.au_statutory_deductions_total == Decimal("500.00")
+    assert result.net_pay == Decimal("5000.00") - Decimal("500.00")
+
+
+def test_australia_statutory_deductions_zero_without_orders():
+    result = calc("AU", 5000, {}, [])
+    assert result.au_statutory_deductions_total == Decimal("0")
+    assert result.au_statutory_deductions_detail == []
+
+
+# ── Australia: state/territory employer payroll tax (§14-18, Phase 4) ───
+# All amounts below are ANNUAL wage totals fed in as a single "period" with
+# ytd_before=0, so telescoping reduces to annual_fn(gross) exactly (since
+# every formula is 0 at cumulative wages of 0) — isolating the annual
+# formula itself from the incremental/telescoping mechanism, which gets
+# its own dedicated test at the end of this section. `employer_payroll_tax`
+# is an EMPLOYER-liability field, confirmed never folded into net pay.
+
+def test_au_state_payroll_tax_zero_when_ytd_not_wired():
+    result = calc("AU", 2000000, {}, [], work_state="NSW")
+    assert result.employer_payroll_tax == Decimal("0")
+    assert result.au_state_payroll_tax_ytd_remuneration_after is None
+
+
+def test_au_state_payroll_tax_zero_for_unsupported_state():
+    result = calc("AU", 2000000, {}, [], work_state="ZZ", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("0")
+
+
+_AU_NSW_PAYROLL_TAX_SLABS = [
+    Slab(Decimal("0"), Decimal("1200000"), Decimal("0")),
+    Slab(Decimal("1200000"), None, Decimal("5.45")),
+]
+
+
+def test_au_state_payroll_tax_does_not_reduce_net_pay():
+    # AU-D05: an employer-liability plane only — net pay must reflect
+    # ordinary PAYG/SG/STSL/MLS alone, regardless of how large the
+    # employer's own payroll-tax liability is.
+    with_tax = calc(
+        "AU", 2000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+    )
+    without_tax = calc("AU", 2000000, {}, [], work_state="NSW")
+    assert with_tax.employer_payroll_tax > 0
+    assert with_tax.net_pay == without_tax.net_pay
+
+
+def test_au_nsw_payroll_tax_flat_rate_above_threshold():
+    result = calc(
+        "AU", 2000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+    )
+    assert result.employer_payroll_tax == Decimal("43600.00")
+    assert result.au_state_payroll_tax_ytd_remuneration_after == Decimal("2000000")
+
+
+def test_au_vic_payroll_tax_below_phase_out_full_deduction():
+    result = calc("AU", 2000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("48500.00")  # (2m - 1m) * 4.85%
+
+
+def test_au_vic_payroll_tax_within_phase_out_band():
+    result = calc("AU", 4000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("169750.00")  # deduction tapered to 500,000
+
+
+def test_au_vic_payroll_tax_above_phase_out_zero_deduction():
+    result = calc("AU", 6000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("291000.00")  # 6m * 4.85%, no deduction
+
+
+def test_au_vic_payroll_tax_regional_rate():
+    result = calc(
+        "AU", 4000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_payroll_tax_regional_status="REGIONAL",
+    )
+    assert result.employer_payroll_tax == Decimal("42437.50")  # same deduction, regional 1.2125% rate
+
+
+def test_au_qld_payroll_tax_low_rate_with_taper():
+    result = calc("AU", 2000000, {}, [], work_state="QLD", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("38000.00")
+
+
+def test_au_qld_payroll_tax_high_rate_above_switch():
+    result = calc("AU", 9000000, {}, [], work_state="QLD", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("435600.00")
+
+
+def test_au_wa_payroll_tax_taper():
+    result = calc("AU", 2300000, {}, [], work_state="WA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("82500.00")
+
+
+def test_au_wa_payroll_tax_zero_deduction_at_upper_threshold():
+    result = calc("AU", 7500000, {}, [], work_state="WA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("412500.00")  # 7.5m * 5.5%, deduction fully tapered out
+
+
+def test_au_nt_payroll_tax_standard_rate():
+    result = calc("AU", 5000000, {}, [], work_state="NT", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("137500.00")
+
+
+def test_au_nt_payroll_tax_high_rate_above_100m_group_wages():
+    result = calc("AU", 150000000, {}, [], work_state="NT", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("9587500.00")
+
+
+def test_au_sa_payroll_tax_below_threshold_is_zero():
+    result = calc("AU", 1000000, {}, [], work_state="SA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("0")
+
+
+def test_au_sa_payroll_tax_above_upper_threshold_flat_rate():
+    result = calc("AU", 2000000, {}, [], work_state="SA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("99000.00")
+
+
+def test_au_sa_payroll_tax_reduced_rate_band_degrades_without_crashing():
+    # §17 SOURCE LOCK: no reduced-rate table exists in the source document
+    # for $1.5m-$1.7m — must report $0 (logged, not silently guessed) and,
+    # critically, must NOT crash the rest of this employee's own payslip.
+    result = calc("AU", 1600000, {}, [], work_state="SA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("0")
+    assert result.au_state_payroll_tax_ytd_remuneration_after is None
+
+
+def test_au_tas_payroll_tax_two_band_marginal_sum():
+    tas_slabs = [
+        Slab(Decimal("0"), Decimal("1250000"), Decimal("0")),
+        Slab(Decimal("1250000"), Decimal("2000000"), Decimal("4")),
+        Slab(Decimal("2000000"), None, Decimal("6.1")),
+    ]
+    result = calc(
+        "AU", 3000000, {}, [], state_slabs=tas_slabs, work_state="TAS",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+    )
+    assert result.employer_payroll_tax == Decimal("91000.00")
+
+
+def test_au_act_payroll_tax_marginal_bands():
+    act_slabs = [
+        Slab(Decimal("0"), Decimal("1750000"), Decimal("0")),
+        Slab(Decimal("1750000"), Decimal("20000000"), Decimal("6.75")),
+        Slab(Decimal("20000000"), Decimal("50000000"), Decimal("6.85")),
+        Slab(Decimal("50000000"), Decimal("100000000"), Decimal("7.35")),
+        Slab(Decimal("100000000"), Decimal("150000000"), Decimal("7.85")),
+        Slab(Decimal("150000000"), None, Decimal("8.75")),
+    ]
+    result = calc(
+        "AU", 30000000, {}, [], state_slabs=act_slabs, work_state="ACT",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+    )
+    assert result.employer_payroll_tax == Decimal("1916875.00")
+
+
+def test_au_payroll_tax_telescopes_correctly_across_two_periods():
+    # Same NSW config as above, but split into two $1,000,000 periods
+    # instead of one $2,000,000 period — the SUM of both periods' amounts
+    # must equal the single-period result exactly (43,600.00), proving
+    # telescope_period_amount correctly handles the threshold being
+    # crossed mid-year regardless of how many periods it takes.
+    period1 = calc(
+        "AU", 1000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+    )
+    assert period1.employer_payroll_tax == Decimal("0")  # entirely within the untaxed band
+    assert period1.au_state_payroll_tax_ytd_remuneration_after == Decimal("1000000")
+
+    period2 = calc(
+        "AU", 1000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=period1.au_state_payroll_tax_ytd_remuneration_after,
+    )
+    # This period straddles the $1.2m threshold: only $800,000 of it is
+    # actually taxable (2,000,000 - 1,200,000).
+    assert period2.employer_payroll_tax == Decimal("43600.00")
+    assert period1.employer_payroll_tax + period2.employer_payroll_tax == Decimal("43600.00")
 
 
 def test_australia_super_guarantee_capped_at_max_contribution_base():
     rates = {"super": Rate("super", employer_rate_pct=Decimal("11.50"))}
-    result = calc("AU", 30000, rates, _FLAT_10_SLAB)  # annual 360,000 > 260,280 cap
+    result = calc("AU", 30000, rates, _FLAT_10_SLAB)  # annual 360,000 > 270,830 cap
     uncapped = Decimal("30000") * Decimal("11.50") / 100
     assert result.employer_pension < uncapped
-    assert result.employer_pension == Decimal("2494.35")  # (260280 * 11.5% ) / 12
+    assert result.employer_pension == Decimal("2595.45")  # (270830 * 11.5% ) / 12
 
 
 def test_germany_contributions_capped_at_contribution_ceiling():
