@@ -289,10 +289,21 @@ export default function LoginPage() {
                 padding: "14px 24px", borderRadius: "50px",
                 background: "linear-gradient(135deg, #087CC1, #1596D1)",
                 color: "white", fontSize: "15px", fontWeight: "700",
-                textDecoration: "none", marginBottom: "24px",
+                textDecoration: "none", marginBottom: "16px",
                 boxShadow: "0 4px 16px rgba(8,124,193,0.35)",
               }}>
               Create your account →
+            </Link>
+
+            <Link to="/trial-register"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "12px 24px", borderRadius: "50px",
+                background: "transparent", border: "1px solid rgba(255,255,255,0.35)",
+                color: "rgba(255,255,255,0.85)", fontSize: "14px", fontWeight: "600",
+                textDecoration: "none", marginBottom: "24px",
+              }}>
+              Try free for 30 days →
             </Link>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

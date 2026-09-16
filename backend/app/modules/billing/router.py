@@ -6,6 +6,7 @@ tenant-facing read API. Mounted with prefix "/billing" (see main.py):
 
     GET /billing/plans           → PUBLISHED plan versions + entitlement flags
     GET /billing/my-subscription → current org's subscription + entitlement flags
+    GET /billing/trial-status    → lightweight banner payload (null when none)
 
 No create/update/checkout endpoints here — see billing/admin_router.py for
 the Super Admin CRUD surface. Entitlement checks are NOT wired into any
@@ -13,7 +14,7 @@ router outside app/modules/billing/ in this task; that wiring is a
 separate, later task.
 """
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -22,10 +23,11 @@ from app.core.dependencies import get_current_user
 from app.core.exceptions import NotFoundException
 from app.database import get_db
 from app.modules.billing import entitlements, plan_catalog
-from app.modules.billing.models import BillingPlan
+from app.modules.billing.models import BillingPlan, BillingPlanVersion
 from app.modules.billing.schemas import (
     BillingMySubscriptionResponse,
     BillingPublishedPlanResponse,
+    BillingTrialStatusResponse,
 )
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
@@ -76,4 +78,44 @@ def get_my_subscription(
     return BillingMySubscriptionResponse(
         subscription=subscription,
         entitlement_flags=plan_catalog.list_entitlement_flags(db, subscription.plan_version_id),
+    )
+
+
+@router.get(
+    "/trial-status",
+    response_model=Optional[BillingTrialStatusResponse],
+    summary="Lightweight subscription status for the trial banner",
+)
+def get_trial_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """The org's subscription fields the frontend trial banner needs (status
+    + period bounds + plan code). Returns null rather than 404 when there is
+    no subscription row — the banner should silently not render, not fail."""
+    subscription = entitlements.get_active_subscription(db, current_user.organization_id)
+    if subscription is None:
+        return None
+
+    plan_code = None
+    if subscription.plan_version_id is not None:
+        plan_version = (
+            db.query(BillingPlanVersion)
+            .filter(BillingPlanVersion.id == subscription.plan_version_id)
+            .first()
+        )
+        if plan_version is not None:
+            plan = (
+                db.query(BillingPlan)
+                .filter(BillingPlan.id == plan_version.plan_id)
+                .first()
+            )
+            if plan is not None:
+                plan_code = plan.code
+
+    return BillingTrialStatusResponse(
+        status=subscription.status,
+        current_period_start=subscription.current_period_start,
+        current_period_end=subscription.current_period_end,
+        plan_code=plan_code,
     )

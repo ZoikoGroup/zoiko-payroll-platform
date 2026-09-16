@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_super_admin
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import get_db
-from app.modules.billing import entitlements, plan_catalog
+from app.modules.billing import entitlements, plan_catalog, trial_lifecycle
 from app.modules.billing.models import BillingCommercialAuditEvent, BillingPlanVersion, PlanVersionStatus
 from app.modules.billing.schemas import (
     BillingAuditEventListResponse,
@@ -34,6 +34,9 @@ from app.modules.billing.schemas import (
     BillingPlanVersionCreateRequest,
     BillingPlanVersionResponse,
     BillingPlanVersionStatusTransition,
+    BillingSubscriptionResponse,
+    ConvertTrialRequest,
+    TrialExpirySweepResult,
 )
 
 router = APIRouter(prefix="/super-admin/billing", tags=["Super Admin Billing"])
@@ -141,6 +144,45 @@ def create_entitlement_override(
         granted_by_user_id=current_user.id,
         reason=data.reason,
         expires_at=data.expires_at,
+    )
+
+
+# ── Trial lifecycle (Prompt 5) ────────────────────────────────────────────
+
+@router.post("/trial-expiry-run", response_model=TrialExpirySweepResult)
+def run_trial_expiry_sweep(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Day-30 expiry sweep: expire trials into GRACE_READONLY, close orgs
+    whose grace window has lapsed (TRIAL_CLOSED → Organization.is_active=False).
+    Audit-first, idempotent, and never creates a BillingInvoice row — the same
+    path the scheduled job runs on a timer (see billing/scheduler.py). None of
+    the state changes here mix realm with the _audit event: the events are
+    committed in the same transaction as the transition they record."""
+    return trial_lifecycle.run_trial_expiry_sweep(db)
+
+
+@router.post(
+    "/organizations/{organization_id}/convert-trial",
+    response_model=BillingSubscriptionResponse,
+)
+def convert_trial_to_paid(
+    organization_id: int,
+    data: ConvertTrialRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Convert a TRIALING subscription to an ACTIVE paid one — the ONLY path
+    that takes a subscription away from TRIALING. Sets workspace_type=PRODUCTION,
+    points the subscription at the paid plan version, opens a fresh 30-day
+    period, reactivates the org, and audits TRIAL_CONVERTED. No invoice is
+    created here (separate, explicit step)."""
+    return trial_lifecycle.convert_trial_to_paid(
+        db,
+        organization_id=organization_id,
+        plan_version_id=data.plan_version_id,
+        actor_user_id=current_user.id,
     )
 
 

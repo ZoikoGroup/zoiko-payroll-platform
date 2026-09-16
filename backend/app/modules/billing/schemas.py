@@ -431,3 +431,34 @@ class BillingMySubscriptionResponse(BaseModel):
 
     subscription: BillingSubscriptionResponse
     entitlement_flags: dict = {}
+
+
+class BillingTrialStatusResponse(BaseModel):
+    """GET /billing/trial-status — lightweight banner payload. Null/absent
+    when the org has no subscription, so the frontend trial banner simply
+    doesn't render instead of erroring."""
+
+    status: str
+    current_period_start: datetime
+    current_period_end: datetime
+    plan_code: Optional[str] = None
+
+
+# ── Trial lifecycle (Prompt 5) ──────────────────────────────────────────────
+
+class TrialExpirySweepResult(BaseModel):
+    """POST /super-admin/billing/trial-expiry-run — per-run summary. All
+    counts are organizations moved this run; idempotent re-runs converge to
+    zeros rather than double-counting already-transitioned orgs."""
+
+    scanned: int
+    grace_started: list[int]
+    closed: list[int]
+
+
+class ConvertTrialRequest(BaseModel):
+    """Body for POST /super-admin/billing/organizations/{org_id}/convert-trial.
+    `organization_id` comes from the URL; only the target plan version is
+    accepted in the body."""
+
+    plan_version_id: int = Field(..., gt=0)

@@ -217,6 +217,12 @@ class BillingSubscription(Base):
     status = Column(String(20), default=SubscriptionStatus.TRIALING.value, nullable=False, index=True)
     current_period_start = Column(DateTime, nullable=False)
     current_period_end = Column(DateTime, nullable=False)
+    # Set the first time the trial-expiry sweep observes an expired trial
+    # (`current_period_end` in the past while status is still TRIALING),
+    # marking the start of the GRACE_READONLY window. NULL until then.
+    # Derived, not a parallel flag to Organization.is_active: a CLOSED trial
+    # reuses Organization.is_active=False (see trial_lifecycle.py).
+    grace_period_ends_at = Column(DateTime, nullable=True, index=True)
     stripe_subscription_id = Column(String(100), nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -40,6 +40,22 @@ class RegisterRequest(BaseModel):
     tax_identifiers: Optional[dict] = None
 
 
+class TrialRegisterRequest(BaseModel):
+    """Minimal payload for the 30-day Professional Evaluation signup
+    (/auth/register-trial). Deliberately has no tax fields, and extra fields
+    are forbidden — a client sending tax_no / tax_identifiers / address data
+    is rejected at the schema level (422) rather than silently discarded, so
+    the evaluation path can never persist compliance data it does not own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    organization: str = Field(..., min_length=1, max_length=200)
+    name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    country: str = Field(..., min_length=1, max_length=100)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 
@@ -112,3 +128,23 @@ class UserUpdateRequest(BaseModel):
 class UserListResponse(BaseModel):
     users: list[UserResponse]
     total: int
+
+
+# ── Trial banner ────────────────────────────────────────────────────────────
+
+class TrialStatusResponse(BaseModel):
+    """GET /auth/me/trial-status — everything the frontend trial banner
+    needs, derived for the current user's organization.
+
+    - ``workspace_type`` is read live from Organization (never inferred from
+      the plan name — a real Professional-plan customer and an evaluation
+      one can share the same plan code, only the workspace type differs).
+    - ``trial_status`` is "ACTIVE"/"GRACE_READONLY"/"CLOSED"/None mapped from
+      the org's BillingSubscription as derived in auth.service.
+    - ``trial_expires_at`` comes from BillingSubscription.current_period_end
+      (single source of truth — no second date field exists)."""
+
+    workspace_type: str
+    trial_status: Optional[str] = None
+    trial_started_at: Optional[datetime] = None
+    trial_expires_at: Optional[datetime] = None

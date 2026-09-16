@@ -29,7 +29,7 @@ class CSVExporter(IBankExporter):
     content_type = "text/csv"
     file_extension = "csv"
 
-    def generate(self, rows: List[BankExportRow]) -> bytes:
+    def generate(self, rows: List[BankExportRow], *, evaluation: bool = False) -> bytes:
         routing_label = rows[0].routing_label if rows else "IFSC"
         buf = io.StringIO()
         writer = csv.writer(buf)

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from app.modules.auth.schemas import SuccessResponse
+from app.modules.billing.entitlements import require_writeable_workspace
 from app.core.dependencies import (
     get_current_super_admin,
     get_current_org_admin,
@@ -114,6 +115,7 @@ def get_my_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.put("/me", response_model=OrganizationResponse)
 def update_my_organization(
     data: OrganizationUpdate,
@@ -133,6 +135,7 @@ def update_my_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.post("/me/logo", response_model=OrganizationDetail)
 async def upload_my_organization_logo(
     file: UploadFile = File(...),
@@ -373,6 +376,7 @@ def get_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.put("/{organization_id}", response_model=OrganizationResponse)
 def update_organization(
     organization_id: int,
@@ -392,6 +396,7 @@ def update_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.post("/", response_model=OrganizationResponse)
 def create_organization(
     data: OrganizationBase,
@@ -473,6 +478,7 @@ def create_organization(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.patch("/{organization_id}/status", response_model=OrganizationResponse)
 def update_organization_status(
     organization_id: int,
@@ -494,6 +500,7 @@ def update_organization_status(
     return org
 
 
+    dependencies=[Depends(require_writeable_workspace())],
 @router.delete("/{organization_id}", response_model=SuccessResponse)
 def delete_organization(
     organization_id: int,
