@@ -204,6 +204,7 @@ def build_context_from_employee(
         w4_extra_withholding_per_period=getattr(employee, "w4_extra_withholding_per_period", None),
         ct_withholding_code=getattr(employee, "ct_withholding_code", None),
         nj_rate_table=getattr(employee, "nj_rate_table", None),
+        ks_k4_dependents=getattr(employee, "ks_k4_dependents", None),
         residence_locality=getattr(employee, "residence_locality", None),
         state_income_tax_election_pct=getattr(employee, "state_income_tax_election_pct", None),
         germany_statutory_profile=germany_statutory_profile,

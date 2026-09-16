@@ -79,6 +79,7 @@ class LocalityRateStub:
     locality_code: Optional[str] = None
     locality_type: Optional[str] = None
     bracket_schedule: Optional[dict] = None
+    lst_exemption_threshold: Optional[Decimal] = None
 
 
 STRATEGY = StandardStrategy()
@@ -105,7 +106,8 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          nj_rate_table=None, w4_form_vintage=None, residence_locality=None,
          ytd_ss_wages_before=None, ytd_futa_wages_before=None, ytd_medicare_wages_before=None,
          w4_allowances_claimed=None, is_nonresident_alien=False, w4_dependents_credit_annual=None,
-         w4_other_income_annual=None, w4_extra_withholding_per_period=None, residence_locality_rate=None):
+         w4_other_income_annual=None, w4_extra_withholding_per_period=None, residence_locality_rate=None,
+         ks_k4_dependents=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -152,6 +154,7 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         w4_dependents_credit_annual=w4_dependents_credit_annual, w4_other_income_annual=w4_other_income_annual,
         w4_extra_withholding_per_period=w4_extra_withholding_per_period,
         residence_locality_rate=residence_locality_rate,
+        ks_k4_dependents=ks_k4_dependents,
     )
     return STRATEGY.calculate(ctx)
 
@@ -1116,6 +1119,145 @@ def test_us_locality_higher_of_no_residence_locality_falls_back_to_generic():
     assert result.local_tax == pytest.approx(Decimal("100.00"), abs=Decimal("0.01"))  # 60000 * 2.0% / 12
 
 
+# ── PA Local Services Tax (LST) — Production-Readiness Plan Phase 4,
+# 2026-09-16. flat_amount on a PSD_EIT_LST row means the LST annual fee,
+# STACKING on top of the EIT rate result, not replacing it (the bug this
+# fixes: flat_amount used to silently win over the rate_pct branch and
+# discard the EIT entirely).
+
+def test_us_pa_lst_stacks_on_top_of_eit():
+    """EIT (1.0%) + LST ($52/yr) together — $60,000/yr, no residence
+    locality (plain single-row lookup path): EIT = 60000*1%/12 = $50.00/mo,
+    LST = 52/12 = $4.33/mo, total $54.33/mo — NOT just one or the other."""
+    work_locality = LocalityRateStub(
+        nonresident_rate_pct=Decimal("1.0"), flat_amount=Decimal("52"),
+        lst_exemption_threshold=Decimal("12000"), locality_type="PSD_EIT_LST",
+    )
+    result = calc("US", 5000, US_RATES, US_SLABS, locality_rate=work_locality)
+    assert result.local_tax == pytest.approx(Decimal("54.33"), abs=Decimal("0.01"))
+
+
+def test_us_pa_lst_exempt_below_threshold():
+    """$9,600/yr, below the $12,000 exemption threshold — LST must NOT
+    apply; only EIT (9600*1%/12 = $8.00/mo)."""
+    work_locality = LocalityRateStub(
+        nonresident_rate_pct=Decimal("1.0"), flat_amount=Decimal("52"),
+        lst_exemption_threshold=Decimal("12000"), locality_type="PSD_EIT_LST",
+    )
+    result = calc("US", 800, US_RATES, US_SLABS, locality_rate=work_locality)
+    assert result.local_tax == pytest.approx(Decimal("8.00"), abs=Decimal("0.01"))
+
+
+def test_us_pa_lst_applies_at_threshold():
+    """Exactly at the $12,000 threshold — LST applies (>=, not >):
+    EIT = 12000*1%/12 = $10.00/mo, LST = 52/12 = $4.33/mo, total $14.33/mo."""
+    work_locality = LocalityRateStub(
+        nonresident_rate_pct=Decimal("1.0"), flat_amount=Decimal("52"),
+        lst_exemption_threshold=Decimal("12000"), locality_type="PSD_EIT_LST",
+    )
+    result = calc("US", 1000, US_RATES, US_SLABS, locality_rate=work_locality)
+    assert result.local_tax == pytest.approx(Decimal("14.33"), abs=Decimal("0.01"))
+
+
+def test_us_pa_lst_stacks_with_higher_of_override():
+    """LST must still apply even when the "higher of resident vs. work"
+    EIT override fires — the two mechanisms are independent. Resident
+    rate (3.0%) beats work rate (1.0%): EIT = 60000*3%/12 = $150.00/mo,
+    plus LST = $4.33/mo, total $154.33/mo."""
+    work_locality = LocalityRateStub(
+        nonresident_rate_pct=Decimal("1.0"), flat_amount=Decimal("52"),
+        lst_exemption_threshold=Decimal("12000"), locality_type="PSD_EIT_LST",
+    )
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("3.0"), locality_type="PSD_EIT_LST")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    assert result.local_tax == pytest.approx(Decimal("154.33"), abs=Decimal("0.01"))
+
+
+def test_us_pa_lst_no_threshold_configured_means_no_exemption():
+    """lst_exemption_threshold left unset (None) — LST applies at every
+    income level, never a guessed default. $1,200/yr: EIT = 1200*1%/12 =
+    $1.00/mo, LST = 52/12 = $4.33/mo, total $5.33/mo even though this
+    income would be exempt if a $12,000 threshold WERE configured."""
+    work_locality = LocalityRateStub(
+        nonresident_rate_pct=Decimal("1.0"), flat_amount=Decimal("52"), locality_type="PSD_EIT_LST",
+    )
+    result = calc("US", 100, US_RATES, US_SLABS, locality_rate=work_locality)
+    assert result.local_tax == pytest.approx(Decimal("5.33"), abs=Decimal("0.01"))
+
+
+def test_us_ordinary_municipal_flat_amount_unaffected_by_lst_fix():
+    """Regression guard: an ordinary MUNICIPAL-type flat_amount row
+    (Detroit/Kansas City-style, applied directly per payslip, NOT
+    divided by periods_per_year) must behave exactly as before — the
+    PSD_EIT_LST carve-out must not touch this path at all."""
+    locality = LocalityRateStub(flat_amount=Decimal("100"), locality_type="MUNICIPAL")
+    result = calc("US", 5000, US_RATES, US_SLABS, locality_rate=locality)
+    assert result.local_tax == pytest.approx(Decimal("100.00"), abs=Decimal("0.01"))
+
+
+# ── Ohio municipal credit-for-tax-paid-elsewhere (Production-Readiness
+# Plan follow-up, 2026-09-16) — reuses the same "higher of" mechanism as
+# PA's PSD_EIT_LST under a distinct locality_type, OH_MUNI_CREDIT, since
+# Ohio's real "100% credit up to my own rate" rule nets out to the exact
+# same total (see the engine's own comment for the worked-out equivalence).
+
+def test_us_oh_credit_uses_higher_of_work_and_residence_rate():
+    """Lives in Columbus (2.5%), works in Cincinnati (1.8%) — $60,000/yr.
+    Real-world: pays 1.8% to Cincinnati + 0.7% to Columbus = 2.5% total.
+    This engine's single local_tax figure is the TOTAL only: 60000*2.5%/12
+    = $125.00/mo, matching max(1.8%, 2.5%)."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("1.8"), locality_type="OH_MUNI_CREDIT")
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("2.5"), locality_type="OH_MUNI_CREDIT")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    assert result.local_tax == pytest.approx(Decimal("125.00"), abs=Decimal("0.01"))
+
+
+def test_us_oh_credit_reversed_work_rate_higher():
+    """Lives in Cincinnati (1.8%), works in Columbus (2.5%) — work rate
+    wins (already fully covers, and exceeds, the residence credit):
+    60000*2.5%/12 = $125.00/mo."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("2.5"), locality_type="OH_MUNI_CREDIT")
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("1.8"), locality_type="OH_MUNI_CREDIT")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    assert result.local_tax == pytest.approx(Decimal("125.00"), abs=Decimal("0.01"))
+
+
+def test_us_oh_credit_same_city_unaffected():
+    """The common case — lives and works in the same OH city, no separate
+    residence locality configured — must fall through to the plain
+    single-row lookup, completely unaffected by the credit mechanism:
+    60000*2.5%/12 = $125.00/mo, using the work row alone."""
+    work_locality = LocalityRateStub(
+        resident_rate_pct=Decimal("2.5"), nonresident_rate_pct=Decimal("2.5"), locality_type="OH_MUNI_CREDIT",
+    )
+    result = calc("US", 5000, US_RATES, US_SLABS, locality_rate=work_locality)
+    assert result.local_tax == pytest.approx(Decimal("125.00"), abs=Decimal("0.01"))
+
+
+def test_us_oh_and_pa_locality_types_never_combine():
+    """A work locality tagged OH_MUNI_CREDIT and a residence locality
+    tagged PSD_EIT_LST must NOT trigger the "higher of" mechanism — the
+    two conventions are gated to only combine with their own kind. Falls
+    through to the plain lookup on the work row alone: 60000*1.0%/12 =
+    $50.00/mo, NOT the much larger PA residence rate."""
+    work_locality = LocalityRateStub(nonresident_rate_pct=Decimal("1.0"), locality_type="OH_MUNI_CREDIT")
+    home_locality = LocalityRateStub(resident_rate_pct=Decimal("9.9"), locality_type="PSD_EIT_LST")
+    result = calc(
+        "US", 5000, US_RATES, US_SLABS,
+        locality_rate=work_locality, residence_locality_rate=home_locality,
+    )
+    assert result.local_tax == pytest.approx(Decimal("50.00"), abs=Decimal("0.01"))
+
+
 def test_us_zero_income():
     result = calc("US", 0, US_RATES, US_SLABS)
     assert result.net_pay == 0
@@ -1794,6 +1936,118 @@ def test_us_me_dispatches_phaseout_through_full_engine():
     taxable_with_flat_wrong_deduction = Decimal("150000") - Decimal("15300")
     tax_with_wrong_deduction = Decimal("4117") + (taxable_with_flat_wrong_deduction - Decimal("64850")) * Decimal("7.15") / 100
     assert result.state_income_tax * 12 > tax_with_wrong_deduction
+
+
+# ── Kansas (Production-Readiness Plan Phase 4, 2026-09-16) ──────────────
+# KS's brackets (5.2% / 5.58%, including their own embedded zero-band) are
+# real, DB-editable TaxSlab rows (unlike Oregon) — only the personal-
+# exemption/HOH/dependent-allowance layer is bespoke. Tested directly
+# against _ks_personal_exemption_for_status using KW-100's own published
+# figures, plus full-engine tests confirming dependents actually reduce
+# withholding (not silently ignored) and MFS uses the Single-equivalent
+# exemption per KW-100's own grouping.
+
+def test_us_ks_personal_exemption_single_default():
+    assert _us._ks_personal_exemption_for_status("SINGLE", 0) == Decimal("9160.00")
+    assert _us._ks_personal_exemption_for_status("SINGLE", None) == Decimal("9160.00")
+
+
+def test_us_ks_personal_exemption_mfj():
+    assert _us._ks_personal_exemption_for_status("MFJ", 0) == Decimal("18320.00")
+
+
+def test_us_ks_personal_exemption_mfs_uses_single_figure():
+    """KW-100's own exemption section groups 'single, head of household,
+    or married filing separate' at the same $9,160 — MFS must NOT get the
+    $18,320 MFJ figure."""
+    assert _us._ks_personal_exemption_for_status("MFS", 0) == Decimal("9160.00")
+
+
+def test_us_ks_personal_exemption_hoh_adds_allowance():
+    assert _us._ks_personal_exemption_for_status("HOH", 0) == Decimal("11480.00")  # 9160 + 2320
+
+
+def test_us_ks_personal_exemption_scales_with_dependents():
+    assert _us._ks_personal_exemption_for_status("SINGLE", 2) == Decimal("13800.00")  # 9160 + 2*2320
+    assert _us._ks_personal_exemption_for_status("HOH", 3) == Decimal("18440.00")  # 9160 + 2320 + 3*2320
+
+
+_KS_SINGLE_HOH_MFS_SLABS = [
+    Slab(Decimal("0"), Decimal("3605"), Decimal("0"), jurisdiction_state="KS", filing_status="SINGLE"),
+    Slab(Decimal("3605"), Decimal("26605"), Decimal("5.2"), jurisdiction_state="KS", filing_status="SINGLE"),
+    Slab(Decimal("26605"), None, Decimal("5.58"), jurisdiction_state="KS", filing_status="SINGLE"),
+]
+_KS_MFJ_SLABS = [
+    Slab(Decimal("0"), Decimal("8240"), Decimal("0"), jurisdiction_state="KS", filing_status="MFJ"),
+    Slab(Decimal("8240"), Decimal("54240"), Decimal("5.2"), jurisdiction_state="KS", filing_status="MFJ"),
+    Slab(Decimal("54240"), None, Decimal("5.58"), jurisdiction_state="KS", filing_status="MFJ"),
+]
+
+
+def test_us_ks_dispatches_through_full_engine_when_enabled():
+    """End-to-end: work_state="KS" with a real filing status on file must
+    actually reach the Kansas-specific deduction + real KS bracket rows
+    (nonzero withholding for a real wage), not silently fall through to
+    $0. $50,000/yr Single, 0 dependents: taxable = 50000 - 9160 = 40840;
+    tax = 1196 (base at $26,605) + (40840-26605)*5.58% = 1196 + 794.313
+    = 1990.313."""
+    was_enabled = "KS" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("KS")
+    try:
+        result = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="KS",
+            w4_filing_status="SINGLE", state_slabs=_KS_SINGLE_HOH_MFS_SLABS, ks_k4_dependents=0,
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("KS")
+    assert result.state_income_tax * 12 == pytest.approx(Decimal("1990.313"), abs=Decimal("0.05"))
+
+
+def test_us_ks_dependents_reduce_withholding():
+    """Same $50,000/yr Single wage, but 2 dependents on the K-4 — must
+    withhold LESS than the 0-dependents case above (a larger exemption)."""
+    was_enabled = "KS" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("KS")
+    try:
+        no_dependents = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="KS",
+            w4_filing_status="SINGLE", state_slabs=_KS_SINGLE_HOH_MFS_SLABS, ks_k4_dependents=0,
+        )
+        with_dependents = calc(
+            "US", Decimal("50000") / 12, US_RATES, US_SLABS, work_state="KS",
+            w4_filing_status="SINGLE", state_slabs=_KS_SINGLE_HOH_MFS_SLABS, ks_k4_dependents=2,
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("KS")
+    assert with_dependents.state_income_tax < no_dependents.state_income_tax
+
+
+def test_us_ks_mfj_uses_married_brackets():
+    was_enabled = "KS" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("KS")
+    try:
+        result = calc(
+            "US", Decimal("80000") / 12, US_RATES, US_SLABS, work_state="KS",
+            w4_filing_status="MFJ", state_slabs=_KS_MFJ_SLABS, ks_k4_dependents=0,
+        )
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("KS")
+    # taxable = 80000 - 18320 = 61680; tax = 2392 + (61680-54240)*5.58% = 2392 + 415.152 = 2807.152
+    assert result.state_income_tax * 12 == pytest.approx(Decimal("2807.152"), abs=Decimal("0.05"))
+
+
+def test_us_ks_no_filing_status_on_file_is_a_no_op():
+    was_enabled = "KS" in shared._US_STATE_TAX_ENABLED_STATES
+    shared._US_STATE_TAX_ENABLED_STATES.add("KS")
+    try:
+        result = calc("US", Decimal("5000"), US_RATES, US_SLABS, work_state="KS", w4_filing_status=None)
+    finally:
+        if not was_enabled:
+            shared._US_STATE_TAX_ENABLED_STATES.discard("KS")
+    assert result.state_income_tax == Decimal("0.00")
 
 
 # ── Tiered/progressive local tax (Production-Readiness Plan Phase 4,

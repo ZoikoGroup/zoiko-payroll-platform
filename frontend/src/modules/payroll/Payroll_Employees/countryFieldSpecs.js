@@ -51,6 +51,10 @@ export const COUNTRY_FIELD_SPECS = {
     // sections (UK RTI / CA TD1X).
     { key: "ct_withholding_code", label: "CT Withholding Code (CT employees only)", type: "select", choices: ["A", "B", "C", "D", "F"], showWhen: (cf) => (cf?.state_tax_jurisdiction || "").toUpperCase() === "CT" },
     { key: "nj_rate_table", label: "NJ-W4 Rate Table (NJ employees only)", type: "select", choices: ["A", "B", "C", "D", "E"], showWhen: (cf) => (cf?.state_tax_jurisdiction || "").toUpperCase() === "NJ" },
+    // Kansas Form K-4 certified dependent count — only meaningful for KS
+    // employees; drives the personal-exemption/HOH/dependent-allowance
+    // layer in engine/countries/us.py's _ks_personal_exemption_for_status.
+    { key: "ks_k4_dependents", label: "K-4 dependent count (KS employees only)", type: "number", min: 0, showWhen: (cf) => (cf?.state_tax_jurisdiction || "").toUpperCase() === "KS" },
     { key: "aba_routing_number", label: "ABA routing number", type: "text", placeholder: "9 digits", pattern: /^\d{9}$/, error: "ABA routing number must be exactly 9 digits." },
     { key: "state_tax_jurisdiction", label: "State tax jurisdiction", type: "text", placeholder: "e.g. CA", required: true, upper: true, pattern: /^[A-Z]{2}$/, error: "State tax jurisdiction must be a 2-letter state code (e.g. CA, NY)." },
     // Reciprocity (backend: service.py's _resolve_us_reciprocity) — only
