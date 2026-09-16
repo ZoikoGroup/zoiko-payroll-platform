@@ -186,33 +186,3 @@ def require_organization_access(
     return True
 
 
-def require_active_subscription(product_code: str):
-    """Dependency factory kept for parity with the copied payroll routers.
-
-    The old platform checked a billing subscription + product entitlement.
-    The standalone platform has no billing module — every onboarded
-    organization is entitled. This gate now simply verifies the
-    organization exists and is not suspended. Super Admin bypasses it.
-    """
-    async def _check_subscription(
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db),
-    ):
-        role = _role_value(current_user)
-        if role == ROLE_SUPER_ADMIN:
-            return current_user
-        if current_user.organization_id is None:
-            raise ForbiddenException("User is not associated with any organization.")
-
-        from app.modules.organizations.models import Organization
-
-        org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
-        if org is None:
-            raise ForbiddenException("Your organization no longer exists.")
-        if not org.is_active:
-            raise ForbiddenException(
-                "Your organization is suspended. Please contact support to regain access."
-            )
-        return current_user
-
-    return _check_subscription

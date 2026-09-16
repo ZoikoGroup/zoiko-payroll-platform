@@ -12,13 +12,13 @@ export default function ProtectedRoute() {
   if (user?.role && user.role !== "super_admin") {
     const { pathname } = location;
     const allowed =
-      pathname === "/portal" ||
       pathname === "/payroll" ||
       pathname.startsWith("/payroll/") ||
+      pathname.startsWith("/billing/") ||
       pathname.startsWith("/organization-admin/") ||
       pathname.startsWith("/hr-admin/");
     if (!allowed) {
-      return <Navigate to="/portal" replace />;
+      return <Navigate to="/payroll" replace />;
     }
   }
   return <Outlet />;
