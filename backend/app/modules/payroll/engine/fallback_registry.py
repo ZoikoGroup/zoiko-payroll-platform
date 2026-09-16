@@ -80,12 +80,48 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "UK", "module": "uk", "attr": "_UK_FLAT_RATE_CODES", "label": "Flat-Rate PAYE Tax Code Families", "resolverKey": "N/A — not read via resolve_jurisdiction_parameter", "kind": "dict", "note": "Pure code constant, no DB counterpart at all."},
 
     # ── Australia ────────────────────────────────────────────────────────
-    {"country": "AU", "module": "australia", "attr": "_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD", "label": "Medicare Levy Low-Income Threshold", "resolverKey": "medicare_low_inc_thr"},
+    # Medicare Levy PROPER has no scalar fallback here any more — it's
+    # embedded in the Schedule 1 Scale 1/2/5/6 AU_PAYG_COEFFICIENT TaxSlab
+    # bands themselves, not a single resolve_jurisdiction_parameter value.
     {"country": "AU", "module": "australia", "attr": "_AU_MLS_THRESHOLD", "label": "Medicare Levy Surcharge Threshold", "resolverKey": "mls_threshold"},
     {"country": "AU", "module": "australia", "attr": "_AU_MLS_RATE", "label": "Medicare Levy Surcharge Rate", "resolverKey": "mls_rate"},
     {"country": "AU", "module": "australia", "attr": "_AU_SUPER_MAX_CONTRIBUTION_BASE", "label": "Superannuation Guarantee Max Contribution Base", "resolverKey": "super_max_contrib"},
-    {"country": "AU", "module": "australia", "attr": "_AU_HELP_THRESHOLD", "label": "HELP/HECS Repayment Threshold", "resolverKey": "help_threshold"},
-    {"country": "AU", "module": "australia", "attr": "_AU_HELP_RATE", "label": "HELP/HECS Repayment Rate", "resolverKey": "help_rate"},
+    # HELP/HECS's old flat threshold+rate fallback is removed along with
+    # the constants themselves — superseded by the real ATO Schedule 8
+    # coefficient-band mechanism, which has no single-scalar fallback.
+    {"country": "AU", "module": "australia", "attr": "_AU_PAYG_SCALE4_RESIDENT_RATE", "label": "PAYG Scale 4 (No TFN) Resident Rate", "resolverKey": "payg_scale4_resident_rate"},
+    {"country": "AU", "module": "australia", "attr": "_AU_PAYG_SCALE4_NONRESIDENT_RATE", "label": "PAYG Scale 4 (No TFN) Non-Resident Rate", "resolverKey": "payg_scale4_nonresident_rate"},
+    {"country": "AU", "module": "australia", "attr": "_AU_ETP_LIFE_CAP", "label": "ETP Life Benefit Cap", "resolverKey": "etp_life_cap"},
+    {"country": "AU", "module": "australia", "attr": "_AU_ETP_DEATH_CAP", "label": "ETP Death Benefit Cap", "resolverKey": "etp_death_cap"},
+    {"country": "AU", "module": "australia", "attr": "_AU_GENUINE_REDUNDANCY_BASE", "label": "Genuine Redundancy Tax-Free Base", "resolverKey": "redundancy_base"},
+    {"country": "AU", "module": "australia", "attr": "_AU_GENUINE_REDUNDANCY_PER_YEAR", "label": "Genuine Redundancy Tax-Free Per Year", "resolverKey": "redundancy_per_yr"},
+    {"country": "AU", "module": "australia", "attr": "_AU_UNTAXED_PLAN_CAP", "label": "Untaxed Plan Cap", "resolverKey": "untaxed_plan_cap"},
+    {"country": "AU", "module": "australia", "attr": "_AU_TRANSFER_BALANCE_CAP", "label": "General Transfer Balance Cap", "resolverKey": "transfer_balance_cap"},
+    {"country": "AU", "module": "australia", "attr": "_AU_DEFINED_BENEFIT_INCOME_CAP", "label": "Defined Benefit Income Cap", "resolverKey": "db_income_cap"},
+    # State/territory employer payroll tax — NSW/TAS/ACT have no scalar
+    # fallback here (they're TaxSlab bracket tables instead, same as
+    # Canada's ON_EHT_BAND rows); SA's reduced-rate band has none of any
+    # kind by the source document's own explicit instruction.
+    {"country": "AU", "module": "australia", "attr": "_AU_WA_PT_THRESHOLD", "label": "WA Payroll Tax Threshold", "resolverKey": "wa_pt_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_WA_PT_UPPER_THRESHOLD", "label": "WA Payroll Tax Upper Threshold", "resolverKey": "wa_pt_upper_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_WA_PT_RATE", "label": "WA Payroll Tax Rate", "resolverKey": "wa_pt_rate"},
+    {"country": "AU", "module": "australia", "attr": "_AU_QLD_PT_THRESHOLD", "label": "QLD Payroll Tax Threshold", "resolverKey": "qld_pt_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_QLD_PT_UPPER_THRESHOLD", "label": "QLD Payroll Tax Deduction Ceiling", "resolverKey": "qld_pt_upper_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_QLD_PT_RATE_LOW", "label": "QLD Payroll Tax Rate (≤$6.5m)", "resolverKey": "qld_pt_rate_low"},
+    {"country": "AU", "module": "australia", "attr": "_AU_QLD_PT_RATE_HIGH", "label": "QLD Payroll Tax Rate (>$6.5m)", "resolverKey": "qld_pt_rate_high"},
+    {"country": "AU", "module": "australia", "attr": "_AU_QLD_PT_RATE_SWITCH", "label": "QLD Payroll Tax Rate Switch Threshold", "resolverKey": "qld_pt_rate_switch"},
+    {"country": "AU", "module": "australia", "attr": "_AU_VIC_PT_PHASE_START", "label": "VIC Payroll Tax Deduction Phase-Out Start", "resolverKey": "vic_pt_phase_start"},
+    {"country": "AU", "module": "australia", "attr": "_AU_VIC_PT_PHASE_END", "label": "VIC Payroll Tax Deduction Phase-Out End", "resolverKey": "vic_pt_phase_end"},
+    {"country": "AU", "module": "australia", "attr": "_AU_VIC_PT_BASE_DEDUCTION", "label": "VIC Payroll Tax Base Deduction", "resolverKey": "vic_pt_base_deduction"},
+    {"country": "AU", "module": "australia", "attr": "_AU_VIC_PT_RATE", "label": "VIC Payroll Tax Rate", "resolverKey": "vic_pt_rate"},
+    {"country": "AU", "module": "australia", "attr": "_AU_VIC_PT_REGIONAL_RATE", "label": "VIC Payroll Tax Regional Rate", "resolverKey": "vic_pt_regional_rate"},
+    {"country": "AU", "module": "australia", "attr": "_AU_NT_PT_THRESHOLD", "label": "NT Payroll Tax Deduction", "resolverKey": "nt_pt_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_NT_PT_RATE", "label": "NT Payroll Tax Rate", "resolverKey": "nt_pt_rate"},
+    {"country": "AU", "module": "australia", "attr": "_AU_NT_PT_RATE_HIGH", "label": "NT Payroll Tax Rate (≥$100m group wages)", "resolverKey": "nt_pt_rate_high"},
+    {"country": "AU", "module": "australia", "attr": "_AU_NT_PT_RATE_SWITCH", "label": "NT Payroll Tax Rate Switch Threshold", "resolverKey": "nt_pt_rate_switch"},
+    {"country": "AU", "module": "australia", "attr": "_AU_SA_PT_LOWER_THRESHOLD", "label": "SA Payroll Tax Lower Threshold", "resolverKey": "sa_pt_lower_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_SA_PT_UPPER_THRESHOLD", "label": "SA Payroll Tax Upper Threshold", "resolverKey": "sa_pt_upper_threshold"},
+    {"country": "AU", "module": "australia", "attr": "_AU_SA_PT_RATE", "label": "SA Payroll Tax Rate (>$1.7m)", "resolverKey": "sa_pt_rate"},
 
     # ── Canada ───────────────────────────────────────────────────────────
     {"country": "CA", "module": "canada", "attr": "_CA_CPP_YMPE", "label": "CPP Year's Maximum Pensionable Earnings", "resolverKey": "cpp_ympe"},

@@ -100,6 +100,12 @@ export const COUNTRY_FIELD_SPECS = {
   ],
   AU: [
     { key: "tfn", label: "TFN", type: "text", placeholder: "8-9 digits", required: true, strip: " ", pattern: /^\d{8,9}$/, error: "TFN must be 8 or 9 digits." },
+    { key: "tfn_status", label: "TFN status", type: "select", choices: ["PROVIDED", "NOT_PROVIDED", "EXEMPTION"] },
+    { key: "residency_status", label: "Residency status", type: "select", choices: ["RESIDENT", "FOREIGN_RESIDENT", "WORKING_HOLIDAY_MAKER"] },
+    { key: "tax_free_threshold_claimed", label: "Tax-free threshold claimed", type: "select", choices: ["true", "false"] },
+    { key: "medicare_levy_exemption", label: "Medicare levy exemption", type: "select", choices: ["FULL", "HALF"] },
+    { key: "withholding_variation_pct", label: "Withholding variation (%)", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "Withholding variation must be a number." },
+    { key: "work_state", label: "State/territory of work", type: "select", upper: true, choices: ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"] },
     { key: "help_stsl_debt", label: "HELP/STSL debt", type: "select", choices: ["true", "false"] },
     { key: "super_fund_usi", label: "Super fund USI", type: "text", upper: true, pattern: /^[A-Z0-9]{8,14}$/, error: "Super fund USI looks incorrect." },
     { key: "super_member_number", label: "Super member number", type: "text", pattern: /^[A-Za-z0-9]{1,20}$/, error: "Member number looks incorrect." },

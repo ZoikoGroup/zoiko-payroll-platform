@@ -87,10 +87,16 @@ _UK_PENSION_MIN_ENPLOYER = _uk._UK_PENSION_MIN_ENPLOYER
 _calculate_annual_tax_uk = _uk._calculate_annual_tax_uk
 _calc_uk = _uk.calculate
 
-_AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD = _australia._AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD
+# _AU_MEDICARE_LEVY_LOW_INCOME_THRESHOLD's re-export removed along with
+# the constant itself (ZP-TAX-AU-2026-27-001 build) — Medicare Levy
+# proper is now embedded in the Schedule 1 Scale 1/2/5/6 coefficient
+# bands, not a separate flat-threshold calculation. See
+# engine/countries/australia.py's own module docstring.
 _AU_MLS_THRESHOLD = _australia._AU_MLS_THRESHOLD
 _AU_MLS_RATE = _australia._AU_MLS_RATE
 _AU_SUPER_MAX_CONTRIBUTION_BASE = _australia._AU_SUPER_MAX_CONTRIBUTION_BASE
+_AU_PAYG_SCALE4_RESIDENT_RATE = _australia._AU_PAYG_SCALE4_RESIDENT_RATE
+_AU_PAYG_SCALE4_NONRESIDENT_RATE = _australia._AU_PAYG_SCALE4_NONRESIDENT_RATE
 _calc_australia = _australia.calculate
 
 _DE_SOLI_THRESHOLD = _germany._DE_SOLI_THRESHOLD
@@ -155,6 +161,7 @@ class StandardStrategy(PayrollStrategy):
             + deductions.get("cpp2", Decimal("0"))
             + deductions.get("state_disability_insurance", Decimal("0"))
             + deductions.get("state_program_deductions", Decimal("0"))
+            + deductions.get("au_statutory_deductions_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -249,6 +256,10 @@ class StandardStrategy(PayrollStrategy):
             employer_qc_hsf=deductions.get("employer_qc_hsf", Decimal("0")),
             qc_hsf_ytd_remuneration_after=deductions.get("qc_hsf_ytd_remuneration_after"),
             employer_qc_labour_standards=deductions.get("employer_qc_labour_standards", Decimal("0")),
+            employer_payroll_tax=deductions.get("employer_payroll_tax", Decimal("0")),
+            au_state_payroll_tax_ytd_remuneration_after=deductions.get("au_state_payroll_tax_ytd_remuneration_after"),
+            au_statutory_deductions_total=deductions.get("au_statutory_deductions_total", Decimal("0")),
+            au_statutory_deductions_detail=deductions.get("au_statutory_deductions_detail", []),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),
@@ -260,6 +271,10 @@ class StandardStrategy(PayrollStrategy):
             ytd_ss_wages_after=deductions.get("ytd_ss_wages_after"),
             ytd_futa_wages_after=deductions.get("ytd_futa_wages_after"),
             ytd_medicare_wages_after=deductions.get("ytd_medicare_wages_after"),
+            ytd_sg_qualifying_earnings_after=deductions.get("ytd_sg_qualifying_earnings_after"),
+            sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),
+            sg_rate_pct=deductions.get("sg_rate_pct"),
+            sg_mcb_reached=deductions.get("sg_mcb_reached"),
             option2_cumulative_gross_after=deductions.get("option2_cumulative_gross_after"),
             option2_periods_elapsed_after=deductions.get("option2_periods_elapsed_after"),
             option2_federal_tax_withheld_after=deductions.get("option2_federal_tax_withheld_after"),

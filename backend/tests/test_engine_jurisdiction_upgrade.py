@@ -417,9 +417,17 @@ def test_germany_church_tax_applied_when_liable():
     assert result.church_tax > 0
 
 
-# ── Australia: HELP/HECS ────────────────────────────────────────────────────
+# ── Australia: HELP/HECS (ATO Schedule 8 / NAT 3539 coefficient bands,
+# ZP-TAX-AU-2026-27-001 §8 — supersedes the old flat threshold+rate
+# approximation these tests originally exercised) ───────────────────────
 
 AU_SLABS = [Slab(Decimal("0"), None, Decimal("30"))]
+# Real Schedule 8 coefficients (§8), "tax-free threshold claimed OR
+# foreign resident" family, trimmed to the two bands these tests need.
+AU_STSL_SLABS = [
+    Slab(Decimal("0"), Decimal("1337"), Decimal("0"), rule_type="AU_STSL_COEFFICIENT", filing_status="STSL_CLAIMED_OR_FOREIGN", flat_amount=Decimal("0")),
+    Slab(Decimal("1337"), Decimal("2494"), Decimal("0.15"), rule_type="AU_STSL_COEFFICIENT", filing_status="STSL_CLAIMED_OR_FOREIGN", flat_amount=Decimal("200.5615")),
+]
 
 
 def test_australia_help_zero_without_plan():
@@ -428,13 +436,25 @@ def test_australia_help_zero_without_plan():
 
 
 def test_australia_help_deducted_above_threshold():
-    result = calc("AU", 8000, {}, AU_SLABS, study_loan_plan="AU_HELP", study_loan_balance=Decimal("15000"))
+    # $8,000/mo -> weekly-equivalent x = floor(8000*3/13)+0.99 = 1846.99,
+    # which lands in the [1337,2494) coefficient band, so a real nonzero
+    # amount computes — no flat annual threshold involved any more.
+    result = calc(
+        "AU", 8000, {}, AU_STSL_SLABS, au_tax_free_threshold_claimed=True,
+        study_loan_plan="AU_HELP", study_loan_balance=Decimal("15000"),
+    )
     assert result.study_loan_deduction > 0
 
 
 def test_australia_help_zero_below_threshold():
-    # $54,435/yr threshold ÷ 12 ≈ $4,536/mo — a $2,000/mo gross stays under it.
-    result = calc("AU", 2000, {}, AU_SLABS, study_loan_plan="AU_HELP", study_loan_balance=Decimal("15000"))
+    # $2,000/mo -> weekly-equivalent x = floor(2000*3/13)+0.99 = 461.99,
+    # below the first configured band's 1337 upper bound (a=0,b=0), so
+    # the coefficient formula itself yields 0 — not a flat annual
+    # threshold check any more.
+    result = calc(
+        "AU", 2000, {}, AU_STSL_SLABS, au_tax_free_threshold_claimed=True,
+        study_loan_plan="AU_HELP", study_loan_balance=Decimal("15000"),
+    )
     assert result.study_loan_deduction == Decimal("0")
 
 

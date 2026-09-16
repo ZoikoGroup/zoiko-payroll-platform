@@ -105,7 +105,13 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 #      once enabled this only produces a nonzero effect for an employee
 #      with is_director=True (a field nobody has set, default False) —
 #      every non-director UK payslip is completely unaffected.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US"}
+# AU added (ZP-TAX-AU-2026-27-001 Payday Super Phase 2, 2026-09-16) for
+# Superannuation Guarantee Maximum Contribution Base tracking — same
+# "0 real employees exist for this country in the live DB at enable time"
+# safety reasoning already used for US's own addition above: enabling
+# changes nothing until a real AU accumulator row exists, and this same
+# session is what builds the write path that would create one.
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -139,7 +145,11 @@ _YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US"}
 #      of this date, so flipping this changes no already-generated
 #      payslip; it takes effect once a real ON/BC/MB/NL/QC employee's
 #      payslip is generated.
-_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "CA"}
+# AU added (ZP-TAX-AU-2026-27-001 §14-18, Phase 4, 2026-09-16) for
+# state/territory employer payroll tax's org-level aggregate-wages
+# tracking — same "0 real AU employees exist, safe to enable now" reasoning
+# as every other addition above.
+_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "CA", "AU"}
 
 # Per-country rollout switch for the CRA-correct CREDIT method of
 # applying "amounts" (federal BPAF, provincial BPA, Quebec BPA — and any
@@ -345,6 +355,17 @@ _CA_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"CA"}
 #      same "enable now, zero live effect until configured" reasoning CA
 #      used for its own switch above).
 _US_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"US"}
+
+# Per-country rollout switch for Australia's PAYG-withholding/SG-qualifying-
+# earnings taxability matrix (ZP-TAX-AU-2026-27-001 §11, Payday Super
+# Phase 2, 2026-09-16) — identical "OFF changes nothing; ON with zero
+# configured TaxabilityRule rows ALSO changes nothing (australia.py's
+# _resolve_au_taxability defaults every component to included, matching
+# today's single-ctx.gross behavior)" safety reasoning as CA/US above.
+# AU — enabled as part of this same build (no real AU employees exist in
+#      the live DB, and no AU TaxabilityRule row exists yet either) —
+#      same "enable now, zero live effect until configured" pattern.
+_AU_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"AU"}
 
 # Per-country rollout switch for Canada's associated-employer-group
 # exemption sharing (ZP-TAX-CA-2026-001 §15, gap-closure Phase 6,
@@ -1077,11 +1098,18 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
     # "ONE flat rate for the whole amount, not a marginal bracket sum"
     # shape as ON_EHT_BAND — see engine/countries/canada.py's
     # _retiring_allowance_rate_for_amount, which reads these rows directly.
+    # AU_PAYG_COEFFICIENT/AU_STSL_COEFFICIENT (ZP-TAX-AU-2026-27-001 §5/§8)
+    # are band-selected-by-PERIOD-weekly-x rows evaluated via y=a·x−b, not
+    # annual-income marginal brackets at all — see
+    # engine/countries/australia.py's _resolve_au_coefficient_band, which
+    # reads these rows directly. AU's own annual bracket table (§4) is
+    # reference/validation data only (AU-D02) and is stored as ordinary
+    # MARGINAL_RATE rows, unaffected by this exclusion.
     bracket_slabs = [
         s for s in slabs
         if getattr(s, "rule_type", None) not in (
             "SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY",
-            "CA_RETIRING_ALLOWANCE_BAND",
+            "CA_RETIRING_ALLOWANCE_BAND", "AU_PAYG_COEFFICIENT", "AU_STSL_COEFFICIENT",
         )
     ]
 

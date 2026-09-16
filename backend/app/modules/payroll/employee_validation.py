@@ -472,8 +472,48 @@ class AUEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{6}$"),
             "error": "BSB code must be 6 digits (e.g. 123456 or 123-456).",
         },
+        # ZP-TAX-AU-2026-27-001 §14 declarations. Previously AU had no
+        # FIELD_COLUMN_MAP at all — the same class of dead-plumbing gap
+        # UK's paye_tax_code/ni_category and US's w4_filing_status/
+        # state_tax_jurisdiction already had before their own fixes:
+        # tfn/help_stsl_debt etc. reached compliance_fields JSON but never
+        # the PayrollEmployee.au_* columns engine/countries/australia.py's
+        # Schedule 1/8 calculator (ZP-TAX-AU-2026-27-001 build) reads.
+        "tfn_status": {"choices": ["PROVIDED", "NOT_PROVIDED", "EXEMPTION"]},
+        "residency_status": {"choices": ["RESIDENT", "FOREIGN_RESIDENT", "WORKING_HOLIDAY_MAKER"]},
+        "tax_free_threshold_claimed": {"choices": ["true", "false", "True", "False"]},
+        "medicare_levy_exemption": {"choices": ["FULL", "HALF"]},
+        "withholding_variation_pct": {"pattern": re.compile(r"^\d+(\.\d{1,2})?$"), "error": "Withholding variation must be a number."},
+        # State/territory of work — drives which of the 8 employer
+        # payroll-tax packages (NSW/VIC/QLD/WA/SA/TAS/ACT/NT) an
+        # employee's wages are attributed to; reuses the same generic
+        # PayrollEmployee.work_state column US/CA already populate.
+        "work_state": {
+            "upper": True,
+            "choices": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
+        },
     }
     duplicate_field = "tfn"
+
+    FIELD_COLUMN_MAP = {
+        "tfn_status": "au_tfn_status",
+        "residency_status": "au_residency_status",
+        "tax_free_threshold_claimed": "au_tax_free_threshold_claimed",
+        "medicare_levy_exemption": "au_medicare_levy_exemption",
+        "withholding_variation_pct": "au_withholding_variation_pct",
+        "work_state": "work_state",
+        # Same shape as UK's has_postgrad_loan reuse of study_loan_plan/
+        # study_loan_balance — HELP/HECS is stored in the SAME generic
+        # study_loan_plan/study_loan_balance pair UK's Student Loan uses
+        # (see models.PayrollEmployee.study_loan_plan's own docstring),
+        # never a parallel AU-only field.
+        "help_stsl_debt": "study_loan_plan",
+    }
+    FIELD_VALUE_MAP = {
+        "tax_free_threshold_claimed": lambda v: str(v).strip().lower() == "true",
+        "withholding_variation_pct": lambda v: Decimal(v) if v else None,
+        "help_stsl_debt": lambda v: "AU_HELP" if str(v).strip().lower() == "true" else None,
+    }
 
 
 class CAEmployeeValidation(EmployeeValidationStrategy):
