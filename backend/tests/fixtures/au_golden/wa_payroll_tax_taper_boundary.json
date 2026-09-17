@@ -1,0 +1,22 @@
+{
+  "description": "Mandatory boundary test (Section 27, 'WA taper'): $1m/$7.5m boundaries, 2/13 taper. Org's cumulative WA wages were $900,000 before this employee's $230,000 contribution this period. annual(1,130,000): excess over $1m threshold = 130,000; deduction = 1,000,000 - 130,000*2/13 = 1,000,000-20,000=980,000; taxable = 1,130,000-980,000=150,000; tax = 150,000*5.5% = 8,250.00. annual(900,000): wages below threshold -> deduction=1,000,000 (full base) -> taxable = max(0, 900,000-1,000,000) = 0 -> tax=0. Period liability = 8,250.00 - 0 = 8,250.00.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 15/17 (WA: $1,000,000/$7,500,000 thresholds, 2/13 taper, 5.5%, effective 1 Jul 2026) and Section 27.",
+  "context": {
+    "gross": "230000.00",
+    "country": "AU",
+    "pay_frequency": "Monthly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "work_state": "WA",
+    "au_state_payroll_tax_ytd_remuneration_before": "900000.00",
+    "rate_map": {
+      "wa_pt_threshold": {"flat_amount": "1000000"},
+      "wa_pt_upper_threshold": {"flat_amount": "7500000"},
+      "wa_pt_rate": {"employer_rate_pct": "5.5"}
+    }
+  },
+  "expected": {
+    "employer_payroll_tax": "8250.00"
+  }
+}

@@ -393,7 +393,21 @@ _AU_TAXABILITY_MATRIX_ENABLED_COUNTRIES: set[str] = {"AU"}
 # ("every org today" per this comment's own original text), so an org
 # sums across a "group of one" -- unchanged from reading its own total
 # alone -- until an admin actually groups two orgs together.
-_CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES: set[str] = {"CA"}
+#
+# AU — widened 2026-09-17 (§AU-D07: "State payroll-tax rate/threshold
+# entitlement may depend on Australian wages and group status, not only
+# wages in the state") to close the cross-employer group/interstate
+# wage aggregation gap engine/countries/australia.py's own module
+# docstring previously disclosed as NOT wired. Reuses this SAME switch
+# (rather than a new near-duplicate one) since the underlying mechanism
+# — service.py's _connected_group_member_ids/_sum_org_ytd_component_
+# across_orgs — is exactly the country-agnostic thing this constant's
+# own docstring above already describes; only
+# _au_org_payroll_tax_read_inputs's own dispatch (service.py) decides
+# which AU components apply it (all 8 states, since §AU-D07 applies to
+# entitlement generally, unlike CA where only 4 of 5 levies qualify).
+# Same "group of one, unchanged" dormancy for every org today.
+_CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES: set[str] = {"CA", "AU"}
 
 # Per-country rollout switch for Quebec's temporary HSF sector exemption
 # (ZP-TAX-CA-2026-001 §15, gap-closure Phase 7, 2026-09-11) — "Eligibility

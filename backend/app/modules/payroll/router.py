@@ -113,6 +113,7 @@ from app.modules.payroll.schemas import (
     GratuityCalculateRequest, GratuityCalculateResponse,
     IndiaForm138GenerateRequest, IndiaForm123GenerateRequest, USW2GenerateRequest,
     USForm941GenerateRequest, USForm940GenerateRequest,
+    AUSuperstreamGenerateRequest, AUPayrollTaxReturnGenerateRequest,
     NewHireReportCreate, NewHireReportMarkFiledRequest, NewHireReportResponse,
     SalaryTdsDeclarationCreate, SalaryTdsDeclarationResponse,
     SalaryTdsClaimCreate, SalaryTdsClaimResponse, SalaryTdsClaimRejectRequest,
@@ -2440,6 +2441,43 @@ def generate_india_form_138(
     return service.generate_india_form_138(
         db, current_user.organization_id, data.report_template_id, data.reporting_year, data.period_key,
         actor_id=current_user.id,
+    )
+
+
+# ── Australia: SuperStream contribution message + state payroll-tax ────
+# return generation (ZP-TAX-AU-2026-27-001 §12/§15-18, Phase 9, 2026-09-17).
+# STP itself has no dedicated endpoint — it uses the fully generic
+# POST /generated-reports above unchanged, same as CA/India/UK's own
+# generic-engine report types.
+
+@payroll_router.post(
+    "/au/reports/superstream", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate an Australia SuperStream contribution message for one payroll run",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_au_superstream(
+    data: AUSuperstreamGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_au_superstream_report(
+        db, current_user.organization_id, data.report_template_id, data.payroll_run_id, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/au/reports/payroll-tax-return", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate an Australia state/territory payroll tax return — employer-level, sums every finalized payslip across the period's runs",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_au_payroll_tax_return(
+    data: AUPayrollTaxReturnGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_au_state_payroll_tax_return(
+        db, current_user.organization_id, data.report_template_id, data.work_state,
+        data.period_start, data.period_end, actor_id=current_user.id,
     )
 
 

@@ -1,0 +1,21 @@
+{
+  "description": "Mandatory boundary test (Section 27, 'NSW threshold'): $1.2m annual Australian wages boundary. Org's cumulative NSW wages were $1,150,000 before this employee's $100,000 contribution this period, crossing the $1,200,000 threshold mid-period. annual(1,250,000) = 0.0545*(1,250,000-1,200,000) = 2725.00; annual(1,150,000) = 0 (below threshold). Period liability = 2725.00 - 0 = 2725.00. Employer-liability-only (AU-D05) -- never reduces employee net pay.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 15/17 (NSW: $1,200,000 annual threshold, 5.45%, effective 1 Jul 2026) and Section 27.",
+  "context": {
+    "gross": "100000.00",
+    "country": "AU",
+    "pay_frequency": "Monthly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "work_state": "NSW",
+    "au_state_payroll_tax_ytd_remuneration_before": "1150000.00",
+    "state_slabs": [
+      {"min_amount": "0", "max_amount": "1200000", "rate_pct": "0"},
+      {"min_amount": "1200000", "max_amount": null, "rate_pct": "5.45"}
+    ]
+  },
+  "expected": {
+    "employer_payroll_tax": "2725.00"
+  }
+}

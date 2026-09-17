@@ -260,6 +260,8 @@ class StandardStrategy(PayrollStrategy):
             au_state_payroll_tax_ytd_remuneration_after=deductions.get("au_state_payroll_tax_ytd_remuneration_after"),
             au_statutory_deductions_total=deductions.get("au_statutory_deductions_total", Decimal("0")),
             au_statutory_deductions_detail=deductions.get("au_statutory_deductions_detail", []),
+            au_workers_compensation_premium=deductions.get("au_workers_compensation_premium", Decimal("0")),
+            au_calculation_trace=deductions.get("au_calculation_trace"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

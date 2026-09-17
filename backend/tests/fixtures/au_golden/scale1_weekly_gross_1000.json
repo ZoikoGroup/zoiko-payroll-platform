@@ -1,0 +1,24 @@
+{
+  "description": "Scale 1 (tax-free threshold not claimed), resident, weekly gross $1000. x=floor(1000)+0.99=1000.99 falls in the [515,932)->[932,2246) boundary at 932, landing in the 932-2246 band (a=0.32, b=71.6508). y = 0.32*1000.99 - 71.6508 = 248.666, rounds to 249.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (NAT 1004, Scale 1 — TF threshold not claimed, effective 1 Jul 2026). Hand-computed against the document's own y=a*x-b formula, cross-checked by running the real engine at authoring time.",
+  "context": {
+    "gross": "1000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": false,
+    "slabs": [
+      {"min_amount": "0", "max_amount": "188", "rate_pct": "0.15", "flat_amount": "0.15", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "188", "max_amount": "371", "rate_pct": "0.2084", "flat_amount": "11.0185", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "371", "max_amount": "515", "rate_pct": "0.179", "flat_amount": "0.1066", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "515", "max_amount": "932", "rate_pct": "0.3227", "flat_amount": "74.1674", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "932", "max_amount": "2246", "rate_pct": "0.32", "flat_amount": "71.6508", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "2246", "max_amount": "3303", "rate_pct": "0.39", "flat_amount": "228.8816", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"},
+      {"min_amount": "3303", "max_amount": null, "rate_pct": "0.47", "flat_amount": "493.1893", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_1"}
+    ]
+  },
+  "expected": {
+    "tds": "249"
+  }
+}

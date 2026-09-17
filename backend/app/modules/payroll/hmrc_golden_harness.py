@@ -202,6 +202,21 @@ def build_context(case_context: dict) -> PayrollContext:
         tax_regime=case_context.get("tax_regime"),
         gender=case_context.get("gender"),
         tax_residency_status=case_context.get("tax_residency_status"),
+        # Australia (ZP-TAX-AU-2026-27-001, Phase 7 golden tests, 2026-09-17):
+        # declaration/YTD fields engine/countries/australia.py reads.
+        # work_state/state_rate_map/state_slabs above are already generic
+        # and reused as-is for the 8-state payroll-tax layer.
+        au_tfn_status=case_context.get("au_tfn_status"),
+        au_residency_status=case_context.get("au_residency_status"),
+        au_tax_free_threshold_claimed=case_context.get("au_tax_free_threshold_claimed"),
+        au_medicare_levy_exemption=case_context.get("au_medicare_levy_exemption"),
+        au_withholding_variation_pct=_to_decimal(case_context.get("au_withholding_variation_pct")),
+        au_extra_pay_calendar=case_context.get("au_extra_pay_calendar"),
+        au_sapto_category=case_context.get("au_sapto_category"),
+        ytd_sg_qualifying_earnings_before=_to_decimal(case_context.get("ytd_sg_qualifying_earnings_before")),
+        au_state_payroll_tax_ytd_remuneration_before=_to_decimal(case_context.get("au_state_payroll_tax_ytd_remuneration_before")),
+        au_payroll_tax_regional_status=case_context.get("au_payroll_tax_regional_status"),
+        au_payroll_tax_charity_exempt=case_context.get("au_payroll_tax_charity_exempt"),
     )
 
 

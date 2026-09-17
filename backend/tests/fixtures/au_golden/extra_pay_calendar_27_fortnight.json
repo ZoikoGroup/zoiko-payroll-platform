@@ -1,0 +1,22 @@
+{
+  "description": "Section 7 'Extra-pay calendar' control: 27 fortnightly pays in the income year. Scale 2, fortnightly gross $3000. x=floor(3000/2)+0.99=1500.99, in [1282,2596) (a=0.32,b=181.7319) -> weekly y=298.5849 -> 299, converted to fortnightly (x2) = 598. Fortnightly gross $3000 falls in the $1,700-$5,199 additional-withholding band -> +$12. Expected tds = 598 + 12 = 610.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (Scale 2) and Section 7 ('Extra-pay calendar', 27 fortnightly pays, $1,700-$5,199 -> $12, effective 1 Jul 2026).",
+  "context": {
+    "gross": "3000.00",
+    "country": "AU",
+    "pay_frequency": "Fortnightly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "au_extra_pay_calendar": "27_FORTNIGHT",
+    "slabs": [
+      {"min_amount": "1282", "max_amount": "2596", "rate_pct": "0.32", "flat_amount": "181.7319", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "1700", "max_amount": "5200", "rate_pct": "0", "flat_amount": "12", "rule_type": "AU_EXTRA_PAY_WITHHOLDING", "filing_status": "27_FORTNIGHT"},
+      {"min_amount": "5200", "max_amount": "7250", "rate_pct": "0", "flat_amount": "27", "rule_type": "AU_EXTRA_PAY_WITHHOLDING", "filing_status": "27_FORTNIGHT"},
+      {"min_amount": "7250", "max_amount": null, "rate_pct": "0", "flat_amount": "48", "rule_type": "AU_EXTRA_PAY_WITHHOLDING", "filing_status": "27_FORTNIGHT"}
+    ]
+  },
+  "expected": {
+    "tds": "610"
+  }
+}

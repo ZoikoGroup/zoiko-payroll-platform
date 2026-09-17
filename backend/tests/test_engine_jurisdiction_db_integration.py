@@ -144,6 +144,56 @@ def test_canonical_rate_seeds_org_on_first_use(db, organization):
     assert pt.organization_id == organization.id  # seeded as the org's own row
 
 
+def test_canonical_rate_sync_preserves_filing_status_and_tax_regime(db, organization):
+    # Real bug, found 2026-09-17 via the same audit that caught TaxSlab's
+    # missing filing_status copy (see test_canonical_slab_sync_preserves_
+    # filing_status above): sync_org_rates_from_canonical's ContributionRate
+    # reconstruction never copied filing_status OR tax_regime either — both
+    # added to the model after this copy list was first written. Without
+    # tax_regime specifically, a synced row silently becomes "regime-
+    # agnostic" instead of staying scoped to Old/New regime
+    # (get_contribution_rates' own regime-aware filter never excludes it),
+    # which would incorrectly apply an Old-Regime-only rate under New Regime
+    # too for any org never explicitly "Apply Tax & Sync Rates"-assigned.
+    pack = _make_active_tax_pack(db, "IN")
+    rate = _make_rate("IN", "standard_deduction", organization_id=None, flat_amount=Decimal("75000"))
+    rate.jurisdiction_pack_id = pack.id
+    rate.tax_regime = "New"
+    db.add(rate)
+    db.commit()
+
+    rows = service.get_contribution_rates(db, organization.id, country="IN", tax_regime="New")
+    synced = next(r for r in rows if r.component_key == "standard_deduction")
+    assert synced.tax_regime == "New"
+    assert synced.organization_id == organization.id
+
+
+def test_canonical_slab_sync_preserves_filing_status(db, organization):
+    # Real bug, found 2026-09-17 via a live AU end-to-end payroll run:
+    # sync_org_rates_from_canonical's TaxSlab(...) reconstruction never
+    # copied filing_status (added to the model after this copy list was
+    # first written, same "field added later, never retrofitted" gap as
+    # flat_amount/adjustment_amount/ni_category/employer_rate_pct already
+    # documented in that function) — every org auto-seeded through this
+    # path (any org never explicitly "Apply Tax & Sync Rates"-assigned to
+    # a canonical pack) silently lost the Scale/declaration-state
+    # identifier AU's own AU_PAYG_COEFFICIENT/AU_STSL_COEFFICIENT bands
+    # are keyed on, computing $0 PAYG/STSL for every employee.
+    pack = _make_active_tax_pack(db, "AU")
+    slab = TaxSlab(
+        organization_id=None, jurisdiction_country="AU", jurisdiction_pack_id=pack.id,
+        min_amount=Decimal("0"), max_amount=Decimal("362"), rate_pct=Decimal("0"), rate_label="PAYG", tax_formula="",
+        rule_type="AU_PAYG_COEFFICIENT", filing_status="SCALE_2", flat_amount=Decimal("0"),
+    )
+    db.add(slab)
+    db.commit()
+
+    rows = service.get_tax_slabs(db, organization.id, country="AU")
+    scale2 = next(r for r in rows if r.rule_type == "AU_PAYG_COEFFICIENT")
+    assert scale2.filing_status == "SCALE_2"
+    assert scale2.organization_id == organization.id  # seeded as the org's own row
+
+
 def test_hardcoded_fallback_when_no_canonical_and_no_org_row(db, organization):
     # Nothing configured anywhere for this org+country — must fall back to
     # the hardcoded _CONTRIBUTION_RATES_BY_COUNTRY default (India "pt" = 200)

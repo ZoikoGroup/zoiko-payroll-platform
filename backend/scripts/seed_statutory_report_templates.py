@@ -38,12 +38,12 @@ from app.modules.payroll.schemas import (
 )
 
 
-def _seed_template(db, *, template_key, name, report_type, country, reporting_year, document_scope, components):
+def _seed_template(db, *, template_key, name, report_type, country, reporting_year, document_scope, components, state=None):
     """`components` = [(component_key, label, [(field_key, label, field_type, data_source_kind, source_column, aggregation), ...])]"""
     template = service.upsert_report_template(
         db, ReportTemplateUpsert(
             templateKey=template_key, name=name, reportType=report_type,
-            jurisdictionCountry=country, reportingYear=reporting_year, documentScope=document_scope,
+            jurisdictionCountry=country, jurisdictionState=state, reportingYear=reporting_year, documentScope=document_scope,
             changeSummary="Seeded via scripts/seed_statutory_report_templates.py",
         ), actor_id=None,
     )
@@ -410,6 +410,75 @@ def run():
         # base cap (not derived from tax, since the effective rate can
         # vary by state/config) rather than a plain SUM_RUN of these
         # mapped source_columns. See that function's own docstring.
+
+        print("Seeding Australia STP (Single Touch Payroll) pay-event submission, aggregate...")
+        _seed_template(
+            db, template_key="AU-STP", name="Single Touch Payroll (STP) Pay Event", report_type="STP",
+            country="AU", reporting_year="2026-27", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_abn", "Australian Business Number (ABN)", "text", "EMPLOYER_PROFILE", "employer_id", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("payg", "PAYG Withholding", [
+                    ("payg_withholding", "PAYG Withholding (Schedule 1 + STSL)", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("stsl_component", "Study and Training Support Loan Component", "currency", "PAYSLIP_ITEM", "study_loan_deduction", None),
+                ]),
+                ("super", "Superannuation", [
+                    ("sg_amount", "Superannuation Guarantee (this payday)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ]),
+                ("ytd", "Year-to-Date", [
+                    ("payg_withholding_ytd", "PAYG Withholding (Year-to-Date)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                    ("sg_amount_ytd", "Superannuation Guarantee (Year-to-Date)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_YTD"),
+                ]),
+            ],
+        )
+        # DISCLOSED SCOPE LIMITATION (Phase 9, 2026-09-17): qualifying
+        # earnings (PayrollResult.sg_qualifying_earnings_period) is NOT
+        # mapped above — it is an ephemeral engine-calculation field, not
+        # a persisted PayslipItem column, so PAYSLIP_ITEM source_column
+        # mapping cannot reach it (see models.PayslipItem's own
+        # calculation-trace disclosure). The 8 states' payroll-tax
+        # periodic/annual return reports are still open — this seed only
+        # covers the STP pay-event submission and the SuperStream
+        # contribution message (below).
+
+        print("Seeding Australia SuperStream contribution message, aggregate (bespoke generator)...")
+        # No components/fields registered — service.generate_au_
+        # superstream_report is a bespoke generator (same reasoning as
+        # generate_uk_eps) that reads SuperGuaranteeLiability directly,
+        # never the generic ReportTemplateComponentField mapping. This
+        # template row exists purely to carry status/version/lifecycle —
+        # the same minimal-template pattern EPS's own declaration fields
+        # already established for data the field-mapper can't reach.
+        _seed_template(
+            db, template_key="AU-SUPERSTREAM", name="SuperStream Contribution Message", report_type="SUPERSTREAM",
+            country="AU", reporting_year="2026-27", document_scope="AGGREGATE", components=[],
+        )
+
+        print("Seeding Australia state/territory payroll-tax returns, one per jurisdiction (bespoke generator)...")
+        # No components/fields registered — service.generate_au_state_
+        # payroll_tax_return is a bespoke generator (same reasoning as
+        # SuperStream above) that sums PayslipItem.employer_payroll_tax
+        # directly, never the generic field-mapper. One template row per
+        # state, matching the document's own AU-NSW-2026-27/AU-VIC-2026-
+        # 27/... package-per-state model (§3) — jurisdiction_state scopes
+        # generate_au_state_payroll_tax_return to exactly that state.
+        for state_code, state_name in [
+            ("NSW", "New South Wales"), ("VIC", "Victoria"), ("QLD", "Queensland"), ("WA", "Western Australia"),
+            ("SA", "South Australia"), ("TAS", "Tasmania"), ("ACT", "Australian Capital Territory"), ("NT", "Northern Territory"),
+        ]:
+            _seed_template(
+                db, template_key=f"AU-PAYROLL-TAX-{state_code}", name=f"{state_name} Payroll Tax Return",
+                report_type="AU_PAYROLL_TAX_RETURN", country="AU", state=state_code,
+                reporting_year="2026-27", document_scope="AGGREGATE", components=[],
+            )
 
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:

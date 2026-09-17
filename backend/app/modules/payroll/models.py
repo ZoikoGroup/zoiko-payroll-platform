@@ -469,6 +469,23 @@ class PayrollEmployee(Base):
     # "Withholding declaration"), applied only where the variation is on
     # file — never inferred. NULL means no variation.
     au_withholding_variation_pct = Column(Numeric(5, 2), nullable=True)
+    # §7's own "Extra-pay calendar" control — set only when an org
+    # explicitly identifies a specific income year as landing this
+    # employee's pay cycle on the 53rd weekly pay or 27th fortnightly pay
+    # (a rare calendar-alignment fact, never inferred from pay_date
+    # arithmetic here). NULL (the ordinary 52/26-pay calendar) is the
+    # default and unaffected behavior for every employee today.
+    au_extra_pay_calendar = Column(String(20), nullable=True)  # "53_WEEK" | "27_FORTNIGHT"
+    # §5 step 4's SAPTO declaration (Phase 10, 2026-09-17) — a self-
+    # declared seniors/pensioners category, entirely separate from
+    # au_tax_free_threshold_claimed. NULL means no SAPTO applies (LITO,
+    # by contrast, applies automatically to every resident and needs no
+    # declaration column at all). Only "SINGLE" resolves to a real offset
+    # today — see engine/countries/australia.py's own docstring for why
+    # "COUPLE"/"ILLNESS_SEPARATED_COUPLE" stay at $0 pending confirmed
+    # ATO data (two independent lookups of the published figures for
+    # those two categories specifically produced conflicting thresholds).
+    au_sapto_category = Column(String(30), nullable=True)  # "SINGLE" | "COUPLE" | "ILLNESS_SEPARATED_COUPLE"
 
     # Government study-loan repayment, deducted via payroll above an
     # income threshold — the SAME mechanism under different names in the
@@ -1111,6 +1128,17 @@ class PayslipItem(Base):
     (rather than always joined live) so historical payslips stay accurate
     even if the employee's record changes or the employee later leaves —
     this is standard practice for payroll/financial documents.
+
+    RESOLVED (ZP-TAX-AU-2026-27-001 §25 "Calculation Trace — Minimum
+    Audit Payload", 2026-09-17): `au_calculation_trace` below is a
+    deliberately AU-SCOPED JSON column (Option A of the two architecture
+    choices raised in the 2026-09-16/17 gap analysis — a platform-wide
+    `PayrollCalculationTrace` table was the alternative, explicitly
+    declined for now), chosen because AU's own §25 requirement is the
+    only one currently forcing this decision and a generic table can
+    still be introduced later without migrating this column's data (the
+    JSON shape would simply become that table's own payload). No other
+    country gets a trace column from this change.
     """
     __tablename__ = "payslip_items"
 
@@ -1398,6 +1426,27 @@ class PayslipItem(Base):
     # same "total only, no frozen snapshot" scope as every other
     # non-YTD-accumulator-backed deduction on this table.
     au_statutory_deductions_total = Column(Numeric(12, 2), default=0, server_default="0")
+    # Australia: workers compensation premium (§18 employer overlay, Phase
+    # 9 follow-up, 2026-09-17) — same employer-liability-only contract as
+    # employer_payroll_tax above (AU-D05), a completely separate figure
+    # from state payroll tax (different rate, different authority, no
+    # YTD/telescoping — a flat rate on this period's own wages).
+    au_workers_compensation_premium = Column(Numeric(12, 2), default=0, server_default="0")
+    # Australia: §25 "Calculation Trace — Minimum Audit Payload" (Phase 9
+    # follow-up, 2026-09-17). AU-only JSON payload recording HOW each AU
+    # statutory figure on this payslip was derived — Schedule 1 scale/
+    # weekly-x/coefficient-a/coefficient-b/pre-rounding-y for PAYG,
+    # Schedule 8's own equivalent for STSL, the MLS threshold/rate/annual-
+    # gross test, which Super Guarantee method applied (YTD-capped vs
+    # annualized-estimate) with the MCB figures used, and the state
+    # payroll-tax state/threshold/taper/charity-exemption facts — see
+    # engine/countries/australia.py's calculate() for exactly what it
+    # writes. Nullable/None for any payslip computed before this field
+    # existed or where a given component didn't run (e.g. no STSL
+    # obligation) — never backfilled or inferred after the fact, same
+    # "real figures only, no reconstruction" discipline as every other
+    # audit-trail field in this codebase.
+    au_calculation_trace = Column(JSON, nullable=True)
     # India: EPS diversion + residual — purely-informational breakdown of
     # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
     # employer_pf_residual == employer_pf always, never additional to it.
@@ -2058,7 +2107,14 @@ class ContributionRate(Base):
     # column's ~99.9999% ceiling. See migration f4a5b6c7d8e9.
     employee_rate_pct    = Column(Numeric(7, 4), nullable=True)  # e.g. 0.1200 for 12%
     employer_rate_pct    = Column(Numeric(7, 4), nullable=True)
-    flat_amount          = Column(Numeric(10, 2), nullable=True)  # for flat components like PT
+    # Widened from Numeric(10,2) to Numeric(14,2) 2026-09-17 — found via
+    # LIVE data entry: NT's payroll-tax high-rate group-wage threshold is
+    # $100,000,000, which overflows Numeric(10,2)'s 8-digit-before-decimal
+    # ceiling. Matches TaxSlab.min_amount/max_amount's own Numeric(14,2)
+    # precision for consistency — same numeric-overflow bug class this
+    # project has hit before on CA/US builds; never caught by pytest,
+    # which never round-trips a value through the real DB column.
+    flat_amount          = Column(Numeric(14, 2), nullable=True)  # for flat components like PT
     # One generic slot for a non-numeric configuration value (UK pension
     # calculation basis "QUALIFYING_EARNINGS"/"BASIC_PAY"/"PENSIONABLE_EARNINGS",
     # auto-enrolment "true"/"false") — reuses this table's existing
@@ -2198,11 +2254,18 @@ class TaxSlab(Base):
     # status," so India/UK/existing-US bracket resolution is unaffected.
     # engine/countries/shared.py:_calculate_annual_tax prefers a row whose
     # filing_status matches the employee's over a NULL row when both exist.
-    filing_status         = Column(String(20), nullable=True)
+    # Widened from VARCHAR(20) to VARCHAR(30) 2026-09-17 — found via LIVE
+    # data entry (never caught by pytest, which builds in-memory dataclass
+    # contexts that never touch this column): AU's own Schedule 8 family
+    # name "STSL_CLAIMED_OR_FOREIGN" is 24 characters, silently truncated
+    # to a StringDataRightTruncation error on insert. Same VARCHAR-limit
+    # bug class this project has hit before on CA/US builds.
+    filing_status         = Column(String(30), nullable=True)
 
     # MARGINAL_RATE (default, existing brackets) | FLAT_RATE | FIXED_PLUS_MARGINAL
     # | FORMULA | TABLE_LOOKUP | CONTRIBUTION | PT_FLAT | AU_PAYG_COEFFICIENT |
-    # AU_STSL_COEFFICIENT. Only FORMULA rows use formula_expression instead
+    # AU_STSL_COEFFICIENT | AU_EXTRA_PAY_WITHHOLDING | AU_LITO_OFFSET |
+    # AU_SAPTO_OFFSET | AU_SCHEDULE3_COEFFICIENT. Only FORMULA rows use formula_expression instead
     # of min/max/rate_pct — e.g. Germany's Lohnsteuer, which isn't a clean
     # bracket table. Existing bracket rows for every country default to
     # MARGINAL_RATE, so no calculator changes are required until a row
@@ -2226,7 +2289,42 @@ class TaxSlab(Base):
     # column per rule_type" convention India's PT_FLAT/gender and US's
     # filing_status already use. See engine/countries/australia.py's
     # _resolve_au_coefficient_band.
-    rule_type             = Column(String(20), nullable=False, default="MARGINAL_RATE", server_default="MARGINAL_RATE")
+    # AU_EXTRA_PAY_WITHHOLDING (ZP-TAX-AU-2026-27-001 §7's "Extra-pay
+    # calendar" table): a flat top-up on top of the ordinary Schedule 1
+    # result, not a formula — min_amount/max_amount hold the period
+    # earnings band (in the pay-frequency-appropriate figure, e.g. weekly
+    # or fortnightly gross, NOT the Schedule 1 weekly-x conversion), and
+    # flat_amount (same column PT_FLAT/AU_STSL_COEFFICIENT's `b` use)
+    # holds the additional withholding dollar amount for that band.
+    # filing_status holds which calendar this row belongs to
+    # ("53_WEEK"/"27_FORTNIGHT"). rate_pct stays 0.00 (unread) on these
+    # rows, same convention PT_FLAT already established.
+    # Widened from VARCHAR(20) to VARCHAR(30) 2026-09-17 — found via LIVE
+    # data entry (never caught by pytest, which builds in-memory dataclass
+    # contexts that never touch this column): "AU_EXTRA_PAY_WITHHOLDING"
+    # is 25 characters, silently truncated to a StringDataRightTruncation
+    # error on insert. Same VARCHAR-limit bug class as filing_status above.
+    # AU_LITO_OFFSET/AU_SAPTO_OFFSET (ZP-TAX-AU-2026-27-001 §5 step 4,
+    # Phase 10 2026-09-17): a shading-out offset band, ANCHORED AT THE
+    # BAND'S OWN min_amount rather than at 0 (unlike AU_PAYG_COEFFICIENT's
+    # y=a·x−b) — offset = flat_amount − rate_pct% × (annual_income −
+    # min_amount), floored at $0. min_amount/max_amount hold the annual
+    # taxable-income band, rate_pct the phase-out rate, flat_amount the
+    # band's own base offset dollar figure (same column reuse convention
+    # as every other AU rule_type above), and filing_status holds "LITO"
+    # for AU_LITO_OFFSET or the SAPTO category ("SINGLE"/"COUPLE"/
+    # "ILLNESS_SEPARATED_COUPLE") for AU_SAPTO_OFFSET — see
+    # engine/countries/australia.py's _calculate_au_income_tax_offset.
+    # AU_SCHEDULE3_COEFFICIENT (Phase 12, 2026-09-17, NAT 1023 entertainers):
+    # identical shape/column mapping to AU_PAYG_COEFFICIENT (y=a·x−b on a
+    # weekly-equivalent x), a separate rule_type only because Schedule 3's
+    # own bands are genuinely different numbers from Schedule 1's — never
+    # read by the ordinary PAYG scale lookup. filing_status holds
+    # "SCHEDULE3_THRESHOLD_CLAIMED"/"SCHEDULE3_NO_THRESHOLD" — the no-TFN
+    # and foreign-resident cases skip this table entirely (flat rate / own
+    # hardcoded weekly scale — see calculate_au_schedule3_entertainer_
+    # withholding).
+    rule_type             = Column(String(30), nullable=False, default="MARGINAL_RATE", server_default="MARGINAL_RATE")
     formula_expression    = Column(Text, nullable=True)
     # PT_FLAT only: the fixed monthly deduction for this gross-income
     # bracket, and an optional override for whichever month absorbs the
@@ -2340,6 +2438,23 @@ class CompanyComplianceDetails(Base):
     # associated-employer-group mechanism already use) rather than a new
     # AU-specific group column.
     au_payroll_tax_regional_status = Column(String(20), nullable=True)
+    # §18 "Charity / public-benefit exemptions" employer overlay — "requires
+    # authority/legal eligibility and often applies only to qualifying
+    # wages/activities." The ELIGIBILITY DETERMINATION itself is a human/
+    # legal judgment call this codebase cannot make (no computable test is
+    # given anywhere in the source document — same reasoning SA's reduced-
+    # rate band raises rather than guesses for); this column only stores
+    # that determination once a human has made it (Tax Ops data entry
+    # against a real authority ruling, same evidentiary footing as
+    # EmployerTaxProfile's own EMPLOYER_NOTICE rows), and
+    # calculate_au_state_payroll_tax short-circuits to $0 while it's True.
+    # NULL/False (every org today) is ordinary (not exempt) — ordinary
+    # calculation is completely unaffected. The document's own "often
+    # applies only to qualifying wages/activities" nuance (a PARTIAL
+    # exemption scoped to specific activities) is NOT modeled — this is a
+    # deliberate, disclosed simplification to a whole-org binary exemption,
+    # since no wage/activity-level qualification rule is given either.
+    au_payroll_tax_charity_exempt = Column(Boolean, nullable=True)
 
     # Which JurisdictionPack this org is currently using, if any. Nullable —
     # orgs created before this table existed, or orgs in a jurisdiction
@@ -2821,10 +2936,24 @@ class RtiSubmission(Base):
     organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     generated_report_id = Column(Integer, ForeignKey("payroll_generated_reports.id"), nullable=False, index=True)
 
-    # FPS | EPS | P45 — denormalized from the GeneratedReport's own
-    # report_type for cheap listing, same convention GeneratedReport
-    # itself uses for report_type against ReportTemplate.
+    # FPS | EPS | P45 | STP | SUPERSTREAM — denormalized from the
+    # GeneratedReport's own report_type for cheap listing, same
+    # convention GeneratedReport itself uses for report_type against
+    # ReportTemplate. Widened to Australia's STP/SuperStream (ZP-TAX-AU-
+    # 2026-27-001 §12, Phase 9, 2026-09-17) the same way it was already
+    # widened to India's forms — see the RTI & Forms summary section
+    # below.
     submission_type = Column(String(20), nullable=False)
+    # Which authority schema/transport version this specific submission
+    # was built against (e.g. "NAT-STP-2026-27" or a SuperStream
+    # Contributions Standard version) — independent of the tax-rule
+    # package version (tracked instead via GeneratedReport.
+    # applicable_tax_pack_version). NULL for every existing UK row
+    # (predates this column; RTI's own schema versioning has never been
+    # tracked here) and optional going forward — closes AU-AC23/AU-AC24
+    # (ZP-TAX-AU-2026-27-001 §12, gap identified 2026-09-16, closed
+    # 2026-09-17) without inventing a second, AU-only tracking mechanism.
+    schema_version = Column(String(30), nullable=True)
 
     # DRAFT -> READY -> SUBMITTED -> ACKNOWLEDGED | REJECTED. DRAFT is the
     # state a fresh row starts in; READY means a human has reviewed it and
@@ -5184,7 +5313,21 @@ class SuperGuaranteeLiability(Base):
     actually transmits a SuperStream contribution message; when a real
     SuperStream/clearing-house integration exists, the only new work
     should be wiring a real API call into the SUBMITTED transition below,
-    not a redesign of this table."""
+    not a redesign of this table.
+
+    RESOLVED GAP (AU-AC23/AU-AC24, identified 2026-09-16, closed Phase 9
+    2026-09-17): §12 requires each STP submission and SuperStream message
+    to record its own schema/transport version, independently of the tax-
+    rule package version. Rather than add AU-only version columns HERE,
+    this is tracked on RtiSubmission.schema_version instead — the actual
+    STP/SuperStream SUBMISSION record (see service.generate_report_from_
+    template + the seeded "AU-STP" ReportTemplate, and RtiSubmission's
+    own widened submission_type set) is a distinct GeneratedReport/
+    RtiSubmission pair per payroll run, not a field on this per-payday
+    liability table. This table's own status/deadline fields remain the
+    correct home for the underlying SG obligation; the submission
+    artifact's schema version belongs with the submission, not the
+    liability it reports on."""
     __tablename__ = "payroll_super_guarantee_liabilities"
 
     id                    = Column(Integer, primary_key=True, index=True)
