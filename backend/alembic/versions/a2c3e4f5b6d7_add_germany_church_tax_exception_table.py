@@ -1,8 +1,15 @@
 """add germany church tax exception table
 
 Revision ID: a2c3e4f5b6d7
-Revises: f0a1b2c3d4e5
+Revises: 824bb1b61dc2
 Create Date: 2026-09-08 00:00:00.000000
+
+Phase 8CN renumbering note: this migration's parent revision was originally
+`f0a1b2c3d4e5`, renamed to `824bb1b61dc2` per
+docs/GERMANY_2026_8CN_ALEMBIC_COLLISION_RECONCILIATION_REPORT.md —
+`origin/main` independently reused `f0a1b2c3d4e5` for an unrelated
+migration. Only this `down_revision` line and this note changed; the
+upgrade()/downgrade() below are unchanged.
 
 Phase 8BC — schema reconciliation forensics found that
 GermanyChurchTaxException (models.py, `payroll_germany_church_tax_exceptions`,
@@ -27,7 +34,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a2c3e4f5b6d7'
-down_revision: Union[str, Sequence[str], None] = 'f0a1b2c3d4e5'
+down_revision: Union[str, Sequence[str], None] = '824bb1b61dc2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

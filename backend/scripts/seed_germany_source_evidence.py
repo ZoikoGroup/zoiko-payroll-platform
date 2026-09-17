@@ -487,6 +487,14 @@ def seed_germany_source_evidence(db: Session) -> list[SourceArtifact]:
 
 
 def main() -> None:
+    # Phase 8DF: some evidence titles contain non-ASCII characters (e.g.
+    # "->"-style arrows); Windows' default console codepage (cp1252) can't
+    # encode all of them and would otherwise crash this print loop AFTER
+    # the real seeding work already committed successfully — a confusing
+    # false-negative failure report, not a functional defect. Never
+    # touches the data itself, only how it's echoed to the console.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     # Phase 8BY: enforce the "isolated database only" instruction this
     # script's docstring already carried, BEFORE initialize_database()
     # creates an engine (and possibly create_all) against the target.

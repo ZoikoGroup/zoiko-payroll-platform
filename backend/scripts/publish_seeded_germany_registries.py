@@ -31,6 +31,15 @@ this directory. Run it against an isolated database only, immediately
 after seed_germany_2026_registries.py, with a real distinct maker/checker
 actor id pair.
 
+PHASE 8DF CHANGE FROM THE NIKHIL-BRANCH VERSION THIS WAS PORTED FROM:
+the earlier version hardcoded maker/checker actor ids as 901/902,
+documented there as "obviously-fake" placeholders. This version instead
+REQUIRES --maker-id/--checker-id on the command line and validates both
+resolve to real, active `User` rows with role=super_admin (see
+scripts/_actor_authorization.py) before doing anything else — it refuses
+to run rather than silently falling back to any placeholder. No other
+logic was changed from the validated nikhil version.
+
 Two responsibilities:
 
 1. publish_all_draft_registry_rows(db, maker_id, checker_id) — walks every
@@ -58,9 +67,10 @@ Usage (against whichever PAYROLL_DATABASE_URL is configured in the
 environment — never invoked automatically, never run against a shared/
 remote database by this phase):
 
-    python -m scripts.publish_seeded_germany_registries
+    python -m scripts.publish_seeded_germany_registries --maker-id 12 --checker-id 34
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -74,6 +84,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, initialize_database
 
 from scripts._local_db_guard import assert_local_database
+from scripts._actor_authorization import resolve_and_authorize_maker_checker
 from app.modules.payroll import service
 from app.modules.payroll.models import (
     GermanyChurchTaxException, GermanyContributionCeiling, GermanyEarningTaxabilityRule,
@@ -206,12 +217,20 @@ def _find_or_create_source(db: Session, agency: str, title: str, form_number=Non
     return row
 
 
-def migrate_and_publish_minijob_midijob_parameters(db: Session, maker_id: int, checker_id: int) -> dict:
+def migrate_and_publish_minijob_midijob_parameters(
+    db: Session, maker_id: int, checker_id: int, jurisdiction_pack_id: "int | None" = None,
+) -> dict:
     """Creates one GermanyMinijobMidijobParameter row per real hardcoded
     constant (see _MINIJOB_MIDIJOB_MIGRATION_PLAN) and publishes each via
     the real governed sequence. Idempotent: skips a parameter_code that
     already has a row covering 2026-01-01 (so re-running this script never
-    creates a duplicate/overlapping version)."""
+    creates a duplicate/overlapping version).
+
+    Phase 8DL: `jurisdiction_pack_id`, when given, is stamped onto every
+    newly-created row here too — unlike the other 8 registries (created by
+    seed_germany_2026_registries.py, which already accepts this
+    parameter), Minijob/Midijob rows are created HERE, by this script, so
+    the linkage must be threaded through this specific call site."""
     spec_4_source = _find_or_create_source(
         db, "Zoiko Payroll — Germany 2026 Statutory Configuration Pack v1.0",
         "§4 Minijob / Midijob Statutory Parameters (thresholds, flat rates, sliding-scale coefficients)",
@@ -251,6 +270,7 @@ def migrate_and_publish_minijob_midijob_parameters(db: Session, maker_id: int, c
                 parameter_code=parameter_code, value=value, value_type=value_type,
                 label=f"{label} (from hardcoded_defaults.{constant_name})",
                 effective_from=date(2026, 1, 1), authority_source_id=source.id if source else None,
+                jurisdiction_pack_id=jurisdiction_pack_id,
             ), actor_id=maker_id,
         )
         published = _walk_to_published(
@@ -269,7 +289,30 @@ def migrate_and_publish_minijob_midijob_parameters(db: Session, maker_id: int, c
     }
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Publish seeded Germany 2026 statutory registry rows (DRAFT -> PUBLISHED) "
+                    "and migrate Minijob/Midijob parameters, using real, distinct Super Admin actors.",
+    )
+    parser.add_argument("--maker-id", type=int, required=True, help="Real, active Super Admin user id (maker).")
+    parser.add_argument("--checker-id", type=int, required=True, help="Real, active Super Admin user id (checker). Must differ from --maker-id.")
+    parser.add_argument(
+        "--jurisdiction-pack-id", type=int, required=True,
+        help="Phase 8DL: REQUIRED — the payroll_jurisdiction_packs.id row (e.g. DE-PAYROLL-CY2026-V1) "
+             "the newly-created Minijob/Midijob parameter rows will be linked to. The other 8 registries "
+             "were already linked at seed time by seed_germany_2026_registries.py's own --jurisdiction-pack-id.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
+
+    # Phase 8DF: guard against a non-UTF8 Windows console crashing on a
+    # non-ASCII character in printed evidence/registry text (see the
+    # identical fix + rationale in seed_germany_source_evidence.py).
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     # Phase 8BY: enforce the "isolated database only" instruction this
     # script's docstring already carried, BEFORE initialize_database()
     # creates an engine (and possibly create_all) against the target.
@@ -277,20 +320,27 @@ def main() -> None:
     initialize_database()
     db = SessionLocal()
     try:
-        # Distinct maker/checker actor ids — no FK enforcement on these
-        # columns in this codebase's own test suite (see
-        # tests/test_germany_e2e_payroll_scenario.py's actor_id=1/2 and
-        # tests/test_germany_minijob_midijob_parameters.py's maker=201/
-        # checker=202 conventions); real production usage would pass real
-        # distinct Super Admin user ids instead.
-        maker_id, checker_id = 901, 902
+        # Phase 8DF: no hardcoded placeholder actor ids — both must
+        # resolve to real, active, distinct Super Admin users, or this
+        # refuses to run before touching any registry row.
+        maker, checker = resolve_and_authorize_maker_checker(db, args.maker_id, args.checker_id)
+        print(f"[publish_seeded_germany_registries] maker={maker.id} ({maker.email}), "
+              f"checker={checker.id} ({checker.email}) — both verified active Super Admin users.")
 
-        registry_results = publish_all_draft_registry_rows(db, maker_id, checker_id)
+        from app.modules.payroll.models import JurisdictionPack
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == args.jurisdiction_pack_id).first()
+        if pack is None:
+            print(f"REFUSING TO RUN — no JurisdictionPack row exists with id={args.jurisdiction_pack_id}.", file=sys.stderr)
+            raise SystemExit(2)
+        print(f"[publish_seeded_germany_registries] Minijob/Midijob rows will link to pack: "
+              f"{pack.pack_id} v{pack.version} (id={pack.id}).")
+
+        registry_results = publish_all_draft_registry_rows(db, maker.id, checker.id)
         print("=== Registry DRAFT -> PUBLISHED walk ===")
         for label, result in registry_results.items():
             print(f"{label}: published {result['published_count']} row(s) -> ids {result['published_ids']}")
 
-        minijob_results = migrate_and_publish_minijob_midijob_parameters(db, maker_id, checker_id)
+        minijob_results = migrate_and_publish_minijob_midijob_parameters(db, maker.id, checker.id, jurisdiction_pack_id=pack.id)
         print("\n=== Minijob/Midijob parameter migration ===")
         for entry in minijob_results["migrated"]:
             print(f"  created+published [{entry['id']}] {entry['parameter_code']} = {entry['value']} "

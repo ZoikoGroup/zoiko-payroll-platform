@@ -266,6 +266,13 @@ export const approveContributionCeiling = (id) =>
 export const setContributionCeilingStatus = (id, statusValue) =>
   apiFetch(`/api/super-admin/compliance/germany/contribution-ceilings/${id}/status`, { method: "PUT", params: { status: statusValue } });
 
+// Germany Compliance Pack completeness (Phase 8DJ) — COMPLETE/PARTIAL/INVALID,
+// per-component PUBLISHED-row-linked-to-this-pack counts. Backend-authoritative:
+// this call surfaces exactly what service.assess_germany_pack_completeness()
+// computes — the frontend never invents or re-derives these counts itself.
+export const getGermanyPackCompleteness = (packId, asOf) =>
+  apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/completeness`, { params: asOf ? { asOf } : {} });
+
 // PV configurations
 export const listPvConfigurations = (childCategory, isSaxony) =>
   apiFetch("/api/super-admin/compliance/germany/pv-configurations", {

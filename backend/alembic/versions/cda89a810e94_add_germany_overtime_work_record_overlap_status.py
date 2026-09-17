@@ -1,8 +1,19 @@
 """add germany overtime work record overlap status
 
-Revision ID: e9f0a1b2c3d4
-Revises: d8e9f0a1b2c3
+Revision ID: cda89a810e94
+Revises: a4dcd30e7ec1
 Create Date: 2026-09-07 00:00:00.000000
+
+Phase 8CN renumbering note: this revision was originally authored as
+`e9f0a1b2c3d4` (Phase 8AQ). `origin/main` independently reused that same
+12-hex id for an unrelated migration (`add_source_evidence_and_us_side_
+tables`) and renamed its own copy of this migration to `185332840016`.
+This `nikhil`-only copy is renamed here to `cda89a810e94`, a freshly
+verified-unique id, and its parent updated to match the sibling rename
+(`d8e9f0a1b2c3` -> `a4dcd30e7ec1`) — see
+docs/GERMANY_2026_8CN_ALEMBIC_COLLISION_RECONCILIATION_REPORT.md. Only
+the `revision`/`down_revision` ids and this note changed; `upgrade()`/
+`downgrade()` and every other line are unchanged.
 
 Phase 8AQ — docs/PHASE_8AQ_GERMANY_OVERTIME_REVERSAL_AND_SOURCE_PRECEDENCE_HARDENING_REPORT.md.
 
@@ -25,8 +36,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e9f0a1b2c3d4'
-down_revision: Union[str, Sequence[str], None] = 'd8e9f0a1b2c3'
+revision: str = 'cda89a810e94'
+down_revision: Union[str, Sequence[str], None] = 'a4dcd30e7ec1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

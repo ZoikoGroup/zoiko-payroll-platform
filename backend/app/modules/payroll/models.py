@@ -3110,6 +3110,17 @@ class GermanyHealthFund(Base):
     # caller-supplied value on THIS table. See Phase 4 report §6/§9.
     authority_source_id       = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_by_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id             = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3230,6 +3241,17 @@ class GermanyHealthFundU1Tariff(Base):
     # registry. The source must specifically establish this tariff's rates,
     # not merely cite the fund generally.
     authority_source_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
     created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3361,6 +3383,17 @@ class GermanyContributionCeiling(Base):
     # limitation as Phase 4's create_source_artifact dependency).
     authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3480,6 +3513,17 @@ class GermanyMinijobMidijobParameter(Base):
     # requirement for a bound source, mirrored here).
     authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3592,6 +3636,17 @@ class GermanyPvConfiguration(Base):
     # and GermanyContributionCeiling.
     authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3690,6 +3745,17 @@ class GermanyEarningTaxabilityRule(Base):
     # ceiling_status/set_pv_configuration_status).
     authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3754,6 +3820,17 @@ class GermanyOvertimePremiumCategory(Base):
     status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
     authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
 
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+
     created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -3806,6 +3883,17 @@ class GermanyOvertimeGrundlohnCap(Base):
 
     status                 = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
     authority_source_id    = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
     created_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -4107,6 +4195,17 @@ class GermanyChurchTaxException(Base):
     status                      = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
 
     authority_source_id         = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    # Phase 8DI — additive, nullable link to the Germany Compliance Pack
+    # version (payroll_jurisdiction_packs, pack_type="tax", jurisdiction_
+    # country="DE") this row was seeded/published under. NULL is valid
+    # and preserves exact pre-8DI behavior (existing effective-dated
+    # PUBLISHED-status resolution, no pack involved at all) — see
+    # service.py's resolve_applicable_germany_pack()/_resolve_germany_
+    # calc_inputs() for how this becomes an ADDITIVE filter only when a
+    # pack applies to the payroll date; it never narrows or replaces the
+    # existing effective-dating/status logic on its own.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
     created_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)

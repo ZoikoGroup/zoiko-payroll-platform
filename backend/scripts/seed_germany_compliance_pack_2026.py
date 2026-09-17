@@ -19,6 +19,23 @@ isolated database. Call `assert_local_database()` BEFORE
 `initialize_database()` — a non-local target must never even get an
 engine constructed against it.
 
+PHASE 8DF CHANGE FROM THE NIKHIL-BRANCH VERSION THIS WAS PORTED FROM: the
+earlier version hardcoded maker/checker actor ids as 901/902, documented
+there as an "obviously-fake" placeholder convention. This version instead
+REQUIRES --maker-id/--checker-id on the command line and validates both
+resolve to real, active `User` rows with role=super_admin (see
+scripts/_actor_authorization.py) before doing anything else. No other
+logic was changed from the validated nikhil version. Also confirmed this
+phase (8DF) against main's current `upsert_jurisdiction_pack` /
+`set_jurisdiction_pack_approver` / `set_jurisdiction_pack_status`: main
+has since grown a "policy" pack type and a US-only tax-pack activation
+gate (source-artifact + effective-date + golden-test-certification),
+both explicitly scoped away from Germany's `packType="tax"`,
+`jurisdictionCountry="DE"` usage here (the US gate's own comment
+explicitly lists DE among the pre-existing non-US Draft packs it was
+written not to break) — no adaptation to this script's own logic was
+required.
+
 WHAT THIS SCRIPT DOES NOT DO:
 
 - Does not seed 2025/2027 packs. Phase 8CI's own brief explicitly says:
@@ -47,9 +64,10 @@ existing SourceArtifact evidence chain those scripts already populate.
 Usage (against an isolated SQLite file ONLY — never the shared/remote DB):
 
     PAYROLL_DATABASE_URL=sqlite:///./phase8ci_local_isolated.sqlite3 \
-        python -m scripts.seed_germany_compliance_pack_2026
+        python -m scripts.seed_germany_compliance_pack_2026 --maker-id 12 --checker-id 34
 """
 
+import argparse
 import sys
 from datetime import date
 from pathlib import Path
@@ -57,19 +75,31 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts._local_db_guard import assert_local_database, describe_target, is_local_database
+from scripts._actor_authorization import resolve_and_authorize_maker_checker
 
 SCRIPT_NAME = "seed_germany_compliance_pack_2026"
 
 PACK_ID = "DE-PAYROLL-CY2026-V1"
 
-# Same obviously-fake, documented maker/checker convention already used by
-# scripts/publish_seeded_germany_registries.py (901/902) — no FK
-# enforcement on these columns in this codebase; a real deployment would
-# pass real, distinct Super Admin user ids instead.
-MAKER_ID, CHECKER_ID = 901, 902
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Create the Germany 2026 top-level Compliance Pack (DE-PAYROLL-CY2026-V1), "
+                    "using real, distinct Super Admin actors.",
+    )
+    parser.add_argument("--maker-id", type=int, required=True, help="Real, active Super Admin user id (maker).")
+    parser.add_argument("--checker-id", type=int, required=True, help="Real, active Super Admin user id (checker). Must differ from --maker-id.")
+    return parser.parse_args()
 
 
 def main() -> None:
+    args = _parse_args()
+
+    # Phase 8DF: guard against a non-UTF8 Windows console crashing on a
+    # non-ASCII character in printed text (see the identical fix +
+    # rationale in seed_germany_source_evidence.py).
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     # ── Section 17 requirement: print DB identity/environment/guard result
     # BEFORE any mutation, and refuse outright if not demonstrably local. ──
     import os
@@ -89,6 +119,13 @@ def main() -> None:
     initialize_database()
     db = SessionLocal()
     try:
+        # Phase 8DF: no hardcoded placeholder actor ids — both must
+        # resolve to real, active, distinct Super Admin users, or this
+        # refuses to run before touching the pack.
+        maker, checker = resolve_and_authorize_maker_checker(db, args.maker_id, args.checker_id)
+        print(f"[{SCRIPT_NAME}] maker={maker.id} ({maker.email}), checker={checker.id} ({checker.email}) "
+              "— both verified active Super Admin users.")
+
         existing = (
             db.query(JurisdictionPack)
             .filter(JurisdictionPack.pack_id == PACK_ID, JurisdictionPack.version == "1.0")
@@ -134,14 +171,14 @@ def main() -> None:
                     "actual configuration the payroll engine reads from."
                 ),
             ),
-            actor_id=MAKER_ID,
+            actor_id=maker.id,
         )
         print(f"[{SCRIPT_NAME}] Created {pack.pack_id} v{pack.version} (id={pack.id}, status={pack.status}).")
 
-        approved = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER_ID)
-        print(f"[{SCRIPT_NAME}] Approved by actor_id={CHECKER_ID} -> status={approved.status}.")
+        approved = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker.id)
+        print(f"[{SCRIPT_NAME}] Approved by actor_id={checker.id} -> status={approved.status}.")
 
-        activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=CHECKER_ID)
+        activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker.id)
         print(f"[{SCRIPT_NAME}] Activated -> status={activated.status}, "
               f"effective {activated.effective_from} to {activated.effective_to}.")
 

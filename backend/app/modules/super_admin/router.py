@@ -1606,7 +1606,9 @@ def resolve_health_fund(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_germany_health_fund(db, health_fund_id, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_germany_health_fund(db, health_fund_id, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
 
 
 # ── Germany: U1 Tariff (Sickness Reimbursement) (Phase 8W) ────────────
@@ -1783,7 +1785,37 @@ def resolve_contribution_ceiling(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_germany_contribution_ceiling(db, branch, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_germany_contribution_ceiling(db, branch, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
+
+
+# ── Germany: Compliance Pack completeness (Phase 8DJ, Part 6) ────────────
+# Exposes service.assess_germany_pack_completeness() — the authoritative
+# COMPLETE/PARTIAL/INVALID calculation designed in Phase 8DI. Deliberately
+# excludes PAP/ELStAM/ELSTER/DEÜV from required components (see that
+# function's own docstring) — none of those are live functionality in
+# this project.
+
+@router.get(
+    "/compliance/germany/compliance-pack/{pack_id}/completeness", response_model=dict,
+    summary="Assess a Germany Compliance Pack's registry-linkage completeness (COMPLETE/PARTIAL/INVALID)",
+)
+def get_germany_pack_completeness(
+    pack_id: int,
+    as_of: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    result = payroll_service.assess_germany_pack_completeness(db, pack_id, as_of=as_of)
+    # dict keys are already the wire-friendly shape assess_germany_pack_completeness
+    # itself defines (snake_case component keys with their own "label" field) —
+    # deliberately not routed through a Pydantic response model, since this
+    # endpoint's shape is intentionally a direct pass-through of that
+    # function's own documented return contract, not a persisted ORM row.
+    return result
 
 
 @router.get(
@@ -1876,7 +1908,9 @@ def resolve_minijob_midijob_parameter(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_minijob_midijob_parameter(db, parameter_code, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_minijob_midijob_parameter(db, parameter_code, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
 
 
 @router.get(
@@ -1972,7 +2006,9 @@ def resolve_pv_configuration(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_germany_pv_configuration(db, child_category, is_saxony, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_germany_pv_configuration(db, child_category, is_saxony, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
 
 
 @router.get(
@@ -2066,7 +2102,9 @@ def resolve_earning_taxability_rule(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_germany_earning_taxability_rule(db, earning_type, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_germany_earning_taxability_rule(db, earning_type, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
 
 
 @router.get(
@@ -2162,7 +2200,9 @@ def resolve_overtime_premium_category(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_germany_overtime_premium_category(db, category_code, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_germany_overtime_premium_category(db, category_code, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
 
 
 @router.get(
@@ -2250,7 +2290,9 @@ def resolve_overtime_grundlohn_cap(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.resolve_germany_overtime_grundlohn_cap(db, dimension, as_of=as_of)
+    as_of_resolved = as_of or date.today()
+    pack = payroll_service.resolve_applicable_germany_pack(db, as_of=as_of_resolved)
+    return payroll_service.resolve_germany_overtime_grundlohn_cap(db, dimension, as_of=as_of, jurisdiction_pack_id=pack.id if pack else None)
 
 
 @router.get(

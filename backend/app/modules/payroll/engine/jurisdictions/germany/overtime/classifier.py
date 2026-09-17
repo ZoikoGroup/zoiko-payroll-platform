@@ -297,6 +297,15 @@ def build_time_segments(db: Session, work_record) -> List[dict]:
     start_local = _to_berlin(work_record.start_datetime)
     end_local = _to_berlin(work_record.end_datetime)
 
+    # Phase 8DJ: resolved ONCE per call (from the shift's start date), not
+    # once per sub-segment — a shift crossing midnight is the only case
+    # where a later segment's own date could theoretically resolve a
+    # different pack version; using the start date consistently for the
+    # whole classification call is a deliberate, disclosed simplification
+    # (see docs/GERMANY_2026_8DJ_..._REPORT.md), not a per-segment lookup.
+    applicable_pack = payroll_service.resolve_applicable_germany_pack(db, as_of=start_local.date())
+    pack_id = applicable_pack.id if applicable_pack is not None else None
+
     boundaries = _day_boundary_candidates(start_local, end_local)
     results: List[dict] = []
     total_seconds = 0.0
@@ -308,7 +317,7 @@ def build_time_segments(db: Session, work_record) -> List[dict]:
         total_seconds += duration_seconds
         hours = Decimal(duration_seconds) / Decimal(3600)
         for category in _categories_for_instant(db, start_local, a):
-            rule = payroll_service.resolve_germany_overtime_premium_category(db, category, as_of=a.date())
+            rule = payroll_service.resolve_germany_overtime_premium_category(db, category, as_of=a.date(), jurisdiction_pack_id=pack_id)
             results.append(dict(
                 segment_start=a, segment_end=b, hours=hours, premium_category=category,
                 classification_status="CONFIGURED" if rule is not None else "NOT_CONFIGURED",
