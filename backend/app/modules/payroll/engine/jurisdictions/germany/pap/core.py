@@ -76,6 +76,12 @@ def _r2(value: Decimal) -> Decimal:
 # machine-readable exception rule (no exception list/schema is given), so
 # it is not implemented; only the general Land rate is applied, and this
 # gap is disclosed rather than silently ignored.
+# NOTE (2026-09-15 registry-readiness audit): default per-Land rates. The
+# production calc path resolves OVERRIDES first via the minijob/midijob
+# parameter registry's church_tax_rate_de_* keys (germany.py _resolve_
+# church_tax_land_rate) — this dict is only the fallback when no override
+# exists. Publication of an override remains a configuration decision; no
+# church-tax base-rate registry exists and none is required.
 CHURCH_TAX_LAND_RATES: dict[str, Decimal] = {
     "DE-BW": Decimal("8"),   # Baden-Württemberg (general rate; see docstring)
     "DE-BY": Decimal("8"),   # Bavaria

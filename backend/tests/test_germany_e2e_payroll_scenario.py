@@ -314,7 +314,7 @@ class TestMidijobE2E:
         # internal calculator (clearly labeled, not BMF-certified).
         trace = item.germany_calculation_snapshot or {}
         assert trace.get("calculationStatus") == "COMPLETE"
-        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
         assert "midijob_rv" in trace.get("resolved", {})
         assert "midijob_alv" in trace.get("resolved", {})
         assert "midijob_gkv" in trace.get("resolved", {})
@@ -365,7 +365,7 @@ class TestRegularE2E:
 
         trace = item.germany_calculation_snapshot or {}
         assert trace.get("calculationStatus") == "COMPLETE"
-        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
         assert trace.get("resolved", {}).get("rv") is not None
         assert trace.get("resolved", {}).get("gkv") is not None
         assert trace.get("resolved", {}).get("pv") is not None
