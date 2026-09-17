@@ -113,6 +113,17 @@ class Settings(BaseSettings):
     TRIAL_SWEEP_ENABLED: bool = True
     TRIAL_SWEEP_INTERVAL_HOURS: int = 24
 
+    # ── Entitlement enforcement rollout (modules/billing/entitlements.py) ──
+    # "off": require_entitlement/require_scope_limit always pass — today's
+    # behavior, safe default. "warn": run the real check but only log +
+    # record a BillingCommercialAuditEvent (ENTITLEMENT_WOULD_HAVE_BLOCKED)
+    # instead of raising, so orgs already over a limit surface in the audit
+    # log before anything actually blocks them. "enforce": raise
+    # ForbiddenException as coded. Flipping "warn" -> "enforce" in
+    # production is a deliberate, separate follow-up — not bundled into the
+    # change that first wires these dependencies into routes.
+    BILLING_ENFORCEMENT_MODE: str = "off"
+
     # ── Self-service checkout (Stripe) ──────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

@@ -72,12 +72,12 @@ def transition_plan_version_status(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
-    """Only two transitions exist: DRAFT->APPROVED and APPROVED->PUBLISHED.
-    Anything else (including re-requesting the version's current status, or
-    editing a PUBLISHED version) is rejected with 400 — checked against the
-    version's actual current status up front so the error names the real
-    problem instead of falling through to whichever service function
-    happens to run first.
+    """Three transitions exist: DRAFT->APPROVED, APPROVED->PUBLISHED, and
+    PUBLISHED->RETIRED. Anything else (including re-requesting the version's
+    current status, or editing a PUBLISHED version) is rejected with 400 —
+    checked against the version's actual current status up front so the
+    error names the real problem instead of falling through to whichever
+    service function happens to run first.
     """
     version = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == plan_version_id).first()
     if version is None:
@@ -91,9 +91,12 @@ def transition_plan_version_status(
     if target == PlanVersionStatus.PUBLISHED.value:
         return plan_catalog.publish_plan_version(db, plan_version_id, published_by_user_id=current_user.id)
 
+    if target == PlanVersionStatus.RETIRED.value:
+        return plan_catalog.retire_plan_version(db, plan_version_id, actor_user_id=current_user.id)
+
     raise BadRequestException(
-        f"Unsupported status transition to '{target}'. Only DRAFT->APPROVED and "
-        f"APPROVED->PUBLISHED are allowed (current status: {version.status})."
+        f"Unsupported status transition to '{target}'. Only DRAFT->APPROVED, "
+        f"APPROVED->PUBLISHED, and PUBLISHED->RETIRED are allowed (current status: {version.status})."
     )
 
 

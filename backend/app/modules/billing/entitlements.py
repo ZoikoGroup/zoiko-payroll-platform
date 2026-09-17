@@ -28,6 +28,7 @@ from typing import Optional
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.exceptions import BadRequestException, ForbiddenException
 from app.database import get_db
 from app.core.dependencies import get_current_user, get_organization_id
@@ -39,10 +40,31 @@ from app.modules.billing.models import (
     BillingSubscription,
 )
 
-# Phase 0 permissive mode — no plan data exists yet; flip to False once
-# Prompt 3's admin CRUD has been used to publish at least one real plan
-# version, per blueprint Phase 0.
-ALLOW_ALL = False
+# Three-state rollout switch (settings.BILLING_ENFORCEMENT_MODE) replacing
+# the earlier Phase 0 ALLOW_ALL boolean:
+#   "off"     - require_entitlement/require_scope_limit always pass (no
+#               behavior change from before these were wired into any route).
+#   "warn"    - run the real check, but on a would-be block only record a
+#               BillingCommercialAuditEvent and let the request proceed.
+#   "enforce" - raise ForbiddenException as coded.
+# Read from settings at call time (not module import time) so tests can
+# override it per-case without reimporting this module.
+def _enforcement_mode() -> str:
+    return getattr(settings, "BILLING_ENFORCEMENT_MODE", "off")
+
+
+def _record_would_have_blocked(
+    db: Session, organization_id: Optional[int], resource_or_feature: str, detail: dict
+) -> None:
+    db.add(
+        BillingCommercialAuditEvent(
+            organization_id=organization_id,
+            actor_user_id=None,
+            event_type="ENTITLEMENT_WOULD_HAVE_BLOCKED",
+            payload={"feature_key": resource_or_feature, **detail},
+        )
+    )
+    db.commit()
 
 
 def get_active_subscription(db: Session, organization_id: int) -> Optional[BillingSubscription]:
@@ -104,6 +126,20 @@ def _resolve_entitlement(
     if flag.limit_value == 0:
         return False, 0
     return True, flag.limit_value
+
+
+def _current_plan_code(db: Session, subscription: Optional[BillingSubscription]) -> Optional[str]:
+    """Best-effort plan code for a 403's `trace` payload (frontend upgrade
+    CTA) — never raises, returns None if it can't be resolved."""
+    if subscription is None:
+        return None
+    from app.modules.billing.models import BillingPlan, BillingPlanVersion
+
+    version = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == subscription.plan_version_id).first()
+    if version is None:
+        return None
+    plan = db.query(BillingPlan).filter(BillingPlan.id == version.plan_id).first()
+    return plan.code if plan else None
 
 
 def entitlement_allows(db: Session, subscription: Optional[BillingSubscription], feature_key: str) -> bool:
@@ -282,13 +318,21 @@ def require_writeable_workspace():
 
 
 def require_entitlement(feature_key: str):
-    """FastAPI dependency factory — gates a route behind one feature_key."""
+    """FastAPI dependency factory — gates a route behind one feature_key.
+
+    Can also be called directly as a plain function (bypassing FastAPI's
+    Depends() injection) by passing current_user/db explicitly — useful from
+    inside a route handler that needs to gate conditionally rather than for
+    every request to that route (see organizations/router.py's currency-
+    override check).
+    """
 
     def _check(
         current_user=Depends(get_current_user),
         db: Session = Depends(get_db),
     ) -> bool:
-        if ALLOW_ALL:
+        mode = _enforcement_mode()
+        if mode == "off":
             return True
 
         if current_user.role == UserRole.SUPER_ADMIN:
@@ -300,8 +344,15 @@ def require_entitlement(feature_key: str):
 
         subscription = get_active_subscription(db, organization_id)
         if not entitlement_allows(db, subscription, feature_key):
+            if mode == "warn":
+                _record_would_have_blocked(
+                    db, organization_id, feature_key, {"reason": "not_entitled"}
+                )
+                return True
             raise ForbiddenException(
-                f"Your plan does not include access to '{feature_key}'."
+                f"Your plan does not include access to '{feature_key}'. "
+                f"Upgrade your plan to unlock this.",
+                trace={"feature_key": feature_key, "plan_code": _current_plan_code(db, subscription)},
             )
         return True
 
@@ -314,13 +365,22 @@ def require_scope_limit(resource: str, requested_qty: int = 1):
     fits within whatever limit_value the subscription's plan version/override
     resolves to. A limit_value of None means unlimited once the resource is
     entitled at all.
+
+    `requested_qty` is normally data-dependent per request (e.g. "current
+    count of legal entities + 1"), not a fixed value known when the route is
+    defined — so call sites typically don't wire this via FastAPI's
+    Depends() at all; they call `require_scope_limit(resource, qty)
+    (current_user=current_user, db=db)` directly inside the handler body
+    once `qty` has been computed, same pattern used for require_entitlement
+    above.
     """
 
     def _check(
         current_user=Depends(get_current_user),
         db: Session = Depends(get_db),
     ) -> bool:
-        if ALLOW_ALL:
+        mode = _enforcement_mode()
+        if mode == "off":
             return True
 
         if current_user.role == UserRole.SUPER_ADMIN:
@@ -332,11 +392,36 @@ def require_scope_limit(resource: str, requested_qty: int = 1):
 
         subscription = get_active_subscription(db, organization_id)
         allowed, limit_value = _resolve_entitlement(db, subscription, resource)
+
         if not allowed:
-            raise ForbiddenException(f"Your plan does not include '{resource}'.")
-        if limit_value is not None and requested_qty > limit_value:
+            if mode == "warn":
+                _record_would_have_blocked(
+                    db, organization_id, resource, {"reason": "not_entitled", "requested_qty": requested_qty}
+                )
+                return True
             raise ForbiddenException(
-                f"This action would exceed your plan's limit for '{resource}' ({limit_value})."
+                f"Your plan does not include '{resource}'.",
+                trace={"resource": resource, "plan_code": _current_plan_code(db, subscription)},
+            )
+
+        if limit_value is not None and requested_qty > limit_value:
+            if mode == "warn":
+                _record_would_have_blocked(
+                    db,
+                    organization_id,
+                    resource,
+                    {"reason": "over_limit", "requested_qty": requested_qty, "limit_value": limit_value},
+                )
+                return True
+            raise ForbiddenException(
+                f"This action would exceed your plan's limit for '{resource}' ({limit_value}). "
+                f"Upgrade your plan to raise this limit.",
+                trace={
+                    "resource": resource,
+                    "limit_value": limit_value,
+                    "requested_qty": requested_qty,
+                    "plan_code": _current_plan_code(db, subscription),
+                },
             )
         return True
 

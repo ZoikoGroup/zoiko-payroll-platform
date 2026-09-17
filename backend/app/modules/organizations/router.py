@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from app.modules.auth.schemas import SuccessResponse
-from app.modules.billing.entitlements import require_writeable_workspace
+from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit
+from app.modules.billing.feature_keys import MAX_ENTITIES, MULTI_ENTITY, MULTI_CURRENCY
 from app.core.dependencies import (
     get_current_super_admin,
     get_current_org_admin,
@@ -39,6 +40,8 @@ from app.modules.organizations.schemas import (
     OrganizationDetail,
     DepartmentHeadcount,
     RecentEmployee,
+    LegalEntityCreate,
+    LegalEntityResponse,
 )
 
 logger = logging.getLogger("zoiko_payroll.organizations")
@@ -128,11 +131,76 @@ def update_my_organization(
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None:
         raise NotFoundException("Organization", "id")
-    for field, value in data.model_dump(exclude_unset=True).items():
+
+    fields = data.model_dump(exclude_unset=True)
+    # An explicit currency override beyond the org's jurisdiction-derived
+    # default is a MULTI_CURRENCY-gated capability (Core: off, Professional:
+    # on) — only checked when currency is actually being set to a real value,
+    # not when it's absent from the request or being cleared back to None.
+    if fields.get("currency"):
+        require_entitlement(MULTI_CURRENCY)(current_user=current_user, db=db)
+
+    for field, value in fields.items():
         setattr(org, field, value)
     db.commit()
     db.refresh(org)
     return org
+
+
+@router.get("/me/legal-entities", response_model=list[LegalEntityResponse])
+def list_my_legal_entities(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.core.dependencies import get_organization_id
+    from app.modules.organizations.models import LegalEntity
+
+    org_id = get_organization_id(current_user)
+    return (
+        db.query(LegalEntity)
+        .filter(LegalEntity.organization_id == org_id, LegalEntity.is_active == True)  # noqa: E712
+        .order_by(LegalEntity.created_at.asc())
+        .all()
+    )
+
+
+@router.post(
+    "/me/legal-entities", response_model=LegalEntityResponse,
+    dependencies=[Depends(require_writeable_workspace())],
+)
+def create_my_legal_entity(
+    data: LegalEntityCreate,
+    current_user=Depends(get_current_org_admin),
+    db: Session = Depends(get_db),
+):
+    """Register a legal entity under the caller's organization — gated by
+    MAX_ENTITIES (every org's plan caps how many it may have) and, for the
+    2nd entity onward, by MULTI_ENTITY (a plan may permit exactly one entity
+    without ever granting multi-entity operation at all)."""
+    from app.core.dependencies import get_organization_id
+    from app.modules.organizations.models import LegalEntity
+
+    org_id = get_organization_id(current_user)
+    current_count = (
+        db.query(LegalEntity)
+        .filter(LegalEntity.organization_id == org_id, LegalEntity.is_active == True)  # noqa: E712
+        .count()
+    )
+
+    if current_count >= 1:
+        require_entitlement(MULTI_ENTITY)(current_user=current_user, db=db)
+    require_scope_limit(MAX_ENTITIES, requested_qty=current_count + 1)(current_user=current_user, db=db)
+
+    entity = LegalEntity(
+        organization_id=org_id,
+        name=data.name,
+        registration_number=data.registration_number,
+        country=data.country,
+    )
+    db.add(entity)
+    db.commit()
+    db.refresh(entity)
+    return entity
 
 
     dependencies=[Depends(require_writeable_workspace())],
