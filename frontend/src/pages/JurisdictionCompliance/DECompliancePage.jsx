@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   LayoutDashboard, FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
-  Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio,
+  Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio, Banknote, FileStack,
 } from "lucide-react";
 import DEOverviewDashboard from "./components/germany/DEOverviewDashboard";
 import GermanyPayrollSummaryTab from "./components/germany/GermanyPayrollSummaryTab";
 import GermanyDeuvTab from "./components/germany/GermanyDeuvTab";
+import GermanyCompliancePackSection from "./components/germany/GermanyCompliancePackSection";
 import {
-  PapTab, HealthFundsTab, ContributionCeilingsTab, PvConfigTab, EarningTaxabilityTab,
+  PapTab, HealthFundsTab, ContributionCeilingsTab, PvConfigTab, MinijobMidijobParametersTab, EarningTaxabilityTab,
   OvertimePremiumCategoriesTab, OvertimeGrundlohnCapsTab, EmployerLeviesTab, ChurchTaxTab,
   ElstamBatchesTab, ElsterTab, SourceEvidenceTab, AuditTab,
 } from "./GermanyStatutoryRegistriesPage";
@@ -35,10 +36,12 @@ import {
 // remains a valid compatibility route).
 const SECTIONS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
+  { key: "compliance-pack", label: "Compliance Pack", icon: FileStack },
   { key: "pap", label: "PAP / Releases", icon: FileCheck2 },
   { key: "health-funds", label: "Health Funds", icon: HeartPulse },
   { key: "ceilings", label: "Contribution Ceilings", icon: Percent },
   { key: "pv", label: "PV Configuration", icon: ShieldCheck },
+  { key: "minijob-midijob", label: "Minijob/Midijob Parameters", icon: Banknote },
   { key: "earning-taxability", label: "Earning Taxability", icon: Layers },
   { key: "overtime-premium-categories", label: "Overtime Premium Categories", icon: Clock3 },
   { key: "overtime-grundlohn-caps", label: "Overtime Grundlohn Caps", icon: Gauge },
@@ -74,9 +77,10 @@ export default function DECompliancePage() {
       <div className="mb-2">
         <h1 className="text-lg font-bold text-foreground">Germany Payroll Compliance</h1>
         <p className="text-xs text-foreground-muted">
-          Manage Germany's statutory payroll configuration — PAP, health funds, contribution ceilings, PV
-          configuration, church tax, overtime treatment, employer levies, ELStAM change-list batches, ELSTER
-          transmission, DEÜV social insurance reporting, the source evidence backing each of them, and the Germany payroll summary.
+          Manage Germany's statutory payroll configuration — the versioned Compliance Pack (tax year), PAP, health
+          funds, contribution ceilings, PV configuration, church tax, overtime treatment, employer levies, ELStAM
+          change-list batches, ELSTER transmission, DEÜV social insurance reporting, the source evidence backing each
+          of them, and the Germany payroll summary.
         </p>
       </div>
 
@@ -96,10 +100,12 @@ export default function DECompliancePage() {
       </div>
 
       {section === "overview" && <DEOverviewDashboard onSelectSection={selectSection} />}
+      {section === "compliance-pack" && <GermanyCompliancePackSection />}
       {section === "pap" && <PapTab />}
       {section === "health-funds" && <HealthFundsTab />}
       {section === "ceilings" && <ContributionCeilingsTab />}
       {section === "pv" && <PvConfigTab />}
+      {section === "minijob-midijob" && <MinijobMidijobParametersTab />}
       {section === "earning-taxability" && <EarningTaxabilityTab />}
       {section === "overtime-premium-categories" && <OvertimePremiumCategoriesTab />}
       {section === "overtime-grundlohn-caps" && <OvertimeGrundlohnCapsTab />}

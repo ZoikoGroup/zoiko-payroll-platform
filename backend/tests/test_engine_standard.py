@@ -16,7 +16,7 @@ from typing import Optional
 import pytest
 
 from app.modules.payroll.engine.base import PayrollContext
-from app.modules.payroll.engine.standard import StandardStrategy, evaluate_tax_formula
+from app.modules.payroll.engine.standard import StandardStrategy, evaluate_tax_formula, _calculate_annual_tax
 from app.modules.payroll.engine.countries import canada as _canada
 from app.modules.payroll.engine.countries import us as _us
 from app.modules.payroll.engine.countries.canada import _resolve_ca_bpaf
@@ -3030,15 +3030,32 @@ def test_australia_super_guarantee_calculates():
     assert result.tds == 0
 
 
-def test_germany_pension_and_social_insurance():
+def test_germany_requires_a_statutory_profile_and_never_guesses_social_insurance():
+    """Phase 8BY (was `test_germany_pension_and_social_insurance`): this
+    test predated Germany becoming a real, fail-closed jurisdiction. It
+    used to assert that a bare `calc("DE", ...)` with two generic rate rows
+    produced non-zero PF/ESI — i.e. that Germany would happily invent
+    social-insurance figures from a generic cross-country rate map with no
+    EmployeeStatutoryProfile, no contribution ceiling, no health fund and
+    no PV configuration.
+
+    That is exactly the behavior the Germany jurisdiction is now designed
+    to make impossible: missing statutory configuration must fail closed,
+    never silently become a number. The assertion is therefore inverted to
+    lock in the CURRENT contract. Real RV/ALV/GKV/PV amount coverage lives
+    in test_germany_pap_calculation.py and test_germany_minijob_midijob.py,
+    which build the full registry first."""
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
+        GermanyStatutoryProfileMissingError,
+    )
+
     rates = {
         "pension": Rate("pension", Decimal("9.30"), Decimal("9.30")),
         "social-insurance": Rate("social-insurance", Decimal("9.00"), Decimal("9.00")),
     }
     slabs = [Slab(Decimal("0"), Decimal("11000"), Decimal("0")), Slab(Decimal("11000"), None, Decimal("14"))]
-    result = calc("DE", 4000, rates, slabs)
-    assert result.employee_pf > 0
-    assert result.employee_esi > 0
+    with pytest.raises(GermanyStatutoryProfileMissingError):
+        calc("DE", 4000, rates, slabs)
 
 
 def test_canada_cpp_and_ei():
@@ -3542,12 +3559,25 @@ def test_australia_super_guarantee_capped_at_max_contribution_base():
     assert result.employer_pension == Decimal("2595.45")  # (270830 * 11.5% ) / 12
 
 
-def test_germany_contributions_capped_at_contribution_ceiling():
+def test_germany_contribution_ceiling_is_never_applied_from_a_stale_engine_constant():
+    """Phase 8BY (was `test_germany_contributions_capped_at_contribution_
+    ceiling`): this asserted a hardcoded EUR 96,600 annual ceiling baked
+    into the engine. No such constant exists any more — the RV/ALV ceiling
+    is an effective-dated, source-evidenced `GermanyContributionCeiling`
+    registry row (EUR 101,400/yr for 2026 per ZP-TAX-DE-2026-001 section
+    9), resolved per payroll period. With no ceiling row resolvable, the
+    engine must refuse rather than fall back to any built-in figure.
+
+    Real capping behavior (at/below/above the ceiling) is covered by
+    test_germany_effective_dating.py and test_germany_pap_calculation.py,
+    which supply an actual registry row."""
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
+        GermanyStatutoryProfileMissingError,
+    )
+
     rates = {"pension": Rate("pension", employee_rate_pct=Decimal("9.30"), employer_rate_pct=Decimal("9.30"))}
-    result = calc("DE", 10000, rates, _FLAT_10_SLAB)  # annual 120,000 > 96,600 ceiling
-    uncapped = Decimal("10000") * Decimal("9.30") / 100
-    assert result.employee_pf < uncapped
-    assert result.employee_pf == Decimal("748.65")  # (96600 * 9.3%) / 12
+    with pytest.raises(GermanyStatutoryProfileMissingError):
+        calc("DE", 10000, rates, _FLAT_10_SLAB)
 
 
 def test_canada_cpp_exempts_basic_amount_and_caps_at_ympe_ei_caps_separately():
@@ -5432,18 +5462,29 @@ def test_unknown_country_falls_back_to_generic():
 # ── Formula-based tax rule (Germany-style continuous formula) ───────────
 
 def test_formula_rule_overrides_bracket_loop():
+    """A FORMULA-type slab replaces the ordinary bracket loop inside the
+    shared, country-agnostic `_calculate_annual_tax` — this is the actual
+    mechanism under test, not any one country's `tds` field.
+
+    Phase 8BY: this used to be exercised end-to-end through "DE". It no
+    longer can be — Germany does not route income tax through the generic
+    slab engine at all any more (there is no `_calculate_annual_tax_de`, no
+    engine-level Grundfreibetrag constant and no engine-level Soli
+    threshold; wage tax goes through the gated PAP path / the
+    effective-dated internal §32a calculator, and a DE run without a
+    statutory profile fails closed). A same-phase attempt to route this
+    through "AU" instead also does not work on this codebase's current
+    Australia engine: AU's own `tds` is unconditionally the real Schedule 1
+    PAYG coefficient result (`_calculate_au_payg_schedule1`) — the generic
+    `_calculate_annual_tax(annual_gross, ctx.slabs)` call in australia.py is
+    explicitly commented "Reference/validation only ... never a substitute
+    for the Schedule 1 result" and is not surfaced on the result at all, so
+    no country's `calc()` wrapper can exercise this mechanism in isolation
+    any more. Calling the shared function directly is therefore the
+    correct, country-independent way to cover it."""
     slabs = [Slab(rule_type="FORMULA", formula_expression="income * 0.2")]
-    result = calc("DE", 10000, {}, slabs)
-    # DE income tax now goes through _calculate_annual_tax_de, which
-    # subtracts the Grundfreibetrag (11,784) before the formula runs, then
-    # adds the Solidarity Surcharge (5.5%) since the resulting tax exceeds
-    # the Soli threshold (18,130) — both use fallback defaults here since
-    # no override rows were given (rate_map={}):
-    #   taxable = 120000 - 11784 = 108216
-    #   formula tax = 108216 * 0.2 = 21643.20
-    #   + Soli (21643.20 > 18130 threshold, so +5.5%) = 22833.576
-    #   tds = 22833.576 / 12 = 1902.80
-    assert result.tds == pytest.approx(Decimal("1902.80"), abs=Decimal("0.01"))
+    annual_tax = _calculate_annual_tax(Decimal("120000"), slabs)
+    assert annual_tax == Decimal("24000.00")
 
 
 def test_evaluate_tax_formula_supports_min_max_and_arithmetic():

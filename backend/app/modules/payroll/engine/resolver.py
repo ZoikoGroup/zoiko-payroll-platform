@@ -60,6 +60,17 @@ def calculate_payroll(
     call.  It replaces the old ``_calculate_employee_monthly_payroll()``
     and the duplicated logic in ``preview_payroll_run``.
     """
+    key = (calculation_mode or "standard").lower().strip()
+    if (ctx.country or "").upper() == "DE" and key == "simple":
+        # Simple mode intentionally omits statutory deductions. It must never
+        # be an escape hatch around Germany's statutory calculation boundary.
+        from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+
+        raise GermanyCalculationError(
+            "GERMANY_SIMPLE_MODE_UNSUPPORTED",
+            "Germany payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     return strategy.calculate(ctx)
 

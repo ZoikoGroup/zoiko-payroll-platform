@@ -262,14 +262,19 @@ def test_reference_approximation_absent_flags_for_class_iii_and_iv():
 
 # ── Effective dating (Phase 8BS): resolve against payroll RUN pay date ──
 
-def test_resolve_income_tax_tariff_resolves_current_and_future_dates():
-    """The one verified tariff version is open-ended from 2023-01-01 —
-    any date on/after that (current 2026, or a plausible future date)
-    resolves to it."""
-    for d in (date(2023, 1, 1), date(2026, 6, 1), date(2030, 1, 1)):
+def test_resolve_income_tax_tariff_resolves_each_version_in_its_own_window():
+    """Phase 8BY: two verified tariff versions now exist. Each payroll
+    date must resolve the version legally applicable to ITS OWN period —
+    2023-2025 to the 2023 tariff, 2026 onward to the 2026 tariff — never
+    simply the newest row."""
+    for d in (date(2023, 1, 1), date(2024, 7, 1), date(2025, 12, 31)):
         tariff = resolve_income_tax_tariff(d)
         assert tariff["tax_year"] == "2023-ESTG-32A"
         assert tariff["effective_from"] == date(2023, 1, 1)
+    for d in (date(2026, 1, 1), date(2026, 6, 1), date(2030, 1, 1)):
+        tariff = resolve_income_tax_tariff(d)
+        assert tariff["tax_year"] == "2026-ESTG-32A"
+        assert tariff["effective_from"] == date(2026, 1, 1)
 
 
 def test_resolve_income_tax_tariff_rejects_historical_date_before_verified_range():
@@ -303,13 +308,128 @@ def test_calculator_fails_closed_for_payroll_date_before_verified_tariff():
         )
 
 
-def test_calculator_with_no_payroll_date_falls_back_to_only_version():
+def test_calculator_with_no_payroll_date_falls_back_to_first_version():
     """Backward compatibility: a caller with no payroll date (e.g. a unit
-    test, or any pre-8BS call site) still gets the one verified tariff
-    directly, exactly as before this phase."""
+    test, or any pre-8BS call site) still gets the first verified tariff
+    directly, exactly as before. Every PRODUCTION call site passes a real
+    payroll date (see test_calculator_resolves_2026_tariff_for_2026_date
+    and service.py's four germany_payroll_date call sites), so this
+    date-less default is only ever reached by non-production callers."""
     calculator = InternalGermanyWageTaxCalculator(soli_threshold_single=SOLI_THRESHOLD, soli_rate_pct=SOLI_RATE)
     result = calculator.execute(_pap_input(re4_cents=450000))
     assert result.pap_version == PROVENANCE_VERSION
+
+
+# ── Phase 8BY: 2026 statutory tariff (ZP-TAX-DE-2026-001 sections 4 & 7) ──
+
+
+def test_2026_tariff_values_match_the_controlled_source_document():
+    """Every 2026 figure is transcribed from ZP-TAX-DE-2026-001 v1.0:
+    Grundfreibetrag EUR 12,348 and the four zone boundaries from section
+    4; Soli Freigrenze EUR 20,350 from section 7; child allowance EUR
+    9,756 per ZKF unit from section 4. A regression here means a
+    statutory value drifted away from the authoritative document."""
+    t = resolve_income_tax_tariff(date(2026, 6, 1))
+    assert t["grundfreibetrag"] == Decimal("12348")
+    assert t["zone2_upper"] == Decimal("17799")
+    assert t["zone3_upper"] == Decimal("69878")
+    assert t["zone4_upper"] == Decimal("277825")
+    assert t["zone4_rate"] == Decimal("0.42")
+    assert t["zone5_rate"] == Decimal("0.45")
+    assert t["soli_threshold_single"] == Decimal("20350")
+    assert t["kinderfreibetrag_plus_bea"] == Decimal("9756")
+
+
+def test_2026_tariff_zero_tax_exactly_at_grundfreibetrag_and_progressive_above():
+    """Section 4 boundary: EUR 0-12,348 is taxed at EUR 0. Above the
+    Grundfreibetrag the tariff must be strictly progressive."""
+    t = resolve_income_tax_tariff(date(2026, 6, 1))
+    assert compute_grundtarif_annual_tax(Decimal("12348"), t) == Decimal("0")
+    assert compute_grundtarif_annual_tax(Decimal("40000"), t) > compute_grundtarif_annual_tax(Decimal("30000"), t)
+
+
+def test_2026_tariff_is_continuous_across_every_zone_boundary():
+    """Section 22 boundary tests: the 2026 zone coefficients must join
+    continuously at 17,799/17,800, 69,878/69,879 and 277,825/277,826 —
+    a transcription error in any coefficient shows up as a jump here."""
+    t = resolve_income_tax_tariff(date(2026, 6, 1))
+    for boundary in (Decimal("17799"), Decimal("69878"), Decimal("277825")):
+        below = compute_grundtarif_annual_tax(boundary, t)
+        above = compute_grundtarif_annual_tax(boundary + 1, t)
+        assert above >= below
+        assert above - below <= Decimal("2"), f"discontinuity at {boundary}: {below} -> {above}"
+
+
+def test_2026_grundfreibetrag_is_higher_so_same_income_is_taxed_less_than_2023():
+    """Directional check (never only an exact-value one): 2026 raises the
+    Grundfreibetrag from 12,348 vs 10,908 and widens the zones, so the
+    SAME zvE must attract strictly LESS tax under 2026 than under 2023.
+    Catches an accidentally inverted/swapped version entry."""
+    t23 = resolve_income_tax_tariff(date(2024, 6, 1))
+    t26 = resolve_income_tax_tariff(date(2026, 6, 1))
+    for zve in (Decimal("20000"), Decimal("45000"), Decimal("80000")):
+        assert compute_grundtarif_annual_tax(zve, t26) < compute_grundtarif_annual_tax(zve, t23)
+
+
+def test_2026_soli_freigrenze_boundary_matches_section_7():
+    """Section 7: exemption threshold EUR 20,350 single / EUR 40,700
+    splitting. Exactly AT the threshold Soli is still zero; one euro
+    above it enters the mitigation zone."""
+    t = resolve_income_tax_tariff(date(2026, 6, 1))
+    threshold = t["soli_threshold_single"]
+    assert compute_soli(Decimal("20350"), False, threshold, SOLI_RATE) == Decimal("0")
+    assert compute_soli(Decimal("20351"), False, threshold, SOLI_RATE) > Decimal("0")
+    # Splitting doubles the Freigrenze to exactly the document's 40,700.
+    assert compute_soli(Decimal("40700"), True, threshold, SOLI_RATE) == Decimal("0")
+    assert compute_soli(Decimal("40701"), True, threshold, SOLI_RATE) > Decimal("0")
+
+
+def test_calculator_resolves_2026_tariff_for_2026_date_and_traces_its_values():
+    """End to end through the executor: a 2026 payroll date must produce
+    a 2026-labelled result whose trace proves WHICH statutory values were
+    applied, and must no longer carry the year-stale approximation flag."""
+    calculator = InternalGermanyWageTaxCalculator(
+        soli_threshold_single=SOLI_THRESHOLD, soli_rate_pct=SOLI_RATE, payroll_date=date(2026, 6, 1),
+    )
+    result = calculator.execute(_pap_input(re4_cents=450000))
+    assert result.calculation_status == "COMPLETE"
+    assert result.pap_version == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
+    assert result.raw_outputs["TAX_YEAR"] == "2026-ESTG-32A"
+    assert result.raw_outputs["TARIFF_EFFECTIVE_FROM"] == "2026-01-01"
+    assert result.raw_outputs["TARIFF_GRUNDFREIBETRAG"] == "12348"
+    assert result.raw_outputs["SOLI_THRESHOLD_SINGLE_APPLIED"] == "20350"
+    assert result.raw_outputs["KINDERFREIBETRAG_PLUS_BEA_APPLIED"] == "9756"
+    assert "GERMANY_TARIFF_YEAR_NOT_CURRENT" not in result.raw_outputs["REFERENCE_APPROXIMATION"]
+
+
+def test_effective_dated_soli_threshold_overrides_a_stale_injected_constant():
+    """The engine injects _DE_SOLI_THRESHOLD (the 2023-2025 value) at the
+    call site. For a 2026 payroll the EFFECTIVE-DATED version must win, so
+    an employee whose surcharge base sits between the two thresholds owes
+    ZERO Soli in 2026 where the stale injected constant would have charged
+    them. This is the regression guard for the actual bug."""
+    stale = Decimal("18130")
+    calc_2026 = InternalGermanyWageTaxCalculator(
+        soli_threshold_single=stale, soli_rate_pct=SOLI_RATE, payroll_date=date(2026, 6, 1),
+    )
+    assert calc_2026._tariff["soli_threshold_single"] == Decimal("20350")
+    # A surcharge base of 19,000 is above the stale 18,130 but below the
+    # correct 2026 Freigrenze of 20,350 -> must be exempt in 2026.
+    assert compute_soli(Decimal("19000"), False, calc_2026._tariff["soli_threshold_single"], SOLI_RATE) == Decimal("0")
+    assert compute_soli(Decimal("19000"), False, stale, SOLI_RATE) > Decimal("0")
+
+
+def test_internal_calculator_still_never_claims_to_be_the_certified_bmf_pap():
+    """PAP governance must not be weakened by the 2026 tariff work: the
+    result still carries the INTERNAL_FUNCTIONAL_REFERENCE provenance and
+    an explicit non-certification warning, for 2026 exactly as for 2023."""
+    calculator = InternalGermanyWageTaxCalculator(
+        soli_threshold_single=SOLI_THRESHOLD, soli_rate_pct=SOLI_RATE, payroll_date=date(2026, 6, 1),
+    )
+    result = calculator.execute(_pap_input(re4_cents=450000))
+    assert result.pap_version.startswith("INTERNAL_FUNCTIONAL_REFERENCE")
+    assert result.pap_hash is None
+    assert any("NOT the certified BMF" in w for w in result.warnings)
 
 
 # ── Tax Class II Entlastungsbetrag fuer Alleinerziehende (Phase 8BT) ────

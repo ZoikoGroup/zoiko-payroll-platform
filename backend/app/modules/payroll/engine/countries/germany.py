@@ -607,7 +607,7 @@ def _calculate_midijob_path(ctx: PayrollContext, profile, trace: GermanyCalculat
         )
         try:
             internal_executor = InternalGermanyWageTaxCalculator(
-                soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE,
+                soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE,  # Phase 8BY: fallback only — the effective-dated tariff version resolved from payroll_date supplies the period-correct Soli Freigrenze and overrides this (germany/tax.py calculate_internal_wage_tax).
                 payroll_date=getattr(ctx, "germany_payroll_date", None),
             )
             pap_result = internal_executor.execute(pap_input)
@@ -972,7 +972,7 @@ def calculate(ctx: PayrollContext) -> dict:
         )
         try:
             internal_executor = InternalGermanyWageTaxCalculator(
-                soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE,
+                soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE,  # Phase 8BY: fallback only — the effective-dated tariff version resolved from payroll_date supplies the period-correct Soli Freigrenze and overrides this (germany/tax.py calculate_internal_wage_tax).
                 payroll_date=getattr(ctx, "germany_payroll_date", None),
             )
             pap_result = internal_executor.execute(pap_input)

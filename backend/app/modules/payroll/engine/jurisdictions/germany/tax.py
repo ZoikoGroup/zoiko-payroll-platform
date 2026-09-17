@@ -29,14 +29,16 @@ and the phase report):
 
 - Grundfreibetrag EUR 10,908 and all 5 tariff-zone boundaries/
   coefficients: section 32a EStG, 2023 assessment year (BGBl. 2022 I
-  S. 2230) — the most recent full tariff this codebase's author can state
-  with high confidence from the published law text. THIS IS OLDER than
-  the 2026 social-insurance rates already configured elsewhere in this
-  Germany jurisdiction (see hardcoded_defaults.py's Phase 7 SI constants)
-  — a disclosed, deliberate choice: shipping a verified-older tariff
-  beats fabricating unverified newer bracket numbers. See "Known
-  limitations" below and the effective-dating note on
-  `resolve_income_tax_tariff()`.
+  S. 2230). Retained as the effective-dated version for payroll dates
+  2023-01-01 .. 2025-12-31 (retro/historical runs).
+- [Phase 8BY] Grundfreibetrag EUR 12,348 and all 5 tariff-zone
+  boundaries/coefficients for the 2026 assessment year: transcribed
+  verbatim from the controlled source document ZP-TAX-DE-2026-001 v1.0
+  section 4 ("2026 Income-Tax Reference Formula"), the Tier-1 authority
+  for this jurisdiction, which cites DE-SRC-003 (BMF Lohnsteuer-Handbuch
+  2026, section 32a). Effective 2026-01-01 onward. This CLOSED the former
+  limitation #1 below: the document supplies exactly the "exact newer
+  zone coefficients" that change was blocked on.
 - Arbeitnehmer-Pauschbetrag EUR 1,230/year: section 9a EStG, in force
   since 2023.
 - Sonderausgaben-Pauschbetrag EUR 36/year (single): section 10c EStG,
@@ -51,8 +53,16 @@ and the phase report):
 - Solidaritaetszuschlag exemption threshold EUR 18,130 (single) /
   EUR 36,260 (Splitting, class III): SAME constant already resolved in
   this codebase's hardcoded_defaults.py (`_DE_SOLI_THRESHOLD`) — reused,
-  not re-invented, per this phase's explicit "use authoritative values
-  already present in the repository" instruction.
+  not re-invented. Retained as the 2023-2025 effective-dated value.
+- [Phase 8BY] Solidaritaetszuschlag exemption threshold EUR 20,350
+  (single) / EUR 40,700 (Splitting): ZP-TAX-DE-2026-001 v1.0 section 7,
+  citing DE-SRC-004 (SolzG 2026). Effective 2026-01-01 onward. The
+  document's splitting figure is exactly 2x the single figure, which
+  `compute_soli`'s pre-existing `* 2` splitting rule already reproduces
+  — no formula change was needed, only the effective-dated value.
+- [Phase 8BY] Kinderfreibetrag + BEA EUR 9,756 per full ZKF unit for
+  2026: ZP-TAX-DE-2026-001 v1.0 section 4 ("Child allowances — per child
+  EUR 9,756"; per parent EUR 4,878). Effective 2026-01-01 onward.
 - Solidaritaetszuschlag mitigation-zone rate 11.9%: section 4 Satz 2
   SolzG 1995, as amended 2021 — unchanged since.
 - Entlastungsbetrag fuer Alleinerziehende EUR 4,260/year (first child) +
@@ -63,13 +73,17 @@ and the phase report):
 KNOWN, DISCLOSED LIMITATIONS (Category A/B per the phase report's own
 taxonomy — tracked, not hidden):
 
-1. Tax year mismatch: the income-tax tariff below is the 2023 assessment
-   year; the rest of this Germany jurisdiction's statutory config targets
-   2026. Every calculation this module performs is labeled with this tax
-   year explicitly. Updating to a later, source-verified tariff is a
-   pure data change (see resolve_income_tax_tariff) — Category B, blocked
-   on acquiring/verifying the exact newer zone coefficients, not on any
-   code limitation.
+1. [CLOSED, Phase 8BY] Tax year mismatch: the income-tax tariff used to
+   be the 2023 assessment year only, while the rest of this Germany
+   jurisdiction's statutory config targets 2026. The controlled source
+   document ZP-TAX-DE-2026-001 v1.0 sections 4 and 7 supply the exact
+   2026 zone coefficients, Grundfreibetrag, child allowance and Soli
+   Freigrenze this was blocked on, so `_TARIFF_VERSIONS` now carries a
+   verified 2026 entry effective 2026-01-01 and the 2023 entry is closed
+   at that date. A 2026 payroll now resolves 2026 values; a 2023-2025
+   retro payroll still resolves the 2023 ones. This was exactly the
+   "pure data change" this note anticipated — the resolution mechanism
+   itself was not modified.
 2. Vorsorgepauschale (pension/health/care insurance deduction estimate)
    is APPROXIMATED as this period's actual computed employee RV+ALV+GKV+PV
    contributions (annualized) rather than the BMF PAP's own distinct
@@ -122,6 +136,7 @@ from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
 )
 
 TAX_YEAR_LABEL = "2023-ESTG-32A"
+TAX_YEAR_LABEL_2026 = "2026-ESTG-32A"
 PROVENANCE_VERSION = "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
 
 # section 32a EStG, 2023 assessment year.
@@ -145,7 +160,49 @@ SONDERAUSGABEN_PAUSCHBETRAG = Decimal("36")
 
 # section 32 Abs. 6 EStG (2023) — Kinderfreibetrag + BEA, per full ZKF unit.
 # Used only for the section 51a Soli/Kirchensteuer assessment-base reduction.
+# NOTE: this module-level constant is the 2023 value and is retained ONLY
+# as the back-compat default for date-less callers. The value actually
+# applied to a payroll is the resolved tariff version's own
+# `kinderfreibetrag_plus_bea` (see _TARIFF_VERSIONS) — 2026 uses EUR 9,756
+# per ZP-TAX-DE-2026-001 section 4.
 KINDERFREIBETRAG_PLUS_BEA = Decimal("8952")
+
+# ZP-TAX-DE-2026-001 section 4 — 2026 assessment year (Grundfreibetrag
+# EUR 12,348). Zone coefficients transcribed verbatim from the controlled
+# document's "2026 Income-Tax Reference Formula" table:
+#   EUR 0        - 12,348  -> 0
+#   EUR 12,349   - 17,799  -> (914.51 * y + 1,400) * y ; y = (x - 12,348)/10,000
+#   EUR 17,800   - 69,878  -> (173.10 * z + 2,397) * z + 1,034.87 ; z = (x - 17,799)/10,000
+#   EUR 69,879   - 277,825 -> 0.42 * x - 11,135.63
+#   EUR 277,826  and above -> 0.45 * x - 19,470.38
+_GRUNDFREIBETRAG_2026 = Decimal("12348")
+_ZONE2_UPPER_2026 = Decimal("17799")
+_ZONE3_UPPER_2026 = Decimal("69878")
+_ZONE4_UPPER_2026 = Decimal("277825")
+_ZONE2_A_2026 = Decimal("914.51")
+_ZONE2_B_2026 = Decimal("1400")
+_ZONE3_A_2026 = Decimal("173.10")
+_ZONE3_B_2026 = Decimal("2397")
+_ZONE3_C_2026 = Decimal("1034.87")
+_ZONE4_RATE_2026 = Decimal("0.42")
+_ZONE4_SUB_2026 = Decimal("11135.63")
+_ZONE5_RATE_2026 = Decimal("0.45")
+_ZONE5_SUB_2026 = Decimal("19470.38")
+
+# ZP-TAX-DE-2026-001 section 4: "Child allowances - per child EUR 9,756"
+# (per parent EUR 4,878). This module's ZKF unit is the per-CHILD figure,
+# matching the 2023 constant's own "per full ZKF unit" semantics.
+KINDERFREIBETRAG_PLUS_BEA_2026 = Decimal("9756")
+
+# ZP-TAX-DE-2026-001 section 7: single/non-splitting Solidaritaetszuschlag
+# exemption threshold EUR 20,350; splitting cases EUR 40,700 (exactly 2x,
+# which `compute_soli`'s existing `* 2` splitting rule already reproduces).
+_SOLI_THRESHOLD_SINGLE_2026 = Decimal("20350")
+
+# SolzG 1995 / pre-2026 threshold retained for the 2023 tariff version so a
+# historical/retro payroll still resolves the threshold that was legally
+# applicable in its own period rather than today's.
+_SOLI_THRESHOLD_SINGLE_2023 = Decimal("18130")
 
 # SolzG 1995 section 4 Satz 2 mitigation-zone rate.
 SOLI_MILDERUNGSZONE_RATE = Decimal("11.9")
@@ -193,14 +250,46 @@ _TARIFF_VERSIONS = [
     {
         "tax_year": TAX_YEAR_LABEL,
         "effective_from": date(2023, 1, 1),
-        "effective_to": None,  # open-ended: the most recent verified tariff, still applies until a newer one is added
+        # Phase 8BY: no longer open-ended — closed the day the verified
+        # 2026 tariff below takes effect, so a 2023-2025 retro/historical
+        # payroll still resolves the tariff legally applicable in its own
+        # period (spec acceptance #33/#34) instead of the newest one.
+        "effective_to": date(2026, 1, 1),
         "grundfreibetrag": _GRUNDFREIBETRAG,
         "zone2_upper": _ZONE2_UPPER, "zone3_upper": _ZONE3_UPPER, "zone4_upper": _ZONE4_UPPER,
         "zone2_a": _ZONE2_A, "zone2_b": _ZONE2_B,
         "zone3_a": _ZONE3_A, "zone3_b": _ZONE3_B, "zone3_c": _ZONE3_C,
         "zone4_rate": _ZONE4_RATE, "zone4_sub": _ZONE4_SUB,
         "zone5_rate": _ZONE5_RATE, "zone5_sub": _ZONE5_SUB,
+        "kinderfreibetrag_plus_bea": KINDERFREIBETRAG_PLUS_BEA,
+        "soli_threshold_single": _SOLI_THRESHOLD_SINGLE_2023,
         "source": "section 32a EStG, 2023 assessment year (BGBl. 2022 I S. 2230)",
+    },
+    {
+        # Phase 8BY: the exact 2026 zone coefficients this module's own
+        # docstring limitation #1 was blocked on ("a pure data change ...
+        # blocked on acquiring/verifying the exact newer zone
+        # coefficients") are supplied verbatim by the controlled source
+        # document ZP-TAX-DE-2026-001 section 4, the Tier-1 authority for
+        # this jurisdiction. Adding this entry is exactly the "add a
+        # second entry" path the registry was designed for — no mechanism
+        # change.
+        "tax_year": TAX_YEAR_LABEL_2026,
+        "effective_from": date(2026, 1, 1),
+        "effective_to": None,  # open-ended: most recent verified tariff
+        "grundfreibetrag": _GRUNDFREIBETRAG_2026,
+        "zone2_upper": _ZONE2_UPPER_2026, "zone3_upper": _ZONE3_UPPER_2026, "zone4_upper": _ZONE4_UPPER_2026,
+        "zone2_a": _ZONE2_A_2026, "zone2_b": _ZONE2_B_2026,
+        "zone3_a": _ZONE3_A_2026, "zone3_b": _ZONE3_B_2026, "zone3_c": _ZONE3_C_2026,
+        "zone4_rate": _ZONE4_RATE_2026, "zone4_sub": _ZONE4_SUB_2026,
+        "zone5_rate": _ZONE5_RATE_2026, "zone5_sub": _ZONE5_SUB_2026,
+        "kinderfreibetrag_plus_bea": KINDERFREIBETRAG_PLUS_BEA_2026,
+        "soli_threshold_single": _SOLI_THRESHOLD_SINGLE_2026,
+        "source": (
+            "ZP-TAX-DE-2026-001 v1.0 section 4 (2026 Income-Tax Reference Formula) "
+            "and section 7 (Solidarity Surcharge 2026); underlying authority "
+            "DE-SRC-003 BMF Lohnsteuer-Handbuch 2026 section 32a and DE-SRC-004 SolzG 2026"
+        ),
     },
 ]
 
@@ -407,7 +496,20 @@ def calculate_internal_wage_tax(
         "figure without independent verification.",
     ]
 
-    approximation_codes: list = ["GERMANY_TARIFF_YEAR_NOT_CURRENT"]
+    # Phase 8BY: no longer unconditional. `resolve_income_tax_tariff()`
+    # now has a verified 2026 version, so a 2026 payroll genuinely runs on
+    # its own assessment year's tariff and must NOT be labelled
+    # year-stale. The flag is emitted only when the resolved version is a
+    # SUPERSEDED one (its validity window has been closed by a newer
+    # verified version) — i.e. exactly the cases where the applied tariff
+    # year is not the newest this module has verified. Note this is only
+    # ever an over-disclosure (a legitimate retro payroll on a correctly
+    # resolved historical tariff also carries it), never an
+    # under-disclosure. The separate INTERNAL_FUNCTIONAL_REFERENCE warning
+    # below (this is not the certified BMF PAP) stays unconditional.
+    approximation_codes: list = []
+    if resolved_tariff.get("effective_to") is not None:
+        approximation_codes.append("GERMANY_TARIFF_YEAR_NOT_CURRENT")
     lohnsteuer_allowance, class_warnings, class_approximation_codes = _class_allowances(
         tax_class, ARBEITNEHMER_PAUSCHBETRAG, SONDERAUSGABEN_PAUSCHBETRAG, vorsorgepauschale_proxy, child_count,
     )
@@ -423,13 +525,30 @@ def calculate_internal_wage_tax(
     # section 51a EStG: Soli/Kirchensteuer use a SEPARATE assessment base
     # that additionally subtracts the child allowance (ZKF), even though
     # ZKF never reduces the wage-tax withholding base itself above.
-    child_allowance = (zkf or Decimal("0")) * KINDERFREIBETRAG_PLUS_BEA
+    # Phase 8BY: the ZKF unit amount is now a property of the resolved
+    # EFFECTIVE-DATED tariff version (2023: EUR 8,952; 2026: EUR 9,756 per
+    # ZP-TAX-DE-2026-001 section 4), not a single module constant, so a
+    # 2026 payroll no longer reduces its section 51a surcharge base by a
+    # 2023 child allowance. Falls back to the module constant for a caller
+    # that supplied a bare/legacy tariff dict without the key.
+    zkf_unit = resolved_tariff.get("kinderfreibetrag_plus_bea", KINDERFREIBETRAG_PLUS_BEA)
+    child_allowance = (zkf or Decimal("0")) * zkf_unit
     zve_for_surcharges = zve_for_lohnsteuer - child_allowance
     annual_surcharge_base_tax = compute_tax_for_class(zve_for_surcharges, tax_class, resolved_tariff)
 
+    # Phase 8BY: the Solidaritaetszuschlag Freigrenze is likewise a
+    # property of the effective-dated tariff version (2023: EUR 18,130;
+    # 2026: EUR 20,350 / EUR 40,700 splitting per ZP-TAX-DE-2026-001
+    # section 7). The EFFECTIVE-DATED value wins over the caller-injected
+    # `soli_threshold_single`; the injected argument remains the fallback
+    # for legacy/date-less callers and keeps the signature unchanged.
+    # This is what closes the prior "hardwired, not registry-resolved"
+    # annotation: the production engine injects _DE_SOLI_THRESHOLD, but a
+    # date-resolved version now overrides it with the period-correct one.
+    effective_soli_threshold = resolved_tariff.get("soli_threshold_single") or soli_threshold_single
     annual_soli = compute_soli(
         annual_surcharge_base_tax, is_splitting=(tax_class == "III"),
-        soli_threshold_single=soli_threshold_single, soli_rate_pct=soli_rate_pct,
+        soli_threshold_single=effective_soli_threshold, soli_rate_pct=soli_rate_pct,
     )
 
     return InternalTaxBreakdown(
@@ -515,6 +634,20 @@ class InternalGermanyWageTaxCalculator(PapExecutor):
                 "ENTLASTUNGSBETRAG_ALLEINERZIEHENDE": str(breakdown.entlastungsbetrag_alleinerziehende),
                 "TAX_YEAR": self._tariff["tax_year"],
                 "TARIFF_EFFECTIVE_FROM": str(self._tariff["effective_from"]),
+                # Phase 8BY: the two statutory values that are now
+                # resolved PER TARIFF VERSION rather than injected as
+                # module constants are traced explicitly, so a payslip's
+                # stored snapshot proves which Grundfreibetrag/Soli
+                # Freigrenze/ZKF actually produced the figure (spec
+                # section 16 "Runtime output / minimum trace payload").
+                "TARIFF_GRUNDFREIBETRAG": str(self._tariff["grundfreibetrag"]),
+                "SOLI_THRESHOLD_SINGLE_APPLIED": str(
+                    self._tariff.get("soli_threshold_single") or self._soli_threshold_single
+                ),
+                "KINDERFREIBETRAG_PLUS_BEA_APPLIED": str(
+                    self._tariff.get("kinderfreibetrag_plus_bea", KINDERFREIBETRAG_PLUS_BEA)
+                ),
+                "TARIFF_SOURCE": str(self._tariff.get("source", "")),
                 # Structured (non-prose) disclosure — a comma-joined string
                 # since raw_outputs is a flat str->str dict; see
                 # calculate_internal_wage_tax's own docstring for the

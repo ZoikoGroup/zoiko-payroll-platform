@@ -618,8 +618,19 @@ def test_calculate_falls_back_to_internal_tax_when_pap_unavailable():
     executor = resolve_pap_executor(None)
     with pytest.raises(GermanyPapNotAvailableError):
         executor.execute(build_pap_input(profile=_FakeProfile(), gross_monthly=Decimal("5000"), kvz_rate=Decimal("1.0")))
+    # `_ctx()` carries no germany_payroll_date, so the calculator takes its
+    # documented date-less back-compat path and resolves the FIRST verified
+    # tariff version (2023). Every production call site passes a real
+    # payroll date — see the two `date(2026, 6, 1)` preview/run tests below,
+    # which assert the 2026 label.
     result = germany.calculate(_ctx())
     assert result["_germany_calculation_snapshot"]["papVersion"] == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+
+    # Phase 8BY: with a real 2026 payroll date the SAME path must resolve
+    # the 2026 statutory tariff instead — proving the fallback calculator
+    # is effective-dated end to end, not pinned to one assessment year.
+    result_2026 = germany.calculate(_ctx(germany_payroll_date=date(2026, 6, 1)))
+    assert result_2026["_germany_calculation_snapshot"]["papVersion"] == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
 
 
 def test_calculate_raises_ceiling_missing_before_pap():
@@ -804,14 +815,17 @@ def test_calculate_rv_alv_exempt_flags_honored_end_to_end():
     assert snap["resolved"]["alv"]["employee"] == "0"
 
 
-def test_legacy_simplified_calculator_retired_and_not_exposed_on_country_module():
-    """Phase-7 normalized the Germany calculator; the pre-Phase-7
-    `_calculate_legacy_simplified` entry point was retired along with the
-    module relocation (the newer jurisdictional tests import the renamed
-    `jurisdictions.germany.pap.core` location instead). Guard that it stays
-    retired and that `calculate` remains the production entry point."""
+def test_legacy_simplified_calculator_was_retired_not_wired_back_in():
+    """Phase 4 (docs/PHASE_4_GERMANY_LEGACY_PAP_ARCHITECTURE_DECISION_REPORT.md)
+    retired the pre-Phase-7 `_calculate_legacy_simplified`/
+    `_calculate_annual_tax_de` functions after a forensic audit found zero
+    production/API/migration callers and zero historical payroll data
+    computed via that path. This test guards the actual invariant that
+    mattered — `germany.calculate` (the production entry point registered
+    in engine/standard.py's `_COUNTRY_CALC["DE"]`) is the only Germany
+    calculator, not that dead code remains importable."""
     assert not hasattr(germany, "_calculate_legacy_simplified")
-    assert callable(germany.calculate)
+    assert not hasattr(germany, "_calculate_annual_tax_de")
 
 
 # ── DB-integration: full orchestration via real registries ──────────────
@@ -923,7 +937,7 @@ def test_preview_germany_calculation_completes_regular_via_internal_tax_with_ful
     assert result["blocked"] is False
     assert result["result"]["monthlyTax"] > 0
     assert result["trace"]["resolved"]["rv"]["employee"] is not None
-    assert result["trace"]["papVersion"] == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+    assert result["trace"]["papVersion"] == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
 
 
 def test_preview_germany_calculation_still_blocks_when_ceiling_genuinely_missing(db, organization):
@@ -1010,7 +1024,7 @@ def test_create_payroll_run_completes_regular_employee_via_internal_tax_calculat
     assert item.net_pay < item.gross_pay
     trace = item.germany_calculation_snapshot or {}
     assert trace.get("calculationStatus") == "COMPLETE"
-    assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+    assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
     assert trace.get("resolved", {}).get("rv") is not None
 
     remaining_run = db.query(PayrollRun).one()

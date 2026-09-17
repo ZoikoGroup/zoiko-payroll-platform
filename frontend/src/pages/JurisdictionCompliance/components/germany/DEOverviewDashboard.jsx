@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import {
   FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
-  Landmark, Church, RefreshCcw, FileSearch, History, ArrowRight,
+  Landmark, Church, RefreshCcw, FileSearch, History, ArrowRight, Banknote, FileStack,
 } from "lucide-react";
 import {
   listPapReleases, listHealthFunds, listContributionCeilings, listPvConfigurations,
+  listMinijobMidijobParameters,
   listEarningTaxabilityRules, listOvertimePremiumCategories, listOvertimeGrundlohnCaps,
-  listGermanyAccidentInsuranceProfiles, listGermanyChurchTaxExceptions, getSourceArtifacts,
+  listGermanyAccidentInsuranceProfiles, listGermanyChurchTaxExceptions, getChurchTaxMatrix,
+  getSourceArtifacts, getCompliancePolicies,
 } from "../../../../service/superAdminService";
 import { listElstamChangeListBatches } from "../../../../service/payrollService";
 import { describeLoadError } from "../../../../service/errorClassification";
-import { countLabel, latestStatus } from "./germanyOverviewSummaries";
+import { countLabel, latestStatus, churchTaxSummary } from "./germanyOverviewSummaries";
 
 // Germany country-level overview — the landing content for
 // Compliance -> Germany, giving one place that surfaces every existing
@@ -23,15 +25,38 @@ import { countLabel, latestStatus } from "./germanyOverviewSummaries";
 // environment) or a network error shows "Not available"/"Backend
 // unreachable" rather than a fabricated 0 or success state.
 const AREAS = [
+  {
+    key: "compliance-pack", label: "Compliance Pack (Tax Year Version)", icon: FileStack,
+    loader: () => getCompliancePolicies({ country: "DE", packType: "tax" }), summarize: (rows) => latestStatus(rows),
+  },
   { key: "pap", label: "PAP / Releases", icon: FileCheck2, loader: () => listPapReleases(), summarize: (rows) => latestStatus(rows) },
   { key: "health-funds", label: "Health Funds", icon: HeartPulse, loader: () => listHealthFunds(), summarize: countLabel("health fund") },
   { key: "ceilings", label: "Contribution Ceilings", icon: Percent, loader: () => listContributionCeilings(), summarize: countLabel("ceiling") },
   { key: "pv", label: "PV Configuration", icon: ShieldCheck, loader: () => listPvConfigurations(), summarize: countLabel("configuration") },
+  // No seed data in any environment (Phase 8BK migration, deliberately) —
+  // each consuming calculation falls back to its own existing hardcoded
+  // default until a real PUBLISHED row exists, so a genuine 0 here means
+  // "no override configured yet", not a bug, unlike the church-tax tile
+  // above whose base matrix is always non-empty.
+  { key: "minijob-midijob", label: "Minijob/Midijob Parameters", icon: Banknote, loader: () => listMinijobMidijobParameters(), summarize: countLabel("parameter") },
   { key: "earning-taxability", label: "Earning Taxability", icon: Layers, loader: () => listEarningTaxabilityRules(), summarize: countLabel("rule") },
   { key: "overtime-premium-categories", label: "Overtime Premium Categories", icon: Clock3, loader: () => listOvertimePremiumCategories(), summarize: countLabel("category", "categories") },
   { key: "overtime-grundlohn-caps", label: "Overtime Grundlohn Caps", icon: Gauge, loader: () => listOvertimeGrundlohnCaps(), summarize: countLabel("cap") },
   { key: "employer-levies", label: "Employer Levies (Accident Insurance)", icon: Landmark, loader: () => listGermanyAccidentInsuranceProfiles(), summarize: countLabel("profile") },
-  { key: "church-tax", label: "Church Tax", icon: Church, loader: () => listGermanyChurchTaxExceptions(), summarize: countLabel("exception") },
+  {
+    key: "church-tax",
+    label: "Church Tax",
+    icon: Church,
+    // The 16-Land base matrix is a hardcoded constant, always present —
+    // unlike every other area here, zero rows in the sub-Land exceptions
+    // registry is the normal case, not "not configured" (see
+    // churchTaxSummary's own doc comment). Load both so the summary can
+    // distinguish "no church tax config" (never true) from "no exceptions"
+    // (usually true).
+    loader: () => Promise.all([getChurchTaxMatrix(), listGermanyChurchTaxExceptions()])
+      .then(([matrix, exceptions]) => ({ laender: matrix?.laender, exceptions })),
+    summarize: churchTaxSummary,
+  },
   { key: "elstam-batches", label: "ELStAM Change-List Batches", icon: RefreshCcw, loader: () => listElstamChangeListBatches(), summarize: countLabel("batch") },
   { key: "source-evidence", label: "Source Evidence", icon: FileSearch, loader: () => getSourceArtifacts(), summarize: countLabel("artifact") },
 ];

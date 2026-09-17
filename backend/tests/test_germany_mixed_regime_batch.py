@@ -228,7 +228,7 @@ def test_mixed_five_regime_batch_exact_run_aggregates_and_idempotent_retry(
         assert item.tds > Decimal("0.00")
         snap = item.germany_calculation_snapshot or {}
         assert snap.get("calculationStatus") == "COMPLETE"
-        assert snap.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+        assert snap.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
 
     # Midijob's social insurance was genuinely computed, not shortcut.
     midi_trace = items[b.id].germany_calculation_snapshot or {}

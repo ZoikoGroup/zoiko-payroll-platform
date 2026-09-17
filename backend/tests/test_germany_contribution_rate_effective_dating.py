@@ -596,4 +596,61 @@ def test_auto_seed_is_date_aware_when_payroll_date_provided(db):
     assert rv_row.employee_rate_pct == Decimal("18.00")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 10. Phase 8BY: overlapping Active packs resolve by EFFECTIVE DATE, never
+#     by edit time.
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_overlapping_packs_resolve_by_effective_date_not_by_edit_time(db):
+    """REGRESSION (Phase 8BY): `_find_active_tax_pack` used to break ties
+    between two Active packs whose validity windows both contain the
+    payroll date with `updated_at DESC` — i.e. the most recently EDITED
+    pack won, not the one that most recently CAME INTO EFFECT.
+
+    `upsert_jurisdiction_pack` rejects overlapping Active windows, so this
+    state is only reachable through legacy/imported data or a direct write
+    — which is exactly why the resolver itself must be deterministic
+    rather than relying on the writer's guard. The rows are therefore
+    widened directly here, deliberately bypassing that guard.
+
+    Touching the OLDER pack last makes it the most recently updated one;
+    the resolver must still return the pack effective from 2026 for a 2026
+    payroll date. Before the fix this returned the 2024 pack's 18.00%."""
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    from app.modules.payroll.models import JurisdictionPack
+
+    older = _make_de_tax_pack(
+        db, "DE-TEST-OVERLAP-OLD", "2024", date(2024, 1, 1), date(2024, 12, 31),
+        rv_employee_pct=Decimal("18.00"), rv_employer_pct=Decimal("18.00"),
+    )
+    newer = _make_de_tax_pack(
+        db, "DE-TEST-OVERLAP-NEW", "2026", date(2026, 1, 1), None,
+        rv_employee_pct=Decimal("20.00"), rv_employer_pct=Decimal("20.00"),
+    )
+
+    # Widen the older pack so BOTH windows contain 2026-06-01, then touch
+    # it last so it is unambiguously the most recently updated row.
+    older_row = db.query(JurisdictionPack).filter(JurisdictionPack.id == older.id).one()
+    older_row.effective_to = None
+    db.flush()
+    from datetime import datetime, timedelta
+    newer_row = db.query(JurisdictionPack).filter(JurisdictionPack.id == newer.id).one()
+    newer_row.updated_at = datetime(2020, 1, 1)
+    older_row.updated_at = datetime(2020, 1, 1) + timedelta(days=3650)
+    db.commit()
+
+    rates, _, resolved_pack = resolve_tax_configuration(db, "DE", payroll_date=date(2026, 6, 1))
+    assert resolved_pack.id == newer.id, (
+        "the pack effective from 2026 must win for a 2026 payroll date, "
+        "even though the 2024 pack was edited more recently"
+    )
+    rv = next(r for r in rates if r.component_key == "rv_pension")
+    assert rv.employee_rate_pct == Decimal("20.00")
+
+    # And a 2024-dated payroll still resolves the pack in force back then:
+    # only the older pack's window starts on/before 2024-06-01.
+    _, _, pack_2024 = resolve_tax_configuration(db, "DE", payroll_date=date(2024, 6, 1))
+    assert pack_2024.id == older.id
+
+
 
