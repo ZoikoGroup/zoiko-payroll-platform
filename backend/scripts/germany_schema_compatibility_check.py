@@ -16,8 +16,11 @@ Features
 * READ-ONLY: runs inside a PostgreSQL READ ONLY transaction and executes only
   fixed `information_schema` / SELECT probes. No DDL, no DML, no writes.
 * Per-migration verdicts for the head chain
-  f61cb4b650f4 -> d3e4f5a6b7c8 -> e4f5a6b7c8d9 -> f5a6b7c8d9e0 ->
+  b7c8d9e0f2a3 -> d3e4f5a6b7c8 -> e4f5a6b7c8d9 -> f5a6b7c8d9e0 ->
   1a2b3c4d5e6f -> 2b3c4d5e6f70, plus a lineage-ordering cross-check.
+  (Phase 8CG: the chain's first revision was renamed from f61cb4b650f4 to
+  b7c8d9e0f2a3 — origin/main independently reused f61cb4b650f4 for an
+  unrelated migration; see docs/GERMANY_2026_RECONCILIATION_IMPLEMENTATION_REPORT.md.)
 * Usable against a restored dump: pass --engine-url to point at a clone of
   production instead of the app's configured DATABASE_URL.
 * Never prints credentials (redacts passwords).
@@ -54,7 +57,7 @@ STATUS_UNKNOWN = "unknown"
 
 # Head region (topological order within the repository).
 HEAD_CHAIN = [
-    "f61cb4b650f4",
+    "b7c8d9e0f2a3",
     "d3e4f5a6b7c8",
     "e4f5a6b7c8d9",
     "f5a6b7c8d9e0",

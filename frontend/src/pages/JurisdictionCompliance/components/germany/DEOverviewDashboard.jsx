@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import {
   FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
-  Landmark, Church, RefreshCcw, FileSearch, History, ArrowRight, Banknote,
+  Landmark, Church, RefreshCcw, FileSearch, History, ArrowRight, Banknote, FileStack,
 } from "lucide-react";
 import {
   listPapReleases, listHealthFunds, listContributionCeilings, listPvConfigurations,
   listMinijobMidijobParameters,
   listEarningTaxabilityRules, listOvertimePremiumCategories, listOvertimeGrundlohnCaps,
   listGermanyAccidentInsuranceProfiles, listGermanyChurchTaxExceptions, getChurchTaxMatrix,
-  getSourceArtifacts,
+  getSourceArtifacts, getCompliancePolicies,
 } from "../../../../service/superAdminService";
 import { listElstamChangeListBatches } from "../../../../service/payrollService";
 import { describeLoadError } from "../../../../service/errorClassification";
@@ -25,6 +25,10 @@ import { countLabel, latestStatus, churchTaxSummary } from "./germanyOverviewSum
 // environment) or a network error shows "Not available"/"Backend
 // unreachable" rather than a fabricated 0 or success state.
 const AREAS = [
+  {
+    key: "compliance-pack", label: "Compliance Pack (Tax Year Version)", icon: FileStack,
+    loader: () => getCompliancePolicies({ country: "DE", packType: "tax" }), summarize: (rows) => latestStatus(rows),
+  },
   { key: "pap", label: "PAP / Releases", icon: FileCheck2, loader: () => listPapReleases(), summarize: (rows) => latestStatus(rows) },
   { key: "health-funds", label: "Health Funds", icon: HeartPulse, loader: () => listHealthFunds(), summarize: countLabel("health fund") },
   { key: "ceilings", label: "Contribution Ceilings", icon: Percent, loader: () => listContributionCeilings(), summarize: countLabel("ceiling") },
