@@ -42,6 +42,14 @@ import SubscriptionPage from "./modules/organization-admin/SubscriptionPage";
 import PlanSelectionPage from "./pages/PlanSelectionPage";
 import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
 import CheckoutCancelPage from "./pages/CheckoutCancelPage";
+import PlansEntitlementsPage from "./pages/SuperAdmin/PlansEntitlementsPage";
+import SubscriptionsBillingPage from "./pages/SuperAdmin/SubscriptionsBillingPage";
+import PayrollRunsMonitorPage from "./pages/SuperAdmin/PayrollRunsMonitorPage";
+import FilingsRemittancesPage from "./pages/SuperAdmin/FilingsRemittancesPage";
+import ExceptionsReconciliationPage from "./pages/SuperAdmin/ExceptionsReconciliationPage";
+import ServiceHealthPage from "./pages/SuperAdmin/ServiceHealthPage";
+import IntegrationsPage from "./pages/SuperAdmin/IntegrationsPage";
+import SecurityAuditPage from "./pages/SuperAdmin/SecurityAuditPage";
 import { ROLE_DEFAULT_REDIRECT, VALID_ROLES } from "./config/roles";
 
 function LandingRedirect() {
@@ -224,6 +232,16 @@ export default function App() {
             </SuperAdminShell>
           }
         />
+
+        {/* Command Center — Zoiko Commercial / Payroll Operations / Platform */}
+        <Route path="/super-admin/plans-entitlements" element={<SuperAdminShell><PlansEntitlementsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/subscriptions-billing" element={<SuperAdminShell><SubscriptionsBillingPage /></SuperAdminShell>} />
+        <Route path="/super-admin/payroll-runs" element={<SuperAdminShell><PayrollRunsMonitorPage /></SuperAdminShell>} />
+        <Route path="/super-admin/filings-remittances" element={<SuperAdminShell><FilingsRemittancesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/exceptions-reconciliation" element={<SuperAdminShell><ExceptionsReconciliationPage /></SuperAdminShell>} />
+        <Route path="/super-admin/service-health" element={<SuperAdminShell><ServiceHealthPage /></SuperAdminShell>} />
+        <Route path="/super-admin/integrations" element={<SuperAdminShell><IntegrationsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/security-audit" element={<SuperAdminShell><SecurityAuditPage /></SuperAdminShell>} />
 
         {/* Legacy paths — permanent redirects so old links/bookmarks keep working */}
         <Route path="/dashboard" element={<Navigate to="/super-admin/dashboard" replace />} />
