@@ -623,6 +623,12 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         tax_regime=data.taxRegime,
         default_tax_regime=data.defaultTaxRegime,
         currency=data.currency,
+        # §2 SOURCE LOCK — found missing platform-wide 2026-09-17 (see
+        # JurisdictionPackResponse.sourceDocumentId's own docstring): this
+        # field existed on the model and was READ by set_jurisdiction_
+        # pack_status's US-only gate, but nothing could ever WRITE it
+        # through this upsert function for any country.
+        source_document_id=data.sourceDocumentId,
     )
     # Policy packs have only Draft | Active — enforce the same two-value
     # vocabulary here (mirrors set_jurisdiction_pack_status's guard) so a
@@ -6740,6 +6746,19 @@ def sync_org_rates_from_canonical(
             total=cr.total, employee_rate_pct=cr.employee_rate_pct, employer_rate_pct=cr.employer_rate_pct,
             flat_amount=cr.flat_amount, sort_order=cr.sort_order,
             jurisdiction_pack_id=pack.id,
+            # filing_status/tax_regime: same "field added to the model after
+            # this copy list was first written, never retrofitted" gap found
+            # 2026-09-17 in TaxSlab's own sync just above/below (see that
+            # fix's own comment) — found here too on a full audit of this
+            # function's OTHER copy list. filing_status is what AU's
+            # AU_PAYG_COEFFICIENT/AU_STSL_COEFFICIENT bands and US's
+            # filing-status-specific rows (e.g. a MFJ medicare_addl_thresh)
+            # are keyed on; tax_regime is what India's Old/New regime split
+            # is keyed on (get_contribution_rates' own regime-aware filter)
+            # — without it, a synced row silently becomes "regime-agnostic"
+            # instead of staying scoped to the regime it was actually
+            # configured for.
+            filing_status=cr.filing_status, tax_regime=cr.tax_regime,
         )
         if existing:
             for k, v in fields.items():
@@ -6806,6 +6825,24 @@ def sync_org_rates_from_canonical(
                 # and copied for every other field.
                 flat_amount=ts.flat_amount, adjustment_amount=ts.adjustment_amount,
                 ni_category=ts.ni_category, employer_rate_pct=ts.employer_rate_pct,
+                # filing_status: same "added after this copy list was
+                # written, never retrofitted" gap as the fields above —
+                # found 2026-09-17 via a real end-to-end AU payroll run
+                # for a brand-new org. AU's Schedule 1/8 coefficient bands
+                # (AU_PAYG_COEFFICIENT/AU_STSL_COEFFICIENT) and Extra-Pay
+                # Calendar (AU_EXTRA_PAY_WITHHOLDING) all key their entire
+                # band lookup on this column (the Scale/declaration-state/
+                # calendar identifier — see models.TaxSlab's own rule_type
+                # docstring) — every AU org auto-seeded through this path
+                # (i.e. any org never explicitly "Apply Tax & Sync Rates"-
+                # assigned to a canonical pack) silently computed $0 PAYG/
+                # STSL/extra-pay withholding, logged only as a quiet
+                # [au-payg-unconfigured]-style warning, never a visible
+                # error. US's filing-status-tagged ContributionRate rows
+                # were unaffected (a different table/function), but any
+                # future country overloading TaxSlab.filing_status the
+                # same way AU does would have hit this identically.
+                filing_status=ts.filing_status,
                 # Each slab keeps its OWN originating pack id (a state
                 # layer row folded in above came from a different pack
                 # than `pack` itself) rather than being force-tagged with
@@ -7189,7 +7226,26 @@ def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[Jurisdicti
     )
 
 
-def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None) -> JurisdictionPack:
+def set_jurisdiction_pack_status(
+    db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None,
+    bypass_approver_check: bool = False,
+) -> JurisdictionPack:
+    """`bypass_approver_check`: ONLY set by activate_jurisdiction_pack_hotfix
+    (never by the ordinary Approve/Publish/Activate path) — see that
+    function's own docstring for why. Found 2026-09-17 via live AU data
+    entry: hotfix mode's own "self-approve, if not already approved by
+    someone else" step sets approved_by_id = actor_id, but for a pack a
+    single actor created AND edited (updated_by_id already == that same
+    actor_id from every prior upsert_canonical_tax_slab/_contribution_
+    rate call), approved_by_id == updated_by_id afterward — the exact
+    condition the check below exists to catch — so hotfix mode's own
+    distinct-approver bypass silently failed to bypass anything in a
+    genuine single-Super-Admin session. The one existing test for this
+    (test_hotfix_activation_bypasses_distinct_approver_gate_and_records_
+    activation) never caught it because its pack was constructed via a
+    raw ORM insert that left updated_by_id NULL, never equal to any real
+    actor_id — a test-setup blind spot, not a passing proof of the real
+    scenario."""
     row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not row:
         raise NotFoundException("JurisdictionPack", pack_row_id)
@@ -7299,7 +7355,7 @@ def set_jurisdiction_pack_status(db: Session, pack_row_id: int, status: str, act
         # `row.updated_by_id = actor_id` assignment below can overwrite
         # it, so activating a pack doesn't retroactively count as
         # approving your own edit.
-        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
+        if not bypass_approver_check and (not row.approved_by_id or row.approved_by_id == row.updated_by_id):
             raise BadRequestException(
                 "This pack needs a distinct approver before it can go Active — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
@@ -7569,7 +7625,18 @@ def activate_jurisdiction_pack_hotfix(
     justification and ALWAYS creates a PackHotfixActivation row flagged
     for mandatory retrospective review — the accountability normal
     maker-checker provides is deferred to that after-the-fact review,
-    never silently skipped."""
+    never silently skipped.
+
+    Passes bypass_approver_check=True to set_jurisdiction_pack_status
+    (fixed 2026-09-17, found via live AU data entry): self-approving
+    below sets approved_by_id = actor_id, which for a pack this SAME
+    actor also last edited (updated_by_id already == actor_id from every
+    prior canonical rate/slab upsert) leaves approved_by_id ==
+    updated_by_id — exactly the condition set_jurisdiction_pack_status's
+    own maker-checker check exists to reject. Without this flag, hotfix
+    mode's "self-approval allowed" promise silently failed for any real
+    single-Super-Admin session, which is the ONLY scenario hotfix mode
+    exists for in the first place."""
     if not incident_id or not incident_id.strip():
         raise BadRequestException("An incident_id is required to activate a pack via hotfix mode.")
     if not justification or not justification.strip():
@@ -7595,7 +7662,7 @@ def activate_jurisdiction_pack_hotfix(
         db.commit()
         db.refresh(row)
 
-    updated = set_jurisdiction_pack_status(db, pack_row_id, "Active", actor_id=actor_id)
+    updated = set_jurisdiction_pack_status(db, pack_row_id, "Active", actor_id=actor_id, bypass_approver_check=True)
 
     activation = PackHotfixActivation(
         jurisdiction_pack_id=pack_row_id, incident_id=incident_id.strip(), justification=justification.strip(),
@@ -7786,6 +7853,17 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "tax_week": ("HMRC Tax Week", "text", False),
     "tax_month": ("HMRC Tax Month", "text", False),
     "auto_enrolment_status": ("Automatic Enrolment Status", "text", False),
+    # Australia (ZP-TAX-AU-2026-27-001 §15-19, Phase 9, 2026-09-17) — an
+    # employer-liability figure (state/territory payroll tax) and a
+    # genuine employee statutory deduction (child support/garnishee),
+    # both real PayslipItem columns not previously exposed to any report
+    # template. Not used by the seeded AU-STP template itself (STP is a
+    # federal, per-employee submission; state payroll tax is a separate
+    # employer-liability plane per AU-D05) — added for the still-open
+    # state payroll-tax return report a future session builds.
+    "employer_payroll_tax": ("State/Territory Payroll Tax (Employer)", "currency", True),
+    "au_statutory_deductions_total": ("Child Support / Garnishee Deductions", "currency", True),
+    "au_workers_compensation_premium": ("Workers Compensation Premium (Employer)", "currency", True),
 }
 
 _PAYROLL_RUN_FIELD_CATALOG = {
@@ -7908,6 +7986,16 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
            "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
            "payable_days", "total_working_days", "pf", "esi", "church_tax", "soli", "tds",
            "total_deductions", "employer_pf", "employer_esi", "net_pay"],
+    # Australia (ZP-TAX-AU-2026-27-001 §12, Phase 9, 2026-09-17): PAYG
+    # Schedule 1 -> tds, Schedule 8 STSL -> study_loan_deduction (same
+    # reused field UK's own Student Loan already uses), Superannuation
+    # Guarantee -> employer_pension, state/territory payroll tax (an
+    # employer-liability figure, never part of an employee-facing STP
+    # report) -> employer_payroll_tax, child support/garnishee ->
+    # au_statutory_deductions_total.
+    "AU": ["employee_name", "bank_name", "bank_account", "gross_pay",
+           "tds", "study_loan_deduction", "employer_pension", "employer_payroll_tax",
+           "au_statutory_deductions_total", "total_deductions", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -8073,6 +8161,17 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information (Box b/c)"), ("employee_info", "Employee Information (Box a/e/f)"),
         ("wages", "Wages & Federal Tax (Box 1-2)"), ("ss_medicare", "Social Security & Medicare (Box 3-6)"),
         ("state_local", "State & Local (Box 14-20)"),
+    ],
+    # Australia STP — per PAYROLL RUN, per-employee pay-event detail
+    # (ZP-TAX-AU-2026-27-001 §12, Phase 9, 2026-09-17). "payg" is its own
+    # component (not folded into the generic "tax") since Schedule 1
+    # PAYG and Schedule 8 STSL are independently calculated/traced
+    # figures per §8's own STSL CONTRACT — see engine/countries/
+    # australia.py's own module docstring.
+    "STP": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("payg", "PAYG Withholding"), ("super", "Superannuation"),
+        ("ytd", "Year-to-Date"), ("rti_metadata", "Submission Metadata"),
     ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
@@ -10372,8 +10471,13 @@ def generate_rti_xml_bytes(db: Session, organization_id: int, generated_report_i
 
 # ── UK RTI Submission tracking (§18.3 gap-closure Part 9B, 2026-09-09) ──
 # Status tracking ONLY — see models.RtiSubmission's own docstring for why
-# this never actually transmits anything to HMRC.
-_UK_RTI_SUBMISSION_TYPES = {"FPS", "EPS", "P45"}
+# this never actually transmits anything to HMRC. Widened to Australia's
+# STP/SuperStream (ZP-TAX-AU-2026-27-001 §12, Phase 9, 2026-09-17) the
+# same way _RTI_FORMS_SUMMARY_REPORT_TYPES below was already widened to
+# India's forms — the constant name stays (avoiding a blast-radius rename
+# for no functional benefit), same convention as
+# _RTI_FORMS_SUMMARY_REPORT_TYPES's own comment already documents.
+_UK_RTI_SUBMISSION_TYPES = {"FPS", "EPS", "P45", "STP", "SUPERSTREAM"}
 _UK_RTI_SUBMISSION_STATUSES = ("DRAFT", "READY", "SUBMITTED", "ACKNOWLEDGED", "REJECTED")
 _UK_RTI_SUBMISSION_TRANSITIONS = {
     "DRAFT": {"READY"},
@@ -10384,13 +10488,17 @@ _UK_RTI_SUBMISSION_TRANSITIONS = {
 }
 
 
-def create_rti_submission(db: Session, organization_id: int, generated_report_id: int, created_by_id: int | None = None) -> RtiSubmission:
+def create_rti_submission(
+    db: Session, organization_id: int, generated_report_id: int, created_by_id: int | None = None,
+    schema_version: str | None = None,
+) -> RtiSubmission:
     report = get_generated_report(db, organization_id, generated_report_id)
     if report.report_type not in _UK_RTI_SUBMISSION_TYPES:
-        raise BadRequestException(f"RTI submission tracking is only for FPS/EPS/P45, not {report.report_type!r}.")
+        raise BadRequestException(f"RTI submission tracking is only for FPS/EPS/P45/STP/SUPERSTREAM, not {report.report_type!r}.")
     submission = RtiSubmission(
         organization_id=organization_id, generated_report_id=generated_report_id,
         submission_type=report.report_type, status="DRAFT", created_by_id=created_by_id,
+        schema_version=schema_version,
     )
     db.add(submission)
     db.commit()
@@ -10454,7 +10562,16 @@ def set_rti_submission_status(
 _UK_RTI_REPORT_TYPES = ("FPS", "EPS", "P45", "P60")
 _INDIA_FORM_REPORT_TYPES = ("FORM_130", "FORM_138", "FORM_123")
 _CA_FORM_REPORT_TYPES = ("T4", "RL1", "ROE", "PD7A")
-_RTI_FORMS_SUMMARY_REPORT_TYPES = _UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES
+# Widened 2026-09-17 (ZP-TAX-AU-2026-27-001 §12, Phase 9) the same way
+# India's forms were widened in 2026-09-10 — Australia's own STP
+# submission report (the "AU-STP" seeded ReportTemplate, see
+# scripts/seed_statutory_report_templates.py) needed no schema change
+# either. SUPERSTREAM and AU_PAYROLL_TAX_RETURN added alongside once
+# generate_au_superstream_report/generate_au_state_payroll_tax_return
+# shipped (same session) — their own GeneratedReport rows need the same
+# cross-org visibility STP gets.
+_AU_FORM_REPORT_TYPES = ("STP", "SUPERSTREAM", "AU_PAYROLL_TAX_RETURN")
+_RTI_FORMS_SUMMARY_REPORT_TYPES = _UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES + _AU_FORM_REPORT_TYPES
 
 
 def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) -> list[dict]:
@@ -10496,7 +10613,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden"}
 
 
 def run_golden_test_certification(
@@ -11984,6 +12101,195 @@ def create_au_sg_liability(
     return liability
 
 
+def generate_au_superstream_report(
+    db: Session, organization_id: int, report_template_id: int, payroll_run_id: int, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Generates a SuperStream contribution-message summary for one
+    payroll run (ZP-TAX-AU-2026-27-001 §12, Phase 9, 2026-09-17) — the
+    Australia counterpart to generate_uk_eps's bespoke-generator pattern,
+    needed here for the same reason EPS bypasses the generic field-mapper:
+    the data this report needs (fund_receipt_deadline, status,
+    submitted_at/received_at, deadline_extended_to) lives on
+    SuperGuaranteeLiability, a table generate_report_from_template has no
+    data_source_kind for — it only knows PAYROLL_RUN/PAYSLIP_ITEM/
+    EMPLOYER_PROFILE/PAYROLL_EMPLOYEE. Unlike EPS, every value here IS a
+    real, already-computed figure (no employer filing declaration), so
+    this reuses the SAME real column values create_au_sg_liability itself
+    wrote — never fabricated or re-derived.
+
+    One row per real PayslipItem's own SuperGuaranteeLiability (see
+    create_au_sg_liability's own "one row per real, persisted payslip"
+    discipline) — a run with no SG liabilities yet (e.g. Super Guarantee
+    Phase 2 not wired for this org) produces an empty employees list
+    rather than raising, matching every other report generator's
+    "nothing to report" handling."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "SUPERSTREAM":
+        raise BadRequestException(f"generate_au_superstream_report is only for SUPERSTREAM templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id).first()
+    if not run:
+        raise NotFoundException("PayrollRun", payroll_run_id)
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    payslip_item_ids = [item.id for item in (run.payslip_items or [])]
+    liabilities = (
+        db.query(SuperGuaranteeLiability)
+        .filter(SuperGuaranteeLiability.organization_id == organization_id, SuperGuaranteeLiability.payslip_item_id.in_(payslip_item_ids or [-1]))
+        .all()
+    )
+    employee_names = {item.employee_id: item.employee_name for item in (run.payslip_items or [])}
+
+    employees_data = [
+        {
+            "employeeId": liability.employee_id,
+            "employeeName": employee_names.get(liability.employee_id),
+            "values": {
+                "qualifying_earnings": float(liability.qualifying_earnings),
+                "sg_rate_pct": float(liability.sg_rate_pct),
+                "sg_amount": float(liability.sg_amount),
+                "mcb_reached": liability.mcb_reached,
+                "fund_receipt_deadline": liability.fund_receipt_deadline.isoformat() if liability.fund_receipt_deadline else None,
+                "deadline_extended_to": liability.deadline_extended_to.isoformat() if liability.deadline_extended_to else None,
+                "status": liability.status,
+                "submitted_at": liability.submitted_at.isoformat() if liability.submitted_at else None,
+                "received_at": liability.received_at.isoformat() if liability.received_at else None,
+            },
+        }
+        for liability in liabilities
+    ]
+    total_sg_amount = sum((Decimal(str(l.sg_amount or 0)) for l in liabilities), Decimal("0"))
+
+    rendered_data = {
+        "employer": {"employer_name": company.name if company else None, "employer_abn": getattr(company, "employer_id", None) if company else None},
+        "period": {
+            "periodLabel": run.period_label,
+            "periodStart": run.period_start.isoformat() if run.period_start else None,
+            "periodEnd": run.period_end.isoformat() if run.period_end else None,
+            "payDate": run.pay_date.isoformat() if run.pay_date else None,
+        },
+        "employees": employees_data,
+        "totals": {"total_sg_amount": float(total_sg_amount), "contribution_count": len(liabilities)},
+    }
+
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.payroll_run_id == payroll_run_id,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=run.id,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=template.reporting_year, reporting_period=run.period_label,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_au_state_payroll_tax_return(
+    db: Session, organization_id: int, report_template_id: int,
+    work_state: str, period_start, period_end, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Generates one state/territory's payroll-tax periodic/annual return
+    (ZP-TAX-AU-2026-27-001 §15-18, Phase 9, 2026-09-17) — genuinely
+    cross-run, like generate_india_form_138's own quarter-summing (a
+    monthly/annual return period spans several pay runs, not one), reused
+    directly rather than a second cross-run accumulation mechanism.
+    `employer_payroll_tax` on each PayslipItem is already this specific
+    period's own INCREMENTAL liability (calculate_au_state_payroll_tax's
+    telescope_period_amount already subtracted the prior YTD figure), so
+    a plain sum across every finalized payslip in the date range is the
+    correct return total — never a second recomputation from state
+    thresholds/rates, which stays the engine's own job.
+
+    One template row per state (jurisdiction_state scoped, matching the
+    document's own AU-NSW-2026-27/AU-VIC-2026-27/... package-per-state
+    model) — `work_state` must match the template's own jurisdiction_state
+    when the template declares one, so an NSW-scoped template can never
+    silently generate a VIC return."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "AU_PAYROLL_TAX_RETURN":
+        raise BadRequestException(f"generate_au_state_payroll_tax_return is only for AU_PAYROLL_TAX_RETURN templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+
+    work_state = (work_state or "").strip().upper()
+    if work_state not in _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE:
+        raise BadRequestException(f"{work_state!r} is not one of Australia's 8 payroll-tax jurisdictions.")
+    if template.jurisdiction_state and template.jurisdiction_state.strip().upper() != work_state:
+        raise BadRequestException(f"Template {template.template_key} is scoped to {template.jurisdiction_state}, not {work_state!r}.")
+
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.work_state == work_state,
+            PayrollRun.period_end >= period_start,
+            PayrollRun.period_end <= period_end,
+            PayrollRun.status.in_(_INDIA_FORM_138_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+    total_employer_payroll_tax = sum((Decimal(str(i.employer_payroll_tax or 0)) for i in items), Decimal("0"))
+    total_wages = sum((Decimal(str(i.gross_pay or 0)) for i in items), Decimal("0"))
+    distinct_employees = {i.employee_id for i in items}
+
+    rendered_data = {
+        "employer": {"employer_name": company.name if company else None, "employer_abn": getattr(company, "employer_id", None) if company else None},
+        "jurisdiction": {"workState": work_state, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "totals": {
+            "total_employer_payroll_tax": float(total_employer_payroll_tax),
+            "total_wages": float(total_wages),
+            "employee_count": len(distinct_employees),
+            "payslip_count": len(items),
+        },
+    }
+
+    scope_key = f"AU_PAYROLL_TAX:{work_state}:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country="AU", jurisdiction_state=work_state,
+        reporting_year=template.reporting_year, reporting_period=f"{period_start.isoformat()}..{period_end.isoformat()}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
 # ── Canada: Option 2 cumulative-averaging income tax withholding ────────
 # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9, 2026-09-11). A
 # genuinely different income-tax methodology from Option 1 annualization
@@ -13228,24 +13534,47 @@ def _au_org_payroll_tax_read_inputs(db: Session, organization_id: int, pay_date,
     _ca_org_levy_read_inputs. Returns {} when the employee isn't in one
     of the 8 supported jurisdictions, or when the rollout switch is off.
 
-    Cross-employer group/interstate wage aggregation (§AU-D07) is NOT
-    wired here yet — a documented Phase 4 follow-on, same as
-    engine/countries/australia.py's own module-level disclosure — so
-    this always reads this org's own total in isolation, never a group's."""
+    Cross-employer group/interstate wage aggregation (§AU-D07, closed
+    2026-09-17): when _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES has "AU",
+    the "before" figure is summed across every org sharing this org's
+    connected_group_code (the exact same mechanism/helper CA's EHT/HE
+    Levy/HAPSET and UK's Apprenticeship Levy already use — see
+    _ca_org_levy_read_inputs's own docstring) instead of read from this
+    org alone. An org with no connected_group_code set (every org today)
+    sums across a "group of one," i.e. unchanged — same dormancy
+    contract every other associated-group feature in this codebase has."""
     component = _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE.get((work_state or "").strip().upper())
     if not component:
         return {}
     tax_year = _au_ytd_tax_year(pay_date)
-    org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, (component,), tax_year=tax_year, country="AU")
-    if not org_levy_ytd:
-        return {}
+    if "AU" in _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES and "AU" in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
+        _group_code, member_ids = _connected_group_member_ids(db, organization_id)
+        remuneration_before = _sum_org_ytd_component_across_orgs(db, member_ids, tax_year, component)
+        inputs = {"au_state_payroll_tax_ytd_remuneration_before": remuneration_before}
+    else:
+        org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, (component,), tax_year=tax_year, country="AU")
+        if not org_levy_ytd:
+            return {}
+        inputs = {"au_state_payroll_tax_ytd_remuneration_before": org_levy_ytd[component]}
     compliance = db.query(CompanyComplianceDetails).filter(
         CompanyComplianceDetails.organization_id == organization_id,
     ).first()
-    return {
-        "au_state_payroll_tax_ytd_remuneration_before": org_levy_ytd[component],
-        "au_payroll_tax_regional_status": getattr(compliance, "au_payroll_tax_regional_status", None),
-    }
+    inputs["au_payroll_tax_regional_status"] = getattr(compliance, "au_payroll_tax_regional_status", None)
+    inputs["au_payroll_tax_charity_exempt"] = bool(getattr(compliance, "au_payroll_tax_charity_exempt", False))
+    # VIC/QLD national-payroll-banded surcharges (§17 follow-up, resolved
+    # 2026-09-17) — only these two states' formulas actually read this
+    # figure, so it's only worth summing for them. A genuinely separate
+    # accumulator dimension from the single-state `component` above: sums
+    # EVERY one of the 8 states' own tax_component keys across the org-
+    # group, not just this employee's own work_state's component.
+    if (work_state or "").strip().upper() in ("VIC", "QLD") and "AU" in _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES:
+        _group_code, member_ids = _connected_group_member_ids(db, organization_id)
+        inputs["au_national_taxable_wages_ytd_before"] = sum(
+            (_sum_org_ytd_component_across_orgs(db, member_ids, tax_year, comp)
+             for comp in _AU_PAYROLL_TAX_COMPONENT_BY_WORK_STATE.values()),
+            Decimal("0"),
+        )
+    return inputs
 
 
 # ── UK org-level accumulators: Apprenticeship Levy pay bill (§14) AND ───
@@ -14054,6 +14383,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "employer_qc_labour_standards": result.employer_qc_labour_standards,
         "employer_payroll_tax": result.employer_payroll_tax,
         "au_statutory_deductions_total": result.au_statutory_deductions_total,
+        "au_workers_compensation_premium": result.au_workers_compensation_premium,
+        "au_calculation_trace": result.au_calculation_trace,
         # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
         # same splat-then-pop contract as "_org_levy_result" above. Only
         # ever non-empty when a real order actually contributed a
@@ -14391,9 +14722,13 @@ def _resolve_employee_calc_inputs(
     _resolve_effective_rate_inputs); state_rate_map/state_slabs are the
     separate, additive region-scoped lookup (see get_state_scoped_config) —
     {}/[] when the employee has no work_state or nothing is configured for
-    it; employer_tax_profiles is the US-specific tenant/agency-assigned
-    overlay (see get_employer_tax_profiles) — {} for every non-US employee
-    and for any US employee whose org has no configured profile; reciprocity
+    it; employer_tax_profiles is the tenant/agency-assigned overlay (see
+    get_employer_tax_profiles) — originally US-only (SUI), now also
+    resolved for CA (WCB), DE (accident insurance), and AU (workers
+    compensation premium, "AU-<state>", component_code
+    "AU_WORKERS_COMP" — ZP-TAX-AU-2026-27-001 §18, Phase 9 follow-up,
+    2026-09-17); {} for every employee whose country/state combination
+    isn't one of these or whose org has no configured profile; reciprocity
     is a dict of PayrollContext kwargs (see _resolve_us_reciprocity) —
     resolved fresh per employee, deliberately NOT part of the cached tuple
     below, since two employees sharing the same work_state can have
@@ -14459,7 +14794,7 @@ def _resolve_employee_calc_inputs(
         # evidence trail) EmployerTaxProfile already models; jurisdiction_id
         # "DE" (no state) resolves it, component_code "DE_ACCIDENT_INSURANCE".
         jurisdiction_id = (
-            f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state)
+            f"{country}-{resolution_state}" if (country in ("US", "CA", "AU") and resolution_state)
             else "DE" if country == "DE"
             else None
         )
@@ -18429,7 +18764,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # evidence trail) EmployerTaxProfile already models; jurisdiction_id
     # "DE" (no state) resolves it, component_code "DE_ACCIDENT_INSURANCE".
     jurisdiction_id = (
-        f"{country}-{resolution_state}" if (country in ("US", "CA") and resolution_state)
+        f"{country}-{resolution_state}" if (country in ("US", "CA", "AU") and resolution_state)
         else "DE" if country == "DE"
         else None
     )
@@ -18693,6 +19028,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         employer_qc_labour_standards=calc.employer_qc_labour_standards,
         employer_payroll_tax=calc.employer_payroll_tax,
         au_statutory_deductions_total=calc.au_statutory_deductions_total,
+        au_workers_compensation_premium=calc.au_workers_compensation_premium,
+        au_calculation_trace=calc.au_calculation_trace,
         net_pay=calc.net_pay,
         unpaid_leave_days=calc.unpaid_leave_days,
         attendance_deduction=calc.attendance_deduction,
@@ -19102,6 +19439,19 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "employerFuta": item.employer_futa or z,
         "employerSui": item.employer_sui or z,
         "employerStateProgramContributions": item.employer_state_program_contributions or z,
+        # Australia: computed+persisted since the AU 2026-27 build but
+        # never reached any payslip API response before this fix (found
+        # 2026-09-17 production-readiness pass) — same "computed,
+        # persisted, never serialized" gap as employerFuta/employerSui
+        # above, just never caught for AU. employerPayrollTax/
+        # auWorkersCompensationPremium are employer-liability-only
+        # (AU-D05, never affect netPay); auStatutoryDeductionsTotal is a
+        # real employee deduction already folded into totalDeductions/
+        # netPay below.
+        "employerPayrollTax": item.employer_payroll_tax or z,
+        "auStatutoryDeductionsTotal": item.au_statutory_deductions_total or z,
+        "auWorkersCompensationPremium": item.au_workers_compensation_premium or z,
+        "auCalculationTrace": item.au_calculation_trace,
         # UK: Automatic Enrolment assessment (gap-closure Part 3) —
         # informational classification, not a monetary field.
         "autoEnrolmentStatus": item.auto_enrolment_status,

@@ -1,0 +1,20 @@
+{
+  "description": "Mandatory boundary test (Section 27, 'SG MCB crossing'): YTD qualifying earnings $270,000 before this payday, $2000 gross this period, crossing the $270,830 annual Maximum Contribution Base. Room = 270830-270000 = 830. Qualifying this period is capped at 830 (not the full 2000). SG = 830 * 12% = 99.60.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 10 (Payday Super: SG 12%, Maximum Contribution Base $270,830) and Section 27.",
+  "context": {
+    "gross": "2000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "ytd_sg_qualifying_earnings_before": "270000.00",
+    "rate_map": {
+      "super": {"employer_rate_pct": "12"}
+    }
+  },
+  "expected": {
+    "sg_qualifying_earnings_period": "830.00",
+    "employer_pension": "99.60"
+  }
+}

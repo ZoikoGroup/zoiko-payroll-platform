@@ -1,0 +1,14 @@
+{
+  "description": "Mandatory boundary test (Section 27, 'No TFN resident'): Scale 4, no TFN provided, resident. Weekly gross $1000 -> flat 47% of floored earnings: floor(1000*0.47) = 470.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (Scale 4 — TFN not provided, resident 47%, effective 1 Jul 2026) and Section 27.",
+  "context": {
+    "gross": "1000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "NOT_PROVIDED",
+    "au_residency_status": "RESIDENT"
+  },
+  "expected": {
+    "tds": "470"
+  }
+}

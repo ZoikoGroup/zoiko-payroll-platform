@@ -1098,6 +1098,16 @@ _AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("270830")
 _AU_PAYG_SCALE4_RESIDENT_RATE = Decimal("47.0")
 _AU_PAYG_SCALE4_NONRESIDENT_RATE = Decimal("45.0")
 
+# Schedule 15 (NAT 75331, Working Holiday Maker subclass 417/462) — real
+# ATO-published flat rates, resolved 2026-09-17: 15% with a TFN on file,
+# 45% with no TFN. Same "flat rate, simple scalar fallback" reasoning as
+# Scale 4 above. The $45,000 first-bracket annual cap is NOT enforced by
+# a hardcoded constant here — it needs a real YTD accumulator (see
+# engine/countries/australia.py's own SCALE_WHM branch for the disclosed
+# limitation), not a value this module could sensibly default.
+_AU_WHM_RATE = Decimal("15.0")
+_AU_WHM_NO_TFN_RATE = Decimal("45.0")
+
 # Special Payments (ZP-TAX-AU-2026-27-001 §13, Phase 3, 2026-09-16) —
 # real, document-given caps and the genuine-redundancy tax-free formula
 # parameters. The ETP/lump-sum/income-stream WITHHOLDING rate itself is
@@ -1147,6 +1157,49 @@ _AU_NT_PT_RATE_SWITCH = Decimal("100000000")
 _AU_SA_PT_LOWER_THRESHOLD = Decimal("1500000")
 _AU_SA_PT_UPPER_THRESHOLD = Decimal("1700000")
 _AU_SA_PT_RATE = Decimal("4.95")
+
+# VIC/QLD national-payroll-banded surcharges (§17 follow-up, resolved
+# 2026-09-17 — SRO Victoria/QRO confirmed): both band on AUSTRALIA-WIDE
+# (national) group wages, not the state's own wages, at the same two
+# tiers. VIC stacks two identically-shaped levies (Mental Health and
+# Wellbeing Levy + COVID-19 Debt Temporary Surcharge), combined here into
+# one pair of rates since they share thresholds/expiry-independent
+# mechanics; QLD has one levy. REVISED 2026-09-17 (same day as the
+# original implementation): both SRO Victoria and QRO independently
+# confirmed the surcharge threshold IS apportioned by (this state's
+# wages / national wages), the same shape the base payroll tax already
+# uses — see engine/countries/australia.py's
+# _au_apportioned_national_surcharge for the marginal, two-tier
+# calculation this now uses. Still not independently verified against a
+# real numeric worked example specific to the $10m/$100m tiers
+# themselves (unlike SA's own confirmed worked example) — flagged for
+# review before relying on this for a real surcharge liability.
+_AU_NATIONAL_SURCHARGE_TIER1_THRESHOLD = Decimal("10000000")
+_AU_NATIONAL_SURCHARGE_TIER2_THRESHOLD = Decimal("100000000")
+_AU_VIC_SURCHARGE_TIER1_RATE = Decimal("1.0")   # 0.5% Mental Health Levy + 0.5% COVID-19 Debt Surcharge
+_AU_VIC_SURCHARGE_TIER2_RATE = Decimal("1.0")   # additional 0.5% + 0.5% above $100m
+_AU_QLD_SURCHARGE_TIER1_RATE = Decimal("0.25")
+_AU_QLD_SURCHARGE_TIER2_RATE = Decimal("0.5")   # additional, so 0.75% total above $100m
+
+# Schedule 3 (NAT 1023, actors/variety artists/other entertainers) —
+# foreign-resident weekly scale, resolved 2026-09-17: real ATO-published
+# figures for payments from 1 July 2026, cross-checked internally (the
+# given base amounts match independently summing the 30%/37% bands from
+# $0 — see _au_schedule3_foreign_resident_weekly_tax's own docstring).
+# The TFN-provided (threshold-claimed / no-threshold) coefficient tables
+# are NOT hardcoded here — they're genuinely per-band a/b coefficient
+# data, stored the same way as every other AU coefficient schedule (real
+# TaxSlab rows, rule_type="AU_SCHEDULE3_COEFFICIENT"), not yet entered
+# into any live canonical pack (engine + tests are built and proven
+# against the real published table; live data entry is a separate,
+# disclosed follow-up).
+_AU_SCHEDULE3_FR_THRESHOLD1 = Decimal("2595")
+_AU_SCHEDULE3_FR_THRESHOLD2 = Decimal("3652")
+_AU_SCHEDULE3_FR_RATE1 = Decimal("30")
+_AU_SCHEDULE3_FR_RATE2 = Decimal("37")
+_AU_SCHEDULE3_FR_RATE3 = Decimal("45")
+_AU_SCHEDULE3_FR_BASE2 = Decimal("779")
+_AU_SCHEDULE3_FR_BASE3 = Decimal("1170")
 
 # ── Germany (previously engine/countries/germany.py) ────────────────────
 # _DE_GRUNDFREIBETRAG, _DE_CONTRIBUTION_CEILING, and _DE_CHURCH_TAX_RATE

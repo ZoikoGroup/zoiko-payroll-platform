@@ -942,6 +942,23 @@ class PayslipItemResponse(BaseModel):
     employerFuta:       Decimal = Decimal("0")
     employerSui:        Decimal = Decimal("0")
     employerStateProgramContributions: Decimal = Decimal("0")
+    # Australia: state/territory employer payroll tax + workers
+    # compensation premium (employer-liability-only, AU-D05) and child
+    # support/garnishee (a real employee deduction, §19) — computed and
+    # persisted since the 2026-09-17 production-readiness pass but never
+    # declared here, so response_model filtering silently stripped them
+    # from every AU payslip API response despite genuinely affecting net
+    # pay (statutory deductions) or being a real employer cost (payroll
+    # tax/workers comp) — same defect class as employerFuta/employerSui
+    # above, just never caught for AU specifically until this pass.
+    employerPayrollTax: Decimal = Decimal("0")
+    auStatutoryDeductionsTotal: Decimal = Decimal("0")
+    auWorkersCompensationPremium: Decimal = Decimal("0")
+    # Australia: §25 "Calculation Trace — Minimum Audit Payload" — see
+    # models.PayslipItem.au_calculation_trace's own docstring. None for
+    # every non-AU payslip and for any AU payslip generated before this
+    # field existed.
+    auCalculationTrace: Optional[dict] = None
     # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
     # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
     # amount; informational only, never affects employeePension/
@@ -1751,6 +1768,14 @@ class JurisdictionPackResponse(BaseModel):
     defaultTaxRegime:    Optional[str] = Field(None, validation_alias="default_tax_regime", serialization_alias="defaultTaxRegime")
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     currency:            Optional[str] = None
+    # §2 SOURCE LOCK ("a published rule version cannot be approved without
+    # at least one authoritative source record") — the column has existed
+    # since JurisdictionPack was first built (read by set_jurisdiction_
+    # pack_status's US-only gate), but was never exposed on either the
+    # read or write schema for ANY country until found via AU's own
+    # production-readiness pass, 2026-09-17: every pack on the platform
+    # had sourceDocumentId silently un-settable through the API.
+    sourceDocumentId:    Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     updatedById:         Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
@@ -1886,6 +1911,9 @@ class JurisdictionPackUpsert(BaseModel):
     defaultTaxRegime: Optional[str] = None
     approvedById: Optional[int] = None
     currency: Optional[str] = None
+    # §2 SOURCE LOCK — see JurisdictionPackResponse's matching field
+    # docstring for why this was missing platform-wide until 2026-09-17.
+    sourceDocumentId: Optional[int] = None
     # Free-text "why" for this specific edit — persisted onto the audit
     # row (TaxConfigurationAudit.reason already exists and is already
     # read by the Compliance UI's Audit tab; no form ever offered it
@@ -2147,6 +2175,18 @@ class IndiaForm123GenerateRequest(BaseModel):
     report_template_id: int
     employee_id: int
     tax_year: str  # e.g. "2026-27"
+
+
+class AUSuperstreamGenerateRequest(BaseModel):
+    report_template_id: int
+    payroll_run_id: int
+
+
+class AUPayrollTaxReturnGenerateRequest(BaseModel):
+    report_template_id: int
+    work_state: str  # "NSW" | "VIC" | "QLD" | "WA" | "SA" | "TAS" | "ACT" | "NT"
+    period_start: date
+    period_end: date
 
 
 # ── US: Form W-2 (Production-Readiness Plan Phase 5) ────────────────────

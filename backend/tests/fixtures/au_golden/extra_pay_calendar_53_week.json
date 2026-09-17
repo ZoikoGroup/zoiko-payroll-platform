@@ -1,0 +1,22 @@
+{
+  "description": "Section 7 'Extra-pay calendar' control: 53 weekly pays in the income year. Scale 2, weekly gross $1000 -> ordinary PAYG = 138 (same as scale2_weekly_gross_1000.json). Gross $1000 falls in the $875-$2,574 additional-withholding band -> +$3. Expected tds = 138 + 3 = 141.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (Scale 2) and Section 7 ('Extra-pay calendar', 53 weekly pays, $875-$2,574 -> $3, effective 1 Jul 2026).",
+  "context": {
+    "gross": "1000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "au_extra_pay_calendar": "53_WEEK",
+    "slabs": [
+      {"min_amount": "865", "max_amount": "1282", "rate_pct": "0.3227", "flat_amount": "185.1935", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "875", "max_amount": "2575", "rate_pct": "0", "flat_amount": "3", "rule_type": "AU_EXTRA_PAY_WITHHOLDING", "filing_status": "53_WEEK"},
+      {"min_amount": "2575", "max_amount": "3650", "rate_pct": "0", "flat_amount": "7", "rule_type": "AU_EXTRA_PAY_WITHHOLDING", "filing_status": "53_WEEK"},
+      {"min_amount": "3650", "max_amount": null, "rate_pct": "0", "flat_amount": "12", "rule_type": "AU_EXTRA_PAY_WITHHOLDING", "filing_status": "53_WEEK"}
+    ]
+  },
+  "expected": {
+    "tds": "141"
+  }
+}

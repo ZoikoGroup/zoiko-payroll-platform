@@ -27,6 +27,7 @@ from app.modules.payroll.engine.countries.australia import (
     calculate_au_special_payment_withholding, calculate_au_etp_cap_classification,
     calculate_au_genuine_redundancy_tax_free_component,
     calculate_au_statutory_deduction, calculate_au_statutory_deductions,
+    calculate_au_schedule3_entertainer_withholding, calculate_au_schedule6_annuity_withholding,
 )
 import app.modules.payroll.engine.countries.shared as shared
 
@@ -117,7 +118,9 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          au_tax_free_threshold_claimed=None, au_medicare_levy_exemption=None,
          au_withholding_variation_pct=None, study_loan_plan=None, study_loan_balance=None,
          ytd_sg_qualifying_earnings_before=None, au_taxability_rules=None,
-         au_state_payroll_tax_ytd_remuneration_before=None, au_payroll_tax_regional_status=None):
+         au_state_payroll_tax_ytd_remuneration_before=None, au_payroll_tax_regional_status=None,
+         au_payroll_tax_charity_exempt=None, au_extra_pay_calendar=None, au_sapto_category=None,
+         au_national_taxable_wages_ytd_before=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -174,6 +177,10 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         au_taxability_rules=au_taxability_rules or {},
         au_state_payroll_tax_ytd_remuneration_before=au_state_payroll_tax_ytd_remuneration_before,
         au_payroll_tax_regional_status=au_payroll_tax_regional_status,
+        au_payroll_tax_charity_exempt=au_payroll_tax_charity_exempt,
+        au_extra_pay_calendar=au_extra_pay_calendar,
+        au_sapto_category=au_sapto_category,
+        au_national_taxable_wages_ytd_before=au_national_taxable_wages_ytd_before,
     )
     return STRATEGY.calculate(ctx)
 
@@ -3159,12 +3166,100 @@ def test_australia_payg_unconfigured_scale_returns_zero_not_a_guess():
     assert result.tds == 0
 
 
-def test_australia_payg_working_holiday_maker_raises_not_yet_implemented():
-    # §9: WHM must route to its own dedicated schedule, never an ordinary
-    # resident/foreign-resident Scale — Phase 3, not yet built. Must fail
-    # loudly, never silently compute an incorrect ordinary-scale amount.
-    with pytest.raises(AuScheduleNotYetImplementedError):
-        calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER")
+def test_australia_payg_working_holiday_maker_flat_15_percent_with_tfn():
+    # Schedule 15 (NAT 75331) — RESOLVED 2026-09-17: flat 15% on actual
+    # earnings when a TFN is on file, no weekly-equivalent conversion.
+    # $1,000 * 15% = $150. See australia.py's own SCALE_WHM docstring for
+    # the disclosed $45,000 YTD-cap limitation (not yet enforced).
+    result = calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED")
+    assert result.tds == Decimal("150")
+
+
+def test_australia_payg_working_holiday_maker_flat_45_percent_no_tfn():
+    # WHM's own no-TFN rate (45%) is distinct from ordinary Scale 4's
+    # resident no-TFN rate (47%) — must route to the WHM rate, never
+    # silently fall through to ordinary Scale 4. $1,000 * 45% = $450.
+    result = calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="NOT_PROVIDED")
+    assert result.tds == Decimal("450")
+
+
+# ── Australia: Schedule 3 (NAT 1023) entertainers, Schedule 6 (NAT 3350) ──
+# annuities — resolved 2026-09-17, real ATO-published data.
+
+_AU_SCHEDULE3_THRESHOLD_CLAIMED_SLABS = [
+    Slab(Decimal("0"), Decimal("452"), Decimal("0"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("0")),
+    Slab(Decimal("452"), Decimal("673"), Decimal("0.1200"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("54.3462")),
+    Slab(Decimal("673"), Decimal("841"), Decimal("0.2000"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("108.2135")),
+    Slab(Decimal("841"), Decimal("901"), Decimal("0.1360"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("54.3473")),
+    Slab(Decimal("901"), Decimal("1081"), Decimal("0.1432"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("60.8377")),
+    Slab(Decimal("1081"), Decimal("1602"), Decimal("0.2582"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("185.1935")),
+    Slab(Decimal("1602"), Decimal("3245"), Decimal("0.2560"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("181.7319")),
+    Slab(Decimal("3245"), Decimal("4567"), Decimal("0.3120"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("363.4627")),
+    Slab(Decimal("4567"), None, Decimal("0.3760"), rule_type="AU_SCHEDULE3_COEFFICIENT", filing_status="SCHEDULE3_THRESHOLD_CLAIMED", flat_amount=Decimal("655.7704")),
+]
+
+
+def test_au_schedule3_entertainer_threshold_claimed():
+    # $266/performance x 3 performances/week = $798 weekly -> x=$798.99,
+    # band [673,841) a=0.20 b=108.2135. y=0.20*798.99-108.2135=51.5845 ->
+    # round $52 weekly. /3 performances/week = round(17.333)=$17/
+    # performance x 1 performance/day = $17.
+    result = calculate_au_schedule3_entertainer_withholding(
+        per_performance_earnings=Decimal("266"), performances_per_week=3, performances_per_day=1,
+        tfn_status="PROVIDED", residency_status="RESIDENT", tax_free_threshold_claimed=True,
+        slabs=_AU_SCHEDULE3_THRESHOLD_CLAIMED_SLABS,
+    )
+    assert result == Decimal("17")
+
+
+def test_au_schedule3_entertainer_no_tfn_resident():
+    # Flat 47% (matches Schedule 1 Scale 4's own resident rate exactly —
+    # the internal-consistency check that raised confidence in this
+    # data). $300/performance x 2 performances/day: floor(300*47%)=$141
+    # per performance x 2 = $282.
+    result = calculate_au_schedule3_entertainer_withholding(
+        per_performance_earnings=Decimal("300"), performances_per_week=3, performances_per_day=2,
+        tfn_status="NOT_PROVIDED", residency_status="RESIDENT", tax_free_threshold_claimed=False,
+        slabs=[],
+    )
+    assert result == Decimal("282")
+
+
+def test_au_schedule3_entertainer_foreign_resident():
+    # $500/performance x 5 performances/week = $2,500 weekly, within the
+    # 30% band (<=$2,595). Weekly tax = $750; /5 = $150/performance x 1
+    # performance/day = $150.
+    result = calculate_au_schedule3_entertainer_withholding(
+        per_performance_earnings=Decimal("500"), performances_per_week=5, performances_per_day=1,
+        tfn_status="PROVIDED", residency_status="FOREIGN_RESIDENT", tax_free_threshold_claimed=False,
+        slabs=[],
+    )
+    assert result == Decimal("150")
+
+
+def test_au_schedule3_entertainer_unconfigured_band_returns_zero():
+    result = calculate_au_schedule3_entertainer_withholding(
+        per_performance_earnings=Decimal("266"), performances_per_week=3, performances_per_day=1,
+        tfn_status="PROVIDED", residency_status="RESIDENT", tax_free_threshold_claimed=True,
+        slabs=[],
+    )
+    assert result == Decimal("0")
+
+
+def test_au_schedule6_annuity_routes_through_schedule1():
+    # Confirmed off the ATO's own page: no separate rate table — subtract
+    # the deductible amount, then run the remainder through ordinary
+    # Schedule 1. Same Scale 1 weekly $500 case as the Schedule 1 test
+    # above (tds=90): a $600 gross annuity instalment with $100
+    # deductible amount leaves exactly $500 taxable, same result.
+    ctx = PayrollContext(
+        gross=Decimal("600"), basic=Decimal("600"), slabs=_AU_PAYG_SCALE1_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+        country="AU",
+    )
+    tds, trace = calculate_au_schedule6_annuity_withholding(ctx, Decimal("600"), Decimal("100"))
+    assert tds == Decimal("90")
+    assert trace["scale"] == "SCALE_1"
 
 
 # ── Australia: ATO Schedule 8 (NAT 3539) STSL coefficient-band engine ────
@@ -3460,6 +3555,71 @@ def test_au_qld_payroll_tax_high_rate_above_switch():
     assert result.employer_payroll_tax == Decimal("435600.00")
 
 
+def test_au_vic_national_surcharge_zero_without_national_wages_wired():
+    # Same base case as test_au_vic_payroll_tax_below_phase_out_full_
+    # deduction — no au_national_taxable_wages_ytd_before means the
+    # surcharge accumulator isn't wired, must resolve to $0 surcharge,
+    # never a guess.
+    result = calc("AU", 2000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
+    assert result.employer_payroll_tax == Decimal("48500.00")
+
+
+def test_au_vic_national_surcharge_tier1():
+    # SRO Victoria + QRO (both independently confirmed 2026-09-17): the
+    # surcharge threshold is APPORTIONED by (VIC wages / national wages),
+    # the same "wages-dependent apportioned threshold" shape the base VIC
+    # tax already uses — see _au_apportioned_national_surcharge's own
+    # docstring for why this isn't a flat rate. wages=2m, national
+    # before=15m -> ratio=2/15; apportioned tier1=$1,333,333.33; tier1
+    # band = 2m-1,333,333.33=666,666.67, taxed at 1.0% (VIC's combined
+    # Mental Health + COVID-19 Debt rate) = $6,666.67. Base tax (2m
+    # wages, unaffected) = $48,500; total = $55,166.67.
+    result = calc(
+        "AU", 2000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_national_taxable_wages_ytd_before=Decimal("15000000"),
+    )
+    assert result.employer_payroll_tax == Decimal("55166.67")
+
+
+def test_au_vic_national_surcharge_tier2_stacks():
+    # national before=150m -> ratio=2/150=1/75; apportioned tier1=
+    # $133,333.33, tier2=$1,333,333.33. Tier1 band ($1,333,333.33-
+    # $133,333.33=$1,200,000) taxed at 1.0%; tier2 band ($2m-
+    # $1,333,333.33=$666,666.67) taxed at the COMBINED 2.0% ("so 2.0%
+    # total in that top band" — the base 1.0% continues to apply there,
+    # the additional 1.0% stacks on top of it, not replaces it). Total
+    # surcharge = $12,000 + $13,333.33 = $25,333.33; + base $48,500.
+    result = calc(
+        "AU", 2000000, {}, [], work_state="VIC", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_national_taxable_wages_ytd_before=Decimal("150000000"),
+    )
+    assert result.employer_payroll_tax == Decimal("73833.33")
+
+
+def test_au_qld_national_surcharge_tier1():
+    # Same apportioned-threshold shape as VIC, QLD's own confirmed rates
+    # (0.25% tier1 / +0.5% tier2). wages=2m, national before=15m ->
+    # tier1 band = $666,666.67 at 0.25% = $1,666.67; base tax
+    # (unaffected) = $38,000; total = $39,666.67.
+    result = calc(
+        "AU", 2000000, {}, [], work_state="QLD", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_national_taxable_wages_ytd_before=Decimal("15000000"),
+    )
+    assert result.employer_payroll_tax == Decimal("39666.67")
+
+
+def test_au_qld_national_surcharge_tier2_stacks():
+    # national before=150m -> tier1 band=$1,200,000 @ 0.25%=$3,000;
+    # tier2 band=$666,666.67 @ the COMBINED 0.75% ("so 0.75% total in
+    # that top band" — 0.25% base continues, 0.5% stacks on top)=$5,000.
+    # Total surcharge=$8,000; + base $38,000 = $46,000 exactly.
+    result = calc(
+        "AU", 2000000, {}, [], work_state="QLD", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_national_taxable_wages_ytd_before=Decimal("150000000"),
+    )
+    assert result.employer_payroll_tax == Decimal("46000.00")
+
+
 def test_au_wa_payroll_tax_taper():
     result = calc("AU", 2300000, {}, [], work_state="WA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
     assert result.employer_payroll_tax == Decimal("82500.00")
@@ -3490,13 +3650,18 @@ def test_au_sa_payroll_tax_above_upper_threshold_flat_rate():
     assert result.employer_payroll_tax == Decimal("99000.00")
 
 
-def test_au_sa_payroll_tax_reduced_rate_band_degrades_without_crashing():
-    # §17 SOURCE LOCK: no reduced-rate table exists in the source document
-    # for $1.5m-$1.7m — must report $0 (logged, not silently guessed) and,
-    # critically, must NOT crash the rest of this employee's own payslip.
+def test_au_sa_payroll_tax_reduced_rate_band_computes_real_rate():
+    # §17 SOURCE LOCK — RESOLVED 2026-09-17: RevenueSA's own published
+    # structure gives a real, non-fabricated straight-line reduced rate
+    # for $1.5m-$1.7m (see _au_sa_annual_payroll_tax's own docstring for
+    # the independent worked-example cross-check). $1,600,000 sits
+    # halfway through the band: 4.95% x (100,000/200,000) = 2.475%,
+    # applied to total wages = $39,600.00. This test previously locked in
+    # the OLD "no table exists, must raise/degrade to $0" contract — that
+    # contract is now obsolete, not this test's replacement value.
     result = calc("AU", 1600000, {}, [], work_state="SA", au_state_payroll_tax_ytd_remuneration_before=Decimal("0"))
-    assert result.employer_payroll_tax == Decimal("0")
-    assert result.au_state_payroll_tax_ytd_remuneration_after is None
+    assert result.employer_payroll_tax == Decimal("39600.00")
+    assert result.au_state_payroll_tax_ytd_remuneration_after == Decimal("1600000")
 
 
 def test_au_tas_payroll_tax_two_band_marginal_sum():
@@ -3549,6 +3714,219 @@ def test_au_payroll_tax_telescopes_correctly_across_two_periods():
     # actually taxable (2,000,000 - 1,200,000).
     assert period2.employer_payroll_tax == Decimal("43600.00")
     assert period1.employer_payroll_tax + period2.employer_payroll_tax == Decimal("43600.00")
+
+
+def test_au_workers_compensation_premium_zero_without_configured_profile():
+    """§18: never a statutory default — no EmployerTaxProfile configured
+    means zero premium, exactly like US SUI's own dormancy behavior."""
+    result = calc("AU", 8000, {}, [])
+    assert result.au_workers_compensation_premium == Decimal("0")
+
+
+def test_au_workers_compensation_premium_computed_from_employer_tax_profile():
+    """Once a real EmployerTaxProfile exists for this employer
+    (component_code AU_WORKERS_COMP), the premium is computed directly
+    from its agency-assigned rate — same resolution shape as US SUI
+    (see engine/countries/us.py's own sui_profile handling), never a
+    jurisdiction-wide default (§18's own 'why it is not a jurisdiction
+    default' rule)."""
+    profiles = {"AU_WORKERS_COMP": EmployerTaxProfileStub(employer_rate_pct=Decimal("2.5"))}
+    result = calc("AU", 8000, {}, [], employer_tax_profiles=profiles)
+    assert result.au_workers_compensation_premium == Decimal("200.00")  # 8000 * 2.5%
+    # Employer-liability-only (AU-D05) — with no other deductions
+    # configured, total_deductions/net_pay must be entirely unaffected by
+    # the premium above.
+    assert result.total_deductions == Decimal("0")
+    assert result.net_pay == Decimal("8000")
+
+
+def test_au_payroll_tax_charity_exemption_suppresses_liability_to_zero():
+    """§18 charity/public-benefit exemption: a flagged-exempt employer
+    owes $0 state payroll tax even well above the NSW threshold, but the
+    YTD wage accumulator keeps running underneath (so a later loss of
+    exemption starts from the correct cumulative baseline, not zero)."""
+    result = calc(
+        "AU", 2000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_payroll_tax_charity_exempt=True,
+    )
+    assert result.employer_payroll_tax == Decimal("0")
+    assert result.au_state_payroll_tax_ytd_remuneration_after == Decimal("2000000")
+
+
+def test_au_payroll_tax_charity_exemption_off_computes_normally():
+    """Same $2,000,000 NSW case as the standard telescoping test, with
+    the exemption flag explicitly False — must produce the ordinary,
+    non-exempt result unchanged."""
+    result = calc(
+        "AU", 2000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+        au_payroll_tax_charity_exempt=False,
+    )
+    assert result.employer_payroll_tax == Decimal("43600.00")
+
+
+def test_au_calculation_trace_records_payg_band_and_coefficients():
+    """§25 Calculation Trace — Minimum Audit Payload: the PAYG scale,
+    weekly-equivalent x, and the exact coefficient band (a/b) used must
+    be recoverable from the trace, matching the same figures the Scale 1
+    weekly test above asserts against (500 -> x=500.99, band [371,515),
+    a=0.179, b=0.1066)."""
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+    )
+    trace = result.au_calculation_trace
+    assert trace is not None
+    payg = trace["payg"]
+    assert payg["scale"] == "SCALE_1"
+    assert payg["method"] == "COEFFICIENT_BAND"
+    assert payg["band_configured"] is True
+    # Trace values are JSON-safe (str), not raw Decimal — same "resolve_ok
+    # stores str(v)" convention Germany's own CalculationTrace already
+    # uses, since the underlying column is a JSON type that cannot
+    # serialize Decimal directly.
+    assert Decimal(payg["weekly_equivalent_x"]) == Decimal("500.99")
+    assert Decimal(payg["coefficient_a"]) == Decimal("0.179")
+    assert Decimal(payg["coefficient_b"]) == Decimal("0.1066")
+    assert Decimal(payg["final_withholding"]) == Decimal("90")
+
+
+def test_au_calculation_trace_records_unconfigured_band_and_no_stsl_obligation():
+    """Every trace sub-section is always a dict, even on the $0/no-
+    obligation paths — never absent, so the audit trail can distinguish
+    'genuinely $0' from 'this section never ran'."""
+    result = calc(
+        "AU", 500, {}, [], pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+    )
+    trace = result.au_calculation_trace
+    assert trace["payg"]["band_configured"] is False
+    assert trace["stsl"]["applicable"] is False
+    assert trace["workers_compensation"]["configured"] is False
+    assert trace["state_payroll_tax"]["applicable"] is False
+
+
+def test_au_calculation_trace_records_state_payroll_tax_and_workers_comp():
+    profiles = {"AU_WORKERS_COMP": EmployerTaxProfileStub(employer_rate_pct=Decimal("2.5"))}
+    result = calc(
+        "AU", 2000000, {}, [], state_slabs=_AU_NSW_PAYROLL_TAX_SLABS, work_state="NSW",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"), employer_tax_profiles=profiles,
+    )
+    trace = result.au_calculation_trace
+    spt = trace["state_payroll_tax"]
+    assert spt["applicable"] is True
+    assert spt["charity_exempt"] is False
+    assert Decimal(spt["employer_payroll_tax"]) == Decimal("43600.00")
+    wc = trace["workers_compensation"]
+    assert wc["configured"] is True
+    assert Decimal(wc["employer_rate_pct"]) == Decimal("2.5")
+    assert Decimal(wc["premium"]) == result.au_workers_compensation_premium
+
+
+# ── Australia: §5 step 4 tax offsets (LITO/SAPTO) — Phase 10 2026-09-17 ──
+# Real ATO-published 2026-27 figures, independently cross-checked against
+# two separate lookups of the ATO's own page (see australia.py's own
+# module docstring for the verification method and for why SAPTO's
+# COUPLE/ILLNESS_SEPARATED_COUPLE categories are deliberately NOT entered.
+
+_AU_LITO_SLABS = [
+    Slab(Decimal("0"), Decimal("37500"), Decimal("0"), rule_type="AU_LITO_OFFSET", filing_status="LITO", flat_amount=Decimal("700")),
+    Slab(Decimal("37500"), Decimal("45000"), Decimal("5"), rule_type="AU_LITO_OFFSET", filing_status="LITO", flat_amount=Decimal("700")),
+    Slab(Decimal("45000"), Decimal("66667"), Decimal("1.5"), rule_type="AU_LITO_OFFSET", filing_status="LITO", flat_amount=Decimal("325")),
+    Slab(Decimal("66667"), None, Decimal("0"), rule_type="AU_LITO_OFFSET", filing_status="LITO", flat_amount=Decimal("0")),
+]
+_AU_SAPTO_SINGLE_SLABS = [
+    Slab(Decimal("0"), Decimal("36034"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("2230")),
+    Slab(Decimal("36034"), Decimal("53874"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("2230")),
+    Slab(Decimal("53874"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("0")),
+]
+
+
+def test_au_lito_offset_reduces_payg_withholding():
+    # Same Scale 1 weekly $500 case as test_australia_payg_schedule1_
+    # scale1_weekly (tds=90 before any offset). Annual = 500*52=26,000,
+    # within LITO band 1 (<=37,500) -> full $700 annual offset ->
+    # period-equivalent (weekly, /52) = 13.46, subtracted from tds.
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_LITO_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert Decimal(trace["lito_annual"]) == Decimal("700")
+    assert Decimal(trace["period_offset"]) == Decimal("13.46")
+    assert result.tds == Decimal("90") - Decimal("13.46")
+
+
+def test_au_lito_offset_phases_out_in_band_two():
+    # Monthly gross $3,200 -> annual 38,400 (within band 2, 37,500-
+    # 45,000): 700 - 0.05*(38,400-37,500) = 700 - 45 = 655.
+    result = calc("AU", 3200, {}, _AU_LITO_SLABS, au_residency_status="RESIDENT")
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert Decimal(trace["lito_annual"]) == Decimal("655")
+
+
+def test_au_lito_offset_zero_above_cutout():
+    # Monthly gross $6,000 -> annual 72,000, above the $66,667 cutout.
+    result = calc("AU", 6000, {}, _AU_LITO_SLABS, au_residency_status="RESIDENT")
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert Decimal(trace["lito_annual"]) == Decimal("0")
+
+
+def test_au_lito_offset_not_applied_for_foreign_resident():
+    # Same income as the reducing-withholding test above, but foreign
+    # resident -> LITO never applies (same "no tax-free threshold either"
+    # rule Schedule 1 itself already encodes for foreign residents).
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_LITO_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="FOREIGN_RESIDENT",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert Decimal(trace["lito_annual"]) == Decimal("0")
+
+
+def test_au_sapto_single_offset_reduces_payg_withholding():
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_SAPTO_SINGLE_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+        au_sapto_category="SINGLE",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    # Annual 26,000 is within SAPTO single's own band 1 (<=36,034) -> full
+    # $2,230 annual offset -> period-equivalent (weekly, /52) = 42.88,
+    # subtracted from the same tds=90 base as the LITO test above.
+    assert Decimal(trace["sapto_annual"]) == Decimal("2230")
+    assert trace["sapto_category"] == "SINGLE"
+    assert Decimal(trace["period_offset"]) == Decimal("42.88")
+    assert result.tds == Decimal("90") - Decimal("42.88")
+
+
+def test_au_sapto_couple_unconfigured_returns_zero_not_a_guess():
+    # COUPLE has no configured rows (two independent lookups of the ATO's
+    # own published figures for this category produced conflicting
+    # thresholds) — must resolve to $0, the same "not yet confirmed, not
+    # not entitled" contract as any other unconfigured AU band, never an
+    # error and never a guessed number.
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_SAPTO_SINGLE_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+        au_sapto_category="COUPLE",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert Decimal(trace["sapto_annual"]) == Decimal("0")
+    assert trace["sapto_category"] == "COUPLE"
+
+
+def test_au_sa_reduced_rate_band_matches_revenuesa_worked_example():
+    # RevenueSA's own worked example (Tiny Pty Ltd, $1,560,000 wages) ->
+    # 1.48% rate. This formula predicts 4.95% x (60,000/200,000) =
+    # 1.485%, which the worked example's own rounding matches.
+    result = calc(
+        "AU", 1560000, {}, [], state_slabs=[], work_state="SA",
+        au_state_payroll_tax_ytd_remuneration_before=Decimal("0"),
+    )
+    expected = (Decimal("1560000") * Decimal("1.485") / Decimal("100")).quantize(Decimal("0.01"))
+    assert result.employer_payroll_tax == expected
 
 
 def test_australia_super_guarantee_capped_at_max_contribution_base():
