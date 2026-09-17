@@ -13,6 +13,7 @@ sits in its own transaction.
 """
 
 import logging
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -24,9 +25,14 @@ logger = logging.getLogger("zoiko_payroll.billing.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
 
+# Last-run tracking consumed by GET /super-admin/platform/service-health —
+# an in-memory dict, not persisted, so it reflects only this process's runs.
+last_run_status: dict = {"last_run_at": None, "last_success_at": None, "last_error": None}
+
 
 def _run_sweep() -> None:
     db = SessionLocal()
+    last_run_status["last_run_at"] = datetime.utcnow()
     try:
         result = run_trial_expiry_sweep(db)
         if result["scanned"]:
@@ -36,8 +42,11 @@ def _run_sweep() -> None:
                 len(result["grace_started"]),
                 len(result["closed"]),
             )
-    except Exception:  # noqa: BLE001
+        last_run_status["last_success_at"] = datetime.utcnow()
+        last_run_status["last_error"] = None
+    except Exception as exc:  # noqa: BLE001
         logger.exception("[trial-sweep] Sweep run failed")
+        last_run_status["last_error"] = str(exc)
     finally:
         db.close()
 
