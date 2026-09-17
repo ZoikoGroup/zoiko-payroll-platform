@@ -20,6 +20,14 @@ import {
   ShieldCheck,
   Landmark,
   ScrollText,
+  Layers,
+  CreditCard,
+  PlayCircle,
+  FileText,
+  AlertTriangle,
+  Activity,
+  Plug,
+  ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
@@ -61,6 +69,29 @@ const NAV_GROUPS = [
   {
     title: "System",
     items: [{ label: "Settings", href: "/super-admin/settings", icon: Settings }],
+  },
+  {
+    title: "Zoiko Commercial",
+    items: [
+      { label: "Plans & Entitlements", href: "/super-admin/plans-entitlements", icon: Layers },
+      { label: "Subscriptions & Billing", href: "/super-admin/subscriptions-billing", icon: CreditCard },
+    ],
+  },
+  {
+    title: "Payroll Operations",
+    items: [
+      { label: "Payroll Runs", href: "/super-admin/payroll-runs", icon: PlayCircle },
+      { label: "Filings & Remittances", href: "/super-admin/filings-remittances", icon: FileText },
+      { label: "Exceptions & Reconciliation", href: "/super-admin/exceptions-reconciliation", icon: AlertTriangle },
+    ],
+  },
+  {
+    title: "Platform",
+    items: [
+      { label: "Service Health", href: "/super-admin/service-health", icon: Activity },
+      { label: "Integrations", href: "/super-admin/integrations", icon: Plug },
+      { label: "Security & Audit", href: "/super-admin/security-audit", icon: ShieldAlert },
+    ],
   },
 ];
 
