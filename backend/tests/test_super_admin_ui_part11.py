@@ -120,6 +120,42 @@ def test_hotfix_activation_bypasses_distinct_approver_gate_and_records_activatio
     assert activations[0].reviewed is False
 
 
+def test_hotfix_activation_bypasses_gate_when_same_actor_created_and_edited_pack(db, organization):
+    """Found 2026-09-17 via live AU data entry, not by this test suite:
+    the OTHER hotfix test above constructs its pack via a raw ORM insert
+    that leaves updated_by_id NULL, so approved_by_id (set to actor_id
+    by self-approval) never actually equals updated_by_id there — a
+    test-setup blind spot that let a real bug ship. This test instead
+    goes through the REAL upsert_compliance_policy + upsert_canonical_
+    tax_slab path with the SAME actor_id throughout (exactly what one
+    Super Admin session produces), so updated_by_id genuinely equals the
+    actor hotfix-activates with — the actual condition
+    set_jurisdiction_pack_status's distinct-approver check exists to
+    catch, and hotfix mode must still bypass it."""
+    from app.modules.payroll.schemas import JurisdictionPackUpsert, CanonicalTaxSlabUpsert
+
+    same_actor = 99
+    pack = service.upsert_jurisdiction_pack(
+        db, JurisdictionPackUpsert(
+            packId="UK-HOTFIX-SAME-ACTOR", jurisdictionCountry="UK", packType="tax",
+            version="1.0", status="Draft", effectiveFrom=date(2026, 7, 1),
+        ), actor_id=same_actor,
+    )
+    service.upsert_canonical_tax_slab(
+        db, CanonicalTaxSlabUpsert(
+            jurisdictionPackId=pack.id, jurisdictionCountry="UK", minAmount=Decimal("0"),
+            maxAmount=Decimal("50000"), ratePct=Decimal("20"), rateLabel="20%",
+        ), actor_id=same_actor,
+    )
+    assert pack.updated_by_id == same_actor  # the real precondition this bug needed
+
+    updated = service.activate_jurisdiction_pack_hotfix(
+        db, pack.id, "INC-SAME-ACTOR", "Single-Super-Admin session, no second approver available",
+        actor_id=same_actor,
+    )
+    assert updated.status == "Active"
+
+
 def test_hotfix_activation_still_enforces_date_overlap_guard(db, organization):
     _make_tax_pack(db, "UK-HOTFIX-OVERLAP-EXISTING", status="Active")
     existing = db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == "UK-HOTFIX-OVERLAP-EXISTING").first()

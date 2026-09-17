@@ -203,6 +203,23 @@ class PayrollContext:
     au_tax_free_threshold_claimed: bool = None
     au_medicare_levy_exemption: str = None        # "FULL" | "HALF" | None (standard)
     au_withholding_variation_pct: Decimal = None
+    # §7's own "Extra-pay calendar" control (53 weekly pays / 27
+    # fortnightly pays in an income year) — None (the ordinary 52/26-pay
+    # calendar) for every employee until an org explicitly flags a
+    # payroll cycle as landing on the extra pay, per §7's own "only when
+    # that pay-calendar control is active" instruction. Never inferred
+    # from pay_date arithmetic — see engine/countries/australia.py's
+    # _resolve_au_extra_pay_withholding.
+    au_extra_pay_calendar: str = None             # "53_WEEK" | "27_FORTNIGHT" | None
+    # §5 step 4's SAPTO declaration (Phase 10, 2026-09-17) — an employee's
+    # own self-declared seniors/pensioners category, entirely separate
+    # from au_tax_free_threshold_claimed. None (no SAPTO applied) for
+    # every employee until explicitly declared — LITO, by contrast,
+    # applies automatically to every resident and needs no declaration
+    # field at all. Only "SINGLE" resolves to a real figure today; see
+    # engine/countries/australia.py's own docstring for why COUPLE/
+    # ILLNESS_SEPARATED_COUPLE stay at $0 pending confirmed ATO data.
+    au_sapto_category: str = None                 # "SINGLE" | "COUPLE" | "ILLNESS_SEPARATED_COUPLE" | None
 
     # US Form W-4: filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and form
     # vintage ("PRE_2020"/"2020_PLUS"). None for every non-US employee, and
@@ -473,6 +490,24 @@ class PayrollContext:
     # the default for every org today — no UI sets this yet) is treated
     # as ordinary/metropolitan.
     au_payroll_tax_regional_status: str = None
+    # §18 "Charity / public-benefit exemptions" — read from
+    # CompanyComplianceDetails.au_payroll_tax_charity_exempt. True short-
+    # circuits calculate_au_state_payroll_tax to $0; None/False (every org
+    # today) is ordinary, fully unaffected. See that column's own
+    # docstring for why this is a whole-org binary flag, not a per-
+    # activity partial exemption.
+    au_payroll_tax_charity_exempt: bool = None
+    # VIC/QLD national-payroll-banded surcharges (§17 follow-up, resolved
+    # 2026-09-17) — the org-GROUP's AUSTRALIA-WIDE (not state-specific)
+    # aggregate taxable wages YTD, as of BEFORE this pay period. A
+    # genuinely separate accumulator dimension from
+    # au_state_payroll_tax_ytd_remuneration_before above (that one is
+    # scoped to whichever single state ctx.work_state resolves to; this
+    # one sums across all 8 states' own accumulators for the org-group —
+    # see service._au_org_payroll_tax_read_inputs). None means not wired,
+    # same "must resolve to no surcharge, never a guess" contract as
+    # every other AU YTD field.
+    au_national_taxable_wages_ytd_before: Decimal = None
     # Australia statutory deductions — child support/garnishee (§19,
     # Phase 5). Raw, DB-free list of dicts (id/order_type/
     # fixed_deduction_rate_pct/fixed_deduction_amount/
@@ -727,6 +762,27 @@ class PayrollResult:
     # re-summed independently of the total.
     au_statutory_deductions_total: Decimal = Decimal("0")
     au_statutory_deductions_detail: list = field(default_factory=list)
+    # Australia workers compensation premium (§18, employer overlay,
+    # ZP-TAX-AU-2026-27-001, Phase 9 follow-up 2026-09-17) — a
+    # tenant-specific, agency-assigned rate resolved from
+    # ctx.employer_tax_profiles["AU_WORKERS_COMP"] (see
+    # service.get_employer_tax_profiles), NEVER a statutory default (no
+    # such default exists — every real AU employer's premium is state-
+    # scheme/industry-classification/experience-rated, assigned by an
+    # insurer/authority notice, per §18's own "Why it is not a
+    # jurisdiction default" column). Zero unless a profile is configured.
+    # An employer-liability-only field, same AU-D05 contract as
+    # employer_payroll_tax above — never summed into
+    # total_employee_deductions.
+    au_workers_compensation_premium: Decimal = Decimal("0")
+    # Australia: §25 calculation trace (Phase 9 follow-up, 2026-09-17) —
+    # AU-only structured payload of how PAYG/STSL/MLS/SG/state-payroll-tax
+    # were each derived this period (scale, weekly-x, coefficient a/b,
+    # bands used, etc.), persisted verbatim onto PayslipItem.
+    # au_calculation_trace by service.add_payslip_item. None when
+    # australia.py's calculate() has nothing to report (e.g. non-AU
+    # employees never populate this at all).
+    au_calculation_trace: dict = None
     # UK: Apprenticeship Levy — same org-level-accumulator-banded contract
     # as employer_eht above (ZP-TAX-UK-2026-27-001 §14). Zero until the
     # org-level accumulator is wired (appr_levy_ytd_pay_bill_before is

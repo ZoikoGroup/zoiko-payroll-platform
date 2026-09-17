@@ -170,6 +170,14 @@ const COMPONENT_OPTIONS_BY_COUNTRY = {
     "MB_HE_LEVY_EXEMPTION_ALLOCATION_PCT", "NL_HAPSET_EXEMPTION_ALLOCATION_PCT",
     "QC_WSDRF_TRAINING_EXPENDITURE", "QC_HSF_TEMP_SECTOR_EXEMPTION",
   ],
+  // AU_WORKERS_COMP (ZP-TAX-AU-2026-27-001 §18, Phase 9 follow-up,
+  // 2026-09-17): the one real, computable §18 employer overlay — a
+  // state-scheme/industry-classification/experience-rated premium,
+  // resolved by engine/countries/australia.py's calculate_au_workers_
+  // compensation_premium exactly like US SUI/CA WCB above. Jurisdiction
+  // is typed as "AU-NSW" etc. (this form's own free-text Jurisdiction
+  // field, pre-filled "AU-" via the country prop, needs no special case).
+  AU: ["AU_WORKERS_COMP"],
 };
 
 // A row for one of these components is headcount-only — it never carries

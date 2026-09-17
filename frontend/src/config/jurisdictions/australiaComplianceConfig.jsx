@@ -8,6 +8,7 @@ import AUStateAccordionWorkspace from "../../components/jurisdiction/australia/s
 import TaxabilityMatrixTab from "../../components/jurisdiction/TaxabilityMatrixTab";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 import TestCertificationPanel from "../../components/jurisdiction/TestCertificationPanel";
+import SuiEmployerRatesPanel from "../../components/jurisdiction/SuiEmployerRatesPanel";
 
 // Australia 2026-27 statutory build (ZP-TAX-AU-2026-27-001), Phase 6 —
 // §20's own Super Admin tab list: "Overview | PAYG | STSL | Medicare |
@@ -58,7 +59,17 @@ export const australiaComplianceConfig = {
       render: () => <AUStateAccordionWorkspace />,
     },
     {
-      key: "taxability", label: "Taxability", icon: ListChecks, after: "statePayrollTax",
+      // §18 employer overlay — workers compensation premium, the one
+      // §18 item with a real, computable formula (Phase 9 follow-up,
+      // 2026-09-17). Reuses SuiEmployerRatesPanel exactly like CA's own
+      // WCB entry — same tenant-specific, agency-assigned-rate CRUD, no
+      // AU-specific component needed.
+      key: "workersComp", label: "Workers Comp", icon: ShieldCheck, after: "statePayrollTax",
+      isVisible: () => true,
+      render: () => <SuiEmployerRatesPanel country="AU" />,
+    },
+    {
+      key: "taxability", label: "Taxability", icon: ListChecks, after: "workersComp",
       isVisible: () => true,
       render: () => <TaxabilityMatrixTab country="AU" />,
     },

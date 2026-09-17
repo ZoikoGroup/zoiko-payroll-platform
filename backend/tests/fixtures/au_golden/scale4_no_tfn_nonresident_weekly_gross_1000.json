@@ -1,0 +1,14 @@
+{
+  "description": "Scale 4, no TFN provided, foreign resident (non-resident rate). Weekly gross $1000 -> flat 45% of floored earnings: floor(1000*0.45) = 450.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (Scale 4 — TFN not provided, non-resident 45%, effective 1 Jul 2026).",
+  "context": {
+    "gross": "1000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "NOT_PROVIDED",
+    "au_residency_status": "FOREIGN_RESIDENT"
+  },
+  "expected": {
+    "tds": "450"
+  }
+}

@@ -105,6 +105,7 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "tax_free_threshold_claimed", label: "Tax-free threshold claimed", type: "select", choices: ["true", "false"] },
     { key: "medicare_levy_exemption", label: "Medicare levy exemption", type: "select", choices: ["FULL", "HALF"] },
     { key: "withholding_variation_pct", label: "Withholding variation (%)", type: "text", pattern: /^\d+(\.\d{1,2})?$/, error: "Withholding variation must be a number." },
+    { key: "extra_pay_calendar", label: "Extra-pay calendar (53/27-pay year)", type: "select", choices: ["53_WEEK", "27_FORTNIGHT"] },
     { key: "work_state", label: "State/territory of work", type: "select", upper: true, choices: ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"] },
     { key: "help_stsl_debt", label: "HELP/STSL debt", type: "select", choices: ["true", "false"] },
     { key: "super_fund_usi", label: "Super fund USI", type: "text", upper: true, pattern: /^[A-Z0-9]{8,14}$/, error: "Super fund USI looks incorrect." },

@@ -501,6 +501,8 @@ class AUEmployeeValidation(EmployeeValidationStrategy):
         "tax_free_threshold_claimed": "au_tax_free_threshold_claimed",
         "medicare_levy_exemption": "au_medicare_levy_exemption",
         "withholding_variation_pct": "au_withholding_variation_pct",
+        "extra_pay_calendar": "au_extra_pay_calendar",
+        "sapto_category": "au_sapto_category",
         "work_state": "work_state",
         # Same shape as UK's has_postgrad_loan reuse of study_loan_plan/
         # study_loan_balance — HELP/HECS is stored in the SAME generic

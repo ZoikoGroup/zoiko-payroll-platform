@@ -1,0 +1,26 @@
+{
+  "description": "Scale 2 (tax-free threshold claimed), resident, weekly gross $1000. x=1000.99 falls in the 865-1282 band (a=0.3227, b=185.1935). y = 0.3227*1000.99 - 185.1935 = 137.826, rounds to 138.",
+  "source": "ZP-TAX-AU-2026-27-001 v1.0 Section 6 (NAT 1004, Scale 2 — TF threshold claimed, effective 1 Jul 2026). Hand-computed against the document's own y=a*x-b formula, cross-checked by running the real engine at authoring time.",
+  "context": {
+    "gross": "1000.00",
+    "country": "AU",
+    "pay_frequency": "Weekly",
+    "au_tfn_status": "PROVIDED",
+    "au_residency_status": "RESIDENT",
+    "au_tax_free_threshold_claimed": true,
+    "slabs": [
+      {"min_amount": "0", "max_amount": "362", "rate_pct": "0", "flat_amount": "0", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "362", "max_amount": "538", "rate_pct": "0.15", "flat_amount": "54.3462", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "538", "max_amount": "673", "rate_pct": "0.25", "flat_amount": "108.2135", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "673", "max_amount": "721", "rate_pct": "0.17", "flat_amount": "54.3473", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "721", "max_amount": "865", "rate_pct": "0.179", "flat_amount": "60.8377", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "865", "max_amount": "1282", "rate_pct": "0.3227", "flat_amount": "185.1935", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "1282", "max_amount": "2596", "rate_pct": "0.32", "flat_amount": "181.7319", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "2596", "max_amount": "3653", "rate_pct": "0.39", "flat_amount": "363.4627", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"},
+      {"min_amount": "3653", "max_amount": null, "rate_pct": "0.47", "flat_amount": "655.7704", "rule_type": "AU_PAYG_COEFFICIENT", "filing_status": "SCALE_2"}
+    ]
+  },
+  "expected": {
+    "tds": "138"
+  }
+}
