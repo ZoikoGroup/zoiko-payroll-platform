@@ -62,24 +62,49 @@ def _resolve_plan_label(db: Session, plan_version_id: int) -> tuple[Optional[str
 
 @router.get("/billing/subscriptions")
 def list_all_subscriptions(
-    status: Optional[str] = Query(None, description="Filter by SubscriptionStatus value"),
+    status: Optional[str] = Query(None, description="Filter by SubscriptionStatus value, or 'NONE' for organizations with no subscription row at all"),
     workspace_type: Optional[str] = Query(None, description="Filter by Organization.workspace_type"),
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
-    """Cross-tenant view of every BillingSubscription. Read-only; plan/
-    subscription mutation stays in billing/admin_router.py's existing
-    endpoints."""
-    q = db.query(BillingSubscription, Organization).join(
-        Organization, Organization.id == BillingSubscription.organization_id
+    """Cross-tenant view of every Organization and its BillingSubscription,
+    if it has one — an org outer-joins in as a NONE-status row rather than
+    being silently dropped, since a plain inner join on BillingSubscription
+    hides every PRODUCTION org that predates the trial/billing feature (they
+    were created via /auth/register, which never creates a subscription
+    row). Read-only; plan/subscription mutation stays in
+    billing/admin_router.py's existing endpoints."""
+    from app.modules.billing.trial_lifecycle import resolve_trial_stage
+
+    q = db.query(Organization, BillingSubscription).outerjoin(
+        BillingSubscription, BillingSubscription.organization_id == Organization.id
     )
-    if status:
-        q = q.filter(BillingSubscription.status == status)
     if workspace_type:
         q = q.filter(Organization.workspace_type == workspace_type)
+    if status:
+        if status == "NONE":
+            q = q.filter(BillingSubscription.id.is_(None))
+        else:
+            q = q.filter(BillingSubscription.status == status)
 
     rows = []
-    for sub, org in q.order_by(BillingSubscription.current_period_end.asc()).all():
+    for org, sub in q.order_by(Organization.organization_name.asc()).all():
+        if sub is None:
+            rows.append({
+                "subscription_id": None,
+                "organization_id": org.id,
+                "organization_name": org.organization_name,
+                "workspace_type": org.workspace_type,
+                "status": "NONE",
+                "trial_stage": None,
+                "plan_code": None,
+                "plan_name": None,
+                "current_period_start": None,
+                "current_period_end": None,
+                "grace_period_ends_at": None,
+            })
+            continue
+
         plan_code, plan_name = _resolve_plan_label(db, sub.plan_version_id)
         rows.append({
             "subscription_id": sub.id,
@@ -87,6 +112,11 @@ def list_all_subscriptions(
             "organization_name": org.organization_name,
             "workspace_type": org.workspace_type,
             "status": sub.status,
+            # Derived stage (ACTIVE/GRACE_READONLY/CLOSED), same pure
+            # function the expiry sweep uses — the raw `status` column
+            # stays "TRIALING" through grace and closure, so the table
+            # would otherwise show a stale trial as still-active.
+            "trial_stage": resolve_trial_stage(sub),
             "plan_code": plan_code,
             "plan_name": plan_name,
             "current_period_start": sub.current_period_start,
