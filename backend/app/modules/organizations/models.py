@@ -92,3 +92,34 @@ class Organization(Base):
 
     def __repr__(self):
         return f"<Organization id={self.id} code={self.organization_code} name={self.organization_name!r}>"
+
+
+class LegalEntity(Base):
+    """One row per legal entity registered under an Organization.
+
+    Net-new concept: before this, there was no first-class way to represent
+    "how many legal entities does this org have" anywhere in the schema —
+    every org was implicitly exactly one entity. This exists specifically
+    so billing's max_entities plan limit (see billing/feature_keys.py) has
+    a real row count to check against, not a fabricated number. Every org
+    is expected to have at least one row here (its own, created alongside
+    the org itself is NOT automated yet — see organizations/router.py's
+    list-legal-entities endpoint, which returns an empty list for an org
+    that hasn't created any yet; the entitlement check treats "about to
+    create the 1st" the same as any other count+1 check).
+    """
+    __tablename__ = "legal_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    name = Column(String(200), nullable=False)
+    registration_number = Column(String(100), nullable=True)
+    country = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<LegalEntity id={self.id} organization_id={self.organization_id} name={self.name!r}>"

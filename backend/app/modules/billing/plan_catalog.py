@@ -57,6 +57,48 @@ def list_entitlement_flags(db: Session, plan_version_id: int) -> dict:
     return {row.feature_key: row.limit_value for row in rows}
 
 
+def retire_plan_version(
+    db: Session, plan_version_id: int, actor_user_id: int
+) -> BillingPlanVersion:
+    """Transition PUBLISHED -> RETIRED. Used when a corrected/successor
+    version has been published for the same plan and the old version
+    should stop being resolvable as "the" published version — get_published_
+    plan_version already orders by version desc, so retiring the old row
+    isn't required for correctness, only for keeping history honest (a
+    RETIRED version is visibly no longer current, not silently superseded).
+    Existing BillingSubscription rows are not affected by this call — moving
+    them to a new plan_version_id is a separate, explicit migration step.
+    """
+    version = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == plan_version_id).first()
+    if version is None:
+        raise NotFoundException("Plan version", plan_version_id)
+
+    if version.status != PlanVersionStatus.PUBLISHED.value:
+        raise BadRequestException(
+            f"Plan version {plan_version_id} must be PUBLISHED before it can be "
+            f"retired (current status: {version.status})."
+        )
+
+    version.status = PlanVersionStatus.RETIRED.value
+    db.add(version)
+
+    db.add(
+        BillingCommercialAuditEvent(
+            organization_id=None,
+            actor_user_id=actor_user_id,
+            event_type="PLAN_VERSION_RETIRED",
+            payload={
+                "plan_version_id": version.id,
+                "plan_id": version.plan_id,
+                "version": version.version,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(version)
+    return version
+
+
 def publish_plan_version(
     db: Session, plan_version_id: int, published_by_user_id: int
 ) -> BillingPlanVersion:

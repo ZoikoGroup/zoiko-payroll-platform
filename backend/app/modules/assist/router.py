@@ -97,6 +97,8 @@ from app.database import get_db
 from app.core.dependencies import get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id
 from app.core.exceptions import NotFoundException
 from app.modules.assist import service
+from app.modules.billing.entitlements import require_entitlement
+from app.modules.billing.feature_keys import ASSIST
 from app.modules.assist.models import (
     AssistEvidenceItem,
     AssistNoticeAcknowledgment,
@@ -159,6 +161,13 @@ from app.modules.assist.schemas import (
 assist_router = APIRouter(
     prefix="/assist",
     tags=["Assist"],
+    # Every endpoint in this router requires ASSIST entitlement (Core: off,
+    # Professional: on) — applied once at router level rather than per
+    # endpoint so nothing is missed. Deliberately NOT applied to
+    # assist_public_router (public_router.py): that router has no
+    # organization_id at all (unauthenticated marketing-site chat widget),
+    # so there's no subscription to check entitlement against.
+    dependencies=[Depends(require_entitlement(ASSIST))],
 )
 
 

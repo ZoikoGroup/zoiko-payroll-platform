@@ -58,12 +58,19 @@ PLAN_PRICES_CENTS = {"CORE": 0, "PROFESSIONAL": 5000, "BUSINESS": 15000, "ENTERP
 @router.get("/plans", response_model=List[BillingPublishedPlanResponse])
 def list_published_plans(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
 ):
     """One entry per plan (CORE/PROFESSIONAL/BUSINESS/ENTERPRISE) that
     currently has a PUBLISHED version. A plan with no PUBLISHED version yet
     (e.g. still DRAFT/APPROVED) is simply omitted, not returned as null/empty —
-    there is nothing publishable to show a tenant for it yet."""
+    there is nothing publishable to show a tenant for it yet.
+
+    Deliberately unauthenticated (no get_current_user dependency): this is
+    read-only, non-sensitive plan-catalog/pricing data — the same kind of
+    thing a public pricing page shows — and RegisterPage.jsx's plan picker
+    needs to render it before an account/JWT exists at all. PlanSelectionPage
+    (post-login) keeps working unchanged; it just no longer requires the
+    token this endpoint never actually used for anything but access control.
+    """
     results = []
     for plan in db.query(BillingPlan).order_by(BillingPlan.id).all():
         version = plan_catalog.get_published_plan_version(db, plan.code)

@@ -39,7 +39,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.core.dependencies import get_current_user, get_current_payroll_operator
+from app.modules.billing.entitlements import require_scope_limit
+from app.modules.billing.feature_keys import MAX_JURISDICTIONS
 from app.modules.payroll.enterprise import service
+from app.modules.payroll.enterprise.models import EnterpriseJurisdiction
 from app.modules.payroll.enterprise.schemas import (
     JurisdictionResponse, JurisdictionCreate, JurisdictionConfigUpdate,
     ValidationResponse, ActivationResponse, EnterpriseDashboardResponse, SuccessResponse,
@@ -72,6 +75,12 @@ def add_jurisdiction(
     data: JurisdictionCreate, db: Session = Depends(get_db),
     current_user=Depends(get_current_payroll_operator),
 ):
+    current_count = (
+        db.query(EnterpriseJurisdiction)
+        .filter(EnterpriseJurisdiction.organization_id == current_user.organization_id)
+        .count()
+    )
+    require_scope_limit(MAX_JURISDICTIONS, requested_qty=current_count + 1)(current_user=current_user, db=db)
     return service.add_jurisdiction(db, current_user.organization_id, data.country_code, actor_id=current_user.id)
 
 

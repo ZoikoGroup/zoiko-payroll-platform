@@ -122,3 +122,21 @@ class OrganizationDetail(BaseModel):
     active_employees: int = 0
     hr_admins: int = 0
     created_at: datetime
+
+
+class LegalEntityCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    registration_number: Optional[str] = None
+    country: Optional[str] = None
+
+
+class LegalEntityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organization_id: int
+    name: str
+    registration_number: Optional[str] = None
+    country: Optional[str] = None
+    is_active: bool
+    created_at: datetime
