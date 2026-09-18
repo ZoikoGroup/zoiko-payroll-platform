@@ -113,11 +113,11 @@ def _children_map(revs: dict) -> dict:
     return children
 
 
-def test_alembic_heads_is_single_head_799b28d80edd():
+def test_alembic_heads_is_single_head_767a807fc98e():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["799b28d80edd"]
+    assert heads == ["767a807fc98e"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -129,31 +129,33 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["799b28d80edd"]
+    assert list(script.get_heads()) == ["767a807fc98e"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
     """Branch points == revisions with more than one child. Reconciliation
     adds exactly one new branchpoint (`2b3c4d5e6f70`, where Germany's
     post-fork history diverges from `main`'s own); every other branchpoint
-    here is pre-existing on `main`'s own independently-evolved graph."""
+    here is pre-existing on `main`'s own independently-evolved graph, plus
+    the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`."""
     revs = _parse_revisions()
     children = _children_map(revs)
     branchpoints = sorted(k for k, v in children.items() if len(v) > 1)
     assert branchpoints == [
-        "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181", "737e7bfa2d77",
-        "b6c7d8e9f0a1", "c1f5a9d22e10", "d6e7f8a9b0c1", "d7e2f4a91b53",
-        "dde9b427b6bf", "f1b78410d568", "fbfe6d7eeb2e",
+        "1dc04f15a9b7", "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181",
+        "737e7bfa2d77", "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf", "f1b78410d568",
+        "fbfe6d7eeb2e",
     ]
 
 
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    # 126 (main) + 4 new/kept from nikhil (b7c8d9e0f2a3, 13ce5f1cf7a1,
-    # abaca1105dbb, the 752aa7829541 merge) = 130, + 2 additive Germany
-    # 2026 all-Länder schema-drift fixes (00a912d5306c, 799b28d80edd) = 132.
-    assert len(revs) == 132
+    # 132 (pre-merge main) + 5 commercial billing (b7e1f4a9c3d2, c9a2d6e5f1b8,
+    # d4f8a2c7e6b1, e5b3f9a1d7c4, f6c8b1a4e9d3) + 1 reconciliation merge
+    # (767a807fc98e) = 138.
+    assert len(revs) == 138
 
 
 def test_germany_head_chain_wiring_is_intact():
