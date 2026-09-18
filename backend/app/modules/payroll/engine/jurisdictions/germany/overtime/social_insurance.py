@@ -207,9 +207,15 @@ def _calculate_one_si_group(db: Session, work_record, start, end, segs: List) ->
     actual_grundlohn = Decimal(profile.de_grundlohn_hourly)
     result.actual_grundlohn_hourly = actual_grundlohn
 
+    # Phase 8DJ: resolved ONCE for this function's single work_date_local,
+    # threaded through every registry resolution below — same pattern as
+    # _resolve_germany_calc_inputs (Phase 8DI).
+    applicable_pack = service.resolve_applicable_germany_pack(db, as_of=work_date_local)
+    pack_id = applicable_pack.id if applicable_pack is not None else None
+
     # ── Resolve the PUBLISHED SOCIAL_INSURANCE Grundlohn cap (Phase 8AD)
     # — NEVER the WAGE_TAX dimension, never hardcoded €25 ────────────────
-    cap_row = service.resolve_germany_overtime_grundlohn_cap(db, "SOCIAL_INSURANCE", as_of=work_date_local)
+    cap_row = service.resolve_germany_overtime_grundlohn_cap(db, "SOCIAL_INSURANCE", as_of=work_date_local, jurisdiction_pack_id=pack_id)
     if cap_row is None:
         result.calculation_status = _NOT_CONFIGURED
         result.calculation_note = f"No PUBLISHED SOCIAL_INSURANCE GermanyOvertimeGrundlohnCap as of {work_date_local}."
@@ -224,7 +230,7 @@ def _calculate_one_si_group(db: Session, work_record, start, end, segs: List) ->
     other = [c for c in categories if c in _OTHER_CATEGORIES]
 
     if len(categories) == 1:
-        rule = service.resolve_germany_overtime_premium_category(db, categories[0], as_of=work_date_local)
+        rule = service.resolve_germany_overtime_premium_category(db, categories[0], as_of=work_date_local, jurisdiction_pack_id=pack_id)
         if rule is None:
             result.calculation_status = _NOT_CONFIGURED
             result.calculation_note = f"No PUBLISHED GermanyOvertimePremiumCategory for {categories[0]} as of {work_date_local}."
@@ -233,8 +239,8 @@ def _calculate_one_si_group(db: Session, work_record, start, end, segs: List) ->
         result.primary_category_rule_id = rule.id
         result.combined_premium_pct = Decimal(rule.wage_tax_free_pct)
     elif len(night) == 1 and len(other) == 1 and len(categories) == 2:
-        night_rule = service.resolve_germany_overtime_premium_category(db, night[0], as_of=work_date_local)
-        other_rule = service.resolve_germany_overtime_premium_category(db, other[0], as_of=work_date_local)
+        night_rule = service.resolve_germany_overtime_premium_category(db, night[0], as_of=work_date_local, jurisdiction_pack_id=pack_id)
+        other_rule = service.resolve_germany_overtime_premium_category(db, other[0], as_of=work_date_local, jurisdiction_pack_id=pack_id)
         if night_rule is None or other_rule is None:
             result.calculation_status = _NOT_CONFIGURED
             missing = night[0] if night_rule is None else other[0]

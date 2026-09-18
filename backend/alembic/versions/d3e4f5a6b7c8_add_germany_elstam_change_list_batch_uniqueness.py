@@ -1,8 +1,20 @@
 """add germany elstam change list batch org+reference uniqueness
 
 Revision ID: d3e4f5a6b7c8
-Revises: 65bc3ca96fd6
+Revises: b7c8d9e0f2a3
 Create Date: 2026-09-09 00:00:00.000000
+
+Phase 8CG renumbering note: this migration's parent revision was originally
+`f61cb4b650f4` (the Germany production chain recovery graft), renamed to
+`b7c8d9e0f2a3` per `docs/GERMANY_2026_RECONCILIATION_IMPLEMENTATION_REPORT.md`'s
+rename map — `origin/main` independently reused `f61cb4b650f4` for an
+unrelated real migration (`add_us_w4_step2_checkbox`). `b7c8d9e0f2a3` has no
+equivalent on `main` at all (main never needed this chain-recovery graft),
+so this branch's own parent is preserved verbatim through reconciliation —
+`b7c8d9e0f2a3` was itself re-parented onto `main`'s canonical
+`65bc3ca96fd6` (Phase 8DT). Only down_revision lines changed across this
+short chain; the unique-constraint `upgrade()`/`downgrade()` below are
+unchanged.
 
 Phase 8BE — genuine engineering gap closure. `GermanyElstamChangeListBatch`
 (payroll_germany_elstam_change_list_batches) had no uniqueness guard on
@@ -23,7 +35,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'd3e4f5a6b7c8'
-down_revision: Union[str, Sequence[str], None] = '65bc3ca96fd6'
+down_revision: Union[str, Sequence[str], None] = 'b7c8d9e0f2a3'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

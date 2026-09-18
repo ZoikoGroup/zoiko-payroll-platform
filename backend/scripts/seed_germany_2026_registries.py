@@ -92,6 +92,8 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, initialize_database
+
+from scripts._local_db_guard import assert_local_database
 from app.modules.payroll.models import (
     GermanyContributionCeiling, GermanyEarningTaxabilityRule, GermanyHealthFund,
     GermanyHealthFundU1Tariff, GermanyPvConfiguration, SourceArtifact,
@@ -444,11 +446,16 @@ def _church_tax_exception_rows(db: Session) -> list[dict]:
     ]
 
 
-def seed_germany_2026_registries(db: Session) -> dict:
+def seed_germany_2026_registries(db: Session, jurisdiction_pack_id: "int | None" = None) -> dict:
     """Idempotent: skips any row whose natural key already exists. Returns
     a dict of the newly-created rows per registry (empty lists if
     everything already existed). Never approves/publishes — see module
-    docstring."""
+    docstring.
+
+    Phase 8DI/8DL: `jurisdiction_pack_id`, when given, is stamped onto
+    every newly-created row (additive nullable FK — see models.py).
+    Omitted (None, the default), every row is created exactly as before
+    this phase, with no pack linkage — fully backward compatible."""
     seed_germany_source_evidence(db)  # ensure the evidence rows exist/are reused first
 
     created = {
@@ -468,7 +475,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyContributionCeiling(**entry, status="DRAFT")
+        row = GermanyContributionCeiling(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["contribution_ceilings"].append(row)
 
@@ -484,7 +491,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyPvConfiguration(**entry, status="DRAFT")
+        row = GermanyPvConfiguration(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["pv_configurations"].append(row)
 
@@ -499,7 +506,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyHealthFund(**entry, status="DRAFT")
+        row = GermanyHealthFund(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["health_funds"].append(row)
 
@@ -516,7 +523,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyHealthFundU1Tariff(**entry, status="DRAFT")
+        row = GermanyHealthFundU1Tariff(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["u1_tariffs"].append(row)
 
@@ -532,7 +539,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyEarningTaxabilityRule(**entry, status="DRAFT")
+        row = GermanyEarningTaxabilityRule(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["earning_taxability_rules"].append(row)
 
@@ -548,7 +555,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyOvertimePremiumCategory(**entry, status="DRAFT")
+        row = GermanyOvertimePremiumCategory(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["overtime_premium_categories"].append(row)
 
@@ -564,7 +571,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyOvertimeGrundlohnCap(**entry, status="DRAFT")
+        row = GermanyOvertimeGrundlohnCap(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["overtime_grundlohn_caps"].append(row)
 
@@ -582,7 +589,7 @@ def seed_germany_2026_registries(db: Session) -> dict:
         )
         if existing:
             continue
-        row = GermanyChurchTaxException(**entry, status="DRAFT")
+        row = GermanyChurchTaxException(**entry, status="DRAFT", jurisdiction_pack_id=jurisdiction_pack_id)
         db.add(row)
         created["church_tax_exceptions"].append(row)
 
@@ -595,11 +602,45 @@ def seed_germany_2026_registries(db: Session) -> dict:
     return created
 
 
+def _parse_args() -> "argparse.Namespace":
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Seed Germany 2026 statutory registries as DRAFT rows, linked to a real "
+                    "Germany Compliance Pack (see scripts/seed_germany_compliance_pack_2026.py).",
+    )
+    parser.add_argument(
+        "--jurisdiction-pack-id", type=int, required=True,
+        help="Phase 8DL: REQUIRED — the real payroll_jurisdiction_packs.id row (e.g. "
+             "DE-PAYROLL-CY2026-V1) every newly-created registry row will be linked to via "
+             "jurisdiction_pack_id. Refuses to run without it — this codebase's production "
+             "activation must never create an unlinked Germany 2026 registry dataset.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    # Phase 8DF: guard against a non-UTF8 Windows console crashing on a
+    # non-ASCII character in printed evidence/registry text (see the
+    # identical fix + rationale in seed_germany_source_evidence.py).
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    args = _parse_args()
+
+    # Phase 8BY: enforce the "isolated database only" instruction this
+    # script's docstring already carried, BEFORE initialize_database()
+    # creates an engine (and possibly create_all) against the target.
+    assert_local_database("seed_germany_2026_registries")
     initialize_database()
     db = SessionLocal()
     try:
-        created = seed_germany_2026_registries(db)
+        from app.modules.payroll.models import JurisdictionPack
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == args.jurisdiction_pack_id).first()
+        if pack is None:
+            print(f"REFUSING TO RUN — no JurisdictionPack row exists with id={args.jurisdiction_pack_id}.", file=sys.stderr)
+            raise SystemExit(2)
+        print(f"Linking every newly-created row to pack: {pack.pack_id} v{pack.version} (id={pack.id}, status={pack.status}).")
+
+        created = seed_germany_2026_registries(db, jurisdiction_pack_id=pack.id)
         for registry, rows in created.items():
             print(f"{registry}: created {len(rows)} new DRAFT row(s).")
         print(
