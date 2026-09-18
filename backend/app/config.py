@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     TRIAL_SWEEP_ENABLED: bool = True
     TRIAL_SWEEP_INTERVAL_HOURS: int = 24
 
+    # ── Revoked-token cleanup (modules/auth/scheduler.py) ───────────────
+    # Deletes revoked_tokens rows once their own expires_at has passed --
+    # same pattern as ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED above.
+    TOKEN_CLEANUP_SWEEP_ENABLED: bool = True
+    TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS: int = 24
+
     # ── Self-service checkout (Stripe) ──────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
