@@ -392,6 +392,20 @@ def test_uk_engine_uses_whatever_state_slabs_it_is_given():
     assert wales_with_real_state_slabs.tds != national.tds
 
 
+def test_uk_wales_with_no_state_specific_slabs_matches_ruk_exactly():
+    # Documents a real, intentional fact (not an oversight): Wales has not
+    # exercised its devolved income-tax-varying power, so a Welsh employee
+    # with no Wales-specific TaxSlab rows configured (today's actual state
+    # for every real employee) must compute IDENTICALLY to rUK — the
+    # fallback in engine/countries/uk.py's calculate() (`state_income_slabs
+    # if state_income_slabs else income_slabs`) already gives this for
+    # free; this test just pins it down explicitly for Wales specifically.
+    national = calc("UK", 5000, UK_RATES, UK_SLABS)
+    wales_no_state_slabs = calc("UK", 5000, UK_RATES, UK_SLABS, work_state="Wales")
+    assert wales_no_state_slabs.tds == national.tds
+    assert wales_no_state_slabs.net_pay == national.net_pay
+
+
 def test_normalize_uk_sub_jurisdiction_recognizes_all_four_nations():
     from app.modules.payroll.service import _normalize_uk_sub_jurisdiction
     assert _normalize_uk_sub_jurisdiction("England") == "England"
