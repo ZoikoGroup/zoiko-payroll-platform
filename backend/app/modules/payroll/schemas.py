@@ -2780,6 +2780,7 @@ class GermanyHealthFundCreate(BaseModel):
     member_applicability:    Optional[str] = Field(None, validation_alias="memberApplicability")
     payroll_recalc_policy:   Optional[str] = Field(None, validation_alias="payrollRecalcPolicy")
     authority_source_id:     Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -2799,6 +2800,7 @@ class GermanyHealthFundResponse(BaseModel):
     payrollRecalcPolicy:  Optional[str] = Field(None, validation_alias="payroll_recalc_policy", serialization_alias="payrollRecalcPolicy")
     authoritySourceId:    Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:    Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:          Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:         Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:            Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -2925,6 +2927,7 @@ class GermanyChurchTaxExceptionCreate(BaseModel):
     effective_from:              date = Field(validation_alias="effectiveFrom")
     effective_to:                Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id:         Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -2941,6 +2944,7 @@ class GermanyChurchTaxExceptionResponse(BaseModel):
     status:                    str
     authoritySourceId:         Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:         Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:               Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:              Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:                 Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -2964,6 +2968,7 @@ class GermanyHealthFundU1TariffCreate(BaseModel):
     effective_from:          date = Field(validation_alias="effectiveFrom")
     effective_to:            Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id:     Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -2980,6 +2985,7 @@ class GermanyHealthFundU1TariffResponse(BaseModel):
     status:                str
     authoritySourceId:     Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:     Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:           Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:          Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:             Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -2999,6 +3005,7 @@ class GermanyContributionCeilingCreate(BaseModel):
     effective_from:    date = Field(validation_alias="effectiveFrom")
     effective_to:      Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -3013,6 +3020,7 @@ class GermanyContributionCeilingResponse(BaseModel):
     status:              str
     authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -3032,6 +3040,7 @@ class GermanyMinijobMidijobParameterCreate(BaseModel):
     effective_from:    date = Field(validation_alias="effectiveFrom")
     effective_to:      Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -3047,6 +3056,7 @@ class GermanyMinijobMidijobParameterResponse(BaseModel):
     status:              str
     authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -3071,6 +3081,7 @@ class GermanyPvConfigurationCreate(BaseModel):
     effective_from:            date = Field(validation_alias="effectiveFrom")
     effective_to:              Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id:       Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -3089,6 +3100,7 @@ class GermanyPvConfigurationResponse(BaseModel):
     status:                      str
     authoritySourceId:           Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:           Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:                 Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:                Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:                   Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -3109,6 +3121,7 @@ class GermanyEarningTaxabilityRuleCreate(BaseModel):
     effective_from:            date = Field(validation_alias="effectiveFrom")
     effective_to:              Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id:       Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -3125,6 +3138,7 @@ class GermanyEarningTaxabilityRuleResponse(BaseModel):
     status:                       str
     authoritySourceId:            Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:            Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:                  Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:                 Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:                    Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -3142,6 +3156,7 @@ class GermanyOvertimePremiumCategoryCreate(BaseModel):
     effective_from:     date = Field(validation_alias="effectiveFrom")
     effective_to:       Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -3155,6 +3170,7 @@ class GermanyOvertimePremiumCategoryResponse(BaseModel):
     status:              str
     authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
@@ -3168,6 +3184,7 @@ class GermanyOvertimeGrundlohnCapCreate(BaseModel):
     effective_from:      date = Field(validation_alias="effectiveFrom")
     effective_to:        Optional[date] = Field(None, validation_alias="effectiveTo")
     authority_source_id: Optional[int] = Field(None, validation_alias="authoritySourceId")
+    jurisdiction_pack_id: Optional[int] = Field(None, validation_alias="jurisdictionPackId")  # Phase 8DI
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -3181,6 +3198,7 @@ class GermanyOvertimeGrundlohnCapResponse(BaseModel):
     status:              str
     authoritySourceId:   Optional[int] = Field(None, validation_alias="authority_source_id", serialization_alias="authoritySourceId")
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
+    jurisdictionPackId:  Optional[int] = Field(None, validation_alias="jurisdiction_pack_id", serialization_alias="jurisdictionPackId")  # Phase 8DJ
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")

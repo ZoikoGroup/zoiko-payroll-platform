@@ -213,7 +213,12 @@ class BillingSubscription(Base):
     organization_id = Column(
         Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True, unique=True
     )
-    plan_version_id = Column(Integer, ForeignKey("billing_plan_versions.id"), nullable=False, index=True)
+    # Nullable specifically for Part 12's ENTERPRISE_ORDER_FORM route — an
+    # Enterprise org has no plan version at all, by design (its limits
+    # come from EnterpriseOrderForm.negotiated_scale_limits instead — see
+    # entitlements._resolve_entitlement). Every STANDALONE/ZOIKO_ONE_BUNDLE
+    # subscription still always has a real plan_version_id in practice.
+    plan_version_id = Column(Integer, ForeignKey("billing_plan_versions.id"), nullable=True, index=True)
     billing_authority = Column(String(30), default=BillingAuthority.STANDALONE.value, nullable=False)
     status = Column(String(20), default=SubscriptionStatus.TRIALING.value, nullable=False, index=True)
     current_period_start = Column(DateTime, nullable=False)
@@ -225,6 +230,14 @@ class BillingSubscription(Base):
     # reuses Organization.is_active=False (see trial_lifecycle.py).
     grace_period_ends_at = Column(DateTime, nullable=True, index=True)
     stripe_subscription_id = Column(String(100), nullable=True, index=True)
+
+    # Part 8 — set when the org admin requests cancellation; the actual
+    # status flip to CANCELLED still only happens via the
+    # customer.subscription.deleted webhook (preserving "webhook is the
+    # only path to a status change"). This just records the request itself
+    # and lets the customer keep access through what they already paid for
+    # (cancel_at_period_end=True on the Stripe side).
+    cancel_requested_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -319,6 +332,16 @@ class BillingInvoice(Base):
     stripe_invoice_id = Column(String(100), nullable=True, index=True)
     status = Column(String(30), nullable=False)
     total = Column(Numeric(12, 2), nullable=False)
+    # Part 5/§9 / Step 5 (blockers #8, #9) — Zoiko SUBSCRIPTION tax ONLY
+    # (sales tax/VAT Stripe Tax calculates on THIS Zoiko invoice, via
+    # automatic_tax in billing/router.py's create_checkout_session).
+    # Zoiko subscription tax only — never aggregate with customer payroll
+    # tax, employee deductions, or employer liabilities computed elsewhere
+    # in this codebase (the Germany/US/etc. statutory tax engines under
+    # modules/payroll/engine/, PayrollRun.total_taxes, or any payslip
+    # figure) — those belong to a completely different legal entity's
+    # obligations. No report, export, or UI label may sum this column
+    # together with any payroll-tax total.
     tax_amount = Column(Numeric(12, 2), default=0, nullable=False)
     currency = Column(String(3), nullable=False)
     issued_at = Column(DateTime, nullable=True)
@@ -386,6 +409,83 @@ class BillingDunningState(Base):
 
 
 # ── Audit ────────────────────────────────────────────────────────────────
+
+class JurisdictionAvailability(str, enum.Enum):
+    AVAILABLE = "AVAILABLE"
+    LIMITED_AVAILABILITY = "LIMITED_AVAILABILITY"
+    PARTNER_SUPPORTED = "PARTNER_SUPPORTED"
+    PLANNED = "PLANNED"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+
+
+class ServiceResponsibility(str, enum.Enum):
+    ZOIKO = "ZOIKO"
+    PARTNER = "PARTNER"
+    CUSTOMER = "CUSTOMER"
+    NOT_OFFERED = "NOT_OFFERED"
+
+
+class JurisdictionServiceRegistry(Base):
+    """Commercial Billing & Subscription Operating Standard §5/§11 — single
+    source of truth for two DIFFERENT questions that must never be
+    conflated: what can be sold and billed (`availability`), and what
+    Zoiko is contractually on the hook for once sold
+    (`*_responsibility` — "never sell technology-only scope as a managed
+    service"). Deliberately separate from payroll's own jurisdiction-pack/
+    canonical-configuration machinery (JurisdictionPack,
+    resolve_tax_configuration): this table is commercial/sales metadata,
+    not calculation configuration — a country can be technically
+    calculation-capable while still `PLANNED` here because Sales/Legal
+    haven't cleared it for sale yet, and vice versa.
+    """
+    __tablename__ = "jurisdiction_service_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    country = Column(String(100), nullable=False, unique=True)
+    availability = Column(String(30), nullable=False)
+    payment_execution_responsibility = Column(String(30), nullable=True)
+    filing_responsibility = Column(String(30), nullable=True)
+    remittance_responsibility = Column(String(30), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<JurisdictionServiceRegistry country={self.country} availability={self.availability}>"
+
+
+class EnterpriseOrderForm(Base):
+    """Part 12 — the ENTERPRISE_ORDER_FORM third of the commercial ledger
+    (Organization.commercial_route). Enterprise is explicitly never
+    self-service, so this has no public checkout UI — a Super Admin
+    records an executed Order Form via a dedicated endpoint, which is the
+    ONE path that ever directly sets an org billable by human decision
+    (mirrors how this whole ledger already treats Enterprise as outside
+    self-service entirely). require_scope_limit reads
+    negotiated_scale_limits from here instead of a BillingPlanVersion's
+    entitlement flags for any org on this route — Enterprise orgs have no
+    plan version at all, by design.
+    """
+    __tablename__ = "enterprise_order_forms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    contract_reference = Column(String(100), nullable=False)
+    # Same feature_key vocabulary as billing/feature_keys.py
+    # (MAX_ENTITIES, MULTI_ENTITY, ASSIST, ...) so _resolve_entitlement can
+    # treat this as a drop-in replacement for BillingEntitlementFlag rows —
+    # {feature_key: limit_value}, same 0-means-off semantics.
+    negotiated_scale_limits = Column(JSON, nullable=False)
+    negotiated_price_terms = Column(JSON, nullable=False)
+    term_start = Column(Date, nullable=False)
+    term_end = Column(Date, nullable=True)
+    signed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<EnterpriseOrderForm organization_id={self.organization_id} contract_reference={self.contract_reference!r}>"
+
 
 class BillingCommercialAuditEvent(Base):
     """Append-only audit trail for commercial (billing/entitlement/

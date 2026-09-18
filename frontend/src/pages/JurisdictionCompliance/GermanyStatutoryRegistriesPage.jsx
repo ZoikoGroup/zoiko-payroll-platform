@@ -416,6 +416,21 @@ function LifecycleRegistryTab({
               )}
             </label>
           ))}
+          {/* Phase 8DJ, Part 4 — applies to every registry tab via this one
+              shared component, so none of the 8 per-registry formFields
+              arrays needed touching. Optional: an unlinked DRAFT row still
+              resolves through the pre-8DI fallback path (see
+              GermanyCompliancePackSection's own docstring). */}
+          <label className="col-span-2">
+            <span className="mb-1 block text-[11px] font-semibold text-foreground-muted">
+              Germany Compliance Pack ID (optional — links this DRAFT version to a specific pack, e.g. "DE-PAYROLL-CY2026-V1")
+            </span>
+            <input
+              className={inputCls} type="number" placeholder="Pack row id (see Compliance Pack tab)"
+              value={form.jurisdictionPackId || ""}
+              onChange={(e) => setForm((s) => ({ ...s, jurisdictionPackId: e.target.value }))}
+            />
+          </label>
           <button type="submit" disabled={saving} className={`${btnPrimary} col-span-2`}>{saving ? "Saving…" : "Save DRAFT"}</button>
         </form>
       )}
@@ -425,7 +440,7 @@ function LifecycleRegistryTab({
       {rows && rows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-[12px]">
-            <thead><tr>{columns.map((c) => <Th key={c.key}>{c.label}</Th>)}<Th>Status</Th><Th>Source</Th><Th>Actions</Th></tr></thead>
+            <thead><tr>{columns.map((c) => <Th key={c.key}>{c.label}</Th>)}<Th>Status</Th><Th>Source</Th><Th>Pack</Th><Th>Actions</Th></tr></thead>
             <tbody>
               {rows.map((row) => {
                 const notEditable = !LIFECYCLE_EDITABLE_STATUSES.has(row.status);
@@ -438,6 +453,13 @@ function LifecycleRegistryTab({
                   {columns.map((c) => <Td key={c.key}>{c.render ? c.render(row) : row[c.key]}</Td>)}
                   <Td><StatusPill value={row.status} /></Td>
                   <Td>{row.authoritySourceId ? `#${row.authoritySourceId}` : <span className="text-warning">missing</span>}</Td>
+                  <Td>
+                    {/* Phase 8DJ, Part 4 item 5 — "unlinked" is a neutral,
+                        valid state (the pre-8DI fallback resolution still
+                        applies), never styled as an error like a missing
+                        source is above. */}
+                    {row.jurisdictionPackId ? `#${row.jurisdictionPackId}` : <span className="text-foreground-disabled">unlinked</span>}
+                  </Td>
                   <Td>
                     <div className="flex flex-wrap gap-1.5">
                       <button
@@ -530,6 +552,7 @@ function U1TariffsTab() {
         reimbursementPct: f.reimbursementPct, levyRatePct: f.levyRatePct,
         effectiveFrom: f.effectiveFrom, effectiveTo: f.effectiveTo || undefined,
         authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
       })}
       approve={approveU1Tariff}
       setStatus={setU1TariffStatus}
@@ -584,6 +607,7 @@ export function HealthFundsTab() {
         healthFundId: f.healthFundId, fundName: f.fundName, supplementaryRatePct: f.supplementaryRatePct,
         isAverageRate: f.isAverageRate, u1RatePct: f.u1RatePct || undefined, u2RatePct: f.u2RatePct || undefined,
         effectiveFrom: f.effectiveFrom, authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
       })}
       approve={approveHealthFund}
       setStatus={setHealthFundStatus}
@@ -624,6 +648,7 @@ export function ContributionCeilingsTab() {
       create={(f) => createContributionCeiling({
         branch: f.branch, monthlyCeiling: f.monthlyCeiling, annualCeiling: f.annualCeiling,
         effectiveFrom: f.effectiveFrom, authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
       })}
       approve={approveContributionCeiling}
       setStatus={setContributionCeilingStatus}
@@ -657,6 +682,7 @@ export function PvConfigTab() {
         employerRatePct: f.employerRatePct, saxonyEmployeeRatePct: f.saxonyEmployeeRatePct,
         saxonyEmployerRatePct: f.saxonyEmployerRatePct, effectiveFrom: f.effectiveFrom,
         authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
       })}
       approve={approvePvConfiguration}
       setStatus={setPvConfigurationStatus}
@@ -736,6 +762,7 @@ export function MinijobMidijobParametersTab() {
           parameterCode: f.parameterCode, value: f.value, valueType: f.valueType, label: f.label,
           effectiveFrom: f.effectiveFrom, effectiveTo: f.effectiveTo || undefined,
           authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
         })}
         approve={approveMinijobMidijobParameter}
         setStatus={setMinijobMidijobParameterStatus}
@@ -800,6 +827,7 @@ export function EarningTaxabilityTab() {
           gkvPvTreatment: f.gkvPvTreatment, rvAlvTreatment: f.rvAlvTreatment,
           reportingClassification: f.reportingClassification || undefined,
           effectiveFrom: f.effectiveFrom, authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
         })}
         approve={approveEarningTaxabilityRule}
         setStatus={setEarningTaxabilityRuleStatus}
@@ -853,6 +881,7 @@ export function OvertimePremiumCategoriesTab() {
         create={(f) => createOvertimePremiumCategory({
           categoryCode: f.categoryCode, wageTaxFreePct: f.wageTaxFreePct,
           effectiveFrom: f.effectiveFrom, authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
         })}
         approve={approveOvertimePremiumCategory}
         setStatus={setOvertimePremiumCategoryStatus}
@@ -892,6 +921,7 @@ export function OvertimeGrundlohnCapsTab() {
         create={(f) => createOvertimeGrundlohnCap({
           dimension: f.dimension, hourlyCapAmount: f.hourlyCapAmount,
           effectiveFrom: f.effectiveFrom, authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
         })}
         approve={approveOvertimeGrundlohnCap}
         setStatus={setOvertimeGrundlohnCapStatus}
@@ -966,6 +996,7 @@ function ChurchTaxExceptionsTab() {
         scopeDescription: f.scopeDescription || undefined, exceptionRatePct: f.exceptionRatePct,
         effectiveFrom: f.effectiveFrom, effectiveTo: f.effectiveTo || undefined,
         authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
       })}
       approve={approveGermanyChurchTaxException}
       setStatus={setGermanyChurchTaxExceptionStatus}
@@ -1479,6 +1510,7 @@ export function EmployerLeviesTab() {
             agencyAccountId: f.agencyAccountId || undefined, riskClassDescription: f.riskClassDescription || undefined,
             employerRatePct: f.employerRatePct, effectiveFrom: f.effectiveFrom, effectiveTo: f.effectiveTo || undefined,
             authoritySourceId: f.authoritySourceId || undefined,
+        jurisdictionPackId: f.jurisdictionPackId || undefined,
           })}
           approve={approveGermanyAccidentInsuranceProfile}
           setStatus={setGermanyAccidentInsuranceProfileStatus}

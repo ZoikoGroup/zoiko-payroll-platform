@@ -27,3 +27,17 @@ export const getTrialStatus = () => api.get("/api/billing/trial-status");
  */
 export const createCheckoutSession = (planCode) =>
   api.post("/api/billing/checkout", { plan_code: planCode });
+
+/** Fetch the calling org's own invoices, newest first (Step 3). */
+export const listMyInvoices = () => api.get("/api/billing/my-subscription/invoices");
+
+/** Fetch a specific invoice's per-employee explanation (Step 3 / Part 7). */
+export const getMyInvoiceExplanation = (invoiceId) =>
+  api.get(`/api/billing/my-subscription/invoice-explanation/${invoiceId}`);
+
+/** Fetch lightweight dunning-banner payload (null when no dunning row exists). Step 4. */
+export const getDunningStatus = () => api.get("/api/billing/dunning-status");
+
+/** Create a Stripe Billing Portal session; returns { portal_url } to redirect to. Step 4. */
+export const createBillingPortalSession = () =>
+  api.post("/api/billing/my-subscription/billing-portal", {});

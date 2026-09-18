@@ -98,6 +98,32 @@ def _resolve_inclusion(db: Session, employee, month_start: date, month_end: date
     return True, None
 
 
+def count_billable_workers(db: Session, organization_id: int, as_of: Optional[date] = None) -> int:
+    """Live count of billable workers for `organization_id` in `as_of`'s
+    month (defaults to today), using the exact same inclusion rule
+    aggregate_billing_month uses (_resolve_inclusion) — without writing
+    anything to billing_worker_month_records.
+
+    entitlements.py's MAX_BWM enforcement calls this directly rather than
+    reading BillingWorkerMonthRecord: aggregate_billing_month itself has no
+    caller anywhere in this codebase (nothing populates that table in any
+    live flow yet), so gating against it would mean gating against a table
+    that's always empty. This function reuses the same counting logic
+    without depending on that unwired persistence path.
+    """
+    from app.modules.payroll.models import PayrollEmployee
+
+    target = (as_of or date.today()).replace(day=1)
+    month_end = _last_day_of_month(target)
+
+    employees = (
+        db.query(PayrollEmployee)
+        .filter(PayrollEmployee.organization_id == organization_id)
+        .all()
+    )
+    return sum(1 for employee in employees if _resolve_inclusion(db, employee, target, month_end)[0])
+
+
 def aggregate_billing_month(db: Session, organization_id: int, billing_month: date) -> dict:
     """Upsert one billing_worker_month_records row per (organization_id,
     payroll_employee_id, billing_month) for every PayrollEmployee in this

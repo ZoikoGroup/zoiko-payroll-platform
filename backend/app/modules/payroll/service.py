@@ -772,7 +772,19 @@ def record_tax_audit(
     Every OTHER of this function's 77 existing call sites keeps the
     default (`auto_commit=True`, unchanged behavior) — this is additive,
     not a behavior change for any caller that doesn't pass the new
-    argument."""
+    argument.
+
+    `legal_reference` is truncated to the column's own limit
+    (TaxConfigurationAudit.legal_reference is String(200)) before insert.
+    Found via a real StringDataRightTruncation crash: upsert_jurisdiction_
+    pack passes a pack's full source_references Text field here, which for
+    Germany's real DE-PAYROLL-CY2026-V1 seed value is >200 chars — the
+    pack row itself commits fine (it's a separate transaction from this
+    audit insert), but this insert then fails and aborts the caller. This
+    is descriptive audit metadata, not a legal document of record, so a
+    truncated value here is a safe, permanent fix rather than a workaround."""
+    if legal_reference and len(legal_reference) > 200:
+        legal_reference = legal_reference[:200]
     db.add(TaxConfigurationAudit(
         actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id,
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=tax_version,
@@ -3152,17 +3164,22 @@ def get_india_salary_tds_inputs(db: Session, organization_id: int, employee_id: 
     }
 
 
-# ── Germany: Church tax (Kirchensteuer) Land matrix (Phase 8O) ──────────
+# ── Germany: Church tax (Kirchensteuer) Land matrix (Phase 8O / 8BL) ─────
 # Read-only surfacing of germany_pap.core.CHURCH_TAX_LAND_RATES — spec §8.
-# Deliberately NOT a new DB-backed registry/lifecycle: there is no
-# effective-dated, source-evidenced church-tax table anywhere in this
-# codebase (the rates are a bare Python dict, cited to spec §8 directly in
-# code), and this phase's own instruction is "if backend support is
-# missing, display NOT IMPLEMENTED rather than pretending it is
-# supported" — inventing a DRAFT/APPROVED/PUBLISHED lifecycle for data
-# that has neither a migration nor a SourceArtifact linkage would be
-# exactly that pretense. This function exists only so the Super Admin UI
-# has a real endpoint to read the actual values from, instead of
+# These 16 general-Land base rates are Tier-1-sourced (the supplied Zoiko
+# document itself) code-level certified defaults. The CALCULATION path
+# resolves them registry-first: engine/countries/germany.py's
+# _resolve_church_tax_land_rate reads a PUBLISHED per-Land overlay
+# (church_tax_rate_de_*) from the global Germany minijob/midijob parameter
+# registry when one exists for the payroll date and falls back to this
+# table otherwise; sub-Land denomination/location exceptions (Bad Wimpfen)
+# are overlaid from the separate, source-evidenced GermanyChurchTaxException
+# registry and take precedence (see models.GermanyChurchTaxException).
+# There is deliberately NOT a dedicated base-rate table/lifecycle of its
+# own — the minijob/midijob parameter registry ALREADY provides the
+# effective-dated, source-evidenced, DRAFT/APPROVED/PUBLISHED lifecycle for
+# Land overlays, and this function only exists so the Super Admin UI has a
+# real endpoint to read the certified base values from instead of
 # hardcoding them a second time in the frontend.
 def get_church_tax_matrix() -> dict:
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import CHURCH_TAX_LAND_RATES
@@ -3171,7 +3188,9 @@ def get_church_tax_matrix() -> dict:
         "laender": [
             {"code": code, "ratePct": str(rate)} for code, rate in sorted(CHURCH_TAX_LAND_RATES.items())
         ],
-        "sourceStatus": "HARDCODED_CONSTANT — no DB-backed registry/lifecycle/source-evidence linkage exists",
+        "sourceStatus": "CERTIFIED CODE DEFAULT — spec §8 base Land rates; registry-first at calc time via "
+        "church_tax_rate_de_* overlay parameters (minijob/midijob parameter registry) with sub-Land "
+        "exceptions from the GermanyChurchTaxException registry",
         "knownGaps": [
             "Bad Wimpfen (Baden-Württemberg) Roman Catholic denomination/location exception — "
             "IMPLEMENTED (Phase 8AM) as a SEPARATE, additive, source-evidenced maker-checker registry "
@@ -3311,7 +3330,7 @@ def create_germany_church_tax_exception_record(
         municipality_postal_code=data.municipality_postal_code,
         scope_description=data.scope_description, exception_rate_pct=data.exception_rate_pct,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -3394,6 +3413,7 @@ def set_germany_church_tax_exception_approver(
 def resolve_germany_church_tax_exception(
     db: Session, land_code: Optional[str], denomination: Optional[str],
     municipality_postal_code: Optional[str], as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyChurchTaxException]:
     """Return the PUBLISHED exception record applicable on `as_of`
     (defaults to today) for this exact (Land, denomination, postal code)
@@ -3408,19 +3428,19 @@ def resolve_germany_church_tax_exception(
     if not land_code or not denomination or not municipality_postal_code:
         return None
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyChurchTaxException)
-        .filter(
-            GermanyChurchTaxException.land_code == land_code,
-            GermanyChurchTaxException.denomination == denomination,
-            GermanyChurchTaxException.municipality_postal_code == municipality_postal_code,
-            GermanyChurchTaxException.status == "PUBLISHED",
-            GermanyChurchTaxException.effective_from <= as_of,
-            (GermanyChurchTaxException.effective_to.is_(None)) | (GermanyChurchTaxException.effective_to >= as_of),
-        )
-        .order_by(GermanyChurchTaxException.effective_from.desc())
-        .first()
+    query = db.query(GermanyChurchTaxException).filter(
+        GermanyChurchTaxException.land_code == land_code,
+        GermanyChurchTaxException.denomination == denomination,
+        GermanyChurchTaxException.municipality_postal_code == municipality_postal_code,
+        GermanyChurchTaxException.status == "PUBLISHED",
+        GermanyChurchTaxException.effective_from <= as_of,
+        (GermanyChurchTaxException.effective_to.is_(None)) | (GermanyChurchTaxException.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyChurchTaxException.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyChurchTaxException.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyChurchTaxException.effective_from.desc()).first()
 
 
 # ── Germany: BMF PAP Algorithm Asset (ZP-TAX-DE-2026-001 §5, §17, §18) ────
@@ -4438,7 +4458,7 @@ def create_health_fund_record(
         u1_rate_pct=data.u1_rate_pct, u2_rate_pct=data.u2_rate_pct,
         effective_from=data.effective_from, effective_to=data.effective_to,
         member_applicability=data.member_applicability, payroll_recalc_policy=data.payroll_recalc_policy,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -4516,7 +4536,10 @@ def set_health_fund_approver(db: Session, record_id: int, actor_id: Optional[int
     return row
 
 
-def resolve_germany_health_fund(db: Session, health_fund_id: str, as_of: Optional[date] = None) -> Optional[GermanyHealthFund]:
+def resolve_germany_health_fund(
+    db: Session, health_fund_id: str, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
+) -> Optional[GermanyHealthFund]:
     """Return the PUBLISHED rate record applicable on `as_of` (defaults to
     today) for one specific fund. Returns None (never raises) if no
     published record covers that date — the future GKV calculation phase
@@ -4527,19 +4550,30 @@ def resolve_germany_health_fund(db: Session, health_fund_id: str, as_of: Optiona
     non-overlapping period is irrelevant here by construction (overlap
     prevention already guarantees at most one PUBLISHED row can cover any
     given date for a given fund); SUPERSEDED only ever applies to a
-    retracted erroneous row, which correctly must not resolve."""
+    retracted erroneous row, which correctly must not resolve.
+
+    Phase 8DI: `jurisdiction_pack_id`, when given (non-None), narrows the
+    match to rows linked to that specific Germany Compliance Pack version
+    — see resolve_applicable_germany_pack()/_resolve_germany_calc_inputs().
+    Omitted (None, the default), behavior is byte-for-byte identical to
+    every prior phase: plain effective-dated PUBLISHED resolution, no pack
+    involved at all."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyHealthFund)
-        .filter(
-            GermanyHealthFund.health_fund_id == health_fund_id,
-            GermanyHealthFund.status == "PUBLISHED",
-            GermanyHealthFund.effective_from <= as_of,
-            (GermanyHealthFund.effective_to.is_(None)) | (GermanyHealthFund.effective_to >= as_of),
-        )
-        .order_by(GermanyHealthFund.effective_from.desc())
-        .first()
+    query = db.query(GermanyHealthFund).filter(
+        GermanyHealthFund.health_fund_id == health_fund_id,
+        GermanyHealthFund.status == "PUBLISHED",
+        GermanyHealthFund.effective_from <= as_of,
+        (GermanyHealthFund.effective_to.is_(None)) | (GermanyHealthFund.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyHealthFund.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyHealthFund.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+        # Falls through to the unfiltered query below: a pack applies to
+        # this date but this row was never linked to it — preserves exact
+        # pre-8DI behavior rather than treating "pack exists, row unlinked"
+        # as "no row" (see resolve_applicable_germany_pack's docstring).
+    return query.order_by(GermanyHealthFund.effective_from.desc()).first()
 
 
 # ── Germany: U1 Tariff (Sickness Reimbursement) (Phase 8W) ────────────
@@ -4657,7 +4691,7 @@ def create_u1_tariff_record(
         health_fund_id=data.health_fund_id, tariff_identifier=data.tariff_identifier,
         tariff_name=data.tariff_name, reimbursement_pct=data.reimbursement_pct,
         levy_rate_pct=data.levy_rate_pct, effective_from=data.effective_from,
-        effective_to=data.effective_to, authority_source_id=data.authority_source_id,
+        effective_to=data.effective_to, authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id,
         status="DRAFT", created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -4736,24 +4770,29 @@ def set_u1_tariff_approver(
 
 def resolve_germany_u1_tariff(
     db: Session, health_fund_id: str, tariff_identifier: str,
-    as_of: Optional[date] = None,
+    as_of: Optional[date] = None, jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyHealthFundU1Tariff]:
     """Return the PUBLISHED U1 tariff record applicable on `as_of` (defaults
     to today) for one specific fund + tariff. Returns None (never raises)
-    if no published record covers that date."""
+    if no published record covers that date.
+
+    Phase 8DI: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version — see resolve_germany_health_
+    fund's docstring for the full rationale; omitted, behavior is
+    unchanged from every prior phase."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyHealthFundU1Tariff)
-        .filter(
-            GermanyHealthFundU1Tariff.health_fund_id == health_fund_id,
-            GermanyHealthFundU1Tariff.tariff_identifier == tariff_identifier,
-            GermanyHealthFundU1Tariff.status == "PUBLISHED",
-            GermanyHealthFundU1Tariff.effective_from <= as_of,
-            (GermanyHealthFundU1Tariff.effective_to.is_(None)) | (GermanyHealthFundU1Tariff.effective_to >= as_of),
-        )
-        .order_by(GermanyHealthFundU1Tariff.effective_from.desc())
-        .first()
+    query = db.query(GermanyHealthFundU1Tariff).filter(
+        GermanyHealthFundU1Tariff.health_fund_id == health_fund_id,
+        GermanyHealthFundU1Tariff.tariff_identifier == tariff_identifier,
+        GermanyHealthFundU1Tariff.status == "PUBLISHED",
+        GermanyHealthFundU1Tariff.effective_from <= as_of,
+        (GermanyHealthFundU1Tariff.effective_to.is_(None)) | (GermanyHealthFundU1Tariff.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyHealthFundU1Tariff.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyHealthFundU1Tariff.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyHealthFundU1Tariff.effective_from.desc()).first()
 
 
 # ── Germany: Contribution Ceiling Configuration (ZP-TAX-DE-2026-001 §9) ──
@@ -4871,7 +4910,7 @@ def create_contribution_ceiling_record(
     row = GermanyContributionCeiling(
         branch=data.branch, monthly_ceiling=data.monthly_ceiling, annual_ceiling=data.annual_ceiling,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -4950,25 +4989,31 @@ def set_contribution_ceiling_approver(db: Session, record_id: int, actor_id: Opt
 
 def resolve_germany_contribution_ceiling(
     db: Session, branch: str, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyContributionCeiling]:
     """Return the PUBLISHED ceiling record applicable on `as_of` (defaults
     to today) for one specific contribution branch ("GKV_PV" or
     "RV_ALV"). Returns None (never raises) if no published record covers
     that date. A future social-insurance calculation phase would call this
     once per branch — it must never conflate the two branches' results,
-    which is exactly what this table's `branch` column exists to prevent."""
+    which is exactly what this table's `branch` column exists to prevent.
+
+    Phase 8DI: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version; omitted, behavior is
+    unchanged from every prior phase — see resolve_germany_health_fund's
+    docstring for the full rationale."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyContributionCeiling)
-        .filter(
-            GermanyContributionCeiling.branch == branch,
-            GermanyContributionCeiling.status == "PUBLISHED",
-            GermanyContributionCeiling.effective_from <= as_of,
-            (GermanyContributionCeiling.effective_to.is_(None)) | (GermanyContributionCeiling.effective_to >= as_of),
-        )
-        .order_by(GermanyContributionCeiling.effective_from.desc())
-        .first()
+    query = db.query(GermanyContributionCeiling).filter(
+        GermanyContributionCeiling.branch == branch,
+        GermanyContributionCeiling.status == "PUBLISHED",
+        GermanyContributionCeiling.effective_from <= as_of,
+        (GermanyContributionCeiling.effective_to.is_(None)) | (GermanyContributionCeiling.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyContributionCeiling.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyContributionCeiling.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyContributionCeiling.effective_from.desc()).first()
 
 
 # ── Germany: Minijob / Midijob statutory parameters (Phase 8BK) ─────────
@@ -5134,7 +5179,7 @@ def create_minijob_midijob_parameter_record(
     row = GermanyMinijobMidijobParameter(
         parameter_code=data.parameter_code, value=data.value, value_type=data.value_type, label=data.label,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         previous_version_id=previous_open.id if closing_previous else None,
         created_by_id=actor_id, updated_by_id=actor_id,
     )
@@ -5214,35 +5259,43 @@ def set_minijob_midijob_parameter_approver(
 
 def resolve_minijob_midijob_parameter(
     db: Session, parameter_code: str, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional["GermanyMinijobMidijobParameter"]:
     """Return the PUBLISHED parameter record applicable on `as_of`
     (defaults to today) for one specific parameter_code. Returns None
     (never raises) if no published record covers that date — callers
     fall back to the hardcoded 2026 default exactly as before this
     registry existed (see engine/countries/germany.py's
-    _resolve_minijob_midijob_value)."""
+    _resolve_minijob_midijob_value).
+
+    Phase 8DI: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version; omitted, behavior is
+    unchanged from every prior phase — see resolve_germany_health_fund's
+    docstring for the full rationale."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyMinijobMidijobParameter)
-        .filter(
-            GermanyMinijobMidijobParameter.parameter_code == parameter_code,
-            GermanyMinijobMidijobParameter.status == "PUBLISHED",
-            GermanyMinijobMidijobParameter.effective_from <= as_of,
-            (GermanyMinijobMidijobParameter.effective_to.is_(None)) | (GermanyMinijobMidijobParameter.effective_to >= as_of),
-        )
-        .order_by(GermanyMinijobMidijobParameter.effective_from.desc())
-        .first()
+    query = db.query(GermanyMinijobMidijobParameter).filter(
+        GermanyMinijobMidijobParameter.parameter_code == parameter_code,
+        GermanyMinijobMidijobParameter.status == "PUBLISHED",
+        GermanyMinijobMidijobParameter.effective_from <= as_of,
+        (GermanyMinijobMidijobParameter.effective_to.is_(None)) | (GermanyMinijobMidijobParameter.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyMinijobMidijobParameter.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyMinijobMidijobParameter.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyMinijobMidijobParameter.effective_from.desc()).first()
 
 
-def resolve_all_minijob_midijob_parameters(db: Session, as_of: Optional[date] = None) -> dict:
+def resolve_all_minijob_midijob_parameters(
+    db: Session, as_of: Optional[date] = None, jurisdiction_pack_id: Optional[int] = None,
+) -> dict:
     """Resolves every known parameter_code in one call — used once per
     calculation by _resolve_germany_calc_inputs, exactly like
     earning_taxability's own {key: resolve(key)} dict pattern, so
     germany.py's Minijob/Midijob call sites never issue their own
     per-parameter queries."""
     return {
-        code: resolve_minijob_midijob_parameter(db, code, as_of=as_of)
+        code: resolve_minijob_midijob_parameter(db, code, as_of=as_of, jurisdiction_pack_id=jurisdiction_pack_id)
         for code in _GERMANY_MINIJOB_MIDIJOB_PARAMETER_CODES
     }
 
@@ -5389,7 +5442,7 @@ def create_pv_configuration_record(
         saxony_employee_rate_pct=data.saxony_employee_rate_pct,
         saxony_employer_rate_pct=data.saxony_employer_rate_pct,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -5472,25 +5525,31 @@ def set_pv_configuration_approver(db: Session, record_id: int, actor_id: Optiona
 
 def resolve_germany_pv_configuration(
     db: Session, child_category: str, is_saxony: bool, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyPvConfiguration]:
     """Return the PUBLISHED PV configuration applicable on `as_of` (defaults
     to today) for one specific (child_category, is_saxony) pair. Returns
     None (never raises) if no published record covers that date. A future
     PV calculation phase would call this once per employee — it must never
-    conflate different child-category or Saxony results."""
+    conflate different child-category or Saxony results.
+
+    Phase 8DI: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version; omitted, behavior is
+    unchanged from every prior phase — see resolve_germany_health_fund's
+    docstring for the full rationale."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyPvConfiguration)
-        .filter(
-            GermanyPvConfiguration.child_category == child_category,
-            GermanyPvConfiguration.is_saxony == is_saxony,
-            GermanyPvConfiguration.status == "PUBLISHED",
-            GermanyPvConfiguration.effective_from <= as_of,
-            (GermanyPvConfiguration.effective_to.is_(None)) | (GermanyPvConfiguration.effective_to >= as_of),
-        )
-        .order_by(GermanyPvConfiguration.effective_from.desc())
-        .first()
+    query = db.query(GermanyPvConfiguration).filter(
+        GermanyPvConfiguration.child_category == child_category,
+        GermanyPvConfiguration.is_saxony == is_saxony,
+        GermanyPvConfiguration.status == "PUBLISHED",
+        GermanyPvConfiguration.effective_from <= as_of,
+        (GermanyPvConfiguration.effective_to.is_(None)) | (GermanyPvConfiguration.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyPvConfiguration.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyPvConfiguration.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyPvConfiguration.effective_from.desc()).first()
 
 
 # ── Germany: Earning/Deduction Taxability (ZP-TAX-DE-2026-001 §15) ──────
@@ -5638,7 +5697,7 @@ def create_earning_taxability_rule(
         rv_alv_treatment=data.rv_alv_treatment,
         reporting_classification=data.reporting_classification,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -5717,24 +5776,30 @@ def set_earning_taxability_rule_approver(db: Session, record_id: int, actor_id: 
 
 def resolve_germany_earning_taxability_rule(
     db: Session, earning_type: str, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyEarningTaxabilityRule]:
     """Return the PUBLISHED taxability rule applicable on `as_of` (defaults
     to today) for one earning type. Returns None (never raises) if no
     published record covers that date — a future consumer must treat
     that as NOT_CONFIGURED, never silently assume ordinary taxable
-    treatment (spec's own "no invented statutory result" principle)."""
+    treatment (spec's own "no invented statutory result" principle).
+
+    Phase 8DI: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version; omitted, behavior is
+    unchanged from every prior phase — see resolve_germany_health_fund's
+    docstring for the full rationale."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyEarningTaxabilityRule)
-        .filter(
-            GermanyEarningTaxabilityRule.earning_type == earning_type,
-            GermanyEarningTaxabilityRule.status == "PUBLISHED",
-            GermanyEarningTaxabilityRule.effective_from <= as_of,
-            (GermanyEarningTaxabilityRule.effective_to.is_(None)) | (GermanyEarningTaxabilityRule.effective_to >= as_of),
-        )
-        .order_by(GermanyEarningTaxabilityRule.effective_from.desc())
-        .first()
+    query = db.query(GermanyEarningTaxabilityRule).filter(
+        GermanyEarningTaxabilityRule.earning_type == earning_type,
+        GermanyEarningTaxabilityRule.status == "PUBLISHED",
+        GermanyEarningTaxabilityRule.effective_from <= as_of,
+        (GermanyEarningTaxabilityRule.effective_to.is_(None)) | (GermanyEarningTaxabilityRule.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyEarningTaxabilityRule.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyEarningTaxabilityRule.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyEarningTaxabilityRule.effective_from.desc()).first()
 
 
 # ── Germany: overtime/shift-premium statutory registries (Phase 8AD) ────
@@ -5836,7 +5901,7 @@ def create_overtime_premium_category_record(
     row = GermanyOvertimePremiumCategory(
         category_code=data.category_code, wage_tax_free_pct=data.wage_tax_free_pct,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -5909,22 +5974,29 @@ def set_overtime_premium_category_approver(db: Session, record_id: int, actor_id
 
 def resolve_germany_overtime_premium_category(
     db: Session, category_code: str, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyOvertimePremiumCategory]:
     """Return the PUBLISHED premium-category record applicable on `as_of`
     (defaults to today). Returns None (never raises) if no published
-    record covers that date — fail closed, never a hardcoded percentage."""
+    record covers that date — fail closed, never a hardcoded percentage.
+
+    Phase 8DJ: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version, falling back to the
+    unfiltered result if no pack-linked row matches — identical pattern
+    to resolve_germany_health_fund (Phase 8DI); omitted, behavior is
+    unchanged."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyOvertimePremiumCategory)
-        .filter(
-            GermanyOvertimePremiumCategory.category_code == category_code,
-            GermanyOvertimePremiumCategory.status == "PUBLISHED",
-            GermanyOvertimePremiumCategory.effective_from <= as_of,
-            (GermanyOvertimePremiumCategory.effective_to.is_(None)) | (GermanyOvertimePremiumCategory.effective_to >= as_of),
-        )
-        .order_by(GermanyOvertimePremiumCategory.effective_from.desc())
-        .first()
+    query = db.query(GermanyOvertimePremiumCategory).filter(
+        GermanyOvertimePremiumCategory.category_code == category_code,
+        GermanyOvertimePremiumCategory.status == "PUBLISHED",
+        GermanyOvertimePremiumCategory.effective_from <= as_of,
+        (GermanyOvertimePremiumCategory.effective_to.is_(None)) | (GermanyOvertimePremiumCategory.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyOvertimePremiumCategory.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyOvertimePremiumCategory.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyOvertimePremiumCategory.effective_from.desc()).first()
 
 
 _GERMANY_OVERTIME_GRUNDLOHN_DIMENSIONS = ("WAGE_TAX", "SOCIAL_INSURANCE")
@@ -6012,7 +6084,7 @@ def create_overtime_grundlohn_cap_record(
     row = GermanyOvertimeGrundlohnCap(
         dimension=data.dimension, hourly_cap_amount=data.hourly_cap_amount,
         effective_from=data.effective_from, effective_to=data.effective_to,
-        authority_source_id=data.authority_source_id, status="DRAFT",
+        authority_source_id=data.authority_source_id, jurisdiction_pack_id=data.jurisdiction_pack_id, status="DRAFT",
         created_by_id=actor_id, updated_by_id=actor_id,
     )
     db.add(row)
@@ -6085,23 +6157,29 @@ def set_overtime_grundlohn_cap_approver(db: Session, record_id: int, actor_id: O
 
 def resolve_germany_overtime_grundlohn_cap(
     db: Session, dimension: str, as_of: Optional[date] = None,
+    jurisdiction_pack_id: Optional[int] = None,
 ) -> Optional[GermanyOvertimeGrundlohnCap]:
     """Return the PUBLISHED Grundlohn cap applicable on `as_of` (defaults
     to today) for one dimension ("WAGE_TAX" or "SOCIAL_INSURANCE"). Returns
     None (never raises) if no published record covers that date — fail
-    closed, never a hardcoded €50/€25 fallback."""
+    closed, never a hardcoded €50/€25 fallback.
+
+    Phase 8DJ: `jurisdiction_pack_id`, when given, narrows to rows linked
+    to that Germany Compliance Pack version, falling back to the
+    unfiltered result if no pack-linked row matches; omitted, behavior is
+    unchanged — same pattern as every other Germany resolver (Phase 8DI)."""
     as_of = as_of or date.today()
-    return (
-        db.query(GermanyOvertimeGrundlohnCap)
-        .filter(
-            GermanyOvertimeGrundlohnCap.dimension == dimension,
-            GermanyOvertimeGrundlohnCap.status == "PUBLISHED",
-            GermanyOvertimeGrundlohnCap.effective_from <= as_of,
-            (GermanyOvertimeGrundlohnCap.effective_to.is_(None)) | (GermanyOvertimeGrundlohnCap.effective_to >= as_of),
-        )
-        .order_by(GermanyOvertimeGrundlohnCap.effective_from.desc())
-        .first()
+    query = db.query(GermanyOvertimeGrundlohnCap).filter(
+        GermanyOvertimeGrundlohnCap.dimension == dimension,
+        GermanyOvertimeGrundlohnCap.status == "PUBLISHED",
+        GermanyOvertimeGrundlohnCap.effective_from <= as_of,
+        (GermanyOvertimeGrundlohnCap.effective_to.is_(None)) | (GermanyOvertimeGrundlohnCap.effective_to >= as_of),
     )
+    if jurisdiction_pack_id is not None:
+        pack_scoped = query.filter(GermanyOvertimeGrundlohnCap.jurisdiction_pack_id == jurisdiction_pack_id).order_by(GermanyOvertimeGrundlohnCap.effective_from.desc()).first()
+        if pack_scoped is not None:
+            return pack_scoped
+    return query.order_by(GermanyOvertimeGrundlohnCap.effective_from.desc()).first()
 
 
 # ── Germany: per-employee calculation-input resolver (Phase 7) ─────────
@@ -6172,15 +6250,157 @@ def get_germany_statutory_configuration_readiness(db: Session, as_of=None) -> di
 # missing row is fatal is a decision for engine/countries/germany.py
 # (the actual calculation), not this resolver — mirrors
 # resolve_germany_pap_asset's own "absence is not an error" contract.
+def resolve_applicable_germany_pack(db: Session, as_of: Optional[date] = None) -> Optional[JurisdictionPack]:
+    """Phase 8DI — the Germany Compliance Pack analogue of
+    engine/tax_resolver.py's `_find_active_tax_pack`, deliberately NOT
+    reusing that function: Germany packs are never organization-scoped
+    (no Germany registry table has an `organization_id` column — the
+    statutory rates are national, not per-employer-customizable, unlike
+    USA/UK/India's ContributionRate/TaxSlab), so the org-scoped-with-
+    canonical-fallback query shape that function implements does not
+    apply here. This is a simpler, country-global lookup: the single
+    Active, pack_type="tax", jurisdiction_country="DE" pack whose
+    effective period covers `as_of` (defaults to today).
+
+    Returns None (never raises) when no such pack exists — callers must
+    treat that as "no governed pack applies; existing Germany registry
+    resolution (effective-dated, PUBLISHED-status, no pack involved)
+    still governs exactly as it has since before this phase," never as
+    license to block calculation outright. This is a deliberate, minimal
+    design choice, not an oversight: it keeps changing/activating a
+    pack version something registries can OPT INTO (via their own
+    `jurisdiction_pack_id`), instead of retroactively requiring a pack to
+    exist before Germany can calculate at all — a much larger behavior
+    change than this phase's brief asked for, and one that would silently
+    break both this codebase's ~576 existing Germany tests and today's
+    real production shape (registries can be legitimately configured
+    before any pack version formally wraps them)."""
+    as_of = as_of or date.today()
+    return (
+        db.query(JurisdictionPack)
+        .filter(
+            JurisdictionPack.jurisdiction_country == "DE",
+            JurisdictionPack.pack_type == "tax",
+            JurisdictionPack.status == "Active",
+            JurisdictionPack.effective_from.isnot(None),
+            JurisdictionPack.effective_from <= as_of,
+            (JurisdictionPack.effective_to.is_(None)) | (JurisdictionPack.effective_to >= as_of),
+        )
+        .order_by(JurisdictionPack.effective_from.desc())
+        .first()
+    )
+
+
+_GERMANY_PACK_COMPLETENESS_COMPONENTS = [
+    # (result key, human label, model, extra filter fn(query) -> query | None)
+    ("contribution_ceilings", "Contribution ceilings (GKV_PV, RV_ALV)", GermanyContributionCeiling, None),
+    ("pv_configurations", "PV (long-term care insurance) configuration", GermanyPvConfiguration, None),
+    ("health_funds", "Health funds (GKV)", GermanyHealthFund, None),
+    ("u1_tariffs", "U1 tariffs (sickness reimbursement)", GermanyHealthFundU1Tariff, None),
+    ("earning_taxability_rules", "Earning/deduction taxability rules", GermanyEarningTaxabilityRule, None),
+    ("overtime_premium_categories", "Overtime premium categories", GermanyOvertimePremiumCategory, None),
+    ("overtime_grundlohn_caps", "Overtime Grundlohn caps", GermanyOvertimeGrundlohnCap, None),
+    ("church_tax_exceptions", "Church tax exceptions", GermanyChurchTaxException, None),
+    ("minijob_midijob_parameters", "Minijob/Midijob parameters", GermanyMinijobMidijobParameter, None),
+]
+
+
+def assess_germany_pack_completeness(db: Session, jurisdiction_pack_id: int, as_of: Optional[date] = None) -> dict:
+    """Phase 8DI, Phase 14 requirement — a Germany Compliance Pack
+    completeness validator. For the given pack id, reports, per component,
+    how many PUBLISHED rows are linked to it (via `jurisdiction_pack_id`)
+    and effective as of `as_of` (defaults to today), and an overall
+    verdict of COMPLETE / PARTIAL / INVALID.
+
+    Deliberately NOT included as a required component: income tax
+    (Lohnsteuer/Soli). Germany's tax calculation is NOT registry/pack-
+    based at all — it is computed by a dedicated internal calculator
+    (engine/jurisdictions/germany/tax.py's hardcoded, effective-dated 2026
+    tariff constants, and the PAP interpreter for the certified path,
+    which remains FAIL-CLOSED/UNAVAILABLE by design). Requiring a tax
+    registry component here would misrepresent how this codebase actually
+    computes German income tax — see docs/GERMANY_2026_8DI_..._REPORT.md
+    §"Germany current architecture" for the full trace.
+
+    Also NOT included: PAP certification, ELStAM, ELSTER, DEÜV — none of
+    these are in scope for this pack's completeness (per this phase's own
+    explicit instruction not to require unsupported government
+    integrations).
+
+    Returns a dict: {"pack_id": ..., "as_of": ..., "components": {key:
+    {"label": ..., "published_row_count": int}}, "verdict": "COMPLETE" |
+    "PARTIAL" | "INVALID", "missing_components": [...]}."""
+    as_of = as_of or date.today()
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == jurisdiction_pack_id).first()
+    if pack is None:
+        return {
+            "pack_id": jurisdiction_pack_id, "as_of": as_of, "components": {},
+            "verdict": "INVALID", "missing_components": [],
+            "reason": f"No JurisdictionPack row exists with id={jurisdiction_pack_id}.",
+        }
+
+    components = {}
+    missing = []
+    for key, label, model, extra_filter in _GERMANY_PACK_COMPLETENESS_COMPONENTS:
+        query = db.query(model).filter(
+            model.jurisdiction_pack_id == jurisdiction_pack_id,
+            model.status == "PUBLISHED",
+            model.effective_from <= as_of,
+            (model.effective_to.is_(None)) | (model.effective_to >= as_of),
+        )
+        if extra_filter is not None:
+            query = extra_filter(query)
+        count = query.count()
+        components[key] = {"label": label, "published_row_count": count}
+        if count == 0:
+            missing.append(key)
+
+    if pack.status != "Active":
+        verdict = "INVALID"
+        reason = f"Pack status is {pack.status!r}, not Active — a non-Active pack cannot be considered complete for production payroll regardless of registry linkage."
+    elif not missing:
+        verdict = "COMPLETE"
+        reason = "Every tracked Germany registry component has at least one PUBLISHED row linked to this pack, effective as of the given date."
+    elif len(missing) == len(_GERMANY_PACK_COMPLETENESS_COMPONENTS):
+        verdict = "INVALID"
+        reason = "No tracked Germany registry component has any PUBLISHED row linked to this pack."
+    else:
+        verdict = "PARTIAL"
+        reason = f"{len(missing)} of {len(_GERMANY_PACK_COMPLETENESS_COMPONENTS)} tracked components have no PUBLISHED row linked to this pack: {missing}."
+
+    return {
+        "pack_id": jurisdiction_pack_id, "pack_version": pack.version, "pack_status": pack.status,
+        "as_of": as_of, "components": components, "verdict": verdict,
+        "missing_components": missing, "reason": reason,
+        "tax_calculation_note": (
+            "Income tax (Lohnsteuer/Soli) is NOT a registry component of this pack — "
+            "computed by the dedicated internal Germany tax calculator, independent of "
+            "any JurisdictionPack. PAP remains FAIL-CLOSED/UNAVAILABLE by design; this is "
+            "not a completeness gap."
+        ),
+    }
+
+
 def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, payroll_date) -> dict:
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         GermanyCalculationError, resolve_pv_child_category,
     )
 
+    # Phase 8DI — resolve the applicable Germany Compliance Pack version
+    # ONCE per calculation, and thread its id through every registry
+    # resolver below as an ADDITIVE filter (see resolve_applicable_germany_
+    # pack's own docstring for why "no pack found" falls back to plain
+    # effective-dated resolution rather than failing closed). This is the
+    # one and only place this wiring happens — every resolver function
+    # itself defaults jurisdiction_pack_id to None and is unchanged for
+    # every other caller (tests, super_admin endpoints, etc.).
+    applicable_pack = resolve_applicable_germany_pack(db, as_of=payroll_date)
+    pack_id = applicable_pack.id if applicable_pack is not None else None
+
     profile = resolve_employee_statutory_profile(db, employee.id, organization_id, as_of=payroll_date)
     pap_asset = resolve_germany_pap_asset(db, payroll_date)
-    ceiling_gkv_pv = resolve_germany_contribution_ceiling(db, "GKV_PV", as_of=payroll_date)
-    ceiling_rv_alv = resolve_germany_contribution_ceiling(db, "RV_ALV", as_of=payroll_date)
+    ceiling_gkv_pv = resolve_germany_contribution_ceiling(db, "GKV_PV", as_of=payroll_date, jurisdiction_pack_id=pack_id)
+    ceiling_rv_alv = resolve_germany_contribution_ceiling(db, "RV_ALV", as_of=payroll_date, jurisdiction_pack_id=pack_id)
 
     health_fund = None
     u1_tariff = None
@@ -6189,16 +6409,16 @@ def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, pa
     if profile is not None:
         health_fund_code = getattr(profile, "de_health_fund_code", None)
         if health_fund_code:
-            health_fund = resolve_germany_health_fund(db, health_fund_code, as_of=payroll_date)
+            health_fund = resolve_germany_health_fund(db, health_fund_code, as_of=payroll_date, jurisdiction_pack_id=pack_id)
             # Phase 8W: resolve the employer's selected U1 tariff at this fund
             u1_tariff_id = getattr(profile, "de_u1_tariff_id", None)
             if u1_tariff_id:
-                u1_tariff = resolve_germany_u1_tariff(db, health_fund_code, u1_tariff_id, as_of=payroll_date)
+                u1_tariff = resolve_germany_u1_tariff(db, health_fund_code, u1_tariff_id, as_of=payroll_date, jurisdiction_pack_id=pack_id)
         if getattr(profile, "de_health_insurance_status", None) != "PRIVATE":
             try:
                 category = resolve_pv_child_category(profile)
                 is_saxony = bool(getattr(profile, "de_saxony", False))
-                pv_configuration = resolve_germany_pv_configuration(db, category, is_saxony, as_of=payroll_date)
+                pv_configuration = resolve_germany_pv_configuration(db, category, is_saxony, as_of=payroll_date, jurisdiction_pack_id=pack_id)
             except GermanyCalculationError:
                 # Category itself can't be determined from this profile —
                 # left None here; germany.py's calculate() re-derives the
@@ -6220,7 +6440,8 @@ def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, pa
         church_tax_municipality_postal_code = getattr(profile, "de_church_tax_municipality_postal_code", None)
         if church_tax_land and church_tax_denomination and church_tax_municipality_postal_code:
             church_tax_exception = resolve_germany_church_tax_exception(
-                db, church_tax_land, church_tax_denomination, church_tax_municipality_postal_code, as_of=payroll_date
+                db, church_tax_land, church_tax_denomination, church_tax_municipality_postal_code, as_of=payroll_date,
+                jurisdiction_pack_id=pack_id,
             )
 
     # Phase 8X — resolve the four-dimension earning taxability (spec §15)
@@ -6232,14 +6453,14 @@ def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, pa
     # the engine/frontend and the batch path agreeing on which rows applied
     # for one employee on one payroll date.
     earning_taxability = {
-        "REGULAR_SALARY": resolve_germany_earning_taxability_rule(db, "REGULAR_SALARY", as_of=payroll_date),
-        "BONUS_ANNUAL_BONUS": resolve_germany_earning_taxability_rule(db, "BONUS_ANNUAL_BONUS", as_of=payroll_date),
+        "REGULAR_SALARY": resolve_germany_earning_taxability_rule(db, "REGULAR_SALARY", as_of=payroll_date, jurisdiction_pack_id=pack_id),
+        "BONUS_ANNUAL_BONUS": resolve_germany_earning_taxability_rule(db, "BONUS_ANNUAL_BONUS", as_of=payroll_date, jurisdiction_pack_id=pack_id),
     }
     # Phase 8BK — resolved once per calculation, exactly like
     # earning_taxability above; None entries mean "fall back to the
     # hardcoded default" (see engine/countries/germany.py's
     # _resolve_minijob_midijob_value).
-    minijob_midijob_parameters = resolve_all_minijob_midijob_parameters(db, as_of=payroll_date)
+    minijob_midijob_parameters = resolve_all_minijob_midijob_parameters(db, as_of=payroll_date, jurisdiction_pack_id=pack_id)
 
     return dict(
         statutory_profile=profile,
@@ -6252,6 +6473,13 @@ def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, pa
         earning_taxability=earning_taxability,
         church_tax_exception=church_tax_exception,
         minijob_midijob_parameters=minijob_midijob_parameters,
+        # Phase 8DI — audit/debug metadata: which pack version (if any)
+        # governed this calculation. Not consumed by germany.py's math,
+        # only carried through for traceability (Phase 18's payslip-
+        # snapshot requirement — see the report for how far this was wired
+        # into the persisted payslip this phase).
+        applicable_germany_pack_id=pack_id,
+        applicable_germany_pack_version=(applicable_pack.version if applicable_pack is not None else None),
     )
 
 
@@ -7258,6 +7486,27 @@ def set_jurisdiction_pack_status(
             f"Policy packs only support 'Draft' and 'Active' statuses (got {status!r}) — "
             "a policy's lifecycle has no review/approval stage."
         )
+
+    # Phase 8DJ — Germany-only downgrade guard, precedent-matched to the
+    # existing US-only certification gate immediately below (same
+    # function, same per-country-opt-in pattern): once a Germany tax pack
+    # is Active, it must never move directly back to a pre-Active status
+    # (that would silently strip governance from a version that may
+    # already be resolving real registry-linked payroll — Phase 8DI/8DJ's
+    # whole point). Deliberately scoped to DE only — every other
+    # jurisdiction's existing Active->Draft workflow (already relied upon
+    # for corrections) is left completely untouched, exactly as the
+    # existing US gate was scoped to avoid a bigger, unreviewed
+    # cross-jurisdiction change.
+    if (
+        row.pack_type == "tax" and row.jurisdiction_country == "DE"
+        and row.status == "Active" and status not in ("Active", "Deprecated", "Retired", "Superseded")
+    ):
+        raise BadRequestException(
+            f"This Germany tax pack is Active and cannot move directly to {status!r} — "
+            "supersede it with a new version instead of downgrading it back to a pre-Active status."
+        )
+
     if status == "Active" and row.pack_type == "tax":
         # No source artifact / no effective date -> cannot publish
         # (ZP-TAX-US-2026-001 §11.2's own publish-gate list, gap-closure
@@ -16567,10 +16816,20 @@ def _compute_overtime_financial_delta(
             zve_surcharges_base = Decimal(internal_wage_tax.get("ZVE_SURCHARGES", internal_wage_tax["ZVE_LOHNSTEUER"]))
             t1_surcharge_base = compute_tax_for_class(zve_surcharges_base, tax_class, tariff)
             t2_surcharge_base = compute_tax_for_class(zve_surcharges_base + wage_taxable, tax_class, tariff)
+            # Phase 8BY: the Soli Freigrenze comes from the SAME
+            # effective-dated tariff version already resolved above from
+            # run.pay_date (2023-2025: EUR 18,130; 2026: EUR 20,350 per
+            # ZP-TAX-DE-2026-001 section 7), so an overtime tax delta can
+            # never be computed against a different statutory year than
+            # the payslip it belongs to. `_DE_SOLI_THRESHOLD` remains only
+            # as the fallback for a legacy tariff dict without the key.
+            # This resolves the former "hardwired, not registry-resolved"
+            # annotation rather than merely relabelling it.
+            overtime_soli_threshold = tariff.get("soli_threshold_single") or _DE_SOLI_THRESHOLD
             soli_t1 = compute_soli(t1_surcharge_base, is_splitting=(tax_class == "III"),
-                                    soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE)
+                                    soli_threshold_single=overtime_soli_threshold, soli_rate_pct=_DE_SOLI_RATE)
             soli_t2 = compute_soli(t2_surcharge_base, is_splitting=(tax_class == "III"),
-                                    soli_threshold_single=_DE_SOLI_THRESHOLD, soli_rate_pct=_DE_SOLI_RATE)
+                                    soli_threshold_single=overtime_soli_threshold, soli_rate_pct=_DE_SOLI_RATE)
             soli_delta = _round2(soli_t2 - soli_t1)
 
             church_tax_liable = bool(snapshot.get("churchTaxLiableUsed"))
@@ -18829,6 +19088,22 @@ def advance_payroll_run_status(
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="This run has already reached its final status.")
 
     next_status = PAYROLL_STATUS_ORDER[current_idx + 1]
+    if next_status == PayrollStatus.PAID:
+        unresolved_statuses = {
+            item_status for (item_status,) in db.query(PayslipItem.status).filter(
+                PayslipItem.payroll_run_id == run.id,
+            ).all()
+            if item_status != PayslipStatus.PENDING.value
+        }
+        if unresolved_statuses:
+            statuses = ", ".join(sorted(str(value) for value in unresolved_statuses))
+            raise HTTPException(
+                http_status.HTTP_409_CONFLICT,
+                detail=(
+                    "Cannot mark this payroll run as Paid while payslips have "
+                    f"unresolved statuses: {statuses}. Resolve or recalculate them first."
+                ),
+            )
     run.status = next_status
     if next_status == PayrollStatus.APPROVED:
         run.approved_by = approver_id

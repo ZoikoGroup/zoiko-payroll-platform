@@ -4,11 +4,12 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173",
     "start": "npm run dev",
     "build": "vite build",
-    "preview": "vite preview",
-    "lint": "eslint ."
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "lint": "eslint .",
+    "test": "node scripts/phase8cg-minijob-validation.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",

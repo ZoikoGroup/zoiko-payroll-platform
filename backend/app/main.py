@@ -69,16 +69,21 @@ async def lifespan(app: FastAPI):
     initialize_database()
     from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
     from app.modules.auth.scheduler import start_token_cleanup_scheduler, stop_token_cleanup_scheduler
-    from app.modules.billing.scheduler import start_trial_scheduler, stop_trial_scheduler
+    from app.modules.billing.scheduler import (
+        start_trial_scheduler, stop_trial_scheduler,
+        start_dunning_scheduler, stop_dunning_scheduler,
+    )
 
     start_assist_scheduler()
     start_trial_scheduler()
+    start_dunning_scheduler()
     start_token_cleanup_scheduler()
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
     stop_token_cleanup_scheduler()
     stop_assist_scheduler()
     stop_trial_scheduler()
+    stop_dunning_scheduler()
 
 
 app = FastAPI(

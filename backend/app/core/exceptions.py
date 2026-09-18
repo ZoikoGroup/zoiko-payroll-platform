@@ -89,9 +89,17 @@ class UnauthorizedException(ZoikoException):
 
 
 class ForbiddenException(ZoikoException):
-    """Use when user is logged in but doesn't have permission (403)."""
-    def __init__(self, message: str = "You do not have permission to perform this action."):
+    """Use when user is logged in but doesn't have permission (403).
+
+    `trace` is optional structured detail (e.g. billing/entitlements.py
+    passes {"plan_code": "CORE", "limit_value": 1, "resource": "max_entities"}
+    on a plan-limit block) surfaced via the same trace mechanism
+    GermanyCalculationBlockedException already uses — no new response-
+    serialization path needed (see zoiko_exception_handler)."""
+    def __init__(self, message: str = "You do not have permission to perform this action.", trace: dict | None = None):
         super().__init__(status_code=403, error_code="FORBIDDEN", message=message)
+        if trace:
+            self.trace = trace
 
 
 class BadRequestException(ZoikoException):

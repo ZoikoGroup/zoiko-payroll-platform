@@ -4,6 +4,15 @@ Revision ID: a2c3e4f5b6d7
 Revises: b4241285b6dd
 Create Date: 2026-09-08 00:00:00.000000
 
+Phase 8DT reconciliation note: this migration's parent was independently
+renamed on two branches after a shared collision (`f0a1b2c3d4e5` reused by
+`origin/main` for an unrelated migration) — `main` chose `b4241285b6dd`,
+`nikhil` chose `824bb1b61dc2` for byte-identical content. Reconciled onto
+`main`'s canonical `b4241285b6dd` (main is the actually-deployed lineage);
+`824bb1b61dc2` was dropped as a redundant duplicate. Only this
+`down_revision` line and this note changed; the upgrade()/downgrade() below
+are unchanged.
+
 Phase 8BC — schema reconciliation forensics found that
 GermanyChurchTaxException (models.py, `payroll_germany_church_tax_exceptions`,
 added Phase 8AM) has NEVER had a corresponding Alembic migration — confirmed

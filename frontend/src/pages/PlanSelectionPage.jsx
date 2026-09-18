@@ -79,6 +79,32 @@ const planNameStyle = {
   color: "#0F172A",
 };
 
+const breakdownStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+  marginTop: "8px",
+  paddingTop: "8px",
+  borderTop: "1px solid #E2E8F0",
+  fontSize: "13px",
+  color: "#64748B",
+};
+
+const breakdownRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+};
+
+const breakdownComponentStyle = {
+  textTransform: "capitalize",
+};
+
+const breakdownAmountStyle = {
+  fontWeight: "600",
+  color: "#0EA5E9",
+};
+
 const featureListStyle = {
   listStyle: "none",
   padding: 0,
@@ -276,6 +302,26 @@ export default function PlanSelectionPage() {
                   <div style={{ fontSize: "24px", fontWeight: "800", color: "#0EA5E9", marginTop: 4 }}>
                     {getPriceLabel(plan)}
                   </div>
+
+                  {/* Step 7 — catalog-driven pricing breakdown. Only shows for
+                      plans with more than one priced component, so flat
+                      single-component plans keep the current one-line card. */}
+                  {plan.price_components && plan.price_components.length > 1 && (
+                    <div style={breakdownStyle}>
+                      {plan.price_components.map((comp) => (
+                        <div key={comp.component_type} style={breakdownRowStyle}>
+                          <span style={breakdownComponentStyle}>
+                            {String(comp.component_type)
+                              .replace(/_/g, " ")
+                              .replace(/\b\w/g, (c) => c.toUpperCase())}
+                          </span>
+                          <span style={breakdownAmountStyle}>
+                            ${Number(comp.unit_amount).toFixed(2)}/mo
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <ul style={featureListStyle}>

@@ -12,18 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import stripe
 from app.database import SessionLocal, initialize_database
+from app.modules.billing import plan_catalog
 from app.modules.billing.models import BillingPlanVersion, BillingPlan, PlanVersionStatus
 from app.config import settings
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-# Just dummy amounts for the test
-PLAN_PRICES = {
-    "CORE": 0,
-    "PROFESSIONAL": 5000,
-    "BUSINESS": 15000,
-    "ENTERPRISE": 50000,
-}
 
 def main():
     parser = argparse.ArgumentParser(description="Sync Stripe Prices")
@@ -44,7 +38,18 @@ def main():
             plan = db.query(BillingPlan).filter(BillingPlan.id == v.plan_id).first()
             
             product_name = f"{plan.name} v{v.version}"
-            amount = PLAN_PRICES.get(plan.code, 5000)
+
+            # Step 7 — the amount comes from the PUBLISHED price catalog
+            # (billing_price_catalog_items), never from a hardcoded mapping.
+            # A plan with no published catalog price is skipped with a
+            # warning: there is no defensible amount to send to Stripe.
+            amount = plan_catalog.resolve_plan_monthly_price_cents(db, plan.code)
+            if amount is None:
+                print(
+                    f"SKIP plan_version_id={v.id} ({plan.code}): no PUBLISHED catalog price. "
+                    "Run scripts/seed_price_catalog.py first."
+                )
+                continue
 
             if args.dry_run:
                 print(f"Would create Stripe Product '{product_name}' and Price {amount} for plan_version_id={v.id}")

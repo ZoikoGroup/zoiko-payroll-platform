@@ -57,6 +57,11 @@ class OrganizationResponse(BaseModel):
     registration_number: Optional[str] = None
     tax_identifiers: Optional[dict] = None
     is_active: bool
+    # Commercial Billing & Subscription Operating Standard §A1.
+    billing_classification: str = "NON_CHARGEABLE"
+    charge_enabled: bool = False
+    commercial_route: Optional[str] = None
+    commercial_account_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -121,4 +126,30 @@ class OrganizationDetail(BaseModel):
     total_employees: int = 0
     active_employees: int = 0
     hr_admins: int = 0
+    created_at: datetime
+
+
+class OrganizationBillingClassificationUpdate(BaseModel):
+    """PATCH /{organization_id}/billing-classification — Super Admin only,
+    confirmation-gated on the frontend. `reason` is required so the audit
+    trail (BillingCommercialAuditEvent) always records WHY, not just what."""
+    billing_classification: str = Field(..., min_length=1, max_length=30)
+    reason: str = Field(..., min_length=1)
+
+
+class LegalEntityCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    registration_number: Optional[str] = None
+    country: Optional[str] = None
+
+
+class LegalEntityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organization_id: int
+    name: str
+    registration_number: Optional[str] = None
+    country: Optional[str] = None
+    is_active: bool
     created_at: datetime

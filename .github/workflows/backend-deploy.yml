@@ -59,13 +59,68 @@ jobs:
           username: ${{ secrets.GCP_SSH_USER }}
           key: ${{ secrets.GCP_SSH_KEY }}
           script: |
-            set -e
+            set -euo pipefail
             cd /var/www/zoiko-payroll/backend
             git pull origin main
             cd backend
             source venv/bin/activate
             pip install -r requirements.txt
+
+            echo "--- Migration diagnostics (read-only) ---"
+            git rev-parse HEAD
+            alembic heads
+            alembic branches
+            alembic history | head -n 40 || true
+            alembic current
+            echo "Database alembic_version:"
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' || true
+            from sqlalchemy import text
+            from app.database import engine
+
+            with engine.connect() as conn:
+                rows = conn.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+            for row in rows:
+                print("  " + row[0])
+            PY
+
+            echo "--- Applying migrations (self-healing orphan revisions) ---"
             bash ../scripts/deploy_migrate.sh
+
+            echo "--- Post-migration verification ---"
+            echo "Repository heads:"
+            alembic heads
+
+            echo "Database revisions:"
+            alembic current
+
+            # Alembic exits nonzero if the database is not at every head.
+            alembic current --check-heads
+
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY'
+            from alembic.config import Config
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+            from app.database import engine
+
+            config = Config("alembic.ini")
+            script = ScriptDirectory.from_config(config)
+
+            expected = set(script.get_heads())
+            with engine.connect() as connection:
+                actual = set(MigrationContext.configure(connection).get_current_heads())
+
+            print(f"expected heads: {sorted(expected)}")
+            print(f"database heads: {sorted(actual)}")
+
+            if actual != expected:
+                raise SystemExit(
+                    "Database is not at the Alembic head: "
+                    f"missing={sorted(expected - actual)}, "
+                    f"unexpected={sorted(actual - expected)}"
+                )
+            print("Database is at the Alembic head.")
+            PY
+
             deactivate
             sudo systemctl restart zoiko-payroll-backend
       - name: Check for model/schema drift

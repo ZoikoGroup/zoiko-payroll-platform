@@ -4,6 +4,19 @@ Revision ID: 0800e995078f
 Revises: c7e2a94f6b31
 Create Date: 2026-09-07 00:00:00.000000
 
+Phase 8CN renumbering note: this revision was originally authored as
+`d8e9f0a1b2c3` (Phase 8AQ). `origin/main` independently reused that same
+12-hex id for an unrelated migration (`add_row_level_effective_dating_to_
+rate_slab`) and renamed its own copy of this migration to `0800e995078f`
+(see docs/GERMANY_2026_8CM_BRANCH_ALEMBIC_DEPLOYMENT_RECONCILIATION_REPORT.md
+and docs/GERMANY_2026_8CN_ALEMBIC_COLLISION_RECONCILIATION_REPORT.md).
+This `nikhil`-only copy is renamed here to `a4dcd30e7ec1`, a freshly
+verified-unique id (checked against every revision id in both branches),
+mirroring the same rename-only pattern Phase 8CG already applied to
+`c7d8e9f0a1b2`/`f61cb4b650f4`. Only the `revision` id and this note
+changed; `down_revision`, `upgrade()`/`downgrade()`, and every other line
+are unchanged.
+
 Phase 8AQ — docs/PHASE_8AQ_GERMANY_OVERTIME_REVERSAL_AND_SOURCE_PRECEDENCE_HARDENING_REPORT.md.
 
 Additive only: three new nullable-or-defaulted columns on the existing

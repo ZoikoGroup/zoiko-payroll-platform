@@ -3,7 +3,7 @@ import { Plus, ChevronDown, ChevronRight } from "lucide-react";
 import {
   getCompliancePolicies, getCompliancePolicyVersions, setCompliancePolicyStatus, approveCompliancePolicy,
   getCompliancePolicyOrganizations, getCompliancePolicyEligibleOrganizations, assignCompliancePolicy,
-  getTaxConfigurationAudit,
+  getTaxConfigurationAudit, getGermanyPackCompleteness,
 } from "../../../../service/superAdminService";
 import { describeLoadError } from "../../../../service/errorClassification";
 import StatusPill from "../../../../components/StatusPill";
@@ -186,6 +186,7 @@ function PackRow({ pack, expanded, onToggle, onChanged }) {
           </div>
 
           <VersionsPanel packId={pack.packId} activeId={pack.id} />
+          <CompletenessPanel packId={pack.id} />
           <OrganizationsPanel pack={pack} />
           <AuditPanel packId={pack.id} />
         </div>
@@ -285,6 +286,63 @@ function OrganizationsPanel({ pack }) {
           onClose={() => { setShowAssign(false); setAssignIds(new Set()); }}
           onSave={handleAssign}
         />
+      )}
+    </div>
+  );
+}
+
+// Phase 8DJ, Part 5/6 — surfaces service.assess_germany_pack_completeness()
+// (Phase 8DI) via GET /compliance/germany/compliance-pack/{id}/completeness.
+// Every count shown here is exactly what the backend returned — nothing is
+// computed or estimated in this component. Deliberately does NOT show
+// PAP/ELStAM/ELSTER/DEÜV as required components (per that function's own
+// documented scope) since none of those are live functionality in this
+// project.
+function CompletenessPanel({ packId }) {
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGermanyPackCompleteness(packId)
+      .then((r) => !cancelled && setResult(r))
+      .catch((err) => !cancelled && setError(err?.message || "Failed to load completeness."));
+    return () => { cancelled = true; };
+  }, [packId]);
+
+  const verdictStyle = {
+    COMPLETE: "border-success/40 bg-success/5 text-success",
+    PARTIAL: "border-warning/40 bg-warning/5 text-warning",
+    INVALID: "border-danger/40 bg-danger/5 text-danger",
+  };
+
+  return (
+    <div>
+      <p className="mb-2 text-xs font-semibold text-foreground">Registry Linkage / Completeness</p>
+      {error ? (
+        <p className="text-xs text-foreground-disabled">{error}</p>
+      ) : result === null ? (
+        <p className="text-xs text-foreground-disabled">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          <div className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-xs font-semibold ${verdictStyle[result.verdict] || "border-border text-foreground-muted"}`}>
+            {result.verdict}
+          </div>
+          {result.reason && <p className="text-xs text-foreground-muted">{result.reason}</p>}
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            {Object.entries(result.components || {}).map(([key, comp]) => (
+              <div key={key} className="flex items-center justify-between rounded-lg border border-border-light px-3 py-1.5 text-xs">
+                <span className="text-foreground-muted">{comp.label}</span>
+                <span className={`font-semibold ${comp.published_row_count > 0 ? "text-foreground" : "text-foreground-disabled"}`}>
+                  {comp.published_row_count} linked
+                </span>
+              </div>
+            ))}
+          </div>
+          {result.tax_calculation_note && (
+            <p className="text-xs text-foreground-disabled">{result.tax_calculation_note}</p>
+          )}
+        </div>
       )}
     </div>
   );

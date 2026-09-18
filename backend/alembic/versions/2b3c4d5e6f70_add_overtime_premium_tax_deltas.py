@@ -40,19 +40,41 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    op.add_column(
-        'payroll_germany_overtime_premium_components',
-        sa.Column('applied_wage_tax_delta', sa.Numeric(precision=12, scale=2), nullable=True),
-    )
-    op.add_column(
-        'payroll_germany_overtime_premium_components',
-        sa.Column('applied_soli_delta', sa.Numeric(precision=12, scale=2), nullable=True),
-    )
-    op.add_column(
-        'payroll_germany_overtime_premium_components',
-        sa.Column('applied_church_tax_delta', sa.Numeric(precision=12, scale=2), nullable=True),
-    )
+    """Upgrade schema.
+
+    Drift-tolerant: columns may already exist if ``sync_schema`` or a prior
+    partial migration run created them before Alembic's version row was
+    stamped.  Each column is inspected before creation; existing columns
+    with the correct definition are silently accepted while mismatches fail
+    closed.
+    """
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_cols = {
+        col["name"]: col for col in inspector.get_columns(
+            "payroll_germany_overtime_premium_components"
+        )
+    }
+
+    _COLUMNS = [
+        ("applied_wage_tax_delta", sa.Numeric(precision=12, scale=2)),
+        ("applied_soli_delta", sa.Numeric(precision=12, scale=2)),
+        ("applied_church_tax_delta", sa.Numeric(precision=12, scale=2)),
+    ]
+
+    for col_name, col_type in _COLUMNS:
+        if col_name not in existing_cols:
+            op.add_column(
+                "payroll_germany_overtime_premium_components",
+                sa.Column(col_name, col_type, nullable=True),
+            )
+        else:
+            col = existing_cols[col_name]
+            if col.get("nullable") is False:
+                raise RuntimeError(
+                    f"Schema drift: payroll_germany_overtime_premium_components.{col_name} "
+                    f"exists but is NOT NULL, expected nullable."
+                )
 
 
 def downgrade() -> None:
