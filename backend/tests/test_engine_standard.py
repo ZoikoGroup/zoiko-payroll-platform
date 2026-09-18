@@ -4931,11 +4931,12 @@ def test_canada_cpp2_employer_side_never_reduces_net_pay():
 
 
 # ── Canada CPP/CPP2/EI real YTD accumulator (ctx.ytd_* fields) ──────────
-# Dormant in production behind engine/countries/shared.py's
-# _YTD_ACCUMULATOR_ENABLED_COUNTRIES (CA not in it — only "UK" is, as of
-# 2026-09-09 Phase 3) — these tests exercise the engine directly via
-# ctx.ytd_* fields, independent of that service-layer rollout switch,
-# proving the calculation itself is correct whenever it IS wired.
+# Gated in production behind engine/countries/shared.py's
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES ("CA" added 2026-09-18, production-
+# readiness fix plan — see test_ca_ytd_accumulator.py's own
+# test_ca_ytd_enabled_by_default) — these tests exercise the engine
+# directly via ctx.ytd_* fields, independent of that service-layer
+# rollout switch, proving the calculation itself is correct.
 
 def test_canada_ytd_pensionable_room_mid_period_crossing():
     # Employee already has $74,000 YTD pensionable (room: $600 left to

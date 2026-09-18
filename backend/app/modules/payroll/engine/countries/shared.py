@@ -77,14 +77,17 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 # independent dormancy gate at the calculation layer — both must be true
 # for YTD-based caps to actually apply.
 #
-# CA — not yet enabled. No backfill of existing PayslipItems is possible
-#      (their figures were computed with the isolated-period bug, not just
-#      missing metadata), so flipping this mid-tax-year for an org with
-#      existing 2026 CA payslips would create a partial-year gap (prior
-#      periods' pensionable/insurable earnings excluded from the room
-#      calculation for the rest of the year). Flip only at a tax-year
-#      boundary (Jan 1) for orgs with existing CA payslips; a CA org
-#      onboarding fresh can be enabled immediately.
+# CA — enabled 2026-09-18 (production-readiness fix plan). No backfill of
+#      existing PayslipItems is possible (their figures were computed with
+#      the isolated-period bug, not just missing metadata), so flipping
+#      this mid-tax-year for an org with existing 2026 CA payslips would
+#      create a partial-year gap (prior periods' pensionable/insurable
+#      earnings excluded from the room calculation for the rest of the
+#      year) — confirmed with Venu that 0 real orgs have any 2026 CA
+#      payslip yet, so this is the "fresh onboarding" safe case, not the
+#      mid-year one. If this is ever disabled and re-enabled later, this
+#      same check (0 existing 2026 CA payslips, or it's already Jan 1 of
+#      a new tax year) must be re-confirmed first.
 # US — Social Security wage base / FUTA wage base / Additional Medicare
 #      threshold shared the identical current-period-annualized bug (see
 #      engine/countries/us.py) and were designed to reuse this exact
@@ -111,7 +114,7 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 # safety reasoning already used for US's own addition above: enabling
 # changes nothing until a real AU accumulator row exists, and this same
 # session is what builds the write path that would create one.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU"}
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE

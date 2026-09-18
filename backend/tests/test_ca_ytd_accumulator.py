@@ -34,17 +34,26 @@ def _make_ca_employee(db, org_id, code="CAE1", work_state=None):
 @pytest.fixture(autouse=True)
 def _restore_ytd_switch():
     """The rollout switch is a plain module-level set — tests that flip it
-    on must not leak that into other tests (same pattern already used for
-    _VALIDATION_ENABLED_COUNTRIES elsewhere in this suite)."""
+    (even though "CA" is now enabled by default, see
+    test_ca_ytd_enabled_by_default below) must not leak any change into
+    other tests, same pattern test_au_sg_ytd_accumulator.py already uses."""
     original = set(shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES)
     yield
     shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.clear()
     shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.update(original)
 
 
+def test_ca_ytd_enabled_by_default():
+    # Flipped on 2026-09-18 as part of the production-readiness fix plan —
+    # the last of CA's ~13 mechanisms still dormant. See this module's own
+    # module docstring; every other test below still exercises the
+    # off-switch contract explicitly via .discard("CA").
+    assert "CA" in shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES
+
+
 def test_load_ca_ytd_empty_when_switch_off(db, organization):
     emp = _make_ca_employee(db, organization.id)
-    assert "CA" not in shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES
+    shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.discard("CA")
     result = service._load_ca_ytd(db, emp.id, date(2026, 6, 1), None)
     assert result == {}
 
