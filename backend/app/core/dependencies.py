@@ -18,12 +18,16 @@ it must explicitly pass an organization_id (get_super_admin_organization_id
 or require_organization_access), or it is blocked.
 """
 
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Optional
+
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, decode_assisted_access_token
 from app.core.exceptions import ForbiddenException, UnauthorizedException
 
 # Tokens are issued by this platform only (see core/security.py).
@@ -32,6 +36,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 ROLE_SUPER_ADMIN = "super_admin"
 ROLE_ORG_ADMIN = "org_admin"
 ROLE_PAYROLL_ADMIN = "payroll_admin"
+
+# NOT a DB role. Assigned exclusively to the in-memory principal built from
+# a validated SafeGuard assisted-access token (core/dependencies.py), never
+# to a stored User row — there is no way for any account to hold it. It
+# exists so role gates can treat assisted sessions as org-scoped operators
+# WITHOUT ever conflating them with a real super_admin (who bypasses org
+# scoping). Because it is not super_admin, assisted tokens are rejected by
+# every Super-Admin-only endpoint.
+ROLE_ASSISTED_ACCESS = "assisted_access"
 
 VALID_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN}
 
@@ -51,6 +64,28 @@ ROLE_DEFAULT_REDIRECT = {
 }
 
 
+@dataclass
+class AssistedAccessPrincipal:
+    """Principal built from a validated assisted-access token. Deliberately
+    a lightweight dataclass, NOT a User ORM row: handing endpoints a real
+    SA row with mutated role/org fields would risk accidentally persisting
+    that mutation on a later commit. Carries just the attributes org-scoped
+    endpoints reliably use, pinned to the session's organization."""
+    id: int
+    email: str
+    first_name: str = ""
+    last_name: str = ""
+    phone: Optional[str] = None
+    role: str = ROLE_ASSISTED_ACCESS
+    organization_id: Optional[int] = None
+    is_active: bool = True
+    assisted_access_session: object = field(default=None, repr=False)
+
+    @property
+    def name(self):
+        return f"{self.first_name} {self.last_name}".strip() or self.email
+
+
 def can_create_role(creator_role, target_role) -> bool:
     return target_role in ROLE_CREATION_RULES.get(creator_role, [])
 
@@ -67,15 +102,56 @@ def role_value(user) -> str:
     return _role_value(user)
 
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-):
-    """Any authenticated, active user. Returns the User ORM row."""
-    payload = decode_access_token(token)
+def _resolve_assisted_principal(token: str, db: Session):
+    """Validate a SafeGuard assisted-access token and build its principal.
+
+    Every gate that matters lives here, not in the endpoint that happens to
+    use it: the session must exist, be un-ended, un-expired, and match the
+    token's own organization binding; the requesting Super Admin must still
+    be active. Failing any check is an unauthorized error — no fallback.
+    """
+    from app.modules.assisted_access.models import AssistedAccessSession
+    from app.modules.auth.models import User
+
+    payload = decode_assisted_access_token(token)
     if payload is None:
         raise UnauthorizedException("Invalid or expired token. Please log in again.")
 
+    session_id = payload.get("assisted_access_session_id")
+    user_id = payload.get("user_id")
+    if session_id is None or user_id is None:
+        raise UnauthorizedException("Token is missing assisted-access session information.")
+
+    session = db.query(AssistedAccessSession).filter(AssistedAccessSession.id == session_id).first()
+    if session is None:
+        raise UnauthorizedException("Assisted access session not found.")
+    if session.ended_at is not None:
+        raise UnauthorizedException("This assisted access session has ended.")
+    if session.expires_at <= datetime.utcnow():
+        raise UnauthorizedException("This assisted access session has expired.")
+
+    # Defense in depth: the token's org claim must equal the session's org.
+    if payload.get("organization_id") != session.organization_id:
+        raise UnauthorizedException("Assisted access token does not match its session.")
+
+    sa = db.query(User).filter(User.id == session.requested_by_user_id).first()
+    if sa is None or not sa.is_active:
+        raise UnauthorizedException("The requesting Super Admin is no longer active.")
+
+    return AssistedAccessPrincipal(
+        id=sa.id,
+        email=sa.email,
+        first_name=sa.first_name,
+        last_name=sa.last_name,
+        phone=getattr(sa, "phone", None),
+        role=ROLE_ASSISTED_ACCESS,
+        organization_id=session.organization_id,
+        assisted_access_session=session,
+    )
+
+
+def _resolve_access_user(db: Session, payload: dict):
+    """Look up and validate the User behind a normal access token."""
     user_id = payload.get("user_id")
     if user_id is None:
         raise UnauthorizedException("Token is missing user information.")
@@ -105,6 +181,50 @@ def get_current_user(
     return user
 
 
+def _decode_required(token: str, db: Session):
+    """Decode a bearer token. Returns (payload, is_assisted).
+
+    A valid assisted-access token is NOT returned as a normal payload: it
+    only flows through the org-scoped dependency below, so every endpoint
+    that depends on plain get_current_user keeps normal-login semantics.
+    """
+    payload = decode_access_token(token)
+    if payload is not None:
+        return payload, False
+    if decode_assisted_access_token(token) is not None:
+        raise UnauthorizedException(
+            "Assisted-access tokens can only be used on organization-scoped endpoints."
+        )
+    raise UnauthorizedException("Invalid or expired token. Please log in again.")
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Any authenticated, active user. Returns the User ORM row.
+
+    Does NOT resolve assisted-access tokens — those are accepted only by
+    get_current_org_scoped_principal (and the org gates built on it), so a
+    SafeGuard session can never reach plain get_current_user endpoints that
+    serialize or depend on full User ORM fields."""
+    payload, _is_assisted = _decode_required(token, db)
+    return _resolve_access_user(db, payload)
+
+
+def get_current_org_scoped_principal(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Either access principal — a User ORM row from a normal login token,
+    or an AssistedAccessPrincipal from a validated SafeGuard aided token.
+    This is the integrity boundary for org-scoped endpoints."""
+    raw = decode_access_token(token)
+    if raw is not None:
+        return _resolve_access_user(db, raw)
+    return _resolve_assisted_principal(token, db)
+
+
 def get_current_super_admin(current_user=Depends(get_current_user)):
     """Only platform-level Super Admin. Bypasses all org scoping."""
     if _role_value(current_user) != ROLE_SUPER_ADMIN:
@@ -114,22 +234,24 @@ def get_current_super_admin(current_user=Depends(get_current_user)):
     return current_user
 
 
-def get_current_org_admin(current_user=Depends(get_current_user)):
-    """Org-scoped admin: org_admin (or super_admin, who may act cross-org)."""
+def get_current_org_admin(current_user=Depends(get_current_org_scoped_principal)):
+    """Org-scoped admin: org_admin (or super_admin, who may act cross-org,
+    or an active assisted-access session acting as the org's admin)."""
     role = _role_value(current_user)
-    if role not in (ROLE_ORG_ADMIN, ROLE_SUPER_ADMIN):
+    if role not in (ROLE_ORG_ADMIN, ROLE_SUPER_ADMIN, ROLE_ASSISTED_ACCESS):
         raise ForbiddenException(
             f"This action requires organization admin privileges. Your role: {role}"
         )
     return current_user
 
 
-def get_current_payroll_operator(current_user=Depends(get_current_user)):
+def get_current_payroll_operator(current_user=Depends(get_current_org_scoped_principal)):
     """Org-scoped payroll operator: org_admin or payroll_admin (or super_admin
-    acting cross-org). This is the gate used by the copied payroll routers —
-    it replaces the old platform's get_current_org_admin for payroll ops."""
+    acting cross-org, or an active assisted-access session). This is the gate
+    used by the copied payroll routers — it replaces the old platform's
+    get_current_org_admin for payroll ops."""
     role = _role_value(current_user)
-    if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_SUPER_ADMIN):
+    if role not in (ROLE_ORG_ADMIN, ROLE_PAYROLL_ADMIN, ROLE_SUPER_ADMIN, ROLE_ASSISTED_ACCESS):
         raise ForbiddenException(
             f"This action requires payroll operator privileges. Your role: {role}"
         )

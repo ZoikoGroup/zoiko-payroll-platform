@@ -141,6 +141,16 @@ class Settings(BaseSettings):
     STRIPE_CHECKOUT_SUCCESS_URL: str = ""   # frontend route, e.g. .../checkout/success
     STRIPE_CHECKOUT_CANCEL_URL: str = ""    # frontend route, e.g. .../checkout/cancelled
 
+    # ── Assisted Access (SafeGuard — session takeover, time-boxed) ──────
+    # Hard cap on how long a single support-assist session may live. The
+    # spec treats indefinite access as unacceptable by construction: a
+    # session is created with a fixed expires_at and MUST be re-requested
+    # (new reason, new session, new token) once it lapses. The background
+    # sweep auto-ends anything past this cap even if nobody manually ends it.
+    ASSISTED_ACCESS_SESSION_MINUTES: int = 30
+    ASSISTED_ACCESS_SWEEP_ENABLED: bool = True
+    ASSISTED_ACCESS_SWEEP_INTERVAL_MINUTES: int = 60
+
     # ── Staging/test billing isolation (Part 11) ────────────────────────
     # When true: refuse to boot with a Stripe LIVE key, force seed/demo
     # data to synthetic values, and sandbox outbound billing email. See

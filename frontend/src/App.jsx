@@ -32,7 +32,7 @@ import {
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
 import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage } from "./pages/ReportTemplates";
-import FinancePage from "./pages/FinancePage";
+import FundingPaymentsPage from "./pages/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
@@ -43,6 +43,8 @@ import PlanSelectionPage from "./pages/PlanSelectionPage";
 import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
 import CheckoutCancelPage from "./pages/CheckoutCancelPage";
 import PlansEntitlementsPage from "./pages/SuperAdmin/PlansEntitlementsPage";
+import RevenueCollectionsPage from "./pages/SuperAdmin/RevenueCollectionsPage";
+import AlertsIncidentsPage from "./pages/SuperAdmin/AlertsIncidentsPage";
 import SubscriptionsBillingPage from "./pages/SuperAdmin/SubscriptionsBillingPage";
 import OrderFormsPage from "./pages/SuperAdmin/OrderFormsPage";
 import PayrollRunsMonitorPage from "./pages/SuperAdmin/PayrollRunsMonitorPage";
@@ -213,7 +215,7 @@ export default function App() {
           path="/super-admin/finance"
           element={
             <SuperAdminShell>
-              <FinancePage />
+              <FundingPaymentsPage />
             </SuperAdminShell>
           }
         />
@@ -236,6 +238,8 @@ export default function App() {
 
         {/* Command Center — Zoiko Commercial / Payroll Operations / Platform */}
         <Route path="/super-admin/plans-entitlements" element={<SuperAdminShell><PlansEntitlementsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/revenue-collections" element={<SuperAdminShell><RevenueCollectionsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/alerts" element={<SuperAdminShell><AlertsIncidentsPage /></SuperAdminShell>} />
         <Route path="/super-admin/subscriptions-billing" element={<SuperAdminShell><SubscriptionsBillingPage /></SuperAdminShell>} />
         <Route path="/super-admin/order-forms" element={<SuperAdminShell><OrderFormsPage /></SuperAdminShell>} />
         <Route path="/super-admin/payroll-runs" element={<SuperAdminShell><PayrollRunsMonitorPage /></SuperAdminShell>} />

@@ -28,6 +28,7 @@ import ThemeToggle from "./ThemeToggle";
 import AssistLauncher from "../modules/assist/AssistLauncher";
 import TrialBanner from "./TrialBanner";
 import DunningBanner from "./DunningBanner";
+import AssistedAccessBanner from "./AssistedAccessBanner";
 
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
 
@@ -404,6 +405,7 @@ export default function PayrollShell({ children }) {
           collapsed={collapsed}
           menuButtonRef={menuButtonRef}
         />
+        <AssistedAccessBanner />
         <TrialBanner />
         <DunningBanner />
         <main className="w-full">{children}</main>
