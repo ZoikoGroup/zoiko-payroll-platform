@@ -14,6 +14,11 @@ import { listU1Tariffs } from "../../../service/superAdminService";
 // generic address-region list in utils/registrationRegions.js, which has
 // no DE-XX codes and is used for postal addresses, not statutory data.
 const CHURCH_TAX_LAENDER = [
+  // Display-only Land picker. Values mirror backend germany_pap/core.py
+  // CHURCH_TAX_LAND_RATES defaults (8%/9%); the backend can override via the
+  // minijob/midijob parameter registry's church_tax_rate_de_* keys. If an
+  // override is ever published, this label list must come from the API.
+  // (2026-09-15 registry-readiness audit marker.)
   { code: "DE-BW", label: "Baden-Württemberg (8%)" },
   { code: "DE-BY", label: "Bavaria (8%)" },
   { code: "DE-BE", label: "Berlin (9%)" },

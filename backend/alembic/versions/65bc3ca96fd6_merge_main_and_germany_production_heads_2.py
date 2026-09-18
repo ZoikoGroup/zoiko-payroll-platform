@@ -12,6 +12,30 @@ date of leaving, LWF, EPS/EDLI, apprenticeship levy, employee
 establishments, contribution-rate precision). No-op, additive-only merge
 point — changes nothing in the database schema itself, only unifies the
 migration graph bookkeeping into a single head.
+
+Phase 8CG renumbering note: this revision was originally authored as
+`c7d8e9f0a1b2` (commit `f807e3b2`, 2026-09-08). `origin/main` independently
+authored a real, unrelated schema migration
+(`add_payroll_ytd_accumulators_table_widen_tax_year`) under the same 12-hex
+id two days later, and later renamed *its own* copy to `65bc3ca96fd6` for
+exactly this collision class. `origin/main`'s copy of `c7d8e9f0a1b2` is the
+one that reached production (confirmed via three independent read-only
+production reads across Phases 8CC/8CD, all `alembic_version` values found
+downstream of it) and is therefore left untouched — see
+`docs/GERMANY_2026_ALEMBIC_493A6E_FORENSIC_REPORT.md` and
+`docs/GERMANY_2026_DEPLOYMENT_LINEAGE_FORENSIC_REPORT.md`. This `nikhil`-only
+copy is the one renamed instead, to `a6b7c8d9e0f2`, per
+`docs/GERMANY_2026_RECONCILIATION_IMPLEMENTATION_REPORT.md`'s rename map.
+Only the `revision` id and this note changed; `down_revision`,
+`upgrade()`/`downgrade()`, and every other line are unchanged.
+
+Phase 8DT reconciliation note: `nikhil` had independently renamed its own
+copy of this same original `c7d8e9f0a1b2` to `a6b7c8d9e0f2` (byte-identical
+content, same down_revision tuple). Reconciled onto this file (`main`'s
+canonical `65bc3ca96fd6`); `a6b7c8d9e0f2` was dropped as a redundant
+duplicate, and `nikhil`'s downstream `b7c8d9e0f2a3` (the Germany production
+chain recovery graft, which has no `main` equivalent) was re-parented onto
+this revision.
 """
 from typing import Sequence, Union
 
