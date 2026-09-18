@@ -63,8 +63,9 @@ from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
 )
 from app.core.exceptions import ForbiddenException, NotFoundException
-from app.modules.billing.entitlements import require_writeable_workspace, require_active_subscription, require_scope_limit
+from app.modules.billing.entitlements import require_writeable_workspace, require_active_subscription, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_BWM
+from app.modules.billing.models import DunningStage
 from app.modules.billing import bwm as billing_bwm
 from app.modules.payroll import service
 from app.modules.payroll.policy.router import policy_router
@@ -908,7 +909,12 @@ def transmit_germany_elster_transmission(
 
 @payroll_router.post(
     "/runs", response_model=PayrollRunResponse, response_model_by_alias=True,
-    summary="Create a payroll run", dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+    summary="Create a payroll run",
+    dependencies=[
+        Depends(get_current_payroll_operator),
+        Depends(require_writeable_workspace()),
+        Depends(require_not_dunning_restricted(DunningStage.RESTRICT_NEW_RUN.value)),
+    ],
 )
 def create_run(
     data: PayrollRunCreate,

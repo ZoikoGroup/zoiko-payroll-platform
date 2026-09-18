@@ -313,6 +313,24 @@ def get_jurisdiction_onboarding_block_reason(
             f"'{country}' is not a supported payroll jurisdiction yet — "
             "please contact your administrator or select a supported country."
         )
+
+    # Commercial Billing & Subscription Operating Standard §5 — a
+    # NOT_AVAILABLE/PLANNED jurisdiction is blocked here, in the one place
+    # every onboarding call site (register_enterprise, POST /billing/checkout)
+    # already goes through, rather than duplicating this check per caller.
+    # A jurisdiction with NO registry row falls through to the existing
+    # canonical-pack check below unchanged — this is a layered ADDITIONAL
+    # gate, not a replacement, so an unseeded jurisdiction is never silently
+    # un-gated by this check's mere absence.
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    registry_row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == code).first()
+    if registry_row is not None and registry_row.availability in ("NOT_AVAILABLE", "PLANNED"):
+        return (
+            f"'{country}' is not yet available for onboarding — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+
     if code == "DE":
         return None
     rates, slabs, pack = resolve_tax_configuration(db, code, state=state, tax_regime=None, payroll_date=as_of)

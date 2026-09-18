@@ -18,13 +18,25 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+import stripe
+
+from app.config import settings
 from app.core.dependencies import get_current_super_admin
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import get_db
 from app.modules.billing import entitlements, plan_catalog, trial_lifecycle
-from app.modules.billing.models import BillingCommercialAuditEvent, BillingPlanVersion, PlanVersionStatus
+from app.modules.billing.enterprise_order_form import record_order_form
+from app.modules.billing.models import (
+    BillingCommercialAuditEvent,
+    BillingCreditNote,
+    BillingInvoice,
+    BillingPlanVersion,
+    PlanVersionStatus,
+)
 from app.modules.billing.schemas import (
     BillingAuditEventListResponse,
+    BillingCreditNoteIssueRequest,
+    BillingCreditNoteResponse,
     BillingEntitlementFlagCreateRequest,
     BillingEntitlementFlagResponse,
     BillingEntitlementOverrideCreateRequest,
@@ -34,8 +46,13 @@ from app.modules.billing.schemas import (
     BillingPlanVersionCreateRequest,
     BillingPlanVersionResponse,
     BillingPlanVersionStatusTransition,
+    BillingRefundRequest,
     BillingSubscriptionResponse,
     ConvertTrialRequest,
+    EnterpriseOrderFormCreate,
+    EnterpriseOrderFormDetailResponse,
+    EnterpriseOrderFormListResponse,
+    EnterpriseOrderFormResponse,
     TrialExpirySweepResult,
 )
 
@@ -214,3 +231,233 @@ def list_audit_events(
         .all()
     )
     return BillingAuditEventListResponse(events=events, total=total)
+
+
+# ── Invoice explanation & BWM reconciliation (Part 7) ────────────────────
+
+@router.get("/organizations/{organization_id}/invoices/{invoice_id}/explanation")
+def get_invoice_explanation(
+    organization_id: int,
+    invoice_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.billing.invoice_explanation import build_invoice_explanation
+
+    invoice = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.id == invoice_id, BillingInvoice.organization_id == organization_id)
+        .first()
+    )
+    if invoice is None:
+        raise NotFoundException("Invoice", invoice_id)
+    return build_invoice_explanation(db, invoice)
+
+
+# Step 3: the Finance-facing BWM/invoice discrepancy check now lives on the
+# existing Super Admin Exceptions & Reconciliation page
+# (GET /super-admin/compliance/exceptions, super_admin/command_center_router.py)
+# instead of here — one home for "two systems that don't otherwise talk to
+# each other disagree", not a second, separate reconciliation view.
+
+
+# ── Enterprise Order Form (Part 12 / Step 6) ──────────────────────────────
+
+@router.post(
+    "/organizations/{organization_id}/order-form",
+    response_model=EnterpriseOrderFormResponse,
+)
+def create_enterprise_order_form(
+    organization_id: int,
+    data: EnterpriseOrderFormCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Records a signed Enterprise Order Form — the ONE path that directly
+    sets an org billable by human decision. Enterprise is explicitly never
+    self-service, so there is no public checkout UI for this.
+
+    Side effects, all in the same transaction (billing/enterprise_order_form.py):
+      - Organization.commercial_route = ENTERPRISE_ORDER_FORM,
+        billing_classification = COMMERCIAL_ACTIVE, charge_enabled = True
+      - a matching BillingSubscription with billing_authority =
+        ENTERPRISE_ORDER_FORM and plan_version_id = None (Enterprise scale
+        limits come from this row's negotiated_scale_limits, never a
+        BillingPlanVersion)
+    Refuses an org that already has a subscription/Order Form under a
+    DIFFERENT commercial route (no overlapping billable ownership)."""
+    return record_order_form(
+        db,
+        organization_id=organization_id,
+        contract_reference=data.contract_reference,
+        negotiated_scale_limits=data.negotiated_scale_limits,
+        negotiated_price_terms=data.negotiated_price_terms,
+        term_start=data.term_start,
+        term_end=data.term_end,
+        signed_by_user_id=current_user.id,
+    )
+
+
+@router.get("/order-forms", response_model=EnterpriseOrderFormListResponse)
+def list_enterprise_order_forms(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Every recorded Enterprise Order Form, newest first (one per org —
+    organization_id is unique on the table itself). Cross-tenant read for
+    the Order Forms section of the Super Admin Command Center."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import EnterpriseOrderForm
+
+    rows = (
+        db.query(EnterpriseOrderForm, Organization)
+        .join(Organization, Organization.id == EnterpriseOrderForm.organization_id)
+        .order_by(EnterpriseOrderForm.created_at.desc())
+        .all()
+    )
+    items = [
+        EnterpriseOrderFormDetailResponse(
+            id=form.id,
+            organization_id=form.organization_id,
+            organization_name=org.organization_name,
+            contract_reference=form.contract_reference,
+            negotiated_scale_limits=form.negotiated_scale_limits,
+            negotiated_price_terms=form.negotiated_price_terms,
+            term_start=form.term_start,
+            term_end=form.term_end,
+            signed_by=form.signed_by,
+            created_at=form.created_at,
+        )
+        for form, org in rows
+    ]
+    return EnterpriseOrderFormListResponse(order_forms=items, total=len(items))
+
+
+@router.get(
+    "/organizations/{organization_id}/order-form",
+    response_model=EnterpriseOrderFormDetailResponse,
+)
+def get_enterprise_order_form(
+    organization_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """One org's signed Order Form (404 when the org has none on file)."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import EnterpriseOrderForm
+
+    row = (
+        db.query(EnterpriseOrderForm, Organization)
+        .join(Organization, Organization.id == EnterpriseOrderForm.organization_id)
+        .filter(EnterpriseOrderForm.organization_id == organization_id)
+        .first()
+    )
+    if row is None:
+        raise NotFoundException("Enterprise Order Form", organization_id)
+    form, org = row
+    return EnterpriseOrderFormDetailResponse(
+        id=form.id,
+        organization_id=form.organization_id,
+        organization_name=org.organization_name,
+        contract_reference=form.contract_reference,
+        negotiated_scale_limits=form.negotiated_scale_limits,
+        negotiated_price_terms=form.negotiated_price_terms,
+        term_start=form.term_start,
+        term_end=form.term_end,
+        signed_by=form.signed_by,
+        created_at=form.created_at,
+    )
+
+
+# ── Refunds & credit notes (Part 8) ──────────────────────────────────────
+
+@router.post("/organizations/{organization_id}/refund")
+def issue_refund(
+    organization_id: int,
+    data: BillingRefundRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Calls the real Stripe refund API — never just edits a local total.
+    Writes a BillingCommercialAuditEvent for every refund issued, append-
+    only, same discipline as every other commercial audit trail here."""
+    invoice = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.organization_id == organization_id, BillingInvoice.stripe_invoice_id == data.stripe_invoice_id)
+        .first()
+    )
+    if invoice is None:
+        raise NotFoundException("Invoice", data.stripe_invoice_id)
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        stripe_invoice = stripe.Invoice.retrieve(data.stripe_invoice_id)
+        payment_intent = stripe_invoice.payment_intent
+        if not payment_intent:
+            raise BadRequestException("This invoice has no associated payment to refund.")
+        refund = stripe.Refund.create(
+            payment_intent=payment_intent,
+            amount=data.amount_cents,
+            reason="requested_by_customer",
+        )
+    except stripe.error.StripeError as e:
+        raise BadRequestException(f"Stripe refund error: {str(e)}")
+
+    db.add(BillingCommercialAuditEvent(
+        organization_id=organization_id,
+        actor_user_id=current_user.id,
+        event_type="REFUND_ISSUED",
+        payload={
+            "stripe_invoice_id": data.stripe_invoice_id,
+            "stripe_refund_id": refund.id,
+            "amount_cents": data.amount_cents or refund.amount,
+            "reason": data.reason,
+        },
+    ))
+    db.commit()
+    return {"success": True, "stripe_refund_id": refund.id}
+
+
+@router.post("/organizations/{organization_id}/credit-note", response_model=BillingCreditNoteResponse)
+def issue_credit_note(
+    organization_id: int,
+    data: BillingCreditNoteIssueRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Calls the real Stripe credit-note API and records our own
+    BillingCreditNote row (invoice_id keyed to our internal BillingInvoice,
+    not the Stripe invoice id the request body carries)."""
+    invoice = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.organization_id == organization_id, BillingInvoice.stripe_invoice_id == data.stripe_invoice_id)
+        .first()
+    )
+    if invoice is None:
+        raise NotFoundException("Invoice", data.stripe_invoice_id)
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        credit_note = stripe.CreditNote.create(
+            invoice=data.stripe_invoice_id,
+            lines=[{"type": "custom_line_item", "description": data.reason, "unit_amount": data.amount_cents, "quantity": 1}],
+        )
+    except stripe.error.StripeError as e:
+        raise BadRequestException(f"Stripe credit note error: {str(e)}")
+
+    note = BillingCreditNote(
+        invoice_id=invoice.id,
+        reason=data.reason,
+        amount=data.amount_cents / 100,
+        approved_by_user_id=current_user.id,
+    )
+    db.add(note)
+    db.add(BillingCommercialAuditEvent(
+        organization_id=organization_id,
+        actor_user_id=current_user.id,
+        event_type="CREDIT_NOTE_ISSUED",
+        payload={"stripe_invoice_id": data.stripe_invoice_id, "stripe_credit_note_id": credit_note.id, "amount_cents": data.amount_cents},
+    ))
+    db.commit()
+    db.refresh(note)
+    return note

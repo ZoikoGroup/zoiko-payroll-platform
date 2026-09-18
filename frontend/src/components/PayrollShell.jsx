@@ -27,6 +27,7 @@ import { ROLE_LABELS, ROLES } from "../config/roles";
 import ThemeToggle from "./ThemeToggle";
 import AssistLauncher from "../modules/assist/AssistLauncher";
 import TrialBanner from "./TrialBanner";
+import DunningBanner from "./DunningBanner";
 
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER_ADMIN]);
 
@@ -404,6 +405,7 @@ export default function PayrollShell({ children }) {
           menuButtonRef={menuButtonRef}
         />
         <TrialBanner />
+        <DunningBanner />
         <main className="w-full">{children}</main>
       </div>
 

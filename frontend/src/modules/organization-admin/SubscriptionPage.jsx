@@ -16,6 +16,8 @@ import {
   getMySubscription,
   listPublishedPlans,
   createCheckoutSession,
+  listMyInvoices,
+  getMyInvoiceExplanation,
 } from "../../service/billingService";
 import {
   X,
@@ -31,6 +33,10 @@ import {
   ExternalLink,
   Package,
   FileText,
+  ChevronDown,
+  ChevronUp,
+  Receipt,
+  Percent,
 } from "lucide-react";
 
 const styles = `
@@ -286,6 +292,9 @@ const STATUS_STYLES = {
   PAST_DUE: { bg: "rgba(217,121,30,0.12)", color: "#B8600F", border: "rgba(217,121,30,0.25)" },
   SUSPENDED: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
   CANCELLED: { bg: "var(--muted-soft)", color: "var(--muted)", border: "var(--muted-border)" },
+  // Invoice statuses (Step 3) — reuse this same pill for the Invoices tab.
+  PAID: { bg: "rgba(23,138,80,0.11)", color: "#178A50", border: "rgba(23,138,80,0.22)" },
+  FAILED: { bg: "rgba(214,48,76,0.10)", color: "#D6304C", border: "rgba(214,48,76,0.25)" },
 };
 
 function StatusPill({ status }) {
@@ -343,6 +352,131 @@ const PLAN_ICONS = {
   BUSINESS: ShieldCheck,
   ENTERPRISE: FileText,
 };
+
+// Step 3 — Invoices tab. Kept self-contained (own loading/error/expand
+// state) rather than threading it through the parent's state, since it's
+// an independent data source (BillingInvoice) from the subscription/plan
+// data the rest of this page already manages.
+function InvoiceExplanationDetail({ invoiceId }) {
+  const [explanation, setExplanation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyInvoiceExplanation(invoiceId)
+      .then((data) => { if (!cancelled) setExplanation(data); })
+      .catch((err) => { if (!cancelled) setError(err.message || "Could not load invoice details."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [invoiceId]);
+
+  if (loading) return <p style={{ padding: "12px 24px", color: "var(--ink-faint)", fontSize: 13 }}>Loading breakdown…</p>;
+  if (error) return <p style={{ padding: "12px 24px", color: "var(--danger)", fontSize: 13 }}>{error}</p>;
+  if (!explanation) return null;
+
+  return (
+    <div style={{ padding: "0 24px 18px" }}>
+      {/* Step 5 (blocker #8/#9) — Zoiko SUBSCRIPTION tax only, deliberately
+          labeled and styled distinctly from any payroll-tax figure (TDS,
+          Lohnsteuer, etc.) shown elsewhere in this app. Never combine this
+          number with those. */}
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 8, margin: "8px 0 10px",
+          padding: "8px 10px", borderRadius: 8, background: "rgba(124, 58, 237, 0.08)",
+        }}
+      >
+        <Percent size={13} style={{ color: "#7C3AED", flexShrink: 0 }} />
+        <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+          Sales tax/VAT on your Zoiko subscription:{" "}
+          <strong style={{ color: "#7C3AED" }}>
+            {explanation.currency} {Number(explanation.tax_amount || 0).toFixed(2)}
+          </strong>
+        </span>
+      </div>
+
+      {!explanation.bwm_data_available ? (
+        <p style={{ fontSize: 13, color: "var(--ink-faint)" }}>
+          No per-employee billable-worker-month data is available for this invoice's period yet.
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)", margin: "8px 0 6px" }}>
+            Billed for {explanation.employees_counted.length} employee{explanation.employees_counted.length === 1 ? "" : "s"} in{" "}
+            {explanation.billing_month ? formatDate(explanation.billing_month) : "this period"}
+          </p>
+          {explanation.employees_excluded.length > 0 && (
+            <p style={{ fontSize: 12, color: "var(--ink-faint)", margin: "0 0 6px" }}>
+              {explanation.employees_excluded.length} employee{explanation.employees_excluded.length === 1 ? "" : "s"} were NOT counted:{" "}
+              {explanation.employees_excluded.map((e) => e.reason_code).filter(Boolean).join(", ") || "no reason recorded"}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function InvoicesPanel() {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+
+  useEffect(() => {
+    listMyInvoices()
+      .then((data) => setInvoices(data.invoices || []))
+      .catch((err) => setError(err.message || "Could not load invoices."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="glass rise" style={{ animationDelay: ".22s", marginBottom: 16 }}>
+      <div className="panel-head">
+        <div className="panel-icon icon-violet">
+          <Receipt size={16} />
+        </div>
+        <div>
+          <p className="panel-title">Invoices</p>
+          <p className="panel-sub">Past billing history for this organization</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <p style={{ padding: "0 24px 20px", color: "var(--ink-faint)", fontSize: 13 }}>Loading invoices…</p>
+      ) : error ? (
+        <p style={{ padding: "0 24px 20px", color: "var(--danger)", fontSize: 13 }}>{error}</p>
+      ) : invoices.length === 0 ? (
+        <p style={{ padding: "0 24px 20px", color: "var(--ink-faint)", fontSize: 13 }}>No invoices yet.</p>
+      ) : (
+        <div className="rows">
+          {invoices.map((inv) => {
+            const isOpen = expandedId === inv.id;
+            return (
+              <div key={inv.id}>
+                <div
+                  className="row"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setExpandedId(isOpen ? null : inv.id)}
+                >
+                  <span className="label">
+                    {formatDate(inv.issued_at)} · <StatusPill status={inv.status} />
+                  </span>
+                  <span className="value" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {inv.currency} {Number(inv.total).toFixed(2)}
+                    {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </span>
+                </div>
+                {isOpen && <InvoiceExplanationDetail invoiceId={inv.id} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SubscriptionPage() {
   const navigate = useNavigate();
@@ -587,6 +721,9 @@ export default function SubscriptionPage() {
                 </div>
               </div>
             </div>
+
+            {/* Invoices — Step 3 */}
+            <InvoicesPanel />
 
             {/* Upgrade CTA — org_admin only */}
             {canManage && !isCancelled && (

@@ -14,7 +14,7 @@ super_admin schemas/models.
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -410,10 +410,25 @@ class BillingEntitlementOverrideCreateRequest(BaseModel):
     expires_at: datetime
 
 
+class BillingPriceComponentResponse(BaseModel):
+    """One line of a plan's price breakdown, resolved from a PUBLISHED
+    billing_price_catalog_items row. component_type identifies the component
+    (for flat plans it is the plan code itself, e.g. "PROFESSIONAL"; add-ons
+    use a suffixed value once they exist, e.g. "BUSINESS:BWM")."""
+
+    component_type: str
+    currency: str
+    unit_amount: Decimal
+
+
 class BillingPublishedPlanResponse(BaseModel):
     """GET /billing/plans — one entry per plan that currently has a
     PUBLISHED version, with that version's entitlement flags resolved.
-    No price data — billing_price_catalog_items is out of scope here."""
+    Price data comes from the PUBLISHED price catalog
+    (billing_price_catalog_items) — monthly_price_usd is the sum of the
+    plan's published components and price_components carries the per-line
+    breakdown for the frontend's multi-component view. Neither is inferred
+    from any hardcoded table in the application layer."""
 
     plan_id: int
     code: str
@@ -425,6 +440,7 @@ class BillingPublishedPlanResponse(BaseModel):
     scale_limits: Optional[dict] = None
     entitlement_flags: dict = {}
     monthly_price_usd: float = 0.0
+    price_components: List[BillingPriceComponentResponse] = []
 
 
 class BillingMySubscriptionResponse(BaseModel):
@@ -443,6 +459,26 @@ class BillingTrialStatusResponse(BaseModel):
     current_period_start: datetime
     current_period_end: datetime
     plan_code: Optional[str] = None
+
+
+class BillingDunningStatusResponse(BaseModel):
+    """GET /billing/dunning-status — lightweight payment-issue banner
+    payload (blocker #17 / Step 4). Null/absent when the org has no
+    BillingDunningState row at all, so the frontend banner simply doesn't
+    render rather than erroring — the common case, since a row only exists
+    once invoice.payment_failed has fired at least once."""
+
+    stage: str
+    entered_at: datetime
+    in_flight_run_guard: bool
+
+
+class BillingPortalResponse(BaseModel):
+    """POST /billing/my-subscription/billing-portal — a one-time Stripe
+    Billing Portal URL so the org admin can update their payment method
+    without Zoiko ever touching card details."""
+
+    portal_url: str
 
 
 # ── Trial lifecycle (Prompt 5) ──────────────────────────────────────────────
@@ -468,8 +504,87 @@ class ConvertTrialRequest(BaseModel):
 class BillingCheckoutRequest(BaseModel):
     """POST /billing/checkout — tenant-facing checkout request."""
     plan_code: str = Field(..., min_length=1, max_length=30)
+    # Part 2 — optional negotiated delayed start; defaults to immediate
+    # (now) for self-service Core/Professional. Never inferred from
+    # checkout completing — see Organization.service_commencement_at.
+    service_commencement_at: Optional[datetime] = None
 
 
 class BillingCheckoutResponse(BaseModel):
     """POST /billing/checkout — response containing Stripe checkout URL."""
     checkout_url: str
+
+
+class BillingCancelRequest(BaseModel):
+    """POST /billing/cancel — tenant-facing, org admin only. No body fields
+    today (cancellation is always "at period end") — kept as its own empty
+    model so a future reason/feedback field doesn't need a breaking change."""
+    pass
+
+
+class EnterpriseOrderFormCreate(BaseModel):
+    """Body for POST /super-admin/billing/organizations/{organization_id}/order-form."""
+    contract_reference: str = Field(..., min_length=1, max_length=100)
+    negotiated_scale_limits: dict
+    negotiated_price_terms: dict
+    term_start: date
+    term_end: Optional[date] = None
+
+
+class EnterpriseOrderFormResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organization_id: int
+    contract_reference: str
+    negotiated_scale_limits: dict
+    negotiated_price_terms: dict
+    term_start: date
+    term_end: Optional[date] = None
+    signed_by: Optional[int] = None
+    created_at: datetime
+
+
+class EnterpriseOrderFormDetailResponse(BaseModel):
+    """One org's signed Order Form with the display-friendly org name
+    attached — shared by GET /super-admin/billing/order-forms (list) and
+    GET /super-admin/billing/organizations/{organization_id}/order-form
+    (detail), both Super Admin only."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organization_id: int
+    organization_name: str
+    contract_reference: str
+    negotiated_scale_limits: dict
+    negotiated_price_terms: dict
+    term_start: date
+    term_end: Optional[date] = None
+    signed_by: Optional[int] = None
+    created_at: datetime
+
+
+class EnterpriseOrderFormListResponse(BaseModel):
+    """GET /super-admin/billing/order-forms — every recorded Order Form,
+    newest first (no pagination: one row per org, unique by design)."""
+    order_forms: List[EnterpriseOrderFormDetailResponse]
+    total: int
+
+
+class BillingRefundRequest(BaseModel):
+    """POST /super-admin/billing/organizations/{organization_id}/refund."""
+    stripe_invoice_id: str = Field(..., min_length=1)
+    amount_cents: Optional[int] = Field(None, gt=0, description="Omit for a full refund")
+    reason: str = Field(..., min_length=1)
+
+
+class BillingCreditNoteIssueRequest(BaseModel):
+    """POST /super-admin/billing/organizations/{organization_id}/credit-note.
+    Named distinctly from the pre-existing BillingCreditNoteCreate (which
+    takes our own internal invoice_id) — this one takes the Stripe invoice
+    id, since that's what a human operator looking at the Stripe dashboard
+    actually has in hand; the endpoint resolves it to our own BillingInvoice
+    row internally."""
+    stripe_invoice_id: str = Field(..., min_length=1)
+    amount_cents: int = Field(..., gt=0)
+    reason: str = Field(..., min_length=1)

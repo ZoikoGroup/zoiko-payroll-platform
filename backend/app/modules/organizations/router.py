@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from app.modules.auth.schemas import SuccessResponse
-from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit
+from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_ENTITIES, MULTI_ENTITY, MULTI_CURRENCY
+from app.modules.billing.models import DunningStage
 from app.core.dependencies import (
     get_current_super_admin,
     get_current_org_admin,
@@ -42,6 +43,7 @@ from app.modules.organizations.schemas import (
     RecentEmployee,
     LegalEntityCreate,
     LegalEntityResponse,
+    OrganizationBillingClassificationUpdate,
 )
 
 logger = logging.getLogger("zoiko_payroll.organizations")
@@ -166,7 +168,10 @@ def list_my_legal_entities(
 
 @router.post(
     "/me/legal-entities", response_model=LegalEntityResponse,
-    dependencies=[Depends(require_writeable_workspace())],
+    dependencies=[
+        Depends(require_writeable_workspace()),
+        Depends(require_not_dunning_restricted(DunningStage.RESTRICT_EXPANSION.value)),
+    ],
 )
 def create_my_legal_entity(
     data: LegalEntityCreate,
@@ -564,6 +569,53 @@ def update_organization_status(
     logger.info(
         "Super Admin %s set organization %s is_active=%s",
         current_user.email, org.organization_code, is_active,
+    )
+    return org
+
+
+_VALID_BILLING_CLASSIFICATIONS = {"COMMERCIAL_ACTIVE", "NON_CHARGEABLE", "LEGACY", "INTERNAL", "DEMO", "QA"}
+
+
+@router.patch("/{organization_id}/billing-classification", response_model=OrganizationResponse)
+def update_organization_billing_classification(
+    organization_id: int,
+    data: OrganizationBillingClassificationUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Super Admin only — moves an org between billing_classification
+    values (e.g. DEMO -> COMMERCIAL_ACTIVE). Setting COMMERCIAL_ACTIVE also
+    sets charge_enabled=True; moving away from it sets charge_enabled=False,
+    since those two fields should never disagree with each other outside
+    the self-service checkout auto-promotion path (billing/router.py)."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import BillingCommercialAuditEvent
+
+    if data.billing_classification not in _VALID_BILLING_CLASSIFICATIONS:
+        raise BadRequestException(
+            f"'{data.billing_classification}' is not a valid billing_classification. "
+            f"Must be one of: {', '.join(sorted(_VALID_BILLING_CLASSIFICATIONS))}."
+        )
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise NotFoundException("Organization", "id")
+
+    previous = org.billing_classification
+    org.billing_classification = data.billing_classification
+    org.charge_enabled = data.billing_classification == "COMMERCIAL_ACTIVE"
+    db.add(org)
+    db.add(BillingCommercialAuditEvent(
+        organization_id=organization_id,
+        actor_user_id=current_user.id,
+        event_type="BILLING_CLASSIFICATION_CHANGED",
+        payload={"from": previous, "to": data.billing_classification, "reason": data.reason},
+    ))
+    db.commit()
+    db.refresh(org)
+    logger.info(
+        "Super Admin %s changed organization %s billing_classification %s -> %s (%s)",
+        current_user.email, org.organization_code, previous, data.billing_classification, data.reason,
     )
     return org
 

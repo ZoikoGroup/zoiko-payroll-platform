@@ -34,6 +34,7 @@ from app.database import get_db
 from app.core.dependencies import get_current_user, get_organization_id
 from app.modules.auth.models import UserRole
 from app.modules.billing.models import (
+    BillingAuthority,
     BillingCommercialAuditEvent,
     BillingEntitlementFlag,
     BillingEntitlementOverride,
@@ -113,6 +114,28 @@ def _resolve_entitlement(
     if override is not None:
         return True, override.limit_value
 
+    # Part 12 — an Enterprise Order Form org has no plan version at all,
+    # by design (Enterprise is never self-service). Its
+    # negotiated_scale_limits dict uses the same feature_key vocabulary
+    # (billing/feature_keys.py) as BillingEntitlementFlag, so this is a
+    # drop-in substitute lookup, same 0-means-off semantics, checked before
+    # ever touching BillingEntitlementFlag/subscription.plan_version_id.
+    if subscription.billing_authority == BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+        from app.modules.billing.models import EnterpriseOrderForm
+
+        order_form = (
+            db.query(EnterpriseOrderForm)
+            .filter(EnterpriseOrderForm.organization_id == subscription.organization_id)
+            .first()
+        )
+        limits = (order_form.negotiated_scale_limits or {}) if order_form else {}
+        if feature_key not in limits:
+            return False, None
+        limit_value = limits[feature_key]
+        if limit_value == 0:
+            return False, 0
+        return True, limit_value
+
     flag = (
         db.query(BillingEntitlementFlag)
         .filter(
@@ -174,6 +197,198 @@ def is_run_in_flight(db: Session, organization_id: int) -> bool:
     )
 
 
+def has_in_flight_authorized_run(db: Session, organization_id: int) -> bool:
+    """Part 9's critical guard: True if this org has a PayrollRun already
+    APPROVED/AUTHORIZED with a pay_date that hasn't passed yet.
+
+    This is deliberately narrower than is_run_in_flight above (which also
+    bypasses entitlement/scope checks for ANY approved run regardless of
+    pay_date) — dunning restriction must specifically never block *completing*
+    an already-authorized, not-yet-paid cycle, which is exactly this
+    condition. require_writeable_workspace-style dunning gating below calls
+    this, not is_run_in_flight, so restriction still applies to starting new
+    payroll activity even if some unrelated older approved run has already
+    passed its pay date.
+    """
+    if organization_id is None:
+        return False
+
+    from datetime import date as date_cls
+
+    from app.modules.payroll.models import PayrollRun, PayrollStatus
+
+    return (
+        db.query(PayrollRun)
+        .filter(
+            PayrollRun.organization_id == organization_id,
+            PayrollRun.status.in_((PayrollStatus.APPROVED.value, PayrollStatus.AUTHORIZED.value)),
+            PayrollRun.pay_date >= date_cls.today(),
+        )
+        .first()
+        is not None
+    )
+
+
+_DUNNING_STAGE_ORDER = ["RETRY", "RESTRICT_EXPANSION", "RESTRICT_NEW_RUN", "READ_ONLY"]
+
+
+def require_not_dunning_restricted(blocking_from_stage: str):
+    """FastAPI dependency factory — Part 9. Blocks NEW payroll/growth
+    activity once an org's BillingDunningState reaches `blocking_from_stage`
+    or later in the RETRY -> RESTRICT_EXPANSION -> RESTRICT_NEW_RUN ->
+    READ_ONLY sequence (billing/dunning.py owns advancing that state).
+
+    Deliberately never gates the run-approve/advance endpoint — that
+    endpoint is shared with completing an already-authorized run, and the
+    Operating Standard's own requirement is explicit: dunning must never
+    block an already-authorized in-flight cycle. Blocking only *creation*
+    (new payroll runs, new legal entities, new jurisdictions), never
+    *advancement*, is how that guarantee holds without needing to
+    distinguish intent inside a shared polymorphic endpoint. Call with
+    DunningStage.RESTRICT_EXPANSION for growth actions, RESTRICT_NEW_RUN
+    for payroll run creation specifically (one stage later/more severe).
+    """
+    threshold_index = _DUNNING_STAGE_ORDER.index(blocking_from_stage)
+
+    def _check(
+        current_user=Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> bool:
+        if current_user.role == UserRole.SUPER_ADMIN:
+            return True
+
+        organization_id = current_user.organization_id
+        from app.modules.billing.models import BillingDunningState
+
+        state = db.query(BillingDunningState).filter(BillingDunningState.organization_id == organization_id).first()
+        if state is None:
+            return True
+
+        current_index = _DUNNING_STAGE_ORDER.index(state.stage) if state.stage in _DUNNING_STAGE_ORDER else 0
+        if current_index >= threshold_index:
+            raise ForbiddenException(
+                "Your account has an overdue payment and this action is currently "
+                "restricted. Existing authorized payroll runs are not affected. "
+                "Please update your billing details to resume.",
+                trace={"dunning_stage": state.stage},
+            )
+        return True
+
+    return _check
+
+
+_VALID_COMMERCIAL_ROUTES = (
+    BillingAuthority.STANDALONE.value,
+    BillingAuthority.ZOIKO_ONE_BUNDLE.value,
+    BillingAuthority.ENTERPRISE_ORDER_FORM.value,
+)
+
+
+def resolve_commercial_route(db: Session, organization, route: str) -> None:
+    """Commercial Billing & Subscription Operating Standard §12 — the ONE
+    place Organization.commercial_route and BillingSubscription.
+    billing_authority are ever set, together, so they can never disagree.
+    Every entry point that establishes or changes an org's commercial
+    route calls this instead of setting either field itself:
+
+      - billing/router.py's create_checkout_session — route=STANDALONE
+      - billing/enterprise_order_form.py's record_order_form —
+        route=ENTERPRISE_ORDER_FORM
+      - apply_zoiko_one_bundle_route() below — route=ZOIKO_ONE_BUNDLE,
+        stubbed now with no caller yet, so that decision doesn't get
+        invented ad hoc when Zoiko One integration actually lands
+
+    Does NOT commit — callers are already inside their own transaction
+    (checkout's auto-promotion, record_order_form's audit-first write) and
+    decide when to commit alongside their own other changes.
+    """
+    if route not in _VALID_COMMERCIAL_ROUTES:
+        raise ValueError(f"Unrecognized commercial_route: {route!r}")
+
+    organization.commercial_route = route
+    db.add(organization)
+
+    sub = get_active_subscription(db, organization.id)
+    if sub is not None:
+        sub.billing_authority = route
+        db.add(sub)
+
+
+def apply_zoiko_one_bundle_route(db: Session, organization) -> None:
+    """Stub — no caller exists yet. Reserved for the future Zoiko One
+    bundle entry point (an org whose billing rides on a Zoiko One-level
+    commercial relationship rather than its own Stripe subscription or an
+    Enterprise Order Form). Exists now purely so that entry point calls
+    resolve_commercial_route() the same way STANDALONE/ENTERPRISE_ORDER_FORM
+    already do, instead of a future implementer inventing a fourth way to
+    set these two fields."""
+    resolve_commercial_route(db, organization, BillingAuthority.ZOIKO_ONE_BUNDLE.value)
+
+
+def assert_no_overlapping_billable_ownership(db: Session, organization_id: int, incoming_route: str) -> None:
+    """Commercial Billing & Subscription Operating Standard §12's core
+    rule: an org may never have overlapping billable ownership — a
+    BillingSubscription under one commercial route while something else
+    (an EnterpriseOrderForm, or a different route's subscription) also
+    claims to govern its billing. Application-level guard rather than a DB
+    constraint: BillingSubscription.organization_id and
+    EnterpriseOrderForm.organization_id are each already unique
+    individually (preventing duplicates within their own table), but
+    nothing at the schema level can express "these two tables must never
+    both have a row for the same org" across tables without a trigger —
+    checked here instead, at the two points that ever create either row
+    (create_checkout_session, record_order_form).
+    """
+    from app.modules.billing.models import EnterpriseOrderForm
+
+    existing_sub = get_active_subscription(db, organization_id)
+    existing_order_form = db.query(EnterpriseOrderForm).filter(EnterpriseOrderForm.organization_id == organization_id).first()
+
+    if incoming_route == BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+        if existing_sub is not None and existing_sub.billing_authority != BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+            raise ForbiddenException(
+                f"This organization already has a {existing_sub.billing_authority} billing relationship. "
+                "Recording an Enterprise Order Form for it would silently overlap two commercial routes — "
+                "migrate it explicitly first."
+            )
+    else:
+        if existing_order_form is not None:
+            raise ForbiddenException(
+                "This organization already has an Enterprise Order Form on file. "
+                "Self-service checkout would silently overlap two commercial routes — "
+                "this org must be managed through its Order Form, not self-service checkout."
+            )
+
+
+def is_billable(organization) -> bool:
+    """Commercial Billing & Subscription Operating Standard §A1 — the one
+    gate every invoice/charge/recurring-billing-event code path must check
+    before doing anything, and refuse (fail closed) if it returns False.
+
+    Deliberately takes the Organization object directly, not an
+    organization_id + db lookup, since every call site (webhook handlers,
+    invoice writers, the dunning sweep) already has the row in hand — this
+    stays a pure, DB-free predicate so it's trivial to unit test.
+    """
+    if organization is None:
+        return False
+    return (
+        getattr(organization, "billing_classification", None) == "COMMERCIAL_ACTIVE"
+        and bool(getattr(organization, "charge_enabled", False))
+    )
+
+
+def is_service_commenced(organization) -> bool:
+    """Part 2 — a subscription is only real-billable once
+    service_commencement_at is set AND in the past. Existing (workspace
+    created, checkout completed, admin account exists) is never sufficient
+    on its own — see Organization.service_commencement_at's own docstring."""
+    commenced_at = getattr(organization, "service_commencement_at", None)
+    if commenced_at is None:
+        return False
+    return commenced_at <= datetime.utcnow()
+
+
 def require_production_workspace(db: Session, organization_id: int) -> None:
     """Block execution-safety-sensitive operations (ELSTER transmission,
     future live bank disbursements) for EVALUATION workspaces.
@@ -198,12 +413,27 @@ def require_active_subscription(
     organization_id: int = Depends(get_organization_id),
     db: Session = Depends(get_db)
 ) -> None:
-    """Blocks access for PRODUCTION-workspace orgs with no ACTIVE subscription.
-    EVALUATION-workspace orgs are exempt — their access comes from the trial
-    subscription (SubscriptionStatus.TRIALING), not this gate. Ignores
-    ALLOW_ALL for the same reason require_production_workspace does: this is
-    about whether a commercial relationship exists at all, not about which
-    plan-tier features are enabled."""
+    """Blocks access for PRODUCTION-workspace orgs with no real commercial
+    relationship at all. EVALUATION-workspace orgs are exempt — their
+    access comes from the trial subscription (SubscriptionStatus.TRIALING),
+    not this gate. Ignores ALLOW_ALL for the same reason
+    require_production_workspace does: this is about whether a commercial
+    relationship exists at all, not about which plan-tier features are
+    enabled.
+
+    PAST_DUE is deliberately NOT blocked here (Commercial Billing &
+    Subscription Operating Standard Part 9): a payment failure must run the
+    graduated dunning sequence (billing/dunning.py — RETRY is fully
+    permissive, matching Stripe's own smart-retry window) and must never
+    terminate an already-authorized in-flight pay cycle immediately on the
+    first failed charge. This router-level gate blocking PAST_DUE
+    unconditionally would make the entire dunning system moot — the
+    specific, narrower require_not_dunning_restricted() gates (wired into
+    new-run/new-entity/new-jurisdiction creation only) are what actually
+    enforce dunning restriction, scaled to how overdue the account is.
+    Only a subscription with no real path back (SUSPENDED, CANCELLED, or
+    simply missing) blocks here.
+    """
     from app.modules.organizations.models import Organization
     from app.modules.billing.models import SubscriptionStatus
 
@@ -215,8 +445,13 @@ def require_active_subscription(
         return
 
     subscription = get_active_subscription(db, organization_id)
-    if subscription is None or subscription.status != SubscriptionStatus.ACTIVE.value:
-        raise ForbiddenException("An ACTIVE subscription is required for production workspaces.")
+    if subscription is None:
+        raise ForbiddenException("An active commercial relationship is required for production workspaces.")
+
+    if subscription.status in (SubscriptionStatus.ACTIVE.value, SubscriptionStatus.PAST_DUE.value):
+        return
+
+    raise ForbiddenException("An active commercial relationship is required for production workspaces.")
 
 
 def list_entitlement_overrides(db: Session, organization_id: int) -> list:

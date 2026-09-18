@@ -28,6 +28,7 @@ import {
   Activity,
   Plug,
   ShieldAlert,
+  FileSignature,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
@@ -75,6 +76,7 @@ const NAV_GROUPS = [
     items: [
       { label: "Plans & Entitlements", href: "/super-admin/plans-entitlements", icon: Layers },
       { label: "Subscriptions & Billing", href: "/super-admin/subscriptions-billing", icon: CreditCard },
+      { label: "Order Forms", href: "/super-admin/order-forms", icon: FileSignature },
     ],
   },
   {

@@ -41,6 +41,19 @@ export const createEntitlementOverride = (organizationId, payload) =>
     body: payload,
   });
 
+// ── Enterprise Order Forms (Step 6 / Part 12) ────────────────────────────
+
+export const listOrderForms = () => apiFetch("/api/super-admin/billing/order-forms");
+
+export const getOrderForm = (organizationId) =>
+  apiFetch(`/api/super-admin/billing/organizations/${organizationId}/order-form`);
+
+export const createOrderForm = (organizationId, payload) =>
+  apiFetch(`/api/super-admin/billing/organizations/${organizationId}/order-form`, {
+    method: "POST",
+    body: payload,
+  });
+
 // ── Payroll Operations ──────────────────────────────────────────────────
 
 export const listAllPayrollRuns = (params) =>
