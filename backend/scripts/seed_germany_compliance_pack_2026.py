@@ -132,7 +132,25 @@ def main() -> None:
             .first()
         )
         if existing:
-            print(f"[{SCRIPT_NAME}] {PACK_ID} v1.0 already exists (id={existing.id}, status={existing.status}) — nothing to do.")
+            print(f"[{SCRIPT_NAME}] {PACK_ID} v1.0 already exists (id={existing.id}, status={existing.status}).")
+            pack = existing
+            if pack.status == "Active":
+                print(f"[{SCRIPT_NAME}] Already Active — nothing to do.")
+                return
+            # Resume the lifecycle rather than stopping — a prior run may have
+            # created the row and then failed before Approve/Activate (found for
+            # real: a since-fixed record_tax_audit truncation bug left exactly
+            # this state). Re-running must finish the job, not silently no-op.
+            if pack.status == "Draft":
+                pack = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker.id)
+                print(f"[{SCRIPT_NAME}] Approved by actor_id={checker.id} -> status={pack.status}.")
+            if pack.status == "Approved":
+                pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker.id)
+                print(f"[{SCRIPT_NAME}] Activated -> status={pack.status}, "
+                      f"effective {pack.effective_from} to {pack.effective_to}.")
+            entries = service.list_tax_configuration_audit(db, jurisdiction_pack_id=pack.id)
+            print(f"[{SCRIPT_NAME}] Audit trail: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} recorded "
+                  f"({', '.join(sorted({e.action for e in entries}))}).")
             return
 
         pack = service.upsert_jurisdiction_pack(

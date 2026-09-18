@@ -35,15 +35,28 @@ were never part of `main`'s 126, so they don't need subtracting.
 
 Checks enforced here:
 
-1. Exactly one head: `752aa7829541`.
+1. Exactly one head: `799b28d80edd`.
 2. Branch points are exactly the reconciled set — `main`'s own pre-existing
    ones plus `2b3c4d5e6f70` (where `main`'s and Germany's post-fork
    histories diverge).
-3. No duplicate revision IDs in the versions directory; total count is 130.
+3. No duplicate revision IDs in the versions directory; total count is 132.
 4. The Germany chain wiring is intact: `65bc3ca96fd6 -> b7c8d9e0f2a3 ->
    d3e4f5a6b7c8` and `2b3c4d5e6f70 -> 13ce5f1cf7a1 -> abaca1105dbb`.
 5. `nikhil`'s 4 redundant renamed duplicates no longer appear as an ACTIVE
    revision anywhere (dropped in favor of `main`'s canonical IDs).
+
+Germany 2026 all-Länder jurisdiction task — two more additive, linear
+migrations landed on top of `752aa7829541` (schema-drift fixes found while
+seeding the real Germany 2026 registries against Postgres for the first
+time; SQLite doesn't enforce VARCHAR length so these went uncaught until
+now): `00a912d5306c` (widen GermanyEarningTaxabilityRule.gkv_pv_treatment/
+rv_alv_treatment to match the model's already-declared String(40)) ->
+`799b28d80edd` (widen TaxConfigurationAudit.entity_type from String(30) to
+String(50) — several existing Germany audit call sites already exceeded
+30 chars). Neither touches a branchpoint or the Germany chain wiring below
+— they're a new, single-parent tail after the existing head, so only the
+head literal and total revision count change; the 5 checks above except
+1 and 3 are otherwise unaffected. 130 + 2 = 132.
 """
 
 import re
@@ -100,11 +113,11 @@ def _children_map(revs: dict) -> dict:
     return children
 
 
-def test_alembic_heads_is_single_head_752aa7829541():
+def test_alembic_heads_is_single_head_799b28d80edd():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["752aa7829541"]
+    assert heads == ["799b28d80edd"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -116,7 +129,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["752aa7829541"]
+    assert list(script.get_heads()) == ["799b28d80edd"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -138,8 +151,9 @@ def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
     # 126 (main) + 4 new/kept from nikhil (b7c8d9e0f2a3, 13ce5f1cf7a1,
-    # abaca1105dbb, the 752aa7829541 merge) = 130.
-    assert len(revs) == 130
+    # abaca1105dbb, the 752aa7829541 merge) = 130, + 2 additive Germany
+    # 2026 all-Länder schema-drift fixes (00a912d5306c, 799b28d80edd) = 132.
+    assert len(revs) == 132
 
 
 def test_germany_head_chain_wiring_is_intact():
