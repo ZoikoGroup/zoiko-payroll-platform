@@ -46,7 +46,7 @@ jobs:
             alembic history | head -n 40 || true
             alembic current
             echo "Database alembic_version:"
-            python - <<'PY' || true
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' || true
             from sqlalchemy import text
             from app.database import engine
 
@@ -69,7 +69,30 @@ jobs:
             # Alembic exits nonzero if the database is not at every head.
             alembic current --check-heads
 
-            echo "Final revision matches Alembic head."
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY'
+            from alembic.config import Config
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+            from app.database import engine
+
+            config = Config("alembic.ini")
+            script = ScriptDirectory.from_config(config)
+
+            expected = set(script.get_heads())
+            with engine.connect() as connection:
+                actual = set(MigrationContext.configure(connection).get_current_heads())
+
+            print(f"expected heads: {sorted(expected)}")
+            print(f"database heads: {sorted(actual)}")
+
+            if actual != expected:
+                raise SystemExit(
+                    "Database is not at the Alembic head: "
+                    f"missing={sorted(expected - actual)}, "
+                    f"unexpected={sorted(actual - expected)}"
+                )
+            print("Database is at the Alembic head.")
+            PY
 
             deactivate
             sudo systemctl restart zoiko-payroll-backend
