@@ -1,0 +1,86 @@
+# DRAFT / PROPOSAL — not yet active.
+#
+# This workflow is a parameterized copy of backend-deploy.yml, targeting a
+# second, isolated environment instead of production. It is safe to merge
+# as-is: it only runs on a push to a `staging` branch (which doesn't exist
+# yet) or a manual dispatch, and every step depends on secrets
+# (STAGING_SSH_HOST/USER/KEY) that are not configured — so until both the
+# branch and the secrets exist, this workflow simply never fires.
+#
+# See docs/STAGING_ENVIRONMENT_PROPOSAL.md for what would need provisioning
+# in GCP before this can actually run, and the rough cost/effort shape.
+# This is a proposal for review, not something already provisioned or
+# executed.
+name: Deploy Zoiko Payroll Backend (Staging)
+
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Run backend test suite
+        working-directory: backend
+        run: python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Verify single Alembic head, no duplicate revision IDs
+        run: |
+          python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; import sys; cfg = Config('backend/alembic.ini'); script = ScriptDirectory.from_config(cfg); heads = script.get_heads();
+          if len(heads) != 1:
+              print(f'FAIL: expected exactly one alembic head, found {len(heads)}: {heads}'); sys.exit(1)
+          print(f'OK: single head {heads[0]}')"
+      # Separate secrets from production's GCP_SSH_HOST/USER/KEY -- a
+      # staging deploy must never be able to reach the production host,
+      # so these are deliberately distinct secret names, not a shared one
+      # with a different value swapped in per-environment.
+      - name: SSH and deploy backend (staging)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/zoiko-payroll-staging/backend
+            git pull origin staging
+            cd backend
+            source venv/bin/activate
+            pip install -r requirements.txt
+            bash ../scripts/deploy_migrate.sh
+            deactivate
+            sudo systemctl restart zoiko-payroll-backend-staging
+      - name: Check for model/schema drift
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/zoiko-payroll-staging/backend/backend
+            source venv/bin/activate
+            python -m scripts.check_schema_drift
