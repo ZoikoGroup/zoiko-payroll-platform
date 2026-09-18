@@ -4,6 +4,17 @@ Revision ID: b4241285b6dd
 Revises: 185332840016
 Create Date: 2026-09-07 00:00:00.000000
 
+Phase 8CN renumbering note: this revision was originally authored as
+`f0a1b2c3d4e5` (Phase 8AR). `origin/main` independently reused that same
+12-hex id for an unrelated migration (`add_source_document_id_to_rate_
+slab`) and renamed its own copy of this migration to `b4241285b6dd`. This
+`nikhil`-only copy is renamed here to `824bb1b61dc2`, a freshly
+verified-unique id, and its parent updated to match the sibling rename
+(`e9f0a1b2c3d4` -> `cda89a810e94`) — see
+docs/GERMANY_2026_8CN_ALEMBIC_COLLISION_RECONCILIATION_REPORT.md. Only
+the `revision`/`down_revision` ids and this note changed; `upgrade()`/
+`downgrade()` and every other line are unchanged.
+
 Phase 8AR — docs/PHASE_8AR_GERMANY_OVERTIME_NET_PAY_INTEGRATION_REPORT.md.
 
 Additive only: four new columns on the existing

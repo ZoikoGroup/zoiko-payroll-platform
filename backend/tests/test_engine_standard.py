@@ -17,6 +17,7 @@ import pytest
 
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.standard import StandardStrategy, evaluate_tax_formula, _calculate_annual_tax
+from app.modules.payroll.engine.enterprise import EnterpriseStrategy
 from app.modules.payroll.engine.countries import canada as _canada
 from app.modules.payroll.engine.countries import us as _us
 from app.modules.payroll.engine.countries.canada import _resolve_ca_bpaf
@@ -5875,3 +5876,99 @@ def test_evaluate_tax_formula_rejects_unsafe_expressions():
         evaluate_tax_formula("__import__('os').system('echo hi')", Decimal("1000"))
     with pytest.raises(Exception):
         evaluate_tax_formula("income.__class__", Decimal("1000"))
+
+
+# ── Phase 2 architecture consolidation: EnterpriseStrategy ══════════════
+# EnterpriseStrategy used to carry its own independently-maintained copy
+# of StandardStrategy.calculate() that had silently dropped
+# `employee_pension` (UK workplace pension) from both the deduction sum
+# and the returned PayrollResult. It is now a plain subclass inheriting
+# StandardStrategy's calculate() outright, so the two can never again
+# silently diverge. These tests prove (a) the previously-dropped field
+# is present again, and (b) Standard and Enterprise produce identical
+# results across representative jurisdictions/values.
+
+ENTERPRISE_STRATEGY = EnterpriseStrategy()
+
+UK_PENSION_RATES = {
+    "national-insurance": Rate("national-insurance", Decimal("8.00"), Decimal("13.80")),
+    "employer-pension": Rate("employer-pension", employee_rate_pct=Decimal("5.00"), employer_rate_pct=Decimal("3.00")),
+}
+
+
+def test_enterprise_includes_uk_employee_pension_previously_dropped():
+    # Regression for the Phase 1-identified bug: EnterpriseStrategy's own
+    # (now-removed) calculate() never read `employee_pension` out of the
+    # UK deductions dict at all, so it was always 0 for Enterprise-mode
+    # orgs even when a real employee-side pension rate was configured.
+    ctx = PayrollContext(
+        gross=Decimal("3000"), basic=Decimal("3000"), country="UK",
+        rate_map=UK_PENSION_RATES, slabs=UK_SLABS,
+    )
+    result = ENTERPRISE_STRATEGY.calculate(ctx)
+    assert result.employee_pension > 0
+    # ... and it must actually reduce net pay / be counted in total_deductions,
+    # not just be reported cosmetically.
+    assert result.total_deductions >= result.employee_pension
+
+
+# ── Phase 2 architecture consolidation: telescope_period_amount ────────
+# Canada's Ontario EHT / BC-MB-NL notch levies / Quebec HSF, and the UK's
+# Apprenticeship Levy, each independently implemented the identical
+# "annual(after) - annual(before)" telescoping shape. Only that mechanical
+# wrapper was extracted to countries/shared.py — each caller keeps its own
+# jurisdiction-specific `annual_amount_fn` closure untouched. Country-level
+# regression tests (test_ca_*/test_uk_apprenticeship_levy* etc., unchanged
+# by this refactor and still passing with the same expected figures) are
+# the primary behavioral-equivalence proof; these are a direct unit test
+# of the shared helper in isolation.
+
+def test_telescope_period_amount_sums_correctly_across_periods():
+    # A flat 10% annual rate with no exemption: two 1000-gross periods
+    # must sum to the same total as one 2000-gross period.
+    annual_fn = lambda total: total * Decimal("0.10")
+    first = shared.telescope_period_amount(Decimal("1000"), Decimal("0"), annual_fn)
+    second = shared.telescope_period_amount(Decimal("1000"), Decimal("1000"), annual_fn)
+    single = shared.telescope_period_amount(Decimal("2000"), Decimal("0"), annual_fn)
+    assert first + second == single
+    assert first == Decimal("100.00")
+
+
+def test_telescope_period_amount_handles_a_threshold_crossed_mid_period():
+    # annual_fn is 0 below 500, 20% above — crossing the threshold mid
+    # -period must only charge the portion above it, not the whole period.
+    annual_fn = lambda total: Decimal("0") if total <= Decimal("500") else (total - Decimal("500")) * Decimal("0.20")
+    result = shared.telescope_period_amount(Decimal("1000"), Decimal("200"), annual_fn)
+    # before=200 (below threshold, annual=0), after=1200 (annual=(1200-500)*0.2=140)
+    assert result == Decimal("140.00")
+
+
+def test_telescope_period_amount_zero_gross_is_zero():
+    annual_fn = lambda total: total * Decimal("0.10")
+    assert shared.telescope_period_amount(Decimal("0"), Decimal("5000"), annual_fn) == Decimal("0.00")
+
+
+@pytest.mark.parametrize(
+    "country,gross,rate_map,slabs",
+    [
+        ("IN", Decimal("0"), IN_RATES, IN_SLABS),
+        ("IN", Decimal("20000"), IN_RATES, IN_SLABS),
+        ("IN", Decimal("200000"), IN_RATES, IN_SLABS),
+        ("UK", Decimal("0"), UK_PENSION_RATES, UK_SLABS),
+        ("UK", Decimal("2000"), UK_PENSION_RATES, UK_SLABS),
+        ("UK", Decimal("10000"), UK_PENSION_RATES, UK_SLABS),
+        ("US", Decimal("5000"), {}, []),
+        ("ZZ", Decimal("1000"), {}, [Slab(Decimal("0"), None, Decimal("10"))]),
+    ],
+)
+def test_standard_and_enterprise_produce_identical_results(country, gross, rate_map, slabs):
+    # Behavioral-equivalence proof for the consolidation: for every
+    # non-Germany case (Germany's own suite covers DE separately, since it
+    # additionally requires a statutory-profile fixture StandardStrategy's
+    # generic test harness here doesn't build), Standard and Enterprise
+    # must return byte-identical PayrollResult objects across zero/normal/
+    # high values and an unrecognised-country fallback.
+    ctx_kwargs = dict(gross=gross, basic=gross, country=country, rate_map=rate_map, slabs=slabs)
+    standard_result = StandardStrategy().calculate(PayrollContext(**ctx_kwargs))
+    enterprise_result = ENTERPRISE_STRATEGY.calculate(PayrollContext(**ctx_kwargs))
+    assert standard_result == enterprise_result
