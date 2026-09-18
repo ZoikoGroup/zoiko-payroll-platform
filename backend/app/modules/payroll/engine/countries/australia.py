@@ -152,7 +152,7 @@ from app.modules.payroll.engine.countries.shared import (
 # their original names so nothing else needs to change.
 from app.modules.payroll.hardcoded_defaults import (
     _AU_MLS_THRESHOLD, _AU_MLS_RATE, _AU_SUPER_MAX_CONTRIBUTION_BASE,
-    _AU_PAYG_SCALE4_RESIDENT_RATE, _AU_PAYG_SCALE4_NONRESIDENT_RATE,
+    _AU_PAYG_SCALE4_RESIDENT_RATE, _AU_PAYG_SCALE4_NONRESIDENT_RATE, _AU_SCHEDULE4_RETURN_TO_WORK_RATE,
     _AU_WHM_RATE, _AU_WHM_NO_TFN_RATE, _AU_WHM_CAP_THRESHOLD, _AU_WHM_ABOVE_CAP_BRACKETS,
     _AU_ETP_LIFE_CAP, _AU_ETP_DEATH_CAP, _AU_GENUINE_REDUNDANCY_BASE, _AU_GENUINE_REDUNDANCY_PER_YEAR,
     _AU_WA_PT_THRESHOLD, _AU_WA_PT_UPPER_THRESHOLD, _AU_WA_PT_RATE,
@@ -1023,6 +1023,26 @@ def calculate_au_schedule5_back_payment_withholding(
         "withholding_with_averaged_payment": withholding_with,
         "total_withholding": total_withholding,
     }
+
+
+def calculate_au_schedule4_return_to_work_withholding(payment_amount: Decimal, tfn_status: str, residency_status: str) -> Decimal:
+    """Schedule 4 (NAT 3347) — return to work payments (paid to resume
+    working for, or provide services to, the payer or any other entity),
+    resolved 2026-09-18 (production-readiness fix plan, Tier 3.1).
+
+    Real ATO-published flat rate, cross-checked via two independent
+    searches since ato.gov.au itself blocks automated fetches: 32%
+    withheld — residents AND foreign residents alike — when a TFN is on
+    file; falls back to the SAME no-TFN rates as Schedule 1 Scale 4
+    (47%/45% resident/foreign-resident) when it isn't. Rounded to the
+    nearest dollar, 50 cents rounding up (_au_round_to_dollar, NAT 1004's
+    own rounding convention, confirmed to apply here too)."""
+    if tfn_status == "NOT_PROVIDED":
+        is_resident = residency_status != "FOREIGN_RESIDENT"
+        rate = _AU_PAYG_SCALE4_RESIDENT_RATE if is_resident else _AU_PAYG_SCALE4_NONRESIDENT_RATE
+    else:
+        rate = _AU_SCHEDULE4_RETURN_TO_WORK_RATE
+    return _au_round_to_dollar(payment_amount * rate / Decimal("100"))
 
 
 def calculate_au_etp_cap_classification(ctx: PayrollContext, etp_amount: Decimal, is_death_benefit: bool = False) -> dict:

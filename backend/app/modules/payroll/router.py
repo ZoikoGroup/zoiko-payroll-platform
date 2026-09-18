@@ -120,6 +120,7 @@ from app.modules.payroll.schemas import (
     CAPd7aGenerateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
     AUSchedule5CalculateRequest, AUSchedule5CalculateResponse,
+    AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
     USSupplementalWageCalculateRequest, USSupplementalWageCalculateResponse,
     USFederalDepositScheduleRequest, USFederalDepositScheduleResponse,
     CARetiringAllowanceCalculateRequest, CARetiringAllowanceCalculateResponse,
@@ -1385,6 +1386,21 @@ def calculate_au_schedule5(
     return service.calculate_au_employee_schedule5_withholding(
         db, current_user.organization_id, data.employee_id,
         data.regular_period_gross, data.special_payment_amount, payroll_date=data.payroll_date,
+    )
+
+
+@payroll_router.post(
+    "/australia/schedule4/calculate", response_model=AUSchedule4CalculateResponse, response_model_by_alias=True,
+    summary="Calculate Australia PAYG withholding on a return-to-work payment (ATO Schedule 4/NAT 3347 flat-rate method)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_au_schedule4(
+    data: AUSchedule4CalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_au_employee_schedule4_withholding(
+        db, current_user.organization_id, data.employee_id, data.payment_amount,
     )
 
 

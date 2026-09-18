@@ -13083,6 +13083,35 @@ def calculate_au_employee_schedule5_withholding(
     return calculate_au_schedule5_back_payment_withholding(ctx, regular_period_gross, special_payment_amount)
 
 
+# ── Australia: Schedule 4 return-to-work payment flat-rate method ───────
+# (ZP-TAX-AU-2026-27-001 §9, production-readiness fix plan Tier 3.1,
+# 2026-09-18) — see engine/countries/australia.py's
+# calculate_au_schedule4_return_to_work_withholding for the rate
+# sourcing. Simpler than Schedule 5: no calc-inputs resolution is
+# needed at all, since this is a flat rate on the payment amount alone
+# — just the employee's own TFN/residency declarations.
+def calculate_au_employee_schedule4_withholding(db: Session, organization_id: int, employee_id: int, payment_amount: Decimal) -> dict:
+    from app.modules.payroll.engine.countries.australia import calculate_au_schedule4_return_to_work_withholding
+
+    if payment_amount is None or payment_amount < 0:
+        raise BadRequestException("payment_amount must be zero or positive.")
+
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "AU":
+        raise BadRequestException("The Schedule 4 return-to-work payment method only applies to Australia employees.")
+
+    tfn_status = getattr(employee, "au_tfn_status", None)
+    residency_status = getattr(employee, "au_residency_status", None)
+    withholding = calculate_au_schedule4_return_to_work_withholding(payment_amount, tfn_status, residency_status)
+    return {
+        "payment_amount": payment_amount,
+        "tfn_status": tfn_status,
+        "residency_status": residency_status,
+        "withholding": withholding,
+    }
+
+
 def _next_business_day(d: date) -> date:
     """Saturday -> following Monday, Sunday -> following Monday, else
     unchanged. Weekend-only — no federal holiday calendar is sourced

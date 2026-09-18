@@ -28,7 +28,7 @@ from app.modules.payroll.engine.countries.australia import (
     calculate_au_genuine_redundancy_tax_free_component,
     calculate_au_statutory_deduction, calculate_au_statutory_deductions,
     calculate_au_schedule3_entertainer_withholding, calculate_au_schedule6_annuity_withholding,
-    calculate_au_schedule5_back_payment_withholding,
+    calculate_au_schedule5_back_payment_withholding, calculate_au_schedule4_return_to_work_withholding,
 )
 import app.modules.payroll.engine.countries.shared as shared
 
@@ -3378,6 +3378,40 @@ def test_au_schedule5_monthly_frequency_uses_12_periods():
     result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("1200"))
     assert result["periods_per_year"] == 12
     assert result["averaged_amount"] == Decimal("100")
+
+
+def test_au_schedule4_return_to_work_flat_32_percent_with_tfn():
+    # $5,000 return-to-work payment, TFN on file -> flat 32%, rounded to
+    # nearest dollar. 5000*32% = 1600 exactly.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "PROVIDED", "RESIDENT")
+    assert result == Decimal("1600")
+
+
+def test_au_schedule4_return_to_work_no_tfn_resident_uses_scale4_rate():
+    # No TFN, resident -> falls back to Schedule 1 Scale 4's own 47% rate,
+    # not the 32% Schedule 4 rate. 5000*47% = 2350.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "NOT_PROVIDED", "RESIDENT")
+    assert result == Decimal("2350")
+
+
+def test_au_schedule4_return_to_work_no_tfn_foreign_resident_uses_scale4_rate():
+    # No TFN, foreign resident -> 45%. 5000*45% = 2250.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "NOT_PROVIDED", "FOREIGN_RESIDENT")
+    assert result == Decimal("2250")
+
+
+def test_au_schedule4_return_to_work_applies_to_foreign_resident_too_with_tfn():
+    # The 32% rate applies to residents AND foreign residents alike when
+    # a TFN is on file -- must NOT silently apply a different rate.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "PROVIDED", "FOREIGN_RESIDENT")
+    assert result == Decimal("1600")
+
+
+def test_au_schedule4_return_to_work_rounds_50_cents_up():
+    # 1.5625 * 32% = 0.50 exactly -- NAT 1004's own rounding convention
+    # (50 cents rounds UP, not to-even/down) must apply here too.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("1.5625"), "PROVIDED", "RESIDENT")
+    assert result == Decimal("1")
 
 
 # ── Australia: ATO Schedule 8 (NAT 3539) STSL coefficient-band engine ────

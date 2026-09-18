@@ -1393,6 +1393,22 @@ class AUSchedule5CalculateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# ── Australia: Schedule 4 return-to-work payment flat-rate method ────────
+# (ZP-TAX-AU-2026-27-001 §9, production-readiness fix plan Tier 3.1) — see
+# service.calculate_au_employee_schedule4_withholding's own docstring.
+class AUSchedule4CalculateRequest(BaseModel):
+    employee_id: int
+    payment_amount: Decimal
+
+
+class AUSchedule4CalculateResponse(BaseModel):
+    paymentAmount: Decimal = Field(validation_alias="payment_amount", serialization_alias="paymentAmount")
+    tfnStatus: Optional[str] = Field(None, validation_alias="tfn_status", serialization_alias="tfnStatus")
+    residencyStatus: Optional[str] = Field(None, validation_alias="residency_status", serialization_alias="residencyStatus")
+    withholding: Decimal
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ── Company Holidays ─────────────────────────────────────────────────────
 
 class HolidayCreate(BaseModel):

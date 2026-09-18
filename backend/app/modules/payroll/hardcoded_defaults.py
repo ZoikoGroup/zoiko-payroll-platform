@@ -1098,6 +1098,20 @@ _AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("270830")
 _AU_PAYG_SCALE4_RESIDENT_RATE = Decimal("47.0")
 _AU_PAYG_SCALE4_NONRESIDENT_RATE = Decimal("45.0")
 
+# Schedule 4 (NAT 3347, return to work payments) — real ATO-published flat
+# rate, resolved 2026-09-18 (production-readiness fix plan, Tier 3.1):
+# 32% withheld (residents AND foreign residents alike) when a TFN is on
+# file; falls back to Schedule 1 Scale 4's own no-TFN rates above
+# (47%/45% resident/foreign-resident) when it isn't — the same published
+# figures, not a coincidence this codebase invents, since a no-TFN
+# payment always attracts the top marginal-adjacent rate regardless of
+# which schedule it's paid under. Confirmed unchanged for 2026-27 despite
+# the broader "Stage 3+" bracket reform (return-to-work payments have
+# their own dedicated flat rate, not derived from resident brackets),
+# cross-checked via two independent searches since ato.gov.au itself
+# blocks automated fetches.
+_AU_SCHEDULE4_RETURN_TO_WORK_RATE = Decimal("32.0")
+
 # Schedule 15 (NAT 75331, Working Holiday Maker subclass 417/462) — real
 # ATO-published flat rates, resolved 2026-09-17: 15% with a TFN on file,
 # 45% with no TFN. Same "flat rate, simple scalar fallback" reasoning as
