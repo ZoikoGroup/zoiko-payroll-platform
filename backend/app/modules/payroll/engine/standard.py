@@ -274,6 +274,8 @@ class StandardStrategy(PayrollStrategy):
             ytd_futa_wages_after=deductions.get("ytd_futa_wages_after"),
             ytd_medicare_wages_after=deductions.get("ytd_medicare_wages_after"),
             ytd_sg_qualifying_earnings_after=deductions.get("ytd_sg_qualifying_earnings_after"),
+            ytd_whm_earnings_after=deductions.get("ytd_whm_earnings_after"),
+            au_whm_cap_exceeded=deductions.get("au_whm_cap_exceeded", False),
             sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),
             sg_rate_pct=deductions.get("sg_rate_pct"),
             sg_mcb_reached=deductions.get("sg_mcb_reached"),

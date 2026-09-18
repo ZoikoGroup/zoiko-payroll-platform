@@ -569,10 +569,28 @@ def calculate(ctx: PayrollContext) -> dict:
 
     annual_gross = gross * MONTHS_PER_YEAR
     age_category = _resolve_old_regime_age_category(ctx.date_of_birth, ctx.tax_residency_status, ctx.pay_date)
+    # Section 80CCD(2) cap (§3.2's own "up to statutory percentage" —
+    # flagged in this function's requirements from the start but never
+    # actually built until now): the employer's NPS CONTRIBUTION
+    # (employer_nps above, an actual cost paid regardless) is uncapped,
+    # but how much of it is excluded from New-Regime taxable salary is
+    # capped at this % of annual Basic — any employer contribution above
+    # the cap becomes a taxable perquisite in the employee's hands. No
+    # hardcoded fallback (same "genuinely dormant until Tax Ops
+    # configures it" convention as gratuity_max_amt/gratuity_min_yrs
+    # above): an unconfigured cap means the full contribution stays
+    # tax-exempt, exactly this function's behavior before this existed.
+    annual_employer_nps_taxexempt = employer_nps * MONTHS_PER_YEAR
+    nps_cap_row = rate_map.get("nps_80ccd2_cap_pct")
+    if nps_cap_row and nps_cap_row.flat_amount is not None:
+        annual_employer_nps_taxexempt = min(
+            annual_employer_nps_taxexempt,
+            _round2(basic * MONTHS_PER_YEAR * nps_cap_row.flat_amount / Decimal("100")),
+        )
     tax_breakdown = _calculate_annual_tax_in(
         annual_gross, ctx.slabs, rate_map, tax_regime=ctx.tax_regime, age_category=age_category,
         annual_professional_tax=professional_tax * MONTHS_PER_YEAR,
-        annual_employer_nps=employer_nps * MONTHS_PER_YEAR,
+        annual_employer_nps=annual_employer_nps_taxexempt,
         # Forms 122/123/124 (§6.2) already carry whole-tax-year figures —
         # unlike professional_tax/employer_nps above, these are NOT
         # multiplied by MONTHS_PER_YEAR.
@@ -693,4 +711,30 @@ def calculate_gratuity(
     if max_row and max_row.flat_amount is not None:
         gratuity_amount = min(gratuity_amount, max_row.flat_amount)
 
-    return {"eligible": True, "reason": "", "gratuity_amount": gratuity_amount}
+    # Income-tax exemption under Section 10(10) — a LEGALLY SEPARATE
+    # ceiling from gratuity_max_amt above (that one caps how much gratuity
+    # the Payment of Gratuity Act allows to be PAID; this one caps how
+    # much of whatever was paid is EXCLUDED from taxable income), even
+    # though CBDT notifications have historically kept both at the same
+    # figure. exempt_gratuity_amount/taxable_gratuity_amount are None
+    # (not 0) when gratuity_exempt_lim isn't configured — this function
+    # has never computed a tax treatment for gratuity before now, so
+    # None means "not computed," matching every other dormant-field
+    # convention in this codebase, never "$0 exempt." DELIBERATE
+    # BOUNDARY: this only classifies the exempt/taxable split of the
+    # PAYOUT figure — it does not feed taxable_gratuity_amount into any
+    # payslip/TDS calculation, since calculate_india_employee_gratuity's
+    # caller has no final-settlement payroll-run integration for this
+    # amount to flow into yet (a separate, larger piece of work).
+    exempt_gratuity_amount = None
+    taxable_gratuity_amount = None
+    exempt_row = rate_map.get("gratuity_exempt_lim")
+    if exempt_row and exempt_row.flat_amount is not None:
+        exempt_gratuity_amount = min(gratuity_amount, exempt_row.flat_amount)
+        taxable_gratuity_amount = gratuity_amount - exempt_gratuity_amount
+
+    return {
+        "eligible": True, "reason": "", "gratuity_amount": gratuity_amount,
+        "exempt_gratuity_amount": exempt_gratuity_amount,
+        "taxable_gratuity_amount": taxable_gratuity_amount,
+    }

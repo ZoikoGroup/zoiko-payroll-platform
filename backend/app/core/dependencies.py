@@ -152,6 +152,11 @@ def _resolve_assisted_principal(token: str, db: Session):
 
 def _resolve_access_user(db: Session, payload: dict):
     """Look up and validate the User behind a normal access token."""
+    from app.modules.auth.service import is_token_revoked
+
+    if is_token_revoked(db, payload.get("jti")):
+        raise UnauthorizedException("You have been logged out. Please log in again.")
+
     user_id = payload.get("user_id")
     if user_id is None:
         raise UnauthorizedException("Token is missing user information.")

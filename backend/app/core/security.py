@@ -6,7 +6,7 @@ Password hashing + JWT create/verify for the standalone Payroll Platform.
 JWT contract (namespaced — never accepted by the main platform):
   - signed with PAYROLL_SECRET_KEY (own secret, not the main platform's)
   - payload: sub=user email, user_id, role, organization_id (null for
-    super_admin), iss=settings.JWT_ISSUER, type=access|refresh, exp
+    super_admin), iss=settings.JWT_ISSUER, type=access|refresh, exp, jti
 
 Distinct token namespaces:
   - type=access        → normal login token (get_current_user)
@@ -19,6 +19,7 @@ Distinct token namespaces:
     to one active, time-boxed session.
 """
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -48,6 +49,11 @@ def _encode(data: dict, expires_delta: timedelta, token_type: str) -> str:
         "exp": expire,
         "iss": settings.JWT_ISSUER,
         "type": token_type,
+        # Unique per issued token (not per user/session) so a single
+        # access or refresh token can be individually revoked on logout
+        # (see auth/router.py's logout, core/dependencies.py's revocation
+        # check) without invalidating any other token the same user holds.
+        "jti": secrets.token_urlsafe(32),
     })
     return jwt.encode(to_encode, settings.PAYROLL_SECRET_KEY, algorithm=settings.ALGORITHM)
 

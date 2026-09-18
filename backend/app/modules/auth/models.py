@@ -106,3 +106,22 @@ class SecurityActionToken(Base):
     # §04 idempotency key: tenant|event|recipient|template|material version.
     idempotency_key = Column(String(160), index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RevokedToken(Base):
+    """A JWT revoked before its own `exp` -- currently only via explicit
+    logout (see auth/router.py). `jti` is the token's own random id claim
+    (added to every access/refresh token at issuance, core/security.py),
+    not a secret, so it's stored as-is rather than hashed like
+    SecurityActionToken.token_hash above. `expires_at` mirrors the
+    token's original `exp` claim purely so the cleanup sweep
+    (auth/scheduler.py) knows when a row is safe to delete -- once the
+    token itself would have expired naturally, keeping its revocation
+    record around serves no purpose."""
+
+    __tablename__ = "revoked_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    jti = Column(String(64), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, default=datetime.utcnow, nullable=False)

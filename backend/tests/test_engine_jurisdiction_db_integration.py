@@ -2053,12 +2053,15 @@ def test_upsert_jurisdiction_pack_rejects_direct_active_on_edit(db, organization
 
 
 def test_upsert_jurisdiction_pack_forces_new_policy_pack_to_draft(db, organization):
-    # Policy packs are Draft | Active only — no review/approval stage. A new
-    # policy pack always enters life as Draft regardless of any status passed
-    # to the plain upsert endpoint; it is promoted to Active only through the
-    # deliberate set_jurisdiction_pack_status transition (which for policy
-    # packs is a plain toggle, no maker-checker/overlap machinery — that
-    # machinery only ever runs for pack_type=="tax").
+    # Policy packs are Draft | Active only — no review/QA/Approved status
+    # stage in their vocabulary. A new policy pack always enters life as
+    # Draft regardless of any status passed to the plain upsert endpoint;
+    # it is promoted to Active only through the deliberate
+    # set_jurisdiction_pack_status transition. As of 2026-09-18
+    # (production-readiness fix plan Phase 6), that transition DOES now
+    # require a distinct-approver maker-checker check, same principle as
+    # pack_type=="tax" — closing a real gap where a policy pack could
+    # previously go live unilaterally with zero review.
     from app.modules.payroll.schemas import JurisdictionPackUpsert
     result = service.upsert_jurisdiction_pack(
         db,
@@ -2068,7 +2071,11 @@ def test_upsert_jurisdiction_pack_forces_new_policy_pack_to_draft(db, organizati
         ),
     )
     assert result.status == "Draft"
-    # The explicit Draft -> Active transition still works.
+    # Activating without a distinct approver on record is now rejected.
+    with pytest.raises(BadRequestException):
+        service.set_jurisdiction_pack_status(db, result.id, "Active", actor_id=1)
+    # A different Super Admin approves it, then activation succeeds.
+    service.set_jurisdiction_pack_approver(db, result.id, actor_id=2)
     activated = service.set_jurisdiction_pack_status(db, result.id, "Active", actor_id=1)
     assert activated.status == "Active"
 

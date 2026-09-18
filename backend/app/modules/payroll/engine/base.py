@@ -216,9 +216,9 @@ class PayrollContext:
     # from au_tax_free_threshold_claimed. None (no SAPTO applied) for
     # every employee until explicitly declared — LITO, by contrast,
     # applies automatically to every resident and needs no declaration
-    # field at all. Only "SINGLE" resolves to a real figure today; see
-    # engine/countries/australia.py's own docstring for why COUPLE/
-    # ILLNESS_SEPARATED_COUPLE stay at $0 pending confirmed ATO data.
+    # field at all. All three categories (SINGLE/COUPLE/ILLNESS_SEPARATED_
+    # COUPLE) resolve to real figures as of 2026-09-18; see
+    # engine/countries/australia.py's _calculate_au_income_tax_offset.
     au_sapto_category: str = None                 # "SINGLE" | "COUPLE" | "ILLNESS_SEPARATED_COUPLE" | None
 
     # US Form W-4: filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and form
@@ -415,6 +415,22 @@ class PayrollContext:
     # _load_au_sg_ytd, gated on shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.
     ytd_sg_qualifying_earnings_before: Decimal = None
 
+    # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
+    # $45,000 first-bracket test — this employee's cumulative WHM earnings
+    # for the current Australian financial year, as of BEFORE this pay
+    # period. Same "None means not wired, must fall back to the existing
+    # dormant flat-rate-every-period behavior" contract as
+    # ytd_sg_qualifying_earnings_before above. Read from
+    # PayrollYtdAccumulator by service.py's _load_au_whm_ytd, gated on
+    # shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES. Once wired (and the
+    # in-cap rate is the unmodified statutory 15% — see
+    # engine/countries/australia.py's SCALE_WHM branch for the one
+    # exception), the engine computes the REAL above-cap graduated
+    # withholding (30%/37%/45% at $45k/$135k/$190k, resolved 2026-09-18
+    # via web research — see hardcoded_defaults._AU_WHM_ABOVE_CAP_
+    # BRACKETS' own docstring for sourcing), not just a detection flag.
+    ytd_whm_earnings_before: Decimal = None
+
     # Canada Option 2 cumulative-averaging income tax withholding
     # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9) — this employee's
     # own income-tax-specific YTD state, as of BEFORE this pay period,
@@ -564,6 +580,12 @@ class PayrollContext:
     # final NIC period of the tax year.
     is_final_ni_period: bool = False
 
+    # Correlation ID for this calculation, for log/debugging correlation
+    # only — never read by any country calculator, never persisted, never
+    # affects a figure. None means "caller didn't supply one," in which
+    # case engine/resolver.py's calculate_payroll() generates one.
+    trace_id: str = None
+
 
 @dataclass
 class PayrollResult:
@@ -651,6 +673,23 @@ class PayrollResult:
     # None-means-"not applicable" contract as the US fields above — see
     # PayrollContext's matching ytd_sg_qualifying_earnings_before field.
     ytd_sg_qualifying_earnings_after: Decimal = None
+    # Australia WHM Schedule 15 cumulative $45,000 test — cumulative WHM
+    # earnings AFTER this period, same None-means-"not applicable" contract
+    # as ytd_sg_qualifying_earnings_after above. See PayrollContext's
+    # matching ytd_whm_earnings_before field for the full explanation,
+    # including why crossing the cap sets au_whm_cap_exceeded below rather
+    # than computing a real above-cap withholding amount.
+    ytd_whm_earnings_after: Decimal = None
+    # True once ytd_whm_earnings_after crosses $45,000 for an employee
+    # whose WHM YTD tracking is wired — informational (the withholding
+    # itself is now genuinely computed using the real above-cap brackets
+    # in the normal case; see engine/countries/australia.py's SCALE_WHM
+    # branch). Only reverts to a pure "needs manual review, not computed"
+    # flag in the one disclosed exception: a custom whm_rate override on
+    # top of YTD tracking, since the above-cap base amounts are fixed
+    # figures anchored to the statutory 15% rate, not derived from an
+    # arbitrary configured one.
+    au_whm_cap_exceeded: bool = False
     # Australia Payday Super (§10) — service.create_au_sg_liability's own
     # inputs, computed once here (where the MCB cap/rate are already
     # resolved) rather than re-derived in service.py from raw numbers.
@@ -870,6 +909,12 @@ class PayrollResult:
     # which isn't an "authorized deduction" in the Code's sense, against
     # 50% of gross wages).
     wage_deduction_cap_exceeded: bool = False
+
+    # Echoes PayrollContext.trace_id back on the result — see that field's
+    # own docstring. None only if the caller never went through
+    # engine/resolver.py's calculate_payroll() (e.g. a strategy invoked
+    # directly in a test).
+    trace_id: str = None
 
 
 class PayrollStrategy(ABC):

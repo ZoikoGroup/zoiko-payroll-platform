@@ -7,10 +7,37 @@ on:
       - 'backend/**'
       - '.github/workflows/**'
       - 'scripts/**'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
   workflow_dispatch:
 
 jobs:
+  # Runs on every PR and every push to main. Nothing previously ran the
+  # test suite in CI at all -- a broken test could reach main and deploy
+  # unchecked. Needs zero configured secrets: tests/conftest.py's `db`
+  # fixture is an isolated in-memory SQLite database per test, and
+  # app/config.py's fail-closed guards only fire outside a "development"
+  # environment, which a bare CI runner (no ENVIRONMENT/APP_ENV set,
+  # DEBUG defaulting to True) satisfies on its own.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Run backend test suite
+        working-directory: backend
+        run: python -m pytest -q
+
   deploy:
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -45,39 +72,53 @@ jobs:
             alembic branches
             alembic history | head -n 40 || true
             alembic current
+            echo "Database alembic_version:"
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' || true
+            from sqlalchemy import text
+            from app.database import engine
+
+            with engine.connect() as conn:
+                rows = conn.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+            for row in rows:
+                print("  " + row[0])
+            PY
 
             echo "--- Applying migrations (self-healing orphan revisions) ---"
             bash ../scripts/deploy_migrate.sh
 
             echo "--- Post-migration verification ---"
-            python - <<'PY'
+            echo "Repository heads:"
+            alembic heads
+
+            echo "Database revisions:"
+            alembic current
+
+            # Alembic exits nonzero if the database is not at every head.
+            alembic current --check-heads
+
+            python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY'
             from alembic.config import Config
-            from alembic.script import ScriptDirectory
             from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
             from app.database import engine
 
             config = Config("alembic.ini")
             script = ScriptDirectory.from_config(config)
 
-            expected_heads = set(script.get_heads())
-
+            expected = set(script.get_heads())
             with engine.connect() as connection:
-                actual_heads = set(
-                    MigrationContext.configure(connection).get_current_heads()
-                )
+                actual = set(MigrationContext.configure(connection).get_current_heads())
 
-            print(f"database revisions: {sorted(actual_heads)}")
-            print(f"migration heads:    {sorted(expected_heads)}")
+            print(f"expected heads: {sorted(expected)}")
+            print(f"database heads: {sorted(actual)}")
 
-            if actual_heads != expected_heads:
-                missing = expected_heads - actual_heads
-                unexpected = actual_heads - expected_heads
+            if actual != expected:
                 raise SystemExit(
-                    "FATAL: database is not at the Alembic head "
-                    f"(missing={sorted(missing)}, unexpected={sorted(unexpected)})"
+                    "Database is not at the Alembic head: "
+                    f"missing={sorted(expected - actual)}, "
+                    f"unexpected={sorted(actual - expected)}"
                 )
-
-            print("Final revision matches Alembic head.")
+            print("Database is at the Alembic head.")
             PY
 
             deactivate

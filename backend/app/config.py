@@ -55,11 +55,18 @@ class Settings(BaseSettings):
                 return True
         return value
 
+    # ── Error tracking (Sentry) ─────────────────────────────────────────
+    # Empty by default -- Sentry init is a no-op until this is set (see
+    # main.py). Same "graceful when unconfigured" pattern as
+    # ASSIST_MODEL_PROVIDER below: no behavior change for any environment
+    # that hasn't opted in.
+    SENTRY_DSN: str = ""
+
     # ── CORS ──────────────────────────────────────────────────────────
     PAYROLL_CORS_ORIGINS: str = (
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
         "http://127.0.0.1:5173,http://127.0.0.1:5174,"
-        "http://192.168.31.148:5173"
+        "http://192.168.31.148:5173,http://192.168.31.149:5173"
     )
 
     # ── Public-facing links (e.g. "Send Template" form-fill emails) ────
@@ -112,6 +119,12 @@ class Settings(BaseSettings):
     # trial-expiry-run) on a timer — same pattern as ASSIST_SWEEP_ENABLED.
     TRIAL_SWEEP_ENABLED: bool = True
     TRIAL_SWEEP_INTERVAL_HOURS: int = 24
+
+    # ── Revoked-token cleanup (modules/auth/scheduler.py) ───────────────
+    # Deletes revoked_tokens rows once their own expires_at has passed --
+    # same pattern as ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED above.
+    TOKEN_CLEANUP_SWEEP_ENABLED: bool = True
+    TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS: int = 24
 
     # ── Entitlement enforcement rollout (modules/billing/entitlements.py) ──
     # "off": require_entitlement/require_scope_limit always pass — today's

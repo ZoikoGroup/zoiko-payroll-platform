@@ -39,7 +39,7 @@ def _make_uk_employee(db, org_id, code="U1"):
     return emp
 
 
-def _seed_gratuity_rates(db, organization_id, min_years=Decimal("5"), max_amt=None):
+def _seed_gratuity_rates(db, organization_id, min_years=Decimal("5"), max_amt=None, exempt_lim=None):
     # organization_id-scoped (not canonical organization_id=None): the
     # test `organization` fixture hasn't opted into canonical tax-pack
     # tracking, so _resolve_effective_rate_inputs reads this org's own
@@ -55,6 +55,12 @@ def _seed_gratuity_rates(db, organization_id, min_years=Decimal("5"), max_amt=No
             organization_id=organization_id, jurisdiction_country="IN", component_key="gratuity_max_amt",
             label="gratuity_max_amt", employee_share="—", employer_share="—", total="—",
             flat_amount=max_amt,
+        ))
+    if exempt_lim is not None:
+        db.add(ContributionRate(
+            organization_id=organization_id, jurisdiction_country="IN", component_key="gratuity_exempt_lim",
+            label="gratuity_exempt_lim", employee_share="—", employer_share="—", total="—",
+            flat_amount=exempt_lim,
         ))
     db.commit()
 
@@ -120,6 +126,49 @@ def test_gratuity_respects_max_amount_ceiling(db, organization):
     )
     result = service.calculate_india_employee_gratuity(db, organization.id, emp.id)
     assert result["gratuity_amount"] == Decimal("200000")
+
+
+def test_gratuity_exempt_split_dormant_when_not_configured(db, organization):
+    # No gratuity_exempt_lim configured -> None (not 0), same "not
+    # computed" convention as every other dormant field in this codebase.
+    _seed_gratuity_rates(db, organization.id)
+    emp = _make_in_employee(
+        db, organization.id, basic=Decimal("600000"),
+        date_of_joining=date(2018, 1, 1), date_of_leaving=date(2026, 1, 1),
+    )
+    result = service.calculate_india_employee_gratuity(db, organization.id, emp.id)
+    assert result["exempt_gratuity_amount"] is None
+    assert result["taxable_gratuity_amount"] is None
+
+
+def test_gratuity_exempt_split_below_limit_is_fully_exempt(db, organization):
+    # Gratuity amount (230,769.23) is under the configured exempt limit
+    # (2,000,000) — the full amount is exempt, nothing taxable.
+    _seed_gratuity_rates(db, organization.id, exempt_lim=Decimal("2000000"))
+    emp = _make_in_employee(
+        db, organization.id, basic=Decimal("600000"),
+        date_of_joining=date(2018, 1, 1), date_of_leaving=date(2026, 1, 1),
+    )
+    result = service.calculate_india_employee_gratuity(db, organization.id, emp.id)
+    assert result["exempt_gratuity_amount"] == Decimal("230769.23")
+    assert result["taxable_gratuity_amount"] == Decimal("0")
+
+
+def test_gratuity_exempt_split_above_limit_is_partially_taxable(db, organization):
+    # gratuity_max_amt (the Payment of Gratuity Act payout ceiling) is a
+    # LEGALLY SEPARATE cap from gratuity_exempt_lim (the Section 10(10)
+    # income-tax exemption ceiling) — set them to different figures here
+    # specifically to prove they're independently applied, not the same
+    # value read twice.
+    _seed_gratuity_rates(db, organization.id, max_amt=Decimal("300000"), exempt_lim=Decimal("200000"))
+    emp = _make_in_employee(
+        db, organization.id, basic=Decimal("600000"),
+        date_of_joining=date(2018, 1, 1), date_of_leaving=date(2026, 1, 1),
+    )
+    result = service.calculate_india_employee_gratuity(db, organization.id, emp.id)
+    assert result["gratuity_amount"] == Decimal("230769.23")  # under the 300,000 payout cap, unaffected
+    assert result["exempt_gratuity_amount"] == Decimal("200000")
+    assert result["taxable_gratuity_amount"] == Decimal("30769.23")
 
 
 def test_gratuity_date_of_leaving_override_used_before_employee_marked_left(db, organization):

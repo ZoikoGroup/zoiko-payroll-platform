@@ -381,6 +381,22 @@ export default function JurisdictionLayout({
                       >
                         <Plus size={13} /> New Version
                       </button>
+                      {/* Maker-checker gap closed 2026-09-18 (production-
+                          readiness fix plan): policy packs previously had
+                          NO approval gate at all, so activating one was a
+                          single unilateral action. A distinct Super Admin
+                          from whoever last edited the pack must now
+                          approve it before it can go Active — enforced
+                          server-side in set_jurisdiction_pack_status, same
+                          as tax packs above; this button just records "I
+                          approve this." */}
+                      <button
+                        onClick={handleApprove}
+                        title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                      >
+                        <ShieldCheck size={13} /> Approve
+                      </button>
                     </>
                   )}
                   <select

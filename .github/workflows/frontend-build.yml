@@ -1,0 +1,35 @@
+name: Build Zoiko Payroll Frontend
+
+# Separate from backend-deploy.yml deliberately: that workflow's `deploy`
+# job SSHes in and restarts the live backend service, and it's scoped to
+# backend/scripts paths only -- a frontend-only change should never
+# trigger a backend restart. This workflow only ever builds, never
+# deploys, so there's no risk of that no matter what paths it's scoped to.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-build.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build

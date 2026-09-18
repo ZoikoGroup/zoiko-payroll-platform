@@ -90,10 +90,11 @@ The CRA-correct method (§7: "T3 = (R×A) − K", crediting the amount at
 the LOWEST rate, not deducting it from income) is implemented as an
 alternate path in _calculate_annual_tax_ca/_calculate_provincial_tax_ca/
 _calculate_quebec_provincial_tax, gated on
-shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES (empty by default — the
-legacy method remains byte-for-byte the default until this is
-deliberately flipped, since doing so changes the actual withheld amount
-on every future Canadian payslip, not just a new dormant feature).
+shared._CA_CREDIT_METHOD_ENABLED_COUNTRIES — enabled ({"CA"}) since
+2026-09-11; the legacy deduction method is now the FALLBACK path (used
+only if this switch is ever disabled again), not the live default —
+flipping it changed the actual withheld amount on every Canadian
+payslip going forward, not just a dormant feature.
 
 The federal K2/K3 credits (§7's full "T3 = (R×A) − K − K1 − K2 − K3 −
 K4" formula — the per-pay-period credit for CPP/QPP and EI/QPIP
@@ -125,10 +126,12 @@ lowest-rate conversion) and the beyond-province/outside-Canada surtax
 (§6/§7 — 48% of T3 for a "XP" work_state employee, the same formula
 step as the Quebec abatement just an increase instead of a reduction,
 gated on shared._CA_BEYOND_PROVINCE_SURTAX_ENABLED_COUNTRIES). Option 2
-(cumulative averaging) withholding is NOT implemented — this engine
-only ever computes Option 1 (annualization); building Option 2 as a
-genuine alternative pay-period-withholding methodology is a separate,
-larger initiative, not a small addition to this function."""
+(cumulative averaging) withholding IS implemented (Phase 9, 2026-09-11) —
+gated on shared._CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES (enabled,
+{"CA"}) and PayrollContext.option2_cumulative_gross_before being set
+per-employee (None means this employee stays on Option 1/annualization,
+this engine's default for every employee until an org opts one in) — see
+_calculate_ca_option2_income_tax below for the actual methodology."""
 
 from decimal import Decimal
 from typing import Optional
@@ -363,11 +366,12 @@ def _calculate_provincial_tax_ca(
     reusing the FEDERAL rate_map — "BPAYT = BPAF" literally means Yukon's
     basic amount always equals whatever the federal BPAF resolves to,
     not a separately-configured Yukon value. Both are gated behind
-    shared._CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES (empty by
-    default) — an org that already has a flat provincial_bpa row
-    configured for MB/YT must not see its tax silently change the
-    moment this ships; the flat-row path remains the default for every
-    province, MB/YT included, until deliberately flipped. An employee's
+    shared._CA_DYNAMIC_PROVINCIAL_BPA_ENABLED_COUNTRIES — enabled
+    ({"CA"}) since 2026-09-11: for MB/YT the dynamic formula now applies
+    UNCONDITIONALLY (it does not check for or defer to an existing flat
+    provincial_bpa row) — the flat-row path is the fallback only for
+    every OTHER province, and for MB/YT itself if this switch is ever
+    disabled again. An employee's
     own filed provincial TD1 claim amount overrides ALL THREE of these
     (flat row, Manitoba's formula, Yukon's federal mirror) entirely,
     mirroring exactly how _calculate_annual_tax_ca's td1_claim_amount

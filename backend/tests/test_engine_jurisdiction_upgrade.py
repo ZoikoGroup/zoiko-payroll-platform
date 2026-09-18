@@ -392,6 +392,20 @@ def test_uk_engine_uses_whatever_state_slabs_it_is_given():
     assert wales_with_real_state_slabs.tds != national.tds
 
 
+def test_uk_wales_with_no_state_specific_slabs_matches_ruk_exactly():
+    # Documents a real, intentional fact (not an oversight): Wales has not
+    # exercised its devolved income-tax-varying power, so a Welsh employee
+    # with no Wales-specific TaxSlab rows configured (today's actual state
+    # for every real employee) must compute IDENTICALLY to rUK — the
+    # fallback in engine/countries/uk.py's calculate() (`state_income_slabs
+    # if state_income_slabs else income_slabs`) already gives this for
+    # free; this test just pins it down explicitly for Wales specifically.
+    national = calc("UK", 5000, UK_RATES, UK_SLABS)
+    wales_no_state_slabs = calc("UK", 5000, UK_RATES, UK_SLABS, work_state="Wales")
+    assert wales_no_state_slabs.tds == national.tds
+    assert wales_no_state_slabs.net_pay == national.net_pay
+
+
 def test_normalize_uk_sub_jurisdiction_recognizes_all_four_nations():
     from app.modules.payroll.service import _normalize_uk_sub_jurisdiction
     assert _normalize_uk_sub_jurisdiction("England") == "England"
@@ -719,6 +733,35 @@ def test_india_employer_nps_never_reduces_old_regime_taxable_income():
     without_nps = calc("IN", annual_basic / Decimal("12"), IN_RATES, IN_SLABS, basic=annual_basic / Decimal("12"), tax_regime="Old")
     assert with_nps.employer_nps > Decimal("0"), "employer still incurs the cost under Old regime"
     assert with_nps.annual_tax == without_nps.annual_tax, "but it must not change Old Regime taxable income"
+
+
+def test_india_employer_nps_80ccd2_cap_limits_taxexempt_portion_not_the_cost():
+    # Section 80CCD(2) cap (2026-09-18 fix): employer configured a
+    # generous 14% NPS contribution rate but the cap is only 10% of
+    # Basic. The actual employer COST (employer_nps) must stay identical
+    # either way — only how much of it is excluded from taxable New
+    # Regime salary is capped, so tax should be HIGHER once capped.
+    annual_basic = Decimal("2000000")
+    monthly_basic = annual_basic / Decimal("12")
+    uncapped_rates = dict(IN_RATES, nps_employer_pct=Rate(employer_rate_pct=Decimal("14.00")))
+    capped_rates = dict(uncapped_rates, nps_80ccd2_cap_pct=Rate(flat_amount=Decimal("10.00")))
+    uncapped = calc("IN", monthly_basic, uncapped_rates, IN_SLABS, basic=monthly_basic, tax_regime="New")
+    capped = calc("IN", monthly_basic, capped_rates, IN_SLABS, basic=monthly_basic, tax_regime="New")
+    assert capped.employer_nps == uncapped.employer_nps == _round2(monthly_basic * Decimal("0.14"))
+    assert capped.annual_tax > uncapped.annual_tax
+
+
+def test_india_employer_nps_80ccd2_cap_is_a_no_op_when_contribution_is_under_it():
+    # Contribution (8% of Basic) is already under the configured 10% cap
+    # — the full amount must remain tax-exempt, same result as no cap
+    # being configured at all.
+    annual_basic = Decimal("2000000")
+    monthly_basic = annual_basic / Decimal("12")
+    no_cap_rates = dict(IN_RATES, nps_employer_pct=Rate(employer_rate_pct=Decimal("8.00")))
+    with_cap_rates = dict(no_cap_rates, nps_80ccd2_cap_pct=Rate(flat_amount=Decimal("10.00")))
+    no_cap = calc("IN", monthly_basic, no_cap_rates, IN_SLABS, basic=monthly_basic, tax_regime="New")
+    with_cap = calc("IN", monthly_basic, with_cap_rates, IN_SLABS, basic=monthly_basic, tax_regime="New")
+    assert with_cap.annual_tax == no_cap.annual_tax
 
 
 def test_india_87a_marginal_relief_can_be_disabled():
