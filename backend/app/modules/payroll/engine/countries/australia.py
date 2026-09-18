@@ -798,24 +798,39 @@ def calculate(ctx: PayrollContext) -> dict:
 # schedule1. Two calculators here are REAL, complete implementations
 # because §13 gives their actual figures/formula in full: the ETP cap
 # classification and the genuine-redundancy tax-free component. Every
-# other schedule in §9's table (2/4/5/12/13) requires a coefficient/
+# other schedule in §9's table (4/7/12/13) requires a coefficient/
 # rate/method the source document names but never actually gives a
 # number or formula for — those raise AuScheduleNotYetImplementedError
 # rather than fabricating a plausible-looking withholding amount. (WHM's
 # own Scale is resolved — see the SCALE_WHM branch in
-# _calculate_au_payg_schedule1 above. Schedules 3 and 6 are resolved too
-# — see calculate_au_schedule3_entertainer_withholding/calculate_au_
-# schedule6_annuity_withholding below, which bypass this section's own
-# generic dispatcher entirely since their real inputs don't fit it.)
+# _calculate_au_payg_schedule1 above. Schedules 3, 5, and 6 are resolved
+# too — see calculate_au_schedule3_entertainer_withholding/calculate_au_
+# schedule5_back_payment_withholding/calculate_au_schedule6_annuity_
+# withholding below, which all bypass this section's own generic
+# dispatcher entirely since their real inputs don't fit it.)
 
-# §9's own routing table, verbatim: payment TYPE -> named schedule. A
-# real, complete piece of §9 even though most schedules' downstream math
-# isn't buildable yet — the ROUTING itself is fully specified, and
-# getting an employee's payment routed to the CORRECT schedule name is
-# exactly what AU-D11 requires, independent of whether that schedule's
-# own rate table exists yet.
+# §9's own routing table: payment TYPE -> named schedule. A real,
+# complete piece of §9 even though most schedules' downstream math isn't
+# buildable yet — the ROUTING itself is fully specified, and getting an
+# employee's payment routed to the CORRECT schedule name is exactly what
+# AU-D11 requires, independent of whether that schedule's own rate table
+# exists yet.
+#
+# CORRECTED 2026-09-18 (production-readiness fix plan, Tier 3.1):
+# UNUSED_LEAVE was routed to "SCHEDULE_2" — but the ATO's CURRENT Schedule
+# 2 (NAT 1006 family) is the tax table for horticultural/shearing
+# industry workers, an entirely unrelated payment type this system
+# doesn't model at all. Unused leave paid on termination is the ATO's
+# Schedule 7 (NAT 3351) in current numbering. Venu doesn't have the
+# original ZP-TAX-AU-2026-27-001 §9 spec text on hand to confirm whether
+# it really said "Schedule 2" (possibly written against an older ATO
+# numbering, before whatever renumbering produced the current Schedule
+# 7), so this is a judgment call, not a confirmed spec correction — but
+# matching the LIVE ATO schedule number is what actually matters for
+# correctness/auditability once this schedule's real rates are entered,
+# so the label is corrected here regardless.
 _AU_SPECIAL_PAYMENT_SCHEDULE_BY_TYPE = {
-    "UNUSED_LEAVE": "SCHEDULE_2",
+    "UNUSED_LEAVE": "SCHEDULE_7",
     "ENTERTAINER": "SCHEDULE_3",
     "RETURN_TO_WORK": "SCHEDULE_4",
     "BACK_PAYMENT": "SCHEDULE_5",
@@ -828,10 +843,15 @@ _AU_SPECIAL_PAYMENT_SCHEDULE_BY_TYPE = {
 }
 
 # Which of the routed schedules already have a real, document-given
-# withholding calculation available. False for every schedule whose rate/
-# coefficient table §9 names but does not actually publish.
+# withholding calculation available via the GENERIC (payment_type,
+# amount) dispatcher below. Stays False for 3/5/6 too even though those
+# ARE now implemented — see calculate_au_schedule3_entertainer_
+# withholding/calculate_au_schedule5_back_payment_withholding/
+# calculate_au_schedule6_annuity_withholding, which all bypass this
+# generic dispatcher entirely since their real inputs don't fit its
+# single `amount` parameter.
 _AU_SPECIAL_PAYMENT_SCHEDULE_IMPLEMENTED = {
-    "SCHEDULE_2": False, "SCHEDULE_3": False, "SCHEDULE_4": False, "SCHEDULE_5": False,
+    "SCHEDULE_7": False, "SCHEDULE_3": False, "SCHEDULE_4": False, "SCHEDULE_5": False,
     "SCHEDULE_6": False, "SCHEDULE_11": False, "SCHEDULE_12": False, "SCHEDULE_13": False,
 }
 

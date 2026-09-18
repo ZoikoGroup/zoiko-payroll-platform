@@ -3459,7 +3459,11 @@ def _au_ctx(rate_map=None):
 
 
 def test_au_special_payment_routing_matches_section9_table():
-    assert resolve_au_special_payment_schedule("UNUSED_LEAVE") == "SCHEDULE_2"
+    # UNUSED_LEAVE -> SCHEDULE_7, not SCHEDULE_2 (fixed 2026-09-18): ATO's
+    # current Schedule 2 is horticultural/shearing industry workers, an
+    # unrelated payment type; unused leave on termination is Schedule 7
+    # (NAT 3351) in current ATO numbering.
+    assert resolve_au_special_payment_schedule("UNUSED_LEAVE") == "SCHEDULE_7"
     assert resolve_au_special_payment_schedule("ENTERTAINER") == "SCHEDULE_3"
     assert resolve_au_special_payment_schedule("RETURN_TO_WORK") == "SCHEDULE_4"
     assert resolve_au_special_payment_schedule("BACK_PAYMENT") == "SCHEDULE_5"
