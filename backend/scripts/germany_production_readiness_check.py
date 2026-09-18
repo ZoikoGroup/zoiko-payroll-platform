@@ -392,6 +392,80 @@ def inspect_registry_seed_status(conn) -> Dict[str, Any]:
             "detail": {"registries": results, "any_published": bool(published)}}
 
 
+_EXPECTED_GERMANY_LAND_CODES = [
+    "DE-BW", "DE-BY", "DE-BE", "DE-BB", "DE-HB", "DE-HH", "DE-HE", "DE-MV",
+    "DE-NI", "DE-NW", "DE-RP", "DE-SL", "DE-SN", "DE-ST", "DE-SH", "DE-TH",
+]
+
+
+def inspect_germany_land_jurisdiction_packs(conn) -> Dict[str, Any]:
+    """All-16-Länder coverage + integrity, read-only. Mirrors the pattern
+    every other inspect_* function in this file already uses (fixed
+    SELECTs only, no writes) — added for the Germany 2026 all-Länder
+    jurisdiction task, since none of the 13 pre-existing inspection areas
+    say anything about per-Land JurisdictionPack coverage."""
+    if not _tbl_exists(conn, "payroll_jurisdiction_packs"):
+        return {"status": STATUS_FAIL, "detail": {"note": "payroll_jurisdiction_packs table missing"}}
+
+    federal_rows = conn.execute(
+        sa.text(
+            "SELECT id, pack_id, status FROM payroll_jurisdiction_packs "
+            "WHERE jurisdiction_country='DE' AND jurisdiction_state IS NULL AND pack_type='tax'"
+        )
+    ).fetchall()
+    active_federal = [r for r in federal_rows if r[2] == "Active"]
+
+    land_rows = conn.execute(
+        sa.text(
+            "SELECT jurisdiction_state, id, pack_id, status, parent_pack_id "
+            "FROM payroll_jurisdiction_packs "
+            "WHERE jurisdiction_country='DE' AND jurisdiction_state IS NOT NULL AND pack_type='tax' "
+            "ORDER BY jurisdiction_state"
+        )
+    ).fetchall()
+    by_land: Dict[str, List[Any]] = {}
+    for r in land_rows:
+        by_land.setdefault(r[0], []).append(r)
+
+    laender: List[Dict[str, Any]] = []
+    for code in _EXPECTED_GERMANY_LAND_CODES:
+        rows = by_land.get(code, [])
+        active = [r for r in rows if r[3] == "Active"]
+        laender.append({
+            "land_code": code,
+            "pack_count": len(rows),
+            "active_count": len(active),
+            "active_pack_id": active[0][2] if len(active) == 1 else None,
+            "parent_pack_id": active[0][4] if len(active) == 1 else None,
+        })
+
+    missing = [l["land_code"] for l in laender if l["active_count"] == 0]
+    duplicate_active = [l["land_code"] for l in laender if l["active_count"] > 1]
+    unexpected_codes = sorted(set(by_land) - set(_EXPECTED_GERMANY_LAND_CODES))
+    orphan_parent = [
+        l["land_code"] for l in laender
+        if l["active_pack_id"] and active_federal and l["parent_pack_id"] not in (r[0] for r in active_federal)
+    ]
+
+    if not active_federal or missing or duplicate_active or unexpected_codes:
+        status = STATUS_FAIL
+    elif orphan_parent:
+        status = STATUS_WARN
+    else:
+        status = STATUS_OK
+
+    return {"status": status, "detail": {
+        "federal_active_pack_count": len(active_federal),
+        "laender": laender,
+        "ready_count": sum(1 for l in laender if l["active_count"] == 1),
+        "total_expected": len(_EXPECTED_GERMANY_LAND_CODES),
+        "missing_active": missing,
+        "duplicate_active": duplicate_active,
+        "unexpected_land_codes": unexpected_codes,
+        "active_pack_with_no_matching_active_federal_parent": orphan_parent,
+    }}
+
+
 def inspect_hardcoded_static(workspace_root: str) -> Dict[str, Any]:
     base = os.path.join(workspace_root, "app", "modules", "payroll")
     files = {
@@ -488,6 +562,7 @@ def main(argv: List[str]) -> int:
                  for k in ("db_connectivity", "alembic_version_current", "head_region_objects", "soli_drift",
                            "germany_registries_rows", "germany_feature_tables", "elstam_readiness",
                            "elster_readiness", "pap_readiness", "registry_seed_status",
+                           "germany_land_jurisdiction_packs",
                            "model_migration_drift", "security_posture")}
         areas["migration_inventory"] = {
             "status": STATUS_OK, "detail": _migration_inventory(
@@ -512,6 +587,7 @@ def main(argv: List[str]) -> int:
                     "elster_readiness": inspect_elster(conn),
                     "pap_readiness": inspect_pap(conn),
                     "registry_seed_status": inspect_registry_seed_status(conn),
+                    "germany_land_jurisdiction_packs": inspect_germany_land_jurisdiction_packs(conn),
                     "hardcoded_defaults_static": inspect_hardcoded_static(args.workspace_root),
                     "model_migration_drift": inspect_model_drift(conn),
                 }
@@ -522,7 +598,7 @@ def main(argv: List[str]) -> int:
             areas = {"db_connectivity": {"status": STATUS_FAIL, "detail": {"error": str(exc)[:400]}}}
             for k in ("alembic_version_current", "head_region_objects", "soli_drift", "germany_registries_rows",
                       "germany_feature_tables", "elstam_readiness", "elster_readiness", "pap_readiness",
-                      "registry_seed_status", "model_migration_drift"):
+                      "registry_seed_status", "germany_land_jurisdiction_packs", "model_migration_drift"):
                 areas[k] = {"status": STATUS_UNKNOWN, "detail": {"note": "DB unreachable"}}
             areas["migration_inventory"] = {"status": STATUS_OK, "detail": _migration_inventory(
                 os.path.join(args.workspace_root, "alembic", "versions"))}

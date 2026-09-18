@@ -772,7 +772,19 @@ def record_tax_audit(
     Every OTHER of this function's 77 existing call sites keeps the
     default (`auto_commit=True`, unchanged behavior) — this is additive,
     not a behavior change for any caller that doesn't pass the new
-    argument."""
+    argument.
+
+    `legal_reference` is truncated to the column's own limit
+    (TaxConfigurationAudit.legal_reference is String(200)) before insert.
+    Found via a real StringDataRightTruncation crash: upsert_jurisdiction_
+    pack passes a pack's full source_references Text field here, which for
+    Germany's real DE-PAYROLL-CY2026-V1 seed value is >200 chars — the
+    pack row itself commits fine (it's a separate transaction from this
+    audit insert), but this insert then fails and aborts the caller. This
+    is descriptive audit metadata, not a legal document of record, so a
+    truncated value here is a safe, permanent fix rather than a workaround."""
+    if legal_reference and len(legal_reference) > 200:
+        legal_reference = legal_reference[:200]
     db.add(TaxConfigurationAudit(
         actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id,
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=tax_version,

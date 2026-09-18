@@ -2668,7 +2668,7 @@ class TaxConfigurationAudit(Base):
 
     actor_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
     action         = Column(String(30), nullable=False)   # "create" | "update" | "status_change" | "delete"
-    entity_type    = Column(String(30), nullable=False)    # "jurisdiction_pack" | "tax_slab" | "contribution_rate"
+    entity_type    = Column(String(50), nullable=False)    # "jurisdiction_pack" | "tax_slab" | "contribution_rate" | ...
     entity_id      = Column(Integer, nullable=False)
 
     jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)

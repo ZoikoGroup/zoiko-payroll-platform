@@ -181,9 +181,18 @@ _MINIJOB_MIDIJOB_MIGRATION_PLAN = [
      "Midijob employee contribution-base formula subtrahend", "_DE_MIDIJOB_EMPLOYEE_BASE_SUBTRAHEND"),
     ("midijob_pv_childless_surcharge_rate", Decimal("0.6"), "PERCENTAGE",
      "PV childless surcharge rate (SGB XI Section 55 Abs. 3)", "_DE_PV_CHILDLESS_SURCHARGE_RATE"),
+    # Label kept short deliberately: GermanyMinijobMidijobParameter.label is
+    # String(150), and this row's original label (plus the "(from
+    # hardcoded_defaults.X)" suffix every migrated row gets below) came to
+    # 176 chars — a real StringDataRightTruncation the first time this ran
+    # against Postgres (SQLite doesn't enforce VARCHAR length). The
+    # "distinct from minijob_u3_rate" clause this drops is not lost
+    # information — it's already documented on _GERMANY_MINIJOB_MIDIJOB_
+    # PARAMETER_CODES's own comment (Phase 8BL) — so trimming it here only
+    # shortens display text, not the governed record.
     ("employer_insolvency_levy_rate", Decimal("0.15"), "PERCENTAGE",
-     "Employer Insolvenzgeldumlage (U3) flat federal rate — applies to every "
-     "Germany classification, distinct from minijob_u3_rate", "_DE_INSOLVENCY_LEVY_RATE"),
+     "Employer Insolvenzgeldumlage (U3) flat federal rate, applies to all "
+     "Germany classifications", "_DE_INSOLVENCY_LEVY_RATE"),
 ]
 
 # Deliberately NOT migrated — reported, not silently skipped. See module
