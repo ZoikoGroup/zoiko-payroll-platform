@@ -41,6 +41,14 @@ logger = logging.getLogger("zoiko_payroll")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+# ── Error tracking (Sentry) ──────────────────────────────────────────────
+# Inert until SENTRY_DSN is set (empty by default -- see config.py). No
+# behavior change for any environment that hasn't opted in.
+if settings.SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False)
+
 # ── Access-log redaction for security tokens in query strings ───────────────
 
 _ACCESS_LOG_REDACT_RE = re.compile(r"(?i)([?&](?:token|code)=)[^&\s\"']+")

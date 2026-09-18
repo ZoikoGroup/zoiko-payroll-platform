@@ -158,6 +158,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
     """Catches any unexpected server error and returns a clean message."""
     import logging
     logging.getLogger("zoiko_payroll").error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    if settings.SENTRY_DSN:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={

@@ -55,6 +55,13 @@ class Settings(BaseSettings):
                 return True
         return value
 
+    # ── Error tracking (Sentry) ─────────────────────────────────────────
+    # Empty by default -- Sentry init is a no-op until this is set (see
+    # main.py). Same "graceful when unconfigured" pattern as
+    # ASSIST_MODEL_PROVIDER below: no behavior change for any environment
+    # that hasn't opted in.
+    SENTRY_DSN: str = ""
+
     # ── CORS ──────────────────────────────────────────────────────────
     PAYROLL_CORS_ORIGINS: str = (
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"

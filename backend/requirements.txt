@@ -83,6 +83,7 @@ resend==2.32.2
 rich==15.0.0
 rich-toolkit==0.20.1
 rsa==4.9.1
+sentry-sdk==2.19.0
 shellingham==1.5.4
 six==1.17.0
 slowapi==0.1.10
