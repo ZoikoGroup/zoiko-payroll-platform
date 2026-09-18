@@ -76,6 +76,15 @@ check_model_drift() {
   python -m scripts.check_schema_drift
 }
 
+verify_at_head() {
+  echo "==> Verifying database is at the Alembic head..."
+  echo "Expected heads:"
+  alembic heads
+  echo "Current revisions:"
+  alembic current
+  alembic current --check-heads
+}
+
 # --- Migration steps -------------------------------------------------------
 
 echo "==> alembic upgrade head"
@@ -84,6 +93,7 @@ if upgrade_output="$(alembic upgrade head 2>&1)"; then
   check_model_drift
   echo "==> Up to date. Running sync_schema drift safety-net..."
   python -m migrations.sync_schema
+  verify_at_head
   exit 0
 fi
 
@@ -137,4 +147,5 @@ alembic upgrade head
 check_model_drift
 echo "==> Running sync_schema drift safety-net..."
 python -m migrations.sync_schema
+verify_at_head
 echo "==> Migration step complete."
