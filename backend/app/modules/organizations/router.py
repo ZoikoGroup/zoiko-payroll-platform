@@ -551,6 +551,12 @@ def delete_organization(
         "payroll_company_compliance",
         "payroll_holidays",
         "payroll_enterprise_jurisdictions",
+        # These three reference payslip_items/payroll_runs/payroll_employees
+        # (NO ACTION) and must be deleted before those tables below, or the
+        # later DELETE fails with a foreign-key violation.
+        "payroll_generated_reports",
+        "payroll_super_guarantee_liabilities",
+        "organization_ytd_accumulators",
         "payslip_items",
         "payroll_attendance_records",
         "payroll_runs",
@@ -562,6 +568,11 @@ def delete_organization(
         ("payroll_policy_overtime_rules", "policy_id", "payroll_policies"),
         ("payroll_policy_leave_rules", "policy_id", "payroll_policies"),
         ("payroll_policy_employee_categories", "policy_id", "payroll_policies"),
+        # Not organization-scoped directly (no organization_id column) — scoped
+        # transitively via employee_id, and its last_updated_payslip_id FK
+        # (NO ACTION) blocks payslip_items from being deleted below unless
+        # this runs first.
+        ("payroll_ytd_accumulators", "employee_id", "payroll_employees"),
     ]
 
     # Inbound attachments reference inbound messages — must go first, before
@@ -594,6 +605,29 @@ def delete_organization(
     if "payroll_policies" in existing_tables:
         db.execute(
             text('DELETE FROM "payroll_policies" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+
+    # Billing audit events have their own organization_id FK (nullable --
+    # some events are platform-level) AND an actor_user_id FK to users,
+    # neither with ondelete=CASCADE. Not DB-cascaded by anything below --
+    # must be cleared explicitly here, before both the org delete and the
+    # users delete right after this.
+    if "billing_commercial_audit_events" in existing_tables:
+        db.execute(
+            text('DELETE FROM "billing_commercial_audit_events" WHERE organization_id = :org_id'),
+            {"org_id": organization_id},
+        )
+
+    # Tax-config audit log has no organization_id column at all — it's scoped
+    # purely by actor_id (NO ACTION FK to users), so it must be cleared by
+    # actor before the users delete below or that delete is blocked.
+    if "payroll_tax_configuration_audit" in existing_tables:
+        db.execute(
+            text(
+                'DELETE FROM "payroll_tax_configuration_audit" WHERE actor_id IN '
+                '(SELECT id FROM "users" WHERE organization_id = :org_id)'
+            ),
             {"org_id": organization_id},
         )
 
