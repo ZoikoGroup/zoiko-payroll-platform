@@ -153,7 +153,7 @@ from app.modules.payroll.engine.countries.shared import (
 from app.modules.payroll.hardcoded_defaults import (
     _AU_MLS_THRESHOLD, _AU_MLS_RATE, _AU_SUPER_MAX_CONTRIBUTION_BASE,
     _AU_PAYG_SCALE4_RESIDENT_RATE, _AU_PAYG_SCALE4_NONRESIDENT_RATE,
-    _AU_WHM_RATE, _AU_WHM_NO_TFN_RATE, _AU_WHM_CAP_THRESHOLD,
+    _AU_WHM_RATE, _AU_WHM_NO_TFN_RATE, _AU_WHM_CAP_THRESHOLD, _AU_WHM_ABOVE_CAP_BRACKETS,
     _AU_ETP_LIFE_CAP, _AU_ETP_DEATH_CAP, _AU_GENUINE_REDUNDANCY_BASE, _AU_GENUINE_REDUNDANCY_PER_YEAR,
     _AU_WA_PT_THRESHOLD, _AU_WA_PT_UPPER_THRESHOLD, _AU_WA_PT_RATE,
     _AU_QLD_PT_THRESHOLD, _AU_QLD_PT_UPPER_THRESHOLD, _AU_QLD_PT_RATE_LOW, _AU_QLD_PT_RATE_HIGH, _AU_QLD_PT_RATE_SWITCH,
@@ -359,6 +359,24 @@ def _calculate_au_program_wages(ctx: PayrollContext, tax_component: str) -> Deci
     return included
 
 
+def _au_whm_cumulative_tax(cumulative_income: Decimal) -> Decimal:
+    """Total WHM (Schedule 15, TFN-provided) tax owed on `cumulative_income`
+    for the whole income year so far: the statutory 15% on the first
+    $45,000, then the real above-cap ATO brackets in
+    hardcoded_defaults._AU_WHM_ABOVE_CAP_BRACKETS (30%/37%/45% at
+    $45k/$135k/$190k — see that constant's own docstring for sourcing).
+    Only called when the in-cap rate is genuinely the statutory 15% (see
+    this function's one caller) — the above-cap bracket base amounts are
+    fixed published figures anchored to that rate, not derived from
+    whatever rate happens to be configured."""
+    if cumulative_income <= _AU_WHM_CAP_THRESHOLD:
+        return cumulative_income * _AU_WHM_RATE / Decimal("100")
+    for min_amt, max_amt, rate_pct, base in _AU_WHM_ABOVE_CAP_BRACKETS:
+        if max_amt is None or cumulative_income <= max_amt:
+            return base + (cumulative_income - min_amt) * rate_pct / Decimal("100")
+    raise AssertionError("unreachable — _AU_WHM_ABOVE_CAP_BRACKETS' last bracket has max=None")
+
+
 def _calculate_au_payg_schedule1(ctx: PayrollContext, period_gross: Decimal) -> tuple:
     """ATO Schedule 1 (NAT 1004) — the Core Calculation Contract, §5.
     `period_gross` is the caller's own PAYG-taxable wage base (§11) —
@@ -395,21 +413,25 @@ def _calculate_au_payg_schedule1(ctx: PayrollContext, period_gross: Decimal) -> 
         # earnings, no weekly-equivalent conversion" shape as Scale 4
         # above.
         #
-        # YTD cap detection (added as part of the production-readiness fix
-        # plan): the real Schedule 15 table is a CUMULATIVE $45,000
-        # first-bracket test across the whole income year, and earnings
-        # above that use the graduated foreign-resident rates (32.5%/37%/
-        # 45%) — those above-cap rates are NOT published anywhere in this
-        # codebase, and this engine will not fabricate them. So once
-        # ctx.ytd_whm_earnings_before is wired (see PayrollContext's own
-        # docstring), this still withholds at the in-cap 15%/45% rate for
-        # every period, but DETECTS a YTD crossing of $45,000 and reports
-        # it via method="FLAT_RATE_CAP_EXCEEDED_NEEDS_REVIEW" plus the
-        # ytd_whm_earnings_after/whm_cap_exceeded trace keys, so
-        # calculate() can surface PayrollResult.au_whm_cap_exceeded for a
-        # human/compliance workflow (same discipline as India's
-        # wage_deduction_cap_exceeded). While ytd_whm_earnings_before is
-        # None (every employee until wired), behavior is byte-for-byte
+        # Real above-cap graduated withholding (production-readiness fix
+        # plan, Tier 2.1, 2026-09-18): the real Schedule 15 table is a
+        # CUMULATIVE $45,000 first-bracket test across the whole income
+        # year, with earnings above it taxed at 30%/37%/45% (at $45k/
+        # $135k/$190k — see hardcoded_defaults._AU_WHM_ABOVE_CAP_BRACKETS'
+        # own docstring for sourcing; this is the WHM schedule's OWN
+        # dedicated above-cap rates, NOT Schedule 3's foreign-resident
+        # rates, which an earlier version of this plan incorrectly
+        # assumed were the same table). Once ctx.ytd_whm_earnings_before
+        # is wired AND the in-cap rate is the unmodified statutory 15%
+        # (a custom DB-configured override falls back to the old flag-
+        # only behavior below, since the above-cap base amounts are
+        # fixed figures anchored to 15%, not derived from an arbitrary
+        # rate), this period's withholding is the real marginal amount:
+        # cumulative tax owed on YTD-after minus cumulative tax owed on
+        # YTD-before — the standard periodic-withholding technique,
+        # not a flat rate applied to the whole period. While
+        # ctx.ytd_whm_earnings_before is None (every employee until
+        # wired) or the rate is overridden, behavior is byte-for-byte
         # identical to before this change — method reports
         # "FLAT_RATE_NO_YTD_CAP", exactly as it always has.
         rate = resolve_jurisdiction_parameter(
@@ -419,12 +441,37 @@ def _calculate_au_payg_schedule1(ctx: PayrollContext, period_gross: Decimal) -> 
             side="employee", country="AU",
         )
         earnings = _au_floor_dollars(period_gross)
+        can_compute_real_above_cap = (
+            ctx.au_tfn_status != "NOT_PROVIDED" and rate == _AU_WHM_RATE
+            and ctx.ytd_whm_earnings_before is not None
+        )
+        if can_compute_real_above_cap:
+            ytd_whm_earnings_after = ctx.ytd_whm_earnings_before + earnings
+            withholding = _au_floor_dollars(
+                _au_whm_cumulative_tax(ytd_whm_earnings_after) - _au_whm_cumulative_tax(ctx.ytd_whm_earnings_before)
+            )
+            whm_cap_exceeded = ytd_whm_earnings_after > _AU_WHM_CAP_THRESHOLD
+            trace = {
+                "scale": scale, "rate_pct": rate, "earnings_floored": earnings, "withholding": withholding,
+                "method": "PROGRESSIVE_YTD_WITHHOLDING" if whm_cap_exceeded else "FLAT_RATE_YTD_TRACKED",
+                "whm_cap_threshold": _AU_WHM_CAP_THRESHOLD,
+                "ytd_whm_earnings_before": ctx.ytd_whm_earnings_before,
+                "ytd_whm_earnings_after": ytd_whm_earnings_after,
+                "whm_cap_exceeded": whm_cap_exceeded,
+            }
+            return withholding, trace
+
         withholding = _au_floor_dollars(earnings * rate / Decimal("100"))
         trace = {
             "scale": scale, "rate_pct": rate,
             "earnings_floored": earnings, "withholding": withholding,
         }
         if ctx.ytd_whm_earnings_before is not None:
+            # Reached only when a custom whm_rate override is configured
+            # (can_compute_real_above_cap is False for that reason) — the
+            # real above-cap bases don't apply to a non-statutory rate,
+            # so this still just flags the crossing rather than fabricating
+            # a mismatched calculation.
             ytd_whm_earnings_after = ctx.ytd_whm_earnings_before + earnings
             whm_cap_exceeded = ytd_whm_earnings_after > _AU_WHM_CAP_THRESHOLD
             trace.update(

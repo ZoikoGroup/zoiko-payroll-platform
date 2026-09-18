@@ -1105,12 +1105,30 @@ _AU_PAYG_SCALE4_NONRESIDENT_RATE = Decimal("45.0")
 _AU_WHM_RATE = Decimal("15.0")
 _AU_WHM_NO_TFN_RATE = Decimal("45.0")
 # Schedule 15's own published $45,000 cumulative first-bracket threshold —
-# a real, stable ATO figure (unlike the above-cap graduated foreign-
-# resident rates, which are NOT in this codebase — see
-# engine/countries/australia.py's SCALE_WHM branch for why crossing this
-# threshold sets a compliance flag rather than computing a real above-cap
-# withholding amount).
+# a real, stable ATO figure.
 _AU_WHM_CAP_THRESHOLD = Decimal("45000")
+
+# Above-$45,000 WHM brackets (production-readiness fix plan, Tier 2.1,
+# 2026-09-18) — resolved via web research since ato.gov.au itself returns
+# HTTP 403 to automated fetches; triangulated instead from multiple
+# independent tax-advisory publications (atotaxrates.info, taxleopard.com.au,
+# taxkiln.com, boxas.com.au) whose figures agree exactly and whose
+# cumulative base amounts are internally consistent ($45,000×15%=$6,750;
+# $6,750+($135,000-$45,000)×30%=$33,750; $33,750+($190,000-$135,000)×37%
+# =$54,100 — each checks out exactly), and confirmed unchanged between the
+# 2024-25/2025-26/2026-27 years despite the broader "Stage 3+" resident-
+# bracket reform (the WHM/"backpacker tax" schedule is its own dedicated
+# legislated scale, not derived from the ordinary resident brackets). This
+# is a real, deliberate ATO decision on how to treat WHM earnings above
+# the concessional first bracket — NOT the same as Schedule 3's foreign-
+# resident rates (32.5/37/45 at different breakpoints), which do NOT apply
+# here despite the superficial similarity assumed in an earlier version of
+# this plan. (min, max-or-None, rate_pct, cumulative_base_at_min)
+_AU_WHM_ABOVE_CAP_BRACKETS = (
+    (Decimal("45000"), Decimal("135000"), Decimal("30.0"), Decimal("6750")),
+    (Decimal("135000"), Decimal("190000"), Decimal("37.0"), Decimal("33750")),
+    (Decimal("190000"), None, Decimal("45.0"), Decimal("54100")),
+)
 
 # Special Payments (ZP-TAX-AU-2026-27-001 §13, Phase 3, 2026-09-16) —
 # real, document-given caps and the genuine-redundancy tax-free formula

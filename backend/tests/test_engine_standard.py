@@ -3206,17 +3206,48 @@ def test_australia_whm_ytd_wired_under_cap_still_charges_in_cap_rate():
     assert result.au_whm_cap_exceeded is False
 
 
-def test_australia_whm_ytd_crossing_cap_flags_for_review_not_a_guessed_rate():
-    # $44,500 YTD + $1,000 this period = $45,500, crosses $45,000 — this
-    # engine has no verified above-cap graduated foreign-resident rate
-    # data, so it must NOT fabricate one: still withholds at the in-cap
-    # 15% rate ($150) but sets the compliance flag for manual review.
+def test_australia_whm_ytd_crossing_cap_computes_real_progressive_withholding():
+    # $44,500 YTD + $1,000 this period = $45,500, crosses $45,000.
+    # tax(45,500) = 6,750 + (45,500-45,000)*30% = 6,900.
+    # tax(44,500) = 44,500*15% = 6,675.
+    # This period's withholding = 6,900 - 6,675 = 225 (NOT a flat 15% of
+    # $150 — 2026-09-18 fix: the real above-cap brackets are now used,
+    # see hardcoded_defaults._AU_WHM_ABOVE_CAP_BRACKETS' own docstring).
     result = calc(
         "AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
         ytd_whm_earnings_before=Decimal("44500"),
     )
-    assert result.tds == Decimal("150")
+    assert result.tds == Decimal("225")
     assert result.ytd_whm_earnings_after == Decimal("45500")
+    assert result.au_whm_cap_exceeded is True
+
+
+def test_australia_whm_ytd_deep_in_above_cap_bracket_computes_correctly():
+    # $150,000 YTD (already in the 37% bracket) + $10,000 this period =
+    # $160,000, still within the 37% band ($135,001-$190,000).
+    # tax(160,000) = 33,750 + (160,000-135,000)*37% = 33,750+9,250=43,000.
+    # tax(150,000) = 33,750 + (150,000-135,000)*37% = 33,750+5,550=39,300.
+    # This period's withholding = 43,000 - 39,300 = 3,700.
+    result = calc(
+        "AU", 10000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("150000"),
+    )
+    assert result.tds == Decimal("3700")
+    assert result.ytd_whm_earnings_after == Decimal("160000")
+    assert result.au_whm_cap_exceeded is True
+
+
+def test_australia_whm_custom_rate_override_still_falls_back_to_flag_only():
+    # A custom DB-configured whm_rate (not the statutory 15%) means the
+    # real above-cap bases (anchored to 15%) don't apply — must fall back
+    # to the old flag-only "needs manual review" behavior rather than
+    # silently computing a mismatched progressive amount.
+    rates = {"whm_rate": Rate("whm_rate", employee_rate_pct=Decimal("20.0"))}
+    result = calc(
+        "AU", 1000, rates, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("44500"),
+    )
+    assert result.tds == Decimal("200")  # flat 20% of this period's $1,000, uncapped
     assert result.au_whm_cap_exceeded is True
 
 
