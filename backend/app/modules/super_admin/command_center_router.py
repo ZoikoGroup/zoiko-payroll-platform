@@ -31,6 +31,7 @@ from app.core.dependencies import get_current_super_admin
 from app.database import get_db
 from app.modules.organizations.models import Organization
 from app.modules.billing.models import (
+    BillingDunningState,
     BillingPlan,
     BillingPlanVersion,
     BillingSubscription,
@@ -64,6 +65,9 @@ def _resolve_plan_label(db: Session, plan_version_id: int) -> tuple[Optional[str
 def list_all_subscriptions(
     status: Optional[str] = Query(None, description="Filter by SubscriptionStatus value, or 'NONE' for organizations with no subscription row at all"),
     workspace_type: Optional[str] = Query(None, description="Filter by Organization.workspace_type"),
+    billing_classification: Optional[str] = Query(None, description="Filter by Organization.billing_classification"),
+    charge_enabled: Optional[bool] = Query(None, description="Filter by Organization.charge_enabled"),
+    dunning_stage: Optional[str] = Query(None, description="Filter by BillingDunningState.stage, or 'NONE' for organizations with no dunning row at all"),
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
@@ -73,7 +77,17 @@ def list_all_subscriptions(
     hides every PRODUCTION org that predates the trial/billing feature (they
     were created via /auth/register, which never creates a subscription
     row). Read-only; plan/subscription mutation stays in
-    billing/admin_router.py's existing endpoints."""
+    billing/admin_router.py's existing endpoints.
+
+    billing_classification/charge_enabled filters exist specifically so
+    "show me every non-chargeable org with an active subscription" — a
+    real inconsistency worth surfacing — is answerable from this one page.
+
+    dunning_stage/dunning_in_flight_run_guard (Step 4 / blocker #17) exist
+    so a Super Admin can tell a correctly-protected org (PAST_DUE, dunning
+    frozen because a run is genuinely in flight) apart from a mistakenly-
+    unrestricted one at a glance, without cross-referencing the payroll
+    runs list."""
     from app.modules.billing.trial_lifecycle import resolve_trial_stage
 
     q = db.query(Organization, BillingSubscription).outerjoin(
@@ -81,20 +95,37 @@ def list_all_subscriptions(
     )
     if workspace_type:
         q = q.filter(Organization.workspace_type == workspace_type)
+    if billing_classification:
+        q = q.filter(Organization.billing_classification == billing_classification)
+    if charge_enabled is not None:
+        q = q.filter(Organization.charge_enabled == charge_enabled)
     if status:
         if status == "NONE":
             q = q.filter(BillingSubscription.id.is_(None))
         else:
             q = q.filter(BillingSubscription.status == status)
 
+    dunning_states = {s.organization_id: s for s in db.query(BillingDunningState).all()}
+
     rows = []
     for org, sub in q.order_by(Organization.organization_name.asc()).all():
+        dunning_row = dunning_states.get(org.id)
+        row_dunning_stage = dunning_row.stage if dunning_row else None
+        if dunning_stage:
+            if dunning_stage == "NONE" and dunning_row is not None:
+                continue
+            if dunning_stage != "NONE" and row_dunning_stage != dunning_stage:
+                continue
+
         if sub is None:
             rows.append({
                 "subscription_id": None,
                 "organization_id": org.id,
                 "organization_name": org.organization_name,
                 "workspace_type": org.workspace_type,
+                "billing_classification": org.billing_classification,
+                "charge_enabled": org.charge_enabled,
+                "billing_authority": None,
                 "status": "NONE",
                 "trial_stage": None,
                 "plan_code": None,
@@ -102,6 +133,8 @@ def list_all_subscriptions(
                 "current_period_start": None,
                 "current_period_end": None,
                 "grace_period_ends_at": None,
+                "dunning_stage": row_dunning_stage,
+                "dunning_in_flight_run_guard": dunning_row.in_flight_run_guard if dunning_row else False,
             })
             continue
 
@@ -111,6 +144,9 @@ def list_all_subscriptions(
             "organization_id": org.id,
             "organization_name": org.organization_name,
             "workspace_type": org.workspace_type,
+            "billing_classification": org.billing_classification,
+            "charge_enabled": org.charge_enabled,
+            "billing_authority": sub.billing_authority,
             "status": sub.status,
             # Derived stage (ACTIVE/GRACE_READONLY/CLOSED), same pure
             # function the expiry sweep uses — the raw `status` column
@@ -122,6 +158,8 @@ def list_all_subscriptions(
             "current_period_start": sub.current_period_start,
             "current_period_end": sub.current_period_end,
             "grace_period_ends_at": sub.grace_period_ends_at,
+            "dunning_stage": row_dunning_stage,
+            "dunning_in_flight_run_guard": dunning_row.in_flight_run_guard if dunning_row else False,
         })
     return {"subscriptions": rows, "total": len(rows)}
 
@@ -282,14 +320,25 @@ def list_exceptions(
                 "over_by": bwm_count - limit,
             })
 
+    # Step 3 / Part 7 — any invoice whose BWM-priced line quantity doesn't
+    # match the actual counted BillingWorkerMonthRecord rows for that org/
+    # month is a real billing bug. Folded into this existing page rather
+    # than a second, separate reconciliation view — this is the one home
+    # for "two systems that don't otherwise talk to each other disagree."
+    from app.modules.billing.invoice_explanation import find_bwm_invoice_discrepancies
+
+    bwm_invoice_mismatches = find_bwm_invoice_discrepancies(db)
+
     return {
         "stuck_reviews": stuck_runs,
         "bwm_scale_limit_overages": bwm_overages,
+        "bwm_invoice_mismatches": bwm_invoice_mismatches,
         "note": (
-            "BWM-over-limit here is informational only — require_scope_limit() "
-            "is defined in billing/entitlements.py but not called from this "
-            "reconciliation view, so nothing here blocks it in real time. This "
-            "page is the first place that makes the gap operationally visible."
+            "bwm_scale_limit_overages is informational only for orgs whose "
+            "subscription pre-dates require_scope_limit(MAX_BWM) being wired "
+            "into employee creation (payroll/router.py) — new employee "
+            "creation is enforced live there; this view still catches any "
+            "org that was already over the limit before that wiring existed."
         ),
     }
 

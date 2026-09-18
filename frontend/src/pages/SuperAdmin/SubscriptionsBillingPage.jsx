@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { CreditCard, RefreshCcw } from "lucide-react";
+import { CreditCard, RefreshCcw, ShieldCheck } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
 import { listAllSubscriptions } from "../../service/commandCenterService";
@@ -23,6 +23,51 @@ const DISPLAY_META = {
   CANCELLED: { pill: "deactivated", label: "Cancelled" },
   GRACE_READONLY: { pill: "on_hold", label: "Grace (Read-Only)" },
   CLOSED: { pill: "rejected", label: "Trial Closed" },
+};
+
+// Commercial Billing & Subscription Operating Standard §A1 — same mapping
+// OrganizationsPage.jsx uses for its billing_classification badge.
+const BILLING_CLASSIFICATIONS = ["COMMERCIAL_ACTIVE", "NON_CHARGEABLE", "LEGACY", "INTERNAL", "DEMO", "QA"];
+const BILLING_CLASSIFICATION_PILL = {
+  COMMERCIAL_ACTIVE: "active",
+  NON_CHARGEABLE: "inactive",
+  LEGACY: "on_hold",
+  INTERNAL: "deactivated",
+  DEMO: "pending",
+  QA: "pending",
+};
+
+// §12 — which commercial route governs this org's billing (mirrors
+// billing/models.py's BillingAuthority). Distinct from billing_classification
+// above: that's WHETHER an org is chargeable, this is WHICH route governs it.
+const BILLING_AUTHORITY_LABEL = {
+  STANDALONE: "Standalone",
+  ZOIKO_ONE_BUNDLE: "Zoiko One Bundle",
+  ENTERPRISE_ORDER_FORM: "Order Form",
+};
+const BILLING_AUTHORITY_PILL = {
+  STANDALONE: "approved",
+  ZOIKO_ONE_BUNDLE: "approved",
+  ENTERPRISE_ORDER_FORM: "active",
+};
+
+// Step 4 / blocker #17 — BillingDunningState.stage (billing/models.py's
+// DunningStage enum). NONE means no dunning row at all (never PAST_DUE,
+// or already recovered and reset back — reset_dunning sets stage=RETRY,
+// not NULL, so a fully-recovered org shows RETRY, not NONE, until the row
+// itself is examined; NONE specifically means the row never existed).
+const DUNNING_STAGES = ["RETRY", "RESTRICT_EXPANSION", "RESTRICT_NEW_RUN", "READ_ONLY"];
+const DUNNING_STAGE_LABEL = {
+  RETRY: "Retry",
+  RESTRICT_EXPANSION: "Restrict Expansion",
+  RESTRICT_NEW_RUN: "Restrict New Runs",
+  READ_ONLY: "Read-Only",
+};
+const DUNNING_STAGE_PILL = {
+  RETRY: "pending",
+  RESTRICT_EXPANSION: "on_hold",
+  RESTRICT_NEW_RUN: "on_hold",
+  READ_ONLY: "rejected",
 };
 
 function formatDate(iso) {
@@ -104,18 +149,27 @@ export default function SubscriptionsBillingPage() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [workspaceType, setWorkspaceType] = useState("");
+  const [billingClassification, setBillingClassification] = useState("");
+  const [chargeEnabled, setChargeEnabled] = useState("");
+  const [dunningStage, setDunningStage] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listAllSubscriptions({ status: status || undefined, workspace_type: workspaceType || undefined });
+      const res = await listAllSubscriptions({
+        status: status || undefined,
+        workspace_type: workspaceType || undefined,
+        billing_classification: billingClassification || undefined,
+        charge_enabled: chargeEnabled || undefined,
+        dunning_stage: dunningStage || undefined,
+      });
       setRows(res.subscriptions || []);
     } catch (err) {
       addToast?.(err.message, "error");
     } finally {
       setLoading(false);
     }
-  }, [status, workspaceType]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, workspaceType, billingClassification, chargeEnabled, dunningStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 
@@ -152,16 +206,34 @@ export default function SubscriptionsBillingPage() {
           <option value="PRODUCTION">Production</option>
           <option value="EVALUATION">Evaluation</option>
         </select>
+        <select value={billingClassification} onChange={(e) => setBillingClassification(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+          <option value="">All Billing Classifications</option>
+          {BILLING_CLASSIFICATIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={chargeEnabled} onChange={(e) => setChargeEnabled(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+          <option value="">Charge Enabled: Any</option>
+          <option value="true">Charge Enabled: Yes</option>
+          <option value="false">Charge Enabled: No</option>
+        </select>
+        <select value={dunningStage} onChange={(e) => setDunningStage(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+          <option value="">All Dunning Stages</option>
+          <option value="NONE">No Dunning Row</option>
+          {DUNNING_STAGES.map((s) => <option key={s} value={s}>{DUNNING_STAGE_LABEL[s]}</option>)}
+        </select>
       </div>
 
       <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
-        <table className="w-full text-sm min-w-[1000px]">
+        <table className="w-full text-sm min-w-[1250px]">
           <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Organization</th>
               <th className="px-4 py-3">Workspace</th>
+              <th className="px-4 py-3">Billing Classification</th>
+              <th className="px-4 py-3">Charge Enabled</th>
+              <th className="px-4 py-3">Commercial Route</th>
               <th className="px-4 py-3">Plan</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Dunning</th>
               <th className="px-4 py-3">Period Start</th>
               <th className="px-4 py-3">Period End</th>
               <th className="px-4 py-3">Grace Ends</th>
@@ -176,8 +248,44 @@ export default function SubscriptionsBillingPage() {
                 <tr key={row.organization_id} className="border-t border-border-light">
                   <td className="px-4 py-3 font-medium text-foreground">{row.organization_name}</td>
                   <td className="px-4 py-3 text-foreground-muted">{row.workspace_type}</td>
+                  <td className="px-4 py-3">
+                    <StatusPill
+                      status={BILLING_CLASSIFICATION_PILL[row.billing_classification] || "inactive"}
+                      label={row.billing_classification || "NON_CHARGEABLE"}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-foreground-muted">{row.charge_enabled ? "Yes" : "No"}</td>
+                  <td className="px-4 py-3">
+                    {row.billing_authority ? (
+                      <StatusPill
+                        status={BILLING_AUTHORITY_PILL[row.billing_authority] || "inactive"}
+                        label={BILLING_AUTHORITY_LABEL[row.billing_authority] || row.billing_authority}
+                      />
+                    ) : (
+                      <span className="text-foreground-disabled">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-foreground-secondary">{row.plan_name || row.plan_code || "—"}</td>
                   <td className="px-4 py-3"><StatusPill status={meta.pill} label={meta.label} /></td>
+                  <td className="px-4 py-3">
+                    {row.dunning_stage ? (
+                      <div className="flex flex-col gap-1">
+                        <StatusPill status={DUNNING_STAGE_PILL[row.dunning_stage] || "inactive"} label={DUNNING_STAGE_LABEL[row.dunning_stage] || row.dunning_stage} />
+                        {row.dunning_in_flight_run_guard && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-semibold"
+                            style={{ color: "#166534" }}
+                            title="An authorized payroll run is currently in flight for this org — dunning is frozen at this stage and that run will complete normally."
+                          >
+                            <ShieldCheck size={12} className="shrink-0" />
+                            Payment overdue, but protected — an authorized run is in flight
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-foreground-disabled">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-foreground-muted">{formatDate(row.current_period_start)}</td>
                   <td className="px-4 py-3 text-foreground-muted">{formatDate(row.current_period_end)}</td>
                   <td className="px-4 py-3 text-foreground-muted">{formatDate(row.grace_period_ends_at)}</td>

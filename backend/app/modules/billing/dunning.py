@@ -34,13 +34,21 @@ Design rules (mirroring trial_lifecycle.py's discipline):
     baseline retry state, functionally "nothing restricted yet") the
     instant it fires, regardless of current stage.
   - Audit-first: every stage transition records a BillingCommercialAuditEvent.
-  - `in_flight_run_guard` is maintained here for visibility (an org's
-    dunning-state row shows whether an authorized run is currently
-    protecting it) but is NOT what makes the safety guarantee hold — that
-    comes structurally from which routes carry
-    entitlements.require_not_dunning_restricted() at all (only new-run
-    creation and new-entity/jurisdiction creation; never the run-advance/
-    complete endpoint). See entitlements.has_in_flight_authorized_run().
+  - The safety guarantee itself is structural, not sweep-dependent: it
+    comes from which routes carry entitlements.require_not_dunning_
+    restricted() at all (only new-run creation and new-entity/jurisdiction
+    creation; never the run-advance/complete endpoint) — see
+    entitlements.has_in_flight_authorized_run(). Completing an
+    already-authorized run is never blocked, at ANY dunning stage.
+  - `in_flight_run_guard` is a second, belt-and-suspenders layer on top of
+    that: the sweep itself refuses to advance an org's stage past
+    RESTRICT_EXPANSION while has_in_flight_authorized_run() is True, and
+    sets this column so a Super Admin can see an org is correctly
+    protected rather than mistakenly unrestricted (blocker #17's own
+    wording). This means an org with a genuinely in-flight authorized run
+    never even reaches RESTRICT_NEW_RUN/READ_ONLY while that run is
+    outstanding — re-checked every sweep, so the freeze lifts the moment
+    the guard condition clears.
 """
 
 import logging
@@ -112,17 +120,34 @@ def run_dunning_sweep(db) -> dict:
         try:
             state = get_or_create_dunning_state(db, sub.organization_id)
 
-            # in_flight_run_guard is informational only (see module docstring)
-            # — refreshed every sweep so it reflects current reality, but the
-            # actual enforcement never reads it.
-            state.in_flight_run_guard = has_in_flight_authorized_run(db, sub.organization_id)
+            # Re-checked every sweep, so this reflects current reality even
+            # if the guard condition has since cleared.
+            in_flight = has_in_flight_authorized_run(db, sub.organization_id)
+            state.in_flight_run_guard = in_flight
 
             days_elapsed = (now - state.entered_at).total_seconds() / 86400
             target_stage = _target_stage_for_elapsed(days_elapsed)
             current_index = _STAGE_ORDER.index(state.stage) if state.stage in _STAGE_ORDER else 0
             target_index = _STAGE_ORDER.index(target_stage)
 
-            if target_index > current_index:
+            next_stage_index = current_index + 1
+            would_pass_restrict_expansion = next_stage_index >= _STAGE_ORDER.index(DunningStage.RESTRICT_NEW_RUN.value)
+
+            if target_index > current_index and in_flight and would_pass_restrict_expansion:
+                # Blocker #17's critical guard: never advance an org past
+                # RESTRICT_EXPANSION while it has a PayrollRun already
+                # APPROVED/AUTHORIZED with a pay_date that hasn't passed —
+                # advancing further would put a real, in-flight pay cycle at
+                # risk of write restrictions, even though completing it is
+                # separately never blocked (see module docstring). Frozen
+                # here, not silently dropped: audited so it's visible.
+                _audit(
+                    db, sub.organization_id, "DUNNING_STAGE_ADVANCE_PAUSED_IN_FLIGHT_RUN",
+                    {"subscription_id": sub.id, "stage": state.stage, "days_past_due": round(days_elapsed, 2)},
+                )
+                db.add(state)
+                db.commit()
+            elif target_index > current_index:
                 # Advance exactly one stage at a time — never leap past an
                 # intermediate stage even if elapsed time would justify it.
                 next_stage = _STAGE_ORDER[current_index + 1]

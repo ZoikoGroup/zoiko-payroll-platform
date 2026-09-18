@@ -12,6 +12,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AlreadyExistsException
+from app.modules.billing import entitlements
 from app.modules.billing.models import (
     BillingAuthority,
     BillingCommercialAuditEvent,
@@ -53,6 +54,13 @@ def record_order_form(
 
         raise NotFoundException("Organization", organization_id)
 
+    # §12 — refuse rather than silently overwrite if this org already has a
+    # BillingSubscription under a DIFFERENT commercial route (e.g. an
+    # existing STANDALONE self-service Stripe customer). Without this, the
+    # code below would silently clobber that subscription's
+    # billing_authority/plan_version_id/status with Enterprise terms.
+    entitlements.assert_no_overlapping_billable_ownership(db, organization_id, BillingAuthority.ENTERPRISE_ORDER_FORM.value)
+
     order_form = EnterpriseOrderForm(
         organization_id=organization_id,
         contract_reference=contract_reference,
@@ -64,7 +72,6 @@ def record_order_form(
     )
     db.add(order_form)
 
-    org.commercial_route = BillingAuthority.ENTERPRISE_ORDER_FORM.value
     org.billing_classification = "COMMERCIAL_ACTIVE"
     org.charge_enabled = True
     from datetime import datetime as _dt
@@ -85,12 +92,21 @@ def record_order_form(
         )
         db.add(sub)
     else:
-        sub.billing_authority = BillingAuthority.ENTERPRISE_ORDER_FORM.value
+        # Guarded above — the only way to reach here with an existing `sub`
+        # is one already on the ENTERPRISE_ORDER_FORM route (e.g. a prior
+        # order form recording that was later superseded), never a
+        # STANDALONE/ZOIKO_ONE_BUNDLE one.
         sub.plan_version_id = None
         sub.status = SubscriptionStatus.ACTIVE.value
         sub.current_period_start = _dt.combine(term_start, _dt.min.time())
         sub.current_period_end = period_end
         db.add(sub)
+
+    # §12 — the single place commercial_route/billing_authority are set
+    # together; must run after `sub` exists (get_active_subscription needs
+    # to find it) so the subscription's billing_authority is stamped
+    # explicitly here too, not left to rely on either branch above alone.
+    entitlements.resolve_commercial_route(db, org, BillingAuthority.ENTERPRISE_ORDER_FORM.value)
 
     db.add(
         BillingCommercialAuditEvent(

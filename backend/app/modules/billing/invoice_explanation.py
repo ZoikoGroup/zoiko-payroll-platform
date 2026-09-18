@@ -110,9 +110,13 @@ def find_bwm_invoice_discrepancies(db: Session, organization_id: Optional[int] =
             .count()
         )
         if actual_count != bwm_line.quantity:
+            from app.modules.organizations.models import Organization
+
+            org = db.query(Organization).filter(Organization.id == invoice.organization_id).first()
             discrepancies.append({
                 "invoice_id": invoice.id,
                 "organization_id": invoice.organization_id,
+                "organization_name": org.organization_name if org else None,
                 "billing_month": billing_month,
                 "invoiced_quantity": bwm_line.quantity,
                 "actual_bwm_count": actual_count,

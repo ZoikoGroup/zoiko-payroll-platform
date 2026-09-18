@@ -277,6 +277,89 @@ def require_not_dunning_restricted(blocking_from_stage: str):
     return _check
 
 
+_VALID_COMMERCIAL_ROUTES = (
+    BillingAuthority.STANDALONE.value,
+    BillingAuthority.ZOIKO_ONE_BUNDLE.value,
+    BillingAuthority.ENTERPRISE_ORDER_FORM.value,
+)
+
+
+def resolve_commercial_route(db: Session, organization, route: str) -> None:
+    """Commercial Billing & Subscription Operating Standard §12 — the ONE
+    place Organization.commercial_route and BillingSubscription.
+    billing_authority are ever set, together, so they can never disagree.
+    Every entry point that establishes or changes an org's commercial
+    route calls this instead of setting either field itself:
+
+      - billing/router.py's create_checkout_session — route=STANDALONE
+      - billing/enterprise_order_form.py's record_order_form —
+        route=ENTERPRISE_ORDER_FORM
+      - apply_zoiko_one_bundle_route() below — route=ZOIKO_ONE_BUNDLE,
+        stubbed now with no caller yet, so that decision doesn't get
+        invented ad hoc when Zoiko One integration actually lands
+
+    Does NOT commit — callers are already inside their own transaction
+    (checkout's auto-promotion, record_order_form's audit-first write) and
+    decide when to commit alongside their own other changes.
+    """
+    if route not in _VALID_COMMERCIAL_ROUTES:
+        raise ValueError(f"Unrecognized commercial_route: {route!r}")
+
+    organization.commercial_route = route
+    db.add(organization)
+
+    sub = get_active_subscription(db, organization.id)
+    if sub is not None:
+        sub.billing_authority = route
+        db.add(sub)
+
+
+def apply_zoiko_one_bundle_route(db: Session, organization) -> None:
+    """Stub — no caller exists yet. Reserved for the future Zoiko One
+    bundle entry point (an org whose billing rides on a Zoiko One-level
+    commercial relationship rather than its own Stripe subscription or an
+    Enterprise Order Form). Exists now purely so that entry point calls
+    resolve_commercial_route() the same way STANDALONE/ENTERPRISE_ORDER_FORM
+    already do, instead of a future implementer inventing a fourth way to
+    set these two fields."""
+    resolve_commercial_route(db, organization, BillingAuthority.ZOIKO_ONE_BUNDLE.value)
+
+
+def assert_no_overlapping_billable_ownership(db: Session, organization_id: int, incoming_route: str) -> None:
+    """Commercial Billing & Subscription Operating Standard §12's core
+    rule: an org may never have overlapping billable ownership — a
+    BillingSubscription under one commercial route while something else
+    (an EnterpriseOrderForm, or a different route's subscription) also
+    claims to govern its billing. Application-level guard rather than a DB
+    constraint: BillingSubscription.organization_id and
+    EnterpriseOrderForm.organization_id are each already unique
+    individually (preventing duplicates within their own table), but
+    nothing at the schema level can express "these two tables must never
+    both have a row for the same org" across tables without a trigger —
+    checked here instead, at the two points that ever create either row
+    (create_checkout_session, record_order_form).
+    """
+    from app.modules.billing.models import EnterpriseOrderForm
+
+    existing_sub = get_active_subscription(db, organization_id)
+    existing_order_form = db.query(EnterpriseOrderForm).filter(EnterpriseOrderForm.organization_id == organization_id).first()
+
+    if incoming_route == BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+        if existing_sub is not None and existing_sub.billing_authority != BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+            raise ForbiddenException(
+                f"This organization already has a {existing_sub.billing_authority} billing relationship. "
+                "Recording an Enterprise Order Form for it would silently overlap two commercial routes — "
+                "migrate it explicitly first."
+            )
+    else:
+        if existing_order_form is not None:
+            raise ForbiddenException(
+                "This organization already has an Enterprise Order Form on file. "
+                "Self-service checkout would silently overlap two commercial routes — "
+                "this org must be managed through its Order Form, not self-service checkout."
+            )
+
+
 def is_billable(organization) -> bool:
     """Commercial Billing & Subscription Operating Standard §A1 — the one
     gate every invoice/charge/recurring-billing-event code path must check

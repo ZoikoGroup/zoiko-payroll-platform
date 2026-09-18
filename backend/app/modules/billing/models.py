@@ -332,14 +332,15 @@ class BillingInvoice(Base):
     stripe_invoice_id = Column(String(100), nullable=True, index=True)
     status = Column(String(30), nullable=False)
     total = Column(Numeric(12, 2), nullable=False)
-    # Part 5/§9 — Zoiko SUBSCRIPTION tax ONLY (sales tax/VAT Stripe Tax
-    # calculates on THIS Zoiko invoice, via automatic_tax in
-    # billing/router.py's create_checkout_session). This must NEVER share
-    # a column, a ledger, or a UI label with any customer PAYROLL tax
-    # figure computed elsewhere in this codebase (the Germany/US/etc.
-    # statutory tax engines under modules/payroll/engine/) — those are a
-    # completely different tax concept belonging to a different legal
-    # entity's obligations. No report or export may sum this column
+    # Part 5/§9 / Step 5 (blockers #8, #9) — Zoiko SUBSCRIPTION tax ONLY
+    # (sales tax/VAT Stripe Tax calculates on THIS Zoiko invoice, via
+    # automatic_tax in billing/router.py's create_checkout_session).
+    # Zoiko subscription tax only — never aggregate with customer payroll
+    # tax, employee deductions, or employer liabilities computed elsewhere
+    # in this codebase (the Germany/US/etc. statutory tax engines under
+    # modules/payroll/engine/, PayrollRun.total_taxes, or any payslip
+    # figure) — those belong to a completely different legal entity's
+    # obligations. No report, export, or UI label may sum this column
     # together with any payroll-tax total.
     tax_amount = Column(Numeric(12, 2), default=0, nullable=False)
     currency = Column(String(3), nullable=False)

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Plus, Trash2, Power, RefreshCw, Pencil, Building2 } from "lucide-react";
+import { Plus, Trash2, Power, RefreshCw, Pencil, Building2, Receipt } from "lucide-react";
 
 import { apiFetch } from "../api/client";
 import { useToast } from "../context/ToastContext";
@@ -7,6 +7,26 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import SearchInput from "../components/SearchInput";
 import StatusPill from "../components/StatusPill";
+
+const BILLING_CLASSIFICATIONS = ["COMMERCIAL_ACTIVE", "NON_CHARGEABLE", "LEGACY", "INTERNAL", "DEMO", "QA"];
+
+const BILLING_CLASSIFICATION_PILL = {
+  COMMERCIAL_ACTIVE: "active",
+  NON_CHARGEABLE: "inactive",
+  LEGACY: "on_hold",
+  INTERNAL: "deactivated",
+  DEMO: "pending",
+  QA: "pending",
+};
+
+const BILLING_CLASSIFICATION_CONSEQUENCE = {
+  COMMERCIAL_ACTIVE: "This organization will become eligible for billing — checkout, invoicing, and dunning will treat it as a real paying customer.",
+  NON_CHARGEABLE: "This organization will no longer be eligible for billing. Any existing subscription is left untouched, but no new invoice will be generated for it.",
+  LEGACY: "This organization will be marked as a legacy account and excluded from billing eligibility.",
+  INTERNAL: "This organization will be marked as an internal Zoiko account and excluded from billing eligibility.",
+  DEMO: "This organization will be marked as a demo account and excluded from billing eligibility.",
+  QA: "This organization will be marked as a QA/test account and excluded from billing eligibility.",
+};
 
 const EMPTY_ORG = {
   organization_name: "",
@@ -41,6 +61,9 @@ export default function OrganizationsPage() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_ORG);
   const [busy, setBusy] = useState(false);
+  const [billingOrg, setBillingOrg] = useState(null); // org currently being reclassified
+  const [billingClassification, setBillingClassification] = useState("");
+  const [billingReason, setBillingReason] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -63,6 +86,30 @@ export default function OrganizationsPage() {
         params: { is_active: !org.is_active },
       });
       addToast?.(`Organization "${org.organization_name}" ${org.is_active ? "suspended" : "activated"}.`);
+      load();
+    } catch (err) {
+      addToast?.(err.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openBillingClassification(org) {
+    setBillingOrg(org);
+    setBillingClassification(org.billing_classification || "NON_CHARGEABLE");
+    setBillingReason("");
+  }
+
+  async function handleBillingClassificationSubmit(e) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await apiFetch(`/api/organizations/${billingOrg.id}/billing-classification`, {
+        method: "PATCH",
+        body: { billing_classification: billingClassification, reason: billingReason },
+      });
+      addToast?.(`"${billingOrg.organization_name}" is now ${billingClassification}.`);
+      setBillingOrg(null);
       load();
     } catch (err) {
       addToast?.(err.message, "error");
@@ -180,6 +227,7 @@ export default function OrganizationsPage() {
               <th className="px-4 py-3">Industry</th>
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Billing</th>
               <th className="px-4 py-3">Created</th>
               <th className="px-4 py-3">Actions</th>
             </tr>
@@ -201,6 +249,12 @@ export default function OrganizationsPage() {
                 <td className="px-4 py-3">
                   <StatusPill status={org.is_active ? "active" : "suspended"} />
                 </td>
+                <td className="px-4 py-3">
+                  <StatusPill
+                    status={BILLING_CLASSIFICATION_PILL[org.billing_classification] || "inactive"}
+                    label={org.billing_classification || "NON_CHARGEABLE"}
+                  />
+                </td>
                 <td className="px-4 py-3 text-slate-500">
                   {new Date(org.created_at).toLocaleDateString()}
                 </td>
@@ -214,6 +268,15 @@ export default function OrganizationsPage() {
                     >
                       <Pencil size={12} />
                       Edit
+                    </button>
+                    <button
+                      disabled={busy}
+                      title="Change billing classification"
+                      onClick={() => openBillingClassification(org)}
+                      className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                    >
+                      <Receipt size={12} />
+                      Billing
                     </button>
                     <button
                       disabled={busy}
@@ -315,6 +378,59 @@ export default function OrganizationsPage() {
           onConfirm={handleDelete}
           onClose={() => setDeleting(null)}
         />
+      )}
+
+      {billingOrg && (
+        <Modal title={`Change billing classification — ${billingOrg.organization_name}`} onClose={() => setBillingOrg(null)} maxWidth="max-w-md">
+          <form onSubmit={handleBillingClassificationSubmit} className="space-y-4">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">New classification</span>
+              <select
+                className={INPUT}
+                value={billingClassification}
+                onChange={(e) => setBillingClassification(e.target.value)}
+              >
+                {BILLING_CLASSIFICATIONS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+              {BILLING_CLASSIFICATION_CONSEQUENCE[billingClassification]}
+            </p>
+
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">Reason *</span>
+              <textarea
+                className={INPUT}
+                required
+                rows={2}
+                value={billingReason}
+                onChange={(e) => setBillingReason(e.target.value)}
+                placeholder="Why is this org moving classifications? (recorded in the audit log)"
+              />
+            </label>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBillingOrg(null)}
+                disabled={busy}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={busy || billingClassification === billingOrg.billing_classification}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Confirm change"}
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );

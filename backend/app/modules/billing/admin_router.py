@@ -50,6 +50,8 @@ from app.modules.billing.schemas import (
     BillingSubscriptionResponse,
     ConvertTrialRequest,
     EnterpriseOrderFormCreate,
+    EnterpriseOrderFormDetailResponse,
+    EnterpriseOrderFormListResponse,
     EnterpriseOrderFormResponse,
     TrialExpirySweepResult,
 )
@@ -252,24 +254,17 @@ def get_invoice_explanation(
     return build_invoice_explanation(db, invoice)
 
 
-@router.get("/bwm-discrepancies")
-def get_bwm_invoice_discrepancies(
-    organization_id: Optional[int] = Query(None),
-    current_user=Depends(get_current_super_admin),
-    db: Session = Depends(get_db),
-):
-    """Finance-facing: any org/month where an invoice's BWM line quantity
-    doesn't match the actual counted BillingWorkerMonthRecord rows — a real
-    billing bug, not an edge case to defer."""
-    from app.modules.billing.invoice_explanation import find_bwm_invoice_discrepancies
-
-    return {"discrepancies": find_bwm_invoice_discrepancies(db, organization_id)}
+# Step 3: the Finance-facing BWM/invoice discrepancy check now lives on the
+# existing Super Admin Exceptions & Reconciliation page
+# (GET /super-admin/compliance/exceptions, super_admin/command_center_router.py)
+# instead of here — one home for "two systems that don't otherwise talk to
+# each other disagree", not a second, separate reconciliation view.
 
 
-# ── Enterprise Order Form (Part 12) ──────────────────────────────────────
+# ── Enterprise Order Form (Part 12 / Step 6) ──────────────────────────────
 
 @router.post(
-    "/organizations/{organization_id}/enterprise-order-form",
+    "/organizations/{organization_id}/order-form",
     response_model=EnterpriseOrderFormResponse,
 )
 def create_enterprise_order_form(
@@ -280,7 +275,17 @@ def create_enterprise_order_form(
 ):
     """Records a signed Enterprise Order Form — the ONE path that directly
     sets an org billable by human decision. Enterprise is explicitly never
-    self-service, so there is no public checkout UI for this."""
+    self-service, so there is no public checkout UI for this.
+
+    Side effects, all in the same transaction (billing/enterprise_order_form.py):
+      - Organization.commercial_route = ENTERPRISE_ORDER_FORM,
+        billing_classification = COMMERCIAL_ACTIVE, charge_enabled = True
+      - a matching BillingSubscription with billing_authority =
+        ENTERPRISE_ORDER_FORM and plan_version_id = None (Enterprise scale
+        limits come from this row's negotiated_scale_limits, never a
+        BillingPlanVersion)
+    Refuses an org that already has a subscription/Order Form under a
+    DIFFERENT commercial route (no overlapping billable ownership)."""
     return record_order_form(
         db,
         organization_id=organization_id,
@@ -290,6 +295,77 @@ def create_enterprise_order_form(
         term_start=data.term_start,
         term_end=data.term_end,
         signed_by_user_id=current_user.id,
+    )
+
+
+@router.get("/order-forms", response_model=EnterpriseOrderFormListResponse)
+def list_enterprise_order_forms(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Every recorded Enterprise Order Form, newest first (one per org —
+    organization_id is unique on the table itself). Cross-tenant read for
+    the Order Forms section of the Super Admin Command Center."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import EnterpriseOrderForm
+
+    rows = (
+        db.query(EnterpriseOrderForm, Organization)
+        .join(Organization, Organization.id == EnterpriseOrderForm.organization_id)
+        .order_by(EnterpriseOrderForm.created_at.desc())
+        .all()
+    )
+    items = [
+        EnterpriseOrderFormDetailResponse(
+            id=form.id,
+            organization_id=form.organization_id,
+            organization_name=org.organization_name,
+            contract_reference=form.contract_reference,
+            negotiated_scale_limits=form.negotiated_scale_limits,
+            negotiated_price_terms=form.negotiated_price_terms,
+            term_start=form.term_start,
+            term_end=form.term_end,
+            signed_by=form.signed_by,
+            created_at=form.created_at,
+        )
+        for form, org in rows
+    ]
+    return EnterpriseOrderFormListResponse(order_forms=items, total=len(items))
+
+
+@router.get(
+    "/organizations/{organization_id}/order-form",
+    response_model=EnterpriseOrderFormDetailResponse,
+)
+def get_enterprise_order_form(
+    organization_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """One org's signed Order Form (404 when the org has none on file)."""
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import EnterpriseOrderForm
+
+    row = (
+        db.query(EnterpriseOrderForm, Organization)
+        .join(Organization, Organization.id == EnterpriseOrderForm.organization_id)
+        .filter(EnterpriseOrderForm.organization_id == organization_id)
+        .first()
+    )
+    if row is None:
+        raise NotFoundException("Enterprise Order Form", organization_id)
+    form, org = row
+    return EnterpriseOrderFormDetailResponse(
+        id=form.id,
+        organization_id=form.organization_id,
+        organization_name=org.organization_name,
+        contract_reference=form.contract_reference,
+        negotiated_scale_limits=form.negotiated_scale_limits,
+        negotiated_price_terms=form.negotiated_price_terms,
+        term_start=form.term_start,
+        term_end=form.term_end,
+        signed_by=form.signed_by,
+        created_at=form.created_at,
     )
 
 

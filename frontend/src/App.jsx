@@ -44,6 +44,7 @@ import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
 import CheckoutCancelPage from "./pages/CheckoutCancelPage";
 import PlansEntitlementsPage from "./pages/SuperAdmin/PlansEntitlementsPage";
 import SubscriptionsBillingPage from "./pages/SuperAdmin/SubscriptionsBillingPage";
+import OrderFormsPage from "./pages/SuperAdmin/OrderFormsPage";
 import PayrollRunsMonitorPage from "./pages/SuperAdmin/PayrollRunsMonitorPage";
 import FilingsRemittancesPage from "./pages/SuperAdmin/FilingsRemittancesPage";
 import ExceptionsReconciliationPage from "./pages/SuperAdmin/ExceptionsReconciliationPage";
@@ -236,6 +237,7 @@ export default function App() {
         {/* Command Center — Zoiko Commercial / Payroll Operations / Platform */}
         <Route path="/super-admin/plans-entitlements" element={<SuperAdminShell><PlansEntitlementsPage /></SuperAdminShell>} />
         <Route path="/super-admin/subscriptions-billing" element={<SuperAdminShell><SubscriptionsBillingPage /></SuperAdminShell>} />
+        <Route path="/super-admin/order-forms" element={<SuperAdminShell><OrderFormsPage /></SuperAdminShell>} />
         <Route path="/super-admin/payroll-runs" element={<SuperAdminShell><PayrollRunsMonitorPage /></SuperAdminShell>} />
         <Route path="/super-admin/filings-remittances" element={<SuperAdminShell><FilingsRemittancesPage /></SuperAdminShell>} />
         <Route path="/super-admin/exceptions-reconciliation" element={<SuperAdminShell><ExceptionsReconciliationPage /></SuperAdminShell>} />

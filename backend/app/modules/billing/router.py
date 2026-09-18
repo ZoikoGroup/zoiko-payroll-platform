@@ -9,6 +9,10 @@ Mounted with prefix "/billing" (see main.py):
     GET  /billing/plans               → PUBLISHED plan versions + entitlement flags
     GET  /billing/my-subscription     → current org's subscription + entitlement flags
     GET  /billing/trial-status        → lightweight banner payload (null when none)
+    GET  /billing/dunning-status      → lightweight payment-issue banner payload (null when none)
+    POST /billing/my-subscription/billing-portal → Stripe Billing Portal URL (update payment method)
+    GET  /billing/my-subscription/invoices                    → org's own invoices, newest first
+    GET  /billing/my-subscription/invoice-explanation/{id}    → one invoice, per-employee breakdown
     POST /billing/checkout            → create a Stripe Checkout Session (PRODUCTION only)
     POST /billing/webhooks/stripe     → Stripe webhook handler (unauthenticated, signature-verified)
 
@@ -31,6 +35,7 @@ from app.core.exceptions import BadRequestException, ForbiddenException, NotFoun
 from app.database import get_db
 from app.modules.billing import entitlements, plan_catalog
 from app.modules.billing.models import (
+    BillingAuthority,
     BillingCommercialAuditEvent,
     BillingPlan,
     BillingPlanVersion,
@@ -44,6 +49,8 @@ from app.modules.billing.schemas import (
     BillingMySubscriptionResponse,
     BillingPublishedPlanResponse,
     BillingTrialStatusResponse,
+    BillingDunningStatusResponse,
+    BillingPortalResponse,
 )
 from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
 
@@ -51,8 +58,9 @@ logger = logging.getLogger("zoiko_payroll.billing.router")
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
-# Plan prices in cents — shared by checkout price creation and plans list.
-PLAN_PRICES_CENTS = {"CORE": 0, "PROFESSIONAL": 5000, "BUSINESS": 15000, "ENTERPRISE": 50000}
+# Plan prices live ONLY in billing_price_catalog_items (see plan_catalog.py's
+# price helpers + scripts/seed_price_catalog.py). No hardcoded amount may
+# exist here — checkout and the plans list both resolve from the catalog.
 
 
 # ── Read-only tenant endpoints ─────────────────────────────────────────────
@@ -78,6 +86,7 @@ def list_published_plans(
         version = plan_catalog.get_published_plan_version(db, plan.code)
         if version is None:
             continue
+        price_items = plan_catalog.resolve_plan_price_items(db, plan.code)
         results.append(
             BillingPublishedPlanResponse(
                 plan_id=plan.id,
@@ -89,7 +98,20 @@ def list_published_plans(
                 feature_set=version.feature_set,
                 scale_limits=version.scale_limits,
                 entitlement_flags=plan_catalog.list_entitlement_flags(db, version.id),
-                monthly_price_usd=PLAN_PRICES_CENTS.get(plan.code, 5000) / 100.0,
+                # Step 7 — monthly price is derived from the PUBLISHED
+                # price catalog, never a hardcoded dict; components feed
+                # the plan card's per-line breakdown on the frontend.
+                monthly_price_usd=sum(
+                    (i.unit_amount for i in price_items), Decimal("0.00")
+                ),
+                price_components=[
+                    {
+                        "component_type": item.component_type,
+                        "currency": item.currency,
+                        "unit_amount": item.unit_amount,
+                    }
+                    for item in price_items
+                ],
             )
         )
     return results
@@ -153,6 +175,71 @@ def get_trial_status(
     )
 
 
+@router.get(
+    "/dunning-status",
+    response_model=Optional[BillingDunningStatusResponse],
+    summary="Lightweight dunning status for the payment-issue banner",
+)
+def get_dunning_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Step 4 / blocker #17 — the org's own BillingDunningState, so the
+    tenant-facing banner can state plainly what's restricted right now.
+    Returns null (no row, or SUPER_ADMIN with no organization_id at all)
+    rather than 404 — the banner should silently not render, not error."""
+    from app.modules.billing.models import BillingDunningState
+
+    if current_user.organization_id is None:
+        return None
+
+    state = (
+        db.query(BillingDunningState)
+        .filter(BillingDunningState.organization_id == current_user.organization_id)
+        .first()
+    )
+    if state is None:
+        return None
+
+    return BillingDunningStatusResponse(
+        stage=state.stage,
+        entered_at=state.entered_at,
+        in_flight_run_guard=state.in_flight_run_guard,
+    )
+
+
+@router.post(
+    "/my-subscription/billing-portal",
+    response_model=BillingPortalResponse,
+    summary="Create a Stripe Billing Portal session to update payment method",
+)
+def create_billing_portal_session(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Step 4 — the dunning banner's "update payment method" CTA. No
+    stripe_customer_id is persisted anywhere in this codebase today
+    (checkout creates an implicit Stripe Customer per session); the
+    subscription's own stripe_subscription_id is the only durable link
+    back to it, so it's looked up live rather than adding a new column
+    just for this."""
+    subscription = entitlements.get_active_subscription(db, current_user.organization_id)
+    if subscription is None or not subscription.stripe_subscription_id:
+        raise BadRequestException("No Stripe subscription on file for this organization.")
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+        portal_session = stripe.billing_portal.Session.create(
+            customer=stripe_sub.customer,
+            return_url=f"{settings.FRONTEND_URL}/organization-admin/subscription",
+        )
+    except stripe.error.StripeError as e:
+        raise BadRequestException(f"Stripe billing portal error: {str(e)}")
+
+    return BillingPortalResponse(portal_url=portal_session.url)
+
+
 def _ensure_stripe_price(db: Session, version: BillingPlanVersion, plan: BillingPlan) -> str:
     """Ensure version has a stripe_price_id; create product and price on-the-fly if missing."""
     if version.stripe_price_id:
@@ -161,7 +248,16 @@ def _ensure_stripe_price(db: Session, version: BillingPlanVersion, plan: Billing
     if not settings.STRIPE_SECRET_KEY:
         raise BadRequestException("Stripe is not configured. STRIPE_SECRET_KEY is missing.")
 
-    amount = PLAN_PRICES_CENTS.get(plan.code, 5000)
+    # Step 7 — the amount comes from the PUBLISHED price catalog. No
+    # hardcoded fallback exists: a plan without a published price has no
+    # defensible amount to charge, so checkout fails closed instead of
+    # inventing one.
+    amount = plan_catalog.resolve_plan_monthly_price_cents(db, plan.code)
+    if amount is None:
+        raise BadRequestException(
+            f"No published price exists in the catalog for plan {plan.code}. "
+            "Run scripts/seed_price_catalog.py (or publish a price) before offering checkout."
+        )
     product_name = f"{plan.name} v{version.version}"
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -200,6 +296,31 @@ def create_checkout_session(
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     if org is None:
         raise NotFoundException("Organization", organization_id)
+
+    # §12 — an Enterprise-governed org (or any org whose commercial route
+    # already disagrees with STANDALONE) must never be allowed into
+    # self-service checkout at all; that would silently overlap two
+    # commercial routes. Checked unconditionally, before the auto-promotion
+    # below, since an already-COMMERCIAL_ACTIVE Enterprise org would
+    # otherwise sail straight through the is_billable() check further down.
+    entitlements.assert_no_overlapping_billable_ownership(db, organization_id, BillingAuthority.STANDALONE.value)
+
+    # Part 1 (§A1) — a NON_CHARGEABLE org attempting its first self-service
+    # checkout is exactly how a STANDALONE org is supposed to become
+    # billable, so auto-promote here rather than gating on a state nothing
+    # has set yet (checkout.session.completed re-affirms this idempotently
+    # below; this is the actual first flip).
+    if org.billing_classification == "NON_CHARGEABLE":
+        org.billing_classification = "COMMERCIAL_ACTIVE"
+        org.charge_enabled = True
+        entitlements.resolve_commercial_route(db, org, BillingAuthority.STANDALONE.value)
+        db.commit()
+
+    if not entitlements.is_billable(org):
+        raise ForbiddenException(
+            "This organization is not eligible for billing "
+            f"(billing_classification={org.billing_classification})."
+        )
 
     # Check 1: Plan must exist and have a published version
     plan = db.query(BillingPlan).filter(BillingPlan.code == body.plan_code).first()
@@ -285,6 +406,68 @@ def create_checkout_session(
     return BillingCheckoutResponse(checkout_url=session.url)
 
 
+def _infer_component_type(price) -> str:
+    """Maps a Stripe Price to a BillingSubscriptionItem-style
+    component_type. No fixed vocabulary exists for this column anywhere in
+    the codebase (a free-text String(50)) — this establishes the two real
+    values in use: RECURRING_BASE (the flat monthly plan price
+    _ensure_stripe_price creates) and BWM (a metered/usage-based billable-
+    worker-month line). Every checkout price today is flat-rate — no
+    metered BWM Stripe Price is ever created yet — so in practice every
+    line currently resolves to RECURRING_BASE; the metered branch is real,
+    checked logic for the day a BWM-priced Stripe Price exists, not dead
+    code guarding against nothing.
+
+    Takes the Price object itself (not the invoice line) — current Stripe
+    API versions no longer nest an expandable `price` object directly on
+    the invoice line; the line only carries a price *id* under
+    `pricing.price_details.price`, so the caller retrieves the Price
+    separately and passes it in here.
+    """
+    recurring = getattr(price, "recurring", None) if price else None
+    usage_type = getattr(recurring, "usage_type", None) if recurring else None
+    if usage_type == "metered":
+        return "BWM"
+    return "RECURRING_BASE"
+
+
+def _sync_subscription_price_item(db: Session, sub: BillingSubscription, plan_code: str) -> None:
+    """Step 7 — pin a subscription's flat base price to the PUBLISHED price
+    catalog by (re)writing its RECURRING_BASE component item.
+
+    checkout.session.completed is the only place a STANDALONE sub is created
+    or re-pointed at a plan, so keeping exactly one RECURRING_BASE item per
+    sub (delete-then-insert) stays correct across initial subscribe and any
+    future replan/renew flows. A plan with no published catalog price leaves
+    the sub without an item rather than breaking the webhook — the catalog-
+    reference invariant only holds when the referenced row actually exists.
+    """
+    from app.modules.billing.models import BillingSubscriptionItem
+
+    base_item = plan_catalog.get_published_base_catalog_item(db, plan_code)
+    if base_item is None:
+        return
+
+    existing = (
+        db.query(BillingSubscriptionItem)
+        .filter(
+            BillingSubscriptionItem.subscription_id == sub.id,
+            BillingSubscriptionItem.component_type == "RECURRING_BASE",
+        )
+        .all()
+    )
+    for row in existing:
+        db.delete(row)
+    db.add(
+        BillingSubscriptionItem(
+            subscription_id=sub.id,
+            component_type="RECURRING_BASE",
+            unit_price_catalog_ref=base_item.id,
+            quantity=1,
+        )
+    )
+
+
 def _write_invoice_from_stripe(db: Session, sub: BillingSubscription, stripe_invoice_id: Optional[str], status: str) -> None:
     """Part 6 — populate BillingInvoice/BillingInvoiceLine, previously
     fully modeled and never populated by anything. Idempotent on
@@ -324,13 +507,20 @@ def _write_invoice_from_stripe(db: Session, sub: BillingSubscription, stripe_inv
         logger.exception("[invoice] Failed to retrieve Stripe invoice %s", stripe_invoice_id)
         return
 
+    # Stripe removed the flat `invoice.tax` field in current API versions —
+    # tax now only shows up as the gap between total and total_excluding_tax
+    # (or, equivalently, summing total_taxes[].amount). Deriving it from the
+    # totals is robust to either shape and to tax being entirely absent.
+    total_excluding_tax = getattr(stripe_invoice, "total_excluding_tax", None)
+    tax_cents = (stripe_invoice.total - total_excluding_tax) if total_excluding_tax is not None else 0
+
     invoice = BillingInvoice(
         organization_id=sub.organization_id,
         subscription_id=sub.id,
         stripe_invoice_id=stripe_invoice.id,
         status=status,
         total=Decimal(stripe_invoice.total) / 100,
-        tax_amount=Decimal(stripe_invoice.tax or 0) / 100,
+        tax_amount=Decimal(tax_cents) / 100,
         currency=stripe_invoice.currency.upper(),
         issued_at=datetime.fromtimestamp(stripe_invoice.created),
     )
@@ -338,12 +528,26 @@ def _write_invoice_from_stripe(db: Session, sub: BillingSubscription, stripe_inv
     db.flush()
 
     for line in stripe_invoice.lines.data:
+        # Current API versions nest only a price *id* on the line
+        # (pricing.price_details.price) rather than an expandable Price
+        # object — retrieve it separately to inspect recurring.usage_type.
+        pricing = getattr(line, "pricing", None)
+        price_details = getattr(pricing, "price_details", None) if pricing else None
+        price_id = getattr(price_details, "price", None) if price_details else None
+        price = None
+        if price_id:
+            try:
+                price = stripe.Price.retrieve(price_id)
+            except stripe.error.StripeError:
+                logger.exception("[invoice] Failed to retrieve Stripe price %s", price_id)
+
+        quantity = line.quantity or 1
         db.add(BillingInvoiceLine(
             invoice_id=invoice.id,
             description=line.description or "Subscription charge",
-            component_type="RECURRING_BASE",
-            quantity=line.quantity or 1,
-            unit_amount=Decimal(line.price.unit_amount) / 100 if line.price and line.price.unit_amount is not None else Decimal(0),
+            component_type=_infer_component_type(price),
+            quantity=quantity,
+            unit_amount=Decimal(line.amount) / quantity / 100,
             line_total=Decimal(line.amount) / 100,
         ))
 
@@ -427,6 +631,24 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 sub.current_period_end = period_end
                 sub.stripe_subscription_id = stripe_sub_id
 
+            # Materialize sub.id now — billing_subscription_items has no
+            # ORM relationship() for SQLAlchemy to auto-order inserts by
+            # dependency, so the item's subscription_id FK below would
+            # otherwise flush as NULL (NOT NULL violation).
+            db.flush()
+
+            # Step 7 — pin the sub's flat base price to the PUBLISHED price
+            # catalog (Enterprise Order Form orgs have no plan_version, so
+            # plan_code resolves to None and no item is written for them).
+            version_row = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == version_id).first()
+            plan_code = None
+            if version_row is not None:
+                plan_row = db.query(BillingPlan).filter(BillingPlan.id == version_row.plan_id).first()
+                if plan_row is not None:
+                    plan_code = plan_row.code
+            if plan_code is not None:
+                _sync_subscription_price_item(db, sub, plan_code)
+
             # Flip workspace to PRODUCTION on successful payment
             from app.modules.organizations.models import Organization
             org = db.query(Organization).filter(Organization.id == org_id).first()
@@ -447,6 +669,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     except ValueError:
                         org.service_commencement_at = datetime.utcnow()
 
+                # Part 1 (§A1) — this webhook is the actual authority for a
+                # STANDALONE org becoming billable on the self-service path
+                # (create_checkout_session's own auto-promotion, above,
+                # already does this idempotently for the common case; this
+                # re-affirms it here too so it holds even if a subscription
+                # somehow reaches ACTIVE via a path that skipped that step).
+                if org.commercial_route != BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+                    org.billing_classification = "COMMERCIAL_ACTIVE"
+                    org.charge_enabled = True
+                    # §12 — resolve_commercial_route also stamps sub.billing_authority
+                    # to match explicitly (previously it only ever got STANDALONE by
+                    # column default, never an explicit assignment).
+                    entitlements.resolve_commercial_route(db, org, org.commercial_route or BillingAuthority.STANDALONE.value)
+
             db.add(BillingCommercialAuditEvent(
                 organization_id=org_id,
                 event_type="SELF_SERVICE_CHECKOUT_COMPLETED",
@@ -464,7 +700,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         )
         if sub:
             stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-            sub.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end)
+            # Stripe moved current_period_end off the Subscription object
+            # itself and onto each subscription item (API versions
+            # 2025-06-30+/current SDK) — reading stripe_sub.current_period_end
+            # directly raises AttributeError against a real Stripe response.
+            period_end_ts = stripe_sub["items"]["data"][0]["current_period_end"]
+            sub.current_period_end = datetime.fromtimestamp(period_end_ts)
             sub.status = SubscriptionStatus.ACTIVE.value  # recover from PAST_DUE on payment
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,
@@ -584,15 +825,71 @@ def cancel_my_subscription(
     }
 
 
-# ── Invoice explanation (Part 7) ────────────────────────────────────────
+# ── Invoices & invoice explanation (Step 3 / Part 7) ────────────────────
+
+@router.get("/my-subscription/invoices")
+def list_my_invoices(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """The caller's own invoices, newest first — feeds the Subscription
+    page's Invoices tab. total/tax_amount/currency/status only; the full
+    per-employee breakdown is a separate call
+    (GET .../invoice-explanation/{invoice_id}) so this list stays cheap."""
+    from app.modules.billing.models import BillingInvoice
+
+    invoices = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.organization_id == current_user.organization_id)
+        .order_by(BillingInvoice.issued_at.desc())
+        .all()
+    )
+    return {
+        "invoices": [
+            {
+                "id": inv.id,
+                "stripe_invoice_id": inv.stripe_invoice_id,
+                "status": inv.status,
+                "total": inv.total,
+                "tax_amount": inv.tax_amount,
+                "currency": inv.currency,
+                "issued_at": inv.issued_at,
+            }
+            for inv in invoices
+        ],
+    }
+
+
+@router.get("/my-subscription/invoice-explanation/{invoice_id}")
+def get_my_invoice_explanation(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """A specific invoice of the caller's own org, explained: which
+    employees it billed for, and who was excluded (and why), per Part 7."""
+    from app.modules.billing.models import BillingInvoice
+    from app.modules.billing.invoice_explanation import build_invoice_explanation
+
+    invoice = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.id == invoice_id, BillingInvoice.organization_id == current_user.organization_id)
+        .first()
+    )
+    if invoice is None:
+        raise NotFoundException("Invoice", invoice_id)
+    return build_invoice_explanation(db, invoice)
+
 
 @router.get("/my-subscription/invoice-explanation")
 def get_my_latest_invoice_explanation(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """The caller's own most recent invoice, explained: which employees it
-    billed for, and who was excluded (and why), per Part 7."""
+    """Convenience alias for the caller's most recent invoice — kept
+    alongside the explicit {invoice_id} route above rather than replaced,
+    since it's a real, already-used shortcut (no invoice id needed for the
+    common "what did my last bill cover" question)."""
     from app.modules.billing.models import BillingInvoice
     from app.modules.billing.invoice_explanation import build_invoice_explanation
 
