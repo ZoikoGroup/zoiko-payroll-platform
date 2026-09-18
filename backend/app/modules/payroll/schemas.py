@@ -1240,6 +1240,11 @@ class GratuityCalculateResponse(BaseModel):
     eligible: bool
     reason: str
     gratuityAmount: Decimal = Field(Decimal("0"), validation_alias="gratuity_amount", serialization_alias="gratuityAmount")
+    # Section 10(10) income-tax exempt/taxable split — None (not 0) means
+    # "not computed," when gratuity_exempt_lim isn't configured (see
+    # india.py's calculate_gratuity docstring for the full explanation).
+    exemptGratuityAmount: Optional[Decimal] = Field(None, validation_alias="exempt_gratuity_amount", serialization_alias="exemptGratuityAmount")
+    taxableGratuityAmount: Optional[Decimal] = Field(None, validation_alias="taxable_gratuity_amount", serialization_alias="taxableGratuityAmount")
     model_config = ConfigDict(populate_by_name=True)
 
 
