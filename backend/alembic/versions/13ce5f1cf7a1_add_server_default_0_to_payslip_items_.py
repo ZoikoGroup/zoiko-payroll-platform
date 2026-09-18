@@ -1,8 +1,20 @@
 """add server default 0 to payslip_items soli
 
 Revision ID: 13ce5f1cf7a1
-Revises: fbfe6d7eeb2e
+Revises: 2b3c4d5e6f70
 Create Date: 2026-09-17 11:44:30.380335
+
+Phase 8DQ correction — this migration's down_revision originally pointed to
+`fbfe6d7eeb2e`, a no-op Alembic-bookkeeping merge migration that exists only
+on a separate, unrelated `main`-lineage worktree (its own parents,
+`b33ef13051bb`/`f1b78410d568`, are Australia-statutory revisions that were
+never part of nikhil's history at all). That reference was never valid on
+this branch, leaving this migration — and everything chained after it —
+disconnected from nikhil's real Alembic graph. Corrected to point at
+`2b3c4d5e6f70` (`add_overtime_premium_wage_tax_soli_church_tax_deltas`,
+Phase 8BW), nikhil's actual prior head at the time this migration was
+authored. No schema change from this correction — `upgrade()`/`downgrade()`
+are unchanged.
 
 Phase 8DD — closes the P2 schema drift Phase 8DB's read-only production
 audit confirmed: `payslip_items.soli` has no DB-level server default,
@@ -35,7 +47,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '13ce5f1cf7a1'
-down_revision: Union[str, Sequence[str], None] = 'fbfe6d7eeb2e'
+down_revision: Union[str, Sequence[str], None] = '2b3c4d5e6f70'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

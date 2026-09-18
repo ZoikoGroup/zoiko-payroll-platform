@@ -22,8 +22,8 @@ import pytest
 
 from app.core.exceptions import BadRequestException, ForbiddenException, GermanyPapGateBlockedException
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_pap import production_gate
-from app.modules.payroll.engine.germany_pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
+from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate
+from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import AUTHORITATIVE_BMF, GermanyPapGoldenVector
 from app.modules.payroll.models import TaxConfigurationAudit
 
 
@@ -203,7 +203,7 @@ def test_synthetic_golden_vector_can_never_satisfy_the_gate(db):
     """Phase 8BG regression: a SYNTHETIC-classified vector must be refused
     outright, regardless of whether its numbers happen to match — the
     classification check runs before, and independent of, the comparison."""
-    from app.modules.payroll.engine.germany_pap.golden_vector import SYNTHETIC
+    from app.modules.payroll.engine.jurisdictions.germany.pap.golden_vector import SYNTHETIC
 
     asset = _publish_asset(db)
     release = service.create_pap_release(db, asset.id, actor_id=1)
@@ -297,10 +297,10 @@ def test_all_gates_satisfied_recognizes_eligibility_but_never_activates_producti
     must recognize eligibility, while the actual production executor
     remains completely unavailable, because reaching ACTIVE on this
     governance row has zero wiring into resolve_pap_executor()."""
-    from app.modules.payroll.engine.germany_pap.core import (
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         resolve_pap_executor, UnavailablePapExecutor, GermanyPapInvalidError,
     )
-    from app.modules.payroll.engine.germany_pap.adapter import PAP_SOURCE_FINALITY, assert_pap_source_finality_resolved
+    from app.modules.payroll.engine.jurisdictions.germany.pap.adapter import PAP_SOURCE_FINALITY, assert_pap_source_finality_resolved
 
     asset = _publish_asset(db)
     release = service.create_pap_release(db, asset.id, actor_id=1)

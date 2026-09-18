@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.modules.payroll import service
 from app.modules.payroll.engine.countries import germany
-from app.modules.payroll.engine.germany_pap.core import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
     calculate_midijob_branch_contribution,
     calculate_midijob_employee_base,
     calculate_midijob_total_base,
@@ -314,7 +314,7 @@ class TestMidijobE2E:
         # internal calculator (clearly labeled, not BMF-certified).
         trace = item.germany_calculation_snapshot or {}
         assert trace.get("calculationStatus") == "COMPLETE"
-        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
         assert "midijob_rv" in trace.get("resolved", {})
         assert "midijob_alv" in trace.get("resolved", {})
         assert "midijob_gkv" in trace.get("resolved", {})
@@ -365,7 +365,7 @@ class TestRegularE2E:
 
         trace = item.germany_calculation_snapshot or {}
         assert trace.get("calculationStatus") == "COMPLETE"
-        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2023"
+        assert trace.get("papVersion") == "INTERNAL_FUNCTIONAL_REFERENCE-ESTG32A-2026"
         assert trace.get("resolved", {}).get("rv") is not None
         assert trace.get("resolved", {}).get("gkv") is not None
         assert trace.get("resolved", {}).get("pv") is not None

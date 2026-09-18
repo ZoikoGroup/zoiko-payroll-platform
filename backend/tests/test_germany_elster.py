@@ -17,7 +17,7 @@ import pytest
 
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import service
-from app.modules.payroll.engine.germany_elster import (
+from app.modules.payroll.engine.jurisdictions.germany.statutory.elster import (
     ElsterTransmissionRequest, GermanyElsterUnavailableError, resolve_elster_transmitter,
 )
 from app.modules.payroll.models import GermanyElsterTransmission

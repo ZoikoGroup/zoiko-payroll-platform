@@ -21,8 +21,8 @@ from decimal import Decimal
 
 import pytest
 
-from app.modules.payroll.engine.germany_pap.core import GermanyPapInvalidError
-from app.modules.payroll.engine.germany_pap.interpreter import (
+from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyPapInvalidError
+from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import (
     Comparison,
     IndexExpr,
     IntSubtractExpr,
@@ -305,52 +305,52 @@ def test_parses_number_literal():
 
 
 def test_parses_qualified_reference():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     node = _ExpressionParser("BigDecimal.ZERO", declared_names=set()).parse_expression_only()
     assert isinstance(node, QualifiedRef)
     assert node.namespace == "BigDecimal" and node.member == "ZERO"
 
 
 def test_parses_array_index():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     node = _ExpressionParser("TAB[J]", declared_names={"TAB", "J"}).parse_expression_only()
     assert isinstance(node, IndexExpr)
     assert isinstance(node.base, NameRef) and node.base.name == "TAB"
 
 
 def test_parses_int_subtraction():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     node = _ExpressionParser("YEAR - 2000", declared_names={"YEAR"}).parse_expression_only()
     assert isinstance(node, IntSubtractExpr)
 
 
 def test_parses_unary_minus_literal():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     node = _ExpressionParser("-1", declared_names=set()).parse_expression_only()
     assert isinstance(node, NumberLiteral)
     assert node.text == "-1"
 
 
 def test_parses_and_condition():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser, LogicalAnd
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser, LogicalAnd
     node = _ExpressionParser("A == 1 && B == 2", declared_names={"A", "B"}).parse_condition_only()
     assert isinstance(node, LogicalAnd)
 
 
 def test_rejects_undeclared_variable_reference():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     with pytest.raises(GermanyPapInvalidError, match="undeclared"):
         _ExpressionParser("GHOST_VAR", declared_names=set()).parse_expression_only()
 
 
 def test_rejects_unsupported_qualified_reference():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     with pytest.raises(GermanyPapInvalidError, match="Unsupported qualified reference"):
         _ExpressionParser("BigDecimal.BOGUS_MEMBER", declared_names=set()).parse_expression_only()
 
 
 def test_rejects_unrecognized_character():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     with pytest.raises(GermanyPapInvalidError, match="Unrecognized character"):
         _ExpressionParser("A $ B", declared_names={"A", "B"}).parse_expression_only()
 
@@ -358,13 +358,13 @@ def test_rejects_unrecognized_character():
 def test_rejects_unsupported_operator_not_equal():
     """`!=` never appears in the real document (Phase 8B report §10's
     inventory found only ==, <, >, >=, &&) — confirmed rejected here."""
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     with pytest.raises(GermanyPapInvalidError):
         _ExpressionParser("A != 1", declared_names={"A"}).parse_condition_only()
 
 
 def test_rejects_unsupported_logical_or():
-    from app.modules.payroll.engine.germany_pap.interpreter import _ExpressionParser
+    from app.modules.payroll.engine.jurisdictions.germany.pap.interpreter import _ExpressionParser
     with pytest.raises(GermanyPapInvalidError):
         _ExpressionParser("A == 1 || B == 2", declared_names={"A", "B"}).parse_condition_only()
 
@@ -575,7 +575,7 @@ def test_no_eval_or_exec_used_in_module_source():
     functions are avoided."""
     import ast
     import inspect
-    import app.modules.payroll.engine.germany_pap.interpreter as mod
+    import app.modules.payroll.engine.jurisdictions.germany.pap.interpreter as mod
 
     source = inspect.getsource(mod)
     tree = ast.parse(source)
@@ -645,7 +645,7 @@ def test_deeply_nested_conditionals_are_bounded_by_depth_budget(monkeypatch):
     budget) must fail closed instead of collapsing Python's interpreter
     recursion stack."""
     import sys
-    from app.modules.payroll.engine.germany_pap import interpreter as interpreter_mod
+    from app.modules.payroll.engine.jurisdictions.germany.pap import interpreter as interpreter_mod
 
     depth = 150  # beyond the real MAX_NESTING_DEPTH (100) and portable across any monkeypatch
     outer = ""
@@ -671,7 +671,7 @@ def test_deeply_nested_conditionals_are_bounded_by_depth_budget(monkeypatch):
 def test_excessive_statement_fanout_is_bounded_by_step_budget(monkeypatch):
     """A flat MAIN with more statements than the step budget must fail
     closed (budget monkeypatched low to keep the fixture cheap)."""
-    from app.modules.payroll.engine.germany_pap import interpreter as interpreter_mod
+    from app.modules.payroll.engine.jurisdictions.germany.pap import interpreter as interpreter_mod
 
     count = 20  # > the monkeypatched MAX_EXECUTION_STEPS below
     evals = "<EVAL exec=\"R = BigDecimal.ONE\"/>" * count

@@ -15,7 +15,7 @@ Verifies:
 from datetime import date
 import pytest
 
-from app.modules.payroll.engine.germany_deuv import (
+from app.modules.payroll.engine.jurisdictions.germany.statutory.deuv import (
     DEUV_MESSAGE_TYPES,
     DeuvTransmissionRequest,
     GermanyDeuvUnavailableError,

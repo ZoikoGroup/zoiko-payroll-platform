@@ -382,14 +382,34 @@ def test_normalize_uk_sub_jurisdiction_recognizes_all_four_nations():
 DE_SLABS = [Slab(Decimal("0"), None, Decimal("20"))]
 
 
-def test_germany_church_tax_off_by_default():
-    result = calc("DE", 5000, {}, DE_SLABS)
-    assert result.church_tax == Decimal("0")
+def test_germany_church_tax_requires_full_statutory_configuration():
+    """Phase 8BY (replaces `test_germany_church_tax_off_by_default` and
+    `test_germany_church_tax_applied_when_liable`): both predated Germany
+    becoming a fail-closed jurisdiction and drove church tax purely from a
+    `church_tax_liable` boolean on a bare context, with no
+    EmployeeStatutoryProfile and no registry.
 
+    Church-tax liability is no longer inferable that way: per
+    ZP-TAX-DE-2026-001 section 8 it is driven by the authoritative ELStAM
+    religious characteristic plus the resolved Land rate (and any sub-Land
+    exception), all of which live on the statutory profile / registries.
+    Without them the engine must refuse rather than return a plausible
+    zero — a silent 0 here would be indistinguishable from "genuinely not
+    liable".
 
-def test_germany_church_tax_applied_when_liable():
-    result = calc("DE", 5000, {}, DE_SLABS, church_tax_liable=True)
-    assert result.church_tax > 0
+    Real 8%/9% Land behavior, the liable and not-liable paths and the
+    sub-Land exception path are covered by
+    test_germany_functional_payroll_final.py (Bavaria/NRW),
+    test_germany_church_tax_exception_resolution.py and
+    test_germany_payslip_surface.py."""
+    from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
+        GermanyStatutoryProfileMissingError,
+    )
+
+    with pytest.raises(GermanyStatutoryProfileMissingError):
+        calc("DE", 5000, {}, DE_SLABS)
+    with pytest.raises(GermanyStatutoryProfileMissingError):
+        calc("DE", 5000, {}, DE_SLABS, church_tax_liable=True)
 
 
 # ── Australia: HELP/HECS ────────────────────────────────────────────────────
@@ -439,9 +459,14 @@ def test_canada_cpp2_nonzero_above_ympe():
 # computed employer cost) — see test_uk_employer_ni_now_actually_consumed.
 
 def test_opt_in_fields_are_zero_without_explicit_employee_data():
+    # Phase 8BY: "DE" removed from this sweep. Germany no longer returns a
+    # default-zero result for an unconfigured employee — it fails closed
+    # with GermanyStatutoryProfileMissingError (asserted directly by
+    # test_germany_church_tax_requires_full_statutory_configuration above),
+    # which is a stronger guarantee than "these opt-in fields are zero".
     for country, rates, slabs in [
         ("IN", IN_RATES, IN_SLABS), ("US", US_RATES, US_SLABS), ("UK", UK_RATES, UK_SLABS),
-        ("DE", {}, DE_SLABS), ("AU", {}, AU_SLABS), ("CA", CA_RATES, CA_SLABS),
+        ("AU", {}, AU_SLABS), ("CA", CA_RATES, CA_SLABS),
     ]:
         result = calc(country, 5000, rates, slabs)
         assert result.study_loan_deduction == Decimal("0"), country

@@ -224,6 +224,20 @@ was executed:
   table, `payslip_items.soli`, three overtime delta columns, and the
   `d3e4f5a6b7c8` unique constraint).
 
+> **STATUS SUPERSEDED (2026-09-15) — the assumptions in this section no
+> longer hold for the live database.** A subsequent read-only forensic
+> investigation (`docs/GERMANY_2026_SHARED_DATABASE_MIGRATION_FORENSIC_REPORT.md`)
+> observed the live DB in a **different** state: `alembic_version` is now
+> `2b8cb41dfbed` (still unresolvable from this repo), and the DB physically
+> **contains** `payslip_items.soli` + the three overtime delta columns while
+> still **lacking** the ELSTER tables, minijob table, and the `d3e4f5a6b7c8`
+> unique constraint. That combination is unreachable on this repo's linear
+> chain — the shared DB was modified by an external migration lineage after
+> this report was written. Therefore the planned "resolve `f61cb4b650f4`, apply
+> five additive migrations" recovery would now **fail** (`soli`/delta columns
+> already exist). Do not rely on the next paragraph as today's recovery path;
+> follow the forensic report's §16 operator sequence instead.
+
 Because the database has NOT been modified, the deployment will repair it
 automatically on the next successful run once this fix is merged to `main`:
 `alembic upgrade head` will resolve `f61cb4b650f4`, apply the five additive
