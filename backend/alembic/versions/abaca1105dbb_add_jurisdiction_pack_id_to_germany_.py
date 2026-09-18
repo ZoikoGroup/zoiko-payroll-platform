@@ -72,17 +72,68 @@ _GERMANY_REGISTRY_TABLES = [
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    """Upgrade schema.
+
+    Drift-tolerant: the column and/or FK may already exist in production
+    if ``sync_schema`` or a prior partial migration run created them before
+    the Alembic version row was stamped.  We inspect the live database
+    before each DDL operation and skip objects that are already present
+    with the correct definition.  If an existing object has the WRONG
+    definition, we fail closed with a diagnostic rather than silently
+    accepting an inconsistent schema.
+    """
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
     for table, suffix in _GERMANY_REGISTRY_TABLES:
-        op.add_column(
-            table,
-            sa.Column("jurisdiction_pack_id", sa.Integer(), nullable=True),
-        )
-        op.create_foreign_key(
-            f"fk_{suffix}_pack_id",
-            table, "payroll_jurisdiction_packs",
-            ["jurisdiction_pack_id"], ["id"],
-        )
+        existing_columns = {
+            col["name"]: col for col in inspector.get_columns(table)
+        }
+
+        # --- Column: jurisdiction_pack_id ---
+        if "jurisdiction_pack_id" not in existing_columns:
+            op.add_column(
+                table,
+                sa.Column("jurisdiction_pack_id", sa.Integer(), nullable=True),
+            )
+        else:
+            # Validate the existing column matches the expected definition.
+            col = existing_columns["jurisdiction_pack_id"]
+            col_type = col["type"]
+            if not isinstance(col_type, sa.Integer):
+                raise RuntimeError(
+                    f"Schema drift: {table}.jurisdiction_pack_id exists but "
+                    f"has type {col_type!r}, expected Integer.  Manual "
+                    f"intervention required."
+                )
+            if col.get("nullable") is False:
+                raise RuntimeError(
+                    f"Schema drift: {table}.jurisdiction_pack_id exists but "
+                    f"is NOT NULL, expected nullable.  Manual intervention "
+                    f"required."
+                )
+
+        # --- Foreign key: fk_{suffix}_pack_id ---
+        fk_name = f"fk_{suffix}_pack_id"
+        existing_fks = inspector.get_foreign_keys(table)
+        fk_exists = any(fk.get("name") == fk_name for fk in existing_fks)
+
+        if not fk_exists:
+            # Also check for an unnamed FK with matching columns/referred table
+            fk_exists = any(
+                fk.get("constrained_columns") == ["jurisdiction_pack_id"]
+                and fk.get("referred_table") == "payroll_jurisdiction_packs"
+                and fk.get("referred_columns") == ["id"]
+                for fk in existing_fks
+            )
+
+        if not fk_exists:
+            if bind.dialect.name != "sqlite":
+                op.create_foreign_key(
+                    fk_name,
+                    table, "payroll_jurisdiction_packs",
+                    ["jurisdiction_pack_id"], ["id"],
+                )
 
 
 def downgrade() -> None:
