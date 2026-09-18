@@ -41,6 +41,14 @@ logger = logging.getLogger("zoiko_payroll")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+# ── Error tracking (Sentry) ──────────────────────────────────────────────
+# Inert until SENTRY_DSN is set (empty by default -- see config.py). No
+# behavior change for any environment that hasn't opted in.
+if settings.SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, send_default_pii=False)
+
 # ── Access-log redaction for security tokens in query strings ───────────────
 
 _ACCESS_LOG_REDACT_RE = re.compile(r"(?i)([?&](?:token|code)=)[^&\s\"']+")
@@ -60,6 +68,7 @@ class _RedactSensitiveQueryFilter(logging.Filter):
 async def lifespan(app: FastAPI):
     initialize_database()
     from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
+    from app.modules.auth.scheduler import start_token_cleanup_scheduler, stop_token_cleanup_scheduler
     from app.modules.billing.scheduler import (
         start_trial_scheduler, stop_trial_scheduler,
         start_dunning_scheduler, stop_dunning_scheduler,
@@ -68,8 +77,10 @@ async def lifespan(app: FastAPI):
     start_assist_scheduler()
     start_trial_scheduler()
     start_dunning_scheduler()
+    start_token_cleanup_scheduler()
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
+    stop_token_cleanup_scheduler()
     stop_assist_scheduler()
     stop_trial_scheduler()
     stop_dunning_scheduler()

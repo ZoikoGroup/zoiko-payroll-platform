@@ -29,6 +29,7 @@ from app.modules.payroll.engine.countries.australia import (
     calculate_au_genuine_redundancy_tax_free_component,
     calculate_au_statutory_deduction, calculate_au_statutory_deductions,
     calculate_au_schedule3_entertainer_withholding, calculate_au_schedule6_annuity_withholding,
+    calculate_au_schedule5_back_payment_withholding, calculate_au_schedule4_return_to_work_withholding,
 )
 import app.modules.payroll.engine.countries.shared as shared
 
@@ -121,7 +122,7 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          ytd_sg_qualifying_earnings_before=None, au_taxability_rules=None,
          au_state_payroll_tax_ytd_remuneration_before=None, au_payroll_tax_regional_status=None,
          au_payroll_tax_charity_exempt=None, au_extra_pay_calendar=None, au_sapto_category=None,
-         au_national_taxable_wages_ytd_before=None):
+         au_national_taxable_wages_ytd_before=None, ytd_whm_earnings_before=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -182,6 +183,7 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         au_extra_pay_calendar=au_extra_pay_calendar,
         au_sapto_category=au_sapto_category,
         au_national_taxable_wages_ytd_before=au_national_taxable_wages_ytd_before,
+        ytd_whm_earnings_before=ytd_whm_earnings_before,
     )
     return STRATEGY.calculate(ctx)
 
@@ -3184,6 +3186,73 @@ def test_australia_payg_working_holiday_maker_flat_45_percent_no_tfn():
     assert result.tds == Decimal("450")
 
 
+def test_australia_whm_ytd_not_wired_reproduces_dormant_behavior():
+    # ytd_whm_earnings_before=None (every employee until wired) must be a
+    # complete no-op — same tds as the plain flat-rate test above, and no
+    # trace/flag output at all.
+    result = calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED")
+    assert result.tds == Decimal("150")
+    assert result.ytd_whm_earnings_after is None
+    assert result.au_whm_cap_exceeded is False
+
+
+def test_australia_whm_ytd_wired_under_cap_still_charges_in_cap_rate():
+    # $40,000 YTD + $1,000 this period = $41,000, still under $45,000 —
+    # in-cap 15% rate applies, no compliance flag.
+    result = calc(
+        "AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("40000"),
+    )
+    assert result.tds == Decimal("150")
+    assert result.ytd_whm_earnings_after == Decimal("41000")
+    assert result.au_whm_cap_exceeded is False
+
+
+def test_australia_whm_ytd_crossing_cap_computes_real_progressive_withholding():
+    # $44,500 YTD + $1,000 this period = $45,500, crosses $45,000.
+    # tax(45,500) = 6,750 + (45,500-45,000)*30% = 6,900.
+    # tax(44,500) = 44,500*15% = 6,675.
+    # This period's withholding = 6,900 - 6,675 = 225 (NOT a flat 15% of
+    # $150 — 2026-09-18 fix: the real above-cap brackets are now used,
+    # see hardcoded_defaults._AU_WHM_ABOVE_CAP_BRACKETS' own docstring).
+    result = calc(
+        "AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("44500"),
+    )
+    assert result.tds == Decimal("225")
+    assert result.ytd_whm_earnings_after == Decimal("45500")
+    assert result.au_whm_cap_exceeded is True
+
+
+def test_australia_whm_ytd_deep_in_above_cap_bracket_computes_correctly():
+    # $150,000 YTD (already in the 37% bracket) + $10,000 this period =
+    # $160,000, still within the 37% band ($135,001-$190,000).
+    # tax(160,000) = 33,750 + (160,000-135,000)*37% = 33,750+9,250=43,000.
+    # tax(150,000) = 33,750 + (150,000-135,000)*37% = 33,750+5,550=39,300.
+    # This period's withholding = 43,000 - 39,300 = 3,700.
+    result = calc(
+        "AU", 10000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("150000"),
+    )
+    assert result.tds == Decimal("3700")
+    assert result.ytd_whm_earnings_after == Decimal("160000")
+    assert result.au_whm_cap_exceeded is True
+
+
+def test_australia_whm_custom_rate_override_still_falls_back_to_flag_only():
+    # A custom DB-configured whm_rate (not the statutory 15%) means the
+    # real above-cap bases (anchored to 15%) don't apply — must fall back
+    # to the old flag-only "needs manual review" behavior rather than
+    # silently computing a mismatched progressive amount.
+    rates = {"whm_rate": Rate("whm_rate", employee_rate_pct=Decimal("20.0"))}
+    result = calc(
+        "AU", 1000, rates, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("44500"),
+    )
+    assert result.tds == Decimal("200")  # flat 20% of this period's $1,000, uncapped
+    assert result.au_whm_cap_exceeded is True
+
+
 # ── Australia: Schedule 3 (NAT 1023) entertainers, Schedule 6 (NAT 3350) ──
 # annuities — resolved 2026-09-17, real ATO-published data.
 
@@ -3261,6 +3330,89 @@ def test_au_schedule6_annuity_routes_through_schedule1():
     tds, trace = calculate_au_schedule6_annuity_withholding(ctx, Decimal("600"), Decimal("100"))
     assert tds == Decimal("90")
     assert trace["scale"] == "SCALE_1"
+
+
+def test_au_schedule5_back_payment_averaging_method():
+    # Same figures as this function's own sanity check: $500 weekly
+    # regular gross (Scale 2, tax-free threshold claimed) withholds $21
+    # alone. Averaging a $520 bonus over 52 weekly periods adds $10/week
+    # -> $510 withholds $22 -> $1/week incremental * 52 = $52 total.
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("520"))
+    assert result["periods_per_year"] == 52
+    assert result["averaged_amount"] == Decimal("10")
+    assert result["withholding_without_payment"] == Decimal("21")
+    assert result["withholding_with_averaged_payment"] == Decimal("22")
+    assert result["total_withholding"] == Decimal("52")
+
+
+def test_au_schedule5_zero_special_payment_yields_zero_withholding():
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("0"))
+    assert result["total_withholding"] == Decimal("0")
+
+
+def test_au_schedule5_rejects_negative_special_payment():
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    with pytest.raises(ValueError):
+        calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("-1"))
+
+
+def test_au_schedule5_monthly_frequency_uses_12_periods():
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Monthly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("1200"))
+    assert result["periods_per_year"] == 12
+    assert result["averaged_amount"] == Decimal("100")
+
+
+def test_au_schedule4_return_to_work_flat_32_percent_with_tfn():
+    # $5,000 return-to-work payment, TFN on file -> flat 32%, rounded to
+    # nearest dollar. 5000*32% = 1600 exactly.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "PROVIDED", "RESIDENT")
+    assert result == Decimal("1600")
+
+
+def test_au_schedule4_return_to_work_no_tfn_resident_uses_scale4_rate():
+    # No TFN, resident -> falls back to Schedule 1 Scale 4's own 47% rate,
+    # not the 32% Schedule 4 rate. 5000*47% = 2350.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "NOT_PROVIDED", "RESIDENT")
+    assert result == Decimal("2350")
+
+
+def test_au_schedule4_return_to_work_no_tfn_foreign_resident_uses_scale4_rate():
+    # No TFN, foreign resident -> 45%. 5000*45% = 2250.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "NOT_PROVIDED", "FOREIGN_RESIDENT")
+    assert result == Decimal("2250")
+
+
+def test_au_schedule4_return_to_work_applies_to_foreign_resident_too_with_tfn():
+    # The 32% rate applies to residents AND foreign residents alike when
+    # a TFN is on file -- must NOT silently apply a different rate.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("5000"), "PROVIDED", "FOREIGN_RESIDENT")
+    assert result == Decimal("1600")
+
+
+def test_au_schedule4_return_to_work_rounds_50_cents_up():
+    # 1.5625 * 32% = 0.50 exactly -- NAT 1004's own rounding convention
+    # (50 cents rounds UP, not to-even/down) must apply here too.
+    result = calculate_au_schedule4_return_to_work_withholding(Decimal("1.5625"), "PROVIDED", "RESIDENT")
+    assert result == Decimal("1")
 
 
 # ── Australia: ATO Schedule 8 (NAT 3539) STSL coefficient-band engine ────
@@ -3342,7 +3494,11 @@ def _au_ctx(rate_map=None):
 
 
 def test_au_special_payment_routing_matches_section9_table():
-    assert resolve_au_special_payment_schedule("UNUSED_LEAVE") == "SCHEDULE_2"
+    # UNUSED_LEAVE -> SCHEDULE_7, not SCHEDULE_2 (fixed 2026-09-18): ATO's
+    # current Schedule 2 is horticultural/shearing industry workers, an
+    # unrelated payment type; unused leave on termination is Schedule 7
+    # (NAT 3351) in current ATO numbering.
+    assert resolve_au_special_payment_schedule("UNUSED_LEAVE") == "SCHEDULE_7"
     assert resolve_au_special_payment_schedule("ENTERTAINER") == "SCHEDULE_3"
     assert resolve_au_special_payment_schedule("RETURN_TO_WORK") == "SCHEDULE_4"
     assert resolve_au_special_payment_schedule("BACK_PAYMENT") == "SCHEDULE_5"
@@ -3825,11 +3981,14 @@ def test_au_calculation_trace_records_state_payroll_tax_and_workers_comp():
     assert Decimal(wc["premium"]) == result.au_workers_compensation_premium
 
 
-# ── Australia: §5 step 4 tax offsets (LITO/SAPTO) — Phase 10 2026-09-17 ──
-# Real ATO-published 2026-27 figures, independently cross-checked against
-# two separate lookups of the ATO's own page (see australia.py's own
-# module docstring for the verification method and for why SAPTO's
-# COUPLE/ILLNESS_SEPARATED_COUPLE categories are deliberately NOT entered.
+# ── Australia: §5 step 4 tax offsets (LITO/SAPTO) — Phase 10 2026-09-17,
+# all 3 SAPTO categories resolved 2026-09-18 (production-readiness fix
+# plan Tier 2.2) — real ATO-published 2026-27 figures, triangulated via
+# web research (ato.gov.au itself blocks automated fetches) from multiple
+# independent tax-advisory sources whose figures agree exactly and whose
+# cumulative arithmetic checks out; entered as real canonical DB rows on
+# the AU-2026-27-FED pack. See australia.py's own
+# _calculate_au_income_tax_offset docstring.
 
 _AU_LITO_SLABS = [
     Slab(Decimal("0"), Decimal("37500"), Decimal("0"), rule_type="AU_LITO_OFFSET", filing_status="LITO", flat_amount=Decimal("700")),
@@ -3841,6 +4000,16 @@ _AU_SAPTO_SINGLE_SLABS = [
     Slab(Decimal("0"), Decimal("36034"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("2230")),
     Slab(Decimal("36034"), Decimal("53874"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("2230")),
     Slab(Decimal("53874"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("0")),
+]
+_AU_SAPTO_COUPLE_SLABS = [
+    Slab(Decimal("0"), Decimal("31847"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="COUPLE", flat_amount=Decimal("1602")),
+    Slab(Decimal("31847"), Decimal("44663"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="COUPLE", flat_amount=Decimal("1602")),
+    Slab(Decimal("44663"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="COUPLE", flat_amount=Decimal("0")),
+]
+_AU_SAPTO_ILLNESS_SEPARATED_SLABS = [
+    Slab(Decimal("0"), Decimal("34767"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="ILLNESS_SEPARATED_COUPLE", flat_amount=Decimal("2040")),
+    Slab(Decimal("34767"), Decimal("51087"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="ILLNESS_SEPARATED_COUPLE", flat_amount=Decimal("2040")),
+    Slab(Decimal("51087"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="ILLNESS_SEPARATED_COUPLE", flat_amount=Decimal("0")),
 ]
 
 
@@ -3903,11 +4072,13 @@ def test_au_sapto_single_offset_reduces_payg_withholding():
 
 
 def test_au_sapto_couple_unconfigured_returns_zero_not_a_guess():
-    # COUPLE has no configured rows (two independent lookups of the ATO's
-    # own published figures for this category produced conflicting
-    # thresholds) — must resolve to $0, the same "not yet confirmed, not
-    # not entitled" contract as any other unconfigured AU band, never an
-    # error and never a guessed number.
+    # Genuinely no COUPLE rows in THIS test's own supplied slabs list
+    # (only _AU_SAPTO_SINGLE_SLABS) — must resolve to $0, the same
+    # "no band configured for this org's pack" contract as any other
+    # unconfigured AU band, never an error and never a guessed number.
+    # (Real COUPLE data now exists as canonical DB rows — see
+    # test_au_sapto_couple_offset_reduces_payg_withholding below — this
+    # test is about the dormancy-fallback mechanism, not that gap.)
     result = calc(
         "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_SAPTO_SINGLE_SLABS, pay_frequency="Weekly",
         au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
@@ -3915,7 +4086,34 @@ def test_au_sapto_couple_unconfigured_returns_zero_not_a_guess():
     )
     trace = result.au_calculation_trace["tax_offsets"]
     assert Decimal(trace["sapto_annual"]) == Decimal("0")
+
+
+def test_au_sapto_couple_offset_reduces_payg_withholding():
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_SAPTO_COUPLE_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+        au_sapto_category="COUPLE",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    # Annual 26,000 is within COUPLE's own band 1 (<=31,847) -> full
+    # $1,602 annual offset -> period-equivalent (weekly, /52) = 30.81.
+    assert Decimal(trace["sapto_annual"]) == Decimal("1602")
     assert trace["sapto_category"] == "COUPLE"
+    assert Decimal(trace["period_offset"]) == Decimal("30.81")
+    assert result.tds == Decimal("90") - Decimal("30.81")
+
+
+def test_au_sapto_illness_separated_couple_offset_phases_out():
+    # Monthly gross $3,500 -> annual 42,000, within ILLNESS_SEPARATED_
+    # COUPLE's phase-out band (34,767-51,087):
+    # 2040 - 12.5%*(42,000-34,767) = 2040 - 904.125 = 1135.875.
+    result = calc(
+        "AU", 3500, {}, _AU_SAPTO_ILLNESS_SEPARATED_SLABS, au_residency_status="RESIDENT",
+        au_sapto_category="ILLNESS_SEPARATED_COUPLE",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert trace["sapto_category"] == "ILLNESS_SEPARATED_COUPLE"
+    assert Decimal(trace["sapto_annual"]) == Decimal("1135.875")
 
 
 def test_au_sa_reduced_rate_band_matches_revenuesa_worked_example():
@@ -4895,11 +5093,12 @@ def test_canada_cpp2_employer_side_never_reduces_net_pay():
 
 
 # ── Canada CPP/CPP2/EI real YTD accumulator (ctx.ytd_* fields) ──────────
-# Dormant in production behind engine/countries/shared.py's
-# _YTD_ACCUMULATOR_ENABLED_COUNTRIES (CA not in it — only "UK" is, as of
-# 2026-09-09 Phase 3) — these tests exercise the engine directly via
-# ctx.ytd_* fields, independent of that service-layer rollout switch,
-# proving the calculation itself is correct whenever it IS wired.
+# Gated in production behind engine/countries/shared.py's
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES ("CA" added 2026-09-18, production-
+# readiness fix plan — see test_ca_ytd_accumulator.py's own
+# test_ca_ytd_enabled_by_default) — these tests exercise the engine
+# directly via ctx.ytd_* fields, independent of that service-layer
+# rollout switch, proving the calculation itself is correct.
 
 def test_canada_ytd_pensionable_room_mid_period_crossing():
     # Employee already has $74,000 YTD pensionable (room: $600 left to

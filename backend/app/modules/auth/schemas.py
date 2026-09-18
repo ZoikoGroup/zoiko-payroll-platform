@@ -60,6 +60,12 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    # Optional -- revoking the refresh token too is the frontend's choice
+    # (only possible if it still has the refresh token on hand to send).
+    refresh_token: Optional[str] = None
+
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 

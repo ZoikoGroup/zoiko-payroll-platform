@@ -1240,6 +1240,11 @@ class GratuityCalculateResponse(BaseModel):
     eligible: bool
     reason: str
     gratuityAmount: Decimal = Field(Decimal("0"), validation_alias="gratuity_amount", serialization_alias="gratuityAmount")
+    # Section 10(10) income-tax exempt/taxable split — None (not 0) means
+    # "not computed," when gratuity_exempt_lim isn't configured (see
+    # india.py's calculate_gratuity docstring for the full explanation).
+    exemptGratuityAmount: Optional[Decimal] = Field(None, validation_alias="exempt_gratuity_amount", serialization_alias="exemptGratuityAmount")
+    taxableGratuityAmount: Optional[Decimal] = Field(None, validation_alias="taxable_gratuity_amount", serialization_alias="taxableGratuityAmount")
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -1364,6 +1369,43 @@ class CASpecialPaymentCalculateResponse(BaseModel):
     provincialWithholding: Decimal = Field(validation_alias="provincial_withholding", serialization_alias="provincialWithholding")
     totalWithholding: Decimal = Field(validation_alias="total_withholding", serialization_alias="totalWithholding")
     isQuebec: bool = Field(validation_alias="is_quebec", serialization_alias="isQuebec")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── Australia: Schedule 5 back payment/commission/bonus averaging method ──
+# (ZP-TAX-AU-2026-27-001 §9, production-readiness fix plan Tier 3.1) — see
+# service.calculate_au_employee_schedule5_withholding's own docstring.
+class AUSchedule5CalculateRequest(BaseModel):
+    employee_id: int
+    regular_period_gross: Decimal
+    special_payment_amount: Decimal
+    payroll_date: Optional[date] = None
+
+
+class AUSchedule5CalculateResponse(BaseModel):
+    regularPeriodGross: Decimal = Field(validation_alias="regular_period_gross", serialization_alias="regularPeriodGross")
+    specialPaymentAmount: Decimal = Field(validation_alias="special_payment_amount", serialization_alias="specialPaymentAmount")
+    periodsPerYear: int = Field(validation_alias="periods_per_year", serialization_alias="periodsPerYear")
+    averagedAmount: Decimal = Field(validation_alias="averaged_amount", serialization_alias="averagedAmount")
+    withholdingWithoutPayment: Decimal = Field(validation_alias="withholding_without_payment", serialization_alias="withholdingWithoutPayment")
+    withholdingWithAveragedPayment: Decimal = Field(validation_alias="withholding_with_averaged_payment", serialization_alias="withholdingWithAveragedPayment")
+    totalWithholding: Decimal = Field(validation_alias="total_withholding", serialization_alias="totalWithholding")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# ── Australia: Schedule 4 return-to-work payment flat-rate method ────────
+# (ZP-TAX-AU-2026-27-001 §9, production-readiness fix plan Tier 3.1) — see
+# service.calculate_au_employee_schedule4_withholding's own docstring.
+class AUSchedule4CalculateRequest(BaseModel):
+    employee_id: int
+    payment_amount: Decimal
+
+
+class AUSchedule4CalculateResponse(BaseModel):
+    paymentAmount: Decimal = Field(validation_alias="payment_amount", serialization_alias="paymentAmount")
+    tfnStatus: Optional[str] = Field(None, validation_alias="tfn_status", serialization_alias="tfnStatus")
+    residencyStatus: Optional[str] = Field(None, validation_alias="residency_status", serialization_alias="residencyStatus")
+    withholding: Decimal
     model_config = ConfigDict(populate_by_name=True)
 
 

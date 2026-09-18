@@ -1098,15 +1098,51 @@ _AU_SUPER_MAX_CONTRIBUTION_BASE = Decimal("270830")
 _AU_PAYG_SCALE4_RESIDENT_RATE = Decimal("47.0")
 _AU_PAYG_SCALE4_NONRESIDENT_RATE = Decimal("45.0")
 
+# Schedule 4 (NAT 3347, return to work payments) — real ATO-published flat
+# rate, resolved 2026-09-18 (production-readiness fix plan, Tier 3.1):
+# 32% withheld (residents AND foreign residents alike) when a TFN is on
+# file; falls back to Schedule 1 Scale 4's own no-TFN rates above
+# (47%/45% resident/foreign-resident) when it isn't — the same published
+# figures, not a coincidence this codebase invents, since a no-TFN
+# payment always attracts the top marginal-adjacent rate regardless of
+# which schedule it's paid under. Confirmed unchanged for 2026-27 despite
+# the broader "Stage 3+" bracket reform (return-to-work payments have
+# their own dedicated flat rate, not derived from resident brackets),
+# cross-checked via two independent searches since ato.gov.au itself
+# blocks automated fetches.
+_AU_SCHEDULE4_RETURN_TO_WORK_RATE = Decimal("32.0")
+
 # Schedule 15 (NAT 75331, Working Holiday Maker subclass 417/462) — real
 # ATO-published flat rates, resolved 2026-09-17: 15% with a TFN on file,
 # 45% with no TFN. Same "flat rate, simple scalar fallback" reasoning as
-# Scale 4 above. The $45,000 first-bracket annual cap is NOT enforced by
-# a hardcoded constant here — it needs a real YTD accumulator (see
-# engine/countries/australia.py's own SCALE_WHM branch for the disclosed
-# limitation), not a value this module could sensibly default.
+# Scale 4 above.
 _AU_WHM_RATE = Decimal("15.0")
 _AU_WHM_NO_TFN_RATE = Decimal("45.0")
+# Schedule 15's own published $45,000 cumulative first-bracket threshold —
+# a real, stable ATO figure.
+_AU_WHM_CAP_THRESHOLD = Decimal("45000")
+
+# Above-$45,000 WHM brackets (production-readiness fix plan, Tier 2.1,
+# 2026-09-18) — resolved via web research since ato.gov.au itself returns
+# HTTP 403 to automated fetches; triangulated instead from multiple
+# independent tax-advisory publications (atotaxrates.info, taxleopard.com.au,
+# taxkiln.com, boxas.com.au) whose figures agree exactly and whose
+# cumulative base amounts are internally consistent ($45,000×15%=$6,750;
+# $6,750+($135,000-$45,000)×30%=$33,750; $33,750+($190,000-$135,000)×37%
+# =$54,100 — each checks out exactly), and confirmed unchanged between the
+# 2024-25/2025-26/2026-27 years despite the broader "Stage 3+" resident-
+# bracket reform (the WHM/"backpacker tax" schedule is its own dedicated
+# legislated scale, not derived from the ordinary resident brackets). This
+# is a real, deliberate ATO decision on how to treat WHM earnings above
+# the concessional first bracket — NOT the same as Schedule 3's foreign-
+# resident rates (32.5/37/45 at different breakpoints), which do NOT apply
+# here despite the superficial similarity assumed in an earlier version of
+# this plan. (min, max-or-None, rate_pct, cumulative_base_at_min)
+_AU_WHM_ABOVE_CAP_BRACKETS = (
+    (Decimal("45000"), Decimal("135000"), Decimal("30.0"), Decimal("6750")),
+    (Decimal("135000"), Decimal("190000"), Decimal("37.0"), Decimal("33750")),
+    (Decimal("190000"), None, Decimal("45.0"), Decimal("54100")),
+)
 
 # Special Payments (ZP-TAX-AU-2026-27-001 §13, Phase 3, 2026-09-16) —
 # real, document-given caps and the genuine-redundancy tax-free formula

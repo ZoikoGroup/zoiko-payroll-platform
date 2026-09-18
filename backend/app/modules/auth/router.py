@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.dependencies import get_current_org_admin, get_current_user
+from app.core.dependencies import get_current_org_admin, get_current_user, oauth2_scheme
 from app.core.exceptions import BadRequestException
 from app.core.rate_limiter import limiter
 from app.database import get_db
@@ -29,6 +29,7 @@ from app.modules.auth.schemas import (
     ForgotPasswordRequest,
     GeneratedPasswordResponse,
     LoginRequest,
+    LogoutRequest,
     RefreshRequest,
     RegisterRequest,
     SuccessResponse,
@@ -149,7 +150,13 @@ def get_me_trial_status(
 
 
 @router.post("/logout", response_model=SuccessResponse, summary="Logout")
-def logout(current_user=Depends(get_current_user), request: Request = None):
+def logout(
+    data: LogoutRequest = None,
+    token: str = Depends(oauth2_scheme),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service.logout_user(db, token, data.refresh_token if data else None)
     logger.info("User %s logged out", current_user.email)
     return {"message": "Logged out successfully."}
 

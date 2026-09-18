@@ -152,8 +152,8 @@ from app.modules.payroll.engine.countries.shared import (
 # their original names so nothing else needs to change.
 from app.modules.payroll.hardcoded_defaults import (
     _AU_MLS_THRESHOLD, _AU_MLS_RATE, _AU_SUPER_MAX_CONTRIBUTION_BASE,
-    _AU_PAYG_SCALE4_RESIDENT_RATE, _AU_PAYG_SCALE4_NONRESIDENT_RATE,
-    _AU_WHM_RATE, _AU_WHM_NO_TFN_RATE,
+    _AU_PAYG_SCALE4_RESIDENT_RATE, _AU_PAYG_SCALE4_NONRESIDENT_RATE, _AU_SCHEDULE4_RETURN_TO_WORK_RATE,
+    _AU_WHM_RATE, _AU_WHM_NO_TFN_RATE, _AU_WHM_CAP_THRESHOLD, _AU_WHM_ABOVE_CAP_BRACKETS,
     _AU_ETP_LIFE_CAP, _AU_ETP_DEATH_CAP, _AU_GENUINE_REDUNDANCY_BASE, _AU_GENUINE_REDUNDANCY_PER_YEAR,
     _AU_WA_PT_THRESHOLD, _AU_WA_PT_UPPER_THRESHOLD, _AU_WA_PT_RATE,
     _AU_QLD_PT_THRESHOLD, _AU_QLD_PT_UPPER_THRESHOLD, _AU_QLD_PT_RATE_LOW, _AU_QLD_PT_RATE_HIGH, _AU_QLD_PT_RATE_SWITCH,
@@ -312,12 +312,14 @@ def _calculate_au_income_tax_offset(annual_income: Decimal, rule_type: str, fili
     always "LITO"; SAPTO's is ctx.au_sapto_category — "SINGLE",
     "COUPLE", or "ILLNESS_SEPARATED_COUPLE"). Returns $0 (never a guess)
     when no matching band is configured — same dormancy discipline as
-    every other AU coefficient-band lookup in this module. This is
-    deliberately true today for COUPLE/ILLNESS_SEPARATED_COUPLE: two
-    independent lookups of the ATO's own published figures for those
-    categories produced conflicting thresholds, so no rows are configured
-    for them yet (see this module's own docstring) — $0 here for those
-    categories means "not yet confirmed," not "not entitled." """
+    every other AU coefficient-band lookup in this module. LITO and all
+    three SAPTO categories were entered as real canonical DB data
+    2026-09-18 (production-readiness fix plan, Tier 2.2) — see the
+    AU-2026-27-FED pack's own AU_SAPTO_OFFSET/AU_LITO_OFFSET TaxSlab rows
+    for the sourced figures (triangulated via web research since
+    ato.gov.au blocks automated fetches — see that commit's message for
+    the sources); $0 here now only ever means "genuinely no band
+    configured for this org's own pack," not an unresolved data gap."""
     band = _resolve_au_coefficient_band(annual_income, filing_status, rule_type, slabs)
     if band is None:
         return Decimal("0")
@@ -359,6 +361,24 @@ def _calculate_au_program_wages(ctx: PayrollContext, tax_component: str) -> Deci
     return included
 
 
+def _au_whm_cumulative_tax(cumulative_income: Decimal) -> Decimal:
+    """Total WHM (Schedule 15, TFN-provided) tax owed on `cumulative_income`
+    for the whole income year so far: the statutory 15% on the first
+    $45,000, then the real above-cap ATO brackets in
+    hardcoded_defaults._AU_WHM_ABOVE_CAP_BRACKETS (30%/37%/45% at
+    $45k/$135k/$190k — see that constant's own docstring for sourcing).
+    Only called when the in-cap rate is genuinely the statutory 15% (see
+    this function's one caller) — the above-cap bracket base amounts are
+    fixed published figures anchored to that rate, not derived from
+    whatever rate happens to be configured."""
+    if cumulative_income <= _AU_WHM_CAP_THRESHOLD:
+        return cumulative_income * _AU_WHM_RATE / Decimal("100")
+    for min_amt, max_amt, rate_pct, base in _AU_WHM_ABOVE_CAP_BRACKETS:
+        if max_amt is None or cumulative_income <= max_amt:
+            return base + (cumulative_income - min_amt) * rate_pct / Decimal("100")
+    raise AssertionError("unreachable — _AU_WHM_ABOVE_CAP_BRACKETS' last bracket has max=None")
+
+
 def _calculate_au_payg_schedule1(ctx: PayrollContext, period_gross: Decimal) -> tuple:
     """ATO Schedule 1 (NAT 1004) — the Core Calculation Contract, §5.
     `period_gross` is the caller's own PAYG-taxable wage base (§11) —
@@ -393,17 +413,29 @@ def _calculate_au_payg_schedule1(ctx: PayrollContext, period_gross: Decimal) -> 
         # 2026-09-17, real ATO-published rates: flat 15% (has a TFN) or
         # 45% (no TFN) on actual earnings, same "flat % of period
         # earnings, no weekly-equivalent conversion" shape as Scale 4
-        # above. DISCLOSED LIMITATION (dormant, same character as SG's
-        # own YTD-vs-annualized-estimate duality): the real Schedule 15
-        # table is a CUMULATIVE $45,000 first-bracket test across the
-        # whole income year — this engine has no YTD-WHM-earnings
-        # accumulator wired yet, so every period is taxed at the in-cap
-        # 15%/45% rate regardless of cumulative earnings. An employee
-        # whose YTD WHM earnings cross $45,000 this year will be
-        # under-withheld until a real YTD accumulator is added (tracked,
-        # not silently wrong — see this function's own trace output,
-        # which always reports method="FLAT_RATE_NO_YTD_CAP" so a
-        # consumer can tell this case apart from a fully YTD-aware one).
+        # above.
+        #
+        # Real above-cap graduated withholding (production-readiness fix
+        # plan, Tier 2.1, 2026-09-18): the real Schedule 15 table is a
+        # CUMULATIVE $45,000 first-bracket test across the whole income
+        # year, with earnings above it taxed at 30%/37%/45% (at $45k/
+        # $135k/$190k — see hardcoded_defaults._AU_WHM_ABOVE_CAP_BRACKETS'
+        # own docstring for sourcing; this is the WHM schedule's OWN
+        # dedicated above-cap rates, NOT Schedule 3's foreign-resident
+        # rates, which an earlier version of this plan incorrectly
+        # assumed were the same table). Once ctx.ytd_whm_earnings_before
+        # is wired AND the in-cap rate is the unmodified statutory 15%
+        # (a custom DB-configured override falls back to the old flag-
+        # only behavior below, since the above-cap base amounts are
+        # fixed figures anchored to 15%, not derived from an arbitrary
+        # rate), this period's withholding is the real marginal amount:
+        # cumulative tax owed on YTD-after minus cumulative tax owed on
+        # YTD-before — the standard periodic-withholding technique,
+        # not a flat rate applied to the whole period. While
+        # ctx.ytd_whm_earnings_before is None (every employee until
+        # wired) or the rate is overridden, behavior is byte-for-byte
+        # identical to before this change — method reports
+        # "FLAT_RATE_NO_YTD_CAP", exactly as it always has.
         rate = resolve_jurisdiction_parameter(
             ctx.rate_map,
             "whm_no_tfn_rate" if ctx.au_tfn_status == "NOT_PROVIDED" else "whm_rate",
@@ -411,11 +443,49 @@ def _calculate_au_payg_schedule1(ctx: PayrollContext, period_gross: Decimal) -> 
             side="employee", country="AU",
         )
         earnings = _au_floor_dollars(period_gross)
+        can_compute_real_above_cap = (
+            ctx.au_tfn_status != "NOT_PROVIDED" and rate == _AU_WHM_RATE
+            and ctx.ytd_whm_earnings_before is not None
+        )
+        if can_compute_real_above_cap:
+            ytd_whm_earnings_after = ctx.ytd_whm_earnings_before + earnings
+            withholding = _au_floor_dollars(
+                _au_whm_cumulative_tax(ytd_whm_earnings_after) - _au_whm_cumulative_tax(ctx.ytd_whm_earnings_before)
+            )
+            whm_cap_exceeded = ytd_whm_earnings_after > _AU_WHM_CAP_THRESHOLD
+            trace = {
+                "scale": scale, "rate_pct": rate, "earnings_floored": earnings, "withholding": withholding,
+                "method": "PROGRESSIVE_YTD_WITHHOLDING" if whm_cap_exceeded else "FLAT_RATE_YTD_TRACKED",
+                "whm_cap_threshold": _AU_WHM_CAP_THRESHOLD,
+                "ytd_whm_earnings_before": ctx.ytd_whm_earnings_before,
+                "ytd_whm_earnings_after": ytd_whm_earnings_after,
+                "whm_cap_exceeded": whm_cap_exceeded,
+            }
+            return withholding, trace
+
         withholding = _au_floor_dollars(earnings * rate / Decimal("100"))
-        return withholding, {
-            "scale": scale, "method": "FLAT_RATE_NO_YTD_CAP", "rate_pct": rate,
+        trace = {
+            "scale": scale, "rate_pct": rate,
             "earnings_floored": earnings, "withholding": withholding,
         }
+        if ctx.ytd_whm_earnings_before is not None:
+            # Reached only when a custom whm_rate override is configured
+            # (can_compute_real_above_cap is False for that reason) — the
+            # real above-cap bases don't apply to a non-statutory rate,
+            # so this still just flags the crossing rather than fabricating
+            # a mismatched calculation.
+            ytd_whm_earnings_after = ctx.ytd_whm_earnings_before + earnings
+            whm_cap_exceeded = ytd_whm_earnings_after > _AU_WHM_CAP_THRESHOLD
+            trace.update(
+                method="FLAT_RATE_CAP_EXCEEDED_NEEDS_REVIEW" if whm_cap_exceeded else "FLAT_RATE_YTD_TRACKED",
+                whm_cap_threshold=_AU_WHM_CAP_THRESHOLD,
+                ytd_whm_earnings_before=ctx.ytd_whm_earnings_before,
+                ytd_whm_earnings_after=ytd_whm_earnings_after,
+                whm_cap_exceeded=whm_cap_exceeded,
+            )
+        else:
+            trace["method"] = "FLAT_RATE_NO_YTD_CAP"
+        return withholding, trace
 
     x = _au_weekly_equivalent(period_gross, ctx.pay_frequency)
     band = _resolve_au_coefficient_band(x, scale, "AU_PAYG_COEFFICIENT", ctx.slabs)
@@ -619,16 +689,17 @@ def calculate(ctx: PayrollContext) -> dict:
     tds, payg_trace = _calculate_au_payg_schedule1(ctx, payg_taxable_gross)
     study_loan_deduction, stsl_trace = _calculate_au_stsl_schedule8(ctx, payg_taxable_gross)
 
-    # §5 step 4 tax offsets — LITO/SAPTO(single), Phase 10 2026-09-17 —
-    # computed against this period's own annualized gross (see this
-    # module's own docstring for why that periodization is an engineering
-    # choice, not a fabricated value) and subtracted from Schedule 1's own
-    # tds, floored at $0. LITO applies to every resident/unset-residency
-    # employee (not foreign residents — the same "no tax-free threshold
-    # either" rule Schedule 1 itself already encodes); SAPTO applies only
-    # when ctx.au_sapto_category is declared, and only ever resolves to a
-    # real figure for "SINGLE" today (see _calculate_au_income_tax_offset
-    # for why COUPLE/ILLNESS_SEPARATED_COUPLE stay at $0).
+    # §5 step 4 tax offsets — LITO/SAPTO, Phase 10 2026-09-17 (all 3 SAPTO
+    # categories resolved 2026-09-18) — computed against this period's own
+    # annualized gross (see this module's own docstring for why that
+    # periodization is an engineering choice, not a fabricated value) and
+    # subtracted from Schedule 1's own tds, floored at $0. LITO applies to
+    # every resident/unset-residency employee (not foreign residents — the
+    # same "no tax-free threshold either" rule Schedule 1 itself already
+    # encodes); SAPTO applies only when ctx.au_sapto_category is declared,
+    # and resolves to a real figure for SINGLE/COUPLE/ILLNESS_SEPARATED_
+    # COUPLE alike now that all three have real canonical data (see
+    # _calculate_au_income_tax_offset's own docstring).
     lito_annual = (
         _calculate_au_income_tax_offset(annual_gross, "AU_LITO_OFFSET", "LITO", ctx.slabs)
         if ctx.au_residency_status != "FOREIGN_RESIDENT" else Decimal("0")
@@ -710,6 +781,12 @@ def calculate(ctx: PayrollContext) -> dict:
         au_statutory_deductions_detail=statutory_deductions_result["orders"],
         au_workers_compensation_premium=workers_compensation_premium,
         au_calculation_trace=calculation_trace,
+        # WHM Schedule 15 cumulative cap detection — see
+        # _calculate_au_payg_schedule1's own docstring. None/False
+        # (payg_trace has no such keys) for every non-WHM employee and
+        # every WHM employee whose YTD tracking isn't wired yet.
+        ytd_whm_earnings_after=payg_trace.get("ytd_whm_earnings_after"),
+        au_whm_cap_exceeded=payg_trace.get("whm_cap_exceeded", False),
     )
 
 
@@ -721,24 +798,39 @@ def calculate(ctx: PayrollContext) -> dict:
 # schedule1. Two calculators here are REAL, complete implementations
 # because §13 gives their actual figures/formula in full: the ETP cap
 # classification and the genuine-redundancy tax-free component. Every
-# other schedule in §9's table (2/4/5/12/13) requires a coefficient/
+# other schedule in §9's table (4/7/12/13) requires a coefficient/
 # rate/method the source document names but never actually gives a
 # number or formula for — those raise AuScheduleNotYetImplementedError
 # rather than fabricating a plausible-looking withholding amount. (WHM's
 # own Scale is resolved — see the SCALE_WHM branch in
-# _calculate_au_payg_schedule1 above. Schedules 3 and 6 are resolved too
-# — see calculate_au_schedule3_entertainer_withholding/calculate_au_
-# schedule6_annuity_withholding below, which bypass this section's own
-# generic dispatcher entirely since their real inputs don't fit it.)
+# _calculate_au_payg_schedule1 above. Schedules 3, 5, and 6 are resolved
+# too — see calculate_au_schedule3_entertainer_withholding/calculate_au_
+# schedule5_back_payment_withholding/calculate_au_schedule6_annuity_
+# withholding below, which all bypass this section's own generic
+# dispatcher entirely since their real inputs don't fit it.)
 
-# §9's own routing table, verbatim: payment TYPE -> named schedule. A
-# real, complete piece of §9 even though most schedules' downstream math
-# isn't buildable yet — the ROUTING itself is fully specified, and
-# getting an employee's payment routed to the CORRECT schedule name is
-# exactly what AU-D11 requires, independent of whether that schedule's
-# own rate table exists yet.
+# §9's own routing table: payment TYPE -> named schedule. A real,
+# complete piece of §9 even though most schedules' downstream math isn't
+# buildable yet — the ROUTING itself is fully specified, and getting an
+# employee's payment routed to the CORRECT schedule name is exactly what
+# AU-D11 requires, independent of whether that schedule's own rate table
+# exists yet.
+#
+# CORRECTED 2026-09-18 (production-readiness fix plan, Tier 3.1):
+# UNUSED_LEAVE was routed to "SCHEDULE_2" — but the ATO's CURRENT Schedule
+# 2 (NAT 1006 family) is the tax table for horticultural/shearing
+# industry workers, an entirely unrelated payment type this system
+# doesn't model at all. Unused leave paid on termination is the ATO's
+# Schedule 7 (NAT 3351) in current numbering. Venu doesn't have the
+# original ZP-TAX-AU-2026-27-001 §9 spec text on hand to confirm whether
+# it really said "Schedule 2" (possibly written against an older ATO
+# numbering, before whatever renumbering produced the current Schedule
+# 7), so this is a judgment call, not a confirmed spec correction — but
+# matching the LIVE ATO schedule number is what actually matters for
+# correctness/auditability once this schedule's real rates are entered,
+# so the label is corrected here regardless.
 _AU_SPECIAL_PAYMENT_SCHEDULE_BY_TYPE = {
-    "UNUSED_LEAVE": "SCHEDULE_2",
+    "UNUSED_LEAVE": "SCHEDULE_7",
     "ENTERTAINER": "SCHEDULE_3",
     "RETURN_TO_WORK": "SCHEDULE_4",
     "BACK_PAYMENT": "SCHEDULE_5",
@@ -751,10 +843,15 @@ _AU_SPECIAL_PAYMENT_SCHEDULE_BY_TYPE = {
 }
 
 # Which of the routed schedules already have a real, document-given
-# withholding calculation available. False for every schedule whose rate/
-# coefficient table §9 names but does not actually publish.
+# withholding calculation available via the GENERIC (payment_type,
+# amount) dispatcher below. Stays False for 3/5/6 too even though those
+# ARE now implemented — see calculate_au_schedule3_entertainer_
+# withholding/calculate_au_schedule5_back_payment_withholding/
+# calculate_au_schedule6_annuity_withholding, which all bypass this
+# generic dispatcher entirely since their real inputs don't fit its
+# single `amount` parameter.
 _AU_SPECIAL_PAYMENT_SCHEDULE_IMPLEMENTED = {
-    "SCHEDULE_2": False, "SCHEDULE_3": False, "SCHEDULE_4": False, "SCHEDULE_5": False,
+    "SCHEDULE_7": False, "SCHEDULE_3": False, "SCHEDULE_4": False, "SCHEDULE_5": False,
     "SCHEDULE_6": False, "SCHEDULE_11": False, "SCHEDULE_12": False, "SCHEDULE_13": False,
 }
 
@@ -870,6 +967,82 @@ def calculate_au_schedule6_annuity_withholding(ctx: PayrollContext, gross_paymen
     Schedule 3 above."""
     taxable_portion = max(Decimal("0"), gross_payment - deductible_amount)
     return _calculate_au_payg_schedule1(ctx, taxable_portion)
+
+
+def calculate_au_schedule5_back_payment_withholding(
+    ctx: PayrollContext, regular_period_gross: Decimal, special_payment_amount: Decimal,
+) -> dict:
+    """Schedule 5 (NAT 3348) — back payments, commissions, bonuses and
+    similar payments that relate to more than one pay period (or an
+    undefined period), resolved 2026-09-18 (production-readiness fix
+    plan, Tier 3.1). If a bonus/commission genuinely relates to work
+    performed in a SINGLE pay period only, Schedule 5 does not apply at
+    all — the caller should simply add it to ctx.gross and use ordinary
+    Schedule 1 directly instead; this function is for the "spans more
+    than one period" case specifically.
+
+    ATO's own Method A (the "averaging method", consistently described
+    the same way by every independent source checked — the ATO's own
+    page text, Tanda's and Microkeeper's payroll help docs — this
+    session could not fetch the primary NAT 3348 PDF directly, both
+    www.ato.gov.au and softwaredevelopers.ato.gov.au were unreachable):
+    apportion the additional payment across the number of pay periods in
+    the income year, add that average to THIS period's ordinary gross,
+    run it through ordinary Schedule 1, and compare against Schedule 1
+    on the ordinary gross alone — the INCREMENTAL withholding is the
+    real effect of the additional payment, then multiplied back up by
+    the number of periods since the whole amount is being paid now, not
+    spread over the rest of the year. This introduces NO new ATO rate/
+    coefficient data of its own — it is built entirely out of
+    _calculate_au_payg_schedule1, which is already real, sourced data.
+    Same "incremental-tax" architecture as
+    service.calculate_ca_special_payment_withholding (Canada's own bonus
+    method) elsewhere in this codebase.
+
+    Bypasses calculate_au_special_payment_withholding's generic
+    (payment_type, amount) dispatcher entirely — same reasoning as
+    Schedule 3/6 above: this schedule's real inputs (the employee's
+    regular period gross, not just the bonus amount) don't fit a single
+    `amount` parameter."""
+    if special_payment_amount is None or special_payment_amount < 0:
+        raise ValueError("special_payment_amount must be zero or positive.")
+    periods_per_year = resolve_periods_per_year(ctx.pay_frequency)
+    averaged_amount = special_payment_amount / periods_per_year
+
+    withholding_without, _ = _calculate_au_payg_schedule1(ctx, regular_period_gross)
+    withholding_with, _ = _calculate_au_payg_schedule1(ctx, regular_period_gross + averaged_amount)
+
+    per_period_incremental = max(Decimal("0"), withholding_with - withholding_without)
+    total_withholding = _au_floor_dollars(per_period_incremental * periods_per_year)
+    return {
+        "regular_period_gross": regular_period_gross,
+        "special_payment_amount": special_payment_amount,
+        "periods_per_year": periods_per_year,
+        "averaged_amount": averaged_amount,
+        "withholding_without_payment": withholding_without,
+        "withholding_with_averaged_payment": withholding_with,
+        "total_withholding": total_withholding,
+    }
+
+
+def calculate_au_schedule4_return_to_work_withholding(payment_amount: Decimal, tfn_status: str, residency_status: str) -> Decimal:
+    """Schedule 4 (NAT 3347) — return to work payments (paid to resume
+    working for, or provide services to, the payer or any other entity),
+    resolved 2026-09-18 (production-readiness fix plan, Tier 3.1).
+
+    Real ATO-published flat rate, cross-checked via two independent
+    searches since ato.gov.au itself blocks automated fetches: 32%
+    withheld — residents AND foreign residents alike — when a TFN is on
+    file; falls back to the SAME no-TFN rates as Schedule 1 Scale 4
+    (47%/45% resident/foreign-resident) when it isn't. Rounded to the
+    nearest dollar, 50 cents rounding up (_au_round_to_dollar, NAT 1004's
+    own rounding convention, confirmed to apply here too)."""
+    if tfn_status == "NOT_PROVIDED":
+        is_resident = residency_status != "FOREIGN_RESIDENT"
+        rate = _AU_PAYG_SCALE4_RESIDENT_RATE if is_resident else _AU_PAYG_SCALE4_NONRESIDENT_RATE
+    else:
+        rate = _AU_SCHEDULE4_RETURN_TO_WORK_RATE
+    return _au_round_to_dollar(payment_amount * rate / Decimal("100"))
 
 
 def calculate_au_etp_cap_classification(ctx: PayrollContext, etp_amount: Decimal, is_death_benefit: bool = False) -> dict:

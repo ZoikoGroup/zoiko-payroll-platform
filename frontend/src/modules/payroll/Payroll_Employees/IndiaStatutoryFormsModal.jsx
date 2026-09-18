@@ -183,6 +183,18 @@ function GratuitySection({ employee }) {
             <>
               <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Gratuity amount</p>
               <p className="mt-1 text-2xl font-bold text-foreground">₹{Number(result.gratuityAmount || result.gratuity_amount || 0).toLocaleString("en-IN")}</p>
+              {(result.exemptGratuityAmount ?? result.exempt_gratuity_amount) != null && (
+                <div className="mt-3 space-y-1 border-t border-border pt-3 text-[12px]">
+                  <p className="flex justify-between text-foreground-secondary">
+                    <span>Exempt under Section 10(10)</span>
+                    <span className="font-semibold text-foreground">₹{Number(result.exemptGratuityAmount ?? result.exempt_gratuity_amount).toLocaleString("en-IN")}</span>
+                  </p>
+                  <p className="flex justify-between text-foreground-secondary">
+                    <span>Taxable</span>
+                    <span className="font-semibold text-foreground">₹{Number(result.taxableGratuityAmount ?? result.taxable_gratuity_amount ?? 0).toLocaleString("en-IN")}</span>
+                  </p>
+                </div>
+              )}
             </>
           ) : (
             <p className="text-[13px] font-semibold text-error">Not eligible — {result.reason}</p>

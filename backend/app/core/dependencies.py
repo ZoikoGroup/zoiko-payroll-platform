@@ -76,6 +76,11 @@ def get_current_user(
     if payload is None:
         raise UnauthorizedException("Invalid or expired token. Please log in again.")
 
+    from app.modules.auth.service import is_token_revoked
+
+    if is_token_revoked(db, payload.get("jti")):
+        raise UnauthorizedException("You have been logged out. Please log in again.")
+
     user_id = payload.get("user_id")
     if user_id is None:
         raise UnauthorizedException("Token is missing user information.")
