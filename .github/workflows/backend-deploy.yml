@@ -50,14 +50,35 @@ jobs:
             bash ../scripts/deploy_migrate.sh
 
             echo "--- Post-migration verification ---"
-            ALB_REV=$(alembic current | tail -n 1)
-            ALB_HEAD=$(alembic heads | tail -n 1)
-            echo "final revision: $ALB_REV"
-            echo "expected head : $ALB_HEAD"
-            case "$ALB_HEAD" in
-              *"$ALB_REV"*) echo "Final revision matches head." ;;
-              *) echo "FATAL: final alembic revision does not match head; backend NOT restarted."; exit 1 ;;
-            esac
+            python - <<'PY'
+            from alembic.config import Config
+            from alembic.script import ScriptDirectory
+            from alembic.runtime.migration import MigrationContext
+            from app.database import engine
+
+            config = Config("alembic.ini")
+            script = ScriptDirectory.from_config(config)
+
+            expected_heads = set(script.get_heads())
+
+            with engine.connect() as connection:
+                actual_heads = set(
+                    MigrationContext.configure(connection).get_current_heads()
+                )
+
+            print(f"database revisions: {sorted(actual_heads)}")
+            print(f"migration heads:    {sorted(expected_heads)}")
+
+            if actual_heads != expected_heads:
+                missing = expected_heads - actual_heads
+                unexpected = actual_heads - expected_heads
+                raise SystemExit(
+                    "FATAL: database is not at the Alembic head "
+                    f"(missing={sorted(missing)}, unexpected={sorted(unexpected)})"
+                )
+
+            print("Final revision matches Alembic head.")
+            PY
 
             deactivate
             sudo systemctl restart zoiko-payroll-backend
