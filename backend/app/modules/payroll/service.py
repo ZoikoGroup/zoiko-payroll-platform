@@ -7360,6 +7360,29 @@ def set_jurisdiction_pack_status(
                 "This pack needs a distinct approver before it can go Active — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
             )
+    if status == "Active" and row.pack_type == "policy":
+        # Production-readiness fix plan, Phase 6 (2026-09-18): policy packs
+        # previously had NO approval gate at all — Draft -> Active was a
+        # single unilateral action, unlike every tax pack (see the
+        # maker-checker block above) and every OTHER registry in this
+        # module (Germany health funds, PAP assets, contribution ceilings,
+        # U1 tariffs all require a distinct approver before publishing).
+        # policy_defaults governs real compliance-relevant settings
+        # (calculation_mode/employee_categories/overtime_rule defaults AND
+        # whether an org may override them) — the same "author cannot
+        # self-approve a production statutory version" principle applies
+        # here too, not just to tax packs. Deliberately NOT reusing any of
+        # the tax-only sub-checks above (source artifact, date-range
+        # overlap, golden-test certification) — those concepts genuinely
+        # don't apply to a policy pack's defaults; only the distinct-
+        # approver check is shared. See set_jurisdiction_pack_approver's
+        # matching change, which now allows policy packs to record an
+        # approver instead of unconditionally rejecting that action.
+        if not bypass_approver_check and (not row.approved_by_id or row.approved_by_id == row.updated_by_id):
+            raise BadRequestException(
+                "This pack needs a distinct approver before it can go Active — "
+                "use \"Approve\" (a different Super Admin than whoever last edited it)."
+            )
     old_status = row.status
     row.status = status
     row.updated_by_id = actor_id
@@ -7392,16 +7415,20 @@ def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Opti
     row = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not row:
         raise NotFoundException("JurisdictionPack", pack_row_id)
-    # Policy packs have no approval stage at all (Draft -> Active
-    # directly) — the maker-checker Approve action is a tax-only concept.
-    if row.pack_type == "policy":
-        raise BadRequestException(
-            "Policy packs have no approval step — set the pack's status directly to 'Active' to publish it."
-        )
+    # Policy packs previously had no approval stage at all (Draft ->
+    # Active directly, no distinct-approver requirement) — fixed as part
+    # of the production-readiness fix plan's Phase 6 (2026-09-18), which
+    # closed that gap in set_jurisdiction_pack_status's own maker-checker
+    # check. This action now works identically for both pack types: it
+    # still does NOT auto-advance a policy pack's status (policy packs
+    # have no "Approved" status in their vocabulary — see this table's
+    # own status docstring — Draft stays Draft until Active), it only
+    # records who reviewed it, which set_jurisdiction_pack_status now
+    # requires before allowing Draft -> Active for a policy pack too.
     old_approver = row.approved_by_id
     old_status = row.status
     row.approved_by_id = actor_id
-    if row.status == "Draft":
+    if row.status == "Draft" and row.pack_type == "tax":
         row.status = "Approved"
     db.commit()
     db.refresh(row)

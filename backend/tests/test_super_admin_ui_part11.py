@@ -419,3 +419,67 @@ def test_non_us_pack_activation_unaffected_by_new_gates(db, organization):
     db.refresh(pack)
     activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
     assert activated.status == "Active"
+
+
+# ── Policy pack maker-checker gap (production-readiness fix plan Phase 6,
+# 2026-09-18) — policy packs previously had NO approval gate at all:
+# Draft -> Active was a single unilateral action, unlike every tax pack
+# and every other registry in this module. ──────────────────────────────
+
+def _make_policy_pack(db, pack_id, status="Draft", approved_by_id=None, updated_by_id=None):
+    pack = JurisdictionPack(
+        pack_id=pack_id, jurisdiction_country="UK", pack_type="policy",
+        version="1.0", status=status, approved_by_id=approved_by_id, updated_by_id=updated_by_id,
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    return pack
+
+
+def test_policy_pack_activation_blocked_without_distinct_approver(db, organization):
+    # Same actor drafted AND would-be-approve it — must be rejected, same
+    # as a tax pack in the identical situation.
+    pack = _make_policy_pack(db, "UK-POLICY-GATE-TEST1", updated_by_id=1)
+    with pytest.raises(BadRequestException):
+        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+
+
+def test_policy_pack_activation_blocked_with_no_approver_at_all(db, organization):
+    pack = _make_policy_pack(db, "UK-POLICY-GATE-TEST2", updated_by_id=1)
+    assert pack.approved_by_id is None
+    with pytest.raises(BadRequestException):
+        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+
+
+def test_policy_pack_activation_succeeds_with_distinct_approver(db, organization):
+    pack = _make_policy_pack(db, "UK-POLICY-GATE-TEST3", approved_by_id=2, updated_by_id=1)
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"
+
+
+def test_set_jurisdiction_pack_approver_now_works_for_policy_packs(db, organization):
+    # Previously raised BadRequestException unconditionally for pack_type
+    # == "policy" ("Policy packs have no approval step"). Now records the
+    # approver like a tax pack does, but must NOT auto-advance status to
+    # "Approved" — that status doesn't exist in a policy pack's own
+    # vocabulary (only "Draft"/"Active").
+    pack = _make_policy_pack(db, "UK-POLICY-GATE-TEST4", updated_by_id=1)
+    approved = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=2)
+    assert approved.approved_by_id == 2
+    assert approved.status == "Draft"
+    # And now that a distinct approver is on record, activation succeeds.
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"
+
+
+def test_policy_pack_tax_only_subchecks_do_not_apply(db, organization):
+    # A policy pack has no source_document_id/effective dates in the same
+    # sense tax packs do, and there's no golden-test-certification concept
+    # for it — activation must succeed purely on the distinct-approver
+    # check, without tripping any of the US-specific tax-pack gates.
+    pack = _make_policy_pack(db, "UK-POLICY-GATE-TEST5", approved_by_id=2, updated_by_id=1)
+    assert pack.source_document_id is None
+    assert pack.effective_from is None
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=1)
+    assert activated.status == "Active"
