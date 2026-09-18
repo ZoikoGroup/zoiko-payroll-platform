@@ -204,6 +204,18 @@ def send_approval_email(
         logger.warning(f"Cannot send email to {email}: template {template_name} not found")
         return False
 
+    from app.config import settings as _staging_cfg
+
+    original_recipient = email
+    if _staging_cfg.STAGING_MODE and _staging_cfg.STAGING_SANDBOX_EMAIL:
+        # Part 11 — staging must never let a dunning warning, invoice
+        # receipt, or any other outbound billing email reach a real
+        # customer address. This is the single shared dispatch primitive
+        # every send_*_email() wrapper in this module ultimately calls, so
+        # redirecting here covers all of them, not just billing-specific ones.
+        email = _staging_cfg.STAGING_SANDBOX_EMAIL
+        context = {**context, "subject": f"[STAGING → {original_recipient}] {context.get('subject', 'Zoiko Payroll — Notification')}"}
+
     branding = _get_org_branding(organization_id, db=db)
     full_context = {**branding, **context}
     # Logo fallback: absolute URL to the SPA-hosted brand asset (public/ dir),

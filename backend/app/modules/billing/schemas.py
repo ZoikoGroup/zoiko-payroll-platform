@@ -468,8 +468,61 @@ class ConvertTrialRequest(BaseModel):
 class BillingCheckoutRequest(BaseModel):
     """POST /billing/checkout — tenant-facing checkout request."""
     plan_code: str = Field(..., min_length=1, max_length=30)
+    # Part 2 — optional negotiated delayed start; defaults to immediate
+    # (now) for self-service Core/Professional. Never inferred from
+    # checkout completing — see Organization.service_commencement_at.
+    service_commencement_at: Optional[datetime] = None
 
 
 class BillingCheckoutResponse(BaseModel):
     """POST /billing/checkout — response containing Stripe checkout URL."""
     checkout_url: str
+
+
+class BillingCancelRequest(BaseModel):
+    """POST /billing/cancel — tenant-facing, org admin only. No body fields
+    today (cancellation is always "at period end") — kept as its own empty
+    model so a future reason/feedback field doesn't need a breaking change."""
+    pass
+
+
+class EnterpriseOrderFormCreate(BaseModel):
+    """Body for POST /super-admin/billing/organizations/{organization_id}/enterprise-order-form."""
+    contract_reference: str = Field(..., min_length=1, max_length=100)
+    negotiated_scale_limits: dict
+    negotiated_price_terms: dict
+    term_start: date
+    term_end: Optional[date] = None
+
+
+class EnterpriseOrderFormResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    organization_id: int
+    contract_reference: str
+    negotiated_scale_limits: dict
+    negotiated_price_terms: dict
+    term_start: date
+    term_end: Optional[date] = None
+    signed_by: Optional[int] = None
+    created_at: datetime
+
+
+class BillingRefundRequest(BaseModel):
+    """POST /super-admin/billing/organizations/{organization_id}/refund."""
+    stripe_invoice_id: str = Field(..., min_length=1)
+    amount_cents: Optional[int] = Field(None, gt=0, description="Omit for a full refund")
+    reason: str = Field(..., min_length=1)
+
+
+class BillingCreditNoteIssueRequest(BaseModel):
+    """POST /super-admin/billing/organizations/{organization_id}/credit-note.
+    Named distinctly from the pre-existing BillingCreditNoteCreate (which
+    takes our own internal invoice_id) — this one takes the Stripe invoice
+    id, since that's what a human operator looking at the Stripe dashboard
+    actually has in hand; the endpoint resolves it to our own BillingInvoice
+    row internally."""
+    stripe_invoice_id: str = Field(..., min_length=1)
+    amount_cents: int = Field(..., gt=0)
+    reason: str = Field(..., min_length=1)

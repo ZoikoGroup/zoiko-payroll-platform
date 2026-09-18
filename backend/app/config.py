@@ -124,11 +124,29 @@ class Settings(BaseSettings):
     # change that first wires these dependencies into routes.
     BILLING_ENFORCEMENT_MODE: str = "off"
 
+    # ── Dunning (modules/billing/dunning.py) — Part 9 ───────────────────
+    # PLACEHOLDER defaults, not a confirmed Finance decision — the spec
+    # this was built from is explicit: "confirm exact timing with Finance,
+    # don't invent silently." Named settings, not a hardcoded number, so
+    # approving the real cadence is a config change, not a code change.
+    DUNNING_WARN_AFTER_DAYS: int = 1
+    DUNNING_RESTRICT_AFTER_DAYS: int = 7
+    DUNNING_SUSPEND_AFTER_DAYS: int = 21
+    DUNNING_SWEEP_ENABLED: bool = True
+    DUNNING_SWEEP_INTERVAL_HOURS: int = 24
+
     # ── Self-service checkout (Stripe) ──────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_CHECKOUT_SUCCESS_URL: str = ""   # frontend route, e.g. .../checkout/success
     STRIPE_CHECKOUT_CANCEL_URL: str = ""    # frontend route, e.g. .../checkout/cancelled
+
+    # ── Staging/test billing isolation (Part 11) ────────────────────────
+    # When true: refuse to boot with a Stripe LIVE key, force seed/demo
+    # data to synthetic values, and sandbox outbound billing email. See
+    # the startup guard below and modules/billing/staging.py.
+    STAGING_MODE: bool = False
+    STAGING_SANDBOX_EMAIL: str = ""   # every outbound billing email is redirected here in staging
 
 settings = Settings()
 
@@ -153,4 +171,15 @@ if settings.PAYROLL_SECRET_KEY == "change-me-payroll-platform-secret" and not _i
     raise RuntimeError(
         "PAYROLL_SECRET_KEY is still the placeholder default. Refusing to start outside a "
         "development environment — set a real PAYROLL_SECRET_KEY in your .env file."
+    )
+
+
+if settings.STAGING_MODE and settings.STRIPE_SECRET_KEY.startswith("sk_live_"):
+    # Part 11 — a simple prefix check, hard-failing rather than warning.
+    # A staging environment charging a real card (or a staging dunning
+    # sweep emailing a real customer) is exactly the failure this guard
+    # exists to make structurally impossible, not just logged.
+    raise RuntimeError(
+        "STAGING_MODE is enabled but STRIPE_SECRET_KEY is a LIVE key (sk_live_...). "
+        "Refusing to start — staging must only ever use a Stripe TEST key (sk_test_...)."
     )

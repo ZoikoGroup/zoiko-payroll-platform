@@ -74,6 +74,28 @@ class Organization(Base):
     # classification/qc_hsf_employer_category on CompanyComplianceDetails.
     connected_group_code = Column(String(50), nullable=True, index=True)
 
+    # ── Commercial account ledger (Commercial Billing & Subscription
+    # Operating Standard §A1) — the single source of truth for whether this
+    # org may ever be charged, and by which commercial route. Every new
+    # org defaults to NON_CHARGEABLE/charge_enabled=False; a human (Super
+    # Admin, via trial conversion or Enterprise Order Form recording) is
+    # the only thing that ever flips these to COMMERCIAL_ACTIVE/True — see
+    # billing/entitlements.py's is_billable().
+    billing_classification = Column(String(30), nullable=False, default="NON_CHARGEABLE")
+    # COMMERCIAL_ACTIVE | NON_CHARGEABLE | LEGACY | INTERNAL | DEMO | QA
+    charge_enabled = Column(Boolean, nullable=False, default=False)
+    commercial_account_id = Column(String(50), nullable=True, unique=True, index=True)
+    # Set once, the moment recurring charges may legally begin (Part 2) —
+    # never inferred from workspace existing, checkout completing, or an
+    # admin account existing. May be future-dated for a negotiated delayed
+    # start; a subscription is only real-billable once this is set AND past.
+    service_commencement_at = Column(DateTime, nullable=True)
+    commercial_route = Column(String(30), nullable=True)
+    # STANDALONE | ZOIKO_ONE_BUNDLE | ENTERPRISE_ORDER_FORM — mirrors
+    # billing.models.BillingAuthority; kept as a separate column (not just
+    # read off BillingSubscription.billing_authority) because an org can be
+    # commercially routed before any subscription row exists at all.
+
     # Tenant is onboarded by /auth/register and becomes active immediately
     # (no billing module in the standalone platform). Super Admin may suspend it.
     is_active = Column(Boolean, default=True, nullable=False)

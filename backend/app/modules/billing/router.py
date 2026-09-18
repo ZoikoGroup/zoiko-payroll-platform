@@ -17,7 +17,8 @@ See billing/admin_router.py for the Super Admin CRUD surface.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import List, Optional
 
 import stripe
@@ -37,6 +38,7 @@ from app.modules.billing.models import (
     SubscriptionStatus,
 )
 from app.modules.billing.schemas import (
+    BillingCancelRequest,
     BillingCheckoutRequest,
     BillingCheckoutResponse,
     BillingMySubscriptionResponse,
@@ -234,27 +236,116 @@ def create_checkout_session(
     # Nonce prevents duplicate Checkout Sessions from double-clicks
     idempotency_key = f"checkout:{organization_id}:{version.id}:{uuid.uuid4()}"
 
+    # Part 2 — Service Commencement Date is the ONLY trigger for recurring
+    # charges, never "checkout completed". Defaults to immediate (now) for
+    # self-service Core/Professional; may be negotiated future-dated.
+    # Carried through Stripe metadata so the checkout.session.completed
+    # webhook (which is where Organization.service_commencement_at is
+    # actually SET — see stripe_webhook below) can read it back.
+    commencement = body.service_commencement_at or datetime.utcnow()
+
+    session_kwargs = dict(
+        mode="subscription",
+        client_reference_id=str(organization_id),
+        line_items=[{
+            "price": stripe_price_id,
+            "quantity": 1,
+        }],
+        metadata={
+            "organization_id": str(organization_id),
+            "plan_version_id": str(version.id),
+            "service_commencement_at": commencement.isoformat(),
+        },
+        success_url=settings.STRIPE_CHECKOUT_SUCCESS_URL,
+        cancel_url=settings.STRIPE_CHECKOUT_CANCEL_URL,
+        idempotency_key=idempotency_key,
+        # Part 5 — jurisdiction-aware SaaS indirect tax (sales tax/VAT on
+        # the Zoiko invoice itself), delegated entirely to Stripe Tax
+        # rather than hand-rolling a rate table. This is Zoiko-subscription
+        # tax only — see BillingInvoice.tax_amount's own docstring for why
+        # this must never be conflated with payroll tax.
+        automatic_tax={"enabled": True},
+        tax_id_collection={"enabled": True},
+        billing_address_collection="required",
+    )
+
+    # Stripe rejects a billing_cycle_anchor that isn't strictly in the
+    # future — only set one for a genuinely negotiated delayed start, and
+    # let an immediate/near-immediate commencement use Stripe's own default
+    # (bill now) rather than risk a rejected anchor a few seconds in the past.
+    if commencement > datetime.utcnow() + timedelta(minutes=5):
+        session_kwargs["subscription_data"] = {"billing_cycle_anchor": int(commencement.timestamp())}
+
     stripe.api_key = settings.STRIPE_SECRET_KEY
     try:
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            client_reference_id=str(organization_id),
-            line_items=[{
-                "price": stripe_price_id,
-                "quantity": 1,
-            }],
-            metadata={
-                "organization_id": str(organization_id),
-                "plan_version_id": str(version.id),
-            },
-            success_url=settings.STRIPE_CHECKOUT_SUCCESS_URL,
-            cancel_url=settings.STRIPE_CHECKOUT_CANCEL_URL,
-            idempotency_key=idempotency_key,
-        )
+        session = stripe.checkout.Session.create(**session_kwargs)
     except stripe.error.StripeError as e:
         raise BadRequestException(f"Stripe Checkout error: {str(e)}")
 
     return BillingCheckoutResponse(checkout_url=session.url)
+
+
+def _write_invoice_from_stripe(db: Session, sub: BillingSubscription, stripe_invoice_id: Optional[str], status: str) -> None:
+    """Part 6 — populate BillingInvoice/BillingInvoiceLine, previously
+    fully modeled and never populated by anything. Idempotent on
+    stripe_invoice_id (a replayed webhook must never create a duplicate
+    invoice row) and fails closed per Part 1/2: an org that isn't
+    is_billable() or hasn't is_service_commenced() gets no invoice row at
+    all, even if Stripe itself somehow generated one.
+
+    tax_amount here is Zoiko SUBSCRIPTION tax only (sales tax/VAT Stripe
+    Tax calculated on the Zoiko invoice, from Part 5's automatic_tax) — see
+    BillingInvoice.tax_amount's own column comment. This must never be
+    confused with, summed with, or displayed alongside any payroll-tax
+    figure computed elsewhere in this codebase (the country tax engines).
+    """
+    if not stripe_invoice_id:
+        return
+
+    from app.modules.organizations.models import Organization
+    from app.modules.billing.models import BillingInvoice, BillingInvoiceLine
+    from app.modules.billing.entitlements import is_billable, is_service_commenced
+
+    org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
+    if org is None or not is_billable(org) or not is_service_commenced(org):
+        logger.info(
+            "[invoice] Skipping invoice write for organization_id=%s (not billable or not yet commenced).",
+            sub.organization_id,
+        )
+        return
+
+    existing = db.query(BillingInvoice).filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id).first()
+    if existing is not None:
+        return
+
+    try:
+        stripe_invoice = stripe.Invoice.retrieve(stripe_invoice_id)
+    except stripe.error.StripeError:
+        logger.exception("[invoice] Failed to retrieve Stripe invoice %s", stripe_invoice_id)
+        return
+
+    invoice = BillingInvoice(
+        organization_id=sub.organization_id,
+        subscription_id=sub.id,
+        stripe_invoice_id=stripe_invoice.id,
+        status=status,
+        total=Decimal(stripe_invoice.total) / 100,
+        tax_amount=Decimal(stripe_invoice.tax or 0) / 100,
+        currency=stripe_invoice.currency.upper(),
+        issued_at=datetime.fromtimestamp(stripe_invoice.created),
+    )
+    db.add(invoice)
+    db.flush()
+
+    for line in stripe_invoice.lines.data:
+        db.add(BillingInvoiceLine(
+            invoice_id=invoice.id,
+            description=line.description or "Subscription charge",
+            component_type="RECURRING_BASE",
+            quantity=line.quantity or 1,
+            unit_amount=Decimal(line.price.unit_amount) / 100 if line.price and line.price.unit_amount is not None else Decimal(0),
+            line_total=Decimal(line.amount) / 100,
+        ))
 
 
 # ── Stripe webhook handler ─────────────────────────────────────────────────
@@ -301,6 +392,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if event_type == "checkout.session.completed":
         org_id_str = (data_object.get("metadata") or {}).get("organization_id")
         version_id_str = (data_object.get("metadata") or {}).get("plan_version_id")
+        commencement_str = (data_object.get("metadata") or {}).get("service_commencement_at")
 
         if org_id_str and version_id_str:
             org_id = int(org_id_str)
@@ -342,6 +434,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 org.workspace_type = "PRODUCTION"
                 if not org.is_active:
                     org.is_active = True
+                # Part 2 — checkout completing is NEVER itself sufficient to
+                # start recurring charges; service_commencement_at (carried
+                # through metadata from POST /billing/checkout) is the only
+                # trigger. Only set once — a later renewal's
+                # checkout.session.completed (there isn't one today, but
+                # future replan/upgrade flows may reuse this handler) must
+                # never push a negotiated commencement date forward.
+                if org.service_commencement_at is None and commencement_str:
+                    try:
+                        org.service_commencement_at = datetime.fromisoformat(commencement_str)
+                    except ValueError:
+                        org.service_commencement_at = datetime.utcnow()
 
             db.add(BillingCommercialAuditEvent(
                 organization_id=org_id,
@@ -368,6 +472,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 payload={"stripe_invoice_id": data_object.get("id")},
                 stripe_event_id=event_id,
             ))
+
+            # Part 9 — recovery must reset dunning state immediately,
+            # regardless of current stage.
+            from app.modules.billing.dunning import reset_dunning
+            reset_dunning(db, sub.organization_id)
+
+            # Part 6 — populate BillingInvoice/BillingInvoiceLine, gated by
+            # is_billable()/is_service_commenced() (Parts 1/2) so a non-
+            # chargeable or not-yet-commenced org never gets a real
+            # invoice row even if Stripe somehow invoiced it.
+            _write_invoice_from_stripe(db, sub, data_object.get("id"), status="PAID")
+
             db.commit()
 
     elif event_type == "invoice.payment_failed":
@@ -385,6 +501,16 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 payload={"stripe_invoice_id": data_object.get("id")},
                 stripe_event_id=event_id,
             ))
+
+            # Part 9 — start the dunning clock the moment PAST_DUE is first
+            # observed, rather than waiting for the next scheduled sweep.
+            from app.modules.billing.dunning import get_or_create_dunning_state
+            get_or_create_dunning_state(db, sub.organization_id)
+
+            # Part 6 — Finance gets a record of failed attempts too, not
+            # just successes (still gated by is_billable/is_service_commenced).
+            _write_invoice_from_stripe(db, sub, data_object.get("id"), status="FAILED")
+
             db.commit()
 
     elif event_type == "customer.subscription.deleted":
@@ -415,3 +541,67 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         logger.info("Stripe webhook: unhandled event type=%s id=%s", event_type, event_id)
 
     return {"status": "success"}
+
+
+# ── Cancellation (Part 8) ────────────────────────────────────────────────
+
+@router.post("/cancel")
+def cancel_my_subscription(
+    body: BillingCancelRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Tenant-facing, org admin only. Cancels at period end
+    (cancel_at_period_end=True) — the customer keeps access through what
+    they already paid for. The actual status flip to CANCELLED still only
+    happens via the customer.subscription.deleted webhook, preserving
+    "webhook is the only path to a status change" — this endpoint only
+    records the request and tells Stripe not to renew.
+    """
+    sub = entitlements.get_active_subscription(db, current_user.organization_id)
+    if sub is None or not sub.stripe_subscription_id:
+        raise NotFoundException("Subscription")
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
+    except stripe.error.StripeError as e:
+        raise BadRequestException(f"Stripe cancellation error: {str(e)}")
+
+    sub.cancel_requested_at = datetime.utcnow()
+    db.add(sub)
+    db.add(BillingCommercialAuditEvent(
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        event_type="CANCELLATION_REQUESTED",
+        payload={"stripe_subscription_id": sub.stripe_subscription_id, "effective_at_period_end": sub.current_period_end.isoformat()},
+    ))
+    db.commit()
+    return {
+        "success": True,
+        "message": "Cancellation scheduled. You'll retain access until the end of your current billing period.",
+        "access_until": sub.current_period_end,
+    }
+
+
+# ── Invoice explanation (Part 7) ────────────────────────────────────────
+
+@router.get("/my-subscription/invoice-explanation")
+def get_my_latest_invoice_explanation(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """The caller's own most recent invoice, explained: which employees it
+    billed for, and who was excluded (and why), per Part 7."""
+    from app.modules.billing.models import BillingInvoice
+    from app.modules.billing.invoice_explanation import build_invoice_explanation
+
+    invoice = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.organization_id == current_user.organization_id)
+        .order_by(BillingInvoice.issued_at.desc())
+        .first()
+    )
+    if invoice is None:
+        raise NotFoundException("Invoice")
+    return build_invoice_explanation(db, invoice)

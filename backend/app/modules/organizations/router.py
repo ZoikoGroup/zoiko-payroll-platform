@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from app.modules.auth.schemas import SuccessResponse
-from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit
+from app.modules.billing.entitlements import require_writeable_workspace, require_entitlement, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_ENTITIES, MULTI_ENTITY, MULTI_CURRENCY
+from app.modules.billing.models import DunningStage
 from app.core.dependencies import (
     get_current_super_admin,
     get_current_org_admin,
@@ -166,7 +167,10 @@ def list_my_legal_entities(
 
 @router.post(
     "/me/legal-entities", response_model=LegalEntityResponse,
-    dependencies=[Depends(require_writeable_workspace())],
+    dependencies=[
+        Depends(require_writeable_workspace()),
+        Depends(require_not_dunning_restricted(DunningStage.RESTRICT_EXPANSION.value)),
+    ],
 )
 def create_my_legal_entity(
     data: LegalEntityCreate,
