@@ -120,7 +120,7 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
          ytd_sg_qualifying_earnings_before=None, au_taxability_rules=None,
          au_state_payroll_tax_ytd_remuneration_before=None, au_payroll_tax_regional_status=None,
          au_payroll_tax_charity_exempt=None, au_extra_pay_calendar=None, au_sapto_category=None,
-         au_national_taxable_wages_ytd_before=None):
+         au_national_taxable_wages_ytd_before=None, ytd_whm_earnings_before=None):
     ctx = PayrollContext(
         gross=Decimal(gross), basic=Decimal(basic if basic is not None else gross),
         country=country, rate_map=rate_map or {}, slabs=slabs or [],
@@ -181,6 +181,7 @@ def calc(country, gross, rate_map=None, slabs=None, basic=None, w4_filing_status
         au_extra_pay_calendar=au_extra_pay_calendar,
         au_sapto_category=au_sapto_category,
         au_national_taxable_wages_ytd_before=au_national_taxable_wages_ytd_before,
+        ytd_whm_earnings_before=ytd_whm_earnings_before,
     )
     return STRATEGY.calculate(ctx)
 
@@ -3181,6 +3182,42 @@ def test_australia_payg_working_holiday_maker_flat_45_percent_no_tfn():
     # silently fall through to ordinary Scale 4. $1,000 * 45% = $450.
     result = calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="NOT_PROVIDED")
     assert result.tds == Decimal("450")
+
+
+def test_australia_whm_ytd_not_wired_reproduces_dormant_behavior():
+    # ytd_whm_earnings_before=None (every employee until wired) must be a
+    # complete no-op — same tds as the plain flat-rate test above, and no
+    # trace/flag output at all.
+    result = calc("AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED")
+    assert result.tds == Decimal("150")
+    assert result.ytd_whm_earnings_after is None
+    assert result.au_whm_cap_exceeded is False
+
+
+def test_australia_whm_ytd_wired_under_cap_still_charges_in_cap_rate():
+    # $40,000 YTD + $1,000 this period = $41,000, still under $45,000 —
+    # in-cap 15% rate applies, no compliance flag.
+    result = calc(
+        "AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("40000"),
+    )
+    assert result.tds == Decimal("150")
+    assert result.ytd_whm_earnings_after == Decimal("41000")
+    assert result.au_whm_cap_exceeded is False
+
+
+def test_australia_whm_ytd_crossing_cap_flags_for_review_not_a_guessed_rate():
+    # $44,500 YTD + $1,000 this period = $45,500, crosses $45,000 — this
+    # engine has no verified above-cap graduated foreign-resident rate
+    # data, so it must NOT fabricate one: still withholds at the in-cap
+    # 15% rate ($150) but sets the compliance flag for manual review.
+    result = calc(
+        "AU", 1000, {}, [], au_residency_status="WORKING_HOLIDAY_MAKER", au_tfn_status="PROVIDED",
+        ytd_whm_earnings_before=Decimal("44500"),
+    )
+    assert result.tds == Decimal("150")
+    assert result.ytd_whm_earnings_after == Decimal("45500")
+    assert result.au_whm_cap_exceeded is True
 
 
 # ── Australia: Schedule 3 (NAT 1023) entertainers, Schedule 6 (NAT 3350) ──

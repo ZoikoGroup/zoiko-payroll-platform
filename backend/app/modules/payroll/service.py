@@ -11270,7 +11270,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             if emp_country == "UK" else
             _load_us_ytd(db, emp.id, period_end or date.today())
             if emp_country == "US" else
-            _load_au_sg_ytd(db, emp.id, period_end or date.today())
+            {**_load_au_sg_ytd(db, emp.id, period_end or date.today()), **_load_au_whm_ytd(db, emp.id, period_end or date.today())}
             if emp_country == "AU" else {}
         )
         option2_inputs = (
@@ -12054,6 +12054,65 @@ def _upsert_au_sg_ytd_accumulator(db: Session, employee_id: int, pay_date, resul
         row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_AU_SG_YTD_COMPONENT)
         db.add(row)
     row.ytd_taxable_wages = result.ytd_sg_qualifying_earnings_after
+    row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# Australia WHM Schedule 15 cumulative $45,000 test — same read/write/
+# tax-year-key shape as _load_au_sg_ytd/_upsert_au_sg_ytd_accumulator
+# above, reusing the SAME PayrollYtdAccumulator table with its own
+# component key so SG and WHM tracking never collide for an employee who
+# somehow has both. Added as part of the production-readiness fix plan
+# (2026-09-18) — see PayrollContext.ytd_whm_earnings_before's own
+# docstring for why crossing the cap sets a compliance flag rather than
+# computing a real above-cap withholding amount.
+_AU_WHM_YTD_COMPONENT = "au_whm_earnings"
+
+
+def _load_au_whm_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    ytd_whm_earnings_before param — empty dict (today, for every employee)
+    when AU hasn't opted into the rollout switch, or when no accumulator
+    row exists yet for this employee/financial-year. Never guesses/
+    backfills a starting value."""
+    if "AU" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _au_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _AU_WHM_YTD_COMPONENT,
+        )
+        .first()
+    )
+    return dict(ytd_whm_earnings_before=row.ytd_taxable_wages if row else Decimal("0"))
+
+
+def _upsert_au_whm_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative WHM earnings back
+    to PayrollYtdAccumulator — get-or-create per (employee, financial_year,
+    component), flush (not commit). No-op if the result carries no YTD
+    figure (result.ytd_whm_earnings_after is None), so calling this
+    unconditionally from every persisting entry point is safe even while
+    the rollout switch is off."""
+    if result.ytd_whm_earnings_after is None:
+        return
+    tax_year = _au_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _AU_WHM_YTD_COMPONENT,
+        )
+        .first()
+    )
+    if row is None:
+        row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_AU_WHM_YTD_COMPONENT)
+        db.add(row)
+    row.ytd_taxable_wages = result.ytd_whm_earnings_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
 
@@ -14431,8 +14490,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                 "medicare_additional": {"ytd_before": str(ctx.ytd_medicare_wages_before), "ytd_after": str(result.ytd_medicare_wages_after)},
             } if result.ytd_ss_wages_after is not None else
             {
-                "sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(result.ytd_sg_qualifying_earnings_after)},
-            } if result.ytd_sg_qualifying_earnings_after is not None else None
+                **({"sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(result.ytd_sg_qualifying_earnings_after)}} if result.ytd_sg_qualifying_earnings_after is not None else {}),
+                # WHM Schedule 15 cumulative $45,000 test — a SEPARATE AU
+                # accumulator dimension from sg_qualifying_earnings above
+                # (an employee can have either, both, or neither wired
+                # independently), same "merge whichever is actually
+                # present" reasoning as service.py's other AU YTD dicts.
+                **({"whm_earnings": {"ytd_before": str(ctx.ytd_whm_earnings_before), "ytd_after": str(result.ytd_whm_earnings_after)}} if result.ytd_whm_earnings_after is not None else {}),
+            } if (result.ytd_sg_qualifying_earnings_after is not None or result.ytd_whm_earnings_after is not None) else None
         ),
         "_ytd_result": result if result.ytd_pensionable_earnings is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for UK
@@ -14449,6 +14514,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # (ZP-TAX-AU-2026-27-001 §10, Payday Super Phase 2) — a separate
         # key since it's gated on ITS OWN result field.
         "_au_sg_ytd_result": result if result.ytd_sg_qualifying_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for
+        # Australia WHM Schedule 15 cumulative-cap tracking — a separate
+        # key since it's gated on ITS OWN result field, independent of SG.
+        "_au_whm_ytd_result": result if result.ytd_whm_earnings_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for Canada
         # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
         # — a separate key since it's gated on ITS OWN result field,
@@ -14559,6 +14628,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
     us_ytd_result = values.pop("_us_ytd_result", None)
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
+    au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
     au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
@@ -14607,6 +14677,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
             ytd_qualifying_earnings_after=au_sg_ytd_result.ytd_sg_qualifying_earnings_after,
             mcb_reached=au_sg_ytd_result.sg_mcb_reached, payslip_item_id=item.id,
         )
+    if au_whm_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, au_whm_ytd_result, payslip_id=item.id)
     if au_statutory_deductions_detail is not None:
         _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
     if option2_ytd_result is not None:
@@ -14938,7 +15011,7 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             if country == "UK" else
             _load_us_ytd(db, emp.id, run.pay_date)
             if country == "US" else
-            _load_au_sg_ytd(db, emp.id, run.pay_date)
+            {**_load_au_sg_ytd(db, emp.id, run.pay_date), **_load_au_whm_ytd(db, emp.id, run.pay_date)}
             if country == "AU" else None
         )
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
@@ -15165,6 +15238,9 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
         before = (existing_snapshot.get("sg_qualifying_earnings") or {}).get("ytd_before")
         if before is not None:
             ytd_inputs["ytd_sg_qualifying_earnings_before"] = Decimal(before)
+        whm_before = (existing_snapshot.get("whm_earnings") or {}).get("ytd_before")
+        if whm_before is not None:
+            ytd_inputs["ytd_whm_earnings_before"] = Decimal(whm_before)
 
     values = _compute_payslip_values(
         db, run, employee, rate_map, slabs, country, calculation_mode,
@@ -15177,6 +15253,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     uk_director_ytd_result = values.pop("_uk_director_ytd_result", None)
     us_ytd_result = values.pop("_us_ytd_result", None)  # never written from this correction path — same reasoning as _ytd_result above
     values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
+    values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
     # the ORIGINAL run already collected against.
@@ -18824,7 +18901,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _load_ca_ytd(db, employee.id, run.pay_date, work_state) if country == "CA"
         else _load_uk_director_ytd(db, employee.id, run.pay_date) if country == "UK"
         else _load_us_ytd(db, employee.id, run.pay_date) if country == "US"
-        else _load_au_sg_ytd(db, employee.id, run.pay_date) if country == "AU"
+        else {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)} if country == "AU"
         else {}
     )
 
@@ -19058,8 +19135,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                 "medicare_additional": {"ytd_before": str(ctx.ytd_medicare_wages_before), "ytd_after": str(calc.ytd_medicare_wages_after)},
             } if calc.ytd_ss_wages_after is not None else
             {
-                "sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(calc.ytd_sg_qualifying_earnings_after)},
-            } if calc.ytd_sg_qualifying_earnings_after is not None else None
+                **({"sg_qualifying_earnings": {"ytd_before": str(ctx.ytd_sg_qualifying_earnings_before), "ytd_after": str(calc.ytd_sg_qualifying_earnings_after)}} if calc.ytd_sg_qualifying_earnings_after is not None else {}),
+                **({"whm_earnings": {"ytd_before": str(ctx.ytd_whm_earnings_before), "ytd_after": str(calc.ytd_whm_earnings_after)}} if calc.ytd_whm_earnings_after is not None else {}),
+            } if (calc.ytd_sg_qualifying_earnings_after is not None or calc.ytd_whm_earnings_after is not None) else None
         ),
         poe_snapshot=poe_snapshot,
     )
@@ -19086,6 +19164,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
             ytd_qualifying_earnings_after=calc.ytd_sg_qualifying_earnings_after,
             mcb_reached=calc.sg_mcb_reached, payslip_item_id=item.id,
         )
+    if calc.ytd_whm_earnings_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
     if calc.au_statutory_deductions_detail:
         _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:

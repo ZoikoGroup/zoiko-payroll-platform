@@ -415,6 +415,25 @@ class PayrollContext:
     # _load_au_sg_ytd, gated on shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.
     ytd_sg_qualifying_earnings_before: Decimal = None
 
+    # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
+    # $45,000 first-bracket test — this employee's cumulative WHM earnings
+    # for the current Australian financial year, as of BEFORE this pay
+    # period. Same "None means not wired, must fall back to the existing
+    # dormant flat-rate-every-period behavior" contract as
+    # ytd_sg_qualifying_earnings_before above. Read from
+    # PayrollYtdAccumulator by service.py's _load_au_whm_ytd, gated on
+    # shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES. DISCLOSED LIMITATION
+    # (see engine/countries/australia.py's SCALE_WHM branch): once wired,
+    # this lets the engine DETECT a YTD-earnings crossing of $45,000, but
+    # the engine still cannot compute the real above-cap graduated
+    # foreign-resident withholding (32.5%/37%/45% bands) because no
+    # verified ATO source figures for those bands exist in this codebase
+    # — crossing the cap sets PayrollResult.au_whm_cap_exceeded instead of
+    # silently mis-taxing, for a human/compliance workflow to resolve
+    # (same "surface, never fabricate or auto-fix" discipline as India's
+    # wage_deduction_cap_exceeded flag).
+    ytd_whm_earnings_before: Decimal = None
+
     # Canada Option 2 cumulative-averaging income tax withholding
     # (ZP-TAX-CA-2026-001 §7/AC, gap-closure Phase 9) — this employee's
     # own income-tax-specific YTD state, as of BEFORE this pay period,
@@ -657,6 +676,20 @@ class PayrollResult:
     # None-means-"not applicable" contract as the US fields above — see
     # PayrollContext's matching ytd_sg_qualifying_earnings_before field.
     ytd_sg_qualifying_earnings_after: Decimal = None
+    # Australia WHM Schedule 15 cumulative $45,000 test — cumulative WHM
+    # earnings AFTER this period, same None-means-"not applicable" contract
+    # as ytd_sg_qualifying_earnings_after above. See PayrollContext's
+    # matching ytd_whm_earnings_before field for the full explanation,
+    # including why crossing the cap sets au_whm_cap_exceeded below rather
+    # than computing a real above-cap withholding amount.
+    ytd_whm_earnings_after: Decimal = None
+    # True only once ytd_whm_earnings_after crosses $45,000 for an employee
+    # whose WHM YTD tracking is wired (ytd_whm_earnings_before was not
+    # None) — a pure COMPLIANCE FLAG, same contract as
+    # wage_deduction_cap_exceeded below: this engine still withholds at the
+    # in-cap 15%/45% rate for this period (never a guessed above-cap rate),
+    # surfacing the crossing for a human/compliance workflow instead.
+    au_whm_cap_exceeded: bool = False
     # Australia Payday Super (§10) — service.create_au_sg_liability's own
     # inputs, computed once here (where the MCB cap/rate are already
     # resolved) rather than re-derived in service.py from raw numbers.

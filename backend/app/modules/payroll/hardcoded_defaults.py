@@ -1101,12 +1101,16 @@ _AU_PAYG_SCALE4_NONRESIDENT_RATE = Decimal("45.0")
 # Schedule 15 (NAT 75331, Working Holiday Maker subclass 417/462) — real
 # ATO-published flat rates, resolved 2026-09-17: 15% with a TFN on file,
 # 45% with no TFN. Same "flat rate, simple scalar fallback" reasoning as
-# Scale 4 above. The $45,000 first-bracket annual cap is NOT enforced by
-# a hardcoded constant here — it needs a real YTD accumulator (see
-# engine/countries/australia.py's own SCALE_WHM branch for the disclosed
-# limitation), not a value this module could sensibly default.
+# Scale 4 above.
 _AU_WHM_RATE = Decimal("15.0")
 _AU_WHM_NO_TFN_RATE = Decimal("45.0")
+# Schedule 15's own published $45,000 cumulative first-bracket threshold —
+# a real, stable ATO figure (unlike the above-cap graduated foreign-
+# resident rates, which are NOT in this codebase — see
+# engine/countries/australia.py's SCALE_WHM branch for why crossing this
+# threshold sets a compliance flag rather than computing a real above-cap
+# withholding amount).
+_AU_WHM_CAP_THRESHOLD = Decimal("45000")
 
 # Special Payments (ZP-TAX-AU-2026-27-001 §13, Phase 3, 2026-09-16) —
 # real, document-given caps and the genuine-redundancy tax-free formula
