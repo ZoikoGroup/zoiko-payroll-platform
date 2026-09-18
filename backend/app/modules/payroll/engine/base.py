@@ -564,6 +564,12 @@ class PayrollContext:
     # final NIC period of the tax year.
     is_final_ni_period: bool = False
 
+    # Correlation ID for this calculation, for log/debugging correlation
+    # only — never read by any country calculator, never persisted, never
+    # affects a figure. None means "caller didn't supply one," in which
+    # case engine/resolver.py's calculate_payroll() generates one.
+    trace_id: str = None
+
 
 @dataclass
 class PayrollResult:
@@ -870,6 +876,12 @@ class PayrollResult:
     # which isn't an "authorized deduction" in the Code's sense, against
     # 50% of gross wages).
     wage_deduction_cap_exceeded: bool = False
+
+    # Echoes PayrollContext.trace_id back on the result — see that field's
+    # own docstring. None only if the caller never went through
+    # engine/resolver.py's calculate_payroll() (e.g. a strategy invoked
+    # directly in a test).
+    trace_id: str = None
 
 
 class PayrollStrategy(ABC):
