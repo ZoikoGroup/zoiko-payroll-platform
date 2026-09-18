@@ -35,7 +35,7 @@ print_diagnostics() {
   echo "  ---- alembic history (tail) ----"
   alembic history 2>&1 | tail -15 || true
   echo "  ---- alembic_version table ----"
-  python - >/dev/null 2>&1 <<'PY' || true
+  python - <<'PY' || true
 from sqlalchemy import text
 
 from app.database import engine
@@ -78,11 +78,35 @@ check_model_drift() {
 
 verify_at_head() {
   echo "==> Verifying database is at the Alembic head..."
-  echo "Expected heads:"
-  alembic heads
-  echo "Current revisions:"
-  alembic current
-  alembic current --check-heads
+
+  python - <<'PY'
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from app.database import engine
+
+config = Config("alembic.ini")
+script = ScriptDirectory.from_config(config)
+
+expected = set(script.get_heads())
+
+with engine.connect() as connection:
+    actual = set(
+        MigrationContext.configure(connection).get_current_heads()
+    )
+
+print(f"expected heads: {sorted(expected)}")
+print(f"database heads: {sorted(actual)}")
+
+if actual != expected:
+    raise SystemExit(
+        "Database is not at the Alembic head: "
+        f"missing={sorted(expected - actual)}, "
+        f"unexpected={sorted(actual - expected)}"
+    )
+
+print("Database is at the Alembic head.")
+PY
 }
 
 # --- Migration steps -------------------------------------------------------
