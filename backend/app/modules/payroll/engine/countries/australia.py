@@ -949,6 +949,62 @@ def calculate_au_schedule6_annuity_withholding(ctx: PayrollContext, gross_paymen
     return _calculate_au_payg_schedule1(ctx, taxable_portion)
 
 
+def calculate_au_schedule5_back_payment_withholding(
+    ctx: PayrollContext, regular_period_gross: Decimal, special_payment_amount: Decimal,
+) -> dict:
+    """Schedule 5 (NAT 3348) — back payments, commissions, bonuses and
+    similar payments that relate to more than one pay period (or an
+    undefined period), resolved 2026-09-18 (production-readiness fix
+    plan, Tier 3.1). If a bonus/commission genuinely relates to work
+    performed in a SINGLE pay period only, Schedule 5 does not apply at
+    all — the caller should simply add it to ctx.gross and use ordinary
+    Schedule 1 directly instead; this function is for the "spans more
+    than one period" case specifically.
+
+    ATO's own Method A (the "averaging method", consistently described
+    the same way by every independent source checked — the ATO's own
+    page text, Tanda's and Microkeeper's payroll help docs — this
+    session could not fetch the primary NAT 3348 PDF directly, both
+    www.ato.gov.au and softwaredevelopers.ato.gov.au were unreachable):
+    apportion the additional payment across the number of pay periods in
+    the income year, add that average to THIS period's ordinary gross,
+    run it through ordinary Schedule 1, and compare against Schedule 1
+    on the ordinary gross alone — the INCREMENTAL withholding is the
+    real effect of the additional payment, then multiplied back up by
+    the number of periods since the whole amount is being paid now, not
+    spread over the rest of the year. This introduces NO new ATO rate/
+    coefficient data of its own — it is built entirely out of
+    _calculate_au_payg_schedule1, which is already real, sourced data.
+    Same "incremental-tax" architecture as
+    service.calculate_ca_special_payment_withholding (Canada's own bonus
+    method) elsewhere in this codebase.
+
+    Bypasses calculate_au_special_payment_withholding's generic
+    (payment_type, amount) dispatcher entirely — same reasoning as
+    Schedule 3/6 above: this schedule's real inputs (the employee's
+    regular period gross, not just the bonus amount) don't fit a single
+    `amount` parameter."""
+    if special_payment_amount is None or special_payment_amount < 0:
+        raise ValueError("special_payment_amount must be zero or positive.")
+    periods_per_year = resolve_periods_per_year(ctx.pay_frequency)
+    averaged_amount = special_payment_amount / periods_per_year
+
+    withholding_without, _ = _calculate_au_payg_schedule1(ctx, regular_period_gross)
+    withholding_with, _ = _calculate_au_payg_schedule1(ctx, regular_period_gross + averaged_amount)
+
+    per_period_incremental = max(Decimal("0"), withholding_with - withholding_without)
+    total_withholding = _au_floor_dollars(per_period_incremental * periods_per_year)
+    return {
+        "regular_period_gross": regular_period_gross,
+        "special_payment_amount": special_payment_amount,
+        "periods_per_year": periods_per_year,
+        "averaged_amount": averaged_amount,
+        "withholding_without_payment": withholding_without,
+        "withholding_with_averaged_payment": withholding_with,
+        "total_withholding": total_withholding,
+    }
+
+
 def calculate_au_etp_cap_classification(ctx: PayrollContext, etp_amount: Decimal, is_death_benefit: bool = False) -> dict:
     """§13's ETP life/death benefit cap — classifies an Employment
     Termination Payment amount into the portion within cap (eligible for

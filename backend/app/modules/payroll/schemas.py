@@ -1372,6 +1372,27 @@ class CASpecialPaymentCalculateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+# ── Australia: Schedule 5 back payment/commission/bonus averaging method ──
+# (ZP-TAX-AU-2026-27-001 §9, production-readiness fix plan Tier 3.1) — see
+# service.calculate_au_employee_schedule5_withholding's own docstring.
+class AUSchedule5CalculateRequest(BaseModel):
+    employee_id: int
+    regular_period_gross: Decimal
+    special_payment_amount: Decimal
+    payroll_date: Optional[date] = None
+
+
+class AUSchedule5CalculateResponse(BaseModel):
+    regularPeriodGross: Decimal = Field(validation_alias="regular_period_gross", serialization_alias="regularPeriodGross")
+    specialPaymentAmount: Decimal = Field(validation_alias="special_payment_amount", serialization_alias="specialPaymentAmount")
+    periodsPerYear: int = Field(validation_alias="periods_per_year", serialization_alias="periodsPerYear")
+    averagedAmount: Decimal = Field(validation_alias="averaged_amount", serialization_alias="averagedAmount")
+    withholdingWithoutPayment: Decimal = Field(validation_alias="withholding_without_payment", serialization_alias="withholdingWithoutPayment")
+    withholdingWithAveragedPayment: Decimal = Field(validation_alias="withholding_with_averaged_payment", serialization_alias="withholdingWithAveragedPayment")
+    totalWithholding: Decimal = Field(validation_alias="total_withholding", serialization_alias="totalWithholding")
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ── Company Holidays ─────────────────────────────────────────────────────
 
 class HolidayCreate(BaseModel):

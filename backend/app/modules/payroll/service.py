@@ -13032,6 +13032,57 @@ def calculate_us_supplemental_wage_withholding(
     }
 
 
+# ── Australia: Schedule 5 back payment/commission/bonus averaging method ──
+# (ZP-TAX-AU-2026-27-001 §9, production-readiness fix plan Tier 3.1,
+# 2026-09-18). Same "standalone caller, not woven into calculate()"
+# reasoning as calculate_ca_special_payment_withholding/
+# calculate_us_supplemental_wage_withholding above — a back payment/
+# commission/bonus spanning more than one pay period is a distinct event
+# an operator explicitly triggers, not something the regular per-period
+# payroll run detects on its own.
+def calculate_au_employee_schedule5_withholding(
+    db: Session, organization_id: int, employee_id: int,
+    regular_period_gross: Decimal, special_payment_amount: Decimal, payroll_date=None,
+) -> dict:
+    """Returns engine/countries/australia.py's
+    calculate_au_schedule5_back_payment_withholding() result for one
+    employee — makes that function (previously built and tested but with
+    no caller anywhere in service/router/frontend, the exact same gap
+    India's calculate_gratuity had before this same fix plan) actually
+    reachable via a real employee record.
+
+    regular_period_gross is a REQUIRED, caller-supplied figure — same
+    reasoning as CA's regular_annual_pay above: this employee's ordinary
+    gross for the CURRENT pay period is needed to run the incremental-tax
+    comparison, and this engine has no reliable way to infer "what would
+    this employee's regular gross have been this period" on its own
+    (attendance/allowances vary period to period)."""
+    from app.modules.payroll.engine.countries.australia import calculate_au_schedule5_back_payment_withholding
+    from app.modules.payroll.engine.resolver import build_context_from_employee
+
+    if special_payment_amount is None or special_payment_amount < 0:
+        raise BadRequestException("special_payment_amount must be zero or positive.")
+    if regular_period_gross is None or regular_period_gross < 0:
+        raise BadRequestException("regular_period_gross must be zero or positive.")
+
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "AU":
+        raise BadRequestException("The Schedule 5 back payment/commission/bonus method only applies to Australia employees.")
+
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    (
+        _country, rate_map, slabs, _pack, _work_state, _state_rate_map, _state_slabs,
+        _profiles, _recip, _loc, _poe, _res_state,
+    ) = _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=payroll_date, org_opted_in=org_opted_in)
+
+    ctx = build_context_from_employee(
+        employee, gross=regular_period_gross, basic=regular_period_gross,
+        country=country, rate_map=rate_map, slabs=slabs, pay_date=payroll_date,
+    )
+    return calculate_au_schedule5_back_payment_withholding(ctx, regular_period_gross, special_payment_amount)
+
+
 def _next_business_day(d: date) -> date:
     """Saturday -> following Monday, Sunday -> following Monday, else
     unchanged. Weekend-only — no federal holiday calendar is sourced

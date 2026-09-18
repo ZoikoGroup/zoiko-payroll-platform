@@ -28,6 +28,7 @@ from app.modules.payroll.engine.countries.australia import (
     calculate_au_genuine_redundancy_tax_free_component,
     calculate_au_statutory_deduction, calculate_au_statutory_deductions,
     calculate_au_schedule3_entertainer_withholding, calculate_au_schedule6_annuity_withholding,
+    calculate_au_schedule5_back_payment_withholding,
 )
 import app.modules.payroll.engine.countries.shared as shared
 
@@ -3328,6 +3329,55 @@ def test_au_schedule6_annuity_routes_through_schedule1():
     tds, trace = calculate_au_schedule6_annuity_withholding(ctx, Decimal("600"), Decimal("100"))
     assert tds == Decimal("90")
     assert trace["scale"] == "SCALE_1"
+
+
+def test_au_schedule5_back_payment_averaging_method():
+    # Same figures as this function's own sanity check: $500 weekly
+    # regular gross (Scale 2, tax-free threshold claimed) withholds $21
+    # alone. Averaging a $520 bonus over 52 weekly periods adds $10/week
+    # -> $510 withholds $22 -> $1/week incremental * 52 = $52 total.
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("520"))
+    assert result["periods_per_year"] == 52
+    assert result["averaged_amount"] == Decimal("10")
+    assert result["withholding_without_payment"] == Decimal("21")
+    assert result["withholding_with_averaged_payment"] == Decimal("22")
+    assert result["total_withholding"] == Decimal("52")
+
+
+def test_au_schedule5_zero_special_payment_yields_zero_withholding():
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("0"))
+    assert result["total_withholding"] == Decimal("0")
+
+
+def test_au_schedule5_rejects_negative_special_payment():
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    with pytest.raises(ValueError):
+        calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("-1"))
+
+
+def test_au_schedule5_monthly_frequency_uses_12_periods():
+    ctx = PayrollContext(
+        gross=Decimal("500"), basic=Decimal("500"), slabs=_AU_PAYG_SCALE2_SLABS, pay_frequency="Monthly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=True,
+        country="AU",
+    )
+    result = calculate_au_schedule5_back_payment_withholding(ctx, Decimal("500"), Decimal("1200"))
+    assert result["periods_per_year"] == 12
+    assert result["averaged_amount"] == Decimal("100")
 
 
 # ── Australia: ATO Schedule 8 (NAT 3539) STSL coefficient-band engine ────
