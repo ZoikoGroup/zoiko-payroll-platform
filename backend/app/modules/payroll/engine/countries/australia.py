@@ -312,12 +312,14 @@ def _calculate_au_income_tax_offset(annual_income: Decimal, rule_type: str, fili
     always "LITO"; SAPTO's is ctx.au_sapto_category — "SINGLE",
     "COUPLE", or "ILLNESS_SEPARATED_COUPLE"). Returns $0 (never a guess)
     when no matching band is configured — same dormancy discipline as
-    every other AU coefficient-band lookup in this module. This is
-    deliberately true today for COUPLE/ILLNESS_SEPARATED_COUPLE: two
-    independent lookups of the ATO's own published figures for those
-    categories produced conflicting thresholds, so no rows are configured
-    for them yet (see this module's own docstring) — $0 here for those
-    categories means "not yet confirmed," not "not entitled." """
+    every other AU coefficient-band lookup in this module. LITO and all
+    three SAPTO categories were entered as real canonical DB data
+    2026-09-18 (production-readiness fix plan, Tier 2.2) — see the
+    AU-2026-27-FED pack's own AU_SAPTO_OFFSET/AU_LITO_OFFSET TaxSlab rows
+    for the sourced figures (triangulated via web research since
+    ato.gov.au blocks automated fetches — see that commit's message for
+    the sources); $0 here now only ever means "genuinely no band
+    configured for this org's own pack," not an unresolved data gap."""
     band = _resolve_au_coefficient_band(annual_income, filing_status, rule_type, slabs)
     if band is None:
         return Decimal("0")
@@ -687,16 +689,17 @@ def calculate(ctx: PayrollContext) -> dict:
     tds, payg_trace = _calculate_au_payg_schedule1(ctx, payg_taxable_gross)
     study_loan_deduction, stsl_trace = _calculate_au_stsl_schedule8(ctx, payg_taxable_gross)
 
-    # §5 step 4 tax offsets — LITO/SAPTO(single), Phase 10 2026-09-17 —
-    # computed against this period's own annualized gross (see this
-    # module's own docstring for why that periodization is an engineering
-    # choice, not a fabricated value) and subtracted from Schedule 1's own
-    # tds, floored at $0. LITO applies to every resident/unset-residency
-    # employee (not foreign residents — the same "no tax-free threshold
-    # either" rule Schedule 1 itself already encodes); SAPTO applies only
-    # when ctx.au_sapto_category is declared, and only ever resolves to a
-    # real figure for "SINGLE" today (see _calculate_au_income_tax_offset
-    # for why COUPLE/ILLNESS_SEPARATED_COUPLE stay at $0).
+    # §5 step 4 tax offsets — LITO/SAPTO, Phase 10 2026-09-17 (all 3 SAPTO
+    # categories resolved 2026-09-18) — computed against this period's own
+    # annualized gross (see this module's own docstring for why that
+    # periodization is an engineering choice, not a fabricated value) and
+    # subtracted from Schedule 1's own tds, floored at $0. LITO applies to
+    # every resident/unset-residency employee (not foreign residents — the
+    # same "no tax-free threshold either" rule Schedule 1 itself already
+    # encodes); SAPTO applies only when ctx.au_sapto_category is declared,
+    # and resolves to a real figure for SINGLE/COUPLE/ILLNESS_SEPARATED_
+    # COUPLE alike now that all three have real canonical data (see
+    # _calculate_au_income_tax_offset's own docstring).
     lito_annual = (
         _calculate_au_income_tax_offset(annual_gross, "AU_LITO_OFFSET", "LITO", ctx.slabs)
         if ctx.au_residency_status != "FOREIGN_RESIDENT" else Decimal("0")

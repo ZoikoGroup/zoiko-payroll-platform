@@ -3892,11 +3892,14 @@ def test_au_calculation_trace_records_state_payroll_tax_and_workers_comp():
     assert Decimal(wc["premium"]) == result.au_workers_compensation_premium
 
 
-# ── Australia: §5 step 4 tax offsets (LITO/SAPTO) — Phase 10 2026-09-17 ──
-# Real ATO-published 2026-27 figures, independently cross-checked against
-# two separate lookups of the ATO's own page (see australia.py's own
-# module docstring for the verification method and for why SAPTO's
-# COUPLE/ILLNESS_SEPARATED_COUPLE categories are deliberately NOT entered.
+# ── Australia: §5 step 4 tax offsets (LITO/SAPTO) — Phase 10 2026-09-17,
+# all 3 SAPTO categories resolved 2026-09-18 (production-readiness fix
+# plan Tier 2.2) — real ATO-published 2026-27 figures, triangulated via
+# web research (ato.gov.au itself blocks automated fetches) from multiple
+# independent tax-advisory sources whose figures agree exactly and whose
+# cumulative arithmetic checks out; entered as real canonical DB rows on
+# the AU-2026-27-FED pack. See australia.py's own
+# _calculate_au_income_tax_offset docstring.
 
 _AU_LITO_SLABS = [
     Slab(Decimal("0"), Decimal("37500"), Decimal("0"), rule_type="AU_LITO_OFFSET", filing_status="LITO", flat_amount=Decimal("700")),
@@ -3908,6 +3911,16 @@ _AU_SAPTO_SINGLE_SLABS = [
     Slab(Decimal("0"), Decimal("36034"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("2230")),
     Slab(Decimal("36034"), Decimal("53874"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("2230")),
     Slab(Decimal("53874"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="SINGLE", flat_amount=Decimal("0")),
+]
+_AU_SAPTO_COUPLE_SLABS = [
+    Slab(Decimal("0"), Decimal("31847"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="COUPLE", flat_amount=Decimal("1602")),
+    Slab(Decimal("31847"), Decimal("44663"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="COUPLE", flat_amount=Decimal("1602")),
+    Slab(Decimal("44663"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="COUPLE", flat_amount=Decimal("0")),
+]
+_AU_SAPTO_ILLNESS_SEPARATED_SLABS = [
+    Slab(Decimal("0"), Decimal("34767"), Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="ILLNESS_SEPARATED_COUPLE", flat_amount=Decimal("2040")),
+    Slab(Decimal("34767"), Decimal("51087"), Decimal("12.5"), rule_type="AU_SAPTO_OFFSET", filing_status="ILLNESS_SEPARATED_COUPLE", flat_amount=Decimal("2040")),
+    Slab(Decimal("51087"), None, Decimal("0"), rule_type="AU_SAPTO_OFFSET", filing_status="ILLNESS_SEPARATED_COUPLE", flat_amount=Decimal("0")),
 ]
 
 
@@ -3970,11 +3983,13 @@ def test_au_sapto_single_offset_reduces_payg_withholding():
 
 
 def test_au_sapto_couple_unconfigured_returns_zero_not_a_guess():
-    # COUPLE has no configured rows (two independent lookups of the ATO's
-    # own published figures for this category produced conflicting
-    # thresholds) — must resolve to $0, the same "not yet confirmed, not
-    # not entitled" contract as any other unconfigured AU band, never an
-    # error and never a guessed number.
+    # Genuinely no COUPLE rows in THIS test's own supplied slabs list
+    # (only _AU_SAPTO_SINGLE_SLABS) — must resolve to $0, the same
+    # "no band configured for this org's pack" contract as any other
+    # unconfigured AU band, never an error and never a guessed number.
+    # (Real COUPLE data now exists as canonical DB rows — see
+    # test_au_sapto_couple_offset_reduces_payg_withholding below — this
+    # test is about the dormancy-fallback mechanism, not that gap.)
     result = calc(
         "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_SAPTO_SINGLE_SLABS, pay_frequency="Weekly",
         au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
@@ -3982,7 +3997,34 @@ def test_au_sapto_couple_unconfigured_returns_zero_not_a_guess():
     )
     trace = result.au_calculation_trace["tax_offsets"]
     assert Decimal(trace["sapto_annual"]) == Decimal("0")
+
+
+def test_au_sapto_couple_offset_reduces_payg_withholding():
+    result = calc(
+        "AU", 500, {}, _AU_PAYG_SCALE1_SLABS + _AU_SAPTO_COUPLE_SLABS, pay_frequency="Weekly",
+        au_tfn_status="PROVIDED", au_residency_status="RESIDENT", au_tax_free_threshold_claimed=False,
+        au_sapto_category="COUPLE",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    # Annual 26,000 is within COUPLE's own band 1 (<=31,847) -> full
+    # $1,602 annual offset -> period-equivalent (weekly, /52) = 30.81.
+    assert Decimal(trace["sapto_annual"]) == Decimal("1602")
     assert trace["sapto_category"] == "COUPLE"
+    assert Decimal(trace["period_offset"]) == Decimal("30.81")
+    assert result.tds == Decimal("90") - Decimal("30.81")
+
+
+def test_au_sapto_illness_separated_couple_offset_phases_out():
+    # Monthly gross $3,500 -> annual 42,000, within ILLNESS_SEPARATED_
+    # COUPLE's phase-out band (34,767-51,087):
+    # 2040 - 12.5%*(42,000-34,767) = 2040 - 904.125 = 1135.875.
+    result = calc(
+        "AU", 3500, {}, _AU_SAPTO_ILLNESS_SEPARATED_SLABS, au_residency_status="RESIDENT",
+        au_sapto_category="ILLNESS_SEPARATED_COUPLE",
+    )
+    trace = result.au_calculation_trace["tax_offsets"]
+    assert trace["sapto_category"] == "ILLNESS_SEPARATED_COUPLE"
+    assert Decimal(trace["sapto_annual"]) == Decimal("1135.875")
 
 
 def test_au_sa_reduced_rate_band_matches_revenuesa_worked_example():

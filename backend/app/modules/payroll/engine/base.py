@@ -216,9 +216,9 @@ class PayrollContext:
     # from au_tax_free_threshold_claimed. None (no SAPTO applied) for
     # every employee until explicitly declared — LITO, by contrast,
     # applies automatically to every resident and needs no declaration
-    # field at all. Only "SINGLE" resolves to a real figure today; see
-    # engine/countries/australia.py's own docstring for why COUPLE/
-    # ILLNESS_SEPARATED_COUPLE stay at $0 pending confirmed ATO data.
+    # field at all. All three categories (SINGLE/COUPLE/ILLNESS_SEPARATED_
+    # COUPLE) resolve to real figures as of 2026-09-18; see
+    # engine/countries/australia.py's _calculate_au_income_tax_offset.
     au_sapto_category: str = None                 # "SINGLE" | "COUPLE" | "ILLNESS_SEPARATED_COUPLE" | None
 
     # US Form W-4: filing status ("SINGLE"/"MFJ"/"MFS"/"HOH") and form
