@@ -113,11 +113,11 @@ def _children_map(revs: dict) -> dict:
     return children
 
 
-def test_alembic_heads_is_single_head_767a807fc98e():
+def test_alembic_heads_is_single_head_259146357852():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["767a807fc98e"]
+    assert heads == ["259146357852"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -129,7 +129,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["767a807fc98e"]
+    assert list(script.get_heads()) == ["259146357852"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -154,8 +154,9 @@ def test_no_duplicate_revision_ids_in_versions_directory():
     assert len(revs) == len(set(revs))
     # 132 (pre-merge main) + 5 commercial billing (b7e1f4a9c3d2, c9a2d6e5f1b8,
     # d4f8a2c7e6b1, e5b3f9a1d7c4, f6c8b1a4e9d3) + 1 reconciliation merge
-    # (767a807fc98e) = 138.
-    assert len(revs) == 138
+    # (767a807fc98e) = 138, + 1 venu-only addition (3a1b4cff7f0e, revoked_tokens)
+    # + 1 venu/main reconciliation merge (259146357852) = 140.
+    assert len(revs) == 140
 
 
 def test_germany_head_chain_wiring_is_intact():

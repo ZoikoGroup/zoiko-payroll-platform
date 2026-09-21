@@ -10,6 +10,8 @@ lives in the resolved strategy.
 
 from __future__ import annotations
 
+import logging
+import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -61,6 +63,14 @@ def calculate_payroll(
     and the duplicated logic in ``preview_payroll_run``.
     """
     key = (calculation_mode or "standard").lower().strip()
+    ctx.trace_id = ctx.trace_id or uuid.uuid4().hex
+    logger = logging.getLogger("zoiko")
+    # DEBUG, not INFO: a full payroll run calls this once per employee, so an
+    # always-on per-employee log line here would flood production logs.
+    logger.debug(
+        "[payroll-calc trace_id=%s] country=%s mode=%s starting",
+        ctx.trace_id, ctx.country, key,
+    )
     if (ctx.country or "").upper() == "DE" and key == "simple":
         # Simple mode intentionally omits statutory deductions. It must never
         # be an escape hatch around Germany's statutory calculation boundary.
@@ -72,7 +82,16 @@ def calculate_payroll(
         )
 
     strategy = resolve_strategy(calculation_mode)
-    return strategy.calculate(ctx)
+    try:
+        result = strategy.calculate(ctx)
+    except Exception:
+        logger.warning(
+            "[payroll-calc trace_id=%s] country=%s mode=%s failed",
+            ctx.trace_id, ctx.country, key,
+        )
+        raise
+    result.trace_id = ctx.trace_id
+    return result
 
 
 def build_context_from_employee(
@@ -130,6 +149,7 @@ def build_context_from_employee(
     ytd_futa_wages_before: Decimal | None = None,
     ytd_medicare_wages_before: Decimal | None = None,
     ytd_sg_qualifying_earnings_before: Decimal | None = None,
+    ytd_whm_earnings_before: Decimal | None = None,
     option2_cumulative_gross_before: Decimal | None = None,
     option2_periods_elapsed_before: int | None = None,
     option2_federal_tax_withheld_before: Decimal | None = None,
@@ -272,6 +292,7 @@ def build_context_from_employee(
         ytd_futa_wages_before=ytd_futa_wages_before,
         ytd_medicare_wages_before=ytd_medicare_wages_before,
         ytd_sg_qualifying_earnings_before=ytd_sg_qualifying_earnings_before,
+        ytd_whm_earnings_before=ytd_whm_earnings_before,
         on_eht_ytd_remuneration_before=on_eht_ytd_remuneration_before,
         appr_levy_ytd_pay_bill_before=appr_levy_ytd_pay_bill_before,
         employer_ni_ytd_before=employer_ni_ytd_before,

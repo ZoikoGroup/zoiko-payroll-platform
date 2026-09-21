@@ -18,17 +18,40 @@ Standard error response format we use everywhere:
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.config import settings
+
+# Same allowlist main.py's real CORSMiddleware is configured with
+# (allow_credentials=True there too) -- computed independently here
+# rather than imported from main.py to avoid a circular import (main.py
+# imports these handlers from this module).
+_ALLOWED_ORIGINS = {
+    o.strip() for o in settings.PAYROLL_CORS_ORIGINS.split(",") if o.strip()
+}
+
 
 def _cors_headers(request: Request) -> dict:
-    """Return CORS headers that mirror the ForceCORSMiddleware logic."""
+    """Return CORS headers for an error response, matching the SAME
+    allowlist main.py's CORSMiddleware enforces for every successful
+    response.
+
+    Previously reflected any Origin header verbatim (falling back to
+    "*") paired with Allow-Credentials: true on every error path --
+    fixed 2026-09-18 (platform infrastructure fix plan) since that let
+    any origin whatsoever get a credentialed CORS pass specifically on
+    error responses, bypassing the real allowlist entirely. Now omits
+    the Allow-Origin/Allow-Credentials headers when the request's Origin
+    isn't on the allowlist, exactly like a disallowed origin is treated
+    by CORSMiddleware itself on the success path."""
     origin = request.headers.get("origin", "")
-    return {
-        "Access-Control-Allow-Origin": origin if origin else "*",
-        "Access-Control-Allow-Credentials": "true",
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "*",
         "Access-Control-Expose-Headers": "*",
     }
+    if origin and origin in _ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    return headers
 
 
 # ── Custom Exception Classes ──────────────────────────────────────────────────
@@ -142,7 +165,10 @@ async def zoiko_exception_handler(request: Request, exc: ZoikoException):
 async def generic_exception_handler(request: Request, exc: Exception):
     """Catches any unexpected server error and returns a clean message."""
     import logging
-    logging.getLogger("zoiko").error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    logging.getLogger("zoiko_payroll").error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    if settings.SENTRY_DSN:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={
@@ -178,7 +204,7 @@ async def database_schema_error_handler(request: Request, exc: Exception):
     if not isinstance(orig, (UndefinedTable, UndefinedColumn)):
         return await generic_exception_handler(request, exc)
 
-    logging.getLogger("zoiko").error(
+    logging.getLogger("zoiko_payroll").error(
         "Schema unavailable on %s %s: %s", request.method, request.url.path, orig,
     )
     friendly_message = (

@@ -55,6 +55,13 @@ class Settings(BaseSettings):
                 return True
         return value
 
+    # ── Error tracking (Sentry) ─────────────────────────────────────────
+    # Empty by default -- Sentry init is a no-op until this is set (see
+    # main.py). Same "graceful when unconfigured" pattern as
+    # ASSIST_MODEL_PROVIDER below: no behavior change for any environment
+    # that hasn't opted in.
+    SENTRY_DSN: str = ""
+
     # ── CORS ──────────────────────────────────────────────────────────
     PAYROLL_CORS_ORIGINS: str = (
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
@@ -113,6 +120,12 @@ class Settings(BaseSettings):
     TRIAL_SWEEP_ENABLED: bool = True
     TRIAL_SWEEP_INTERVAL_HOURS: int = 24
 
+    # ── Revoked-token cleanup (modules/auth/scheduler.py) ───────────────
+    # Deletes revoked_tokens rows once their own expires_at has passed --
+    # same pattern as ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED above.
+    TOKEN_CLEANUP_SWEEP_ENABLED: bool = True
+    TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS: int = 24
+
     # ── Entitlement enforcement rollout (modules/billing/entitlements.py) ──
     # "off": require_entitlement/require_scope_limit always pass — today's
     # behavior, safe default. "warn": run the real check but only log +
@@ -140,6 +153,16 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_CHECKOUT_SUCCESS_URL: str = ""   # frontend route, e.g. .../checkout/success
     STRIPE_CHECKOUT_CANCEL_URL: str = ""    # frontend route, e.g. .../checkout/cancelled
+
+    # ── Assisted Access (SafeGuard — session takeover, time-boxed) ──────
+    # Hard cap on how long a single support-assist session may live. The
+    # spec treats indefinite access as unacceptable by construction: a
+    # session is created with a fixed expires_at and MUST be re-requested
+    # (new reason, new session, new token) once it lapses. The background
+    # sweep auto-ends anything past this cap even if nobody manually ends it.
+    ASSISTED_ACCESS_SESSION_MINUTES: int = 30
+    ASSISTED_ACCESS_SWEEP_ENABLED: bool = True
+    ASSISTED_ACCESS_SWEEP_INTERVAL_MINUTES: int = 60
 
     # ── Staging/test billing isolation (Part 11) ────────────────────────
     # When true: refuse to boot with a Stripe LIVE key, force seed/demo

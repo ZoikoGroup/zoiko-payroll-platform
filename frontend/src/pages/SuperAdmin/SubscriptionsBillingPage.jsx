@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CreditCard, RefreshCcw, ShieldCheck } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -145,13 +146,28 @@ function RemainingBar({ row }) {
 
 export default function SubscriptionsBillingPage() {
   const { addToast } = useToast() || {};
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState("");
-  const [workspaceType, setWorkspaceType] = useState("");
-  const [billingClassification, setBillingClassification] = useState("");
-  const [chargeEnabled, setChargeEnabled] = useState("");
-  const [dunningStage, setDunningStage] = useState("");
+  const [status, setStatus] = useState(searchParams.get("status") || "");
+  const [workspaceType, setWorkspaceType] = useState(searchParams.get("workspace_type") || "");
+  const [billingClassification, setBillingClassification] = useState(searchParams.get("billing_classification") || "");
+  const [chargeEnabled, setChargeEnabled] = useState(searchParams.get("charge_enabled") || "");
+  const [dunningStage, setDunningStage] = useState(searchParams.get("dunning_stage") || "");
+
+  const setStatusAndUrl = (value) => {
+    setStatus(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("status", value); else next.delete("status");
+    setSearchParams(next, { replace: true });
+  };
+
+  const setWorkspaceTypeAndUrl = (value) => {
+    setWorkspaceType(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("workspace_type", value); else next.delete("workspace_type");
+    setSearchParams(next, { replace: true });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,7 +208,7 @@ export default function SubscriptionsBillingPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+        <select value={status} onChange={(e) => setStatusAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Statuses</option>
           <option value="NONE">No Subscription</option>
           <option value="TRIALING">Trialing</option>
@@ -201,7 +217,7 @@ export default function SubscriptionsBillingPage() {
           <option value="SUSPENDED">Suspended</option>
           <option value="CANCELLED">Cancelled</option>
         </select>
-        <select value={workspaceType} onChange={(e) => setWorkspaceType(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+        <select value={workspaceType} onChange={(e) => setWorkspaceTypeAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Workspace Types</option>
           <option value="PRODUCTION">Production</option>
           <option value="EVALUATION">Evaluation</option>

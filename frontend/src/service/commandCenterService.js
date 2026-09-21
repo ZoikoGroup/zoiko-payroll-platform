@@ -54,6 +54,19 @@ export const createOrderForm = (organizationId, payload) =>
     body: payload,
   });
 
+// ── Zoiko Commercial — Revenue & Collections (Step 5) ─────────────────────
+// Zoiko's own subscription revenue (PAID BillingInvoice rows), distinct
+// from /finance/* which reports customer payroll money movement. See the
+// backend endpoint's docstring for the never-merge rationale.
+export const getRevenueCollections = () =>
+  apiFetch("/api/super-admin/commercial/revenue-collections");
+
+// ── Alerts & Incidents (unified triage feed) ──────────────────────────────
+// One feed over signals each existing Command Center page already computes —
+// severity is derived on the backend from the source signal, never invented
+// on the client. Also polled by SuperAdminShell for the nav badge.
+export const listAlerts = () => apiFetch("/api/super-admin/alerts");
+
 // ── Payroll Operations ──────────────────────────────────────────────────
 
 export const listAllPayrollRuns = (params) =>

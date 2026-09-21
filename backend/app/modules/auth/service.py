@@ -26,10 +26,12 @@ from app.core.exceptions import (
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
     hash_password,
     verify_password,
 )
-from app.modules.auth.models import SecurityActionPurpose, SecurityActionToken, User, UserRole
+from app.modules.auth.models import RevokedToken, SecurityActionPurpose, SecurityActionToken, User, UserRole
 from app.modules.auth.schemas import RegisterRequest, TrialRegisterRequest
 from app.modules.organizations.models import Organization
 
@@ -54,6 +56,57 @@ ROLE_DISPLAY_LABELS = {
     UserRole.ORG_ADMIN: "Organization Administrator",
     UserRole.PAYROLL_ADMIN: "Payroll Administrator",
 }
+
+
+# ── Token revocation (logout) ───────────────────────────────────────────────
+
+def revoke_token(db: Session, jti: str, expires_at: datetime) -> None:
+    """Records a token as revoked. `expires_at` is the token's own `exp`
+    claim (already a datetime, decoded by jose) -- stored so the cleanup
+    sweep (auth/scheduler.py) knows once the token would have expired
+    naturally anyway, at which point the revocation row is dead weight.
+    Idempotent: logging out twice with the same still-valid token is a
+    no-op the second time, not an error."""
+    if db.query(RevokedToken).filter(RevokedToken.jti == jti).first() is not None:
+        return
+    db.add(RevokedToken(jti=jti, expires_at=expires_at))
+    db.commit()
+
+
+def is_token_revoked(db: Session, jti: Optional[str]) -> bool:
+    if not jti:
+        return False
+    return db.query(RevokedToken).filter(RevokedToken.jti == jti).first() is not None
+
+
+def run_revoked_token_cleanup_sweep(db: Session) -> dict:
+    """Deletes revoked_tokens rows whose own expires_at has passed -- once
+    a token would have expired naturally, its revocation record has
+    nothing left to guard against. Called on a timer by
+    auth/scheduler.py, mirroring modules/billing/trial_lifecycle.py's
+    run_trial_expiry_sweep."""
+    deleted = (
+        db.query(RevokedToken)
+        .filter(RevokedToken.expires_at <= datetime.utcnow())
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": deleted}
+
+
+def logout_user(db: Session, access_token: str, refresh_token: Optional[str] = None) -> None:
+    """Revokes the access token that authenticated this request, and the
+    refresh token too if the caller sends one (frontend's choice -- a
+    refresh token that's never presented here simply expires naturally
+    at its own exp, same as before this feature existed)."""
+    access_payload = decode_access_token(access_token)
+    if access_payload and access_payload.get("jti"):
+        revoke_token(db, access_payload["jti"], datetime.utcfromtimestamp(access_payload["exp"]))
+
+    if refresh_token:
+        refresh_payload = decode_refresh_token(refresh_token)
+        if refresh_payload and refresh_payload.get("jti"):
+            revoke_token(db, refresh_payload["jti"], datetime.utcfromtimestamp(refresh_payload["exp"]))
 
 
 # ── Action tokens (invite / password reset) ────────────────────────────────
