@@ -31,7 +31,7 @@ import {
 } from "./pages/JurisdictionStatutory";
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
-import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage } from "./pages/ReportTemplates";
+import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage, DEReportTemplatesPage } from "./pages/ReportTemplates";
 import FundingPaymentsPage from "./pages/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -211,6 +211,8 @@ export default function App() {
         <Route path="/super-admin/report-templates/canada/:jurisdiction" element={<SuperAdminShell><CAReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/australia" element={<SuperAdminShell><AUReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/australia/:jurisdiction" element={<SuperAdminShell><AUReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/germany" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/germany/:jurisdiction" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={
