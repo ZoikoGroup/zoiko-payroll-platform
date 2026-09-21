@@ -403,6 +403,8 @@ def issue_refund(
     except stripe.error.StripeError as e:
         raise BadRequestException(f"Stripe refund error: {str(e)}")
 
+    refund_amount = data.amount_cents or refund.amount
+    invoice.status = "REFUNDED" if refund_amount >= int(invoice.total * 100) else "PARTIALLY_REFUNDED"
     db.add(BillingCommercialAuditEvent(
         organization_id=organization_id,
         actor_user_id=current_user.id,
@@ -410,7 +412,7 @@ def issue_refund(
         payload={
             "stripe_invoice_id": data.stripe_invoice_id,
             "stripe_refund_id": refund.id,
-            "amount_cents": data.amount_cents or refund.amount,
+            "amount_cents": refund_amount,
             "reason": data.reason,
         },
     ))

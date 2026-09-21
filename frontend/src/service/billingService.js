@@ -41,3 +41,7 @@ export const getDunningStatus = () => api.get("/api/billing/dunning-status");
 /** Create a Stripe Billing Portal session; returns { portal_url } to redirect to. Step 4. */
 export const createBillingPortalSession = () =>
   api.post("/api/billing/my-subscription/billing-portal", {});
+
+/** Schedule cancellation at the end of the current Stripe billing period. */
+export const cancelMySubscription = () =>
+  api.post("/api/billing/cancel", {});

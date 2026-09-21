@@ -10,8 +10,9 @@ Coverage for GET /auth/me/trial-status (auth.service.get_my_trial_status):
   3. A PRODUCTION org (even with a TRIALING-looking subscription) →
      workspace_type "PRODUCTION" and all-null trial fields — the banner
      must only ever render for evaluation workspaces.
-  4. Status mapping: ACTIVE/TRIALING → "ACTIVE", PAST_DUE →
-     "GRACE_READONLY", SUSPENDED/CANCELLED → "CLOSED".
+  4. Trial status is derived by the trial lifecycle: only TRIALING
+      subscriptions report ACTIVE/GRACE_READONLY/CLOSED; paid or terminal
+      subscription statuses report no trial.
   5. A missing org row → defaults to "PRODUCTION" (safe, banner stays off).
 """
 
@@ -106,25 +107,30 @@ def test_production_org_never_reports_trial(db, published_professional_plan):
     assert result.trial_expires_at is None
 
 
-@pytest.mark.parametrize(
-    "status,expected",
-    [
-        (SubscriptionStatus.TRIALING.value, "ACTIVE"),
-        (SubscriptionStatus.ACTIVE.value, "ACTIVE"),
-        (SubscriptionStatus.PAST_DUE.value, "GRACE_READONLY"),
-        (SubscriptionStatus.SUSPENDED.value, "CLOSED"),
-        (SubscriptionStatus.CANCELLED.value, "CLOSED"),
-    ],
-)
-def test_status_mapping(db, status, expected, published_professional_plan):
+def test_trialing_status_uses_lifecycle_derivation(db, published_professional_plan):
+    org = _evaluation_org(db, name="Eval TRIALING")
+    _subscription(db, org, status=SubscriptionStatus.TRIALING.value, plan_version=published_professional_plan)
+
+    result = get_my_trial_status(db, org.id)
+
+    assert result.workspace_type == "EVALUATION"
+    assert result.trial_status == "ACTIVE"
+    assert result.trial_expires_at is not None
+
+
+@pytest.mark.parametrize("status", [
+    SubscriptionStatus.ACTIVE.value,
+    SubscriptionStatus.PAST_DUE.value,
+    SubscriptionStatus.SUSPENDED.value,
+    SubscriptionStatus.CANCELLED.value,
+])
+def test_non_trial_statuses_do_not_report_trial(db, status, published_professional_plan):
     org = _evaluation_org(db, name=f"Eval {status}")
     _subscription(db, org, status=status, plan_version=published_professional_plan)
 
     result = get_my_trial_status(db, org.id)
 
-    assert result.workspace_type == "EVALUATION"
-    assert result.trial_status == expected
-    assert result.trial_expires_at is not None
+    assert result.trial_status is None
 
 
 def test_missing_org_defaults_to_production(db):

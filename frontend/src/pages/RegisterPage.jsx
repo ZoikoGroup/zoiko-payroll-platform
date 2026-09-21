@@ -374,6 +374,7 @@ export default function RegisterPage() {
           timezone: form.timezone,
           industry: form.industry,
           company_type: form.companyType,
+          terms_accepted: form.termsAccepted,
           tax_no: hasTaxIdentifiers
             ? primaryTaxValue(form.country, form.taxIdentifiers)
             : form.taxNo,

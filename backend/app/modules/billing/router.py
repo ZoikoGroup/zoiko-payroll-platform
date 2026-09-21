@@ -385,10 +385,11 @@ def create_checkout_session(
         # rather than hand-rolling a rate table. This is Zoiko-subscription
         # tax only — see BillingInvoice.tax_amount's own docstring for why
         # this must never be conflated with payroll tax.
-        automatic_tax={"enabled": True},
         tax_id_collection={"enabled": True},
         billing_address_collection="required",
     )
+    if settings.STRIPE_AUTOMATIC_TAX_ENABLED:
+        session_kwargs["automatic_tax"] = {"enabled": True}
 
     # Stripe rejects a billing_cycle_anchor that isn't strictly in the
     # future — only set one for a genuinely negotiated delayed start, and
@@ -552,6 +553,27 @@ def _write_invoice_from_stripe(db: Session, sub: BillingSubscription, stripe_inv
         ))
 
 
+def _update_invoice_status_from_stripe_event(db: Session, stripe_invoice_id: Optional[str], status: str) -> None:
+    """Keep the local invoice ledger aligned with non-payment Stripe events."""
+    if not stripe_invoice_id:
+        return
+    from app.modules.billing.models import BillingInvoice
+
+    invoice = db.query(BillingInvoice).filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id).first()
+    if invoice is not None:
+        invoice.status = status
+
+
+def _subscription_period(subscription_object: dict) -> tuple[Optional[datetime], Optional[datetime]]:
+    item = ((subscription_object.get("items") or {}).get("data") or [{}])[0]
+    start = item.get("current_period_start") or subscription_object.get("current_period_start")
+    end = item.get("current_period_end") or subscription_object.get("current_period_end")
+    return (
+        datetime.fromtimestamp(start) if start else None,
+        datetime.fromtimestamp(end) if end else None,
+    )
+
+
 # ── Stripe webhook handler ─────────────────────────────────────────────────
 
 @router.post("/webhooks/stripe", include_in_schema=False)
@@ -654,6 +676,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             org = db.query(Organization).filter(Organization.id == org_id).first()
             if org:
                 org.workspace_type = "PRODUCTION"
+                org.billing_onboarding_status = "ACTIVE"
                 if not org.is_active:
                     org.is_active = True
                 # Part 2 — checkout completing is NEVER itself sufficient to
@@ -691,6 +714,53 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             ))
             db.commit()
 
+    elif event_type == "customer.subscription.updated":
+        stripe_sub_id = data_object.get("id")
+        sub = db.query(BillingSubscription).filter(
+            BillingSubscription.stripe_subscription_id == stripe_sub_id
+        ).first()
+        if sub:
+            status_map = {
+                "active": SubscriptionStatus.ACTIVE.value,
+                "trialing": SubscriptionStatus.TRIALING.value,
+                "past_due": SubscriptionStatus.PAST_DUE.value,
+                "unpaid": SubscriptionStatus.PAST_DUE.value,
+                "canceled": SubscriptionStatus.CANCELLED.value,
+                "incomplete_expired": SubscriptionStatus.CANCELLED.value,
+            }
+            sub.status = status_map.get(data_object.get("status"), sub.status)
+            period_start, period_end = _subscription_period(data_object)
+            if period_start:
+                sub.current_period_start = period_start
+            if period_end:
+                sub.current_period_end = period_end
+            price_id = (((data_object.get("items") or {}).get("data") or [{}])[0].get("price") or {})
+            price_id = price_id.get("id") if isinstance(price_id, dict) else price_id
+            version = db.query(BillingPlanVersion).filter(
+                BillingPlanVersion.stripe_price_id == price_id
+            ).first() if price_id else None
+            if version:
+                sub.plan_version_id = version.id
+                plan = db.query(BillingPlan).filter(BillingPlan.id == version.plan_id).first()
+                if plan:
+                    _sync_subscription_price_item(db, sub, plan.code)
+            from app.modules.organizations.models import Organization
+            org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
+            if org:
+                org.billing_onboarding_status = {
+                    SubscriptionStatus.ACTIVE.value: "ACTIVE",
+                    SubscriptionStatus.TRIALING.value: "TRIALING",
+                    SubscriptionStatus.PAST_DUE.value: "PAST_DUE",
+                    SubscriptionStatus.CANCELLED.value: "CANCELLED",
+                }.get(sub.status, org.billing_onboarding_status)
+            db.add(BillingCommercialAuditEvent(
+                organization_id=sub.organization_id,
+                event_type="SUBSCRIPTION_UPDATED",
+                payload={"stripe_status": data_object.get("status"), "plan_version_id": sub.plan_version_id},
+                stripe_event_id=event_id,
+            ))
+            db.commit()
+
     elif event_type == "invoice.paid":
         stripe_sub_id = data_object.get("subscription")
         sub = (
@@ -707,6 +777,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             period_end_ts = stripe_sub["items"]["data"][0]["current_period_end"]
             sub.current_period_end = datetime.fromtimestamp(period_end_ts)
             sub.status = SubscriptionStatus.ACTIVE.value  # recover from PAST_DUE on payment
+            from app.modules.organizations.models import Organization
+            org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
+            if org:
+                org.billing_onboarding_status = "ACTIVE"
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,
                 event_type="SUBSCRIPTION_RENEWED",
@@ -736,6 +810,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         )
         if sub:
             sub.status = SubscriptionStatus.PAST_DUE.value
+            from app.modules.organizations.models import Organization
+            org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
+            if org:
+                org.billing_onboarding_status = "PAST_DUE"
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,
                 event_type="PAYMENT_FAILED",
@@ -754,6 +832,37 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
             db.commit()
 
+    elif event_type in {"charge.refunded", "refund.created"}:
+        stripe_invoice_id = data_object.get("invoice")
+        if stripe_invoice_id:
+            from app.modules.billing.models import BillingInvoice
+            invoice = db.query(BillingInvoice).filter(
+                BillingInvoice.stripe_invoice_id == stripe_invoice_id
+            ).first()
+            if invoice:
+                refunded_cents = data_object.get("amount") or data_object.get("amount_refunded") or 0
+                invoice.status = "REFUNDED" if refunded_cents >= int(invoice.total * 100) else "PARTIALLY_REFUNDED"
+                db.add(BillingCommercialAuditEvent(
+                    organization_id=invoice.organization_id,
+                    event_type="REFUND_RECONCILED",
+                    payload={"stripe_invoice_id": stripe_invoice_id, "status": invoice.status},
+                    stripe_event_id=event_id,
+                ))
+        db.commit()
+
+    elif event_type in {"charge.dispute.created", "charge.dispute.closed"}:
+        stripe_invoice_id = data_object.get("invoice")
+        dispute_status = "DISPUTED" if event_type.endswith("created") else (
+            "DISPUTE_WON" if data_object.get("status") == "won" else "DISPUTE_LOST"
+        )
+        _update_invoice_status_from_stripe_event(db, stripe_invoice_id, dispute_status)
+        db.add(BillingCommercialAuditEvent(
+            event_type="PAYMENT_DISPUTE_UPDATED",
+            payload={"stripe_invoice_id": stripe_invoice_id, "dispute_status": data_object.get("status")},
+            stripe_event_id=event_id,
+        ))
+        db.commit()
+
     elif event_type == "customer.subscription.deleted":
         stripe_sub_id = data_object.get("id")
         sub = (
@@ -763,6 +872,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         )
         if sub:
             sub.status = SubscriptionStatus.CANCELLED.value
+            from app.modules.organizations.models import Organization
+            org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
+            if org:
+                org.billing_onboarding_status = "CANCELLED"
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,
                 event_type="SUBSCRIPTION_CANCELLED",

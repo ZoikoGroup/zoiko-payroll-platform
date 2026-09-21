@@ -396,6 +396,8 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
     existing = db.query(User).filter(User.email == data.email).first()
     if existing:
         raise AlreadyExistsException("User", "email")
+    if not data.terms_accepted:
+        raise BadRequestException("You must accept the registration terms.")
 
     # Reject registration outright for a jurisdiction with no valid Active
     # canonical compliance pack — never silently register the org and let
@@ -436,6 +438,8 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
         email=data.email,
         phone=data.phone,
         is_active=True,
+        billing_onboarding_status="PENDING_CHECKOUT",
+        terms_accepted_at=datetime.utcnow(),
     )
     db.add(org)
     db.flush()
@@ -590,6 +594,7 @@ def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
         current_period_end=trial_end,
     )
     db.add(subscription)
+    org.billing_onboarding_status = "TRIALING"
     db.flush()
 
     db.add(
@@ -850,28 +855,15 @@ def _send_invite_email(
 
 from app.modules.billing.models import SubscriptionStatus  # noqa: E402
 
-TRIAL_STATUS_BY_SUBSCRIPTION = {
-    # SubscriptionStatus value → trial_status vocabulary used by the banner.
-    # ACTIVE and TRIALING both browse->actively-in-trial; a live
-    # (production) customer has no trial at all, which we signal with null
-    # rather than a made-up value.
-    SubscriptionStatus.TRIALING.value: "ACTIVE",
-    SubscriptionStatus.ACTIVE.value: "ACTIVE",
-    SubscriptionStatus.PAST_DUE.value: "GRACE_READONLY",
-    SubscriptionStatus.SUSPENDED.value: "CLOSED",
-    SubscriptionStatus.CANCELLED.value: "CLOSED",
-}
-
-
 def get_my_trial_status(db: Session, organization_id: int):
     """Payload for GET /auth/me/trial-status — all values derived from the
     org's live rows, never cached/duplicated.
 
     - workspace_type: Organization.workspace_type (defaults to
       PRODUCTION for a missing org — safe for banner rendering).
-    - trial_status: mapped from BillingSubscription.status via
-      TRIAL_STATUS_BY_SUBSCRIPTION, or null when no subscription exists or
-      the org is not an evaluation workspace.
+        - trial_status: derived by the billing trial lifecycle state machine, or
+            null when no subscription exists or the org is not an evaluation
+            workspace. This keeps the banner and expiry sweep on one vocabulary.
     - trial_started_at: BillingSubscription.current_period_start (needed by
       the dashboard's remaining-time bar to render elapsed-vs-remaining).
     - trial_expires_at: BillingSubscription.current_period_end (single
@@ -886,10 +878,11 @@ def get_my_trial_status(db: Session, organization_id: int):
 
     if workspace_type == "EVALUATION":
         from app.modules.billing.entitlements import get_active_subscription
+        from app.modules.billing.trial_lifecycle import resolve_trial_stage
 
         subscription = get_active_subscription(db, organization_id)
         if subscription is not None:
-            trial_status = TRIAL_STATUS_BY_SUBSCRIPTION.get(subscription.status)
+            trial_status = resolve_trial_stage(subscription)
             trial_started_at = subscription.current_period_start
             trial_expires_at = subscription.current_period_end
 

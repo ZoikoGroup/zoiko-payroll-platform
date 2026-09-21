@@ -74,6 +74,7 @@ def record_order_form(
 
     org.billing_classification = "COMMERCIAL_ACTIVE"
     org.charge_enabled = True
+    org.billing_onboarding_status = "ACTIVE"
     from datetime import datetime as _dt
 
     org.service_commencement_at = _dt.combine(term_start, _dt.min.time())

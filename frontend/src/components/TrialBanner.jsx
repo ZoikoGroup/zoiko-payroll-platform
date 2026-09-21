@@ -5,31 +5,45 @@ import { apiFetch } from "../api/client";
 
 const DAY_MS = 86400000;
 const WARN_BELOW_DAYS = 7;
+const STATUS_REFRESH_MS = 60000;
 
-function daysRemaining(iso) {
+function daysRemaining(iso, now = Date.now()) {
   if (!iso) return null;
   const end = new Date(iso).getTime();
   if (Number.isNaN(end)) return null;
-  return Math.ceil((end - Date.now()) / DAY_MS);
+  return Math.ceil((end - now) / DAY_MS);
+}
+
+function dateMs(iso) {
+  if (!iso) return null;
+  const value = new Date(iso).getTime();
+  return Number.isNaN(value) ? null : value;
 }
 
 export default function TrialBanner() {
   const [trial, setTrial] = useState(null);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch("/api/auth/me/trial-status")
-      .then((data) => {
-        if (cancelled) return;
-        if (data && (data.workspace_type === "EVALUATION" || data.status)) {
-          setTrial(data);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setTrial(null);
-      });
+    const loadTrialStatus = () => {
+      apiFetch("/api/auth/me/trial-status")
+        .then((data) => {
+          if (cancelled) return;
+          setTrial(data && data.workspace_type === "EVALUATION" ? data : null);
+        })
+        .catch(() => {
+          if (!cancelled) setTrial(null);
+        });
+    };
+
+    loadTrialStatus();
+    const refreshTimer = window.setInterval(loadTrialStatus, STATUS_REFRESH_MS);
+    const clockTimer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancelled = true;
+      window.clearInterval(refreshTimer);
+      window.clearInterval(clockTimer);
     };
   }, []);
 
@@ -40,25 +54,24 @@ export default function TrialBanner() {
   const startedIso = trial.trial_started_at || trial.current_period_start || trial.started_at;
   const statusStr = trial.trial_status || trial.status;
 
-  const rawRemaining = daysRemaining(expiresIso);
-  const displayDays = rawRemaining !== null ? Math.max(0, rawRemaining) : 30;
+  const rawRemaining = daysRemaining(expiresIso, now);
+  const displayDays = rawRemaining !== null ? Math.max(0, rawRemaining) : null;
+  const startMs = dateMs(startedIso);
+  const endMs = dateMs(expiresIso);
+  const trialLengthDays = startMs !== null && endMs !== null && endMs > startMs
+    ? Math.max(1, Math.ceil((endMs - startMs) / DAY_MS))
+    : null;
 
   const isGrace = statusStr === "GRACE_READONLY";
   const isClosed = statusStr === "CLOSED";
-  const isWarning = displayDays <= WARN_BELOW_DAYS && !isGrace && !isClosed;
+  const isWarning = displayDays !== null && displayDays <= WARN_BELOW_DAYS && !isGrace && !isClosed;
 
   // Calculate progress percentage
   let percentRemaining = 100;
   if (expiresIso) {
-    const endMs = new Date(expiresIso).getTime();
-    const startMs = startedIso
-      ? new Date(startedIso).getTime()
-      : endMs - 30 * DAY_MS;
-    const totalMs = Math.max(1, endMs - startMs);
-    const remainingMs = Math.max(0, endMs - Date.now());
+    const totalMs = startMs !== null && endMs !== null ? Math.max(1, endMs - startMs) : 1;
+    const remainingMs = endMs !== null ? Math.max(0, endMs - now) : 0;
     percentRemaining = isGrace || isClosed ? 0 : Math.min(100, Math.max(0, (remainingMs / totalMs) * 100));
-  } else {
-    percentRemaining = Math.min(100, Math.max(0, (displayDays / 30) * 100));
   }
 
   // Format expiry date string
@@ -145,7 +158,7 @@ export default function TrialBanner() {
                 <span>Your evaluation workspace has closed. Upgrade to restore access.</span>
               ) : (
                 <span>
-                  You are on a 30-day evaluation of <strong>Zoiko Payroll</strong>.
+                  You are on{trialLengthDays ? ` a ${trialLengthDays}-day` : " an"} evaluation of <strong>Zoiko Payroll</strong>.
                 </span>
               )}
             </div>
@@ -175,14 +188,14 @@ export default function TrialBanner() {
               ) : (
                 <span>
                   <strong className="text-sm font-black" style={{ color: theme.text }}>
-                    {displayDays} day{displayDays === 1 ? "" : "s"}
+                    {displayDays === null ? "Calculating" : `${displayDays} day${displayDays === 1 ? "" : "s"}`}
                   </strong>{" "}
-                  remaining{expiryFormatted ? ` (ends ${expiryFormatted})` : ""}
+                  {displayDays === null ? "remaining" : `remaining${expiryFormatted ? ` (ends ${expiryFormatted})` : ""}`}
                 </span>
               )}
             </span>
             <span className="font-extrabold text-xs">
-              {isGrace || isClosed ? "0 Days Left" : `${displayDays} Days Left (${Math.round(percentRemaining)}%)`}
+              {isGrace || isClosed ? "0 Days Left" : displayDays === null ? "Status unavailable" : `${displayDays} Days Left (${Math.round(percentRemaining)}%)`}
             </span>
           </div>
 
