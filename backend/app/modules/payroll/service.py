@@ -8177,10 +8177,18 @@ _PAYROLL_EMPLOYEE_FIELD_CATALOG = {
     "starter_declaration": ("Starter Declaration", "text", False),
     "tax_code": ("Tax Code", "text", False),
     "ni_category": ("NI Category", "text", False),
+    # Germany's own Lohnsteuerbescheinigung identity fields — same
+    # compliance_fields-backed special case as "nino" above (see
+    # _payslip_identity_rows' "DE" row, the payslip's own existing source
+    # of truth for these two keys — never a new/parallel storage
+    # location).
+    "steuer_id": ("Tax ID (Steuer-ID)", "text", False),
+    "iban": ("IBAN", "text", False),
 }
 _PAYROLL_EMPLOYEE_FIELDS_BY_COUNTRY = {
     "UK": list(_PAYROLL_EMPLOYEE_FIELD_CATALOG.keys()),
     "CA": ["name", "date_of_birth", "date_of_joining"],
+    "DE": ["name", "date_of_birth", "date_of_joining", "steuer_id", "iban"],
 }
 
 _REPORT_FIELD_ALLOWED_COLUMNS = {
@@ -8421,6 +8429,29 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("earnings", "Earnings"), ("payg", "PAYG Withholding"), ("super", "Superannuation"),
         ("ytd", "Year-to-Date"), ("rti_metadata", "Submission Metadata"),
+    ],
+    # Germany Lohnsteuerbescheinigung (annual wage tax certificate) — per
+    # EMPLOYEE, triggered by tax-year end, generated via the same generic
+    # generate_uk_employee_report engine as P60/T4/Form 130 (never
+    # UK-specific despite the function's name — see its own docstring).
+    # "tax" and "contributions" are split into their real, separately-
+    # persisted PayslipItem columns (tds=Lohnsteuer, soli=Soli,
+    # church_tax=Kirchensteuer; pf/esi=pension/social insurance) rather
+    # than one folded "tax" bucket, since a real Lohnsteuerbescheinigung
+    # prints Lohnsteuer, Soli and Kirchensteuer as distinct lines.
+    "LSTB": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)"),
+        ("contributions", "Social Insurance"), ("employer_contributions", "Employer Contributions"),
+        ("ytd", "Year-to-Date"),
+    ],
+    # Germany period payroll summary — AGGREGATE, per PayrollRun, uses the
+    # fully generic generate_report_from_template (no bespoke generator
+    # needed — same mechanism as TDS/FPS/STP above).
+    "DE_PAYROLL_SUMMARY": [
+        ("employer_info", "Employer Information"), ("earnings", "Earnings"),
+        ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)"), ("contributions", "Social Insurance"),
+        ("employer_contributions", "Employer Contributions"),
     ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
@@ -9226,6 +9257,8 @@ def _resolve_field_value(
             value = None
         elif field.source_column == "nino":
             value = (employee.compliance_fields or {}).get("nino")
+        elif field.source_column in ("steuer_id", "iban"):
+            value = (employee.compliance_fields or {}).get(field.source_column)
         else:
             value = getattr(employee, field.source_column, None)
     elif field.data_source_kind == "PAYSLIP_ITEM":
@@ -9454,13 +9487,15 @@ def generate_uk_employee_report(
     UK's P45 (triggered by a leaving date), P60 (triggered by tax-year
     end), India's Form 130 salary TDS certificate (also triggered by
     FY-end, ZP-TAX-IN-2026-27-001 §6.2, gap-closure Phase E 2026-09-10),
-    or Canada's T4/RL-1 (triggered by calendar-year end) and ROE (Record
+    Canada's T4/RL-1 (triggered by calendar-year end) and ROE (Record
     of Employment, triggered by an interruption of earnings — the same
     "leaving/trigger date" shape as a P45, ZP-TAX-CA-2026-001 forms/
-    reports gap-closure) — added here rather than as separate functions
-    since this function's own logic was never actually UK-specific, just
-    gated to a report_type allow-list; kept its original name for
-    backward compatibility with existing callers/tests. `as_of_date` is
+    reports gap-closure), or Germany's Lohnsteuerbescheinigung (LSTB,
+    triggered by tax-year end — same shape as P60/T4) — added here
+    rather than as separate functions since this function's own logic was
+    never actually UK-specific, just gated to a report_type allow-list;
+    kept its original name for backward compatibility with existing
+    callers/tests. `as_of_date` is
     the YTD boundary every SUM_YTD field on the template resolves
     against (the leaving date for a P45/ROE, the tax year's own 5
     April/31 March/31 December end date for a P60/Form 130/T4/RL-1).
@@ -9480,8 +9515,8 @@ def generate_uk_employee_report(
     maps one simply resolves it to None here, the same as any other
     field this engine can't currently resolve."""
     template = get_report_template(db, report_template_id)
-    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE"):
-        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE templates, not {template.report_type!r}.")
+    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE", "LSTB"):
+        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE/LSTB templates, not {template.report_type!r}.")
     if template.status != "Active":
         raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
     employee = db.query(PayrollEmployee).filter(

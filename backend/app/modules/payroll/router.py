@@ -2668,6 +2668,27 @@ def generate_ca_pd7a(
     )
 
 
+# Germany Lohnsteuerbescheinigung — same generic per-employee, non-run-
+# based engine as UK P60/India Form 130/Canada T4/RL1/ROE above (see
+# service.generate_uk_employee_report's own docstring: never actually
+# UK-specific, just gated to a report_type allow-list).
+
+@payroll_router.post(
+    "/germany/reports/lohnsteuerbescheinigung", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Germany Lohnsteuerbescheinigung (annual wage tax certificate) for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_de_lstb(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
 @payroll_router.get(
     "/generated-reports/{generated_report_id}/rti-xml",
     summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",
