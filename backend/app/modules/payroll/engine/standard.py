@@ -55,6 +55,18 @@ from app.modules.payroll.engine.countries import germany as _germany
 from app.modules.payroll.engine.countries import canada as _canada
 from app.modules.payroll.engine.countries import generic as _generic
 
+# Caribbean production jurisdictions (2026-09-21) — each is its own file
+# under engine/countries/, same one-file-per-country doctrine as every
+# country above. See each module's own docstring for its statutory scope
+# and which generic PayrollResult fields it reuses.
+from app.modules.payroll.engine.countries import barbados as _barbados
+from app.modules.payroll.engine.countries import cayman_islands as _cayman_islands
+from app.modules.payroll.engine.countries import dominican_republic as _dominican_republic
+from app.modules.payroll.engine.countries import guyana as _guyana
+from app.modules.payroll.engine.countries import jamaica as _jamaica
+from app.modules.payroll.engine.countries import bahamas as _bahamas
+from app.modules.payroll.engine.countries import trinidad_and_tobago as _trinidad_and_tobago
+
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
 # countries/ split — kept importable from exactly this path, exactly
@@ -112,6 +124,14 @@ _calc_canada = _canada.calculate
 
 _calc_generic = _generic.calculate
 
+_calc_barbados = _barbados.calculate
+_calc_cayman_islands = _cayman_islands.calculate
+_calc_dominican_republic = _dominican_republic.calculate
+_calc_guyana = _guyana.calculate
+_calc_jamaica = _jamaica.calculate
+_calc_bahamas = _bahamas.calculate
+_calc_trinidad_and_tobago = _trinidad_and_tobago.calculate
+
 
 _COUNTRY_CALC = {
     "IN": _calc_india,
@@ -120,6 +140,19 @@ _COUNTRY_CALC = {
     "AU": _calc_australia,
     "DE": _calc_germany,
     "CA": _calc_canada,
+    # Caribbean production jurisdictions (2026-09-21). Every other
+    # Caribbean code (see app.core.caribbean_regions — "Coming Soon")
+    # is deliberately ABSENT here: it must never resolve to a real
+    # calculator, and falls through to _calc_generic only in the
+    # theoretical case registration/onboarding somehow failed to block
+    # it first (see tests/test_registration_jurisdiction_gate.py).
+    "BB": _calc_barbados,
+    "KY": _calc_cayman_islands,
+    "DO": _calc_dominican_republic,
+    "GY": _calc_guyana,
+    "JM": _calc_jamaica,
+    "BS": _calc_bahamas,
+    "TT": _calc_trinidad_and_tobago,
 }
 
 
@@ -275,6 +308,7 @@ class StandardStrategy(PayrollStrategy):
             ytd_medicare_wages_after=deductions.get("ytd_medicare_wages_after"),
             ytd_sg_qualifying_earnings_after=deductions.get("ytd_sg_qualifying_earnings_after"),
             ytd_whm_earnings_after=deductions.get("ytd_whm_earnings_after"),
+            ytd_ky_mandatory_pensionable_earnings_after=deductions.get("ytd_ky_mandatory_pensionable_earnings_after"),
             au_whm_cap_exceeded=deductions.get("au_whm_cap_exceeded", False),
             sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),
             sg_rate_pct=deductions.get("sg_rate_pct"),

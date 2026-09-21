@@ -415,6 +415,18 @@ class PayrollContext:
     # _load_au_sg_ytd, gated on shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.
     ytd_sg_qualifying_earnings_before: Decimal = None
 
+    # Cayman Islands mandatory pension — this employee's cumulative
+    # mandatory (non-AVC) pensionable earnings for the current calendar
+    # year, as of BEFORE this pay period, toward the CI$87,000 annual cap
+    # (KY-008). Same dormancy contract as ytd_sg_qualifying_earnings_before
+    # above: None means "no accumulator wired yet" — engine/countries/
+    # cayman_islands.py MUST fall back to a per-period pro-rated share of
+    # the annual cap (annual_cap / periods_per_year) rather than treat
+    # None as $0 already-used. Not yet wired to PayrollYtdAccumulator —
+    # Phase 2 work, same explicitly-deferred shape as AU's own WHM/SG
+    # accumulators above before their service.py wiring landed.
+    ytd_ky_mandatory_pensionable_earnings_before: Decimal = None
+
     # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
     # $45,000 first-bracket test — this employee's cumulative WHM earnings
     # for the current Australian financial year, as of BEFORE this pay
@@ -680,6 +692,12 @@ class PayrollResult:
     # including why crossing the cap sets au_whm_cap_exceeded below rather
     # than computing a real above-cap withholding amount.
     ytd_whm_earnings_after: Decimal = None
+    # Cayman Islands mandatory pension (KY-008) — cumulative mandatory
+    # (non-AVC) pensionable earnings AFTER this period, same
+    # None-means-"not applicable"/dormant contract as every YTD-adjacent
+    # field above. See PayrollContext's matching
+    # ytd_ky_mandatory_pensionable_earnings_before field.
+    ytd_ky_mandatory_pensionable_earnings_after: Decimal = None
     # True once ytd_whm_earnings_after crosses $45,000 for an employee
     # whose WHM YTD tracking is wired — informational (the withholding
     # itself is now genuinely computed using the real above-cap brackets

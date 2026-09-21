@@ -88,6 +88,53 @@ def test_registration_gate_applies_identically_to_super_admin_org_creation(db):
     assert get_jurisdiction_onboarding_block_reason(db, "Canada") is not None
 
 
+# ── Caribbean (2026-09-21) ────────────────────────────────────────────────
+# The 7 production Caribbean countries follow the exact same gate as
+# every existing country (no special-cased logic); the ~25 "Coming Soon"
+# Caribbean jurisdictions are deliberately absent from
+# app.core.jurisdiction's code/name maps, so they are rejected as
+# unrecognized countries — the same path "Nonexistria" already proves —
+# before the canonical-pack/registry checks are ever reached.
+
+def test_registration_rejects_coming_soon_caribbean_jurisdiction(db):
+    from app.core.caribbean_regions import CARIBBEAN_JURISDICTIONS, STATUS_COMING_SOON
+
+    coming_soon_name = next(
+        name for name, classification, status in CARIBBEAN_JURISDICTIONS.values() if status == STATUS_COMING_SOON
+    )
+    with pytest.raises(BadRequestException):
+        register_enterprise(db, _register_data(coming_soon_name))
+    assert db.query(Organization).count() == 0
+
+
+def test_registration_rejects_active_caribbean_country_with_no_pack_yet(db):
+    # Jamaica is a real ACTIVE code in core/jurisdiction.py, but registers
+    # like any other country: no Active canonical pack yet in THIS test's
+    # isolated db means it must still be rejected, same as Australia above.
+    with pytest.raises(BadRequestException):
+        register_enterprise(db, _register_data("Jamaica"))
+    assert db.query(Organization).count() == 0
+
+
+def test_registration_accepts_caribbean_country_once_canonical_pack_is_active(db):
+    pack = JurisdictionPack(
+        pack_id="JM-TEST", jurisdiction_country="JM", pack_type="tax", version="1.0", status="Active",
+    )
+    db.add(pack)
+    db.commit()
+    db.refresh(pack)
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="JM", jurisdiction_pack_id=pack.id,
+        min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("25"),
+        rate_label="25%", tax_formula="25%",
+    ))
+    db.commit()
+
+    result = register_enterprise(db, _register_data("Jamaica"))
+    assert result is not None
+    assert db.query(Organization).filter(Organization.country == "Jamaica").count() == 1
+
+
 # ── Inverted effective-date range ────────────────────────────────────────
 
 def test_upsert_jurisdiction_pack_rejects_inverted_date_range(db):

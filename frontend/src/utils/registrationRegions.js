@@ -2,6 +2,16 @@ import { COUNTRIES } from "../modules/payroll/Payroll_Employees/countryFieldSpec
 
 export const REGISTRATION_COUNTRIES = [
   "India", "Germany", "Canada", "United States", "United Kingdom", "Australia",
+  // Caribbean production jurisdictions (2026-09-21) — mirrors
+  // backend/app/core/jurisdiction.py's own REGISTRATION_COUNTRIES
+  // addition. Each is country-level only (no state/province division
+  // for payroll purposes — see JurisdictionPack.jurisdiction_state's own
+  // "null = country-level" convention), so none of these appear in
+  // STATES_BY_COUNTRY below; the state dropdown correctly stays disabled
+  // ("Select country first" / country-level) for them, same as it
+  // already does for any country absent from that map.
+  "Barbados", "Cayman Islands", "Dominican Republic", "Guyana", "Jamaica",
+  "Bahamas", "Trinidad and Tobago",
 ];
 
 const STATES_BY_COUNTRY = {
@@ -297,6 +307,13 @@ const TIMEZONES_BY_COUNTRY = {
   "Tanzania": ["Africa/Dar_es_Salaam"],
   "Uganda": ["Africa/Kampala"],
   "South Africa": ["Africa/Johannesburg"],
+  "Barbados": ["America/Barbados"],
+  "Cayman Islands": ["America/Cayman"],
+  "Dominican Republic": ["America/Santo_Domingo"],
+  "Guyana": ["America/Guyana"],
+  "Jamaica": ["America/Jamaica"],
+  "Bahamas": ["America/Nassau"],
+  "Trinidad and Tobago": ["America/Port_of_Spain"],
 };
 
 export function getStatesForCountryName(country) {

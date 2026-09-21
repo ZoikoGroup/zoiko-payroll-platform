@@ -114,7 +114,15 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 # safety reasoning already used for US's own addition above: enabling
 # changes nothing until a real AU accumulator row exists, and this same
 # session is what builds the write path that would create one.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA"}
+# KY added 2026-09-21 for Cayman Islands mandatory-pension CI$87,000
+# annual-cap tracking (KY-008) — Cayman is a brand-new country with zero
+# existing payroll history to create a partial-year gap (same "0 real
+# employees exist for this country in the live DB at enable time" safety
+# reasoning as AU/US's own additions above), so enabling it from day one
+# (rather than shipping it dormant first) is the correct default for a
+# genuinely new jurisdiction rather than an existing one gaining new
+# tracked behavior.
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -1122,11 +1130,28 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
     # reads these rows directly. AU's own annual bracket table (§4) is
     # reference/validation data only (AU-D02) and is stored as ordinary
     # MARGINAL_RATE rows, unaffected by this exclusion.
+    # TT_NIS_CLASS (ZP-TT-ENG-001 §5): Trinidad and Tobago's NIS is a
+    # fixed 16-earnings-class table — a flat weekly dollar amount per
+    # band, not a percentage — the same "band lookup, not a marginal-
+    # bracket sum" shape as ON_EHT_BAND/NI_BAND above, excluded here for
+    # the identical reason. min_amount/max_amount hold the weekly
+    # earnings-class band boundaries (exactly like every other bracket
+    # row); flat_amount holds the fixed weekly EMPLOYEE contribution for
+    # that class, and adjustment_amount (repurposed as a plain dollar
+    # figure, not a percentage — the same generic-column-reuse
+    # convention PT_FLAT/AU_PAYG_COEFFICIENT already establish; NOT
+    # employer_rate_pct, whose Numeric(6,4) column overflows on a
+    # class-XVI-sized $339.00 employer figure — found live against
+    # production Postgres, 2026-09-21, same bug class this project has
+    # hit before on UK/CA/US builds, never caught by SQLite-backed tests)
+    # holds the fixed weekly EMPLOYER contribution. See
+    # engine/countries/trinidad_and_tobago.py's _resolve_tt_nis_class,
+    # which reads these rows directly instead of this bracket-sum loop.
     bracket_slabs = [
         s for s in slabs
         if getattr(s, "rule_type", None) not in (
             "SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY",
-            "CA_RETIRING_ALLOWANCE_BAND", "AU_PAYG_COEFFICIENT", "AU_STSL_COEFFICIENT",
+            "CA_RETIRING_ALLOWANCE_BAND", "AU_PAYG_COEFFICIENT", "AU_STSL_COEFFICIENT", "TT_NIS_CLASS",
         )
     ]
 

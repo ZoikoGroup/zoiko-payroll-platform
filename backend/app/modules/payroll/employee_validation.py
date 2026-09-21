@@ -632,6 +632,52 @@ class DEEmployeeValidation(EmployeeValidationStrategy):
     duplicate_field = "steuer_id"
 
 
+# ── Caribbean production jurisdictions (2026-09-21) ──────────────────────
+# FIELD_SPECS is deliberately empty (no required/pattern-validated fields
+# yet) for all 7 — get_employee_validation_strategy() RAISES for any
+# country_code with no entry in _STRATEGIES at all, so registering these
+# 7 here (even with an empty spec) is what lets employee creation/import
+# succeed for an org onboarded under one of them; a genuinely required,
+# pattern-validated identifier field (NIS number, TRN, BIR file number,
+# TAMIS TIN, etc. — see each country's engineering spec) is deferred
+# pending confirmation of the exact current issuing format, same
+# disclosed-gap discipline as core/jurisdiction.py's own lenient tax-ID
+# patterns for these same 7 countries.
+class BBEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "BB"
+    FIELD_SPECS = {}
+
+
+class KYEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "KY"
+    FIELD_SPECS = {}
+
+
+class DOEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "DO"
+    FIELD_SPECS = {}
+
+
+class GYEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "GY"
+    FIELD_SPECS = {}
+
+
+class JMEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "JM"
+    FIELD_SPECS = {}
+
+
+class BSEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "BS"
+    FIELD_SPECS = {}
+
+
+class TTEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "TT"
+    FIELD_SPECS = {}
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -639,6 +685,13 @@ _STRATEGIES = {
     "AU": AUEmployeeValidation,
     "CA": CAEmployeeValidation,
     "DE": DEEmployeeValidation,
+    "BB": BBEmployeeValidation,
+    "KY": KYEmployeeValidation,
+    "DO": DOEmployeeValidation,
+    "GY": GYEmployeeValidation,
+    "JM": JMEmployeeValidation,
+    "BS": BSEmployeeValidation,
+    "TT": TTEmployeeValidation,
 }
 
 

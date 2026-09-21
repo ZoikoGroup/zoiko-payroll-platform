@@ -9,6 +9,12 @@ import { apiFetch, API_BASE, getAccessToken } from "../api/client";
 
 export const getComplianceJurisdictions = () => apiFetch("/api/super-admin/compliance/jurisdictions");
 
+// Full Caribbean jurisdiction master (region-grouped, includes Coming
+// Soon entries) — a display-only view, separate from
+// getComplianceJurisdictions above (which only ever lists jurisdictions
+// that already have real configured data).
+export const getCaribbeanJurisdictions = () => apiFetch("/api/super-admin/compliance/caribbean-jurisdictions");
+
 // One row per jurisdiction with real counts (active tax packs, active
 // policy packs, active statutory rates, orgs assigned) — powers the
 // jurisdiction card grid landing view.

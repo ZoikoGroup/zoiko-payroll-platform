@@ -12,6 +12,20 @@ export const COUNTRIES = [
   { code: "AU", name: "Australia" },
   { code: "CA", name: "Canada" },
   { code: "DE", name: "Germany" },
+  // Caribbean production jurisdictions (2026-09-21) — matching
+  // backend/app/modules/payroll/employee_validation.py's _STRATEGIES
+  // (BB/KY/DO/GY/JM/BS/TT entries, each with an empty FIELD_SPECS for
+  // now — no jurisdiction-specific employee field validation is
+  // enforced yet, so COUNTRY_FIELD_SPECS below has no entry for them
+  // either; the `|| []` fallback everywhere COUNTRY_FIELD_SPECS is read
+  // already handles an absent key).
+  { code: "BB", name: "Barbados" },
+  { code: "KY", name: "Cayman Islands" },
+  { code: "DO", name: "Dominican Republic" },
+  { code: "GY", name: "Guyana" },
+  { code: "JM", name: "Jamaica" },
+  { code: "BS", name: "Bahamas" },
+  { code: "TT", name: "Trinidad and Tobago" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {

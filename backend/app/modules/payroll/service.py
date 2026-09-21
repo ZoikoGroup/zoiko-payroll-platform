@@ -11547,7 +11547,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_us_ytd(db, emp.id, period_end or date.today())
             if emp_country == "US" else
             {**_load_au_sg_ytd(db, emp.id, period_end or date.today()), **_load_au_whm_ytd(db, emp.id, period_end or date.today())}
-            if emp_country == "AU" else {}
+            if emp_country == "AU" else
+            _load_ky_pension_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "KY" else {}
         )
         option2_inputs = (
             _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if emp_country == "CA" else {}
@@ -12389,6 +12391,71 @@ def _upsert_au_whm_ytd_accumulator(db: Session, employee_id: int, pay_date, resu
         row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_AU_WHM_YTD_COMPONENT)
         db.add(row)
     row.ytd_taxable_wages = result.ytd_whm_earnings_after
+    row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# Cayman Islands mandatory-pension CI$87,000 annual cap (KY-008, 2026-09-21)
+# — same read/write/component-key shape as _load_au_sg_ytd/
+# _upsert_au_sg_ytd_accumulator above, reusing the SAME PayrollYtdAccumulator
+# table with its own component key. Unlike Australia's financial-year key,
+# Cayman's cap is a CALENDAR year (KY-008: "annual pensionable-earnings
+# cap... per calendar year"), so this uses its own tax-year key function
+# rather than _au_ytd_tax_year.
+_KY_PENSION_YTD_COMPONENT = "ky_mandatory_pensionable_earnings"
+
+
+def _ky_ytd_tax_year(pay_date) -> str:
+    """Cayman calendar-year accumulator key — "KY-CY-2026" for any date
+    in calendar year 2026."""
+    return f"KY-CY-{pay_date.year}"
+
+
+def _load_ky_pension_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    ytd_ky_mandatory_pensionable_earnings_before param — empty dict when KY
+    hasn't opted into the rollout switch, or {"ytd_ky_mandatory_pensionable_
+    earnings_before": Decimal("0")} when no accumulator row exists yet
+    (a brand-new KY employee's first payslip of the calendar year). Never
+    guesses/backfills a starting value."""
+    if "KY" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _ky_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _KY_PENSION_YTD_COMPONENT,
+        )
+        .first()
+    )
+    return dict(ytd_ky_mandatory_pensionable_earnings_before=row.ytd_taxable_wages if row else Decimal("0"))
+
+
+def _upsert_ky_pension_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative mandatory
+    pensionable earnings back to PayrollYtdAccumulator — get-or-create per
+    (employee, calendar_year, component), flush (not commit). No-op if the
+    result carries no YTD figure (result.ytd_ky_mandatory_pensionable_
+    earnings_after is None), so calling this unconditionally from every
+    persisting entry point is safe even while the rollout switch is off."""
+    if result.ytd_ky_mandatory_pensionable_earnings_after is None:
+        return
+    tax_year = _ky_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _KY_PENSION_YTD_COMPONENT,
+        )
+        .first()
+    )
+    if row is None:
+        row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_KY_PENSION_YTD_COMPONENT)
+        db.add(row)
+    row.ytd_taxable_wages = result.ytd_ky_mandatory_pensionable_earnings_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
 
@@ -14874,6 +14941,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Australia WHM Schedule 15 cumulative-cap tracking — a separate
         # key since it's gated on ITS OWN result field, independent of SG.
         "_au_whm_ytd_result": result if result.ytd_whm_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for
+        # Cayman Islands mandatory-pension CI$87,000 annual-cap tracking
+        # (KY-008) — a separate key since it's gated on ITS OWN result
+        # field.
+        "_ky_pension_ytd_result": result if result.ytd_ky_mandatory_pensionable_earnings_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for Canada
         # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
         # — a separate key since it's gated on ITS OWN result field,
@@ -14985,6 +15057,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     us_ytd_result = values.pop("_us_ytd_result", None)
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
+    ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
     au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
@@ -15036,6 +15109,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if au_whm_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, au_whm_ytd_result, payslip_id=item.id)
+    if ky_pension_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, ky_pension_ytd_result, payslip_id=item.id)
     if au_statutory_deductions_detail is not None:
         _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
     if option2_ytd_result is not None:
@@ -15225,6 +15301,15 @@ def _resolve_employee_calc_inputs(
         jurisdiction_id = (
             f"{country}-{resolution_state}" if (country in ("US", "CA", "AU") and resolution_state)
             else "DE" if country == "DE"
+            # Dominican Republic occupational risk (SRL, DO-007) reuses
+            # this same agency-assigned-rate mechanism — TSS assigns each
+            # employer a risk-type add-on (I-IV) to the base 1.00% rate,
+            # exactly the same shape (assigned by an agency, own account
+            # number/evidence trail) as US SUI / DE accident insurance.
+            # component_code "do_srl" (see engine/countries/
+            # dominican_republic.py). No state, so jurisdiction_id is the
+            # bare country code.
+            else "DO" if country == "DO"
             else None
         )
         employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=payroll_date)
@@ -15368,7 +15453,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_us_ytd(db, emp.id, run.pay_date)
             if country == "US" else
             {**_load_au_sg_ytd(db, emp.id, run.pay_date), **_load_au_whm_ytd(db, emp.id, run.pay_date)}
-            if country == "AU" else None
+            if country == "AU" else
+            _load_ky_pension_ytd(db, emp.id, run.pay_date)
+            if country == "KY" else None
         )
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
         # persisted into the calculation snapshot, not just used to pick
@@ -15610,6 +15697,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     us_ytd_result = values.pop("_us_ytd_result", None)  # never written from this correction path — same reasoning as _ytd_result above
     values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
     values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
+    values.pop("_ky_pension_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
     # the ORIGINAL run already collected against.
@@ -19225,6 +19313,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     jurisdiction_id = (
         f"{country}-{resolution_state}" if (country in ("US", "CA", "AU") and resolution_state)
         else "DE" if country == "DE"
+        # Dominican Republic SRL — see the matching comment in
+        # _resolve_employee_calc_inputs.
+        else "DO" if country == "DO"
         else None
     )
     employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=run.pay_date)
@@ -19284,6 +19375,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         else _load_uk_director_ytd(db, employee.id, run.pay_date) if country == "UK"
         else _load_us_ytd(db, employee.id, run.pay_date) if country == "US"
         else {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)} if country == "AU"
+        else _load_ky_pension_ytd(db, employee.id, run.pay_date) if country == "KY"
         else {}
     )
 
@@ -19549,6 +19641,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_whm_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_ky_mandatory_pensionable_earnings_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
     if calc.au_statutory_deductions_detail:
         _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:

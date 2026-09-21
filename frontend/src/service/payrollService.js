@@ -29,6 +29,18 @@ export const COMPLIANCE_COUNTRIES = [
   { code: "AU", name: "Australia" },
   { code: "DE", name: "Germany" },
   { code: "CA", name: "Canada" },
+  // Caribbean production jurisdictions (2026-09-21). The ~25 other
+  // Caribbean jurisdictions ("Coming Soon") are NOT listed here — this
+  // array feeds the real, configurable Compliance jurisdiction picker;
+  // Coming Soon entries live only in utils/caribbeanJurisdictions.js's
+  // region-grouped master, which is a display-only view.
+  { code: "BB", name: "Barbados" },
+  { code: "KY", name: "Cayman Islands" },
+  { code: "DO", name: "Dominican Republic" },
+  { code: "GY", name: "Guyana" },
+  { code: "JM", name: "Jamaica" },
+  { code: "BS", name: "Bahamas" },
+  { code: "TT", name: "Trinidad and Tobago" },
 ];
 
 export const DEFAULT_COUNTRY = "IN";
