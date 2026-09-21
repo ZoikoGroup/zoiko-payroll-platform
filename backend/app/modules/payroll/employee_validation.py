@@ -171,6 +171,18 @@ class INEmployeeValidation(EmployeeValidationStrategy):
     }
     duplicate_field = None  # PAN (the real dedup key) is a dedicated column — checked separately
 
+    # Same dead-plumbing gap US's state_tax_jurisdiction/w4_filing_status
+    # and UK's own FIELD_COLUMN_MAP entries were added to close: without
+    # this, tax_regime lived ONLY in compliance_fields JSON, never reached
+    # the dedicated PayrollEmployee.tax_regime column india.py and
+    # service.py's rate/slab resolution actually read — every India
+    # employee's Old/New regime election was silently ignored, with
+    # service.py's own effective_tax_regime fallback quietly defaulting
+    # every employee to "New" regardless of what was selected on the form.
+    FIELD_COLUMN_MAP = {
+        "tax_regime": "tax_regime",
+    }
+
 
 class USEmployeeValidation(EmployeeValidationStrategy):
     country_code = "US"
@@ -632,50 +644,104 @@ class DEEmployeeValidation(EmployeeValidationStrategy):
     duplicate_field = "steuer_id"
 
 
-# ── Caribbean production jurisdictions (2026-09-21) ──────────────────────
-# FIELD_SPECS is deliberately empty (no required/pattern-validated fields
-# yet) for all 7 — get_employee_validation_strategy() RAISES for any
-# country_code with no entry in _STRATEGIES at all, so registering these
-# 7 here (even with an empty spec) is what lets employee creation/import
-# succeed for an org onboarded under one of them; a genuinely required,
-# pattern-validated identifier field (NIS number, TRN, BIR file number,
-# TAMIS TIN, etc. — see each country's engineering spec) is deferred
-# pending confirmation of the exact current issuing format, same
-# disclosed-gap discipline as core/jurisdiction.py's own lenient tax-ID
-# patterns for these same 7 countries.
+# ── Caribbean production jurisdictions (2026-09-21, fields added 2026-09-22) ──
+# Every field below is deliberately NOT required and uses the SAME lenient
+# pattern already established in core/jurisdiction.py's JURISDICTION_TAX_
+# SCHEMAS for these 7 countries' EMPLOYER-level identifiers — none of the
+# 7 engineering specs confirm the exact current issuing form/format for
+# the employee-level identifier (e.g. Barbados: "acquire the currently
+# issued form and identifier instead of hard-coding a form number"), so a
+# strict pattern here would risk rejecting a real, valid ID. Optional
+# (not required) for the same reason: onboarding an employee before their
+# statutory number is issued/known is a real, common case (see e.g.
+# Bahamas/Cayman's own "pending-registration workflow" language) that a
+# required field would incorrectly block. Tightening any of these to a
+# confirmed real format/requirement is a follow-up once each country's
+# exact current form is acquired — same gate the specs themselves impose.
 class BBEmployeeValidation(EmployeeValidationStrategy):
     country_code = "BB"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        "tamis_tin": {
+            "pattern": re.compile(r"^\d{9,13}$"),
+            "error": "TAMIS TIN must be 9 to 13 digits.",
+        },
+        "nis_number": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
+            "error": "NIS number looks incorrect.",
+        },
+    }
 
 
 class KYEmployeeValidation(EmployeeValidationStrategy):
     country_code = "KY"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        "nib_member_number": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
+            "error": "NIB member number looks incorrect.",
+        },
+    }
 
 
 class DOEmployeeValidation(EmployeeValidationStrategy):
     country_code = "DO"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        # Cédula de identidad — the standard Dominican national ID format
+        # (000-0000000-0), the one field in this whole Caribbean set with
+        # a genuinely well-known, stable official format.
+        "cedula": {
+            "pattern": re.compile(r"^\d{3}-\d{7}-\d{1}$"),
+            "error": "Cédula must be in the format 000-0000000-0.",
+        },
+    }
 
 
 class GYEmployeeValidation(EmployeeValidationStrategy):
     country_code = "GY"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        "gra_tin": {
+            "pattern": re.compile(r"^\d{7,10}$"),
+            "error": "GRA TIN must be 7 to 10 digits.",
+        },
+        "nis_number": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
+            "error": "NIS number looks incorrect.",
+        },
+    }
 
 
 class JMEmployeeValidation(EmployeeValidationStrategy):
     country_code = "JM"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        "trn": {
+            "strip_chars": "-",
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "TRN must be 9 digits (e.g. 123456789 or 123-456-789).",
+        },
+    }
 
 
 class BSEmployeeValidation(EmployeeValidationStrategy):
     country_code = "BS"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        "nib_number": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
+            "error": "NIB number looks incorrect.",
+        },
+    }
 
 
 class TTEmployeeValidation(EmployeeValidationStrategy):
     country_code = "TT"
-    FIELD_SPECS = {}
+    FIELD_SPECS = {
+        "bir_file_number": {
+            "pattern": re.compile(r"^\d{9,10}$"),
+            "error": "BIR file number must be 9 to 10 digits.",
+        },
+        "nibtt_number": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
+            "error": "NIBTT number looks incorrect.",
+        },
+    }
 
 
 _STRATEGIES = {

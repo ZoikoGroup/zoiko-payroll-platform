@@ -16,11 +16,19 @@ Four independent statutory obligations (JM-008 — never one generic
      `ctx.slabs` (canonical TaxSlab rows for country="JM") via the
      generic `_calculate_annual_tax` bracket engine, annualized/
      de-annualized like every other bracket-based country (Barbados,
-     UK, India, ...). The personal-allowance scalar's Python fallback
-     uses the spec's own April-Dec 2026 annualized figure
-     (158,530 x 12 = 1,902,360); the January-March mixed-rate period
-     (JM-005/JM-006) is NOT modelled — a real cumulative-withholding
-     method is explicitly still pending TAJ confirmation per the spec.
+     UK, India, ...). The personal allowance is period-by-period, not
+     one blended annual figure: the spec's own §3 table gives a
+     January-March 2026 monthly rate (149,948) that is genuinely lower
+     than the April-December rate (158,530) — JM-005 requires selecting
+     content by the actual pay date's month, not a server-date/blended
+     guess. `ctx.pay_date.month <= 3` selects the Jan-Mar monthly
+     allowance (own Python fallback, `jm_personal_allowance_jan_mar_
+     monthly`); every other month uses the existing annual
+     `jm_personal_allowance` value (still the Apr-Dec annualized
+     figure, unchanged, already live-seeded) divided by
+     periods_per_year. `ctx.pay_date is None` (e.g. an older caller)
+     falls back to the Apr-Dec value exactly as before this change —
+     no behavior change for existing callers that never set pay_date.
      Reused field: `tds`.
   2. NIS — employee 3% / employer 3%. Reused fields: `social_security` /
      `employer_social_security`.
@@ -53,6 +61,7 @@ from app.modules.payroll.engine.countries.shared import (
 )
 
 _JM_ANNUAL_ALLOWANCE = Decimal("1902360")  # 158,530 x 12 (Apr-Dec 2026 rate) — see module docstring
+_JM_JAN_MAR_MONTHLY_ALLOWANCE = Decimal("149948")  # Jan-Mar 2026 monthly rate — see module docstring
 
 _JM_NIS_RATE = Decimal("0.03")
 _JM_NHT_EMPLOYEE_RATE = Decimal("0.02")
@@ -61,6 +70,20 @@ _JM_EDU_TAX_EMPLOYEE_RATE = Decimal("0.0225")
 _JM_EDU_TAX_EMPLOYER_RATE = Decimal("0.035")
 _JM_HEART_RATE = Decimal("0.03")
 _JM_HEART_THRESHOLD = Decimal("14444")
+
+
+def _resolve_period_allowance(rate_map: dict, periods_per_year: Decimal, pay_date) -> Decimal:
+    """Jan-Mar 2026 uses a genuinely lower monthly personal allowance than
+    Apr-Dec (ZP-JM-ENG-001 §3) — selected by the actual pay date's month,
+    never server date. `pay_date is None` (no behavior change for callers
+    that don't set it) falls back to the existing Apr-Dec annual value."""
+    if pay_date is not None and pay_date.month <= 3:
+        jan_mar_monthly = resolve_jurisdiction_parameter(
+            rate_map, "jm_personal_allowance_jan_mar_monthly", _JM_JAN_MAR_MONTHLY_ALLOWANCE, country="JM",
+        )
+        return (jan_mar_monthly * Decimal("12")) / periods_per_year
+    allowance_annual = resolve_jurisdiction_parameter(rate_map, "jm_personal_allowance", _JM_ANNUAL_ALLOWANCE, country="JM")
+    return allowance_annual / periods_per_year
 
 
 def calculate(ctx: PayrollContext) -> dict:
@@ -89,8 +112,7 @@ def calculate(ctx: PayrollContext) -> dict:
     # PAYE base = gross minus employee NIS (the spec's own §12 fixture:
     # "PAYE: (194,000 − 158,530) × 25%", where 194,000 = 200,000 gross
     # minus the 6,000 NIS employee deduction above) — NOT full gross.
-    allowance_annual = resolve_jurisdiction_parameter(rate_map, "jm_personal_allowance", _JM_ANNUAL_ALLOWANCE, country="JM")
-    period_allowance = allowance_annual / periods_per_year
+    period_allowance = _resolve_period_allowance(rate_map, periods_per_year, ctx.pay_date)
     paye_base_period = max(period_gross - social_security, Decimal("0"))
     taxable_annualized = max(paye_base_period - period_allowance, Decimal("0")) * periods_per_year
     tds = _round2(_calculate_annual_tax(taxable_annualized, ctx.slabs) / periods_per_year)

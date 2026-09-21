@@ -7,6 +7,7 @@ Validates engine/countries/trinidad_and_tobago.py against ZP-TT-ENG-001
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -67,8 +68,11 @@ def _tt_slabs():
     return slabs
 
 
-def _ctx(gross: Decimal, pay_frequency="Monthly") -> PayrollContext:
-    return PayrollContext(gross=gross, basic=gross, country="TT", rate_map=_tt_rate_map(), slabs=_tt_slabs(), pay_frequency=pay_frequency)
+def _ctx(gross: Decimal, pay_frequency="Monthly", date_of_birth: date = None, pay_date: date = None) -> PayrollContext:
+    return PayrollContext(
+        gross=gross, basic=gross, country="TT", rate_map=_tt_rate_map(), slabs=_tt_slabs(), pay_frequency=pay_frequency,
+        date_of_birth=date_of_birth, pay_date=pay_date,
+    )
 
 
 def test_dispatch_resolves_tt_to_its_own_calculator():
@@ -124,3 +128,33 @@ def test_weekly_paid_employee_uses_weekly_health_surcharge_threshold():
 def test_weekly_paid_employee_below_weekly_threshold_gets_low_health_surcharge_rate():
     result = trinidad_and_tobago.calculate(_ctx(Decimal("100"), pay_frequency="Weekly"))
     assert result["professional_tax"] == Decimal("4.80")
+
+
+# ── Health Surcharge age exemptions (TT-008) ───────────────────────────────
+
+def test_health_surcharge_exempt_under_16():
+    result = trinidad_and_tobago.calculate(
+        _ctx(Decimal("10000"), date_of_birth=date(2015, 6, 1), pay_date=date(2026, 9, 1))
+    )
+    assert result["professional_tax"] == Decimal("0")
+
+
+def test_health_surcharge_exempt_at_60():
+    result = trinidad_and_tobago.calculate(
+        _ctx(Decimal("10000"), date_of_birth=date(1966, 6, 1), pay_date=date(2026, 9, 1))
+    )
+    assert result["professional_tax"] == Decimal("0")
+
+
+def test_health_surcharge_not_exempt_just_under_60():
+    result = trinidad_and_tobago.calculate(
+        _ctx(Decimal("10000"), date_of_birth=date(1966, 10, 1), pay_date=date(2026, 9, 1))
+    )
+    assert result["professional_tax"] == Decimal("33.00")  # 8.25 x 4 weeks, monthly
+
+
+def test_health_surcharge_exemption_dormant_without_date_of_birth():
+    """No date_of_birth (every TT employee until entered) must never guess
+    an exemption — identical to pre-exemption behavior."""
+    result = trinidad_and_tobago.calculate(_ctx(Decimal("10000"), pay_date=date(2026, 9, 1)))
+    assert result["professional_tax"] == Decimal("33.00")  # 8.25 x 4 weeks, monthly

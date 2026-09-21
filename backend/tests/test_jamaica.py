@@ -8,6 +8,7 @@ cash 176,767.50).
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -51,8 +52,11 @@ def _jm_slabs():
     ]
 
 
-def _ctx(gross: Decimal) -> PayrollContext:
-    return PayrollContext(gross=gross, basic=gross, country="JM", rate_map=_jm_rate_map(), slabs=_jm_slabs(), pay_frequency="Monthly")
+def _ctx(gross: Decimal, pay_date: date = None) -> PayrollContext:
+    return PayrollContext(
+        gross=gross, basic=gross, country="JM", rate_map=_jm_rate_map(), slabs=_jm_slabs(),
+        pay_frequency="Monthly", pay_date=pay_date,
+    )
 
 
 def test_dispatch_resolves_jamaica_to_its_own_calculator():
@@ -86,3 +90,32 @@ def test_standard_strategy_end_to_end_net_pay_matches_fixture():
 def test_heart_not_applied_below_threshold():
     result = jamaica.calculate(_ctx(Decimal("14444")))
     assert result["employer_payroll_tax"] == Decimal("0")
+
+
+# ── Jan-Mar vs Apr-Dec personal allowance (ZP-JM-ENG-001 §3 / §12 F2) ──────
+# The spec's own Fixture F2: at the same 194,000 PAYE base (200,000 gross
+# minus 6,000 NIS), January's component is (194,000-149,948)x25%=11,013.00
+# while September's is 8,867.50 — a real difference of 2,145.50, driven by
+# the Jan-Mar monthly allowance (149,948) genuinely being lower than the
+# Apr-Dec rate (158,530), not a rounding artifact.
+
+def test_january_uses_the_lower_jan_mar_monthly_allowance():
+    result = jamaica.calculate(_ctx(Decimal("200000"), pay_date=date(2026, 1, 15)))
+    assert result["tds"] == Decimal("11013.00")
+
+
+def test_march_still_uses_the_jan_mar_allowance():
+    result = jamaica.calculate(_ctx(Decimal("200000"), pay_date=date(2026, 3, 31)))
+    assert result["tds"] == Decimal("11013.00")
+
+
+def test_april_switches_to_the_apr_dec_allowance():
+    result = jamaica.calculate(_ctx(Decimal("200000"), pay_date=date(2026, 4, 1)))
+    assert result["tds"] == Decimal("8867.50")
+
+
+def test_no_pay_date_falls_back_to_apr_dec_allowance_unchanged():
+    """A caller that never sets pay_date (e.g. an older test double) must
+    see identical behavior to before this Jan-Mar split was added."""
+    result = jamaica.calculate(_ctx(Decimal("200000")))
+    assert result["tds"] == Decimal("8867.50")
