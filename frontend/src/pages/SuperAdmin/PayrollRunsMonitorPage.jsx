@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PlayCircle, RefreshCcw, AlertTriangle } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -46,9 +47,17 @@ function RunsTable({ rows, emptyLabel }) {
 
 export default function PayrollRunsMonitorPage() {
   const { addToast } = useToast() || {};
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState({ at_risk: [], all_runs: [], at_risk_window_days: 5 });
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(searchParams.get("status") || "");
+
+  const setStatusAndUrl = (value) => {
+    setStatus(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("status", value); else next.delete("status");
+    setSearchParams(next, { replace: true });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,7 +83,7 @@ export default function PayrollRunsMonitorPage() {
           <p className="text-sm text-foreground-muted mt-0.5">Cross-organization payroll run monitor — read-only.</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+          <select value={status} onChange={(e) => setStatusAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
             <option value="">All Statuses</option>
             {["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>

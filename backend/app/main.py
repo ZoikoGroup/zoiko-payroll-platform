@@ -67,23 +67,30 @@ class _RedactSensitiveQueryFilter(logging.Filter):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize_database()
+    from app.modules.assisted_access.models import ensure_tables
     from app.modules.assist.scheduler import start_assist_scheduler, stop_assist_scheduler
     from app.modules.auth.scheduler import start_token_cleanup_scheduler, stop_token_cleanup_scheduler
     from app.modules.billing.scheduler import (
         start_trial_scheduler, stop_trial_scheduler,
         start_dunning_scheduler, stop_dunning_scheduler,
     )
+    from app.modules.assisted_access.scheduler import (
+        start_assisted_access_scheduler, stop_assisted_access_scheduler,
+    )
 
     start_assist_scheduler()
     start_trial_scheduler()
     start_dunning_scheduler()
+    start_assisted_access_scheduler()
     start_token_cleanup_scheduler()
+    ensure_tables()
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
     stop_token_cleanup_scheduler()
     stop_assist_scheduler()
     stop_trial_scheduler()
     stop_dunning_scheduler()
+    stop_assisted_access_scheduler()
 
 
 app = FastAPI(
@@ -150,6 +157,8 @@ from app.modules.assist.router import assist_router
 from app.modules.assist.public_router import assist_public_router
 from app.modules.billing.router import router as billing_router
 from app.modules.billing.admin_router import router as billing_admin_router
+from app.modules.assisted_access.router import sa_router as assisted_access_sa_router
+from app.modules.assisted_access.router import org_router as assisted_access_org_router
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(auth_user_router, prefix="/api")
@@ -163,6 +172,21 @@ app.include_router(assist_router, prefix="/api")
 app.include_router(assist_public_router, prefix="/api")
 app.include_router(billing_router, prefix="/api")
 app.include_router(billing_admin_router, prefix="/api")
+app.include_router(assisted_access_sa_router, prefix="/api")
+app.include_router(assisted_access_org_router, prefix="/api")
+
+# ── Assisted Access audit middleware ────────────────────────────────────────
+# Single chokepoint: every request that ran under a SafeGuard assisted-access
+# token is appended to assisted_access_audit_events. Best-effort by design —
+# an audit write failure must never break the request it describes.
+
+@app.middleware("http")
+async def assisted_access_audit_middleware(request: Request, call_next):
+    from app.modules.assisted_access.audit import record_request_if_assisted
+
+    response = await call_next(request)
+    record_request_if_assisted(request, response.status_code)
+    return response
 
 # ── Root health ──────────────────────────────────────────────────────────────
 

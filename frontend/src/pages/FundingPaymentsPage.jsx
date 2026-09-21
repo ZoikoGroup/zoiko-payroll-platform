@@ -115,7 +115,7 @@ function SummaryCard({ icon: Icon, label, value, accent }) {
 
 const STATUS_PILL_MAP = { Paid: "active", Closed: "active", Approved: "approved", Authorized: "approved", Review: "pending", Draft: "inactive" };
 
-export default function FinancePage() {
+export default function FundingPaymentsPage() {
   const [summary, setSummary] = useState(null);
   const [overview, setOverview] = useState({ items: [], total: 0 });
   const [organizations, setOrganizations] = useState([]);
@@ -172,10 +172,12 @@ export default function FinancePage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Wallet size={22} className="text-primary" /> Finance
+            <Wallet size={22} className="text-primary" /> Funding &amp; Payments
           </h1>
           <p className="text-sm text-foreground-muted mt-0.5">
-            Cross-organization payroll financial overview. Does not replace an org's own Payroll module.
+            Customer payroll money movement across organizations — not Zoiko revenue
+            (that lives in Zoiko Commercial → Revenue &amp; Collections, and the two are never merged).
+            Does not replace an org's own Payroll module.
           </p>
         </div>
         <div className="flex items-center gap-2">
