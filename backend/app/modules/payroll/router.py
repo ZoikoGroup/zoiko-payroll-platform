@@ -121,6 +121,7 @@ from app.modules.payroll.schemas import (
     EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
     CAPd7aGenerateRequest,
+    GYMonthlyReportGenerateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
     AUSchedule5CalculateRequest, AUSchedule5CalculateResponse,
     AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
@@ -2698,6 +2699,58 @@ def generate_ca_pd7a(
     return service.generate_ca_pd7a(
         db, current_user.organization_id, data.report_template_id, data.period_start, data.period_end,
         actor_id=current_user.id,
+    )
+
+
+# ── Guyana: GRA Form 5 (monthly PAYE) + NIS Electronic Schedule (monthly)
+# + Form 7B (per-employee, annual) generation (Caribbean forms gap-
+# closure, 2026-09-22).
+
+@payroll_router.post(
+    "/guyana/reports/form5", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Guyana GRA Form 5 monthly PAYE return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_gy_form_5(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_gy_form_5(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/guyana/reports/nis-schedule", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Guyana NIS Electronic Schedule for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_gy_nis_schedule(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_gy_nis_schedule(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/guyana/reports/form7b", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Guyana Form 7B annual employee earnings statement for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_gy_form_7b(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
     )
 
 

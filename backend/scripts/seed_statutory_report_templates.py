@@ -601,6 +601,71 @@ def run():
             ],
         )
 
+        print("Seeding Guyana GRA Form 5 monthly PAYE return, employer-wide (real per-employee rows computed by generate_gy_form_5)...")
+        _seed_template(
+            db, template_key="GY-FORM-5", name="GRA Form 5 — Monthly PAYE Return", report_type="GY_FORM_5",
+            country="GY", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_gra_tin", "GRA TIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_gy_form_5, same
+                # convention as US-941's own line1_employee_count field above.
+                ("totals", "Employer Totals (PAYE / NIS)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_salary_wages", "Total Salary / Wages", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_paye_tax_deducted", "Total PAYE Tax Deducted", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Guyana NIS Electronic Schedule, employer-wide (real per-employee rows computed by generate_gy_nis_schedule)...")
+        _seed_template(
+            db, template_key="GY-NIS-SCHEDULE", name="NIS Electronic Schedule", report_type="GY_NIS_SCHEDULE",
+            country="GY", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_gy_nis_schedule.
+                ("totals", "Employer Totals (Insurable Earnings / NIS)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_insurable_earnings", "Total Insurable Earnings", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Guyana Form 7B annual employee earnings statement, per-employee...")
+        _seed_template(
+            db, template_key="GY-FORM-7B", name="Form 7B — Annual Employee Earnings Statement", report_type="FORM_7B",
+            country="GY", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_gra_tin", "GRA TIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("earnings", "Earnings (Year-to-Date)", [
+                    ("gross_pay_ytd", "Total Salary / Wages (YTD)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                ]),
+                ("tax", "PAYE (Year-to-Date)", [
+                    ("tds_ytd", "PAYE Tax Deducted (YTD)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                ]),
+                ("contributions", "NIS (Year-to-Date)", [
+                    ("nis_employee_ytd", "NIS Employee (YTD)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                ]),
+            ],
+        )
+
         print("Seeding Jamaica payroll statement (PAYE/NIS/NHT/Education Tax/HEART), per-employee...")
         _seed_template(
             db, template_key="JM-PAYROLL", name="PAYE + NIS/NHT/Education Tax Statement", report_type="JM_PAYROLL_STATEMENT",
