@@ -122,7 +122,17 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 # (rather than shipping it dormant first) is the correct default for a
 # genuinely new jurisdiction rather than an existing one gaining new
 # tracked behavior.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY"}
+# GY added 2026-09-22 for the PAYE statutory credit ledger (GY-010).
+# UNLIKE every addition above, Guyana already has real live payroll
+# history (went live 2026-09-21) — but enabling this switch is still
+# provably a no-op for every existing employee: with no
+# PayrollYtdAccumulator row, _load_gy_paye_credit_ytd defaults
+# ytd_gy_paye_credit_before to 0 (same "no row = 0" convention as KY's
+# own loader), and guyana.py's calculate() only touches `tds` when
+# credit_before > 0 — so every employee is byte-for-byte unaffected
+# until a real credit balance is manually entered (which, per this
+# feature's own disclosed scope, no UI/API path exists to do yet).
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -160,7 +170,19 @@ _YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY"}
 # state/territory employer payroll tax's org-level aggregate-wages
 # tracking — same "0 real AU employees exist, safe to enable now" reasoning
 # as every other addition above.
-_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "CA", "AU"}
+# JM added 2026-09-22 for HEART's employer-wide monthly aggregation
+# (JM-008). UNLIKE every addition above, this is NOT provably inert:
+# Jamaica already has real live payroll history (went live 2026-09-21),
+# and enabling this switch is the DELIBERATE fix for a disclosed Phase 1
+# gap — HEART was previously evaluated against each employee's own gross
+# independently rather than the employer's combined monthly total, which
+# both under- and over-charges relative to JM-008's actual rule (an
+# employer whose combined payroll crosses JMD 14,444 only because of
+# several employees together, none individually over it, previously paid
+# nothing at all). Enabling this switch is a real, intended behavior
+# change for every Jamaica employer's NEXT payroll run, not a no-op —
+# see jamaica.py's own module docstring for the corrected calculation.
+_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "CA", "AU", "JM"}
 
 # Per-country rollout switch for the CRA-correct CREDIT method of
 # applying "amounts" (federal BPAF, provincial BPA, Quebec BPA — and any

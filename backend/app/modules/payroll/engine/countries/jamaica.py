@@ -39,12 +39,21 @@ Four independent statutory obligations (JM-008 — never one generic
      employee NIS). Reused fields (repurposed, NOT UK National
      Insurance): `ni_employee` / `employer_ni`.
   5. HEART — employer-only 3% once EMPLOYER-WIDE monthly emoluments
-     exceed JMD 14,444 (JM-008's "evaluate across all pay groups").
-     Phase 1 evaluates the threshold against this employee's own gross
-     only — genuine employer-wide aggregation across pay groups needs a
-     YTD/org-level accumulator not yet wired (same deferred-until-real-
-     data discipline as every other cross-employee aggregate in this
-     codebase). Reused field: `employer_payroll_tax`.
+     exceed JMD 14,444 (JM-008's "evaluate across all pay groups"),
+     applied to the ENTIRE eligible base once liable (not just the
+     excess over the threshold, unlike a notch-shaped levy). Wired to a
+     real employer-wide monthly accumulator (`ctx.jm_heart_ytd_
+     remuneration_before` — see its own docstring in engine/base.py):
+     when present, this period's incremental HEART liability is computed
+     via the same `annual(after) − annual(before)` telescoping shared.py
+     helper (`telescope_period_amount`) Canada's own org-level employer
+     levies (Ontario EHT etc.) already use, so the per-employee amounts
+     always sum to the correct employer-wide monthly total regardless of
+     processing order or how many employees cross the threshold
+     together. `ctx.jm_heart_ytd_remuneration_before is None` (the
+     rollout switch off, or an older caller) falls back to the original
+     Phase 1 per-employee-only check — identical behavior to before this
+     accumulator was wired. Reused field: `employer_payroll_tax`.
 
 Validated against ZP-JM-ENG-001 §12 Fixture F1 (200,000/mo) — see
 tests/test_jamaica.py; matches the fixture's exact totals (23,232.50
@@ -58,6 +67,7 @@ from app.modules.payroll.engine.countries.shared import (
     resolve_periods_per_year,
     resolve_jurisdiction_parameter,
     _calculate_annual_tax,
+    telescope_period_amount,
 )
 
 _JM_ANNUAL_ALLOWANCE = Decimal("1902360")  # 158,530 x 12 (Apr-Dec 2026 rate) — see module docstring
@@ -70,6 +80,14 @@ _JM_EDU_TAX_EMPLOYEE_RATE = Decimal("0.0225")
 _JM_EDU_TAX_EMPLOYER_RATE = Decimal("0.035")
 _JM_HEART_RATE = Decimal("0.03")
 _JM_HEART_THRESHOLD = Decimal("14444")
+
+
+def _jm_heart_annual_amount(total: Decimal, threshold: Decimal, rate: Decimal) -> Decimal:
+    """JM-008: 'apply the rate to the ENTIRE eligible base' once the
+    employer-wide monthly total exceeds the threshold — a flat rate on
+    the WHOLE total, not just the excess over the threshold (unlike a
+    notch-shaped levy)."""
+    return total * rate if total > threshold else Decimal("0")
 
 
 def _resolve_period_allowance(rate_map: dict, periods_per_year: Decimal, pay_date) -> Decimal:
@@ -88,7 +106,8 @@ def _resolve_period_allowance(rate_map: dict, periods_per_year: Decimal, pay_dat
 
 def calculate(ctx: PayrollContext) -> dict:
     """Jamaica: PAYE (annualized bracket lookup) + NIS + NHT + Education
-    Tax + HEART (per-employee threshold, Phase 1)."""
+    Tax + HEART (employer-wide monthly aggregation when wired, else the
+    Phase 1 per-employee-only fallback)."""
     rate_map = ctx.rate_map
     periods_per_year = resolve_periods_per_year(ctx.pay_frequency)
     period_gross = ctx.gross
@@ -119,7 +138,15 @@ def calculate(ctx: PayrollContext) -> dict:
 
     heart_threshold = resolve_jurisdiction_parameter(rate_map, "jm_heart_threshold", _JM_HEART_THRESHOLD, country="JM")
     heart_rate = resolve_jurisdiction_parameter(rate_map, "jm_heart", _JM_HEART_RATE, side="employer", country="JM")
-    employer_payroll_tax = _round2(period_gross * heart_rate) if period_gross > heart_threshold else Decimal("0")
+    heart_ytd_before = ctx.jm_heart_ytd_remuneration_before
+    if heart_ytd_before is not None:
+        employer_payroll_tax = telescope_period_amount(
+            period_gross, heart_ytd_before, lambda total: _jm_heart_annual_amount(total, heart_threshold, heart_rate),
+        )
+        heart_ytd_after = heart_ytd_before + period_gross
+    else:
+        employer_payroll_tax = _round2(period_gross * heart_rate) if period_gross > heart_threshold else Decimal("0")
+        heart_ytd_after = None
 
     return dict(
         tds=tds,
@@ -130,4 +157,5 @@ def calculate(ctx: PayrollContext) -> dict:
         ni_employee=ni_employee,
         employer_ni=employer_ni,
         employer_payroll_tax=employer_payroll_tax,
+        jm_heart_ytd_remuneration_after=heart_ytd_after,
     )

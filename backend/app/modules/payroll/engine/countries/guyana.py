@@ -6,13 +6,32 @@ Guyana (GY) — Phase 1 statutory build (ZP-GY-ENG-001).
 PAYE (GY-006/GY-007/GY-009), non-cumulative, period-by-period:
   personal_deduction = max(fixed monthly allowance, one-third of period
   gross) — Phase 1 models the ordinary primary-employee case only
-  (overtime/second-job/child/medical-premium deductions, and the
-  2026-Jan/Feb statutory refund-credit ledger, are explicitly deferred;
-  GY-010's ledger needs a real YTD accumulator, same dormancy discipline
-  as every other deferred YTD feature in this codebase — not built yet).
+  (overtime/second-job/child/medical-premium deductions are still
+  deferred).
   chargeable = max(gross - personal_deduction - employee_NIS, 0), then
   25% up to the GYD 280,000 chargeable band, 35% above. Reused field:
   `tds`.
+
+GY-010 statutory credit ledger: `ctx.ytd_gy_paye_credit_before`, when
+not None and > 0, is applied against this period's calculated PAYE
+liability to determine the ACTUAL cash withheld from the employee.
+DISCLOSED SIMPLIFICATION: GY-010 itself distinguishes "current-period
+tax liability" (what a Form 5 return would report) from "cash
+remittance" (what's actually withheld) as two separate values — this
+module does not persist both. `tds` is the field every strategy
+(engine/standard.py) actually deducts from net pay, so `tds` here is
+the POST-CREDIT cash-withheld figure (the correctness-critical one —
+an employee must not be shown paying more than they actually owe this
+period); the pre-credit calculated liability is not separately
+retained. Verified against the spec's own §13 Fixture F4 (5,000 credit
+applied against a 12,200 March liability -> `tds` = 7,200 actual
+withholding, credit exhausted to 0). DISCLOSED SCOPE: see
+PayrollContext.ytd_gy_paye_credit_before's own docstring
+(engine/base.py) — this is a general-purpose mechanism, not hardcoded
+to the spec's specific 2026 Jan-Feb scenario, and there is no UI/API
+yet to populate a real opening balance. `ctx.ytd_gy_paye_credit_before
+is None` (every employee today) means no credit — identical behavior
+to before this feature existed.
 
 Bands come from `ctx.slabs` (canonical TaxSlab rows for country="GY",
 period-denominated — the spec's own GYD 280,000 figure IS the monthly
@@ -71,10 +90,24 @@ def calculate(ctx: PayrollContext) -> dict:
     personal_deduction = max(fixed_allowance, one_third)
 
     chargeable = max(period_gross - personal_deduction - social_security, Decimal("0"))
-    tds = _round2(_calculate_annual_tax(chargeable, ctx.slabs))
+    calculated_liability = _round2(_calculate_annual_tax(chargeable, ctx.slabs))
+
+    # GY-010 statutory credit ledger — see module docstring. credit_before
+    # is None for every employee until a real opening balance is entered
+    # (dormant today); ytd_gy_paye_credit_after is only ever set (for
+    # service.py to persist) when the credit path actually ran.
+    credit_before = ctx.ytd_gy_paye_credit_before
+    if credit_before is not None and credit_before > 0:
+        credit_applied = min(credit_before, calculated_liability)
+        tds = _round2(calculated_liability - credit_applied)
+        credit_after = _round2(credit_before - credit_applied)
+    else:
+        tds = calculated_liability
+        credit_after = None
 
     return dict(
         tds=tds,
         social_security=social_security,
         employer_social_security=employer_social_security,
+        ytd_gy_paye_credit_after=credit_after,
     )

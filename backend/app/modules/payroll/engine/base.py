@@ -497,6 +497,17 @@ class PayrollContext:
     # employee/org today) means "not wired" — engine/countries/canada.py
     # MUST resolve Ontario EHT to $0 when None, never treat None as 0.
     on_eht_ytd_remuneration_before: Decimal = None
+    # Jamaica: the employer's aggregate MONTHLY emoluments across ALL its
+    # employees, as of BEFORE this employee's own period, for HEART
+    # (JM-008: "evaluate across all pay groups"). Reuses the SAME
+    # OrganizationYtdAccumulator table and _load_ca_org_levy_ytd/
+    # _upsert_ca_org_levy_ytd generic reader/writer as Ontario EHT above
+    # (see service.py's _load_jm_heart_ytd), but with a MONTHLY tax_year
+    # key instead of a calendar-year one — HEART's threshold is evaluated
+    # per calendar month, not per year. Same "None means not wired, must
+    # resolve exactly as Phase 1's per-employee-only check did" contract
+    # as on_eht_ytd_remuneration_before above.
+    jm_heart_ytd_remuneration_before: Decimal = None
     # UK: the org's aggregate annual statutory pay bill YTD, for the
     # Apprenticeship Levy (ZP-TAX-UK-2026-27-001 §14) — same "None means
     # not wired, must resolve to £0" contract as on_eht_ytd_remuneration_before
@@ -782,6 +793,13 @@ class PayrollResult:
     # without recomputing. None unless Ontario EHT was actually wired for
     # this calculation — see PayrollContext.on_eht_ytd_remuneration_before.
     on_eht_ytd_remuneration_after: Decimal = None
+    # Jamaica: the employer's aggregate MONTHLY emoluments AFTER this
+    # employee's own period, for service.py to persist into
+    # OrganizationYtdAccumulator (its own monthly tax_year key — see
+    # service.py's _upsert_jm_heart_ytd). None unless HEART's org-level
+    # accumulator was actually wired for this calculation — see
+    # PayrollContext.jm_heart_ytd_remuneration_before.
+    jm_heart_ytd_remuneration_after: Decimal = None
     # Canada: the same after-period contract as on_eht_ytd_remuneration_after
     # above, for BC EHT, Manitoba HE Levy and NL HAPSET respectively.
     bc_eht_ytd_remuneration_after: Decimal = None

@@ -11662,7 +11662,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             {**_load_au_sg_ytd(db, emp.id, period_end or date.today()), **_load_au_whm_ytd(db, emp.id, period_end or date.today())}
             if emp_country == "AU" else
             _load_ky_pension_ytd(db, emp.id, period_end or date.today())
-            if emp_country == "KY" else {}
+            if emp_country == "KY" else
+            _load_gy_paye_credit_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "GY" else {}
         )
         option2_inputs = (
             _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if emp_country == "CA" else {}
@@ -11678,7 +11680,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_uk_org_levy_ytd(db, organization_id, period_end or date.today())
             if emp_country == "UK" else
             _au_org_payroll_tax_read_inputs(db, organization_id, period_end or date.today(), work_state)
-            if emp_country == "AU" else {}
+            if emp_country == "AU" else
+            _load_jm_heart_ytd(db, organization_id, period_end or date.today())
+            if emp_country == "JM" else {}
         )
 
         ni_category_override = (
@@ -12582,6 +12586,71 @@ def _upsert_ky_pension_ytd_accumulator(db: Session, employee_id: int, pay_date, 
         row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_KY_PENSION_YTD_COMPONENT)
         db.add(row)
     row.ytd_taxable_wages = result.ytd_ky_mandatory_pensionable_earnings_after
+    row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# Guyana PAYE statutory credit ledger (GY-010, 2026-09-22) — same
+# read/write/component-key shape as _load_ky_pension_ytd/
+# _upsert_ky_pension_ytd_accumulator above, reusing the SAME
+# PayrollYtdAccumulator table with its own component key. A calendar-year
+# key (not tied to any specific tax year's own boundary dates) since this
+# is a general-purpose running balance, not a year-scoped cap.
+_GY_PAYE_CREDIT_YTD_COMPONENT = "gy_paye_refund_credit"
+
+
+def _gy_ytd_tax_year(pay_date) -> str:
+    """Guyana calendar-year accumulator key — "GY-CY-2026" for any date in
+    calendar year 2026."""
+    return f"GY-CY-{pay_date.year}"
+
+
+def _load_gy_paye_credit_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    ytd_gy_paye_credit_before param — empty dict when GY hasn't opted into
+    the rollout switch, or {"ytd_gy_paye_credit_before": Decimal("0")} when
+    no accumulator row exists yet (every employee today, since no UI/API
+    path exists to enter a real opening balance — see guyana.py's own
+    module docstring). Never guesses/backfills a starting value."""
+    if "GY" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _gy_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _GY_PAYE_CREDIT_YTD_COMPONENT,
+        )
+        .first()
+    )
+    return dict(ytd_gy_paye_credit_before=row.ytd_taxable_wages if row else Decimal("0"))
+
+
+def _upsert_gy_paye_credit_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation remaining PAYE credit balance
+    back to PayrollYtdAccumulator — get-or-create per (employee, calendar
+    year, component), flush (not commit). No-op if the result carries no
+    credit figure (result.ytd_gy_paye_credit_after is None — the ordinary
+    case, since guyana.py only sets it when a nonzero credit was actually
+    applied), so calling this unconditionally from every persisting entry
+    point is safe even while the rollout switch is off."""
+    if result.ytd_gy_paye_credit_after is None:
+        return
+    tax_year = _gy_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _GY_PAYE_CREDIT_YTD_COMPONENT,
+        )
+        .first()
+    )
+    if row is None:
+        row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_GY_PAYE_CREDIT_YTD_COMPONENT)
+        db.add(row)
+    row.ytd_taxable_wages = result.ytd_gy_paye_credit_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
 
@@ -14185,6 +14254,48 @@ def _au_org_payroll_tax_read_inputs(db: Session, organization_id: int, pay_date,
     return inputs
 
 
+# Jamaica HEART (JM-008, 2026-09-22) — the employer's aggregate MONTHLY
+# emoluments across ALL its employees, reusing the SAME generic
+# _load_ca_org_levy_ytd/_upsert_ca_org_levy_ytd reader/writer pair AU's
+# state payroll tax reuses above (see that function's own docstring) —
+# no new accumulator table, no dedicated per-component pair. The one
+# genuine difference: HEART's threshold is evaluated per CALENDAR MONTH,
+# not per year, so this uses its own monthly tax_year key instead of
+# _org_ytd_tax_year's calendar-year one — the same reasoning UK's own
+# tax-year key override exists for, just a month instead of a
+# differently-bounded year.
+def _jm_heart_tax_year(pay_date) -> str:
+    """Jamaica HEART accumulator key — "JM-M-2026-09" for any date in
+    September 2026. Resets every calendar month, unlike every other
+    org-level levy in this file."""
+    return f"JM-M-{pay_date.year}-{pay_date.month:02d}"
+
+
+def _load_jm_heart_ytd(db: Session, organization_id: int, pay_date) -> dict:
+    """Returns {} when the shared _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES
+    switch is off for "JM" (jamaica.py then falls back to its Phase 1
+    per-employee-only check, unchanged). Never guesses/backfills a
+    starting value — a brand-new employer-month always starts real at 0
+    via _load_ca_org_levy_ytd's own "unconfigured component defaults to
+    Decimal('0')" convention."""
+    if "JM" not in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _jm_heart_tax_year(pay_date)
+    org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, ("jm_heart",), tax_year=tax_year, country="JM")
+    return dict(jm_heart_ytd_remuneration_before=org_levy_ytd["jm_heart"])
+
+
+def _upsert_jm_heart_ytd(db: Session, organization_id: int, pay_date, increment: Decimal, payslip_id: int = None):
+    """Adds this employee's period gross to the employer's running MONTHLY
+    remuneration total — reuses _upsert_ca_org_levy_ytd's ADD-an-increment
+    contract with HEART's own monthly tax_year key. No-op for a
+    falsy/zero increment, matching that writer's own convention."""
+    if not increment:
+        return
+    tax_year = _jm_heart_tax_year(pay_date)
+    _upsert_ca_org_levy_ytd(db, organization_id, pay_date, {"jm_heart": increment}, payslip_id=payslip_id, tax_year=tax_year)
+
+
 # ── UK org-level accumulators: Apprenticeship Levy pay bill (§14) AND ───
 # Employment Allowance's cumulative employer_ni total (§14) — same
 # OrganizationYtdAccumulator table and ADDS-an-increment contract as
@@ -15073,6 +15184,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # (KY-008) — a separate key since it's gated on ITS OWN result
         # field.
         "_ky_pension_ytd_result": result if result.ytd_ky_mandatory_pensionable_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for the
+        # Guyana PAYE statutory credit ledger (GY-010) — a separate key
+        # since it's gated on ITS OWN result field.
+        "_gy_paye_credit_ytd_result": result if result.ytd_gy_paye_credit_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for Canada
         # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
         # — a separate key since it's gated on ITS OWN result field,
@@ -15130,6 +15245,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             result.employer_ni_ytd_after - ctx.employer_ni_ytd_before
             if result.employer_ni_ytd_after is not None else None,
         ),
+        # Jamaica HEART (JM-008) employer-wide monthly remuneration
+        # increment — popped out and written via _upsert_jm_heart_ytd
+        # separately (its own MONTHLY tax_year key, not _org_ytd_
+        # tax_year's calendar-year one), same reasoning as
+        # "_uk_org_levy_increment" above.
+        "_jm_heart_increment": (
+            result.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
+            if result.jm_heart_ytd_remuneration_after is not None else None
+        ),
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: persist the POE reason code
         # into the calculation snapshot instead of discarding it (see
         # _resolve_country_aware_state). Passed straight through from the
@@ -15185,10 +15309,12 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
     ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
+    gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
     uk_org_levy_increment = values.pop("_uk_org_levy_increment", None)
+    jm_heart_increment = values.pop("_jm_heart_increment", None)
     germany_unavailable_components = values.pop("_germany_unavailable_components", None)
 
     item = PayslipItem(
@@ -15239,6 +15365,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if ky_pension_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, ky_pension_ytd_result, payslip_id=item.id)
+    if gy_paye_credit_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, gy_paye_credit_ytd_result, payslip_id=item.id)
     if au_statutory_deductions_detail is not None:
         _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
     if option2_ytd_result is not None:
@@ -15258,6 +15387,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if uk_gross_increment is not None or uk_employer_ni_increment is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_uk_org_levy_ytd(db, run.organization_id, run.pay_date, uk_gross_increment, uk_employer_ni_increment, payslip_id=item.id)
+    if jm_heart_increment is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_jm_heart_ytd(db, run.organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
     return item
 
 
@@ -15582,7 +15714,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             {**_load_au_sg_ytd(db, emp.id, run.pay_date), **_load_au_whm_ytd(db, emp.id, run.pay_date)}
             if country == "AU" else
             _load_ky_pension_ytd(db, emp.id, run.pay_date)
-            if country == "KY" else None
+            if country == "KY" else
+            _load_gy_paye_credit_ytd(db, emp.id, run.pay_date)
+            if country == "GY" else None
         )
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
         # persisted into the calculation snapshot, not just used to pick
@@ -15603,7 +15737,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
             if country == "UK" else
             _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "AU" else {}
+            if country == "AU" else
+            _load_jm_heart_ytd(db, organization_id, run.pay_date)
+            if country == "JM" else {}
         )
         # Phase 8BI (P0): a statutorily-blocked employee (today, only
         # Germany — GermanyCalculationBlockedException, e.g. no PUBLISHED
@@ -15825,6 +15961,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
     values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
     values.pop("_ky_pension_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
+    values.pop("_gy_paye_credit_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
     # the ORIGINAL run already collected against.
@@ -15836,6 +15973,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # same as _ytd_result.
     values.pop("_org_levy_result", None)
     values.pop("_uk_org_levy_increment", None)
+    values.pop("_jm_heart_increment", None)
     # Option 2 cumulative-averaging (gap-closure Phase 9): option2_inputs
     # is likewise never passed above, for the identical reason — this is
     # a single-payslip CORRECTION path, and re-reading/re-incrementing
@@ -19503,6 +19641,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         else _load_us_ytd(db, employee.id, run.pay_date) if country == "US"
         else {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)} if country == "AU"
         else _load_ky_pension_ytd(db, employee.id, run.pay_date) if country == "KY"
+        else _load_gy_paye_credit_ytd(db, employee.id, run.pay_date) if country == "GY"
         else {}
     )
 
@@ -19515,6 +19654,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _ca_org_levy_read_inputs(db, organization_id, run.pay_date, work_state) if country == "CA"
         else _load_uk_org_levy_ytd(db, organization_id, run.pay_date) if country == "UK"
         else _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, work_state) if country == "AU"
+        else _load_jm_heart_ytd(db, organization_id, run.pay_date) if country == "JM"
         else {}
     )
     option2_inputs = (
@@ -19772,6 +19912,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_ky_mandatory_pensionable_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_gy_paye_credit_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
     if calc.au_statutory_deductions_detail:
         _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:
@@ -19816,6 +19959,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
             if calc.employer_ni_ytd_after is not None else None
         )
         _upsert_uk_org_levy_ytd(db, organization_id, run.pay_date, uk_levy_increment, uk_employer_ni_increment, payslip_id=item.id)
+    if calc.jm_heart_ytd_remuneration_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        jm_heart_increment = calc.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
+        _upsert_jm_heart_ytd(db, organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
     db.commit()
     db.refresh(item)
     _recompute_run_aggregates(db, run)

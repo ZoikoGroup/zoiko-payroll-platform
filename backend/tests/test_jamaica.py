@@ -52,10 +52,11 @@ def _jm_slabs():
     ]
 
 
-def _ctx(gross: Decimal, pay_date: date = None) -> PayrollContext:
+def _ctx(gross: Decimal, pay_date: date = None, jm_heart_ytd_remuneration_before: Decimal = None) -> PayrollContext:
     return PayrollContext(
         gross=gross, basic=gross, country="JM", rate_map=_jm_rate_map(), slabs=_jm_slabs(),
         pay_frequency="Monthly", pay_date=pay_date,
+        jm_heart_ytd_remuneration_before=jm_heart_ytd_remuneration_before,
     )
 
 
@@ -119,3 +120,49 @@ def test_no_pay_date_falls_back_to_apr_dec_allowance_unchanged():
     see identical behavior to before this Jan-Mar split was added."""
     result = jamaica.calculate(_ctx(Decimal("200000")))
     assert result["tds"] == Decimal("8867.50")
+
+
+# ── HEART employer-wide monthly aggregation (JM-008) ───────────────────────
+# Three employees each earning 5,000 (individually well under the 14,444
+# threshold): the combined monthly total (15,000) crosses it only once the
+# third employee is processed. The full 3% liability (450.00 = 3% of
+# 15,000) must be collected exactly once, attributed to whichever
+# employee's period pushed the cumulative total over — not charged to
+# every employee, and not missed because no single employee was over the
+# threshold on their own (the actual bug Phase 1's per-employee-only
+# check has).
+
+def test_heart_aggregates_across_employees_not_per_employee():
+    before = Decimal("0")
+    collected = Decimal("0")
+    for _ in range(3):
+        result = jamaica.calculate(_ctx(Decimal("5000"), jm_heart_ytd_remuneration_before=before))
+        collected += result["employer_payroll_tax"]
+        before = result["jm_heart_ytd_remuneration_after"]
+    assert collected == Decimal("450.00")  # 3% of the combined 15,000
+    assert before == Decimal("15000")
+
+
+def test_heart_first_two_employees_below_combined_threshold_owe_nothing():
+    result1 = jamaica.calculate(_ctx(Decimal("5000"), jm_heart_ytd_remuneration_before=Decimal("0")))
+    assert result1["employer_payroll_tax"] == Decimal("0.00")
+    result2 = jamaica.calculate(_ctx(Decimal("5000"), jm_heart_ytd_remuneration_before=Decimal("5000")))
+    assert result2["employer_payroll_tax"] == Decimal("0.00")
+
+
+def test_heart_wired_still_levies_full_base_once_liable_same_employee():
+    """A single employee whose own gross alone crosses the threshold,
+    with the accumulator wired from 0, must match Phase 1's own math
+    exactly (3% of the whole base, not just the excess)."""
+    result = jamaica.calculate(_ctx(Decimal("200000"), jm_heart_ytd_remuneration_before=Decimal("0")))
+    assert result["employer_payroll_tax"] == Decimal("6000.00")  # matches fixture F1's own HEART figure
+    assert result["jm_heart_ytd_remuneration_after"] == Decimal("200000")
+
+
+def test_heart_not_wired_falls_back_to_phase_1_behavior_unchanged():
+    """jm_heart_ytd_remuneration_before is None (every employee before this
+    accumulator was wired, or the rollout switch off) must produce
+    byte-for-byte the same result as before this feature existed."""
+    result = jamaica.calculate(_ctx(Decimal("200000")))
+    assert result["employer_payroll_tax"] == Decimal("6000.00")
+    assert result["jm_heart_ytd_remuneration_after"] is None
