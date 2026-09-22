@@ -131,3 +131,72 @@ def test_cap_crossing_end_to_end_via_real_accumulator(db, organization):
     assert result["employer_pension"] == Decimal("350.00")
     assert result["pension_cap_ytd_wired"] is True
     assert result["ytd_ky_mandatory_pensionable_earnings_after"] == Decimal("87000")
+
+
+def _stub_business_code_generation(monkeypatch):
+    """generate_payslips_for_run numbers payslips via generate_business_code,
+    which needs a Postgres advisory lock the SQLite test DB can't provide —
+    same stub tests/test_engine_calendar_days.py uses."""
+    import app.core.code_generation as code_generation
+    counter = {"n": 0}
+
+    def _fake(db, organization_id, prefix, table, code_column, date_format=None, seq_width=3):
+        counter["n"] += 1
+        return f"TEST{prefix}{counter['n']:05d}"
+
+    monkeypatch.setattr(code_generation, "generate_business_code", _fake)
+
+
+def test_generate_payslips_for_run_works_for_a_real_ky_employee(db, organization, monkeypatch):
+    """Real end-to-end regression guard (2026-09-22): every earlier test in
+    this file calls _load_ky_pension_ytd/_upsert_ky_pension_ytd_accumulator
+    directly, or builds PayrollContext by hand — none of them go through
+    build_context_from_employee(**ytd_inputs), the actual call every real
+    payslip generation uses. That gap let a real bug ship and go
+    undetected: build_context_from_employee had no
+    ytd_ky_mandatory_pensionable_earnings_before parameter at all, so
+    _load_ky_pension_ytd's returned dict, spread as **ytd_inputs, raised
+    TypeError: got an unexpected keyword argument — meaning every real
+    Cayman Islands employee's payroll (preview, generation, and manual
+    payslip-item add) crashed outright. Fixed by adding the parameter to
+    build_context_from_employee (engine/resolver.py) and threading it to
+    PayrollContext. This test proves the real integration point, not just
+    the accumulator plumbing in isolation."""
+    from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
+
+    _stub_business_code_generation(monkeypatch)
+    shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.add("KY")
+
+    emp = PayrollEmployee(
+        organization_id=organization.id, employee_code="KY-E2E-1", name="Employee KY-E2E-1",
+        country_code="KY", ctc=Decimal("72000"),
+    )
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+
+    run = PayrollRun(
+        organization_id=organization.id, period_label="Aug 2026",
+        period_start=date(2026, 8, 1), period_end=date(2026, 8, 31), pay_date=date(2026, 8, 31),
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    service.generate_payslips_for_run(db, run, organization.id)
+
+    item = db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.employee_id == emp.id,
+    ).first()
+    assert item is not None
+    # 72,000/12 = 6,000 monthly gross; 5% mandatory pension each side.
+    assert item.employee_pension == Decimal("300.00")
+    assert item.employer_pension == Decimal("300.00")
+
+    # The write side must also have actually run (not silently skipped).
+    accumulator = db.query(PayrollYtdAccumulator).filter(
+        PayrollYtdAccumulator.employee_id == emp.id,
+        PayrollYtdAccumulator.tax_component == service._KY_PENSION_YTD_COMPONENT,
+    ).first()
+    assert accumulator is not None
+    assert accumulator.ytd_taxable_wages == Decimal("6000.00")

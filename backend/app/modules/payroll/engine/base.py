@@ -436,6 +436,26 @@ class PayrollContext:
     # accumulators above before their service.py wiring landed.
     ytd_ky_mandatory_pensionable_earnings_before: Decimal = None
 
+    # Guyana PAYE statutory credit (GY-010) — this employee's remaining
+    # unconsumed over-deduction credit balance BEFORE this period.
+    # DISCLOSED SCOPE: the spec's own worked scenario (Jan-Feb 2026
+    # over-withholding under pre-2026 thresholds, refunded from March
+    # 2026) has already passed relative to this platform's actual Guyana
+    # go-live (September 2026) — Zoiko never processed that period's
+    # payroll, so no historical over-deduction can be auto-derived from
+    # this platform's own PayrollYtdAccumulator history the way KY's
+    # pension accumulator above naturally starts at 0 and accumulates
+    # forward. This mechanism is built general-purpose (any future GRA
+    # rate-change/refund scenario of the same shape, not hardcoded to
+    # 2026 Jan-Feb), but there is no UI/API path yet to populate a real
+    # opening balance — only a direct PayrollYtdAccumulator row entry
+    # (component "gy_paye_refund_credit") would activate it today.
+    # None (every employee until such an entry exists) means "no credit
+    # to apply" — engine/countries/guyana.py's calculate() runs its
+    # ordinary, unaffected PAYE calculation, identical to before this
+    # field existed. Never guesses/backfills a starting value.
+    ytd_gy_paye_credit_before: Decimal = None
+
     # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
     # $45,000 first-bracket test — this employee's cumulative WHM earnings
     # for the current Australian financial year, as of BEFORE this pay
@@ -712,6 +732,14 @@ class PayrollResult:
     # field above. See PayrollContext's matching
     # ytd_ky_mandatory_pensionable_earnings_before field.
     ytd_ky_mandatory_pensionable_earnings_after: Decimal = None
+
+    # Guyana PAYE statutory credit (GY-010) — remaining unconsumed credit
+    # balance AFTER this period (calculated liability minus whatever
+    # portion of the credit this period's calculation consumed, floored
+    # at 0). Same None-means-"not applicable"/dormant contract as every
+    # YTD-adjacent field above. See PayrollContext's matching
+    # ytd_gy_paye_credit_before field for the disclosed scope limitation.
+    ytd_gy_paye_credit_after: Decimal = None
     # True once ytd_whm_earnings_after crosses $45,000 for an employee
     # whose WHM YTD tracking is wired — informational (the withholding
     # itself is now genuinely computed using the real above-cap brackets
