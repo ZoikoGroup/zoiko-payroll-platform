@@ -167,8 +167,9 @@ class StandardStrategy(PayrollStrategy):
 
     def calculate(self, ctx: PayrollContext) -> PayrollResult:
         payroll_days = ctx.payroll_days or PAYROLL_DAYS
+        calendar_days = max(ctx.calendar_days or payroll_days, 0)
         unpaid = max(ctx.unpaid_leave_days, 0)
-        payable_days = max(payroll_days - unpaid, 0)
+        payable_days = max(calendar_days - unpaid, 0)
 
         per_day_salary = _round2(ctx.gross / Decimal(payroll_days)) if payroll_days else Decimal("0")
         attendance_deduction = min(_round2(per_day_salary * Decimal(unpaid)), ctx.gross)
@@ -226,6 +227,7 @@ class StandardStrategy(PayrollStrategy):
 
         return PayrollResult(
             payroll_days=payroll_days,
+            calendar_days=calendar_days,
             unpaid_leave_days=unpaid,
             payable_days=payable_days,
             per_day_salary=per_day_salary,

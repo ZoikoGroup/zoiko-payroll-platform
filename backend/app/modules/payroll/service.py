@@ -34,7 +34,7 @@ from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func as sa_func, tuple_, or_, and_, case
+from sqlalchemy import func as sa_func, tuple_, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
@@ -8272,6 +8272,31 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "AU": ["employee_name", "bank_name", "bank_account", "gross_pay",
            "tds", "study_loan_deduction", "employer_pension", "employer_payroll_tax",
            "au_statutory_deductions_total", "total_deductions", "net_pay"],
+    # Caribbean 7 (2026-09-22, Group D gap-closure) — each country's list
+    # is exactly the PayslipItem columns that country's own engine/
+    # countries/<code>.py calculate() actually returns (see each module's
+    # own "Reused fields" docstring), nothing more. Cayman and Bahamas
+    # deliberately EXCLUDE "tds": both have no personal income tax
+    # (KY-002/BS-005 — "never a fake 0% tax band"), so a report template
+    # for either country has no tax field to pick, not a zero one.
+    "BB": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "employee_pension", "total_deductions",
+           "employer_social_security", "employer_pension", "net_pay"],
+    "KY": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "employee_pension", "total_deductions", "employer_pension", "net_pay"],
+    "DO": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "employee_pension", "total_deductions",
+           "employer_social_security", "employer_pension", "employer_payroll_tax", "employer_ni", "net_pay"],
+    "GY": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "total_deductions", "employer_social_security", "net_pay"],
+    "JM": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "employee_pension", "ni_employee", "total_deductions",
+           "employer_social_security", "employer_pension", "employer_ni", "employer_payroll_tax", "net_pay"],
+    "BS": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "social_security", "total_deductions", "employer_social_security", "net_pay"],
+    "TT": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "professional_tax", "social_security", "total_deductions",
+           "employer_social_security", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -8299,6 +8324,42 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "church_tax": "Kirchensteuer",
         "employer_pf": "Pension Insurance (Employer)",
         "employer_esi": "Social Insurance (Employer)",
+    },
+    # Caribbean 7 — each override names the real statutory scheme a
+    # generic reused field stands in for, per that country's own
+    # engine module docstring (never changes which column is read).
+    "BB": {
+        "tds": "PAYE", "social_security": "NIS (Employee, Code R)",
+        "employer_social_security": "NIS (Employer, Code R)",
+        "employee_pension": "Resilience & Regeneration Levy (Employee)",
+        "employer_pension": "Resilience & Regeneration Levy (Employer)",
+    },
+    "KY": {
+        "employee_pension": "Mandatory Pension (Employee)",
+        "employer_pension": "Mandatory Pension (Employer)",
+    },
+    "DO": {
+        "tds": "ISR (Impuesto Sobre la Renta)",
+        "social_security": "SFS (Employee)", "employer_social_security": "SFS (Employer)",
+        "employee_pension": "Pensión / SVDS (Employee)", "employer_pension": "Pensión / SVDS (Employer)",
+        "employer_payroll_tax": "Seguro de Riesgos Laborales — SRL (Employer)",
+        "employer_ni": "INFOTEP (Employer)",
+    },
+    "GY": {
+        "tds": "PAYE", "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
+    },
+    "JM": {
+        "tds": "PAYE", "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
+        "employee_pension": "NHT (Employee)", "employer_pension": "NHT (Employer)",
+        "ni_employee": "Education Tax (Employee)", "employer_ni": "Education Tax (Employer)",
+        "employer_payroll_tax": "HEART (Employer)",
+    },
+    "BS": {
+        "social_security": "NIB (Employee)", "employer_social_security": "NIB (Employer)",
+    },
+    "TT": {
+        "tds": "PAYE", "professional_tax": "Health Surcharge",
+        "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
     },
 }
 
@@ -8448,6 +8509,56 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("earnings", "Earnings"), ("payg", "PAYG Withholding"), ("super", "Superannuation"),
         ("ytd", "Year-to-Date"), ("rti_metadata", "Submission Metadata"),
+    ],
+    # Caribbean 7 (2026-09-22, Group D gap-closure) — each is a per
+    # EMPLOYEE, per PAYROLL RUN itemized statutory pay-component
+    # statement generated via the generic field mapper (no bespoke
+    # generate_<cc>_<form> function needed, since it reads this run's
+    # own PayslipItem columns directly rather than aggregating across
+    # multiple runs in a calendar period). This is deliberately NOT the
+    # literal government e-filing artifact (TAMIS/GRA Form 5/NIBTT
+    # upload/C10/DGII IR-3, etc.) — those need real external file
+    # schemas the specs themselves say aren't acquired yet (e.g.
+    # ZP-BB-ENG-001 BB-028, ZP-GY-ENG-001 GY-024), and some (a true
+    # calendar-month return) would need the same cross-run aggregation
+    # US 941/940 and CA PD7A use, which is a distinct further build, not
+    # done here. This unlocks Super Admin template authoring and a real
+    # per-employee statutory pay-component report for each of the 7,
+    # matching the same bar Germany is still waiting to reach.
+    "BB_PAYE_NIS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("contributions", "NIS / R&R (Employee)"),
+        ("employer_contributions", "NIS / R&R (Employer)"),
+    ],
+    "KY_PENSION_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("contributions", "Mandatory Pension (Employee)"),
+        ("employer_contributions", "Mandatory Pension (Employer)"),
+    ],
+    "DO_PAYROLL_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "ISR"), ("contributions", "SFS / Pensión (Employee)"),
+        ("employer_contributions", "SFS / Pensión / SRL / INFOTEP (Employer)"),
+    ],
+    "GY_PAYE_NIS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("contributions", "NIS (Employee)"),
+        ("employer_contributions", "NIS (Employer)"),
+    ],
+    "JM_PAYROLL_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE / Education Tax"),
+        ("contributions", "NIS / NHT (Employee)"), ("employer_contributions", "NIS / NHT / HEART (Employer)"),
+    ],
+    "BS_NIB_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("contributions", "NIB (Employee)"),
+        ("employer_contributions", "NIB (Employer)"),
+    ],
+    "TT_PAYE_HS_NIS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE / Health Surcharge"), ("contributions", "NIS (Employee)"),
+        ("employer_contributions", "NIS (Employer)"),
     ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
@@ -11339,11 +11450,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         PAYROLL_DAYS = 30
         Per Day Salary = Monthly Gross / 30
         Attendance Deduction = Unpaid Leave Days × Per Day Salary
+        Payable Days = calendar days in the period − Unpaid Leave Days
 
     period_start/period_end are optional because a preview can happen
     before a run (and its period) exists. When provided, unpaid leave days
-    are counted from attendance records. When omitted, no attendance
-    deduction is applied."""
+    are counted from attendance records and payable/total working days use
+    the period's real calendar length. When omitted, no attendance
+    deduction is applied and the engine falls back to the 30-day basis."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
 
@@ -11617,6 +11730,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             additional_compensation=additional_compensation,
             unpaid_leave_days=unpaid_leave_days,
             country=emp_country, rate_map=emp_rate_map, slabs=emp_slabs,
+            calendar_days=_calendar_days(period_start, period_end),
             code_wages_rules=code_wages_rules,
             epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
             ca_taxability_rules=ca_taxability_rules,
@@ -11665,7 +11779,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "department": getattr(emp, "department", None),
             "attendanceStatus": "active" if is_active else "inactive",
             "payableDays": float(calc.payable_days),
-            "totalWorkingDays": float(calc.payroll_days),
+            "totalWorkingDays": float(calc.calendar_days),
             "unpaidLeaveDays": calc.unpaid_leave_days,
             "attendanceDeduction": float(calc.attendance_deduction),
             "perDaySalary": float(calc.per_day_salary),
@@ -11988,6 +12102,18 @@ def _get_holiday_dates(db: Session, organization_id: int, period_start, period_e
 
 # ── Payslip generation (real computation, replaces client-side mock) ──
 
+def _calendar_days(period_start, period_end):
+    """Days in a run's pay period: (period_end − period_start) + 1 inclusive.
+
+    28/29/30/31 for a calendar-month run, the raw span for semi-monthly /
+    bi-weekly periods. Returns None when the period is missing or invalid
+    (end before start) so the caller/engine falls back to PAYROLL_DAYS.
+    """
+    if not period_start or not period_end or period_end < period_start:
+        return None
+    return (period_end - period_start).days + 1
+
+
 def _count_unpaid_leave_days(db: Session, organization_id: int, employee_id: int,
                              period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> int:
     """Count unpaid leave days for this employee within the pay period.
@@ -11996,7 +12122,7 @@ def _count_unpaid_leave_days(db: Session, organization_id: int, employee_id: int
         PAYROLL_DAYS = 30
         Per Day Salary = Monthly Gross / 30
         Attendance Deduction = Unpaid Leave Days × Per Day Salary
-        Payable Days = 30 − Unpaid Leave Days
+        Payable Days = calendar days in the period − Unpaid Leave Days
 
     Only "absent" status or "leave" with leave_type="unpaid" (or None for
     backwards compatibility) count as unpaid leave. Paid/sick/casual leaves
@@ -14735,6 +14861,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         additional_compensation=additional_compensation,
         unpaid_leave_days=unpaid_leave_days,
         country=country, rate_map=rate_map, slabs=slabs,
+        calendar_days=_calendar_days(run.period_start, run.period_end),
         code_wages_rules=code_wages_rules,
         epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
         ca_taxability_rules=ca_taxability_rules,
@@ -14803,7 +14930,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "overtime": result.overtime,
         "additional_compensation": result.additional_compensation,
         "payable_days": Decimal(result.payable_days),
-        "total_working_days": Decimal(result.payroll_days),
+        "total_working_days": Decimal(result.calendar_days),
         "gross_pay": result.gross,
         "pf": result.employee_pf,
         "esi": result.employee_esi,
@@ -15026,7 +15153,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         PAYROLL_DAYS = 30
         Per Day Salary = Monthly Gross / 30
         Attendance Deduction = Unpaid Leave Days × Per Day Salary
-        Payable Days = 30 − Unpaid Leave Days
+        Payable Days = calendar days in the period − Unpaid Leave Days
 
     Salary components (basic, hra, special) are full monthly amounts — no
     proration.  Attendance deduction is a separate line item.  Statutory
@@ -19451,6 +19578,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         residence_locality_rate=residence_locality_rate,
         pay_date=run.pay_date,
         ni_category_override=ni_category_override,
+        calendar_days=_calendar_days(run.period_start, run.period_end),
         **reciprocity,
         **germany_kwargs,
         **ytd_inputs,
@@ -19586,7 +19714,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         attendance_deduction=calc.attendance_deduction,
         per_day_salary=calc.per_day_salary,
         payable_days=Decimal(calc.payable_days),
-        total_working_days=Decimal(calc.payroll_days),
+        total_working_days=Decimal(calc.calendar_days),
         # Germany (Phase 7/8E) — frozen statutory provenance, same as the
         # batch path; None for every non-German manual payslip.
         employee_statutory_profile_id=calc.germany_statutory_profile_id,
@@ -23698,37 +23826,23 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
 
 
 def _compute_attendance_deductions(db: Session, organization_id: int = None, year: int = None, month: int = None) -> Decimal:
-    """Compute total attendance deductions from payslip proration loss.
+    """Compute total attendance deductions across payslips.
 
-    Summed entirely at the SQL level (a per-row CASE/arithmetic expression
-    aggregated with SUM) instead of pulling every PayslipItem row into Python
-    and looping — this ran on every Dashboard poll tick (every 30s per open
-    tab) and, with no month filter ("All Months"), scaled linearly with the
-    total number of payslips ever generated.
+    Summed entirely at the SQL level (a single COALESCE/SUM over the stored
+    attendance_deduction column) instead of pulling every PayslipItem row
+    into Python and looping — this ran on every Dashboard poll tick (every
+    30s per open tab) and, with no month filter ("All Months"), scaled
+    linearly with the total number of payslips ever generated.
 
-    full_x - x, where full_x = x / (payable_days / total_working_days),
-    algebraically simplifies to x * (total_working_days - payable_days) / payable_days
-    — avoids computing an intermediate proration_factor per row.
+    Previously this reconstructed the total from the payable_days /
+    total_working_days proration ratio (full_x − x, where full_x = x /
+    (payable_days / total_working_days)). That reconstruction only equaled
+    the real deductions while total_working_days was hard-coded to 30;
+    with calendar-length (28/29/30/31) periods it would drift. The stored
+    attendance_deduction is the actual amount that reduced net pay, so it
+    is the exact, stable source.
     """
-    gross_components = (
-        sa_func.coalesce(PayslipItem.basic_salary, 0)
-        + sa_func.coalesce(PayslipItem.hra, 0)
-        + sa_func.coalesce(PayslipItem.special_allowance, 0)
-    )
-    att_ded_expr = case(
-        (
-            and_(
-                PayslipItem.payable_days.isnot(None),
-                PayslipItem.total_working_days.isnot(None),
-                PayslipItem.total_working_days > 0,
-                PayslipItem.payable_days > 0,
-                PayslipItem.payable_days < PayslipItem.total_working_days,
-            ),
-            gross_components * (PayslipItem.total_working_days - PayslipItem.payable_days) / PayslipItem.payable_days,
-        ),
-        else_=0,
-    )
-    q = db.query(sa_func.coalesce(sa_func.sum(att_ded_expr), 0)).select_from(PayslipItem).join(
+    q = db.query(sa_func.coalesce(sa_func.sum(PayslipItem.attendance_deduction), 0)).select_from(PayslipItem).join(
         PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id
     )
     q = _apply_org_filter(q, PayslipItem, organization_id)

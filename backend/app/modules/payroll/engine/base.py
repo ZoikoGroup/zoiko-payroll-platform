@@ -12,7 +12,9 @@ Fixed 30-Day Payroll Model (applies to ALL strategies):
     PAYROLL_DAYS = 30
     Per Day Salary = Monthly Gross / 30
     Attendance Deduction = Unpaid Leave Days × Per Day Salary
-    Payable Days = 30 − Unpaid Leave Days
+    Payable Days = calendar days in the pay period − Unpaid Leave Days
+    (calendar_days = 28/29/30/31 for a calendar-month run; falls back to
+    30 when the caller doesn't supply a real period length)
 """
 
 from __future__ import annotations
@@ -44,6 +46,13 @@ class PayrollContext:
     # Attendance (fixed 30-day model)
     unpaid_leave_days: int = 0
     payroll_days: int = PAYROLL_DAYS
+    # Actual length of this run's pay period — 28/29/30/31 for a calendar
+    # month, the raw span for semi-monthly/bi-weekly periods. Used ONLY
+    # for payable_days and total_working_days; per_day_salary always
+    # divides by payroll_days (30), so the attendance deduction is
+    # unchanged by month length. None (every direct/db-free caller that
+    # doesn't know its period) falls back to payroll_days.
+    calendar_days: int | None = None
 
     # Country / compliance
     country: str = "IN"
@@ -605,7 +614,12 @@ class PayrollResult:
 
     # Attendance
     payroll_days: int = PAYROLL_DAYS
+    # Real pay-period length this run actually spans (see PayrollContext.
+    # calendar_days). Echoed back so service.py can persist it as
+    # total_working_days without recomputing it.
+    calendar_days: int = PAYROLL_DAYS
     unpaid_leave_days: int = 0
+    # calendar_days − unpaid_leave_days (floored at 0).
     payable_days: int = PAYROLL_DAYS
     per_day_salary: Decimal = Decimal("0")
     attendance_deduction: Decimal = Decimal("0")

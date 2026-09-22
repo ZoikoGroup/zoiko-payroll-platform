@@ -1241,14 +1241,17 @@ class PayslipItem(Base):
     additional_compensation = Column(Numeric(12, 2), default=0, server_default="0")
     gross_pay         = Column(Numeric(12, 2), default=0)
 
-    # Loss-of-pay proration transparency. total_working_days excludes
-    # weekends within the run's period; payable_days additionally excludes
-    # any day the employee's attendance record is "absent" or "leave" with
-    # leave_type = "unpaid" (or NULL for legacy rows). Paid / sick / casual
-    # leaves do NOT reduce payable_days. basic/hra/special_allowance above
-    # are the *prorated* amounts actually paid; these two columns record
-    # what the proration factor was, so a payslip is self-explanatory
-    # without recomputing it.
+    # Loss-of-pay proration transparency. total_working_days is the actual
+    # calendar length of the run's pay period (28/29/30/31 for a calendar
+    # month — the engine mirrors it from PayrollResult.calendar_days);
+    # payable_days additionally excludes any day the employee's attendance
+    # record is "absent" or "leave" with leave_type = "unpaid" (or NULL for
+    # legacy rows), so total_working_days − payable_days == unpaid days.
+    # Paid / sick / casual leaves do NOT reduce payable_days.
+    # basic/hra/special_allowance above are the full monthly amounts
+    # actually paid (per-day salary always divides by the 30-day basis);
+    # these two columns record the payable-day breakdown so a payslip is
+    # self-explanatory without recomputing it.
     payable_days       = Column(Numeric(5, 2), nullable=True)
     total_working_days = Column(Numeric(5, 2), nullable=True)
 

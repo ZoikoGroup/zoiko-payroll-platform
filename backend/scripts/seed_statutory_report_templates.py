@@ -480,6 +480,209 @@ def run():
                 reporting_year="2026-27", document_scope="AGGREGATE", components=[],
             )
 
+        # Caribbean 7 (2026-09-22, Group D gap-closure) — one PER_EMPLOYEE
+        # itemized statutory pay-component statement per country, all via
+        # the generic field mapper (straight PayslipItem columns for this
+        # one committed run, no cross-run aggregation and no bespoke
+        # generator). Deliberately NOT the literal government e-filing
+        # artifact (TAMIS/GRA Form 5/C10/DGII IR-3/NIBTT upload) — those
+        # need real external file schemas the specs themselves say
+        # aren't acquired yet. All calendar-year countries, so
+        # reporting_year="2026" (matching the US/CA convention above,
+        # not AU/IN's fiscal-year "2026-27").
+
+        print("Seeding Barbados PAYE + NIS/R&R statement, per-employee...")
+        _seed_template(
+            db, template_key="BB-PAYE-NIS", name="PAYE + NIS/R&R Statement", report_type="BB_PAYE_NIS",
+            country="BB", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tamis_tin", "TAMIS TIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "PAYE", [
+                    ("tds", "PAYE", "currency", "PAYSLIP_ITEM", "tds", None),
+                ]),
+                ("contributions", "NIS / R&R (Employee)", [
+                    ("social_security", "NIS (Employee, Code R)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("employee_pension", "Resilience & Regeneration Levy (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                ]),
+                ("employer_contributions", "NIS / R&R (Employer)", [
+                    ("employer_social_security", "NIS (Employer, Code R)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("employer_pension", "Resilience & Regeneration Levy (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Cayman Islands pension statement, per-employee (no personal income tax)...")
+        _seed_template(
+            db, template_key="KY-PENSION", name="Mandatory Pension Statement", report_type="KY_PENSION_STATEMENT",
+            country="KY", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("contributions", "Mandatory Pension (Employee)", [
+                    ("employee_pension", "Mandatory Pension (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                ]),
+                ("employer_contributions", "Mandatory Pension (Employer)", [
+                    ("employer_pension", "Mandatory Pension (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Dominican Republic payroll statement, per-employee...")
+        _seed_template(
+            db, template_key="DO-PAYROLL", name="ISR + SFS/SVDS/SRL/INFOTEP Statement", report_type="DO_PAYROLL_STATEMENT",
+            country="DO", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_rnc", "RNC", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "ISR", [
+                    ("tds", "ISR", "currency", "PAYSLIP_ITEM", "tds", None),
+                ]),
+                ("contributions", "SFS / Pensión (Employee)", [
+                    ("social_security", "SFS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("employee_pension", "Pensión / SVDS (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                ]),
+                ("employer_contributions", "SFS / Pensión / SRL / INFOTEP (Employer)", [
+                    ("employer_social_security", "SFS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("employer_pension", "Pensión / SVDS (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("employer_payroll_tax", "Seguro de Riesgos Laborales — SRL (Employer)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                    ("employer_ni", "INFOTEP (Employer)", "currency", "PAYSLIP_ITEM", "employer_ni", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Guyana PAYE + NIS statement, per-employee...")
+        _seed_template(
+            db, template_key="GY-PAYE-NIS", name="PAYE + NIS Statement", report_type="GY_PAYE_NIS",
+            country="GY", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_gra_tin", "GRA TIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "PAYE", [
+                    ("tds", "PAYE", "currency", "PAYSLIP_ITEM", "tds", None),
+                ]),
+                ("contributions", "NIS (Employee)", [
+                    ("social_security", "NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                ]),
+                ("employer_contributions", "NIS (Employer)", [
+                    ("employer_social_security", "NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Jamaica payroll statement (PAYE/NIS/NHT/Education Tax/HEART), per-employee...")
+        _seed_template(
+            db, template_key="JM-PAYROLL", name="PAYE + NIS/NHT/Education Tax Statement", report_type="JM_PAYROLL_STATEMENT",
+            country="JM", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "PAYE / Education Tax", [
+                    ("tds", "PAYE", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("ni_employee", "Education Tax (Employee)", "currency", "PAYSLIP_ITEM", "ni_employee", None),
+                ]),
+                ("contributions", "NIS / NHT (Employee)", [
+                    ("social_security", "NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("employee_pension", "NHT (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                ]),
+                ("employer_contributions", "NIS / NHT / HEART (Employer)", [
+                    ("employer_social_security", "NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("employer_pension", "NHT (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("employer_ni", "Education Tax (Employer)", "currency", "PAYSLIP_ITEM", "employer_ni", None),
+                    ("employer_payroll_tax", "HEART (Employer)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                ]),
+            ],
+        )
+
+        print("Seeding The Bahamas NIB statement, per-employee (no personal income tax)...")
+        _seed_template(
+            db, template_key="BS-NIB", name="NIB Contribution Statement", report_type="BS_NIB_STATEMENT",
+            country="BS", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("contributions", "NIB (Employee)", [
+                    ("social_security", "NIB (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                ]),
+                ("employer_contributions", "NIB (Employer)", [
+                    ("employer_social_security", "NIB (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Trinidad and Tobago PAYE + Health Surcharge + NIS statement, per-employee...")
+        _seed_template(
+            db, template_key="TT-PAYE-HS-NIS", name="PAYE + Health Surcharge + NIS Statement", report_type="TT_PAYE_HS_NIS",
+            country="TT", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bir_number", "BIR File Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "PAYE / Health Surcharge", [
+                    ("tds", "PAYE", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("professional_tax", "Health Surcharge", "currency", "PAYSLIP_ITEM", "professional_tax", None),
+                ]),
+                ("contributions", "NIS (Employee)", [
+                    ("social_security", "NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                ]),
+                ("employer_contributions", "NIS (Employer)", [
+                    ("employer_social_security", "NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:
         db.close()
