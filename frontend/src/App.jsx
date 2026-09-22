@@ -32,7 +32,7 @@ import {
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
 import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage, DEReportTemplatesPage } from "./pages/ReportTemplates";
-import FundingPaymentsPage from "./pages/FundingPaymentsPage";
+import FundingPaymentsPage from "./pages/SuperAdmin/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
@@ -40,6 +40,7 @@ import AssistAdminPage from "./modules/assist/AssistAdminPage";
 import TeamPage from "./modules/organization-admin/TeamPage";
 import SubscriptionPage from "./modules/organization-admin/SubscriptionPage";
 import PlanSelectionPage from "./pages/PlanSelectionPage";
+import PlanReviewPage from "./pages/PlanReviewPage";
 import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
 import CheckoutCancelPage from "./pages/CheckoutCancelPage";
 import PlansEntitlementsPage from "./pages/SuperAdmin/PlansEntitlementsPage";
@@ -75,6 +76,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
 <Route element={<ProtectedRoute />}>
           {/* Billing — plan selection & Stripe Checkout landing pages */}
+        <Route path="/register/plan-review" element={<PlanReviewPage />} />
         <Route path="/billing/plans" element={<PlanSelectionPage />} />
         <Route path="/billing/checkout/success" element={<CheckoutSuccessPage />} />
         <Route path="/billing/checkout/cancel" element={<CheckoutCancelPage />} />

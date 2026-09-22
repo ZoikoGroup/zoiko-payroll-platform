@@ -74,15 +74,22 @@ def _sweep_all_organizations() -> None:
         last_run_status["last_error"] = None
 
 
-def start_assist_scheduler() -> BackgroundScheduler | None:
+def start_assist_scheduler(run_now: bool = False) -> BackgroundScheduler | None:
     """Start the background sweep on app startup. No-op if disabled via
-    ASSIST_SWEEP_ENABLED or already running (safe to call more than once)."""
+    ASSIST_SWEEP_ENABLED or already running (safe to call more than once).
+    `run_now` executes one sweep immediately before scheduling (used once at
+    startup so service-health shows a real last-run rather than 'unknown'
+    for one full interval)."""
     global _scheduler
     if not settings.ASSIST_SWEEP_ENABLED:
         logger.info("[assist-sweep] Disabled via ASSIST_SWEEP_ENABLED=false; not starting.")
         return None
     if _scheduler is not None:
         return _scheduler
+
+    if run_now:
+        logger.info("[assist-sweep] Running initial sweep at startup.")
+        _sweep_all_organizations()
 
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(

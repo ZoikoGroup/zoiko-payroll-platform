@@ -4,6 +4,8 @@ import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
 import { getRevenueCollections } from "../../service/commandCenterService";
 
+const SECTION_LABEL_CLS = "text-xs font-semibold uppercase tracking-wider text-foreground-muted";
+
 // Same dunning vocabulary as SubscriptionsBillingPage.jsx — raw
 // BillingDunningState.stage values, identical labels and pill tokens. One
 // visual language for dunning across the Command Center; not a second one.
@@ -29,15 +31,19 @@ function formatMoney(value) {
   }).format(num);
 }
 
-function StatCard({ icon: Icon, label, value, detail }) {
+// Deliberately quieter than a "hero" figure: no border/shadow competing for
+// attention, smaller data-value size — these are supporting context next to
+// the MRR figure, not four equally-weighted cards.
+function QuietStat({ icon: Icon, label, value, detail, tone }) {
+  const toneCls = tone === "warning" ? "text-warning" : "text-foreground";
   return (
-    <div className="bg-surface border border-border rounded-xl shadow-sm p-5 min-w-[200px]">
-      <div className="flex items-center gap-2 text-foreground-muted mb-1">
-        <Icon size={16} className="text-primary" />
-        <span className="text-sm font-medium">{label}</span>
+    <div className="p-3">
+      <div className="flex items-center gap-1.5 text-foreground-muted mb-1">
+        <Icon size={14} className={tone === "warning" ? "text-warning" : "text-primary"} />
+        <span className="text-xs font-medium">{label}</span>
       </div>
-      <p className="text-2xl font-bold text-foreground">{value}</p>
-      {detail && <p className="mt-1 text-xs text-foreground-muted">{detail}</p>}
+      <p className={`text-xl font-bold ${toneCls}`}>{value}</p>
+      {detail && <p className="mt-0.5 text-xs text-foreground-muted">{detail}</p>}
     </div>
   );
 }
@@ -46,6 +52,7 @@ export default function RevenueCollectionsPage() {
   const { addToast } = useToast() || {};
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [revealed, setRevealed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,6 +67,15 @@ export default function RevenueCollectionsPage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
+
+  // One deliberate reveal moment for the MRR figure itself — not applied to
+  // every card, per the "avoid generic fade-and-slide-up" guidance.
+  useEffect(() => {
+    if (data) {
+      const frame = requestAnimationFrame(() => setRevealed(true));
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [data]);
 
   const pastDue = data?.past_due || [];
 
@@ -84,35 +100,47 @@ export default function RevenueCollectionsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 mb-6">
-        <StatCard
-          icon={CircleDollarSign}
-          label="MRR This Month"
-          value={formatMoney(data?.mrr_this_month)}
-          detail={
-            data && data.paid_invoices_this_month > 0
+      <div className="mb-8 flex flex-col gap-6 border-b border-border-light pb-6 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-foreground-muted mb-1">
+            <CircleDollarSign size={16} className="text-primary" />
+            <span className={SECTION_LABEL_CLS}>MRR This Month</span>
+          </div>
+          <p
+            className={`text-6xl font-extrabold tracking-tight text-foreground transition-opacity duration-500 ease-out ${
+              revealed ? "opacity-100" : "opacity-0"
+            }`}
+          >
+            {formatMoney(data?.mrr_this_month)}
+          </p>
+          <p className="mt-1 text-sm text-foreground-muted">
+            {data && data.paid_invoices_this_month > 0
               ? `${data.paid_invoices_this_month} paid invoice(s) this month`
-              : "No paid invoices issued this month"
-          }
-        />
-        <StatCard
-          icon={CircleDollarSign}
-          label="Active Subscriptions"
-          value={data?.active_subscriptions ?? "—"}
-          detail={data && data.cancelled_this_month > 0 ? `${data.cancelled_this_month} cancelled this month` : "No cancellations this month"}
-        />
-        <StatCard
-          icon={CircleDollarSign}
-          label="Churn This Month"
-          value={data ? `${data.churn_pct}%` : "—"}
-          detail="Cancelled / (active + cancelled)"
-        />
-        <StatCard
-          icon={AlertTriangle}
-          label="Past-Due Orgs"
-          value={pastDue.length}
-          detail={pastDue.length > 0 ? "Org(s) in a dunning stage" : "Nothing in dunning"}
-        />
+              : "No paid invoices issued this month"}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 divide-y divide-border-light rounded-lg bg-surface-muted sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:min-w-[440px]">
+          <QuietStat
+            icon={CircleDollarSign}
+            label="Active Subscriptions"
+            value={data?.active_subscriptions ?? "—"}
+            detail={data && data.cancelled_this_month > 0 ? `${data.cancelled_this_month} cancelled this month` : "No cancellations this month"}
+          />
+          <QuietStat
+            icon={CircleDollarSign}
+            label="Churn This Month"
+            value={data ? `${data.churn_pct}%` : "—"}
+            detail="Cancelled / (active + cancelled)"
+          />
+          <QuietStat
+            icon={AlertTriangle}
+            label="Past-Due Orgs"
+            value={pastDue.length}
+            detail={pastDue.length > 0 ? "Org(s) in a dunning stage" : "Nothing in dunning"}
+            tone={pastDue.length > 0 ? "warning" : undefined}
+          />
+        </div>
       </div>
 
       {data && data.mrr_by_currency.length > 0 && (
@@ -130,8 +158,8 @@ export default function RevenueCollectionsPage() {
 
       <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
         <div className="px-4 py-3 border-b border-border-light">
-          <h2 className="text-sm font-semibold text-foreground-secondary flex items-center gap-1.5">
-            <AlertTriangle size={15} className="text-amber-500" />
+          <h2 className={`${SECTION_LABEL_CLS} flex items-center gap-1.5`}>
+            <AlertTriangle size={14} className="text-warning" />
             Past Due — dunning stages and in-flight-run protection
           </h2>
         </div>
@@ -145,7 +173,10 @@ export default function RevenueCollectionsPage() {
           </thead>
           <tbody>
             {pastDue.map((row) => (
-              <tr key={row.organization_id} className="border-t border-border-light">
+              <tr
+                key={row.organization_id}
+                className={`border-t border-border-light ${!row.in_flight_run_guard ? "bg-warning-light/40" : ""}`}
+              >
                 <td className="px-4 py-3 font-medium text-foreground">{row.organization_name}</td>
                 <td className="px-4 py-3">
                   <StatusPill
@@ -156,17 +187,19 @@ export default function RevenueCollectionsPage() {
                 <td className="px-4 py-3">
                   {row.in_flight_run_guard ? (
                     <span
-                      className="inline-flex items-center gap-1 text-xs font-semibold"
-                      style={{ color: "#166534" }}
+                      className="inline-flex items-center gap-1.5"
                       title="An authorized payroll run is currently in flight for this org — dunning is frozen at this stage and that run will complete normally."
                     >
-                      <ShieldCheck size={12} className="shrink-0" />
-                      Payment overdue, but protected — an authorized run is in flight
+                      <ShieldCheck size={13} className="shrink-0 text-success" />
+                      <StatusPill status="active" label="Protected — run in flight" />
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-500">
-                      <AlertTriangle size={12} className="shrink-0" />
-                      At risk — no authorized run in flight to shield this org
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      title="No authorized payroll run is currently in flight to shield this org from the next dunning escalation."
+                    >
+                      <AlertTriangle size={13} className="shrink-0 text-warning" />
+                      <StatusPill status="on_hold" label="At risk — no run in flight" />
                     </span>
                   )}
                 </td>

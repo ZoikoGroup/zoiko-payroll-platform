@@ -32,6 +32,7 @@ class RegisterRequest(BaseModel):
     country: Optional[str] = None
     timezone: Optional[str] = "UTC"
     phone: Optional[str] = None
+    terms_accepted: bool = Field(..., description="Whether the registration terms were accepted")
     # Jurisdiction-aware tax/registration identifiers collected on the Register
     # Page once a country is selected — keyed by the field keys in
     # app/core/jurisdiction.py (gstin/pan/cin, ein/state_tax_id, crn/vat_number,

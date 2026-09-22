@@ -2114,6 +2114,39 @@ class FilingCalendarStatusUpdate(BaseModel):
     status: str
 
 
+# ── Statutory Filing (per-org filing-status tracker) ───────────────────────
+# The persisted "did we actually file it" record behind the Super Admin
+# Filings & Remittances dashboard (command_center_router.py) and any org-facing
+# compliance recording UI. One row per (org, jurisdiction, filing type, period).
+
+class StatutoryFilingResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(serialization_alias="organizationId")
+    organizationName:   Optional[str] = Field(None, serialization_alias="organizationName")
+    jurisdiction:       str
+    filingType:         str = Field(serialization_alias="filingType")
+    periodLabel:        str = Field(serialization_alias="periodLabel")
+    periodStart:        Optional[date] = Field(None, serialization_alias="periodStart")
+    periodEnd:          Optional[date] = Field(None, serialization_alias="periodEnd")
+    status:             str
+    blockedReason:      Optional[str] = Field(None, serialization_alias="blockedReason")
+    submittedAt:        Optional[datetime] = Field(None, serialization_alias="submittedAt")
+    createdAt:          Optional[datetime] = Field(None, serialization_alias="createdAt")
+    updatedAt:          Optional[datetime] = Field(None, serialization_alias="updatedAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class StatutoryFilingUpsert(BaseModel):
+    filingType:   str
+    periodLabel:  str
+    periodStart:  Optional[date] = None
+    periodEnd:    Optional[date] = None
+    status:       str = "NOT_STARTED"
+    blockedReason: Optional[str] = None
+    submittedAt:  Optional[datetime] = None
+
+
 class AvailableComponentItem(BaseModel):
     key: str
     label: str

@@ -44,14 +44,21 @@ def _run_sweep() -> None:
         db.close()
 
 
-def start_assisted_access_scheduler() -> BackgroundScheduler | None:
-    """Start on app startup. No-op if disabled or already running."""
+def start_assisted_access_scheduler(run_now: bool = False) -> BackgroundScheduler | None:
+    """Start on app startup. No-op if disabled or already running. `run_now`
+    executes one sweep immediately before scheduling (used once at startup so
+    service-health shows a real last-run rather than 'unknown' for one full
+    interval)."""
     global _scheduler
     if not settings.ASSISTED_ACCESS_SWEEP_ENABLED:
         logger.info("[assisted-access-sweep] Disabled via ASSISTED_ACCESS_SWEEP_ENABLED=false; not starting.")
         return None
     if _scheduler is not None:
         return _scheduler
+
+    if run_now:
+        logger.info("[assisted-access-sweep] Running initial sweep at startup.")
+        _run_sweep()
 
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(

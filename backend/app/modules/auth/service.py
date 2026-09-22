@@ -12,6 +12,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -392,10 +393,12 @@ def refresh_user_token(db: Session, refresh_token: str) -> dict:
 
 # ── Registration (public self-serve onboarding) ─────────────────────────────
 
-def register_enterprise(db: Session, data: RegisterRequest) -> dict:
+def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Optional[BackgroundTasks] = None) -> dict:
     existing = db.query(User).filter(User.email == data.email).first()
     if existing:
         raise AlreadyExistsException("User", "email")
+    if not data.terms_accepted:
+        raise BadRequestException("You must accept the registration terms.")
 
     # Reject registration outright for a jurisdiction with no valid Active
     # canonical compliance pack — never silently register the org and let
@@ -436,6 +439,8 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
         email=data.email,
         phone=data.phone,
         is_active=True,
+        billing_onboarding_status="PENDING_CHECKOUT",
+        terms_accepted_at=datetime.utcnow(),
     )
     db.add(org)
     db.flush()
@@ -462,33 +467,46 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
 
     logger.info("New organization %s registered by %s", org.organization_code, data.email)
 
-    try:
-        from app.services.email_service import (
-            send_organization_created_email,
-            send_super_admin_org_created_notification_email,
-        )
-        ref_id = f"ORG-{org.id:04d}-INIT"
-        send_organization_created_email(
-            email=admin.email,
-            recipient_first_name=first_name,
-            organization_name=org.organization_name,
-            reference_id=ref_id,
-            organization_id=org.id,
-            db=db,
-        )
-        logger.info(
-            "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
-            admin.email, org.id, ref_id,
-        )
-        # Notify Super Admins with full org & primary admin metadata
-        send_super_admin_org_created_notification_email(
-            org=org,
-            admin_user=admin,
-            reference_id=f"ADM-ORG-{org.id:04d}",
-            db=db,
-        )
-    except Exception as exc:
-        logger.warning("Failed to dispatch org created emails for org %s: %s", org.id, exc)
+    def _dispatch_org_created_emails() -> None:
+        # Runs after the HTTP response is sent (or synchronously if no
+        # background_tasks was supplied — e.g. direct/test callers). Doing
+        # this inline used to block the register response on a live SMTP
+        # round-trip: a hung or auth-rejecting relay (see SMTP_HOST) made a
+        # real registration take ~30s (the socket timeout) before the
+        # client ever saw a response, for an email that isn't required for
+        # the account to work.
+        try:
+            from app.services.email_service import (
+                send_organization_created_email,
+                send_super_admin_org_created_notification_email,
+            )
+            ref_id = f"ORG-{org.id:04d}-INIT"
+            send_organization_created_email(
+                email=admin.email,
+                recipient_first_name=first_name,
+                organization_name=org.organization_name,
+                reference_id=ref_id,
+                organization_id=org.id,
+                db=db,
+            )
+            logger.info(
+                "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
+                admin.email, org.id, ref_id,
+            )
+            # Notify Super Admins with full org & primary admin metadata
+            send_super_admin_org_created_notification_email(
+                org=org,
+                admin_user=admin,
+                reference_id=f"ADM-ORG-{org.id:04d}",
+                db=db,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch org created emails for org %s: %s", org.id, exc)
+
+    if background_tasks is not None:
+        background_tasks.add_task(_dispatch_org_created_emails)
+    else:
+        _dispatch_org_created_emails()
 
     token_payload = {
         "sub": admin.email,
@@ -504,7 +522,7 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
     }
 
 
-def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
+def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Optional[BackgroundTasks] = None) -> dict:
     """30-day Professional Evaluation signup (/auth/register-trial).
 
     Same JWT + email pipeline as register_enterprise, but the evaluation path
@@ -590,6 +608,7 @@ def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
         current_period_end=trial_end,
     )
     db.add(subscription)
+    org.billing_onboarding_status = "TRIALING"
     db.flush()
 
     db.add(
@@ -612,27 +631,36 @@ def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
 
     logger.info("New evaluation organization %s registered by %s", org.organization_code, data.email)
 
-    try:
-        from app.services.email_service import send_trial_organization_created_email
+    def _dispatch_trial_org_created_email() -> None:
+        # See register_enterprise's identical wrapper for why this is
+        # deferred to a background task rather than blocking the response
+        # on a live SMTP round-trip.
+        try:
+            from app.services.email_service import send_trial_organization_created_email
 
-        evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
-        ref_id = f"TRIAL-{org.id:04d}-INIT"
-        send_trial_organization_created_email(
-            email=admin.email,
-            recipient_first_name=first_name,
-            organization_name=org.organization_name,
-            reference_id=ref_id,
-            evaluation_days=30,
-            evaluation_end_date=evaluation_end,
-            organization_id=org.id,
-            db=db,
-        )
-        logger.info(
-            "email_audit event=commercial.evaluation_created template_id=COM-003 recipient=%s org_id=%s reference_id=%s",
-            admin.email, org.id, ref_id,
-        )
-    except Exception as exc:
-        logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
+            evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
+            ref_id = f"TRIAL-{org.id:04d}-INIT"
+            send_trial_organization_created_email(
+                email=admin.email,
+                recipient_first_name=first_name,
+                organization_name=org.organization_name,
+                reference_id=ref_id,
+                evaluation_days=30,
+                evaluation_end_date=evaluation_end,
+                organization_id=org.id,
+                db=db,
+            )
+            logger.info(
+                "email_audit event=commercial.evaluation_created template_id=COM-003 recipient=%s org_id=%s reference_id=%s",
+                admin.email, org.id, ref_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
+
+    if background_tasks is not None:
+        background_tasks.add_task(_dispatch_trial_org_created_email)
+    else:
+        _dispatch_trial_org_created_email()
 
     token_payload = {
         "sub": admin.email,
@@ -850,28 +878,15 @@ def _send_invite_email(
 
 from app.modules.billing.models import SubscriptionStatus  # noqa: E402
 
-TRIAL_STATUS_BY_SUBSCRIPTION = {
-    # SubscriptionStatus value → trial_status vocabulary used by the banner.
-    # ACTIVE and TRIALING both browse->actively-in-trial; a live
-    # (production) customer has no trial at all, which we signal with null
-    # rather than a made-up value.
-    SubscriptionStatus.TRIALING.value: "ACTIVE",
-    SubscriptionStatus.ACTIVE.value: "ACTIVE",
-    SubscriptionStatus.PAST_DUE.value: "GRACE_READONLY",
-    SubscriptionStatus.SUSPENDED.value: "CLOSED",
-    SubscriptionStatus.CANCELLED.value: "CLOSED",
-}
-
-
 def get_my_trial_status(db: Session, organization_id: int):
     """Payload for GET /auth/me/trial-status — all values derived from the
     org's live rows, never cached/duplicated.
 
     - workspace_type: Organization.workspace_type (defaults to
       PRODUCTION for a missing org — safe for banner rendering).
-    - trial_status: mapped from BillingSubscription.status via
-      TRIAL_STATUS_BY_SUBSCRIPTION, or null when no subscription exists or
-      the org is not an evaluation workspace.
+        - trial_status: derived by the billing trial lifecycle state machine, or
+            null when no subscription exists or the org is not an evaluation
+            workspace. This keeps the banner and expiry sweep on one vocabulary.
     - trial_started_at: BillingSubscription.current_period_start (needed by
       the dashboard's remaining-time bar to render elapsed-vs-remaining).
     - trial_expires_at: BillingSubscription.current_period_end (single
@@ -886,10 +901,11 @@ def get_my_trial_status(db: Session, organization_id: int):
 
     if workspace_type == "EVALUATION":
         from app.modules.billing.entitlements import get_active_subscription
+        from app.modules.billing.trial_lifecycle import resolve_trial_stage
 
         subscription = get_active_subscription(db, organization_id)
         if subscription is not None:
-            trial_status = TRIAL_STATUS_BY_SUBSCRIPTION.get(subscription.status)
+            trial_status = resolve_trial_stage(subscription)
             trial_started_at = subscription.current_period_start
             trial_expires_at = subscription.current_period_end
 

@@ -1,0 +1,47 @@
+<claude-code-hint v="1" type="plugin" value="stripe@claude-plugins-official" />
+INFO:     Started server process [16800]
+INFO:     Waiting for application startup.
+2026-09-22 15:02:20,006 [INFO] Existing tables detected — skipping schema creation.
+2026-09-22 15:02:21,621 [INFO] [assist-sweep] Running initial sweep at startup.
+2026-09-22 15:02:45,712 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 15:02:45,713 [INFO] Added job "_sweep_all_organizations" to job store "default"
+2026-09-22 15:02:45,714 [INFO] Scheduler started
+2026-09-22 15:02:45,714 [INFO] [assist-sweep] Started, running every 24 hour(s).
+2026-09-22 15:02:45,714 [INFO] [trial-sweep] Running initial sweep at startup.
+2026-09-22 15:02:46,358 [INFO] [trial-sweep] scanned=1 grace_started=0 closed=0
+2026-09-22 15:02:46,572 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 15:02:46,573 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 15:02:46,573 [INFO] Scheduler started
+2026-09-22 15:02:46,574 [INFO] [trial-sweep] Started, running every 24 hour(s).
+2026-09-22 15:02:46,574 [INFO] [dunning-sweep] Running initial sweep at startup.
+2026-09-22 15:02:47,434 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 15:02:47,435 [INFO] Added job "_run_dunning_sweep" to job store "default"
+2026-09-22 15:02:47,435 [INFO] Scheduler started
+2026-09-22 15:02:47,436 [INFO] [dunning-sweep] Started, running every 24 hour(s).
+2026-09-22 15:02:47,436 [INFO] [bwm-aggregation] Running initial aggregation at startup.
+2026-09-22 15:02:54,815 [INFO] [bwm-aggregation] month=2026-09-01 orgs=3
+2026-09-22 15:02:55,243 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 15:02:55,243 [INFO] Added job "_bwm_sweep_job" to job store "default"
+2026-09-22 15:02:55,243 [INFO] Scheduler started
+2026-09-22 15:02:55,244 [INFO] [bwm-aggregation] Started, running every 24 hour(s).
+2026-09-22 15:02:55,244 [INFO] [assisted-access-sweep] Running initial sweep at startup.
+2026-09-22 15:02:56,108 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 15:02:56,108 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 15:02:56,108 [INFO] Scheduler started
+2026-09-22 15:02:56,109 [INFO] [assisted-access-sweep] Started, running every 60 minute(s).
+2026-09-22 15:02:56,110 [INFO] [token-cleanup] Running initial sweep at startup.
+2026-09-22 15:02:56,973 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-22 15:02:56,973 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-22 15:02:56,974 [INFO] Scheduler started
+2026-09-22 15:02:56,974 [INFO] [token-cleanup] Started, running every 24 hour(s).
+2026-09-22 15:02:58,484 [INFO] Zoiko Payroll Platform backend is ready.
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+2026-09-22 15:02:58,486 [INFO] Scheduler has been shut down
+2026-09-22 15:02:58,487 [INFO] Scheduler has been shut down
+2026-09-22 15:02:58,487 [INFO] Scheduler has been shut down
+2026-09-22 15:02:58,488 [INFO] Scheduler has been shut down
+2026-09-22 15:02:58,489 [INFO] Scheduler has been shut down
+2026-09-22 15:02:58,489 [INFO] Scheduler has been shut down
+INFO:     Application shutdown complete.
