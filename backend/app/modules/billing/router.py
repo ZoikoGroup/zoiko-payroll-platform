@@ -696,6 +696,17 @@ def _update_invoice_status_from_stripe_event(db: Session, stripe_invoice_id: Opt
         invoice.status = status
 
 
+def _stripe_period_timestamp(subscription, item, field):
+    value = item.get(field)
+    if value is None:
+        value = getattr(subscription, field, None)
+    if value is None:
+        raise BadRequestException(
+            f"Stripe subscription is missing required field: {field}"
+        )
+    return value
+
+
 def _subscription_period(subscription_object: dict) -> tuple[Optional[datetime], Optional[datetime]]:
     item = ((subscription_object.get("items") or {}).get("data") or [{}])[0]
     start = item.get("current_period_start") or subscription_object.get("current_period_start")
@@ -758,21 +769,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             stripe_sub_id = data_object.get("subscription")
 
             stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-            # Stripe moved current_period_start/end off the Subscription
-            # object itself and onto each subscription item (API versions
-            # 2025-06-30+/current SDK) — reading stripe_sub.current_period_start
-            # directly raises KeyError against a real Stripe response
-            # (confirmed against API version 2026-07-29.dahlia; this is the
-            # exact KeyError that was silently failing every real checkout
-            # completion). Same fix as the invoice.paid handler below.
-            # utcfromtimestamp (not fromtimestamp) keeps this naive-UTC,
-            # matching this codebase's datetime.utcnow() convention —
-            # fromtimestamp() without a tz interprets the epoch as LOCAL
-            # time, silently shifting period boundaries by the server's own
-            # UTC offset (confirmed 5.5h off on a server in IST).
             sub_item = stripe_sub["items"]["data"][0]
-            period_start = datetime.utcfromtimestamp(sub_item["current_period_start"])
-            period_end = datetime.utcfromtimestamp(sub_item["current_period_end"])
+            period_start_ts = _stripe_period_timestamp(
+                stripe_sub, sub_item, "current_period_start"
+            )
+            period_end_ts = _stripe_period_timestamp(
+                stripe_sub, sub_item, "current_period_end"
+            )
+            period_start = datetime.utcfromtimestamp(period_start_ts)
+            period_end = datetime.utcfromtimestamp(period_end_ts)
 
             # A deferred service_commencement_at (PlanReviewPage's "delayed
             # billing" checkout) means checkout completing here is NOT the
@@ -843,14 +848,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             org = db.query(Organization).filter(Organization.id == org_id).first()
             if org:
                 org.workspace_type = "EVALUATION" if is_deferred else "PRODUCTION"
-                org.billing_onboarding_status = "TRIALING" if is_deferred else "ACTIVE"
-                if not org.is_active:
-                    org.is_active = True
-                # Part 2 — checkout completing is NEVER itself sufficient to
-                # start recurring charges; service_commencement_at (carried
-                # through metadata from POST /billing/checkout) is the only
-                # trigger. Only set once — a later renewal's
-                # checkout.session.completed (there isn't one today, but
+                sub_items = (stripe_sub.get("items") or {}).get("data") or []
+                sub_item = sub_items[0] if sub_items else {}
+                period_end_ts = _stripe_period_timestamp(
+                    stripe_sub, sub_item, "current_period_end"
+                )
                 # future replan/upgrade flows may reuse this handler) must
                 # never push a negotiated commencement date forward.
                 if org.service_commencement_at is None and commencement_str:
