@@ -25,7 +25,7 @@ from app.core.dependencies import get_current_super_admin
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import get_db
 from app.modules.billing import entitlements, plan_catalog, trial_lifecycle
-from app.modules.billing.enterprise_order_form import record_order_form
+from app.modules.billing.enterprise_order_form import list_order_form_eligibility, record_order_form
 from app.modules.billing.models import (
     BillingCommercialAuditEvent,
     BillingCreditNote,
@@ -167,6 +167,34 @@ def create_entitlement_override(
     )
 
 
+# ── BWM aggregation (Prompt 4 §4) ─────────────────────────────────────────
+
+@router.post("/aggregate-bwm")
+def run_bwm_aggregation(
+    billing_month: Optional[str] = Query(None, description="YYYY-MM of the month to (re)aggregate; defaults to the current month"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Upsert one billing_worker_month_records row per (org, employee,
+    month) for every org that has PayrollEmployee rows — the persistence
+    that feeds bwm_invoice_mismatches on the Exceptions & Reconciliation
+    page and future metered invoicing. Idempotent: re-running the same
+    month updates rows in place via the UniqueConstraint. Same batch the
+    background BWM_AGGREGATION scheduler runs on a timer."""
+    from datetime import date
+
+    from app.modules.billing import bwm as bwm_service
+
+    parsed = None
+    if billing_month:
+        try:
+            parsed = date.fromisoformat(billing_month)
+        except ValueError:
+            raise BadRequestException("billing_month must be YYYY-MM-DD or omitted for the current month.")
+    result = bwm_service.aggregate_all_billing_months(db, billing_month=parsed)
+    return result
+
+
 # ── Trial lifecycle (Prompt 5) ────────────────────────────────────────────
 
 @router.post("/trial-expiry-run", response_model=TrialExpirySweepResult)
@@ -262,6 +290,19 @@ def get_invoice_explanation(
 
 
 # ── Enterprise Order Form (Part 12 / Step 6) ──────────────────────────────
+
+@router.get("/order-form-eligible-orgs")
+def list_order_form_eligible_orgs(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Every organization with its ordering eligibility computed up front —
+    `eligible` only when whatever the create endpoint would refuse is absent
+    (existing Order Form, or a non-Enterprise billing relationship). The
+    Order Forms page uses this to disable ineligible orgs with the reason,
+    instead of letting the operator find out via a 403/409 on submit."""
+    return {"organizations": list_order_form_eligibility(db)}
+
 
 @router.post(
     "/organizations/{organization_id}/order-form",

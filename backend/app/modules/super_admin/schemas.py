@@ -136,6 +136,24 @@ class FinanceSummaryResponse(BaseModel):
     payrollsCompleted: int
 
 
+class FinanceOrganizationTotal(BaseModel):
+    organizationId: int
+    organizationName: str
+    jurisdictionCountry: Optional[str] = None
+    currency: Optional[str] = None
+    runCount: int
+    grossPay: Decimal
+    netPay: Decimal
+    totalDeductions: Decimal
+    employerCost: Decimal
+    lastPayDate: Optional[date] = None
+
+
+class FinanceByOrganizationResponse(BaseModel):
+    organizations: list[FinanceOrganizationTotal]
+    total: int
+
+
 # ── Reports (Super Admin) ───────────────────────────────────────────────────
 
 class ReportsListResponse(BaseModel):

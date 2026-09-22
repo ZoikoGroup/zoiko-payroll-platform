@@ -45,6 +45,9 @@ export const createEntitlementOverride = (organizationId, payload) =>
 
 export const listOrderForms = () => apiFetch("/api/super-admin/billing/order-forms");
 
+export const listOrderFormEligibleOrgs = () =>
+  apiFetch("/api/super-admin/billing/order-form-eligible-orgs").then((data) => data.organizations || []);
+
 export const getOrderForm = (organizationId) =>
   apiFetch(`/api/super-admin/billing/organizations/${organizationId}/order-form`);
 
@@ -74,6 +77,21 @@ export const listAllPayrollRuns = (params) =>
 
 export const listFilingsRemittances = () =>
   apiFetch("/api/super-admin/compliance/filings-remittances");
+
+// Write path for the same dashboard: record/update a statutory filing
+// status for an org (upserts by natural key — jurisdiction + filing type +
+// period — so re-saving an existing period updates it in place), and delete
+// a recorded filing.
+export const upsertStatutoryFiling = (organizationId, payload) =>
+  apiFetch(`/api/super-admin/compliance/filings-remittances/${organizationId}`, {
+    method: "PUT",
+    body: payload,
+  });
+
+export const deleteStatutoryFiling = (organizationId, filingId) =>
+  apiFetch(`/api/super-admin/compliance/filings-remittances/${organizationId}/${filingId}`, {
+    method: "DELETE",
+  });
 
 export const listExceptions = (params) =>
   apiFetch("/api/super-admin/compliance/exceptions", { params });

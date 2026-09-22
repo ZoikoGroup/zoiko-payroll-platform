@@ -12,6 +12,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -392,7 +393,7 @@ def refresh_user_token(db: Session, refresh_token: str) -> dict:
 
 # ── Registration (public self-serve onboarding) ─────────────────────────────
 
-def register_enterprise(db: Session, data: RegisterRequest) -> dict:
+def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Optional[BackgroundTasks] = None) -> dict:
     existing = db.query(User).filter(User.email == data.email).first()
     if existing:
         raise AlreadyExistsException("User", "email")
@@ -466,33 +467,46 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
 
     logger.info("New organization %s registered by %s", org.organization_code, data.email)
 
-    try:
-        from app.services.email_service import (
-            send_organization_created_email,
-            send_super_admin_org_created_notification_email,
-        )
-        ref_id = f"ORG-{org.id:04d}-INIT"
-        send_organization_created_email(
-            email=admin.email,
-            recipient_first_name=first_name,
-            organization_name=org.organization_name,
-            reference_id=ref_id,
-            organization_id=org.id,
-            db=db,
-        )
-        logger.info(
-            "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
-            admin.email, org.id, ref_id,
-        )
-        # Notify Super Admins with full org & primary admin metadata
-        send_super_admin_org_created_notification_email(
-            org=org,
-            admin_user=admin,
-            reference_id=f"ADM-ORG-{org.id:04d}",
-            db=db,
-        )
-    except Exception as exc:
-        logger.warning("Failed to dispatch org created emails for org %s: %s", org.id, exc)
+    def _dispatch_org_created_emails() -> None:
+        # Runs after the HTTP response is sent (or synchronously if no
+        # background_tasks was supplied — e.g. direct/test callers). Doing
+        # this inline used to block the register response on a live SMTP
+        # round-trip: a hung or auth-rejecting relay (see SMTP_HOST) made a
+        # real registration take ~30s (the socket timeout) before the
+        # client ever saw a response, for an email that isn't required for
+        # the account to work.
+        try:
+            from app.services.email_service import (
+                send_organization_created_email,
+                send_super_admin_org_created_notification_email,
+            )
+            ref_id = f"ORG-{org.id:04d}-INIT"
+            send_organization_created_email(
+                email=admin.email,
+                recipient_first_name=first_name,
+                organization_name=org.organization_name,
+                reference_id=ref_id,
+                organization_id=org.id,
+                db=db,
+            )
+            logger.info(
+                "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
+                admin.email, org.id, ref_id,
+            )
+            # Notify Super Admins with full org & primary admin metadata
+            send_super_admin_org_created_notification_email(
+                org=org,
+                admin_user=admin,
+                reference_id=f"ADM-ORG-{org.id:04d}",
+                db=db,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch org created emails for org %s: %s", org.id, exc)
+
+    if background_tasks is not None:
+        background_tasks.add_task(_dispatch_org_created_emails)
+    else:
+        _dispatch_org_created_emails()
 
     token_payload = {
         "sub": admin.email,
@@ -508,7 +522,7 @@ def register_enterprise(db: Session, data: RegisterRequest) -> dict:
     }
 
 
-def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
+def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Optional[BackgroundTasks] = None) -> dict:
     """30-day Professional Evaluation signup (/auth/register-trial).
 
     Same JWT + email pipeline as register_enterprise, but the evaluation path
@@ -617,27 +631,36 @@ def register_trial(db: Session, data: TrialRegisterRequest) -> dict:
 
     logger.info("New evaluation organization %s registered by %s", org.organization_code, data.email)
 
-    try:
-        from app.services.email_service import send_trial_organization_created_email
+    def _dispatch_trial_org_created_email() -> None:
+        # See register_enterprise's identical wrapper for why this is
+        # deferred to a background task rather than blocking the response
+        # on a live SMTP round-trip.
+        try:
+            from app.services.email_service import send_trial_organization_created_email
 
-        evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
-        ref_id = f"TRIAL-{org.id:04d}-INIT"
-        send_trial_organization_created_email(
-            email=admin.email,
-            recipient_first_name=first_name,
-            organization_name=org.organization_name,
-            reference_id=ref_id,
-            evaluation_days=30,
-            evaluation_end_date=evaluation_end,
-            organization_id=org.id,
-            db=db,
-        )
-        logger.info(
-            "email_audit event=commercial.evaluation_created template_id=COM-003 recipient=%s org_id=%s reference_id=%s",
-            admin.email, org.id, ref_id,
-        )
-    except Exception as exc:
-        logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
+            evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
+            ref_id = f"TRIAL-{org.id:04d}-INIT"
+            send_trial_organization_created_email(
+                email=admin.email,
+                recipient_first_name=first_name,
+                organization_name=org.organization_name,
+                reference_id=ref_id,
+                evaluation_days=30,
+                evaluation_end_date=evaluation_end,
+                organization_id=org.id,
+                db=db,
+            )
+            logger.info(
+                "email_audit event=commercial.evaluation_created template_id=COM-003 recipient=%s org_id=%s reference_id=%s",
+                admin.email, org.id, ref_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
+
+    if background_tasks is not None:
+        background_tasks.add_task(_dispatch_trial_org_created_email)
+    else:
+        _dispatch_trial_org_created_email()
 
     token_payload = {
         "sub": admin.email,

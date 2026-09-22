@@ -19,6 +19,15 @@ statutory state; that stays in each domain's existing, already-correct
 workflows. This router is deliberately separate from the very large existing
 modules/super_admin/router.py so that file doesn't grow further for
 unrelated new work.
+
+The single exception is the Filings & Remittances write pair below
+(PUT/DELETE on /compliance/filings-remittances/{organization_id}): while
+the dashboard is displayed read-only, it is also where a Super Admin
+records an organization's filing status into the otherwise-empty
+statutory_filings table. That write still funnels through the same
+validated service function (payroll.service.upsert_statutory_filing) any
+org-facing recording UI would call, so the org jurisdiction is derived from
+compliance config and per-period uniqueness is enforced in one place.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -29,6 +38,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_super_admin
+from app.core.jurisdiction import CODE_TO_COUNTRY_NAME
 from app.database import get_db
 from app.modules.organizations.models import Organization
 from app.modules.billing.models import (
@@ -37,15 +47,17 @@ from app.modules.billing.models import (
     BillingPlan,
     BillingPlanVersion,
     BillingSubscription,
-    BillingWorkerMonthRecord,
     BillingCommercialAuditEvent,
 )
 from app.modules.payroll.models import (
+    CompanyComplianceDetails,
     PayrollRun,
     PayrollStatus,
     GermanyElsterTransmission,
+    StatutoryFiling,
     TaxConfigurationAudit,
 )
+from app.modules.payroll.schemas import StatutoryFilingUpsert, StatutoryFilingResponse
 from app.modules.assist.models import AssistAuditEvent
 
 router = APIRouter(prefix="/super-admin", tags=["Super Admin — Command Center"])
@@ -321,7 +333,32 @@ def list_all_payroll_runs(
 
 # ── Payroll Operations: Filings & Remittances ──────────────────────────────
 
-BLOCKED_FILING_STATUSES = ("BLOCKED_EXTERNAL", "REJECTED")
+# Statuses that mean "a human needs to intervene", across both filing
+# sources: Germany's ELSTER transport rejects (REJECTED / BLOCKED_EXTERNAL)
+# and the manual StatutoryFiling workflow's BLOCKED state.
+BLOCKED_FILING_STATUSES = ("BLOCKED_EXTERNAL", "REJECTED", "BLOCKED")
+
+
+def _load_statutory_filings(db: Session) -> list[dict]:
+    """All manual filing-status rows (StatutoryFiling) — the
+    cross-jurisdiction model every org's AU/IN/… filings live in."""
+    rows = (
+        db.query(StatutoryFiling)
+        .order_by(StatutoryFiling.updated_at.desc().nullslast())
+        .all()
+    )
+    return [{
+        "filing_id": sf.id,
+        "source": "statutory",
+        "organization_id": sf.organization_id,
+        "filing_type": sf.filing_type or "—",
+        "period_label": sf.period_label,
+        "period_start": sf.period_start,
+        "period_end": sf.period_end,
+        "status": sf.status,
+        "blocked_reason": sf.blocked_reason,
+        "updated_at": sf.updated_at,
+    } for sf in rows]
 
 
 def _load_germany_filings(db: Session) -> list[dict]:
@@ -336,6 +373,7 @@ def _load_germany_filings(db: Session) -> list[dict]:
     for tx, org in rows:
         germany.append({
             "transmission_id": tx.id,
+            "source": "elster",
             "organization_id": org.id,
             "organization_name": org.organization_name,
             "transmission_type": tx.transmission_type,
@@ -352,10 +390,101 @@ def _load_germany_filings(db: Session) -> list[dict]:
 
 
 def _blocked_filings(db: Session) -> list[dict]:
-    """Confirmed-blocked transmissions only (BLOCKED_EXTERNAL / REJECTED) —
-    the filing subset that needs a human. Nothing here is inferred from a
-    missing signal."""
-    return [f for f in _load_germany_filings(db) if f["status"] in BLOCKED_FILING_STATUSES]
+    """Confirmed-blocked filings only (ELSTER REJECTED / BLOCKED_EXTERNAL and
+    manual BLOCKED) — the subset that needs a human across both filing
+    sources. Nothing here is inferred from a missing signal."""
+    blocked = []
+    for f in _load_statutory_filings(db):
+        if f["status"] == "BLOCKED":
+            blocked.append(f)
+    for f in _load_germany_filings(db):
+        if f["status"] in BLOCKED_FILING_STATUSES:
+            blocked.append(f)
+    return blocked
+
+
+def _load_org_filing_coverage(db: Session) -> tuple[dict, list[dict]]:
+    """Every Organization, bucketed by its configured compliance jurisdiction.
+
+    Returns ``(jurisdictions, unconfigured)``:
+
+      jurisdictions  {code: {label, total, blocked_count, total_orgs,
+                    organizations: [{org_id, org_name, filings: [...]}]}}
+                    — every org with a jurisdiction country, one bucket per
+                    country. Each org's filings merge two sources:
+                    StatutoryFiling rows (the manual cross-jurisdiction
+                    model) plus, for Germany, its live ELSTER transmission
+                    state. Orgs with no filing records get ``filings: []`` —
+                    the frontend renders that as a muted "no filing records
+                    yet" state, never as filed, and never as a dropped org.
+      unconfigured [{org_id, org_name}] — orgs with no jurisdiction_country
+                    set.
+
+    Every org appears exactly once across the two buckets; nothing is
+    inferred from a missing signal."""
+    org_rows = (
+        db.query(
+            Organization.id.label("org_id"),
+            Organization.organization_name,
+            CompanyComplianceDetails.jurisdiction_country,
+        )
+        .outerjoin(
+            CompanyComplianceDetails,
+            CompanyComplianceDetails.organization_id == Organization.id,
+        )
+        .order_by(Organization.organization_name)
+        .all()
+    )
+    org_names = {org_id: org_name for org_id, org_name, _ in org_rows}
+
+    filings_by_org: dict[int, list[dict]] = {}
+    for tx in _load_statutory_filings(db):
+        tx["organization_name"] = org_names.get(tx["organization_id"])
+        filings_by_org.setdefault(tx["organization_id"], []).append(tx)
+    for tx in _load_germany_filings(db):
+        filings_by_org.setdefault(tx["organization_id"], []).append(tx)
+
+    jurisdictions: dict[str, dict] = {}
+    unconfigured: list[dict] = []
+
+    def _section(code: str) -> dict:
+        if code not in jurisdictions:
+            jurisdictions[code] = {
+                "label": CODE_TO_COUNTRY_NAME.get(code, code),
+                "total": 0,
+                "blocked_count": 0,
+                "total_orgs": 0,
+                "organizations": [],
+            }
+        return jurisdictions[code]
+
+    for org_id, org_name, raw_country in org_rows:
+        country = (raw_country or "").strip().upper() or None
+        if country is None:
+            unconfigured.append({"org_id": org_id, "org_name": org_name})
+            continue
+        org_filings = filings_by_org.get(org_id, [])
+        # Blocked first, then most recently updated — "what's at risk" on
+        # top, matching the payroll-run monitor's framing. Stable two-pass
+        # so the update ordering survives the blocked reordering.
+        org_filings.sort(
+            key=lambda r: r["updated_at"] or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        org_filings.sort(key=lambda r: 0 if r["status"] in BLOCKED_FILING_STATUSES else 1)
+        section = _section(country)
+        section["organizations"].append({
+            "org_id": org_id,
+            "org_name": org_name,
+            "filings": org_filings,
+        })
+        section["total"] += len(org_filings)
+        section["blocked_count"] += sum(
+            1 for tx in org_filings if tx["status"] in BLOCKED_FILING_STATUSES
+        )
+        section["total_orgs"] += 1
+
+    return jurisdictions, unconfigured
 
 
 @router.get("/compliance/filings-remittances")
@@ -363,16 +492,22 @@ def list_filings_remittances(
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
-    """Cross-tenant filing status. Germany ELSTER today (GermanyElsterTransmission)
-    — structured so a second jurisdiction's filings slot in under their own
-    'jurisdiction' key without a rewrite. Bank-export/remittance file
-    generation (modules/payroll/bank_export/) has no persisted status model
-    today — that's a real gap, surfaced honestly below rather than a
-    fabricated status column."""
+    """Cross-tenant statutory filing status, with every organization visible.
+
+    Backed by two persisted sources, merged per org: GermanyElsterTransmission
+    (Germany's live ELSTER transport state) and StatutoryFiling (the manual
+    cross-jurisdiction model that covers AU GST/BAS, IN TDS/GST, … and any
+    manual record for a German org). Every org is bucketed under its
+    configured compliance jurisdiction — never silently dropped — and an org
+    with no filing records shows an explicit empty state, not a fabricated
+    "filed" status. Orgs with no jurisdiction set land in 'unconfigured'.
+    Bank-export/remittance file generation (modules/payroll/bank_export/)
+    still has no persisted status model — that gap is stated below rather
+    than faked."""
+    jurisdictions, unconfigured = _load_org_filing_coverage(db)
     return {
-        "jurisdictions": {
-            "germany": {"filings": _load_germany_filings(db), "total": len(_load_germany_filings(db))},
-        },
+        "jurisdictions": jurisdictions,
+        "unconfigured": unconfigured,
         "known_gaps": [
             "Bank-export/remittance file generation has no persisted status "
             "model yet — only on-demand file generation. Not represented here."
@@ -380,7 +515,92 @@ def list_filings_remittances(
     }
 
 
+@router.put(
+    "/compliance/filings-remittances/{organization_id}",
+    response_model=StatutoryFilingResponse,
+    response_model_by_alias=True,
+    summary="Record or update a statutory filing status for an organization (Super Admin authored)",
+)
+def upsert_statutory_filing_record(
+    organization_id: int,
+    payload: StatutoryFilingUpsert,
+    db: Session = Depends(get_db),
+    _admin=Depends(get_current_super_admin),
+):
+    """Write path for the Filings & Remittances dashboard: creates/updates
+    one (org, jurisdiction, filing type, period) status row via the same
+    validated service function any org-facing recording UI calls. The
+    jurisdiction is always derived from the org's configured compliance
+    country, and re-recording an existing period updates its row."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_statutory_filing(db, organization_id, payload, actor_id=_admin.id)
+
+
+@router.delete(
+    "/compliance/filings-remittances/{organization_id}/{filing_id}",
+    summary="Delete a statutory filing record",
+)
+def delete_statutory_filing_record(
+    organization_id: int,
+    filing_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(get_current_super_admin),
+):
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.delete_statutory_filing(
+        db, filing_id, actor_id=_admin.id, organization_id=organization_id,
+    )
+    return {"success": True, "message": "Filing record deleted."}
+
+
 # ── Payroll Operations: Exceptions & Reconciliation ────────────────────────
+
+def _load_bwm_scale_limit_overages(db: Session, billing_month: date) -> list:
+    """Orgs whose live billable-worker count exceeds their plan's resolved
+    MAX_BWM limit for `billing_month`.
+
+    Two deliberate changes from the original implementation, which read
+    BillingWorkerMonthRecord rows (a table nothing ever populated — see
+    billing/bwm.py's own disclosure) against BillingPlanVersion.scale_limits
+    under the wrong key ('billable_worker_months' vs feature_keys.MAX_BWM):
+
+      1. bwm_count comes from billing/bwm.count_billable_workers() — the
+         SAME live inclusion logic entitlements.require_scope_limit enforces
+         at employee-creation time (payroll/router.py), so a count that
+         would have been blocked always surfaces here, and it works whether
+         or not the background BWM aggregation has ever run.
+      2. plan_limit resolves through entitlements._resolve_entitlement() with
+         feature_keys.MAX_BWM — the same feature-key vocabulary as the
+         enforcement path (including Enterprise Order Form negotiated limits
+         and live org overrides). A None limit means unlimited, so no
+         overage row; a limit == 0 means the feature is explicitly off.
+    """
+    from app.modules.billing import bwm as bwm_service
+    from app.modules.billing.entitlements import _resolve_entitlement, get_active_subscription
+    from app.modules.billing.feature_keys import MAX_BWM
+
+    overages = []
+    for org_id, name in db.query(Organization.id, Organization.organization_name).all():
+        sub = get_active_subscription(db, org_id)
+        if sub is None:
+            continue
+        allowed, limit_value = _resolve_entitlement(db, sub, MAX_BWM)
+        if not allowed or limit_value is None:
+            continue
+        count = bwm_service.count_billable_workers(db, org_id, as_of=billing_month)
+        if count > limit_value:
+            overages.append({
+                "organization_id": org_id,
+                "organization_name": name,
+                "billing_month": billing_month,
+                "bwm_count": count,
+                "plan_limit": limit_value,
+                "over_by": count - limit_value,
+            })
+    return overages
+
 
 @router.get("/compliance/exceptions")
 def list_exceptions(
@@ -389,8 +609,8 @@ def list_exceptions(
     _admin=Depends(get_current_super_admin),
 ):
     """Narrow, honest scope: (1) payroll runs stuck in REVIEW an unusual
-    length of time with an approaching pay date, and (2) orgs whose actual
-    Billable Worker-Month count exceeds their plan's scale_limits — a real,
+    length of time with an approaching pay date, and (2) orgs whose current
+    Billable Worker-Month count exceeds their plan's resolved limit — a real,
     computable reconciliation between two systems that don't otherwise talk
     to each other. No auto-remediation actions here — this page surfaces
     problems; fixing them uses each domain's existing workflow."""
@@ -413,38 +633,8 @@ def list_exceptions(
                 "stuck_since": marker,
             })
 
-    bwm_overages = []
     current_month_start = date.today().replace(day=1)
-    bwm_counts = (
-        db.query(
-            BillingWorkerMonthRecord.organization_id,
-            func.count(BillingWorkerMonthRecord.id).label("bwm_count"),
-        )
-        .filter(
-            BillingWorkerMonthRecord.billing_month == current_month_start,
-            BillingWorkerMonthRecord.counted.is_(True),
-        )
-        .group_by(BillingWorkerMonthRecord.organization_id)
-        .all()
-    )
-    for org_id, bwm_count in bwm_counts:
-        sub = db.query(BillingSubscription).filter(BillingSubscription.organization_id == org_id).first()
-        if sub is None:
-            continue
-        version = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == sub.plan_version_id).first()
-        if version is None or not version.scale_limits:
-            continue
-        limit = version.scale_limits.get("billable_worker_months")
-        if limit is not None and bwm_count > limit:
-            org = db.query(Organization).filter(Organization.id == org_id).first()
-            bwm_overages.append({
-                "organization_id": org_id,
-                "organization_name": org.organization_name if org else None,
-                "billing_month": current_month_start,
-                "bwm_count": bwm_count,
-                "plan_limit": limit,
-                "over_by": bwm_count - limit,
-            })
+    bwm_overages = _load_bwm_scale_limit_overages(db, current_month_start)
 
     # Step 3 / Part 7 — any invoice whose BWM-priced line quantity doesn't
     # match the actual counted BillingWorkerMonthRecord rows for that org/
@@ -460,11 +650,11 @@ def list_exceptions(
         "bwm_scale_limit_overages": bwm_overages,
         "bwm_invoice_mismatches": bwm_invoice_mismatches,
         "note": (
-            "bwm_scale_limit_overages is informational only for orgs whose "
-            "subscription pre-dates require_scope_limit(MAX_BWM) being wired "
-            "into employee creation (payroll/router.py) — new employee "
-            "creation is enforced live there; this view still catches any "
-            "org that was already over the limit before that wiring existed."
+            "bwm_scale_limit_overages counts billable workers live (the "
+            "same inclusion logic require_scope_limit(MAX_BWM) uses at "
+            "employee creation) and resolves the plan limit through "
+            "entitlements, so it reports real demand vs. the plan even "
+            "before the background BWM aggregation has run."
         ),
     }
 
@@ -487,6 +677,7 @@ def _service_health_report(db: Session) -> dict:
     stale state is returned explicitly. Shared by the service-health endpoint
     AND the alerts feed (platform category)."""
     from app.modules.assist import scheduler as assist_scheduler
+    from app.modules.auth import scheduler as auth_scheduler
     from app.modules.billing import scheduler as billing_scheduler
     from app.modules.assisted_access import scheduler as assisted_access_scheduler
 
@@ -503,8 +694,11 @@ def _service_health_report(db: Session) -> dict:
         "database": db_status,
         "scheduled_jobs": [
             _job_health("trial_expiry_sweep", billing_scheduler.last_run_status),
+            _job_health("dunning_sweep", billing_scheduler.dunning_last_run_status),
+            _job_health("bwm_aggregation", billing_scheduler.bwm_last_run_status),
             _job_health("assist_sweep", assist_scheduler.last_run_status),
             _job_health("assisted_access_sweep", assisted_access_scheduler.last_run_status),
+            _job_health("token_cleanup_sweep", auth_scheduler.last_run_status),
         ],
         "checked_at": datetime.utcnow(),
     }
@@ -530,18 +724,60 @@ def service_health(
     return _service_health_report(db)
 
 
-# ── Platform: Integrations (honest placeholder) ────────────────────────────
+# ── Platform: Integrations (real, computed from this deployment's config) ──
 
 @router.get("/platform/integrations")
 def list_integrations(_admin=Depends(get_current_super_admin)):
-    """No external integration layer exists in this codebase today — no
-    live disbursement API, no third-party HR/ATS connectors. Returning a
-    fabricated set of integration health cards for things that don't exist
-    would be misleading. Honest empty state until a real integration is
-    built."""
+    """Every external-service integration this deployment has available to
+    it, computed from live settings — not a fabricated card for something
+    that isn't configured. Each entry carries `configured` (bool) and a
+    status string so the page can show a real state per provider:
+
+      - stripe_billing   — self-service checkout/subs/invoices (STRIPE_SECRET_KEY)
+      - email_smtp       — outbound email (SMTP_HOST)
+      - sentry           — error tracking (SENTRY_DSN; optional, no-op when empty)
+      - assist_model     — Assist model gateway (ASSIST_MODEL_PROVIDER; deterministic-only when unset)
+
+    Nothing here pings a provider: `configured` reflects configuration, not
+    liveness. Stripe/SMTP liveness is exercised separately by real money/
+    email flows and would fail loudly in their own logs.
+    """
+    from app.config import settings
+
+    integrations = [
+        {
+            "slug": "stripe_billing",
+            "name": "Stripe Billing",
+            "configured": bool(settings.STRIPE_SECRET_KEY),
+            "status": "Connected" if settings.STRIPE_SECRET_KEY else "Not configured",
+            "description": "Self-service checkout, subscriptions and invoicing.",
+        },
+        {
+            "slug": "email_smtp",
+            "name": "Email delivery (SMTP)",
+            "configured": bool(settings.SMTP_HOST),
+            "status": "Connected" if settings.SMTP_HOST else "Not configured",
+            "description": "Transactional email (verify, onboarding, templates).",
+        },
+        {
+            "slug": "sentry",
+            "name": "Sentry (error tracking)",
+            "configured": bool(settings.SENTRY_DSN),
+            "status": "Configured" if settings.SENTRY_DSN else "Not configured (optional)",
+            "description": "Server-side error monitoring.",
+        },
+        {
+            "slug": "assist_model",
+            "name": "Assist model gateway",
+            "configured": bool(settings.ASSIST_MODEL_PROVIDER),
+            "status": "Connected" if settings.ASSIST_MODEL_PROVIDER else "Deterministic-only",
+            "description": "LLM provider for grounded Assist answers.",
+        },
+    ]
+    connected = sum(1 for it in integrations if it["configured"])
     return {
-        "integrations": [],
-        "message": "No external integrations are configured in this deployment yet.",
+        "integrations": integrations,
+        "message": f"{connected} of {len(integrations)} integrations configured.",
     }
 
 
@@ -562,30 +798,50 @@ def _naive_utc(ts: Optional[datetime]) -> Optional[datetime]:
 
 @router.get("/security/audit")
 def security_audit_log(
-    source: Optional[str] = Query(None, description="compliance | billing | assist | assisted_access"),
-    actor_id: Optional[int] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    source: Optional[str] = None,
+    actor_id: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    page: int = 1,
+    page_size: int = 50,
     db: Session = Depends(get_db),
     _admin=Depends(get_current_super_admin),
 ):
     """No single audit table exists — TaxConfigurationAudit (compliance),
-    BillingCommercialAuditEvent (billing/trial), and AssistAuditEvent
-    (assist) are three separately-shaped tables. Rather than a risky
-    consolidation migration, this normalizes and merge-sorts across all
-    three as a read model. Paginates each source query first, then merges
-    pages, so a large date range doesn't load every table fully into
-    memory. Append-only by nature — no edit/delete endpoint exists or
-    should ever exist here."""
+    BillingCommercialAuditEvent (billing/trial), AssistAuditEvent (assist)
+    and AssistedAccessAuditEvent are four separately-shaped tables. Rather
+    than a risky consolidation migration, this normalizes and merge-sorts
+    across all four as a read model.
+
+    Filters are pushed down to the SQL queries (actor + inclusive date
+    range on the source's own timestamp column) BEFORE any row is loaded,
+    so a filtered page can never silently drop rows that fall outside the
+    loaded limit; then all matching rows across the requested sources are
+    merge-sorted once and sliced for the page. `total` is the exact count
+    of the filtered union, so pagination is exact (not "more rows than
+    page_size on this page"). Append-only by nature — no edit/delete
+    endpoint exists or should ever exist here."""
+    end_exclusive = end_date + timedelta(days=1) if end_date else None
+
+    def _date_filter(ts_column):
+        clause = []
+        if start_date:
+            clause.append(func.date(ts_column) >= start_date)
+        if end_exclusive:
+            clause.append(func.date(ts_column) < end_exclusive)
+        return clause
+
     normalized = []
+    totals = {"compliance": 0, "billing": 0, "assist": 0, "assisted_access": 0}
 
     if source in (None, "compliance"):
         q = db.query(TaxConfigurationAudit)
         if actor_id:
             q = q.filter(TaxConfigurationAudit.actor_id == actor_id)
-        for row in q.order_by(TaxConfigurationAudit.id.desc()).limit(page_size * page).all():
+        for predicate in _date_filter(TaxConfigurationAudit.created_at):
+            q = q.filter(predicate)
+        totals["compliance"] = q.count()
+        for row in q.order_by(TaxConfigurationAudit.id.desc()).all():
             normalized.append({
                 "timestamp": _naive_utc(row.created_at),
                 "actor_id": row.actor_id,
@@ -600,7 +856,10 @@ def security_audit_log(
         q = db.query(BillingCommercialAuditEvent)
         if actor_id:
             q = q.filter(BillingCommercialAuditEvent.actor_user_id == actor_id)
-        for row in q.order_by(BillingCommercialAuditEvent.id.desc()).limit(page_size * page).all():
+        for predicate in _date_filter(BillingCommercialAuditEvent.created_at):
+            q = q.filter(predicate)
+        totals["billing"] = q.count()
+        for row in q.order_by(BillingCommercialAuditEvent.id.desc()).all():
             normalized.append({
                 "timestamp": _naive_utc(row.created_at),
                 "actor_id": row.actor_user_id,
@@ -615,7 +874,10 @@ def security_audit_log(
         q = db.query(AssistAuditEvent)
         if actor_id:
             q = q.filter(AssistAuditEvent.user_id == actor_id)
-        for row in q.order_by(AssistAuditEvent.id.desc()).limit(page_size * page).all():
+        for predicate in _date_filter(AssistAuditEvent.recorded_at):
+            q = q.filter(predicate)
+        totals["assist"] = q.count()
+        for row in q.order_by(AssistAuditEvent.id.desc()).all():
             normalized.append({
                 "timestamp": _naive_utc(row.recorded_at),
                 "actor_id": row.user_id,
@@ -632,7 +894,10 @@ def security_audit_log(
         q = db.query(AssistedAccessAuditEvent)
         if actor_id:
             q = q.filter(AssistedAccessAuditEvent.actor_user_id == actor_id)
-        for row in q.order_by(AssistedAccessAuditEvent.id.desc()).limit(page_size * page).all():
+        for predicate in _date_filter(AssistedAccessAuditEvent.recorded_at):
+            q = q.filter(predicate)
+        totals["assisted_access"] = q.count()
+        for row in q.order_by(AssistedAccessAuditEvent.id.desc()).all():
             normalized.append({
                 "timestamp": _naive_utc(row.recorded_at),
                 "actor_id": row.actor_user_id,
@@ -655,19 +920,7 @@ def security_audit_log(
 
     normalized.sort(key=_sort_key, reverse=True)
 
-    if start_date or end_date:
-        def _in_range(entry):
-            ts = entry["timestamp"]
-            if ts is None:
-                return False
-            d = ts.date() if hasattr(ts, "date") else ts
-            if start_date and d < start_date:
-                return False
-            if end_date and d > end_date:
-                return False
-            return True
-        normalized = [e for e in normalized if _in_range(e)]
-
+    total_filtered = sum(totals.values()) if source is None else totals.get(source, 0)
     start_idx = (page - 1) * page_size
     page_rows = normalized[start_idx:start_idx + page_size]
 
@@ -676,6 +929,7 @@ def security_audit_log(
         "page": page,
         "page_size": page_size,
         "returned": len(page_rows),
+        "total": total_filtered,
     }
 
 

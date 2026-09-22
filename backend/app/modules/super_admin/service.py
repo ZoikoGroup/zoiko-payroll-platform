@@ -24,7 +24,7 @@ from datetime import date, timedelta
 from typing import Optional, List
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func, or_
+from sqlalchemy import func as sa_func, or_, and_
 
 from app.modules.payroll.models import (
     PayrollRun, PayrollEmployee, CompanyComplianceDetails, JurisdictionPack, ContributionRate, TaxSlab, PayrollStatus,
@@ -167,6 +167,82 @@ def finance_summary(
         "payrollsPending": pending,
         "payrollsCompleted": completed,
     }
+
+
+def finance_by_organization(
+    db: Session, organization_id: Optional[int] = None, country: Optional[str] = None,
+    status: Optional[str] = None, start_date: Optional[date] = None, end_date: Optional[date] = None,
+) -> dict:
+    """Per-organization financial totals — every organization appears
+    exactly once, including one with zero payroll runs, because this
+    outer-joins from Organization (unlike finance_overview/finance_summary,
+    which join from PayrollRun and so silently omit any organization that
+    has never run payroll). That omission is exactly the gap this exists to
+    close: "every organization's payroll money movement" isn't answerable
+    from a query that only ever starts from PayrollRun.
+
+    status/date filters are applied on the PayrollRun join condition, not a
+    WHERE clause — a WHERE on the outer-joined table would silently turn
+    this back into an inner join for any org with zero matching rows,
+    reintroducing the exact omission this function exists to avoid. An org
+    with no runs in the filtered window still appears, with zero totals,
+    which is itself a meaningful answer ("nothing happened here"). country
+    is a genuine WHERE, since an org actually in a different country should
+    be excluded when filtering by country, not zeroed out."""
+    run_conditions = [PayrollRun.organization_id == Organization.id]
+    if status:
+        run_conditions.append(PayrollRun.status == status)
+    if start_date:
+        run_conditions.append(PayrollRun.period_start >= start_date)
+    if end_date:
+        run_conditions.append(PayrollRun.period_start < end_date + timedelta(days=1))
+
+    query = (
+        db.query(
+            Organization.id.label("organization_id"),
+            Organization.organization_name,
+            CompanyComplianceDetails.jurisdiction_country,
+            Organization.currency,
+            sa_func.count(PayrollRun.id).label("run_count"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_deductions), 0).label("deductions"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_employer_contribution), 0).label("employer_cost"),
+            sa_func.max(PayrollRun.pay_date).label("last_pay_date"),
+        )
+        .outerjoin(CompanyComplianceDetails, CompanyComplianceDetails.organization_id == Organization.id)
+        .outerjoin(PayrollRun, and_(*run_conditions))
+    )
+    if organization_id:
+        query = query.filter(Organization.id == organization_id)
+    if country:
+        query = query.filter(CompanyComplianceDetails.jurisdiction_country == country)
+
+    rows = (
+        query.group_by(
+            Organization.id, Organization.organization_name,
+            CompanyComplianceDetails.jurisdiction_country, Organization.currency,
+        )
+        .order_by(Organization.organization_name.asc())
+        .all()
+    )
+
+    organizations = [
+        {
+            "organizationId": r.organization_id,
+            "organizationName": r.organization_name,
+            "jurisdictionCountry": r.jurisdiction_country,
+            "currency": r.currency,
+            "runCount": r.run_count,
+            "grossPay": r.gross,
+            "netPay": r.net,
+            "totalDeductions": r.deductions,
+            "employerCost": r.employer_cost,
+            "lastPayDate": r.last_pay_date,
+        }
+        for r in rows
+    ]
+    return {"organizations": organizations, "total": len(organizations)}
 
 
 def list_organization_currencies(db: Session) -> List[dict]:

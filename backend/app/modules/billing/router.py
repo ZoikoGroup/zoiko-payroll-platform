@@ -21,7 +21,7 @@ See billing/admin_router.py for the Super Admin CRUD surface.
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 
@@ -46,6 +46,7 @@ from app.modules.billing.schemas import (
     BillingCancelRequest,
     BillingCheckoutRequest,
     BillingCheckoutResponse,
+    BillingStartTrialResponse,
     BillingMySubscriptionResponse,
     BillingPublishedPlanResponse,
     BillingTrialStatusResponse,
@@ -279,6 +280,32 @@ def _ensure_stripe_price(db: Session, version: BillingPlanVersion, plan: Billing
 
 # ── Self-service checkout (Path 2) ─────────────────────────────────────────
 
+def _missing_checkout_config() -> list[str]:
+    return [
+        name for name, value in [
+            ("STRIPE_SECRET_KEY", settings.STRIPE_SECRET_KEY),
+            ("STRIPE_CHECKOUT_SUCCESS_URL", settings.STRIPE_CHECKOUT_SUCCESS_URL),
+            ("STRIPE_CHECKOUT_CANCEL_URL", settings.STRIPE_CHECKOUT_CANCEL_URL),
+        ] if not value
+    ]
+
+
+def _require_checkout_config() -> None:
+    """Fail closed with a clear, actionable message before any Stripe call,
+    instead of letting an empty STRIPE_SECRET_KEY surface as an opaque
+    Stripe SDK auth error, or an empty success_url/cancel_url get sent to
+    Stripe as-is — which can leave a customer stranded after paying with no
+    way back into the app. Shared by both callers of this endpoint: a fresh
+    NON_CHARGEABLE org's first checkout, and an EVALUATION org converting
+    via TrialBanner -> /billing/plans -> here."""
+    missing = _missing_checkout_config()
+    if missing:
+        raise BadRequestException(
+            f"Checkout is not configured: missing {', '.join(missing)}. "
+            "Set these environment variables before offering checkout."
+        )
+
+
 @router.post("/checkout", response_model=BillingCheckoutResponse)
 def create_checkout_session(
     body: BillingCheckoutRequest,
@@ -291,6 +318,8 @@ def create_checkout_session(
     and active PRODUCTION workspaces subscribing or renewing.
     """
     from app.modules.organizations.models import Organization
+
+    _require_checkout_config()
 
     organization_id = current_user.organization_id
     org = db.query(Organization).filter(Organization.id == organization_id).first()
@@ -364,6 +393,14 @@ def create_checkout_session(
     # webhook (which is where Organization.service_commencement_at is
     # actually SET — see stripe_webhook below) can read it back.
     commencement = body.service_commencement_at or datetime.utcnow()
+    # Normalize to naive-UTC, this codebase's datetime.utcnow()-based
+    # convention throughout — a browser-originated request always sends a
+    # timezone-AWARE ISO string (JS Date.toISOString() always appends "Z"),
+    # which Pydantic parses as tz-aware, while the comparison below is
+    # naive; mixing the two raises TypeError. Without this normalization,
+    # PlanReviewPage's checkout call fails outright.
+    if commencement.tzinfo is not None:
+        commencement = commencement.astimezone(timezone.utc).replace(tzinfo=None)
 
     session_kwargs = dict(
         mode="subscription",
@@ -396,7 +433,14 @@ def create_checkout_session(
     # let an immediate/near-immediate commencement use Stripe's own default
     # (bill now) rather than risk a rejected anchor a few seconds in the past.
     if commencement > datetime.utcnow() + timedelta(minutes=5):
-        session_kwargs["subscription_data"] = {"billing_cycle_anchor": int(commencement.timestamp())}
+        # commencement is naive-UTC at this point (normalized above) — a
+        # bare .timestamp() on a naive datetime is interpreted as LOCAL
+        # time by Python, silently shifting the anchor by the server's own
+        # UTC offset (confirmed: off by 5.5h on a server in IST). Attaching
+        # UTC tzinfo explicitly before converting is what actually makes
+        # this the UTC epoch Stripe expects.
+        anchor_epoch = int(commencement.replace(tzinfo=timezone.utc).timestamp())
+        session_kwargs["subscription_data"] = {"billing_cycle_anchor": anchor_epoch}
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
     try:
@@ -405,6 +449,94 @@ def create_checkout_session(
         raise BadRequestException(f"Stripe Checkout error: {str(e)}")
 
     return BillingCheckoutResponse(checkout_url=session.url)
+
+
+@router.post("/start-trial", response_model=BillingStartTrialResponse)
+def start_trial(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Convert the caller's already-registered PRODUCTION org into a 30-day
+    Professional Evaluation — no Stripe, no card. Reached from
+    PlanReviewPage.jsx's "Start Trial" button, shown on Core and
+    Professional's review pages only (Business has no trial path — those
+    buyers pay directly, enforced by that page simply never rendering the
+    button, since this endpoint takes no plan_code to check server-side).
+
+    Deliberately always PROFESSIONAL, matching register_trial's own single
+    trial product (see its docstring) — this app has no per-plan trial
+    concept, so this does not honor whatever plan_code the customer was
+    reviewing; it's the same evaluation /register-trial already offers,
+    just reachable after a real registration instead of only before one.
+
+    Idempotent: an org already in EVALUATION is a no-op success (a second
+    click/page reload must not error). An org that already has ANY
+    BillingSubscription (trialing, active, or otherwise) is refused — this
+    must never overwrite an existing commercial relationship.
+    """
+    from app.modules.organizations.models import Organization
+
+    organization_id = current_user.organization_id
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if org is None:
+        raise NotFoundException("Organization", organization_id)
+
+    existing_sub = (
+        db.query(BillingSubscription)
+        .filter(BillingSubscription.organization_id == organization_id)
+        .first()
+    )
+
+    if org.workspace_type == "EVALUATION" and existing_sub is not None:
+        return BillingStartTrialResponse(
+            workspace_type=org.workspace_type,
+            trial_ends_at=existing_sub.current_period_end,
+        )
+
+    if existing_sub is not None:
+        raise ForbiddenException(
+            "This organization already has a commercial relationship — trial conversion is not available."
+        )
+
+    plan_version = plan_catalog.get_published_plan_version(db, "PROFESSIONAL")
+    if plan_version is None:
+        raise BadRequestException(
+            "The Professional plan is not available for evaluation yet — please try again later."
+        )
+
+    org.workspace_type = "EVALUATION"
+    org.billing_onboarding_status = "TRIALING"
+
+    trial_start = datetime.utcnow()
+    trial_end = trial_start + timedelta(days=30)
+    subscription = BillingSubscription(
+        organization_id=org.id,
+        plan_version_id=plan_version.id,
+        billing_authority=BillingAuthority.STANDALONE.value,
+        status=SubscriptionStatus.TRIALING.value,
+        current_period_start=trial_start,
+        current_period_end=trial_end,
+    )
+    db.add(subscription)
+    db.add(
+        BillingCommercialAuditEvent(
+            organization_id=org.id,
+            actor_user_id=current_user.id,
+            event_type="TRIAL_SUBSCRIPTION_CREATED",
+            payload={
+                "plan_code": "PROFESSIONAL",
+                "plan_version_id": plan_version.id,
+                "trial_days": 30,
+                "current_period_end": trial_end.isoformat(),
+                "source": "plan_review_page",
+            },
+        )
+    )
+    db.commit()
+
+    logger.info("Org %s converted to trial via PlanReviewPage by %s", org.organization_code, current_user.email)
+
+    return BillingStartTrialResponse(workspace_type="EVALUATION", trial_ends_at=trial_end)
 
 
 def _infer_component_type(price) -> str:
@@ -626,8 +758,40 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             stripe_sub_id = data_object.get("subscription")
 
             stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-            period_start = datetime.fromtimestamp(stripe_sub.current_period_start)
-            period_end = datetime.fromtimestamp(stripe_sub.current_period_end)
+            # Stripe moved current_period_start/end off the Subscription
+            # object itself and onto each subscription item (API versions
+            # 2025-06-30+/current SDK) — reading stripe_sub.current_period_start
+            # directly raises KeyError against a real Stripe response
+            # (confirmed against API version 2026-07-29.dahlia; this is the
+            # exact KeyError that was silently failing every real checkout
+            # completion). Same fix as the invoice.paid handler below.
+            # utcfromtimestamp (not fromtimestamp) keeps this naive-UTC,
+            # matching this codebase's datetime.utcnow() convention —
+            # fromtimestamp() without a tz interprets the epoch as LOCAL
+            # time, silently shifting period boundaries by the server's own
+            # UTC offset (confirmed 5.5h off on a server in IST).
+            sub_item = stripe_sub["items"]["data"][0]
+            period_start = datetime.utcfromtimestamp(sub_item["current_period_start"])
+            period_end = datetime.utcfromtimestamp(sub_item["current_period_end"])
+
+            # A deferred service_commencement_at (PlanReviewPage's "delayed
+            # billing" checkout) means checkout completing here is NOT the
+            # same moment as actually being charged — Stripe won't bill
+            # until the commencement date. Until then this org must read as
+            # evaluation (workspace_type=EVALUATION, status=TRIALING), the
+            # same shape the real trial already uses — not "normal" — and
+            # only the invoice.paid handler below (the real charge
+            # succeeding) is allowed to flip it to PRODUCTION/ACTIVE. An
+            # immediate checkout (no deferral, e.g. Core's $0 signup) keeps
+            # the original behavior: normal access right away.
+            commencement_dt = None
+            if commencement_str:
+                try:
+                    commencement_dt = datetime.fromisoformat(commencement_str)
+                except ValueError:
+                    commencement_dt = None
+            is_deferred = commencement_dt is not None and commencement_dt > datetime.utcnow() + timedelta(minutes=5)
+            pending_status = SubscriptionStatus.TRIALING.value if is_deferred else SubscriptionStatus.ACTIVE.value
 
             sub = (
                 db.query(BillingSubscription)
@@ -638,17 +802,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 sub = BillingSubscription(
                     organization_id=org_id,
                     plan_version_id=version_id,
-                    status=SubscriptionStatus.ACTIVE.value,
+                    status=pending_status,
                     current_period_start=period_start,
                     current_period_end=period_end,
                     stripe_subscription_id=stripe_sub_id,
                 )
                 db.add(sub)
             else:
-                # This is the ONLY place status → ACTIVE is written outside of
-                # convert_trial_to_paid (which is the Super Admin path).
+                # This is the ONLY place status is written outside of
+                # convert_trial_to_paid (which is the Super Admin path) and
+                # invoice.paid (the real-charge conversion, below).
                 sub.plan_version_id = version_id
-                sub.status = SubscriptionStatus.ACTIVE.value
+                sub.status = pending_status
                 sub.current_period_start = period_start
                 sub.current_period_end = period_end
                 sub.stripe_subscription_id = stripe_sub_id
@@ -671,12 +836,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             if plan_code is not None:
                 _sync_subscription_price_item(db, sub, plan_code)
 
-            # Flip workspace to PRODUCTION on successful payment
+            # Deferred commencement -> stay/become EVALUATION until
+            # invoice.paid confirms the real charge; immediate checkout ->
+            # PRODUCTION right away, same as before this change.
             from app.modules.organizations.models import Organization
             org = db.query(Organization).filter(Organization.id == org_id).first()
             if org:
-                org.workspace_type = "PRODUCTION"
-                org.billing_onboarding_status = "ACTIVE"
+                org.workspace_type = "EVALUATION" if is_deferred else "PRODUCTION"
+                org.billing_onboarding_status = "TRIALING" if is_deferred else "ACTIVE"
                 if not org.is_active:
                     org.is_active = True
                 # Part 2 — checkout completing is NEVER itself sufficient to
@@ -775,11 +942,22 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             # 2025-06-30+/current SDK) — reading stripe_sub.current_period_end
             # directly raises AttributeError against a real Stripe response.
             period_end_ts = stripe_sub["items"]["data"][0]["current_period_end"]
-            sub.current_period_end = datetime.fromtimestamp(period_end_ts)
+            # utcfromtimestamp, not fromtimestamp — see checkout.session.completed
+            # above for why a naive fromtimestamp() silently shifts this by
+            # the server's own local UTC offset.
+            sub.current_period_end = datetime.utcfromtimestamp(period_end_ts)
             sub.status = SubscriptionStatus.ACTIVE.value  # recover from PAST_DUE on payment
             from app.modules.organizations.models import Organization
             org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
             if org:
+                # The real charge succeeding is what "only after payment do
+                # you get the normal account" actually means — a deferred
+                # checkout parked the org in EVALUATION at
+                # checkout.session.completed; this is the one event allowed
+                # to move it to PRODUCTION. A no-op for an org that was
+                # already PRODUCTION (immediate checkout, or a later
+                # renewal's invoice.paid).
+                org.workspace_type = "PRODUCTION"
                 org.billing_onboarding_status = "ACTIVE"
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,

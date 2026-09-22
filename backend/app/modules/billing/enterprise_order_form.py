@@ -120,3 +120,45 @@ def record_order_form(
     db.commit()
     db.refresh(order_form)
     return order_form
+
+
+def list_order_form_eligibility(db: Session) -> list[dict]:
+    """For every organization: can a signed Enterprise Order Form be
+    recorded for it today, and if not, why?
+
+    Mirrors exactly the two refusal paths in record_order_form / §12's
+    assert_no_overlapping_billable_ownership so the picker can never offer
+    an org that the create endpoint would reject:
+      - an EnterpriseOrderForm row already exists for the org (409)
+      - a BillingSubscription exists under a NON-Enterprise commercial
+        route (403 — overlapping billable ownership)
+    An org with a subscription already on the ENTERPRISE_ORDER_FORM route
+    but no Order Form row is eligible (record_order_form would update it).
+    """
+    from app.modules.billing.models import EnterpriseOrderForm as Eof
+    from app.modules.organizations.models import Organization
+
+    subs = {s.organization_id: s for s in db.query(BillingSubscription).all()}
+    forms = {f.organization_id for f in db.query(Eof).all()}
+
+    items = []
+    for org in db.query(Organization).order_by(Organization.organization_name).all():
+        reason = None
+        if org.id in forms:
+            reason = "Already has an Enterprise Order Form on file."
+        else:
+            sub = subs.get(org.id)
+            if sub is not None and sub.billing_authority != BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+                reason = (
+                    f"Already has a {sub.billing_authority} billing relationship — "
+                    "migrate it before recording an Order Form."
+                )
+        items.append(
+            {
+                "organization_id": org.id,
+                "organization_name": org.organization_name,
+                "eligible": reason is None,
+                "block_reason": reason,
+            }
+        )
+    return items

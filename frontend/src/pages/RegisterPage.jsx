@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Eye, EyeOff, AlertCircle, Check, X, Sparkles, Clock, Mail, ArrowLeft } from "lucide-react";
+import { Loader2, Eye, EyeOff, AlertCircle, Check, X, Sparkles, Mail, ArrowLeft } from "lucide-react";
 import { apiFetch, setSession } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { listPublishedPlans } from "../service/billingService";
@@ -54,6 +54,10 @@ const PLAN_PRESENTATION = {
     tagline: "For businesses that have grown past one entity or jurisdiction.",
     recommended: true,
   },
+  BUSINESS: {
+    tagline: "Higher scale limits for growing multi-entity operations.",
+    recommended: false,
+  },
 };
 
 const CAPABILITY_LABELS = [
@@ -91,7 +95,7 @@ function buildPlanCard(apiPlan) {
   };
 }
 
-const planCardStyle = (recommended) => ({
+export const planCardStyle = (recommended) => ({
   background: "#FFFFFF",
   borderRadius: "16px",
   padding: "28px 24px",
@@ -103,14 +107,14 @@ const planCardStyle = (recommended) => ({
   position: "relative",
 });
 
-const badgeStyle = {
+export const badgeStyle = {
   position: "absolute", top: "-12px", left: "50%", transform: "translateX(-50%)",
   background: "linear-gradient(135deg, #087CC1, #1596D1)", color: "#FFFFFF",
   fontSize: "11px", fontWeight: "700", padding: "4px 14px", borderRadius: "20px",
   whiteSpace: "nowrap", letterSpacing: "0.03em",
 };
 
-function PlanCapabilityRow({ label, on }) {
+export function PlanCapabilityRow({ label, on }) {
   return (
     <li style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: on ? "#374151" : "#B0B7C3" }}>
       {on ? (
@@ -152,32 +156,6 @@ function ChoosablePlanCard({ plan, onChoose }) {
         }}
       >
         Choose {plan.name}
-      </button>
-    </div>
-  );
-}
-
-function ComingSoonPlanCard() {
-  return (
-    <div style={{ ...planCardStyle(false), opacity: 0.72 }}>
-      <div>
-        <div style={{ fontSize: "18px", fontWeight: "700", color: "#111827" }}>Business</div>
-        <div style={{ fontSize: "13px", color: "#9CA3AF", marginTop: 2, display: "flex", alignItems: "center", gap: 6 }}>
-          <Clock size={13} /> Coming soon
-        </div>
-        <p style={{ fontSize: "12px", color: "#6B7280", marginTop: 6, minHeight: "32px" }}>
-          For multi-region operations at scale. Not yet available for self-service signup.
-        </p>
-      </div>
-      <button
-        type="button"
-        disabled
-        style={{
-          marginTop: "auto", width: "100%", padding: "11px", borderRadius: "10px", border: "1.5px solid #E5E7EB",
-          fontSize: "14px", fontWeight: "700", color: "#9CA3AF", background: "#F3F4F6", cursor: "not-allowed",
-        }}
-      >
-        Coming Soon
       </button>
     </div>
   );
@@ -232,7 +210,7 @@ function PlanPickerStage({ plans, plansLoading, plansError, onChoosePlan }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px" }}>
           {plans.CORE && <ChoosablePlanCard plan={plans.CORE} onChoose={onChoosePlan} />}
           {plans.PROFESSIONAL && <ChoosablePlanCard plan={plans.PROFESSIONAL} onChoose={onChoosePlan} />}
-          <ComingSoonPlanCard />
+          {plans.BUSINESS && <ChoosablePlanCard plan={plans.BUSINESS} onChoose={onChoosePlan} />}
           <ContactSalesPlanCard />
         </div>
       )}
@@ -251,7 +229,7 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const [stage, setStage] = useState("plan"); // "plan" | "details" | "checkout-failed"
+  const [stage, setStage] = useState("plan"); // "plan" | "details"
   const [selectedPlanCode, setSelectedPlanCode] = useState(null);
 
   const [plans, setPlans] = useState({});
@@ -296,7 +274,6 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState(null);
-  const [checkoutError, setCheckoutError] = useState(null);
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -329,22 +306,6 @@ export default function RegisterPage() {
   const jurisdictionSchema = getJurisdictionTaxSchema(form.country);
   const jurisdictionTaxFields = getJurisdictionTaxFields(form.country);
   const selectedPlan = selectedPlanCode ? plans[selectedPlanCode] : null;
-
-  async function retryCheckout() {
-    setCheckoutError(null);
-    setSubmitting(true);
-    try {
-      const { checkout_url } = await apiFetch("/api/billing/checkout", {
-        method: "POST",
-        body: { plan_code: selectedPlanCode },
-      });
-      window.location.href = checkout_url;
-    } catch (err) {
-      setCheckoutError(err.message || "Could not start checkout. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -382,25 +343,18 @@ export default function RegisterPage() {
         },
       });
 
-      // Account exists from here on — log the browser in immediately so the
-      // checkout call below (which requires a real org-admin JWT) can fire
-      // in the same page load, with no separate login step in between.
+      // Account exists from here on — log the browser in immediately so
+      // PlanReviewPage's checkout call (which requires a real org-admin
+      // JWT) works with no separate login step in between.
       setSession(data);
       await login(data.user);
 
-      try {
-        const { checkout_url } = await apiFetch("/api/billing/checkout", {
-          method: "POST",
-          body: { plan_code: selectedPlanCode },
-        });
-        window.location.href = checkout_url;
-      } catch (checkoutErr) {
-        // The account was already created and the browser is already
-        // logged in — don't strand the user on a spinner or bounce them to
-        // a generic dashboard as if nothing happened.
-        setCheckoutError(checkoutErr.message || "We couldn't start checkout for your plan.");
-        setStage("checkout-failed");
-      }
+      // Checkout itself now happens on PlanReviewPage, not here — it's the
+      // one place that reviews the plan and computes the actual
+      // service_commencement_at before ever calling /billing/checkout.
+      // Pass the already-fetched plan card along so that page doesn't need
+      // a second GET /billing/plans round-trip.
+      navigate("/register/plan-review", { state: { planCode: selectedPlanCode, plan: selectedPlan } });
     } catch (err) {
       setLocalError(err.message || "Unable to create your account.");
     } finally {
@@ -427,51 +381,6 @@ export default function RegisterPage() {
             plansError={plansError}
             onChoosePlan={handleChoosePlan}
           />
-        )}
-
-        {stage === "checkout-failed" && (
-          <div style={{ width: "100%", maxWidth: "560px" }}>
-            <div style={{
-              background: "white", borderRadius: "20px",
-              boxShadow: "0 8px 40px rgba(0,0,0,0.10)",
-              border: "1px solid #F3F4F6", padding: "36px", textAlign: "center",
-            }}>
-              <AlertCircle size={32} color="#D97706" style={{ marginBottom: 12 }} />
-              <h1 style={{ fontSize: "20px", fontWeight: "800", color: "#111827", margin: "0 0 8px 0" }}>
-                Your account was created
-              </h1>
-              <p style={{ fontSize: "14px", color: "#6B7280", margin: "0 0 4px 0" }}>
-                But we couldn't start checkout for the {selectedPlan?.name || selectedPlanCode} plan:
-              </p>
-              <p style={{ fontSize: "13px", color: "#DC2626", margin: "0 0 24px 0" }}>{checkoutError}</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={retryCheckout}
-                  style={{
-                    padding: "12px", borderRadius: "10px", border: "none", fontSize: "14px", fontWeight: "700",
-                    color: "white", cursor: submitting ? "not-allowed" : "pointer",
-                    background: submitting ? "#7EC1E0" : "linear-gradient(135deg, #087CC1, #1596D1)",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  }}
-                >
-                  {submitting && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
-                  Retry checkout
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate("/billing/plans")}
-                  style={{
-                    padding: "12px", borderRadius: "10px", border: "1.5px solid #E5E7EB", fontSize: "14px",
-                    fontWeight: "600", color: "#374151", background: "white", cursor: "pointer",
-                  }}
-                >
-                  Go to plan selection instead
-                </button>
-              </div>
-            </div>
-          </div>
         )}
 
         {stage === "details" && (

@@ -13,7 +13,7 @@ Org admin: /auth/admin/users (list/create/update/deactivate/reset)
 import json
 import logging
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -117,14 +117,14 @@ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/register", response_model=TokenResponse, summary="Register a new organization")
 @limiter.limit("5/minute")
-def register(request: Request, data: RegisterRequest, db: Session = Depends(get_db)):
-    return service.register_enterprise(db, data)
+def register(request: Request, data: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    return service.register_enterprise(db, data, background_tasks)
 
 
 @router.post("/register-trial", response_model=TokenResponse, summary="Register a 30-day Professional Evaluation workspace")
 @limiter.limit("5/minute")
-def register_trial(request: Request, data: TrialRegisterRequest, db: Session = Depends(get_db)):
-    return service.register_trial(db, data)
+def register_trial(request: Request, data: TrialRegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    return service.register_trial(db, data, background_tasks)
 
 
 @router.post("/refresh", response_model=TokenResponse, summary="Refresh access token")

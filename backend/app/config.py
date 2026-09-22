@@ -148,6 +148,15 @@ class Settings(BaseSettings):
     DUNNING_SWEEP_ENABLED: bool = True
     DUNNING_SWEEP_INTERVAL_HOURS: int = 24
 
+    # ── BWM aggregation (modules/billing/bwm.py) ─────────────────────────
+    # Materializes billing_worker_month_records (Compute-only — never calls
+    # a gateway), the persistence that feeds the Exceptions & Reconciliation
+    # bwm_invoice_mismatches view and future invoicing. Runs the same batch
+    # function the manual POST /super-admin/billing/aggregate-bwm admin
+    # endpoint calls, mirroring ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED.
+    BWM_AGGREGATION_ENABLED: bool = True
+    BWM_AGGREGATION_INTERVAL_HOURS: int = 24
+
     # ── Self-service checkout (Stripe) ──────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
