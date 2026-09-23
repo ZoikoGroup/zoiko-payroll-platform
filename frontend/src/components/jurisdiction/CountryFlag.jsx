@@ -82,7 +82,96 @@ function Germany() {
   );
 }
 
-const FLAGS = { IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany };
+// ── Caribbean production jurisdictions (2026-09-21) — simplified, same
+// "recognizable, not vexillographically precise" convention as every
+// flag above.
+
+function Barbados() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="8" height="16" fill="#00267F" />
+      <rect x="8" width="8" height="16" fill="#FFC726" />
+      <rect x="16" width="8" height="16" fill="#00267F" />
+      <path d="M11 3 L13 3 L13 10 L11.7 13 L11 10 Z" fill="#000" />
+    </svg>
+  );
+}
+
+function CaymanIslands() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#A5C8ED" />
+      <rect width="12" height="8" fill="#00247D" />
+      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#fff" strokeWidth="1.6" />
+      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#CF142B" strokeWidth="0.6" />
+      <path d="M6,0 V8 M0,4 H12" stroke="#fff" strokeWidth="2.6" />
+      <path d="M6,0 V8 M0,4 H12" stroke="#CF142B" strokeWidth="1.5" />
+      <circle cx="17" cy="8" r="3.4" fill="#fff" stroke="#00267F" strokeWidth="0.4" />
+    </svg>
+  );
+}
+
+function DominicanRepublic() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#002D62" />
+      <rect x="10" width="4" height="16" fill="#fff" />
+      <rect y="6" width="24" height="4" fill="#fff" />
+      <rect width="10" height="6" fill="#CE1126" />
+      <rect x="14" width="10" height="6" fill="#002D62" />
+      <rect width="10" height="6" y="10" fill="#002D62" />
+      <rect x="14" width="10" height="6" y="10" fill="#CE1126" />
+    </svg>
+  );
+}
+
+function Guyana() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#009E49" />
+      <polygon points="0,0 16,8 0,16" fill="#FCD116" />
+      <polygon points="0,0 10,8 0,16" fill="#CE1126" />
+      <polygon points="0,3 5,8 0,13" fill="#000" />
+    </svg>
+  );
+}
+
+function Jamaica() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#000" />
+      <polygon points="0,0 24,16 24,0" fill="#009B3A" />
+      <polygon points="0,0 0,16 24,16" fill="#009B3A" />
+      <path d="M0,0 L24,16 M24,0 L0,16" stroke="#FED100" strokeWidth="2.6" />
+    </svg>
+  );
+}
+
+function Bahamas() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="5.33" fill="#00778B" />
+      <rect y="5.33" width="24" height="5.33" fill="#FFC72C" />
+      <rect y="10.67" width="24" height="5.33" fill="#00778B" />
+      <polygon points="0,0 9,8 0,16" fill="#000" />
+    </svg>
+  );
+}
+
+function TrinidadAndTobago() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#CE1126" />
+      <path d="M-2,18 L18,-2" stroke="#fff" strokeWidth="4.6" />
+      <path d="M-2,18 L18,-2" stroke="#000" strokeWidth="2.8" />
+    </svg>
+  );
+}
+
+const FLAGS = {
+  IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
+  BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
+};
 
 export default function CountryFlag({ code, className = "", fallback = null }) {
   const Flag = FLAGS[code];

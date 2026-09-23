@@ -31,6 +31,20 @@ REGISTRATION_COUNTRIES = [
     "United States",
     "United Kingdom",
     "Australia",
+    # Caribbean production jurisdictions (Wave A + adjacent T1), added
+    # 2026-09-21 — each has its own JURISDICTION_TAX_SCHEMAS entry below
+    # and a dedicated engine/countries/*.py calculator wired into
+    # engine/standard.py's _COUNTRY_CALC. The ~25 other Caribbean
+    # jurisdictions (Coming Soon) are deliberately NOT listed here — see
+    # app/core/caribbean_regions.py, which is the master for those and is
+    # never consulted by registration/onboarding.
+    "Barbados",
+    "Cayman Islands",
+    "Dominican Republic",
+    "Guyana",
+    "Jamaica",
+    "Bahamas",
+    "Trinidad and Tobago",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -151,6 +165,126 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    # ── Caribbean production jurisdictions (2026-09-21) ──────────────────
+    # Digit-count patterns below follow each country's own engineering
+    # spec (ZP-BB/KY/DO/GY/JM/BS/TT-ENG-001) where it states a length;
+    # where the spec explicitly says the exact issuing form/identifier is
+    # still unresolved (e.g. Barbados's "acquire the currently issued form
+    # instead of hard-coding a form number"), the pattern is deliberately
+    # lenient rather than guessing a stricter format that could reject a
+    # real, valid ID.
+    "BB": {
+        "label": "TAMIS TIN / NIS Number",
+        "currency": "BBD",
+        "fields": [
+            {
+                "key": "tamis_tin",
+                "label": "TAMIS TIN",
+                "pattern": r"^\d{9,13}$",
+                "example": "1234567890123",
+                "primary": True,
+            },
+            {
+                "key": "nis_number",
+                "label": "NIS Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIS-1234567",
+                "primary": False,
+            },
+        ],
+    },
+    "KY": {
+        "label": "NIB Employer Number",
+        "currency": "KYD",
+        "fields": [
+            {
+                "key": "nib_employer_number",
+                "label": "NIB Employer Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIB-000123",
+                "primary": True,
+            },
+        ],
+    },
+    "DO": {
+        "label": "RNC (Registro Nacional del Contribuyente)",
+        "currency": "DOP",
+        "fields": [
+            {
+                "key": "rnc",
+                "label": "RNC",
+                "pattern": r"^\d{1,3}-?\d{2}-?\d{5}-?\d{1,2}$|^\d{9,11}$",
+                "example": "1-01-12345-6",
+                "primary": True,
+            },
+        ],
+    },
+    "GY": {
+        "label": "GRA TIN / NIS Number",
+        "currency": "GYD",
+        "fields": [
+            {
+                "key": "gra_tin",
+                "label": "GRA TIN",
+                "pattern": r"^\d{7,10}$",
+                "example": "1234567",
+                "primary": True,
+            },
+            {
+                "key": "nis_number",
+                "label": "NIS Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIS-1234567",
+                "primary": False,
+            },
+        ],
+    },
+    "JM": {
+        "label": "TRN (Taxpayer Registration Number)",
+        "currency": "JMD",
+        "fields": [
+            {
+                "key": "trn",
+                "label": "TRN",
+                "pattern": r"^\d{9}$",
+                "example": "123456789",
+                "primary": True,
+            },
+        ],
+    },
+    "BS": {
+        "label": "NIB Employer Number",
+        "currency": "BSD",
+        "fields": [
+            {
+                "key": "nib_employer_number",
+                "label": "NIB Employer Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIB-000123",
+                "primary": True,
+            },
+        ],
+    },
+    "TT": {
+        "label": "BIR File Number / NIBTT Employer Number",
+        "currency": "TTD",
+        "fields": [
+            {
+                "key": "bir_file_number",
+                "label": "BIR File Number",
+                "pattern": r"^\d{9,10}$",
+                "example": "1234567890",
+                "primary": True,
+            },
+            {
+                "key": "nibtt_employer_number",
+                "label": "NIBTT Employer Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "NIBTT-000123",
+                "primary": False,
+            },
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -165,6 +299,15 @@ COUNTRY_NAME_TO_CODE = {
     "great britain": "UK",
     "germany": "DE",
     "australia": "AU",
+    "barbados": "BB",
+    "cayman islands": "KY",
+    "dominican republic": "DO",
+    "guyana": "GY",
+    "jamaica": "JM",
+    "bahamas": "BS",
+    "the bahamas": "BS",
+    "trinidad and tobago": "TT",
+    "trinidad & tobago": "TT",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -173,6 +316,13 @@ CODE_TO_COUNTRY_NAME = {
     "UK": "United Kingdom",
     "DE": "Germany",
     "AU": "Australia",
+    "BB": "Barbados",
+    "KY": "Cayman Islands",
+    "DO": "Dominican Republic",
+    "GY": "Guyana",
+    "JM": "Jamaica",
+    "BS": "Bahamas",
+    "TT": "Trinidad and Tobago",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

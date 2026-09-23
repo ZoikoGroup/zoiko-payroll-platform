@@ -151,14 +151,22 @@ function monthYearLabelsForDates(dates) {
 
 const TIME_RANGES = [
   { label: "1W", days: 7 },
-  { label: "1M", days: 30 },
+  { label: "1M", days: 30, calendarMonth: true },
   { label: "4M", days: 120 },
   { label: "6M", days: 180 },
   { label: "1Y", days: 365 },
   { label: "ALL", days: 0 },
 ];
 
-function getDateRange(days, startDate) {
+// Last calendar day of the month containing the given date string — native
+// Date rollover handles Feb 28/29, 30-day and 31-day months, and the
+// December→January boundary without any manual month-length table.
+function calendarMonthEnd(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return toLocalDateStr(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+}
+
+function getDateRange(days, startDate, calendarMonth = false) {
   const today = new Date();
   const start = startDate ? new Date(startDate + "T00:00:00") : today;
   if (days <= 0) {
@@ -168,8 +176,15 @@ function getDateRange(days, startDate) {
       end: toLocalDateStr(today),
     };
   }
-  const end = new Date(start);
-  end.setDate(end.getDate() + (days - 1));
+  let end;
+  if (calendarMonth && days === 30) {
+    // The "1M" preset is a real calendar month: a start of Jan 1 means
+    // Jan 1–31 (28/29 in February), not a flat 30-day span ending Jan 30.
+    end = new Date(calendarMonthEnd(toLocalDateStr(start)) + "T00:00:00");
+  } else {
+    end = new Date(start);
+    end.setDate(end.getDate() + (days - 1));
+  }
   return {
     start: toLocalDateStr(start),
     end: toLocalDateStr(end),
@@ -202,6 +217,7 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
   const [date, setDate] = useState(toLocalDateStr(new Date()));
   const [timeRange, setTimeRange] = useState(30);
+  const [monthRange, setMonthRange] = useState(false);
   const [historyRecords, setHistoryRecords] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -330,7 +346,7 @@ export default function AttendancePage() {
     const requestId = ++historyRequestIdRef.current;
     setHistoryLoading(true);
     const local = getLocalRecords(orgId);
-    const range = days === 0 ? null : getDateRange(days, filterStartDate);
+    const range = days === 0 ? null : getDateRange(days, filterStartDate, monthRange);
 
     const localSeen = new Map();
     Object.values(local).flat().forEach((rec) => {
@@ -386,7 +402,7 @@ export default function AttendancePage() {
     } finally {
       if (requestId === historyRequestIdRef.current) setHistoryLoading(false);
     }
-  }, [filterStartDate, orgId]);
+  }, [filterStartDate, orgId, monthRange]);
 
   useEffect(() => {
     loadHistory(timeRange);
@@ -443,9 +459,9 @@ export default function AttendancePage() {
       const sorted = [...dates].sort();
       return countBusinessDays(sorted[0], sorted[sorted.length - 1], excludeWeekends, holidayDates);
     }
-    const { start, end } = getDateRange(timeRange, filterStartDate);
+    const { start, end } = getDateRange(timeRange, filterStartDate, monthRange);
     return countBusinessDays(start, end, excludeWeekends, holidayDates);
-  }, [timeRange, filterStartDate, historyRecords, excludeWeekends, holidayDates]);
+  }, [timeRange, filterStartDate, historyRecords, excludeWeekends, holidayDates, monthRange]);
 
   // Aggregate history records by employee — only days that have actually occurred count
   // toward completed attendance stats; future/scheduled entries are excluded here.
@@ -565,7 +581,7 @@ export default function AttendancePage() {
   // skipping or partially clearing — saved attendance is never deleted by
   // this button; that would need its own separate, deliberate action.
   async function handleResetAll() {
-    const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate);
+    const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate, monthRange);
 
     let existing = [];
     try {
@@ -1456,7 +1472,7 @@ export default function AttendancePage() {
           const cacheMap = new Map(orgCache.data.map((r) => [recordKey(r), r]));
           savedRecords.forEach((r) => cacheMap.set(recordKey(r), r));
           orgCache.data = [...cacheMap.values()];
-          const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate);
+          const range = timeRange === 0 ? null : getDateRange(timeRange, filterStartDate, monthRange);
           const scoped = range
             ? orgCache.data.filter((rec) => rec?.date && rec.date >= range.start && rec.date <= range.end)
             : orgCache.data;
@@ -1652,7 +1668,7 @@ export default function AttendancePage() {
 
     if (activeTab === "records") {
       const rangeLabel = timeRange === 0 ? "all" : `${timeRange}d`;
-      const { start, end } = timeRange > 0 ? getDateRange(timeRange, filterStartDate) : { start: "all", end: "all" };
+      const { start, end } = timeRange > 0 ? getDateRange(timeRange, filterStartDate, monthRange) : { start: "all", end: "all" };
       const rows = filteredSummary.map((emp) => ({
         "Employee ID": emp.employeeId || "",
         "Employee Name": emp.name || "",
@@ -2451,14 +2467,17 @@ export default function AttendancePage() {
               </div>
               {timeRange > 0 && (
                 <span className="text-[11px] text-foreground-muted">
-                  {formatDisplayDate(getDateRange(timeRange, filterStartDate).start)} → {formatDisplayDate(getDateRange(timeRange, filterStartDate).end)}
+                  {formatDisplayDate(getDateRange(timeRange, filterStartDate, monthRange).start)} → {formatDisplayDate(getDateRange(timeRange, filterStartDate, monthRange).end)}
                 </span>
               )}
               <div className="flex gap-1 bg-surface-muted rounded-[12px] p-1">
                 {TIME_RANGES.map((r) => (
                   <button
                     key={r.label}
-                    onClick={() => setTimeRange(r.days)}
+                    onClick={() => {
+                      setMonthRange(r.calendarMonth === true);
+                      setTimeRange(r.days);
+                    }}
                     className={`px-3 py-1.5 rounded-[10px] text-[12px] font-semibold transition-all ${
                       timeRange === r.days
                         ? "bg-surface text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]"

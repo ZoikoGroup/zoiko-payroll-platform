@@ -11,7 +11,7 @@ double-deduct the same loan via two separate mechanisms).
 import pytest
 
 from app.core.exceptions import BadRequestException
-from app.modules.payroll.employee_validation import UKEmployeeValidation, USEmployeeValidation
+from app.modules.payroll.employee_validation import INEmployeeValidation, UKEmployeeValidation, USEmployeeValidation
 
 # nino/paye_tax_code/sort_code are required for every UK employee —
 # included in every payload below so each test isolates the ONE thing
@@ -123,3 +123,29 @@ def test_w4_form_vintage_absent_when_not_submitted():
     cleaned = USEmployeeValidation.validate(_us_payload())
     columns = USEmployeeValidation.sync_to_columns(cleaned)
     assert "w4_form_vintage" not in columns
+
+
+# ── IN: tax_regime (2026-09-21 gap-closure Group B) ────────────────────────
+# Real column (models.py's PayrollEmployee.tax_regime, read directly by
+# india.py and service.py's rate/slab resolution) previously had FIELD_SPECS
+# choice validation but no FIELD_COLUMN_MAP entry — the same dead-plumbing
+# gap UK's has_postgrad_loan and US's w4_form_vintage/state_tax_jurisdiction
+# were fixed for above. Without it, tax_regime lived only in compliance_
+# fields JSON and the column stayed NULL forever, so service.py's own
+# effective_tax_regime fallback silently defaulted every India employee to
+# "New" regardless of what was actually selected on the Employee Form.
+
+def test_tax_regime_syncs_to_the_real_column():
+    cleaned = INEmployeeValidation.validate({"tax_regime": "Old"})
+    columns = INEmployeeValidation.sync_to_columns(cleaned)
+    assert columns["tax_regime"] == "Old"
+
+    cleaned_new = INEmployeeValidation.validate({"tax_regime": "New"})
+    columns_new = INEmployeeValidation.sync_to_columns(cleaned_new)
+    assert columns_new["tax_regime"] == "New"
+
+
+def test_tax_regime_absent_when_not_submitted():
+    cleaned = INEmployeeValidation.validate({})
+    columns = INEmployeeValidation.sync_to_columns(cleaned)
+    assert "tax_regime" not in columns

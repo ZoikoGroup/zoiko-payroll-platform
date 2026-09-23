@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Globe2, ChevronRight, Eye, FileText, ShieldCheck, Zap } from "lucide-react";
+import { Globe2, ChevronRight, Eye, FileText, ShieldCheck, Zap, Palmtree } from "lucide-react";
 import { getComplianceJurisdictions } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
@@ -36,6 +36,12 @@ export default function CompliancePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/super-admin/compliance/caribbean"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
+          >
+            <Palmtree size={14} /> Caribbean
+          </Link>
           <Link
             to="/super-admin/compliance/engine-defaults"
             className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:border-primary/40 hover:text-primary transition-colors"
