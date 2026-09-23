@@ -873,6 +873,26 @@ def run():
             ],
         )
 
+        print("Seeding The Bahamas C10 monthly NIB contribution statement (non-hospitality), employer-wide (real per-employee rows computed by generate_bs_c10)...")
+        _seed_template(
+            db, template_key="BS-C10", name="C10 — Monthly NIB Contribution Statement (Non-Hospitality)", report_type="BS_C10",
+            country="BS", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_bs_c10, same
+                # convention as US-941's own line1_employee_count field.
+                ("totals", "Employer Totals (Insurable Earnings / NIB)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_insurable_earnings", "Total Insurable Earnings", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_nib_employee", "Total NIB (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nib_employer", "Total NIB (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
         print("Seeding Trinidad and Tobago PAYE + Health Surcharge + NIS statement, per-employee...")
         _seed_template(
             db, template_key="TT-PAYE-HS-NIS", name="PAYE + Health Surcharge + NIS Statement", report_type="TT_PAYE_HS_NIS",

@@ -2929,6 +2929,26 @@ def generate_do_ir13(
     )
 
 
+# ── The Bahamas: C10 monthly NIB contribution statement (non-
+# hospitality) generation (Caribbean forms gap-closure, country #6,
+# 2026-09-23).
+
+@payroll_router.post(
+    "/bahamas/reports/c10", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Bahamas C10 monthly NIB contribution statement (non-hospitality) — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_bs_c10(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_bs_c10(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
 @payroll_router.get(
     "/generated-reports/{generated_report_id}/rti-xml",
     summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",

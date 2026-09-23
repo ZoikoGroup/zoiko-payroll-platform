@@ -8651,6 +8651,15 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("earnings", "Earnings (Year-to-Date)"), ("tax", "ISR (Year-to-Date)"),
     ],
+    # The Bahamas real named form (Caribbean forms gap-closure, country
+    # #6, 2026-09-23). Per MONTH, employer-level components only (Super
+    # Admin sees the box structure) — the real per-employee rows are
+    # computed by generate_bs_c10 directly, same reasoning as GY_FORM_5
+    # above.
+    "BS_C10": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Insurable Earnings / NIB)"),
+    ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -12067,6 +12076,130 @@ def generate_do_tss_suir(
             "carries contribution data, never movement/novelty records.",
             "SRL's risk-type add-on (I-IV) resolves from a single org-level EmployerTaxProfile rate, not "
             "a per-employee risk classification.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── The Bahamas: C10 monthly NIB contribution statement (non-hospitality
+# variant) ───────────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #6, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as the prior 5 countries —
+# reuses _walk_us_aggregate_report_components for the employer-totals
+# side. No PAYE/ISR equivalent here — Bahamas has no personal income
+# tax, so this report only ever carries NIB contribution data, same
+# scope as the existing BS_NIB_STATEMENT per-run template.
+#
+# DISCLOSED SCOPE (see "knownGaps"): only real, engine-computed figures
+# (gross pay, NIB via `social_security`/`employer_social_security`) are
+# populated. The HOSPITALITY variant of C10 (which needs the gratuity
+# rate still blocked in Group C's own disclosed gaps) is deliberately
+# NOT built here — this generator covers the non-hospitality variant
+# only, per the approved plan's own scope.
+
+_BS_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def generate_bs_c10(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """The Bahamas's C10 monthly NIB contribution statement (non-
+    hospitality variant). Per-employee rows for the calendar month plus
+    an employer-totals row, summed from real FINALIZED BS PayslipItems
+    (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "BS_C10":
+        raise BadRequestException(f"generate_bs_c10 is only for BS_C10 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "BS",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_BS_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    employee_rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        nib_employee = sum((i.social_security or z for i in emp_items), z)
+        nib_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        employee_rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "nibNumber": cf.get("nib_number"),
+            "insurableEarnings": float(gross),
+            "nibEmployee": float(nib_employee), "nibEmployer": float(nib_employer),
+        })
+    employee_rows.sort(key=lambda r: r["employeeName"] or "")
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_insurable_earnings": float(sum((i.gross_pay or z for i in items), z)),
+        "total_nib_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nib_employer": float(sum((i.employer_social_security or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "The hospitality variant of C10 (gratuity/tip-inclusive insurable earnings) is not built — "
+            "it needs the gratuity NIB rate still blocked in Group C's own disclosed gaps (requires "
+            "NIB confirmation per the spec's own wording). This generator covers the non-hospitality "
+            "variant only.",
+            "Employee address and BS §9's own real field ordering/layout were not re-acquired for this "
+            "pass — only real, engine-computed figures (gross pay, NIB employee/employer) are populated.",
         ],
     }
 
