@@ -12,6 +12,16 @@ export const COUNTRIES = [
   { code: "AU", name: "Australia" },
   { code: "CA", name: "Canada" },
   { code: "DE", name: "Germany" },
+  // Caribbean production jurisdictions (2026-09-21, employee field specs
+  // added 2026-09-22) — matching backend/app/modules/payroll/
+  // employee_validation.py's _STRATEGIES/FIELD_SPECS exactly.
+  { code: "BB", name: "Barbados" },
+  { code: "KY", name: "Cayman Islands" },
+  { code: "DO", name: "Dominican Republic" },
+  { code: "GY", name: "Guyana" },
+  { code: "JM", name: "Jamaica" },
+  { code: "BS", name: "Bahamas" },
+  { code: "TT", name: "Trinidad and Tobago" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {
@@ -134,6 +144,38 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "krankenkasse", label: "Krankenkasse", type: "text", required: true },
     { key: "iban", label: "IBAN", type: "text", placeholder: "DE + 20 digits", required: true, upper: true, strip: " ", pattern: /^DE\d{20}$/, error: "German IBAN must be DE followed by 20 digits." },
     { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
+  ],
+  // Caribbean production jurisdictions (2026-09-21, fields added
+  // 2026-09-22) — matches backend/employee_validation.py's FIELD_SPECS
+  // exactly. Every field is optional (not required) and uses the same
+  // lenient pattern core/jurisdiction.py already uses for these 7
+  // countries' EMPLOYER-level identifiers — none of the 7 engineering
+  // specs confirm the exact current issuing form for the EMPLOYEE-level
+  // identifier, so a strict pattern/requirement would risk rejecting a
+  // real ID or blocking onboarding before a number is issued.
+  BB: [
+    { key: "tamis_tin", label: "TAMIS TIN", type: "text", placeholder: "9-13 digits", pattern: /^\d{9,13}$/, error: "TAMIS TIN must be 9 to 13 digits." },
+    { key: "nis_number", label: "Barbados NIS number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIS number looks incorrect." },
+  ],
+  KY: [
+    { key: "nib_member_number", label: "NIB member number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIB member number looks incorrect." },
+  ],
+  DO: [
+    { key: "cedula", label: "Cédula", type: "text", placeholder: "000-0000000-0", pattern: /^\d{3}-\d{7}-\d{1}$/, error: "Cédula must be in the format 000-0000000-0." },
+  ],
+  GY: [
+    { key: "gra_tin", label: "GRA TIN", type: "text", placeholder: "7-10 digits", pattern: /^\d{7,10}$/, error: "GRA TIN must be 7 to 10 digits." },
+    { key: "nis_number", label: "Guyana NIS number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIS number looks incorrect." },
+  ],
+  JM: [
+    { key: "trn", label: "TRN", type: "text", placeholder: "123456789", strip: "-", pattern: /^\d{9}$/, error: "TRN must be 9 digits (e.g. 123456789 or 123-456-789)." },
+  ],
+  BS: [
+    { key: "nib_number", label: "NIB number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIB number looks incorrect." },
+  ],
+  TT: [
+    { key: "bir_file_number", label: "BIR file number", type: "text", placeholder: "9-10 digits", pattern: /^\d{9,10}$/, error: "BIR file number must be 9 to 10 digits." },
+    { key: "nibtt_number", label: "NIBTT number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIBTT number looks incorrect." },
   ],
 };
 

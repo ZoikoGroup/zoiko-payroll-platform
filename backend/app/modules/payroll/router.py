@@ -121,6 +121,8 @@ from app.modules.payroll.schemas import (
     EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
     CAPd7aGenerateRequest,
+    GYMonthlyReportGenerateRequest,
+    JMAnnualReportGenerateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
     AUSchedule5CalculateRequest, AUSchedule5CalculateResponse,
     AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
@@ -2724,6 +2726,58 @@ def generate_ca_pd7a(
     )
 
 
+# ── Guyana: GRA Form 5 (monthly PAYE) + NIS Electronic Schedule (monthly)
+# + Form 7B (per-employee, annual) generation (Caribbean forms gap-
+# closure, 2026-09-22).
+
+@payroll_router.post(
+    "/guyana/reports/form5", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Guyana GRA Form 5 monthly PAYE return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_gy_form_5(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_gy_form_5(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/guyana/reports/nis-schedule", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Guyana NIS Electronic Schedule for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_gy_nis_schedule(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_gy_nis_schedule(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/guyana/reports/form7b", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Guyana Form 7B annual employee earnings statement for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_gy_form_7b(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
 # Germany Lohnsteuerbescheinigung — same generic per-employee, non-run-
 # based engine as UK P60/India Form 130/Canada T4/RL1/ROE above (see
 # service.generate_uk_employee_report's own docstring: never actually
@@ -2742,6 +2796,222 @@ def generate_de_lstb(
     return service.generate_uk_employee_report(
         db, current_user.organization_id, data.report_template_id, data.employee_id,
         data.as_of_date, actor_id=current_user.id,
+    )
+
+
+# ── Trinidad and Tobago: Monthly PAYE/HS Return + NIBTT contribution
+# data (monthly) + TD4 (per-employee, annual) generation (Caribbean
+# forms gap-closure, country #2, 2026-09-23).
+
+@payroll_router.post(
+    "/tt/reports/monthly-return", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Trinidad and Tobago Monthly PAYE/Health Surcharge Return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_tt_monthly_return(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_tt_monthly_return(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/tt/reports/nibtt-data", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate Trinidad and Tobago NIBTT contribution data for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_tt_nibtt_data(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_tt_nibtt_data(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/tt/reports/td4", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Trinidad and Tobago TD4 annual employee certificate for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_tt_td4(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+# ── Jamaica: S01 (monthly) + S02 (annual) return generation (Caribbean
+# forms gap-closure, country #3, 2026-09-23).
+
+@payroll_router.post(
+    "/jamaica/reports/s01", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Jamaica S01 monthly PAYE/NIS/NHT/Education Tax/HEART return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_jm_s01(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_jm_s01(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/jamaica/reports/s02", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Jamaica S02 annual employer return for one calendar year — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_jm_s02(
+    data: JMAnnualReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_jm_s02(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+# ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule
+# generation (Caribbean forms gap-closure, country #4, 2026-09-23).
+
+@payroll_router.post(
+    "/barbados/reports/tamis-monthly-paye", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Barbados TAMIS Monthly PAYE return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_bb_tamis_monthly_paye(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_bb_tamis_monthly_paye(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/barbados/reports/nis-earnings-schedule", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Barbados NIS Earnings Schedule for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_bb_nis_earnings_schedule(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_bb_nis_earnings_schedule(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+# ── Dominican Republic: DGII IR-3 + TSS/SUIR (monthly) + IR-13
+# (per-employee, annual) generation (Caribbean forms gap-closure,
+# country #5, 2026-09-23).
+
+@payroll_router.post(
+    "/do/reports/ir3", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Dominican Republic DGII IR-3 monthly withholding declaration — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_do_ir3(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_do_ir3(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/do/reports/tss-suir", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Dominican Republic TSS/SUIR contribution submission for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_do_tss_suir(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_do_tss_suir(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/do/reports/ir13", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Dominican Republic DGII IR-13 annual withholding declaration for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_do_ir13(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
+# ── The Bahamas: C10 monthly NIB contribution statement (non-
+# hospitality) generation (Caribbean forms gap-closure, country #6,
+# 2026-09-23).
+
+@payroll_router.post(
+    "/bahamas/reports/c10", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Bahamas C10 monthly NIB contribution statement (non-hospitality) — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_bs_c10(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_bs_c10(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+# ── Cayman Islands: monthly Pension contribution submission generation
+# (Caribbean forms gap-closure, country #7 — the last of the 7,
+# 2026-09-23). The Wage/Gratuity Statement needs no dedicated endpoint —
+# it uses the fully generic POST /generated-reports above unchanged,
+# same as STP/CA/India/UK's own generic-engine report types.
+
+@payroll_router.post(
+    "/ky/reports/pension-submission", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Cayman Islands monthly Pension contribution submission — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_ky_pension_submission(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_ky_pension_submission(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
     )
 
 

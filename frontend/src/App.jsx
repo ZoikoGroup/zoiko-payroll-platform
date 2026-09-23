@@ -23,15 +23,25 @@ import HotfixActivationsPage from "./pages/HotfixActivationsPage";
 import {
   INCompliancePage, USACompliancePage, UKCompliancePage,
   AUCompliancePage, CACompliancePage, DECompliancePage,
+  BBCompliancePage, KYCompliancePage, DOCompliancePage,
+  GYCompliancePage, JMCompliancePage, BSCompliancePage, TTCompliancePage,
 } from "./pages/JurisdictionCompliance";
+import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
 import {
   INStatutoryPage, USAStatutoryPage, UKStatutoryPage,
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
+  BBStatutoryPage, KYStatutoryPage, DOStatutoryPage,
+  GYStatutoryPage, JMStatutoryPage, BSStatutoryPage, TTStatutoryPage,
 } from "./pages/JurisdictionStatutory";
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
-import { INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage, DEReportTemplatesPage } from "./pages/ReportTemplates";
+import {
+  INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage,
+  DEReportTemplatesPage,
+  BBReportTemplatesPage, KYReportTemplatesPage, DOReportTemplatesPage, GYReportTemplatesPage, JMReportTemplatesPage,
+  BSReportTemplatesPage, TTReportTemplatesPage,
+} from "./pages/ReportTemplates";
 import FundingPaymentsPage from "./pages/SuperAdmin/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
@@ -171,6 +181,18 @@ export default function App() {
         <Route path="/super-admin/compliance/germany" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/germany/registries" element={<SuperAdminShell><GermanyStatutoryRegistriesPage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/germany/:jurisdiction" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
+        {/* Caribbean production jurisdictions (2026-09-21) — each is
+            country-level only, so no :jurisdiction sub-route is needed. */}
+        <Route path="/super-admin/compliance/barbados" element={<SuperAdminShell><BBCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/cayman-islands" element={<SuperAdminShell><KYCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/dominican-republic" element={<SuperAdminShell><DOCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/guyana" element={<SuperAdminShell><GYCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/jamaica" element={<SuperAdminShell><JMCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/bahamas" element={<SuperAdminShell><BSCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/trinidad-and-tobago" element={<SuperAdminShell><TTCompliancePage /></SuperAdminShell>} />
+        {/* Caribbean master (grouped, incl. Coming Soon) — a separate
+            browsing view from the pack-driven landing grid above. */}
+        <Route path="/super-admin/compliance/caribbean" element={<SuperAdminShell><CaribbeanCompliancePage /></SuperAdminShell>} />
         <Route
           path="/super-admin/statutory-rates"
           element={
@@ -193,6 +215,14 @@ export default function App() {
         <Route path="/super-admin/statutory-rates/canada/:jurisdiction" element={<SuperAdminShell><CAStatutoryPage /></SuperAdminShell>} />
         <Route path="/super-admin/statutory-rates/germany" element={<SuperAdminShell><DEStatutoryPage /></SuperAdminShell>} />
         <Route path="/super-admin/statutory-rates/germany/:jurisdiction" element={<SuperAdminShell><DEStatutoryPage /></SuperAdminShell>} />
+        {/* Caribbean production jurisdictions (2026-09-21). */}
+        <Route path="/super-admin/statutory-rates/barbados" element={<SuperAdminShell><BBStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/cayman-islands" element={<SuperAdminShell><KYStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/dominican-republic" element={<SuperAdminShell><DOStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/guyana" element={<SuperAdminShell><GYStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/jamaica" element={<SuperAdminShell><JMStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/bahamas" element={<SuperAdminShell><BSStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/trinidad-and-tobago" element={<SuperAdminShell><TTStatutoryPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/report-templates"
           element={
@@ -213,6 +243,20 @@ export default function App() {
         <Route path="/super-admin/report-templates/canada/:jurisdiction" element={<SuperAdminShell><CAReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/australia" element={<SuperAdminShell><AUReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/australia/:jurisdiction" element={<SuperAdminShell><AUReportTemplatesPage /></SuperAdminShell>} />
+<Route path="/super-admin/report-templates/barbados" element={<SuperAdminShell><BBReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/barbados/:jurisdiction" element={<SuperAdminShell><BBReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/cayman-islands" element={<SuperAdminShell><KYReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/cayman-islands/:jurisdiction" element={<SuperAdminShell><KYReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/dominican-republic" element={<SuperAdminShell><DOReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/dominican-republic/:jurisdiction" element={<SuperAdminShell><DOReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/guyana" element={<SuperAdminShell><GYReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/guyana/:jurisdiction" element={<SuperAdminShell><GYReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/jamaica" element={<SuperAdminShell><JMReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/jamaica/:jurisdiction" element={<SuperAdminShell><JMReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/bahamas" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/bahamas/:jurisdiction" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/trinidad-and-tobago" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/trinidad-and-tobago/:jurisdiction" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/germany" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/germany/:jurisdiction" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
         <Route

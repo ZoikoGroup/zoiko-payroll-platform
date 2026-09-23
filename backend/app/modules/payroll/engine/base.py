@@ -12,7 +12,9 @@ Fixed 30-Day Payroll Model (applies to ALL strategies):
     PAYROLL_DAYS = 30
     Per Day Salary = Monthly Gross / 30
     Attendance Deduction = Unpaid Leave Days × Per Day Salary
-    Payable Days = 30 − Unpaid Leave Days
+    Payable Days = calendar days in the pay period − Unpaid Leave Days
+    (calendar_days = 28/29/30/31 for a calendar-month run; falls back to
+    30 when the caller doesn't supply a real period length)
 """
 
 from __future__ import annotations
@@ -44,6 +46,13 @@ class PayrollContext:
     # Attendance (fixed 30-day model)
     unpaid_leave_days: int = 0
     payroll_days: int = PAYROLL_DAYS
+    # Actual length of this run's pay period — 28/29/30/31 for a calendar
+    # month, the raw span for semi-monthly/bi-weekly periods. Used ONLY
+    # for payable_days and total_working_days; per_day_salary always
+    # divides by payroll_days (30), so the attendance deduction is
+    # unchanged by month length. None (every direct/db-free caller that
+    # doesn't know its period) falls back to payroll_days.
+    calendar_days: int | None = None
 
     # Country / compliance
     country: str = "IN"
@@ -415,6 +424,38 @@ class PayrollContext:
     # _load_au_sg_ytd, gated on shared._YTD_ACCUMULATOR_ENABLED_COUNTRIES.
     ytd_sg_qualifying_earnings_before: Decimal = None
 
+    # Cayman Islands mandatory pension — this employee's cumulative
+    # mandatory (non-AVC) pensionable earnings for the current calendar
+    # year, as of BEFORE this pay period, toward the CI$87,000 annual cap
+    # (KY-008). Same dormancy contract as ytd_sg_qualifying_earnings_before
+    # above: None means "no accumulator wired yet" — engine/countries/
+    # cayman_islands.py MUST fall back to a per-period pro-rated share of
+    # the annual cap (annual_cap / periods_per_year) rather than treat
+    # None as $0 already-used. Not yet wired to PayrollYtdAccumulator —
+    # Phase 2 work, same explicitly-deferred shape as AU's own WHM/SG
+    # accumulators above before their service.py wiring landed.
+    ytd_ky_mandatory_pensionable_earnings_before: Decimal = None
+
+    # Guyana PAYE statutory credit (GY-010) — this employee's remaining
+    # unconsumed over-deduction credit balance BEFORE this period.
+    # DISCLOSED SCOPE: the spec's own worked scenario (Jan-Feb 2026
+    # over-withholding under pre-2026 thresholds, refunded from March
+    # 2026) has already passed relative to this platform's actual Guyana
+    # go-live (September 2026) — Zoiko never processed that period's
+    # payroll, so no historical over-deduction can be auto-derived from
+    # this platform's own PayrollYtdAccumulator history the way KY's
+    # pension accumulator above naturally starts at 0 and accumulates
+    # forward. This mechanism is built general-purpose (any future GRA
+    # rate-change/refund scenario of the same shape, not hardcoded to
+    # 2026 Jan-Feb), but there is no UI/API path yet to populate a real
+    # opening balance — only a direct PayrollYtdAccumulator row entry
+    # (component "gy_paye_refund_credit") would activate it today.
+    # None (every employee until such an entry exists) means "no credit
+    # to apply" — engine/countries/guyana.py's calculate() runs its
+    # ordinary, unaffected PAYE calculation, identical to before this
+    # field existed. Never guesses/backfills a starting value.
+    ytd_gy_paye_credit_before: Decimal = None
+
     # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
     # $45,000 first-bracket test — this employee's cumulative WHM earnings
     # for the current Australian financial year, as of BEFORE this pay
@@ -456,6 +497,17 @@ class PayrollContext:
     # employee/org today) means "not wired" — engine/countries/canada.py
     # MUST resolve Ontario EHT to $0 when None, never treat None as 0.
     on_eht_ytd_remuneration_before: Decimal = None
+    # Jamaica: the employer's aggregate MONTHLY emoluments across ALL its
+    # employees, as of BEFORE this employee's own period, for HEART
+    # (JM-008: "evaluate across all pay groups"). Reuses the SAME
+    # OrganizationYtdAccumulator table and _load_ca_org_levy_ytd/
+    # _upsert_ca_org_levy_ytd generic reader/writer as Ontario EHT above
+    # (see service.py's _load_jm_heart_ytd), but with a MONTHLY tax_year
+    # key instead of a calendar-year one — HEART's threshold is evaluated
+    # per calendar month, not per year. Same "None means not wired, must
+    # resolve exactly as Phase 1's per-employee-only check did" contract
+    # as on_eht_ytd_remuneration_before above.
+    jm_heart_ytd_remuneration_before: Decimal = None
     # UK: the org's aggregate annual statutory pay bill YTD, for the
     # Apprenticeship Levy (ZP-TAX-UK-2026-27-001 §14) — same "None means
     # not wired, must resolve to £0" contract as on_eht_ytd_remuneration_before
@@ -593,7 +645,12 @@ class PayrollResult:
 
     # Attendance
     payroll_days: int = PAYROLL_DAYS
+    # Real pay-period length this run actually spans (see PayrollContext.
+    # calendar_days). Echoed back so service.py can persist it as
+    # total_working_days without recomputing it.
+    calendar_days: int = PAYROLL_DAYS
     unpaid_leave_days: int = 0
+    # calendar_days − unpaid_leave_days (floored at 0).
     payable_days: int = PAYROLL_DAYS
     per_day_salary: Decimal = Decimal("0")
     attendance_deduction: Decimal = Decimal("0")
@@ -680,6 +737,20 @@ class PayrollResult:
     # including why crossing the cap sets au_whm_cap_exceeded below rather
     # than computing a real above-cap withholding amount.
     ytd_whm_earnings_after: Decimal = None
+    # Cayman Islands mandatory pension (KY-008) — cumulative mandatory
+    # (non-AVC) pensionable earnings AFTER this period, same
+    # None-means-"not applicable"/dormant contract as every YTD-adjacent
+    # field above. See PayrollContext's matching
+    # ytd_ky_mandatory_pensionable_earnings_before field.
+    ytd_ky_mandatory_pensionable_earnings_after: Decimal = None
+
+    # Guyana PAYE statutory credit (GY-010) — remaining unconsumed credit
+    # balance AFTER this period (calculated liability minus whatever
+    # portion of the credit this period's calculation consumed, floored
+    # at 0). Same None-means-"not applicable"/dormant contract as every
+    # YTD-adjacent field above. See PayrollContext's matching
+    # ytd_gy_paye_credit_before field for the disclosed scope limitation.
+    ytd_gy_paye_credit_after: Decimal = None
     # True once ytd_whm_earnings_after crosses $45,000 for an employee
     # whose WHM YTD tracking is wired — informational (the withholding
     # itself is now genuinely computed using the real above-cap brackets
@@ -722,6 +793,13 @@ class PayrollResult:
     # without recomputing. None unless Ontario EHT was actually wired for
     # this calculation — see PayrollContext.on_eht_ytd_remuneration_before.
     on_eht_ytd_remuneration_after: Decimal = None
+    # Jamaica: the employer's aggregate MONTHLY emoluments AFTER this
+    # employee's own period, for service.py to persist into
+    # OrganizationYtdAccumulator (its own monthly tax_year key — see
+    # service.py's _upsert_jm_heart_ytd). None unless HEART's org-level
+    # accumulator was actually wired for this calculation — see
+    # PayrollContext.jm_heart_ytd_remuneration_before.
+    jm_heart_ytd_remuneration_after: Decimal = None
     # Canada: the same after-period contract as on_eht_ytd_remuneration_after
     # above, for BC EHT, Manitoba HE Levy and NL HAPSET respectively.
     bc_eht_ytd_remuneration_after: Decimal = None

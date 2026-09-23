@@ -313,6 +313,16 @@ def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin),
 
 
 @router.get(
+    "/compliance/caribbean-jurisdictions",
+    summary="Full Caribbean jurisdiction master (region-grouped), including Coming Soon entries — read-only, gates nothing",
+)
+def list_caribbean_jurisdictions(current_user=Depends(get_current_super_admin)):
+    from app.core.caribbean_regions import list_caribbean_master
+
+    return list_caribbean_master()
+
+
+@router.get(
     "/compliance/engine-fallback-defaults",
     summary="Read-only: every hardcoded fallback value the payroll engine uses when no canonical/org rate exists",
 )

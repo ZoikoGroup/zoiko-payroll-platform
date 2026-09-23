@@ -6,6 +6,8 @@ const JURISDICTION_TO_CURRENCY = {
   NP: "NPR", NZ: "NZD", OM: "OMR", PK: "PKR", QA: "QAR", RW: "RWF",
   SA: "SAR", SE: "SEK", SG: "SGD", TH: "THB", TZ: "TZS", UG: "UGX",
   ZA: "ZAR",
+  // Caribbean production jurisdictions (2026-09-21).
+  BB: "BBD", KY: "KYD", DO: "DOP", GY: "GYD", JM: "JMD", BS: "BSD", TT: "TTD",
   India: "INR", "United States": "USD", "United Kingdom": "GBP",
   "United Arab Emirates": "AED", Australia: "AUD", Bangladesh: "BDT",
   Bahrain: "BHD", Brazil: "BRL", Canada: "CAD", Switzerland: "CHF",
@@ -19,6 +21,8 @@ const JURISDICTION_TO_CURRENCY = {
   Pakistan: "PKR", Qatar: "QAR", Rwanda: "RWF", "Saudi Arabia": "SAR",
   Sweden: "SEK", Singapore: "SGD", Thailand: "THB", Tanzania: "TZS",
   Uganda: "UGX", "South Africa": "ZAR",
+  Barbados: "BBD", "Cayman Islands": "KYD", "Dominican Republic": "DOP",
+  Guyana: "GYD", Jamaica: "JMD", Bahamas: "BSD", "Trinidad and Tobago": "TTD",
 };
 
 export const CURRENCY_MASTER = {
@@ -59,6 +63,14 @@ export const CURRENCY_MASTER = {
   UGX: { code: 'UGX', symbol: 'USh', name: 'Ugandan Shilling', nameNative: 'Uganda Shilling', locale: 'en-UG', flag: '\uD83C\uDDFA\uD83C\uDDEC', decimalDigits: 0 },
   USD: { code: 'USD', symbol: '$', name: 'US Dollar', nameNative: 'US Dollar', locale: 'en-US', flag: '\uD83C\uDDFA\uD83C\uDDF8', decimalDigits: 2 },
   ZAR: { code: 'ZAR', symbol: 'R', name: 'South African Rand', nameNative: 'South African Rand', locale: 'en-ZA', flag: '\uD83C\uDDFF\uD83C\uDDE6', decimalDigits: 2 },
+  // Caribbean production jurisdictions (2026-09-21).
+  BBD: { code: 'BBD', symbol: 'Bds$', name: 'Barbadian Dollar', nameNative: 'Barbadian Dollar', locale: 'en-BB', flag: '\uD83C\uDDE7\uD83C\uDDE7', decimalDigits: 2 },
+  KYD: { code: 'KYD', symbol: 'CI$', name: 'Cayman Islands Dollar', nameNative: 'Cayman Islands Dollar', locale: 'en-KY', flag: '\uD83C\uDDF0\uD83C\uDDFE', decimalDigits: 2 },
+  DOP: { code: 'DOP', symbol: 'RD$', name: 'Dominican Peso', nameNative: 'Peso Dominicano', locale: 'es-DO', flag: '\uD83C\uDDE9\uD83C\uDDF4', decimalDigits: 2 },
+  GYD: { code: 'GYD', symbol: 'G$', name: 'Guyanese Dollar', nameNative: 'Guyanese Dollar', locale: 'en-GY', flag: '\uD83C\uDDEC\uD83C\uDDFE', decimalDigits: 2 },
+  JMD: { code: 'JMD', symbol: 'J$', name: 'Jamaican Dollar', nameNative: 'Jamaican Dollar', locale: 'en-JM', flag: '\uD83C\uDDEF\uD83C\uDDF2', decimalDigits: 2 },
+  BSD: { code: 'BSD', symbol: 'B$', name: 'Bahamian Dollar', nameNative: 'Bahamian Dollar', locale: 'en-BS', flag: '\uD83C\uDDE7\uD83C\uDDF8', decimalDigits: 2 },
+  TTD: { code: 'TTD', symbol: 'TT$', name: 'Trinidad and Tobago Dollar', nameNative: 'Trinidad and Tobago Dollar', locale: 'en-TT', flag: '\uD83C\uDDF9\uD83C\uDDF9', decimalDigits: 2 },
 };
 
 export function getCurrencyForJurisdiction(jurisdictionCountry) {
@@ -175,6 +187,14 @@ export const COUNTRY_OPTIONS = [
   { code: "TZ", name: "Tanzania", currency: "TZS" },
   { code: "UG", name: "Uganda", currency: "UGX" },
   { code: "ZA", name: "South Africa", currency: "ZAR" },
+  // Caribbean production jurisdictions (2026-09-21).
+  { code: "BB", name: "Barbados", currency: "BBD" },
+  { code: "KY", name: "Cayman Islands", currency: "KYD" },
+  { code: "DO", name: "Dominican Republic", currency: "DOP" },
+  { code: "GY", name: "Guyana", currency: "GYD" },
+  { code: "JM", name: "Jamaica", currency: "JMD" },
+  { code: "BS", name: "Bahamas", currency: "BSD" },
+  { code: "TT", name: "Trinidad and Tobago", currency: "TTD" },
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export function getCurrencyForCountry(countryNameOrCode) {

@@ -2332,6 +2332,17 @@ class CAPd7aGenerateRequest(BaseModel):
     period_end: date
 
 
+class GYMonthlyReportGenerateRequest(BaseModel):
+    report_template_id: int
+    year: int
+    month: int  # 1-12
+
+
+class JMAnnualReportGenerateRequest(BaseModel):
+    report_template_id: int
+    year: int
+
+
 class RtiSubmissionCreate(BaseModel):
     generated_report_id: int
 

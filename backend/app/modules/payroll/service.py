@@ -34,7 +34,7 @@ from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func as sa_func, tuple_, or_, and_, case
+from sqlalchemy import func as sa_func, tuple_, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
@@ -8303,6 +8303,31 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "AU": ["employee_name", "bank_name", "bank_account", "gross_pay",
            "tds", "study_loan_deduction", "employer_pension", "employer_payroll_tax",
            "au_statutory_deductions_total", "total_deductions", "net_pay"],
+    # Caribbean 7 (2026-09-22, Group D gap-closure) — each country's list
+    # is exactly the PayslipItem columns that country's own engine/
+    # countries/<code>.py calculate() actually returns (see each module's
+    # own "Reused fields" docstring), nothing more. Cayman and Bahamas
+    # deliberately EXCLUDE "tds": both have no personal income tax
+    # (KY-002/BS-005 — "never a fake 0% tax band"), so a report template
+    # for either country has no tax field to pick, not a zero one.
+    "BB": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "employee_pension", "total_deductions",
+           "employer_social_security", "employer_pension", "net_pay"],
+    "KY": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "employee_pension", "total_deductions", "employer_pension", "net_pay"],
+    "DO": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "employee_pension", "total_deductions",
+           "employer_social_security", "employer_pension", "employer_payroll_tax", "employer_ni", "net_pay"],
+    "GY": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "total_deductions", "employer_social_security", "net_pay"],
+    "JM": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "employee_pension", "ni_employee", "total_deductions",
+           "employer_social_security", "employer_pension", "employer_ni", "employer_payroll_tax", "net_pay"],
+    "BS": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "social_security", "total_deductions", "employer_social_security", "net_pay"],
+    "TT": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "professional_tax", "social_security", "total_deductions",
+           "employer_social_security", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -8330,6 +8355,42 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "church_tax": "Kirchensteuer",
         "employer_pf": "Pension Insurance (Employer)",
         "employer_esi": "Social Insurance (Employer)",
+    },
+    # Caribbean 7 — each override names the real statutory scheme a
+    # generic reused field stands in for, per that country's own
+    # engine module docstring (never changes which column is read).
+    "BB": {
+        "tds": "PAYE", "social_security": "NIS (Employee, Code R)",
+        "employer_social_security": "NIS (Employer, Code R)",
+        "employee_pension": "Resilience & Regeneration Levy (Employee)",
+        "employer_pension": "Resilience & Regeneration Levy (Employer)",
+    },
+    "KY": {
+        "employee_pension": "Mandatory Pension (Employee)",
+        "employer_pension": "Mandatory Pension (Employer)",
+    },
+    "DO": {
+        "tds": "ISR (Impuesto Sobre la Renta)",
+        "social_security": "SFS (Employee)", "employer_social_security": "SFS (Employer)",
+        "employee_pension": "Pensión / SVDS (Employee)", "employer_pension": "Pensión / SVDS (Employer)",
+        "employer_payroll_tax": "Seguro de Riesgos Laborales — SRL (Employer)",
+        "employer_ni": "INFOTEP (Employer)",
+    },
+    "GY": {
+        "tds": "PAYE", "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
+    },
+    "JM": {
+        "tds": "PAYE", "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
+        "employee_pension": "NHT (Employee)", "employer_pension": "NHT (Employer)",
+        "ni_employee": "Education Tax (Employee)", "employer_ni": "Education Tax (Employer)",
+        "employer_payroll_tax": "HEART (Employer)",
+    },
+    "BS": {
+        "social_security": "NIB (Employee)", "employer_social_security": "NIB (Employer)",
+    },
+    "TT": {
+        "tds": "PAYE", "professional_tax": "Health Surcharge",
+        "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
     },
 }
 
@@ -8479,6 +8540,177 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("earnings", "Earnings"), ("payg", "PAYG Withholding"), ("super", "Superannuation"),
         ("ytd", "Year-to-Date"), ("rti_metadata", "Submission Metadata"),
+    ],
+    # Caribbean 7 (2026-09-22, Group D gap-closure) — each is a per
+    # EMPLOYEE, per PAYROLL RUN itemized statutory pay-component
+    # statement generated via the generic field mapper (no bespoke
+    # generate_<cc>_<form> function needed, since it reads this run's
+    # own PayslipItem columns directly rather than aggregating across
+    # multiple runs in a calendar period). This is deliberately NOT the
+    # literal government e-filing artifact (TAMIS/GRA Form 5/NIBTT
+    # upload/C10/DGII IR-3, etc.) — those need real external file
+    # schemas the specs themselves say aren't acquired yet (e.g.
+    # ZP-BB-ENG-001 BB-028, ZP-GY-ENG-001 GY-024), and some (a true
+    # calendar-month return) would need the same cross-run aggregation
+    # US 941/940 and CA PD7A use, which is a distinct further build, not
+    # done here. This unlocks Super Admin template authoring and a real
+    # per-employee statutory pay-component report for each of the 7,
+    # matching the same bar Germany is still waiting to reach.
+    "BB_PAYE_NIS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("contributions", "NIS / R&R (Employee)"),
+        ("employer_contributions", "NIS / R&R (Employer)"),
+    ],
+    "KY_PENSION_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("contributions", "Mandatory Pension (Employee)"),
+        ("employer_contributions", "Mandatory Pension (Employer)"),
+    ],
+    "DO_PAYROLL_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "ISR"), ("contributions", "SFS / Pensión (Employee)"),
+        ("employer_contributions", "SFS / Pensión / SRL / INFOTEP (Employer)"),
+    ],
+    "GY_PAYE_NIS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("contributions", "NIS (Employee)"),
+        ("employer_contributions", "NIS (Employer)"),
+    ],
+    "JM_PAYROLL_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE / Education Tax"),
+        ("contributions", "NIS / NHT (Employee)"), ("employer_contributions", "NIS / NHT / HEART (Employer)"),
+    ],
+    "BS_NIB_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("contributions", "NIB (Employee)"),
+        ("employer_contributions", "NIB (Employer)"),
+    ],
+    "TT_PAYE_HS_NIS": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE / Health Surcharge"), ("contributions", "NIS (Employee)"),
+        ("employer_contributions", "NIS (Employer)"),
+    ],
+    # Guyana real named forms (Caribbean forms gap-closure, 2026-09-22).
+    # GY_FORM_5/GY_NIS_SCHEDULE are per MONTH, employer-level components
+    # only (Super Admin sees the box structure) — the real per-employee
+    # rows are computed by generate_gy_form_5/generate_gy_nis_schedule
+    # directly, not this generic mapper, same reasoning as US 941/940.
+    "GY_FORM_5": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS)"),
+    ],
+    "GY_NIS_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Insurable Earnings / NIS)"),
+    ],
+    # Form 7B — per EMPLOYEE, annual (calendar-year-end), no PayrollRun.
+    # Real fields resolved by the generic generate_uk_employee_report
+    # mapper (SUM_YTD over real PayslipItem columns) — no bespoke
+    # function needed, same as India's FORM_130/Canada's T4.
+    "FORM_7B": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings (Year-to-Date)"), ("tax", "PAYE (Year-to-Date)"),
+        ("contributions", "NIS (Year-to-Date)"),
+    ],
+    # Trinidad and Tobago real named forms (Caribbean forms gap-closure,
+    # country #2, 2026-09-23). TT_MONTHLY_RETURN/TT_NIBTT_DATA are per
+    # MONTH, employer-level components only (Super Admin sees the box
+    # structure) — the real per-employee rows are computed by
+    # generate_tt_monthly_return/generate_tt_nibtt_data directly, same
+    # reasoning as Guyana's GY_FORM_5/GY_NIS_SCHEDULE above.
+    "TT_MONTHLY_RETURN": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / Health Surcharge / NIS)"),
+    ],
+    "TT_NIBTT_DATA": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Insurable Earnings / NIS)"),
+    ],
+    # TD4 — per EMPLOYEE, annual (calendar-year-end), no PayrollRun. Real
+    # fields resolved by the generic generate_uk_employee_report mapper
+    # (SUM_YTD), same as Guyana's FORM_7B above.
+    "TD4": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings (Year-to-Date)"), ("tax", "PAYE / Health Surcharge (Year-to-Date)"),
+        ("contributions", "NIS (Year-to-Date)"),
+    ],
+    # Jamaica real named forms (Caribbean forms gap-closure, country #3,
+    # 2026-09-23). Both per MONTH/YEAR, employer-level components only
+    # (Super Admin sees the box structure) — the real per-employee rows
+    # are computed by generate_jm_s01/generate_jm_s02 directly, same
+    # reasoning as Guyana's GY_FORM_5/Trinidad's TT_MONTHLY_RETURN above.
+    "JM_S01": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART)"),
+    ],
+    "JM_S02": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART, Annual)"),
+    ],
+    # Barbados real named forms (Caribbean forms gap-closure, country #4,
+    # 2026-09-23). Both per MONTH, employer-level components only (Super
+    # Admin sees the box structure) — the real per-employee rows are
+    # computed by generate_bb_tamis_monthly_paye/generate_bb_nis_
+    # earnings_schedule directly, same reasoning as GY_FORM_5 above.
+    "BB_TAMIS_MONTHLY_PAYE": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS / R&R Levy)"),
+    ],
+    "BB_NIS_EARNINGS_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Insurable Earnings / NIS)"),
+    ],
+    # Dominican Republic real named forms (Caribbean forms gap-closure,
+    # country #5, 2026-09-23). DO_IR3/DO_TSS_SUIR are per MONTH,
+    # employer-level components only (Super Admin sees the box
+    # structure) — the real per-employee rows are computed by
+    # generate_do_ir3/generate_do_tss_suir directly, same reasoning as
+    # GY_FORM_5 above.
+    "DO_IR3": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Gross Pay / ISR)"),
+    ],
+    "DO_TSS_SUIR": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (SFS / Pensión / SRL / INFOTEP)"),
+    ],
+    # IR-13 — per EMPLOYEE, annual (calendar-year-end), no PayrollRun.
+    # Real fields resolved by the generic generate_uk_employee_report
+    # mapper (SUM_YTD), same as GY's FORM_7B/TT's TD4 above.
+    "IR13": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings (Year-to-Date)"), ("tax", "ISR (Year-to-Date)"),
+    ],
+    # The Bahamas real named form (Caribbean forms gap-closure, country
+    # #6, 2026-09-23). Per MONTH, employer-level components only (Super
+    # Admin sees the box structure) — the real per-employee rows are
+    # computed by generate_bs_c10 directly, same reasoning as GY_FORM_5
+    # above.
+    "BS_C10": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Insurable Earnings / NIB)"),
+    ],
+    # Cayman Islands real named forms (Caribbean forms gap-closure,
+    # country #7 — the last of the 7, 2026-09-23). Wage/Gratuity
+    # Statement is per EMPLOYEE, per PAYROLL RUN — uses the fully
+    # generic generate_report_from_template mapper unchanged (no
+    # bespoke function), same architecture as the existing KY_PENSION_
+    # STATEMENT/BB_PAYE_NIS templates. Gratuity itself has no field here
+    # — no gratuity/tip figure is computed anywhere in cayman_islands.py,
+    # so it's omitted rather than fabricated (see the seed script's own
+    # comment). Pension Submission is per MONTH, employer-level
+    # components only — the real per-employee rows are computed by
+    # generate_ky_pension_submission directly, same reasoning as
+    # GY_FORM_5 above.
+    "KY_WAGE_GRATUITY_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Wages"), ("contributions", "Mandatory Pension (Employee)"),
+        ("employer_contributions", "Mandatory Pension (Employer)"),
+    ],
+    "KY_PENSION_SUBMISSION": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Pensionable Earnings / Pension)"),
     ],
     # Germany Lohnsteuerbescheinigung (annual wage tax certificate) — per
     # EMPLOYEE, triggered by tax-year end, generated via the same generic
@@ -9658,12 +9890,16 @@ def generate_uk_employee_report(
     Canada's T4/RL-1 (triggered by calendar-year end) and ROE (Record
     of Employment, triggered by an interruption of earnings — the same
     "leaving/trigger date" shape as a P45, ZP-TAX-CA-2026-001 forms/
-    reports gap-closure), or Germany's Lohnsteuerbescheinigung (LSTB,
-    triggered by tax-year end — same shape as P60/T4) — added here
-    rather than as separate functions since this function's own logic was
-    never actually UK-specific, just gated to a report_type allow-list;
-    kept its original name for backward compatibility with existing
-    callers/tests. `as_of_date` is
+    reports gap-closure), Guyana's Form 7B annual employee earnings
+    statement (triggered by calendar-year end, GY-023), Trinidad and
+    Tobago's TD4 employee annual certificate (triggered by calendar-year
+    end, TT-023), the Dominican Republic's DGII IR-13 annual withholding
+    declaration (triggered by calendar-year end), or Germany's
+    Lohnsteuerbescheinigung (LSTB, triggered by tax-year end — same shape
+    as P60/T4) — added here rather than as separate functions since this
+    function's own logic was never actually UK-specific, just gated to a
+    report_type allow-list; kept its original name for backward
+    compatibility with existing callers/tests. `as_of_date` is
     the YTD boundary every SUM_YTD field on the template resolves
     against (the leaving date for a P45/ROE, the tax year's own 5
     April/31 March/31 December end date for a P60/Form 130/T4/RL-1).
@@ -9683,8 +9919,8 @@ def generate_uk_employee_report(
     maps one simply resolves it to None here, the same as any other
     field this engine can't currently resolve."""
     template = get_report_template(db, report_template_id)
-    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE", "LSTB"):
-        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE/LSTB templates, not {template.report_type!r}.")
+    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE", "FORM_7B", "TD4", "IR13", "LSTB"):
+        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE/FORM_7B/TD4/IR13/LSTB templates, not {template.report_type!r}.")
     if template.status != "Active":
         raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
     employee = db.query(PayrollEmployee).filter(
@@ -10853,6 +11089,1476 @@ def generate_ca_pd7a(
     return row
 
 
+# ── Guyana: GRA Form 5 (monthly PAYE return) + NIS Electronic Schedule
+# (monthly) ───────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, 2026-09-22). Both are genuinely PER-
+# EMPLOYEE listings for a calendar month (GY-023's own field table), not
+# a single aggregate row like generate_us_941/generate_ca_pd7a — an
+# employer with weekly-paid staff can have several PayrollRuns land in
+# one calendar month, so each employee's row must sum across whichever
+# runs fell in that month, then the report also carries an employer-
+# totals row. Reuses _walk_us_aggregate_report_components (genuinely
+# country-agnostic despite its name — it only walks a template's own
+# components/fields and resolves each field_key from a caller-supplied
+# dict) for the employer-totals side; the per-employee rows are this
+# function's own new concept since no prior report type needed one.
+#
+# DISCLOSED SCOPE (see "knownGaps" in the rendered output): GY-023's
+# spec lists employee address, pay frequency, full/part-time and
+# primary/secondary-job flags, a separate overtime/allowance/board-and-
+# lodging breakdown, the personal allowance figure, medical/life and
+# children deductions, bank details, and a child-declaration number —
+# none of these are tracked as distinct, real PayslipItem columns in
+# this platform today, so they are left out of the row rather than
+# fabricated. Only real, engine-computed figures (gross pay, PAYE
+# withheld, NIS employee/employer) are populated. Form 2 (Guyana's
+# annual employer return) is deliberately deferred, per plan.
+
+_GY_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _gy_month_date_range(year: int, month: int) -> tuple:
+    if month not in range(1, 13):
+        raise BadRequestException(f"month must be 1-12, got {month}.")
+    import calendar as _calendar
+    last_day = _calendar.monthrange(year, month)[1]
+    return date(year, month, 1), date(year, month, last_day)
+
+
+def _gy_month_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "GY",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_GY_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _gy_employee_rows(db: Session, items: list) -> list:
+    """Groups a month's finalized GY PayslipItems by employee and sums
+    each employee's real, engine-computed figures — the shared shape
+    used by both Form 5 and the NIS Electronic Schedule below (they
+    read different subsets of the same row)."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        paye = sum((i.tds or z for i in emp_items), z)
+        nis_employee = sum((i.social_security or z for i in emp_items), z)
+        nis_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "graTin": cf.get("gra_tin"),
+            "nisNumber": cf.get("nis_number"),
+            "dateOfBirth": employee.date_of_birth.isoformat() if employee and employee.date_of_birth else None,
+            "salaryWages": float(gross),
+            "totalIncome": float(gross),
+            "payeTaxDeducted": float(paye),
+            "nisEmployee": float(nis_employee),
+            "nisEmployer": float(nis_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+_GY_FORM_5_KNOWN_GAPS = [
+    "Employee address, pay frequency, full/part-time and primary/secondary-job flags are not "
+    "tracked in this platform and are omitted rather than fabricated.",
+    "No separate overtime, board-and-lodging, or other-allowance columns exist — salaryWages/"
+    "totalIncome is gross pay as a single figure, not GY-023's itemized breakdown.",
+    "Personal allowance, medical/life deduction, and children deduction are not persisted as "
+    "distinct, reportable figures — only the tax actually withheld (payeTaxDeducted) is shown.",
+    "Bank details and the child-declaration number are not included.",
+]
+
+
+def generate_gy_form_5(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """GRA Form 5 — Guyana's monthly PAYE return. Per-employee rows for
+    the calendar month plus an employer-totals row, summed from real
+    FINALIZED GY PayslipItems (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "GY_FORM_5":
+        raise BadRequestException(f"generate_gy_form_5 is only for GY_FORM_5 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _gy_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _gy_employee_rows(db, items)
+
+    z = Decimal("0")
+    total_salary_wages = sum((i.gross_pay or z for i in items), z)
+    total_paye = sum((i.tds or z for i in items), z)
+    total_nis_employee = sum((i.social_security or z for i in items), z)
+    total_nis_employer = sum((i.employer_social_security or z for i in items), z)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_gra_tin": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_salary_wages": float(total_salary_wages),
+        "total_paye_tax_deducted": float(total_paye),
+        "total_nis_employee": float(total_nis_employee),
+        "total_nis_employer": float(total_nis_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": _GY_FORM_5_KNOWN_GAPS,
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_gy_nis_schedule(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Guyana's NIS Electronic Schedule — monthly, per-employee NIS
+    number/earnings/contributions plus an employer-totals row. Shares
+    _gy_employee_rows with Form 5 (same underlying data), since both
+    forms report the same month's same real PayslipItem figures, just
+    to a different authority."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "GY_NIS_SCHEDULE":
+        raise BadRequestException(f"generate_gy_nis_schedule is only for GY_NIS_SCHEDULE templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _gy_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _gy_employee_rows(db, items)
+
+    z = Decimal("0")
+    total_earnings = sum((i.gross_pay or z for i in items), z)
+    total_nis_employee = sum((i.social_security or z for i in items), z)
+    total_nis_employer = sum((i.employer_social_security or z for i in items), z)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_nis_number": (company.tax_identifiers or {}).get("nis_employer_number") if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_insurable_earnings": float(total_earnings),
+        "total_nis_employee": float(total_nis_employee),
+        "total_nis_employer": float(total_nis_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": [
+            {
+                "employeeId": r["employeeId"], "employeeName": r["employeeName"], "nisNumber": r["nisNumber"],
+                "insurableEarnings": r["salaryWages"], "nisEmployee": r["nisEmployee"], "nisEmployer": r["nisEmployer"],
+            }
+            for r in employee_rows
+        ],
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Weekly insurable-earnings ceiling capping (NIS applies a per-week, not per-month, "
+            "insurable wage ceiling) is not separately re-derived here — this report sums the "
+            "same social_security/employer_social_security figures the engine already computed "
+            "(and already capped) at calculation time, never a second independent cap.",
+            "Employee address and the electronic schedule's file-transmission format are not "
+            "modeled — this is an internal record, not GRA's real upload byte format.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Trinidad and Tobago: Monthly PAYE/Health Surcharge Return + NIBTT
+# contribution data (monthly) + TD4 (per-employee, annual) ──────────────
+# (Caribbean forms gap-closure, country #2, 2026-09-23). Same shape as
+# Guyana's Form 5/NIS Schedule above — genuinely PER-EMPLOYEE monthly
+# listings, not a single aggregate row, so this reuses _walk_us_
+# aggregate_report_components for the employer-totals side and defines
+# its own per-employee row builder, mirroring _gy_employee_rows.
+#
+# DISCLOSED SCOPE (see "knownGaps"): TD4's real field list (TT-023) and
+# NIBTT's real "Week 1-5" contribution encoding (TT-024) were not
+# re-acquired verbatim for this pass — only the real, already-engine-
+# computed figures (gross pay, PAYE via `tds`, Health Surcharge via
+# `professional_tax`, NIS employee/employer via `social_security`/
+# `employer_social_security`) are populated. The week-of-month bucketing
+# below (day 1-7 -> Week 1, 8-14 -> Week 2, etc.) is this platform's own
+# best-effort convention, not independently verified against NIBTT's
+# actual encoding rule — do not treat it as authoritative without
+# checking the real NIBTT schedule spec first.
+
+_TT_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _tt_month_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "TT",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_TT_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _tt_employee_rows(db: Session, items: list) -> list:
+    """Groups a month's finalized TT PayslipItems by employee and sums
+    each employee's real, engine-computed figures — shared shape used by
+    both the Monthly Return and the NIBTT contribution data below."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        paye = sum((i.tds or z for i in emp_items), z)
+        health_surcharge = sum((i.professional_tax or z for i in emp_items), z)
+        nis_employee = sum((i.social_security or z for i in emp_items), z)
+        nis_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "birFileNumber": cf.get("bir_file_number"),
+            "nibttNumber": cf.get("nibtt_number"),
+            "salaryWages": float(gross),
+            "payeTaxDeducted": float(paye),
+            "healthSurcharge": float(health_surcharge),
+            "nisEmployee": float(nis_employee),
+            "nisEmployer": float(nis_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+def _tt_week_of_month(pay_date: date) -> int:
+    """Best-effort week-of-month bucket (1-5) for NIBTT's weekly-column
+    contribution schedule — see this section's own module-level caveat."""
+    return min(5, ((pay_date.day - 1) // 7) + 1)
+
+
+def generate_tt_monthly_return(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Trinidad and Tobago's Monthly PAYE / Health Surcharge Return.
+    Per-employee rows for the calendar month plus an employer-totals
+    row, summed from real FINALIZED TT PayslipItems (never Draft/
+    Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "TT_MONTHLY_RETURN":
+        raise BadRequestException(f"generate_tt_monthly_return is only for TT_MONTHLY_RETURN templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _tt_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _tt_employee_rows(db, items)
+
+    z = Decimal("0")
+    total_salary_wages = sum((i.gross_pay or z for i in items), z)
+    total_paye = sum((i.tds or z for i in items), z)
+    total_health_surcharge = sum((i.professional_tax or z for i in items), z)
+    total_nis_employee = sum((i.social_security or z for i in items), z)
+    total_nis_employer = sum((i.employer_social_security or z for i in items), z)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_bir_number": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_salary_wages": float(total_salary_wages),
+        "total_paye_tax_deducted": float(total_paye),
+        "total_health_surcharge": float(total_health_surcharge),
+        "total_nis_employee": float(total_nis_employee),
+        "total_nis_employer": float(total_nis_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Employee address and TT-023's own field ordering/layout were not re-acquired for this pass — "
+            "only real, engine-computed figures (gross pay, PAYE, Health Surcharge, NIS) are populated.",
+            "No pension/annuity or other allowable-deduction breakdown is modeled beyond what the engine "
+            "already computes into tds/professional_tax.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_tt_nibtt_data(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Trinidad and Tobago's NIBTT contribution data — monthly, per-
+    employee NIS number/earnings/contributions, bucketed into this
+    platform's own best-effort Week 1-5 columns (see this section's own
+    module-level caveat), plus an employer-totals row."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "TT_NIBTT_DATA":
+        raise BadRequestException(f"generate_tt_nibtt_data is only for TT_NIBTT_DATA templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _tt_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _tt_employee_rows(db, items)
+
+    z = Decimal("0")
+    total_earnings = sum((i.gross_pay or z for i in items), z)
+    total_nis_employee = sum((i.social_security or z for i in items), z)
+    total_nis_employer = sum((i.employer_social_security or z for i in items), z)
+
+    # Per-employee Week 1-5 breakdown — grouped from the same real items,
+    # not re-queried, so it can never drift from employeeRows' own totals.
+    by_employee_week: dict = {}
+    for i in items:
+        week = _tt_week_of_month(i.payroll_run.pay_date) if i.payroll_run else None
+        entry = by_employee_week.setdefault(i.employee_id, {})
+        week_entry = entry.setdefault(week, {"earnings": z, "nisEmployee": z, "nisEmployer": z})
+        week_entry["earnings"] += i.gross_pay or z
+        week_entry["nisEmployee"] += i.social_security or z
+        week_entry["nisEmployer"] += i.employer_social_security or z
+
+    weekly_rows = []
+    for r in employee_rows:
+        weeks = by_employee_week.get(r["employeeId"], {})
+        weekly_rows.append({
+            "employeeId": r["employeeId"], "employeeName": r["employeeName"], "nibttNumber": r["nibttNumber"],
+            "insurableEarnings": r["salaryWages"], "nisEmployee": r["nisEmployee"], "nisEmployer": r["nisEmployer"],
+            "weeks": {
+                f"week{w}": {
+                    "earnings": float(v["earnings"]), "nisEmployee": float(v["nisEmployee"]), "nisEmployer": float(v["nisEmployer"]),
+                }
+                for w, v in sorted(weeks.items()) if w is not None
+            },
+        })
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_nibtt_number": (company.tax_identifiers or {}).get("nibtt_employer_number") if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_insurable_earnings": float(total_earnings),
+        "total_nis_employee": float(total_nis_employee),
+        "total_nis_employer": float(total_nis_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": weekly_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "The Week 1-5 bucketing is this platform's own best-effort day-of-month convention "
+            "(days 1-7 = Week 1, 8-14 = Week 2, ...), not independently verified against NIBTT's "
+            "real encoding rule (TT-024) — verify against the authority's own schedule before relying "
+            "on this for a real electronic submission.",
+            "The 16-class NIS table's weekly-vs-monthly classification is unaffected by this — this "
+            "report only re-groups the SAME already-classified social_security/employer_social_security "
+            "figures the engine computed, never a second independent classification.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Jamaica: S01 (monthly PAYE/NIS/NHT/Education Tax/HEART return) + S02
+# (annual employer return) ──────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #3, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as Guyana's Form 5 and
+# Trinidad's Monthly Return above — reuses _walk_us_aggregate_report_
+# components for the employer-totals side. HEART (jm.heart via
+# employer_payroll_tax) is deliberately EMPLOYER-ONLY on both S01 and
+# S02 — it's already correctly aggregated across the whole employer's
+# payroll by the org-levy accumulator (JM-008, Step 3 of the earlier
+# gap-closure plan), so re-attributing it to any one employee's row
+# here would misrepresent a genuinely employer-wide liability as a
+# per-employee one.
+#
+# DISCLOSED SCOPE (see "knownGaps"): S01/S02's own exact field ordering/
+# layout was not re-acquired verbatim for this pass — only real, engine-
+# computed figures (gross pay, PAYE via `tds`, NIS via `social_security`/
+# `employer_social_security`, NHT via `employee_pension`/`employer_
+# pension`, Education Tax via `ni_employee`/`employer_ni`, HEART via
+# `employer_payroll_tax`) are populated.
+
+_JM_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _jm_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "JM",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_JM_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _jm_employee_rows(db: Session, items: list) -> list:
+    """Groups a period's finalized JM PayslipItems by employee and sums
+    each employee's real, engine-computed figures (HEART excluded — see
+    this section's own module-level note)."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        paye = sum((i.tds or z for i in emp_items), z)
+        nis_employee = sum((i.social_security or z for i in emp_items), z)
+        nis_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        nht_employee = sum((i.employee_pension or z for i in emp_items), z)
+        nht_employer = sum((i.employer_pension or z for i in emp_items), z)
+        edu_tax_employee = sum((i.ni_employee or z for i in emp_items), z)
+        edu_tax_employer = sum((i.employer_ni or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "trn": cf.get("trn"),
+            "salaryWages": float(gross),
+            "payeTaxDeducted": float(paye),
+            "nisEmployee": float(nis_employee), "nisEmployer": float(nis_employer),
+            "nhtEmployee": float(nht_employee), "nhtEmployer": float(nht_employer),
+            "educationTaxEmployee": float(edu_tax_employee), "educationTaxEmployer": float(edu_tax_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+_JM_FORM_KNOWN_GAPS = [
+    "Employee address and S01/S02's own real field ordering/layout were not re-acquired for this "
+    "pass — only real, engine-computed figures (gross pay, PAYE, NIS, NHT, Education Tax, HEART) "
+    "are populated.",
+    "HEART is shown as an EMPLOYER-ONLY total, never attributed to any one employee's row — it is "
+    "a genuinely employer-wide liability, already correctly aggregated across the whole employer's "
+    "payroll by the org-levy accumulator (JM-008); showing it per-employee would misrepresent it.",
+]
+
+
+def generate_jm_s01(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Jamaica's S01 monthly PAYE/NIS/NHT/Education Tax/HEART return.
+    Per-employee rows for the calendar month plus an employer-totals
+    row, summed from real FINALIZED JM PayslipItems (never Draft/
+    Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "JM_S01":
+        raise BadRequestException(f"generate_jm_s01 is only for JM_S01 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _jm_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _jm_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_salary_wages": float(sum((i.gross_pay or z for i in items), z)),
+        "total_paye_tax_deducted": float(sum((i.tds or z for i in items), z)),
+        "total_nis_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nis_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_nht_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_nht_employer": float(sum((i.employer_pension or z for i in items), z)),
+        "total_education_tax_employee": float(sum((i.ni_employee or z for i in items), z)),
+        "total_education_tax_employer": float(sum((i.employer_ni or z for i in items), z)),
+        "total_heart_employer": float(sum((i.employer_payroll_tax or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": _JM_FORM_KNOWN_GAPS,
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_jm_s02(
+    db: Session, organization_id: int, report_template_id: int, year: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Jamaica's S02 annual employer return — same figures as S01, over
+    the full calendar year rather than one month."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "JM_S02":
+        raise BadRequestException(f"generate_jm_s02 is only for JM_S02 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = date(year, 1, 1), date(year, 12, 31)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _jm_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _jm_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_salary_wages": float(sum((i.gross_pay or z for i in items), z)),
+        "total_paye_tax_deducted": float(sum((i.tds or z for i in items), z)),
+        "total_nis_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nis_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_nht_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_nht_employer": float(sum((i.employer_pension or z for i in items), z)),
+        "total_education_tax_employee": float(sum((i.ni_employee or z for i in items), z)),
+        "total_education_tax_employer": float(sum((i.employer_ni or z for i in items), z)),
+        "total_heart_employer": float(sum((i.employer_payroll_tax or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": _JM_FORM_KNOWN_GAPS,
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule (both
+# monthly) ──────────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #4, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as Guyana's Form 5/Trinidad's
+# Monthly Return/Jamaica's S01 above — reuses _walk_us_aggregate_report_
+# components for the employer-totals side and _tt_week_of_month for the
+# NIS Earnings Schedule's weekly columns (that helper is genuinely
+# generic day-of-month bucketing despite its TT-prefixed name, the same
+# "reused despite the name" precedent as generate_uk_employee_report/
+# _walk_us_aggregate_report_components).
+#
+# DISCLOSED SCOPE (see "knownGaps"): BB-009's own real field list (basic
+# salary vs. allowance breakdown, worker-type classification) and
+# BB-013's real Monday-count weekly-column rule were not re-acquired
+# verbatim for this pass — only real, engine-computed figures (gross
+# pay, PAYE via `tds`, NIS via `social_security`/`employer_social_
+# security`, R&R Levy via `employee_pension`/`employer_pension`) are
+# populated, and the weekly bucketing reuses the SAME best-effort day-
+# of-month convention already disclosed for Trinidad's NIBTT data, not
+# independently verified against BB-013's actual Monday-count rule.
+
+_BB_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _bb_month_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "BB",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_BB_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _bb_employee_rows(db: Session, items: list) -> list:
+    """Groups a month's finalized BB PayslipItems by employee and sums
+    each employee's real, engine-computed figures — shared shape used
+    by both the TAMIS Monthly PAYE return and the NIS Earnings Schedule
+    below."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        basic_salary = sum((i.basic_salary or z for i in emp_items), z)
+        paye = sum((i.tds or z for i in emp_items), z)
+        nis_employee = sum((i.social_security or z for i in emp_items), z)
+        nis_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        rr_employee = sum((i.employee_pension or z for i in emp_items), z)
+        rr_employer = sum((i.employer_pension or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "tamisTin": cf.get("tamis_tin"),
+            "nisNumber": cf.get("nis_number"),
+            "totalRemuneration": float(gross),
+            "basicSalary": float(basic_salary),
+            "payeTaxDeducted": float(paye),
+            "nisEmployee": float(nis_employee), "nisEmployer": float(nis_employer),
+            "rrLevyEmployee": float(rr_employee), "rrLevyEmployer": float(rr_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+def generate_bb_tamis_monthly_paye(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Barbados's TAMIS Monthly PAYE return. Per-employee rows for the
+    calendar month plus an employer-totals row, summed from real
+    FINALIZED BB PayslipItems (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "BB_TAMIS_MONTHLY_PAYE":
+        raise BadRequestException(f"generate_bb_tamis_monthly_paye is only for BB_TAMIS_MONTHLY_PAYE templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _bb_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _bb_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_tamis_tin": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_remuneration": float(sum((i.gross_pay or z for i in items), z)),
+        "total_paye_tax_deducted": float(sum((i.tds or z for i in items), z)),
+        "total_nis_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nis_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_rr_levy_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_rr_levy_employer": float(sum((i.employer_pension or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Employee address and BB-009's own basic-salary-vs-allowance breakdown were not re-acquired "
+            "for this pass — only real, engine-computed figures (gross pay, basic salary, PAYE, NIS, "
+            "R&R Levy) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_bb_nis_earnings_schedule(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Barbados's NIS Earnings Schedule — monthly, per-employee NIS
+    number/earnings/contributions, bucketed into this platform's own
+    best-effort Week 1-5 columns (see this section's own module-level
+    caveat), plus an employer-totals row."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "BB_NIS_EARNINGS_SCHEDULE":
+        raise BadRequestException(f"generate_bb_nis_earnings_schedule is only for BB_NIS_EARNINGS_SCHEDULE templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _bb_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _bb_employee_rows(db, items)
+
+    z = Decimal("0")
+    total_earnings = sum((i.gross_pay or z for i in items), z)
+    total_nis_employee = sum((i.social_security or z for i in items), z)
+    total_nis_employer = sum((i.employer_social_security or z for i in items), z)
+
+    by_employee_week: dict = {}
+    for i in items:
+        week = _tt_week_of_month(i.payroll_run.pay_date) if i.payroll_run else None
+        entry = by_employee_week.setdefault(i.employee_id, {})
+        week_entry = entry.setdefault(week, {"earnings": z, "nisEmployee": z, "nisEmployer": z})
+        week_entry["earnings"] += i.gross_pay or z
+        week_entry["nisEmployee"] += i.social_security or z
+        week_entry["nisEmployer"] += i.employer_social_security or z
+
+    weekly_rows = []
+    for r in employee_rows:
+        weeks = by_employee_week.get(r["employeeId"], {})
+        weekly_rows.append({
+            "employeeId": r["employeeId"], "employeeName": r["employeeName"], "nisNumber": r["nisNumber"],
+            "roundedEarnings": round(r["totalRemuneration"]), "nisEmployee": r["nisEmployee"], "nisEmployer": r["nisEmployer"],
+            "weeks": {
+                f"week{w}": {
+                    "earnings": float(v["earnings"]), "nisEmployee": float(v["nisEmployee"]), "nisEmployer": float(v["nisEmployer"]),
+                }
+                for w, v in sorted(weeks.items()) if w is not None
+            },
+        })
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_nis_number": (company.tax_identifiers or {}).get("nis_employer_number") if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_insurable_earnings": float(total_earnings),
+        "total_nis_employee": float(total_nis_employee),
+        "total_nis_employer": float(total_nis_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": weekly_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Worker-type classification (regular employed / domestic / self-employed) is not modeled — "
+            "every row is treated identically.",
+            "The Week 1-5 bucketing reuses the same best-effort day-of-month convention already "
+            "disclosed for Trinidad's NIBTT data (days 1-7 = Week 1, 8-14 = Week 2, ...), not "
+            "independently verified against BB-013's real Monday-count rule.",
+            "roundedEarnings is a simple round-to-nearest-dollar of the real gross pay figure, not "
+            "independently verified against BB's own official NIS earnings-rounding rule.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Dominican Republic: DGII IR-3 (monthly withholding declaration) +
+# TSS/SUIR contribution submission (monthly) + IR-13 (per-employee,
+# annual) ────────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #5, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as the prior 4 countries —
+# reuses _walk_us_aggregate_report_components for the employer-totals
+# side; IR-13 needed no new function, just another entry on generate_
+# uk_employee_report's allow-list (same as GY's FORM_7B/TT's TD4).
+#
+# DISCLOSED SCOPE (see "knownGaps"): only real, engine-computed figures
+# (gross pay, ISR via `tds`, SFS via `social_security`/`employer_
+# social_security`, Pensión/SVDS via `employee_pension`/`employer_
+# pension`, SRL via `employer_payroll_tax`, INFOTEP via `employer_ni`)
+# are populated. TSS/SUIR's real "novelty" (novedad) reporting — new
+# hires, terminations, and mid-month changes reported alongside that
+# month's contributions — is NOT modeled; this report only carries
+# contribution data, never movement/novelty records.
+
+_DO_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _do_month_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "DO",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_DO_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _do_employee_rows(db: Session, items: list) -> list:
+    """Groups a month's finalized DO PayslipItems by employee and sums
+    each employee's real, engine-computed figures — shared shape used
+    by both DGII IR-3 and the TSS/SUIR submission below."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        isr = sum((i.tds or z for i in emp_items), z)
+        sfs_employee = sum((i.social_security or z for i in emp_items), z)
+        sfs_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        pension_employee = sum((i.employee_pension or z for i in emp_items), z)
+        pension_employer = sum((i.employer_pension or z for i in emp_items), z)
+        srl_employer = sum((i.employer_payroll_tax or z for i in emp_items), z)
+        infotep_employer = sum((i.employer_ni or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "cedula": cf.get("cedula"),
+            "grossPay": float(gross),
+            "isrWithheld": float(isr),
+            "sfsEmployee": float(sfs_employee), "sfsEmployer": float(sfs_employer),
+            "pensionEmployee": float(pension_employee), "pensionEmployer": float(pension_employer),
+            "srlEmployer": float(srl_employer), "infotepEmployer": float(infotep_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+def generate_do_ir3(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """DGII IR-3 monthly withholding declaration. Per-employee rows for
+    the calendar month plus an employer-totals row, summed from real
+    FINALIZED DO PayslipItems (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "DO_IR3":
+        raise BadRequestException(f"generate_do_ir3 is only for DO_IR3 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _do_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _do_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_rnc": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_gross_pay": float(sum((i.gross_pay or z for i in items), z)),
+        "total_isr_withheld": float(sum((i.tds or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Employee address and DGII IR-3's own real field ordering/layout were not re-acquired for "
+            "this pass — only real, engine-computed figures (gross pay, ISR withheld) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_do_tss_suir(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Dominican Republic's TSS/SUIR contribution submission — monthly,
+    per-employee SFS/Pensión/SRL/INFOTEP contribution data plus an
+    employer-totals row (see this section's own module-level note on
+    the "novelty" reporting gap)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "DO_TSS_SUIR":
+        raise BadRequestException(f"generate_do_tss_suir is only for DO_TSS_SUIR templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _do_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _do_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_rnc": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_gross_pay": float(sum((i.gross_pay or z for i in items), z)),
+        "total_sfs_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_sfs_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_pension_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_pension_employer": float(sum((i.employer_pension or z for i in items), z)),
+        "total_srl_employer": float(sum((i.employer_payroll_tax or z for i in items), z)),
+        "total_infotep_employer": float(sum((i.employer_ni or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "TSS/SUIR's real \"novelty\" (novedad) reporting — new hires, terminations, and mid-month "
+            "changes reported alongside that month's contributions — is NOT modeled; this report only "
+            "carries contribution data, never movement/novelty records.",
+            "SRL's risk-type add-on (I-IV) resolves from a single org-level EmployerTaxProfile rate, not "
+            "a per-employee risk classification.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── The Bahamas: C10 monthly NIB contribution statement (non-hospitality
+# variant) ───────────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #6, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as the prior 5 countries —
+# reuses _walk_us_aggregate_report_components for the employer-totals
+# side. No PAYE/ISR equivalent here — Bahamas has no personal income
+# tax, so this report only ever carries NIB contribution data, same
+# scope as the existing BS_NIB_STATEMENT per-run template.
+#
+# DISCLOSED SCOPE (see "knownGaps"): only real, engine-computed figures
+# (gross pay, NIB via `social_security`/`employer_social_security`) are
+# populated. The HOSPITALITY variant of C10 (which needs the gratuity
+# rate still blocked in Group C's own disclosed gaps) is deliberately
+# NOT built here — this generator covers the non-hospitality variant
+# only, per the approved plan's own scope.
+
+_BS_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def generate_bs_c10(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """The Bahamas's C10 monthly NIB contribution statement (non-
+    hospitality variant). Per-employee rows for the calendar month plus
+    an employer-totals row, summed from real FINALIZED BS PayslipItems
+    (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "BS_C10":
+        raise BadRequestException(f"generate_bs_c10 is only for BS_C10 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "BS",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_BS_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    employee_rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        nib_employee = sum((i.social_security or z for i in emp_items), z)
+        nib_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        employee_rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "nibNumber": cf.get("nib_number"),
+            "insurableEarnings": float(gross),
+            "nibEmployee": float(nib_employee), "nibEmployer": float(nib_employer),
+        })
+    employee_rows.sort(key=lambda r: r["employeeName"] or "")
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_insurable_earnings": float(sum((i.gross_pay or z for i in items), z)),
+        "total_nib_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nib_employer": float(sum((i.employer_social_security or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "The hospitality variant of C10 (gratuity/tip-inclusive insurable earnings) is not built — "
+            "it needs the gratuity NIB rate still blocked in Group C's own disclosed gaps (requires "
+            "NIB confirmation per the spec's own wording). This generator covers the non-hospitality "
+            "variant only.",
+            "Employee address and BS §9's own real field ordering/layout were not re-acquired for this "
+            "pass — only real, engine-computed figures (gross pay, NIB employee/employer) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Cayman Islands: monthly Pension contribution submission (bespoke) —
+# the last of the 7-country real-forms plan ─────────────────────────────
+# (Caribbean forms gap-closure, country #7, 2026-09-23). KY's Wage/
+# Gratuity Statement (KY-018) needed NO new code at all — it's the SAME
+# per-employee, per-payroll-run generic mapper the existing KY_PENSION_
+# STATEMENT template already uses (see _REPORT_COMPONENTS_BY_TYPE's own
+# "KY_WAGE_GRATUITY_STATEMENT" entry below), just under the form's real
+# name. Gratuity itself is NOT populated — no gratuity/tip figure is
+# computed anywhere in cayman_islands.py, so it is omitted rather than
+# fabricated (disclosed in the seed script's own comment, mirroring
+# every other disclosed-but-unmapped field in this pass).
+#
+# The Pension contribution submission (KY-009) DOES need a bespoke
+# monthly cross-run generator, same per-employee-row-plus-employer-
+# totals shape as the other 6 countries — reuses _walk_us_aggregate_
+# report_components for the employer-totals side.
+#
+# DISCLOSED SCOPE (see "knownGaps"): KY-009's real submission groups
+# contributions BY PLAN/PROVIDER — this platform has no per-employee
+# pension-plan/provider field anywhere, so every employee is reported
+# under a single implicit bucket rather than fabricating a provider
+# breakdown that doesn't exist in this platform's data model.
+
+_KY_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def generate_ky_pension_submission(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Cayman Islands's monthly Pension contribution submission. Per-
+    employee rows for the calendar month plus an employer-totals row,
+    summed from real FINALIZED KY PayslipItems (never Draft/Review) —
+    see this section's own module-level note on the plan/provider
+    grouping gap."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "KY_PENSION_SUBMISSION":
+        raise BadRequestException(f"generate_ky_pension_submission is only for KY_PENSION_SUBMISSION templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "KY",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_KY_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    employee_rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        pension_employee = sum((i.employee_pension or z for i in emp_items), z)
+        pension_employer = sum((i.employer_pension or z for i in emp_items), z)
+        employee_rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "pensionMemberNumber": cf.get("nib_member_number"),
+            "pensionableEarnings": float(gross),
+            "pensionEmployee": float(pension_employee), "pensionEmployer": float(pension_employer),
+        })
+    employee_rows.sort(key=lambda r: r["employeeName"] or "")
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_pensionable_earnings": float(sum((i.gross_pay or z for i in items), z)),
+        "total_pension_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_pension_employer": float(sum((i.employer_pension or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "KY-009's real submission groups contributions BY PLAN/PROVIDER — this platform has no "
+            "per-employee pension-plan/provider field, so every employee is reported under a single "
+            "implicit bucket rather than a fabricated provider breakdown.",
+            "Employee address and KY-009's own real field ordering/layout were not re-acquired for "
+            "this pass — only real, engine-computed figures (gross pay, mandatory pension employee/"
+            "employer) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
 # ── RTI XML rendering (§18 gap-closure Part 9, 2026-09-09) ──────────────
 # Serializes a FPS/EPS/P45 GeneratedReport's rendered_data into HMRC's
 # real RTI top-level element structure — a correctly-SHAPED submission
@@ -11515,11 +13221,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         PAYROLL_DAYS = 30
         Per Day Salary = Monthly Gross / 30
         Attendance Deduction = Unpaid Leave Days × Per Day Salary
+        Payable Days = calendar days in the period − Unpaid Leave Days
 
     period_start/period_end are optional because a preview can happen
     before a run (and its period) exists. When provided, unpaid leave days
-    are counted from attendance records. When omitted, no attendance
-    deduction is applied."""
+    are counted from attendance records and payable/total working days use
+    the period's real calendar length. When omitted, no attendance
+    deduction is applied and the engine falls back to the 30-day basis."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
 
@@ -11723,7 +13431,11 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_us_ytd(db, emp.id, period_end or date.today())
             if emp_country == "US" else
             {**_load_au_sg_ytd(db, emp.id, period_end or date.today()), **_load_au_whm_ytd(db, emp.id, period_end or date.today())}
-            if emp_country == "AU" else {}
+            if emp_country == "AU" else
+            _load_ky_pension_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "KY" else
+            _load_gy_paye_credit_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "GY" else {}
         )
         option2_inputs = (
             _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if emp_country == "CA" else {}
@@ -11739,7 +13451,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_uk_org_levy_ytd(db, organization_id, period_end or date.today())
             if emp_country == "UK" else
             _au_org_payroll_tax_read_inputs(db, organization_id, period_end or date.today(), work_state)
-            if emp_country == "AU" else {}
+            if emp_country == "AU" else
+            _load_jm_heart_ytd(db, organization_id, period_end or date.today())
+            if emp_country == "JM" else {}
         )
 
         ni_category_override = (
@@ -11791,6 +13505,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             additional_compensation=additional_compensation,
             unpaid_leave_days=unpaid_leave_days,
             country=emp_country, rate_map=emp_rate_map, slabs=emp_slabs,
+            calendar_days=_calendar_days(period_start, period_end),
             code_wages_rules=code_wages_rules,
             epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
             ca_taxability_rules=ca_taxability_rules,
@@ -11839,7 +13554,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             "department": getattr(emp, "department", None),
             "attendanceStatus": "active" if is_active else "inactive",
             "payableDays": float(calc.payable_days),
-            "totalWorkingDays": float(calc.payroll_days),
+            "totalWorkingDays": float(calc.calendar_days),
             "unpaidLeaveDays": calc.unpaid_leave_days,
             "attendanceDeduction": float(calc.attendance_deduction),
             "perDaySalary": float(calc.per_day_salary),
@@ -12162,6 +13877,18 @@ def _get_holiday_dates(db: Session, organization_id: int, period_start, period_e
 
 # ── Payslip generation (real computation, replaces client-side mock) ──
 
+def _calendar_days(period_start, period_end):
+    """Days in a run's pay period: (period_end − period_start) + 1 inclusive.
+
+    28/29/30/31 for a calendar-month run, the raw span for semi-monthly /
+    bi-weekly periods. Returns None when the period is missing or invalid
+    (end before start) so the caller/engine falls back to PAYROLL_DAYS.
+    """
+    if not period_start or not period_end or period_end < period_start:
+        return None
+    return (period_end - period_start).days + 1
+
+
 def _count_unpaid_leave_days(db: Session, organization_id: int, employee_id: int,
                              period_start, period_end, records: List["PayrollAttendanceRecord"] = None) -> int:
     """Count unpaid leave days for this employee within the pay period.
@@ -12170,7 +13897,7 @@ def _count_unpaid_leave_days(db: Session, organization_id: int, employee_id: int
         PAYROLL_DAYS = 30
         Per Day Salary = Monthly Gross / 30
         Attendance Deduction = Unpaid Leave Days × Per Day Salary
-        Payable Days = 30 − Unpaid Leave Days
+        Payable Days = calendar days in the period − Unpaid Leave Days
 
     Only "absent" status or "leave" with leave_type="unpaid" (or None for
     backwards compatibility) count as unpaid leave. Paid/sick/casual leaves
@@ -12565,6 +14292,136 @@ def _upsert_au_whm_ytd_accumulator(db: Session, employee_id: int, pay_date, resu
         row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_AU_WHM_YTD_COMPONENT)
         db.add(row)
     row.ytd_taxable_wages = result.ytd_whm_earnings_after
+    row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# Cayman Islands mandatory-pension CI$87,000 annual cap (KY-008, 2026-09-21)
+# — same read/write/component-key shape as _load_au_sg_ytd/
+# _upsert_au_sg_ytd_accumulator above, reusing the SAME PayrollYtdAccumulator
+# table with its own component key. Unlike Australia's financial-year key,
+# Cayman's cap is a CALENDAR year (KY-008: "annual pensionable-earnings
+# cap... per calendar year"), so this uses its own tax-year key function
+# rather than _au_ytd_tax_year.
+_KY_PENSION_YTD_COMPONENT = "ky_mandatory_pensionable_earnings"
+
+
+def _ky_ytd_tax_year(pay_date) -> str:
+    """Cayman calendar-year accumulator key — "KY-CY-2026" for any date
+    in calendar year 2026."""
+    return f"KY-CY-{pay_date.year}"
+
+
+def _load_ky_pension_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    ytd_ky_mandatory_pensionable_earnings_before param — empty dict when KY
+    hasn't opted into the rollout switch, or {"ytd_ky_mandatory_pensionable_
+    earnings_before": Decimal("0")} when no accumulator row exists yet
+    (a brand-new KY employee's first payslip of the calendar year). Never
+    guesses/backfills a starting value."""
+    if "KY" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _ky_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _KY_PENSION_YTD_COMPONENT,
+        )
+        .first()
+    )
+    return dict(ytd_ky_mandatory_pensionable_earnings_before=row.ytd_taxable_wages if row else Decimal("0"))
+
+
+def _upsert_ky_pension_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative mandatory
+    pensionable earnings back to PayrollYtdAccumulator — get-or-create per
+    (employee, calendar_year, component), flush (not commit). No-op if the
+    result carries no YTD figure (result.ytd_ky_mandatory_pensionable_
+    earnings_after is None), so calling this unconditionally from every
+    persisting entry point is safe even while the rollout switch is off."""
+    if result.ytd_ky_mandatory_pensionable_earnings_after is None:
+        return
+    tax_year = _ky_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _KY_PENSION_YTD_COMPONENT,
+        )
+        .first()
+    )
+    if row is None:
+        row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_KY_PENSION_YTD_COMPONENT)
+        db.add(row)
+    row.ytd_taxable_wages = result.ytd_ky_mandatory_pensionable_earnings_after
+    row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# Guyana PAYE statutory credit ledger (GY-010, 2026-09-22) — same
+# read/write/component-key shape as _load_ky_pension_ytd/
+# _upsert_ky_pension_ytd_accumulator above, reusing the SAME
+# PayrollYtdAccumulator table with its own component key. A calendar-year
+# key (not tied to any specific tax year's own boundary dates) since this
+# is a general-purpose running balance, not a year-scoped cap.
+_GY_PAYE_CREDIT_YTD_COMPONENT = "gy_paye_refund_credit"
+
+
+def _gy_ytd_tax_year(pay_date) -> str:
+    """Guyana calendar-year accumulator key — "GY-CY-2026" for any date in
+    calendar year 2026."""
+    return f"GY-CY-{pay_date.year}"
+
+
+def _load_gy_paye_credit_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    ytd_gy_paye_credit_before param — empty dict when GY hasn't opted into
+    the rollout switch, or {"ytd_gy_paye_credit_before": Decimal("0")} when
+    no accumulator row exists yet (every employee today, since no UI/API
+    path exists to enter a real opening balance — see guyana.py's own
+    module docstring). Never guesses/backfills a starting value."""
+    if "GY" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _gy_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _GY_PAYE_CREDIT_YTD_COMPONENT,
+        )
+        .first()
+    )
+    return dict(ytd_gy_paye_credit_before=row.ytd_taxable_wages if row else Decimal("0"))
+
+
+def _upsert_gy_paye_credit_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation remaining PAYE credit balance
+    back to PayrollYtdAccumulator — get-or-create per (employee, calendar
+    year, component), flush (not commit). No-op if the result carries no
+    credit figure (result.ytd_gy_paye_credit_after is None — the ordinary
+    case, since guyana.py only sets it when a nonzero credit was actually
+    applied), so calling this unconditionally from every persisting entry
+    point is safe even while the rollout switch is off."""
+    if result.ytd_gy_paye_credit_after is None:
+        return
+    tax_year = _gy_ytd_tax_year(pay_date)
+    row = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component == _GY_PAYE_CREDIT_YTD_COMPONENT,
+        )
+        .first()
+    )
+    if row is None:
+        row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=_GY_PAYE_CREDIT_YTD_COMPONENT)
+        db.add(row)
+    row.ytd_taxable_wages = result.ytd_gy_paye_credit_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
 
@@ -14168,6 +16025,48 @@ def _au_org_payroll_tax_read_inputs(db: Session, organization_id: int, pay_date,
     return inputs
 
 
+# Jamaica HEART (JM-008, 2026-09-22) — the employer's aggregate MONTHLY
+# emoluments across ALL its employees, reusing the SAME generic
+# _load_ca_org_levy_ytd/_upsert_ca_org_levy_ytd reader/writer pair AU's
+# state payroll tax reuses above (see that function's own docstring) —
+# no new accumulator table, no dedicated per-component pair. The one
+# genuine difference: HEART's threshold is evaluated per CALENDAR MONTH,
+# not per year, so this uses its own monthly tax_year key instead of
+# _org_ytd_tax_year's calendar-year one — the same reasoning UK's own
+# tax-year key override exists for, just a month instead of a
+# differently-bounded year.
+def _jm_heart_tax_year(pay_date) -> str:
+    """Jamaica HEART accumulator key — "JM-M-2026-09" for any date in
+    September 2026. Resets every calendar month, unlike every other
+    org-level levy in this file."""
+    return f"JM-M-{pay_date.year}-{pay_date.month:02d}"
+
+
+def _load_jm_heart_ytd(db: Session, organization_id: int, pay_date) -> dict:
+    """Returns {} when the shared _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES
+    switch is off for "JM" (jamaica.py then falls back to its Phase 1
+    per-employee-only check, unchanged). Never guesses/backfills a
+    starting value — a brand-new employer-month always starts real at 0
+    via _load_ca_org_levy_ytd's own "unconfigured component defaults to
+    Decimal('0')" convention."""
+    if "JM" not in _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _jm_heart_tax_year(pay_date)
+    org_levy_ytd = _load_ca_org_levy_ytd(db, organization_id, pay_date, ("jm_heart",), tax_year=tax_year, country="JM")
+    return dict(jm_heart_ytd_remuneration_before=org_levy_ytd["jm_heart"])
+
+
+def _upsert_jm_heart_ytd(db: Session, organization_id: int, pay_date, increment: Decimal, payslip_id: int = None):
+    """Adds this employee's period gross to the employer's running MONTHLY
+    remuneration total — reuses _upsert_ca_org_levy_ytd's ADD-an-increment
+    contract with HEART's own monthly tax_year key. No-op for a
+    falsy/zero increment, matching that writer's own convention."""
+    if not increment:
+        return
+    tax_year = _jm_heart_tax_year(pay_date)
+    _upsert_ca_org_levy_ytd(db, organization_id, pay_date, {"jm_heart": increment}, payslip_id=payslip_id, tax_year=tax_year)
+
+
 # ── UK org-level accumulators: Apprenticeship Levy pay bill (§14) AND ───
 # Employment Allowance's cumulative employer_ni total (§14) — same
 # OrganizationYtdAccumulator table and ADDS-an-increment contract as
@@ -14844,6 +16743,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         additional_compensation=additional_compensation,
         unpaid_leave_days=unpaid_leave_days,
         country=country, rate_map=rate_map, slabs=slabs,
+        calendar_days=_calendar_days(run.period_start, run.period_end),
         code_wages_rules=code_wages_rules,
         epf_base_rules=epf_base_rules, esi_base_rules=esi_base_rules, pt_base_rules=pt_base_rules,
         ca_taxability_rules=ca_taxability_rules,
@@ -14912,7 +16812,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "overtime": result.overtime,
         "additional_compensation": result.additional_compensation,
         "payable_days": Decimal(result.payable_days),
-        "total_working_days": Decimal(result.payroll_days),
+        "total_working_days": Decimal(result.calendar_days),
         "gross_pay": result.gross,
         "pf": result.employee_pf,
         "esi": result.employee_esi,
@@ -15050,6 +16950,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Australia WHM Schedule 15 cumulative-cap tracking — a separate
         # key since it's gated on ITS OWN result field, independent of SG.
         "_au_whm_ytd_result": result if result.ytd_whm_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for
+        # Cayman Islands mandatory-pension CI$87,000 annual-cap tracking
+        # (KY-008) — a separate key since it's gated on ITS OWN result
+        # field.
+        "_ky_pension_ytd_result": result if result.ytd_ky_mandatory_pensionable_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for the
+        # Guyana PAYE statutory credit ledger (GY-010) — a separate key
+        # since it's gated on ITS OWN result field.
+        "_gy_paye_credit_ytd_result": result if result.ytd_gy_paye_credit_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for Canada
         # Option 2 cumulative-averaging income tax (gap-closure Phase 9)
         # — a separate key since it's gated on ITS OWN result field,
@@ -15107,6 +17016,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
             result.employer_ni_ytd_after - ctx.employer_ni_ytd_before
             if result.employer_ni_ytd_after is not None else None,
         ),
+        # Jamaica HEART (JM-008) employer-wide monthly remuneration
+        # increment — popped out and written via _upsert_jm_heart_ytd
+        # separately (its own MONTHLY tax_year key, not _org_ytd_
+        # tax_year's calendar-year one), same reasoning as
+        # "_uk_org_levy_increment" above.
+        "_jm_heart_increment": (
+            result.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
+            if result.jm_heart_ytd_remuneration_after is not None else None
+        ),
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: persist the POE reason code
         # into the calculation snapshot instead of discarding it (see
         # _resolve_country_aware_state). Passed straight through from the
@@ -15130,7 +17048,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         PAYROLL_DAYS = 30
         Per Day Salary = Monthly Gross / 30
         Attendance Deduction = Unpaid Leave Days × Per Day Salary
-        Payable Days = 30 − Unpaid Leave Days
+        Payable Days = calendar days in the period − Unpaid Leave Days
 
     Salary components (basic, hra, special) are full monthly amounts — no
     proration.  Attendance deduction is a separate line item.  Statutory
@@ -15161,10 +17079,13 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     us_ytd_result = values.pop("_us_ytd_result", None)
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
+    ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
+    gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
     uk_org_levy_increment = values.pop("_uk_org_levy_increment", None)
+    jm_heart_increment = values.pop("_jm_heart_increment", None)
     germany_unavailable_components = values.pop("_germany_unavailable_components", None)
 
     item = PayslipItem(
@@ -15212,6 +17133,12 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if au_whm_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, au_whm_ytd_result, payslip_id=item.id)
+    if ky_pension_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, ky_pension_ytd_result, payslip_id=item.id)
+    if gy_paye_credit_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, gy_paye_credit_ytd_result, payslip_id=item.id)
     if au_statutory_deductions_detail is not None:
         _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
     if option2_ytd_result is not None:
@@ -15231,6 +17158,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if uk_gross_increment is not None or uk_employer_ni_increment is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_uk_org_levy_ytd(db, run.organization_id, run.pay_date, uk_gross_increment, uk_employer_ni_increment, payslip_id=item.id)
+    if jm_heart_increment is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_jm_heart_ytd(db, run.organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
     return item
 
 
@@ -15401,6 +17331,15 @@ def _resolve_employee_calc_inputs(
         jurisdiction_id = (
             f"{country}-{resolution_state}" if (country in ("US", "CA", "AU") and resolution_state)
             else "DE" if country == "DE"
+            # Dominican Republic occupational risk (SRL, DO-007) reuses
+            # this same agency-assigned-rate mechanism — TSS assigns each
+            # employer a risk-type add-on (I-IV) to the base 1.00% rate,
+            # exactly the same shape (assigned by an agency, own account
+            # number/evidence trail) as US SUI / DE accident insurance.
+            # component_code "do_srl" (see engine/countries/
+            # dominican_republic.py). No state, so jurisdiction_id is the
+            # bare country code.
+            else "DO" if country == "DO"
             else None
         )
         employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=payroll_date)
@@ -15544,7 +17483,11 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_us_ytd(db, emp.id, run.pay_date)
             if country == "US" else
             {**_load_au_sg_ytd(db, emp.id, run.pay_date), **_load_au_whm_ytd(db, emp.id, run.pay_date)}
-            if country == "AU" else None
+            if country == "AU" else
+            _load_ky_pension_ytd(db, emp.id, run.pay_date)
+            if country == "KY" else
+            _load_gy_paye_credit_ytd(db, emp.id, run.pay_date)
+            if country == "GY" else None
         )
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
         # persisted into the calculation snapshot, not just used to pick
@@ -15565,7 +17508,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
             if country == "UK" else
             _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "AU" else {}
+            if country == "AU" else
+            _load_jm_heart_ytd(db, organization_id, run.pay_date)
+            if country == "JM" else {}
         )
         # Phase 8BI (P0): a statutorily-blocked employee (today, only
         # Germany — GermanyCalculationBlockedException, e.g. no PUBLISHED
@@ -15786,6 +17731,8 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     us_ytd_result = values.pop("_us_ytd_result", None)  # never written from this correction path — same reasoning as _ytd_result above
     values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
     values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
+    values.pop("_ky_pension_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
+    values.pop("_gy_paye_credit_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
     # the ORIGINAL run already collected against.
@@ -15797,6 +17744,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # same as _ytd_result.
     values.pop("_org_levy_result", None)
     values.pop("_uk_org_levy_increment", None)
+    values.pop("_jm_heart_increment", None)
     # Option 2 cumulative-averaging (gap-closure Phase 9): option2_inputs
     # is likewise never passed above, for the identical reason — this is
     # a single-payslip CORRECTION path, and re-reading/re-incrementing
@@ -19706,6 +21654,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     jurisdiction_id = (
         f"{country}-{resolution_state}" if (country in ("US", "CA", "AU") and resolution_state)
         else "DE" if country == "DE"
+        # Dominican Republic SRL — see the matching comment in
+        # _resolve_employee_calc_inputs.
+        else "DO" if country == "DO"
         else None
     )
     employer_tax_profiles = get_employer_tax_profiles(db, organization_id, jurisdiction_id, as_of=run.pay_date)
@@ -19765,6 +21716,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         else _load_uk_director_ytd(db, employee.id, run.pay_date) if country == "UK"
         else _load_us_ytd(db, employee.id, run.pay_date) if country == "US"
         else {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)} if country == "AU"
+        else _load_ky_pension_ytd(db, employee.id, run.pay_date) if country == "KY"
+        else _load_gy_paye_credit_ytd(db, employee.id, run.pay_date) if country == "GY"
         else {}
     )
 
@@ -19777,6 +21730,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _ca_org_levy_read_inputs(db, organization_id, run.pay_date, work_state) if country == "CA"
         else _load_uk_org_levy_ytd(db, organization_id, run.pay_date) if country == "UK"
         else _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, work_state) if country == "AU"
+        else _load_jm_heart_ytd(db, organization_id, run.pay_date) if country == "JM"
         else {}
     )
     option2_inputs = (
@@ -19840,6 +21794,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         residence_locality_rate=residence_locality_rate,
         pay_date=run.pay_date,
         ni_category_override=ni_category_override,
+        calendar_days=_calendar_days(run.period_start, run.period_end),
         **reciprocity,
         **germany_kwargs,
         **ytd_inputs,
@@ -19975,7 +21930,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         attendance_deduction=calc.attendance_deduction,
         per_day_salary=calc.per_day_salary,
         payable_days=Decimal(calc.payable_days),
-        total_working_days=Decimal(calc.payroll_days),
+        total_working_days=Decimal(calc.calendar_days),
         # Germany (Phase 7/8E) — frozen statutory provenance, same as the
         # batch path; None for every non-German manual payslip.
         employee_statutory_profile_id=calc.germany_statutory_profile_id,
@@ -20030,6 +21985,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_whm_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_ky_mandatory_pensionable_earnings_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_gy_paye_credit_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
     if calc.au_statutory_deductions_detail:
         _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:
@@ -20074,6 +22035,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
             if calc.employer_ni_ytd_after is not None else None
         )
         _upsert_uk_org_levy_ytd(db, organization_id, run.pay_date, uk_levy_increment, uk_employer_ni_increment, payslip_id=item.id)
+    if calc.jm_heart_ytd_remuneration_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        jm_heart_increment = calc.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
+        _upsert_jm_heart_ytd(db, organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
     db.commit()
     db.refresh(item)
     _recompute_run_aggregates(db, run)
@@ -24084,37 +26049,23 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
 
 
 def _compute_attendance_deductions(db: Session, organization_id: int = None, year: int = None, month: int = None) -> Decimal:
-    """Compute total attendance deductions from payslip proration loss.
+    """Compute total attendance deductions across payslips.
 
-    Summed entirely at the SQL level (a per-row CASE/arithmetic expression
-    aggregated with SUM) instead of pulling every PayslipItem row into Python
-    and looping — this ran on every Dashboard poll tick (every 30s per open
-    tab) and, with no month filter ("All Months"), scaled linearly with the
-    total number of payslips ever generated.
+    Summed entirely at the SQL level (a single COALESCE/SUM over the stored
+    attendance_deduction column) instead of pulling every PayslipItem row
+    into Python and looping — this ran on every Dashboard poll tick (every
+    30s per open tab) and, with no month filter ("All Months"), scaled
+    linearly with the total number of payslips ever generated.
 
-    full_x - x, where full_x = x / (payable_days / total_working_days),
-    algebraically simplifies to x * (total_working_days - payable_days) / payable_days
-    — avoids computing an intermediate proration_factor per row.
+    Previously this reconstructed the total from the payable_days /
+    total_working_days proration ratio (full_x − x, where full_x = x /
+    (payable_days / total_working_days)). That reconstruction only equaled
+    the real deductions while total_working_days was hard-coded to 30;
+    with calendar-length (28/29/30/31) periods it would drift. The stored
+    attendance_deduction is the actual amount that reduced net pay, so it
+    is the exact, stable source.
     """
-    gross_components = (
-        sa_func.coalesce(PayslipItem.basic_salary, 0)
-        + sa_func.coalesce(PayslipItem.hra, 0)
-        + sa_func.coalesce(PayslipItem.special_allowance, 0)
-    )
-    att_ded_expr = case(
-        (
-            and_(
-                PayslipItem.payable_days.isnot(None),
-                PayslipItem.total_working_days.isnot(None),
-                PayslipItem.total_working_days > 0,
-                PayslipItem.payable_days > 0,
-                PayslipItem.payable_days < PayslipItem.total_working_days,
-            ),
-            gross_components * (PayslipItem.total_working_days - PayslipItem.payable_days) / PayslipItem.payable_days,
-        ),
-        else_=0,
-    )
-    q = db.query(sa_func.coalesce(sa_func.sum(att_ded_expr), 0)).select_from(PayslipItem).join(
+    q = db.query(sa_func.coalesce(sa_func.sum(PayslipItem.attendance_deduction), 0)).select_from(PayslipItem).join(
         PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id
     )
     q = _apply_org_filter(q, PayslipItem, organization_id)

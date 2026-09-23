@@ -4,6 +4,14 @@ export { default as UKCompliancePage } from "./UKCompliancePage";
 export { default as AUCompliancePage } from "./AUCompliancePage";
 export { default as CACompliancePage } from "./CACompliancePage";
 export { default as DECompliancePage } from "./DECompliancePage";
+// Caribbean production jurisdictions (2026-09-21).
+export { default as BBCompliancePage } from "./BBCompliancePage";
+export { default as KYCompliancePage } from "./KYCompliancePage";
+export { default as DOCompliancePage } from "./DOCompliancePage";
+export { default as GYCompliancePage } from "./GYCompliancePage";
+export { default as JMCompliancePage } from "./JMCompliancePage";
+export { default as BSCompliancePage } from "./BSCompliancePage";
+export { default as TTCompliancePage } from "./TTCompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -15,4 +23,11 @@ export const COUNTRY_CODE_TO_ROUTE = {
   AU: "australia",
   CA: "canada",
   DE: "germany",
+  BB: "barbados",
+  KY: "cayman-islands",
+  DO: "dominican-republic",
+  GY: "guyana",
+  JM: "jamaica",
+  BS: "bahamas",
+  TT: "trinidad-and-tobago",
 };
