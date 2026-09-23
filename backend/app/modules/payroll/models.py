@@ -5470,3 +5470,61 @@ class SuperGuaranteeLiability(Base):
 
     def __repr__(self):
         return f"<SuperGuaranteeLiability employee={self.employee_id} pay_date={self.pay_date} status={self.status}>"
+
+
+class StatutoryFiling(Base):
+    """Cross-jurisdiction statutory-filing status tracker, one row per
+    (organization, jurisdiction, filing type, period).
+
+    The persisted "did we actually file it" model behind the Super Admin
+    Filings & Remittances page. Germany already tracks its wage-tax filings
+    through GermanyElsterTransmission (real ELSTER transport state) — rows
+    here are how every other jurisdiction (Australia GST/BAS, India
+    TDS/GST, …) records filing status, and how a manual override/adjourned
+    record can exist alongside an ELSTER transmission. The dashboard merges
+    both sources per org (see
+    modules/super_admin/command_center_router.py's _load_org_filing_coverage).
+
+    Status vocabulary is deliberately the filing WORKFLOW, not a transport
+    state machine: an ELSTER transmission moves DRAFT/VALIDATED/QUEUED/
+    TRANSMITTED/ACKNOWLEDGED because ELSTER is a live wire; for a manual
+    filing the only states that matter to an admin are not-started /
+    in-progress / filed / overdue / blocked. No status here is inferred
+    from a missing signal — a human records what actually happened, and
+    BY_DEFAULT the page treats an org with no row as "no filing record
+    yet", never as filed (see the endpoint's empty-state handling).
+    """
+    __tablename__ = "statutory_filings"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    jurisdiction    = Column(String(10), nullable=False, index=True)  # "AU" / "IN" / "DE" / …
+    filing_type     = Column(String(50), nullable=False, default="")  # "GST" / "BAS" / "TDS" / …
+    period_label    = Column(String(50), nullable=False, default="")  # "Q2 2026 — Apr–Jun"
+    period_start    = Column(Date, nullable=True)
+    period_end      = Column(Date, nullable=True)
+
+    # NOT_STARTED -> IN_PROGRESS -> FILED | OVERDUE | BLOCKED.
+    status          = Column(String(20), nullable=False, default="NOT_STARTED", server_default="NOT_STARTED")
+    # Required context when status == "BLOCKED" (why it cannot proceed); the
+    # dashboard surfaces it in the Blocked Reason column, same as ELSTER.
+    blocked_reason  = Column(String(300), nullable=True)
+    # When the filing was actually lodged — informational; the dashboard's
+    # "Updated" timestamp reflects the row's own updated_at.
+    submitted_at    = Column(DateTime(timezone=True), nullable=True)
+
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        # One filing per (org, jurisdiction, type, period) — an admin entry
+        # upserts into the period's existing row instead of stacking dupes.
+        UniqueConstraint(
+            "organization_id", "jurisdiction", "filing_type", "period_label",
+            name="uq_statutory_filing_per_period",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<StatutoryFiling org={self.organization_id} {self.jurisdiction} {self.filing_type} {self.period_label} {self.status}>"

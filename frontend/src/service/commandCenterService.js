@@ -45,6 +45,9 @@ export const createEntitlementOverride = (organizationId, payload) =>
 
 export const listOrderForms = () => apiFetch("/api/super-admin/billing/order-forms");
 
+export const listOrderFormEligibleOrgs = () =>
+  apiFetch("/api/super-admin/billing/order-form-eligible-orgs").then((data) => data.organizations || []);
+
 export const getOrderForm = (organizationId) =>
   apiFetch(`/api/super-admin/billing/organizations/${organizationId}/order-form`);
 
@@ -54,6 +57,19 @@ export const createOrderForm = (organizationId, payload) =>
     body: payload,
   });
 
+// ── Zoiko Commercial — Revenue & Collections (Step 5) ─────────────────────
+// Zoiko's own subscription revenue (PAID BillingInvoice rows), distinct
+// from /finance/* which reports customer payroll money movement. See the
+// backend endpoint's docstring for the never-merge rationale.
+export const getRevenueCollections = () =>
+  apiFetch("/api/super-admin/commercial/revenue-collections");
+
+// ── Alerts & Incidents (unified triage feed) ──────────────────────────────
+// One feed over signals each existing Command Center page already computes —
+// severity is derived on the backend from the source signal, never invented
+// on the client. Also polled by SuperAdminShell for the nav badge.
+export const listAlerts = () => apiFetch("/api/super-admin/alerts");
+
 // ── Payroll Operations ──────────────────────────────────────────────────
 
 export const listAllPayrollRuns = (params) =>
@@ -61,6 +77,21 @@ export const listAllPayrollRuns = (params) =>
 
 export const listFilingsRemittances = () =>
   apiFetch("/api/super-admin/compliance/filings-remittances");
+
+// Write path for the same dashboard: record/update a statutory filing
+// status for an org (upserts by natural key — jurisdiction + filing type +
+// period — so re-saving an existing period updates it in place), and delete
+// a recorded filing.
+export const upsertStatutoryFiling = (organizationId, payload) =>
+  apiFetch(`/api/super-admin/compliance/filings-remittances/${organizationId}`, {
+    method: "PUT",
+    body: payload,
+  });
+
+export const deleteStatutoryFiling = (organizationId, filingId) =>
+  apiFetch(`/api/super-admin/compliance/filings-remittances/${organizationId}/${filingId}`, {
+    method: "DELETE",
+  });
 
 export const listExceptions = (params) =>
   apiFetch("/api/super-admin/compliance/exceptions", { params });

@@ -30,6 +30,7 @@ from app.modules.super_admin.schemas import (
     DashboardStats,
     FinanceOverviewResponse,
     FinanceSummaryResponse,
+    FinanceByOrganizationResponse,
     PolicyStatusUpdate,
     ReportsListResponse,
     UpdateCurrencyRequest,
@@ -2955,6 +2956,27 @@ def finance_summary(
     from app.modules.super_admin import service as sa_service
 
     return sa_service.finance_summary(db, organization_id=organization_id, country=country, start_date=start_date, end_date=end_date)
+
+
+@router.get(
+    "/finance/by-organization",
+    response_model=FinanceByOrganizationResponse,
+    summary="Financial totals per organization — every organization appears, including ones with zero payroll runs",
+)
+def finance_by_organization(
+    organization_id: Optional[int] = Query(None),
+    country: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.super_admin import service as sa_service
+
+    return sa_service.finance_by_organization(
+        db, organization_id=organization_id, country=country, status=status, start_date=start_date, end_date=end_date,
+    )
 
 
 @router.get(

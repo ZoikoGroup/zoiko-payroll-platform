@@ -198,3 +198,41 @@ def aggregate_billing_month(db: Session, organization_id: int, billing_month: da
         "counted": counted_count,
         "excluded": excluded_count,
     }
+
+
+def aggregate_all_billing_months(db: Session, billing_month: Optional[date] = None) -> dict:
+    """Run aggregate_billing_month for every organization that has at least
+    one PayrollEmployee row. Idempotent at both levels — aggregate_billing_month
+    upserts per (organization_id, employee_id, billing_month) via the
+    UniqueConstraint, so re-running the same month over the same org just
+    updates rows in place.
+
+    This is the entry point the background scheduler and the manual
+    super-admin endpoint both call; it exists because aggregate_billing_month
+    previously had *no caller anywhere in the codebase*, which left
+    billing_worker_month_records permanently empty and the
+    bwm_invoice_mismatches reconciliation on the Exceptions & Reconciliation
+    page with nothing to compare against.
+    """
+    from app.modules.payroll.models import PayrollEmployee
+    from app.modules.organizations.models import Organization
+
+    target_month = (billing_month or date.today()).replace(day=1)
+    org_ids = [row[0] for row in db.query(Organization.id).all() if (row[0] is not None)]
+
+    org_summaries = []
+    for org_id in org_ids:
+        if db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == org_id).first() is None:
+            continue
+        try:
+            summary = aggregate_billing_month(db, org_id, target_month)
+            org_summaries.append(summary)
+        except Exception:
+            db.rollback()
+            raise
+
+    return {
+        "billing_month": target_month,
+        "organizations_processed": len(org_summaries),
+        "organizations": org_summaries,
+    }

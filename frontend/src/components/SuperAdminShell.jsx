@@ -3,11 +3,6 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Menu,
   X,
-  LayoutDashboard,
-  Building2,
-  Users,
-  Settings,
-  LogOut,
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
@@ -15,98 +10,23 @@ import {
   KeyRound,
   Copy,
   Check,
-  Wallet,
-  FileBarChart,
-  ShieldCheck,
-  Landmark,
-  ScrollText,
-  Layers,
-  CreditCard,
-  PlayCircle,
-  FileText,
-  AlertTriangle,
-  Activity,
-  Plug,
-  ShieldAlert,
-  FileSignature,
+  LogOut,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ToastProvider, useToast } from "../context/ToastContext";
 import { apiFetch } from "../api/client";
+import { listAlerts } from "../service/commandCenterService";
 import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
+import CommandPalette from "./CommandPalette";
+import { NAV_GROUPS, isItemActive, getPageLabel } from "./superAdminNav";
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_super_admin_sidebar_collapsed";
 
-// Same grouped enterprise-nav format as the Organization Admin sidebar
-// (components/PayrollShell.jsx) — short section labels, few items each.
-const NAV_GROUPS = [
-  {
-    title: "Overview",
-    items: [{ label: "Dashboard", href: "/super-admin/dashboard", icon: LayoutDashboard, end: true }],
-  },
-  {
-    title: "Organizations",
-    items: [
-      { label: "Organizations", href: "/super-admin/organizations", icon: Building2 },
-      { label: "Users", href: "/super-admin/users", icon: Users },
-    ],
-  },
-  {
-    title: "Compliance & Finance",
-    items: [
-      { label: "Compliance", href: "/super-admin/compliance", icon: ShieldCheck },
-      { label: "Statutory Rates", href: "/super-admin/statutory-rates", icon: Landmark },
-      { label: "Finance", href: "/super-admin/finance", icon: Wallet },
-    ],
-  },
-  {
-    title: "Reporting",
-    items: [
-      { label: "Reports", href: "/super-admin/reports", icon: FileBarChart },
-      { label: "Report Templates", href: "/super-admin/report-templates", icon: ScrollText },
-    ],
-  },
-  {
-    title: "System",
-    items: [{ label: "Settings", href: "/super-admin/settings", icon: Settings }],
-  },
-  {
-    title: "Zoiko Commercial",
-    items: [
-      { label: "Plans & Entitlements", href: "/super-admin/plans-entitlements", icon: Layers },
-      { label: "Subscriptions & Billing", href: "/super-admin/subscriptions-billing", icon: CreditCard },
-      { label: "Order Forms", href: "/super-admin/order-forms", icon: FileSignature },
-    ],
-  },
-  {
-    title: "Payroll Operations",
-    items: [
-      { label: "Payroll Runs", href: "/super-admin/payroll-runs", icon: PlayCircle },
-      { label: "Filings & Remittances", href: "/super-admin/filings-remittances", icon: FileText },
-      { label: "Exceptions & Reconciliation", href: "/super-admin/exceptions-reconciliation", icon: AlertTriangle },
-    ],
-  },
-  {
-    title: "Platform",
-    items: [
-      { label: "Service Health", href: "/super-admin/service-health", icon: Activity },
-      { label: "Integrations", href: "/super-admin/integrations", icon: Plug },
-      { label: "Security & Audit", href: "/super-admin/security-audit", icon: ShieldAlert },
-    ],
-  },
-];
-
-function isItemActive(item, pathname) {
-  if (item.end) return pathname === item.href;
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
-}
-
-function getPageLabel(pathname) {
-  const entries = NAV_GROUPS.flatMap((group) => group.items);
-  const match = entries.find((item) => isItemActive(item, pathname));
-  return match?.label || "Dashboard";
-}
+// Poll cadence for the Command Center high-severity count badge — same
+// pattern as org-facing pages (setInterval + refetch on tab focus) so an
+// alert raised in another tab surfaces here without a manual reload.
+const ALERTS_POLL_INTERVAL_MS = 30000;
 
 function getInitials(name) {
   return (
@@ -120,7 +40,7 @@ function getInitials(name) {
   );
 }
 
-function NavSection({ title, items, pathname, onNavigate, collapsed }) {
+function NavSection({ title, items, pathname, onNavigate, collapsed, badges }) {
   return (
     <div>
       {!collapsed && (
@@ -147,6 +67,14 @@ function NavSection({ title, items, pathname, onNavigate, collapsed }) {
             >
               <item.icon className={`h-4 w-4 shrink-0 ${active ? "text-brand-cyan" : ""}`} />
               {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+              {!collapsed && (badges?.[item.href] || 0) > 0 && (
+                <span
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-bold leading-none text-white"
+                  aria-label={`${badges[item.href]} high-severity alert${badges[item.href] === 1 ? "" : "s"}`}
+                >
+                  {badges[item.href]}
+                </span>
+              )}
             </NavLink>
           );
         })}
@@ -155,7 +83,7 @@ function NavSection({ title, items, pathname, onNavigate, collapsed }) {
   );
 }
 
-function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRef }) {
+function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRef, badges }) {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -209,6 +137,7 @@ function SidebarContent({ onNavigate, collapsed, onToggleCollapse, closeButtonRe
             pathname={pathname}
             onNavigate={onNavigate}
             collapsed={collapsed}
+            badges={badges}
           />
         ))}
       </nav>
@@ -451,9 +380,33 @@ export default function SuperAdminShell({ children }) {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
   });
+  const [alertCount, setAlertCount] = useState(0);
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
   const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshAlerts() {
+      try {
+        const res = await listAlerts();
+        if (!cancelled) setAlertCount(res?.high_severity_count ?? 0);
+      } catch {
+        // Polling stays silent by design — a down backend shouldn't spam
+        // toasts or crash the shell; the badge simply keeps its last value.
+      }
+    }
+    refreshAlerts();
+    const id = setInterval(refreshAlerts, ALERTS_POLL_INTERVAL_MS);
+    window.addEventListener("focus", refreshAlerts);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener("focus", refreshAlerts);
+    };
+  }, []);
+
+  const navBadges = { "/super-admin/dashboard": alertCount };
 
   function toggleCollapse() {
     setCollapsed((prev) => {
@@ -495,6 +448,7 @@ export default function SuperAdminShell({ children }) {
             collapsed={collapsed && !sidebarOpen}
             onToggleCollapse={toggleCollapse}
             closeButtonRef={closeButtonRef}
+            badges={navBadges}
           />
         </aside>
 
@@ -514,6 +468,7 @@ export default function SuperAdminShell({ children }) {
         </div>
 
         <ToastStack />
+        <CommandPalette />
       </div>
     </ToastProvider>
   );

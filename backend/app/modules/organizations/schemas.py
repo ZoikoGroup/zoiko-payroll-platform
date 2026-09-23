@@ -56,6 +56,8 @@ class OrganizationResponse(BaseModel):
     tax_no: Optional[str] = None
     registration_number: Optional[str] = None
     tax_identifiers: Optional[dict] = None
+    billing_onboarding_status: str = "PENDING_CHECKOUT"
+    terms_accepted_at: Optional[datetime] = None
     is_active: bool
     # Commercial Billing & Subscription Operating Standard §A1.
     billing_classification: str = "NON_CHARGEABLE"

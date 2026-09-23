@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { Layers, RefreshCcw, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Layers, RefreshCcw, Plus, Check } from "lucide-react";
+import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
 import {
   listPublishedPlans,
@@ -11,13 +12,24 @@ import {
   createEntitlementOverride,
 } from "../../service/commandCenterService";
 
+// One section-label scale, reused identically across all Command Center
+// pages: uppercase, muted, small — distinct from a page title and from a
+// data value, so a screen isn't just "rows of same-weight text."
+const SECTION_LABEL_CLS = "text-xs font-semibold uppercase tracking-wider text-foreground-muted mb-3";
+
 function SectionCard({ title, children }) {
   return (
     <div className="bg-surface border border-border rounded-xl shadow-sm p-5 mb-6">
-      <h2 className="text-sm font-semibold text-foreground-secondary mb-3">{title}</h2>
+      <h2 className={SECTION_LABEL_CLS}>{title}</h2>
       {children}
     </div>
   );
+}
+
+// Same feature_key -> label convention as PlanSelectionPage.jsx's
+// self-service plan cards, reused here rather than inventing a second one.
+function humanizeFeatureKey(key) {
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 const inputCls = "rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground";
@@ -37,6 +49,12 @@ export default function PlansEntitlementsPage() {
   const [overrideOrgId, setOverrideOrgId] = useState("");
   const [overrides, setOverrides] = useState([]);
   const [newOverride, setNewOverride] = useState({ featureKey: "", limitValue: "", reason: "", expiresAt: "" });
+
+  const featureKeys = useMemo(() => {
+    const keys = new Set();
+    plans.forEach((p) => Object.keys(p.entitlement_flags || {}).forEach((k) => keys.add(k)));
+    return Array.from(keys).sort();
+  }, [plans]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,27 +165,69 @@ export default function PlansEntitlementsPage() {
       </div>
 
       <SectionCard title="Published Plans">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {plans.map((p) => (
-            <div key={p.plan_version_id} className="rounded-lg border border-border-light p-4">
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-sm font-semibold text-foreground">{p.name}</p>
-                <span className="text-xs text-foreground-disabled">v{p.version}</span>
-              </div>
-              <p className="text-xs text-foreground-muted mb-2">{p.code} · plan_id={p.plan_id} · plan_version_id={p.plan_version_id}</p>
-              <p className="text-sm text-foreground-secondary mb-2">${p.monthly_price_usd}/mo</p>
-              <ul className="text-xs text-foreground-muted space-y-0.5">
-                {Object.entries(p.entitlement_flags || {}).map(([featureKey, limitValue]) => (
-                  <li key={featureKey}>{featureKey}{limitValue != null ? `: ${limitValue}` : ""}</li>
+        {plans.length === 0 && !loading ? (
+          <p className="text-sm text-foreground-disabled">No published plans yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead>
+                <tr>
+                  <th className="w-48 px-3 py-3 text-left align-bottom text-xs font-semibold uppercase tracking-wider text-foreground-muted">
+                    Entitlement
+                  </th>
+                  {plans.map((p) => (
+                    <th key={p.plan_version_id} className="border-l border-border-light px-3 py-3 text-left align-bottom">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className="text-sm font-semibold text-foreground"
+                          title={`plan_id=${p.plan_id} · plan_version_id=${p.plan_version_id}`}
+                        >
+                          {p.name}
+                        </span>
+                        <StatusPill status="active" label="Published" />
+                      </div>
+                      <p className="mt-1 text-xs text-foreground-muted">{p.code} · v{p.version}</p>
+                      <p className="mt-1.5 text-lg font-bold text-foreground">
+                        ${p.monthly_price_usd}
+                        <span className="text-xs font-normal text-foreground-muted">/mo</span>
+                      </p>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {featureKeys.map((key) => (
+                  <tr key={key} className="border-t border-border-light">
+                    <td className="px-3 py-2.5 text-foreground-secondary">{humanizeFeatureKey(key)}</td>
+                    {plans.map((p) => {
+                      const flags = p.entitlement_flags || {};
+                      const has = Object.prototype.hasOwnProperty.call(flags, key);
+                      const val = flags[key];
+                      return (
+                        <td key={p.plan_version_id} className="border-l border-border-light px-3 py-2.5">
+                          {!has ? (
+                            <span className="text-foreground-disabled">—</span>
+                          ) : val == null ? (
+                            <Check size={15} className="text-success" />
+                          ) : (
+                            <span className="font-medium text-foreground">{val}</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
                 ))}
-                {Object.keys(p.entitlement_flags || {}).length === 0 && <li>No entitlement flags.</li>}
-              </ul>
-            </div>
-          ))}
-          {plans.length === 0 && !loading && (
-            <p className="text-sm text-foreground-disabled col-span-full">No published plans yet.</p>
-          )}
-        </div>
+                {featureKeys.length === 0 && (
+                  <tr className="border-t border-border-light">
+                    <td colSpan={plans.length + 1} className="px-3 py-4 text-foreground-disabled">
+                      No entitlement flags on any published plan.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </SectionCard>
 
       <SectionCard title="Create Plan">

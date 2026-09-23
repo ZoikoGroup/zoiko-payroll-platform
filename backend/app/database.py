@@ -281,3 +281,4 @@ import app.modules.payroll.enterprise.models  # noqa: F401,E402
 import app.modules.payroll.mail.models  # noqa: F401,E402
 import app.modules.assist.models  # noqa: F401,E402
 import app.modules.billing.models  # noqa: F401,E402
+import app.modules.assisted_access.models  # noqa: F401,E402

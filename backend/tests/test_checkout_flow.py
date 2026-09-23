@@ -3,7 +3,7 @@ tests/test_checkout_flow.py
 -----------------------------
 Integration tests for Path 2 (Self-Service Paid Checkout):
 
-  1. POST /billing/checkout rejects EVALUATION workspace orgs (403)
+    1. POST /billing/checkout allows EVALUATION workspace upgrades
   2. POST /billing/checkout rejects a plan_code with no published version (404)
   3. POST /billing/checkout returns a checkout_url when Stripe is mocked (200)
   4. Stripe webhook checkout.session.completed → sub becomes ACTIVE, org → PRODUCTION
@@ -46,6 +46,7 @@ os.environ["STRIPE_SECRET_KEY"] = "sk_test_FAKE"
 os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_FAKEFAKEFAKE"
 os.environ["STRIPE_CHECKOUT_SUCCESS_URL"] = "http://localhost:3000/billing/checkout/success"
 os.environ["STRIPE_CHECKOUT_CANCEL_URL"] = "http://localhost:3000/billing/checkout/cancel"
+os.environ["STRIPE_AUTOMATIC_TAX_ENABLED"] = "true"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

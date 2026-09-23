@@ -38,10 +38,11 @@ import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/Germa
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
 import {
   INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage,
+  DEReportTemplatesPage,
   BBReportTemplatesPage, KYReportTemplatesPage, DOReportTemplatesPage, GYReportTemplatesPage, JMReportTemplatesPage,
   BSReportTemplatesPage, TTReportTemplatesPage,
 } from "./pages/ReportTemplates";
-import FinancePage from "./pages/FinancePage";
+import FundingPaymentsPage from "./pages/SuperAdmin/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
 import ZoikoPayrollModule from "./modules/payroll";
 import OrgAdminOrganizationPage from "./modules/organization-admin/OrganizationPage";
@@ -49,9 +50,12 @@ import AssistAdminPage from "./modules/assist/AssistAdminPage";
 import TeamPage from "./modules/organization-admin/TeamPage";
 import SubscriptionPage from "./modules/organization-admin/SubscriptionPage";
 import PlanSelectionPage from "./pages/PlanSelectionPage";
+import PlanReviewPage from "./pages/PlanReviewPage";
 import CheckoutSuccessPage from "./pages/CheckoutSuccessPage";
 import CheckoutCancelPage from "./pages/CheckoutCancelPage";
 import PlansEntitlementsPage from "./pages/SuperAdmin/PlansEntitlementsPage";
+import RevenueCollectionsPage from "./pages/SuperAdmin/RevenueCollectionsPage";
+import AlertsIncidentsPage from "./pages/SuperAdmin/AlertsIncidentsPage";
 import SubscriptionsBillingPage from "./pages/SuperAdmin/SubscriptionsBillingPage";
 import OrderFormsPage from "./pages/SuperAdmin/OrderFormsPage";
 import PayrollRunsMonitorPage from "./pages/SuperAdmin/PayrollRunsMonitorPage";
@@ -82,6 +86,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
 <Route element={<ProtectedRoute />}>
           {/* Billing — plan selection & Stripe Checkout landing pages */}
+        <Route path="/register/plan-review" element={<PlanReviewPage />} />
         <Route path="/billing/plans" element={<PlanSelectionPage />} />
         <Route path="/billing/checkout/success" element={<CheckoutSuccessPage />} />
         <Route path="/billing/checkout/cancel" element={<CheckoutCancelPage />} />
@@ -238,7 +243,7 @@ export default function App() {
         <Route path="/super-admin/report-templates/canada/:jurisdiction" element={<SuperAdminShell><CAReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/australia" element={<SuperAdminShell><AUReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/australia/:jurisdiction" element={<SuperAdminShell><AUReportTemplatesPage /></SuperAdminShell>} />
-        <Route path="/super-admin/report-templates/barbados" element={<SuperAdminShell><BBReportTemplatesPage /></SuperAdminShell>} />
+<Route path="/super-admin/report-templates/barbados" element={<SuperAdminShell><BBReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/barbados/:jurisdiction" element={<SuperAdminShell><BBReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/cayman-islands" element={<SuperAdminShell><KYReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/cayman-islands/:jurisdiction" element={<SuperAdminShell><KYReportTemplatesPage /></SuperAdminShell>} />
@@ -252,11 +257,13 @@ export default function App() {
         <Route path="/super-admin/report-templates/bahamas/:jurisdiction" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/trinidad-and-tobago" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/trinidad-and-tobago/:jurisdiction" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/germany" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/germany/:jurisdiction" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={
             <SuperAdminShell>
-              <FinancePage />
+              <FundingPaymentsPage />
             </SuperAdminShell>
           }
         />
@@ -279,6 +286,8 @@ export default function App() {
 
         {/* Command Center — Zoiko Commercial / Payroll Operations / Platform */}
         <Route path="/super-admin/plans-entitlements" element={<SuperAdminShell><PlansEntitlementsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/revenue-collections" element={<SuperAdminShell><RevenueCollectionsPage /></SuperAdminShell>} />
+        <Route path="/super-admin/alerts" element={<SuperAdminShell><AlertsIncidentsPage /></SuperAdminShell>} />
         <Route path="/super-admin/subscriptions-billing" element={<SuperAdminShell><SubscriptionsBillingPage /></SuperAdminShell>} />
         <Route path="/super-admin/order-forms" element={<SuperAdminShell><OrderFormsPage /></SuperAdminShell>} />
         <Route path="/super-admin/payroll-runs" element={<SuperAdminShell><PayrollRunsMonitorPage /></SuperAdminShell>} />

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CreditCard, RefreshCcw, ShieldCheck } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
@@ -84,17 +85,26 @@ function displayStatus(row) {
 }
 
 const BAR_COLOR = {
-  success: "#16A34A",
-  warning: "#D97706",
-  error: "#DC2626",
+  success: "var(--color-success)",
+  warning: "var(--color-warning)",
+  error: "var(--color-error)",
 };
+
+const SECTION_LABEL_CLS = "text-xs font-semibold uppercase tracking-wider text-foreground-muted";
+
+// The raw backend status values this page's own status filter dropdown
+// already supports (see the <select> below) — the summary badges reuse
+// exactly this set so a click always maps onto a working filter value.
+// Ordered by day-to-day triage priority, not alphabetically.
+const STATUS_SUMMARY_ORDER = ["ACTIVE", "TRIALING", "PAST_DUE", "SUSPENDED", "CANCELLED", "NONE"];
 
 // Percent of the current period (or, once in grace, the grace window)
 // remaining, plus a human label — same "remaining/total" derivation
-// TrialBanner.jsx uses for the trial banner's own progress bar.
-function computeRemaining(row) {
-  const now = Date.now();
-
+// TrialBanner.jsx uses for the trial banner's own progress bar. `now` is
+// passed in (rather than read via Date.now() here) so the caller can drive
+// it from a ticking clock and this column actually counts down live instead
+// of freezing at whatever time the data happened to load.
+function computeRemaining(row, now) {
   if (row.status === "NONE") return null;
 
   if (row.trial_stage === "CLOSED") {
@@ -126,8 +136,8 @@ function computeRemaining(row) {
   return { label: `${Math.max(0, days)}d left`, percent, tone };
 }
 
-function RemainingBar({ row }) {
-  const remaining = computeRemaining(row);
+function RemainingBar({ row, now }) {
+  const remaining = computeRemaining(row, now);
   if (!remaining) return <span className="text-foreground-disabled">—</span>;
   const color = BAR_COLOR[remaining.tone];
   return (
@@ -145,13 +155,41 @@ function RemainingBar({ row }) {
 
 export default function SubscriptionsBillingPage() {
   const { addToast } = useToast() || {};
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
+  // Unfiltered snapshot, loaded independently of the table's own filtered
+  // query — same listAllSubscriptions() call, just with no filter args —
+  // so the status-distribution summary reflects the whole fleet even while
+  // the table below is filtered down to one slice of it.
+  const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState("");
-  const [workspaceType, setWorkspaceType] = useState("");
-  const [billingClassification, setBillingClassification] = useState("");
-  const [chargeEnabled, setChargeEnabled] = useState("");
-  const [dunningStage, setDunningStage] = useState("");
+  const [status, setStatus] = useState(searchParams.get("status") || "");
+  const [workspaceType, setWorkspaceType] = useState(searchParams.get("workspace_type") || "");
+  const [billingClassification, setBillingClassification] = useState(searchParams.get("billing_classification") || "");
+  const [chargeEnabled, setChargeEnabled] = useState(searchParams.get("charge_enabled") || "");
+  const [dunningStage, setDunningStage] = useState(searchParams.get("dunning_stage") || "");
+  // Live clock for the Remaining column — without this, computeRemaining's
+  // "now" would be frozen at whatever moment the data last loaded, and the
+  // countdown would only ever move on a manual refresh.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const setStatusAndUrl = (value) => {
+    setStatus(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("status", value); else next.delete("status");
+    setSearchParams(next, { replace: true });
+  };
+
+  const setWorkspaceTypeAndUrl = (value) => {
+    setWorkspaceType(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("workspace_type", value); else next.delete("workspace_type");
+    setSearchParams(next, { replace: true });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -171,7 +209,31 @@ export default function SubscriptionsBillingPage() {
     }
   }, [status, workspaceType, billingClassification, chargeEnabled, dunningStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadSummary = useCallback(async () => {
+    try {
+      const res = await listAllSubscriptions({});
+      setAllRows(res.subscriptions || []);
+    } catch {
+      // Supplementary summary only — a failure here shouldn't block the
+      // filtered table below, which already reports its own errors.
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  const summaryCounts = useMemo(() => {
+    const counts = {};
+    allRows.forEach((row) => {
+      counts[row.status] = (counts[row.status] || 0) + 1;
+    });
+    return counts;
+  }, [allRows]);
+
+  function handleRefresh() {
+    load();
+    loadSummary();
+  }
 
   return (
     <div>
@@ -183,7 +245,7 @@ export default function SubscriptionsBillingPage() {
           <p className="text-sm text-foreground-muted mt-0.5">Every organization, whether or not it has a subscription yet — and their billing status.</p>
         </div>
         <button
-          onClick={load}
+          onClick={handleRefresh}
           disabled={loading}
           className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-50"
         >
@@ -191,8 +253,35 @@ export default function SubscriptionsBillingPage() {
         </button>
       </div>
 
+      {allRows.length > 0 && (
+        <div className="mb-5">
+          <p className={`${SECTION_LABEL_CLS} mb-2`}>Status Distribution — click to filter</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {STATUS_SUMMARY_ORDER.map((key) => {
+              const count = summaryCounts[key] || 0;
+              if (count === 0) return null;
+              const meta = DISPLAY_META[key];
+              const isActive = status === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setStatusAndUrl(isActive ? "" : key)}
+                  className={`appearance-none border-0 bg-transparent p-0 rounded-full transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                    isActive ? "ring-2 ring-primary" : ""
+                  }`}
+                  aria-pressed={isActive}
+                >
+                  <StatusPill status={meta.pill} label={`${meta.label} · ${count}`} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+        <select value={status} onChange={(e) => setStatusAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Statuses</option>
           <option value="NONE">No Subscription</option>
           <option value="TRIALING">Trialing</option>
@@ -201,7 +290,7 @@ export default function SubscriptionsBillingPage() {
           <option value="SUSPENDED">Suspended</option>
           <option value="CANCELLED">Cancelled</option>
         </select>
-        <select value={workspaceType} onChange={(e) => setWorkspaceType(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
+        <select value={workspaceType} onChange={(e) => setWorkspaceTypeAndUrl(e.target.value)} className="rounded-lg border border-border bg-surface py-2 px-3 text-sm text-foreground">
           <option value="">All Workspace Types</option>
           <option value="PRODUCTION">Production</option>
           <option value="EVALUATION">Evaluation</option>
@@ -262,10 +351,23 @@ export default function SubscriptionsBillingPage() {
                         label={BILLING_AUTHORITY_LABEL[row.billing_authority] || row.billing_authority}
                       />
                     ) : (
-                      <span className="text-foreground-disabled">—</span>
+                      <span className="text-foreground-disabled" title="No subscription on file — no commercial route assigned yet.">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-foreground-secondary">{row.plan_name || row.plan_code || "—"}</td>
+                  <td className="px-4 py-3 text-foreground-secondary">
+                    {row.plan_name || row.plan_code || (
+                      <span
+                        className="text-foreground-disabled"
+                        title={
+                          row.billing_authority === "ENTERPRISE_ORDER_FORM"
+                            ? "Enterprise Order Form — pricing is negotiated directly, not tied to the plan catalog."
+                            : "No subscription on file — no plan assigned yet."
+                        }
+                      >
+                        —
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3"><StatusPill status={meta.pill} label={meta.label} /></td>
                   <td className="px-4 py-3">
                     {row.dunning_stage ? (
@@ -273,23 +375,22 @@ export default function SubscriptionsBillingPage() {
                         <StatusPill status={DUNNING_STAGE_PILL[row.dunning_stage] || "inactive"} label={DUNNING_STAGE_LABEL[row.dunning_stage] || row.dunning_stage} />
                         {row.dunning_in_flight_run_guard && (
                           <span
-                            className="inline-flex items-center gap-1 text-xs font-semibold"
-                            style={{ color: "#166534" }}
+                            className="inline-flex items-center gap-1.5"
                             title="An authorized payroll run is currently in flight for this org — dunning is frozen at this stage and that run will complete normally."
                           >
-                            <ShieldCheck size={12} className="shrink-0" />
-                            Payment overdue, but protected — an authorized run is in flight
+                            <ShieldCheck size={12} className="shrink-0 text-success" />
+                            <StatusPill status="active" label="Protected — run in flight" />
                           </span>
                         )}
                       </div>
                     ) : (
-                      <span className="text-foreground-disabled">—</span>
+                      <span className="text-foreground-disabled" title="This organization has never entered a dunning stage.">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-foreground-muted">{formatDate(row.current_period_start)}</td>
                   <td className="px-4 py-3 text-foreground-muted">{formatDate(row.current_period_end)}</td>
                   <td className="px-4 py-3 text-foreground-muted">{formatDate(row.grace_period_ends_at)}</td>
-                  <td className="px-4 py-3"><RemainingBar row={row} /></td>
+                  <td className="px-4 py-3"><RemainingBar row={row} now={now} /></td>
                 </tr>
               );
             })}

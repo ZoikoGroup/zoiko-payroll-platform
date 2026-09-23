@@ -515,6 +515,13 @@ class BillingCheckoutResponse(BaseModel):
     checkout_url: str
 
 
+class BillingStartTrialResponse(BaseModel):
+    """POST /billing/start-trial — response confirming the org's conversion
+    to a 30-day Professional Evaluation, no Stripe/card involved."""
+    workspace_type: str
+    trial_ends_at: datetime
+
+
 class BillingCancelRequest(BaseModel):
     """POST /billing/cancel — tenant-facing, org admin only. No body fields
     today (cancellation is always "at period end") — kept as its own empty

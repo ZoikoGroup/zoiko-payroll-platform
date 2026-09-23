@@ -504,6 +504,8 @@ export const getFinanceOverview = (params) => apiFetch("/api/super-admin/finance
 
 export const getFinanceSummary = (params) => apiFetch("/api/super-admin/finance/summary", { params });
 
+export const getFinanceByOrganization = (params) => apiFetch("/api/super-admin/finance/by-organization", { params });
+
 export const getOrganizationCurrencies = () => apiFetch("/api/super-admin/finance/organization-currencies");
 
 export const updateOrganizationCurrency = (organizationId, currency) =>

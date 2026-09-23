@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { Wallet, Building2, RefreshCcw, TrendingUp, Clock, CheckCircle2, Coins } from "lucide-react";
-import Modal from "../components/Modal";
-import DateRangeFilter from "../components/DateRangeFilter";
-import StatusPill from "../components/StatusPill";
-import { useToast } from "../context/ToastContext";
-import { resolveDateRange } from "../utils/dateRangePresets";
-import { formatCurrency, getCurrencyForCountry, getCurrencySelectOptions } from "../utils/currency";
+import Modal from "../../components/Modal";
+import DateRangeFilter from "../../components/DateRangeFilter";
+import StatusPill from "../../components/StatusPill";
+import { useToast } from "../../context/ToastContext";
+import { resolveDateRange } from "../../utils/dateRangePresets";
+import { formatCurrency, getCurrencyForCountry, getCurrencySelectOptions } from "../../utils/currency";
 import {
-  getFinanceOverview, getFinanceSummary, listAllOrganizationsBrief, getComplianceJurisdictions,
+  getFinanceOverview, getFinanceSummary, getFinanceByOrganization, listAllOrganizationsBrief, getComplianceJurisdictions,
   getOrganizationCurrencies, updateOrganizationCurrency,
-} from "../service/superAdminService";
+} from "../../service/superAdminService";
 
 const RUN_STATUSES = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
 
@@ -115,8 +115,13 @@ function SummaryCard({ icon: Icon, label, value, accent }) {
 
 const STATUS_PILL_MAP = { Paid: "active", Closed: "active", Approved: "approved", Authorized: "approved", Review: "pending", Draft: "inactive" };
 
-export default function FinancePage() {
+// Same section-label scale established across the Command Center: uppercase,
+// muted, small — distinct from a page title and from a data value.
+const SECTION_LABEL_CLS = "text-xs font-semibold uppercase tracking-wider text-foreground-muted";
+
+export default function FundingPaymentsPage() {
   const [summary, setSummary] = useState(null);
+  const [byOrganization, setByOrganization] = useState({ organizations: [], total: 0 });
   const [overview, setOverview] = useState({ items: [], total: 0 });
   const [organizations, setOrganizations] = useState([]);
   const [jurisdictions, setJurisdictions] = useState([]);
@@ -151,11 +156,13 @@ export default function FinancePage() {
       end_date: dateRange.endDate || undefined,
     };
     try {
-      const [summaryRes, overviewRes] = await Promise.all([
+      const [summaryRes, byOrgRes, overviewRes] = await Promise.all([
         getFinanceSummary(params),
+        getFinanceByOrganization(params),
         getFinanceOverview({ ...params, skip: page * pageSize, limit: pageSize }),
       ]);
       setSummary(summaryRes);
+      setByOrganization(byOrgRes);
       setOverview(overviewRes);
     } catch (err) {
       setError(err.message);
@@ -172,10 +179,12 @@ export default function FinancePage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Wallet size={22} className="text-primary" /> Finance
+            <Wallet size={22} className="text-primary" /> Funding &amp; Payments
           </h1>
           <p className="text-sm text-foreground-muted mt-0.5">
-            Cross-organization payroll financial overview. Does not replace an org's own Payroll module.
+            Customer payroll money movement across organizations — not Zoiko revenue
+            (that lives in Zoiko Commercial → Revenue &amp; Collections, and the two are never merged).
+            Does not replace an org's own Payroll module.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -203,7 +212,7 @@ export default function FinancePage() {
       </div>
 
       <div className="mb-6">
-        <h2 className="text-sm font-semibold text-foreground-secondary mb-3">Totals by Jurisdiction (currency-safe — never combined)</h2>
+        <h2 className={`${SECTION_LABEL_CLS} mb-3`}>Totals by Jurisdiction (currency-safe — never combined)</h2>
         {!summary || summary.byCountry.length === 0 ? (
           <p className="text-sm text-foreground-disabled">No payroll data for the selected filters.</p>
         ) : (
@@ -211,7 +220,12 @@ export default function FinancePage() {
             {summary.byCountry.map((row) => {
               const currencyInfo = getCurrencyForCountry(row.country);
               return (
-              <div key={row.country} className="bg-surface border border-border rounded-xl shadow-sm p-4">
+              // A distinct, self-contained section per jurisdiction/currency
+              // — never a shared table with currency as just another column
+              // — with a left accent bar in that currency's own badge color,
+              // so the boundary between currencies reads structurally, not
+              // just via a label inside a uniform box.
+              <div key={row.country} className="bg-surface border border-border border-l-4 border-l-primary rounded-xl shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
                   <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     {row.country}
@@ -223,9 +237,20 @@ export default function FinancePage() {
                   </span>
                   <span className="text-xs text-foreground-disabled">{row.organizations} org(s) · {row.payrollRuns} run(s)</span>
                 </div>
-                <dl className="space-y-1.5 text-sm">
-                  <div className="flex justify-between"><dt className="text-foreground-muted">Gross Pay</dt><dd className="font-medium text-foreground">{money(row.grossPay, row.country)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-foreground-muted">Net Pay</dt><dd className="font-medium text-foreground">{money(row.netPay, row.country)}</dd></div>
+                {/* The totals themselves are this card's hero content — larger
+                    and bolder than the secondary Deductions/Employer Cost
+                    figures below them, not four equally-weighted lines. */}
+                <div className="mb-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-foreground-muted">Gross Pay</p>
+                    <p className="text-xl font-bold text-foreground">{money(row.grossPay, row.country)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-foreground-muted">Net Pay</p>
+                    <p className="text-xl font-bold text-foreground">{money(row.netPay, row.country)}</p>
+                  </div>
+                </div>
+                <dl className="space-y-1.5 border-t border-border-light pt-2.5 text-sm">
                   <div className="flex justify-between"><dt className="text-foreground-muted">Deductions</dt><dd className="text-foreground-secondary">{money(row.totalDeductions, row.country)}</dd></div>
                   <div className="flex justify-between"><dt className="text-foreground-muted">Employer Cost</dt><dd className="text-foreground-secondary">{money(row.employerCost, row.country)}</dd></div>
                 </dl>
@@ -234,6 +259,56 @@ export default function FinancePage() {
             })}
           </div>
         )}
+      </div>
+
+      <div className="mb-6">
+        <h2 className={`${SECTION_LABEL_CLS} mb-3`}>
+          Totals by Organization — every organization, including ones with no payroll runs yet
+        </h2>
+        <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Organization</th>
+                <th className="px-4 py-3">Jurisdiction</th>
+                <th className="px-4 py-3 text-right">Runs</th>
+                <th className="px-4 py-3 text-right">Gross Pay</th>
+                <th className="px-4 py-3 text-right">Net Pay</th>
+                <th className="px-4 py-3 text-right">Employer Cost</th>
+                <th className="px-4 py-3">Last Pay Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byOrganization.organizations.map((org) => {
+                const hasRuns = org.runCount > 0;
+                return (
+                  <tr key={org.organizationId} className="border-t border-border-light">
+                    <td className="px-4 py-3 font-medium text-foreground">{org.organizationName}</td>
+                    <td className="px-4 py-3 text-foreground-muted">{org.jurisdictionCountry || "—"}</td>
+                    <td className="px-4 py-3 text-right text-foreground-secondary">{org.runCount}</td>
+                    <td className="px-4 py-3 text-right font-medium text-foreground">
+                      {hasRuns ? money(org.grossPay, org.jurisdictionCountry, org.currency) : (
+                        <span className="text-foreground-disabled" title="No payroll runs yet — nothing to total.">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-foreground">
+                      {hasRuns ? money(org.netPay, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right text-foreground-muted">
+                      {hasRuns ? money(org.employerCost, org.jurisdictionCountry, org.currency) : <span className="text-foreground-disabled">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-foreground-muted">{org.lastPayDate || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {byOrganization.organizations.length === 0 && !loading && (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+              <p className="text-sm text-foreground-disabled">No organizations found.</p>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">

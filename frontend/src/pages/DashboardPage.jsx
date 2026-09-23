@@ -165,7 +165,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-8">
         <ChartCard
           title="Payroll Trend"
-          note="Operational trend only — sums across every organization's currency. For currency-accurate totals, see Finance."
+          note="Operational trend only — sums across every organization's currency. For currency-accurate totals, see Funding &amp; Payments."
         >
           {!charts || charts.payrollTrend.length === 0 ? (
             <EmptyChart message="No payroll runs in this period." />

@@ -5,6 +5,9 @@ Seeds concrete, named Report Templates for the statutory forms explicitly
 named in the India/UK configuration packs (Form 130 TDS certificate, Form
 138 quarterly TDS statement + its Q1-Q4 filing calendar, UK P60, and a UK
 EPS/FPS-style employer summary) — Phase 3 of the Report Template system.
+Later additions: Canada (T4/RL-1/ROE/PD7A), US (W-2/941/940), Australia
+(STP/SuperStream/8 state payroll-tax returns), and Germany (DE-LSTB
+Lohnsteuerbescheinigung + DE-PAYROLL-SUMMARY aggregate).
 
 This is NOT hardcoded business logic: every row is created by calling the
 same validated service functions (upsert_report_template/_component/
@@ -33,13 +36,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import SessionLocal
 from app.modules.payroll import service
+from app.modules.payroll.models import ReportTemplate
 from app.modules.payroll.schemas import (
     ReportTemplateUpsert, ReportTemplateComponentUpsert, ReportTemplateFieldUpsert, FilingCalendarUpsert,
 )
 
 
 def _seed_template(db, *, template_key, name, report_type, country, reporting_year, document_scope, components, state=None):
-    """`components` = [(component_key, label, [(field_key, label, field_type, data_source_kind, source_column, aggregation), ...])]"""
+    """`components` = [(component_key, label, [(field_key, label, field_type, data_source_kind, source_column, aggregation), ...])]
+
+    Genuinely idempotent (matching this module's own docstring, which
+    upsert_report_template alone does NOT guarantee): once a real Super
+    Admin has moved a previously-seeded template past Draft/Review/
+    Approved in production, upsert_report_template's own editability
+    guard correctly refuses to silently rewrite it in place — but that
+    means a straight re-run of this whole script would crash on the
+    FIRST such promoted template and never reach any jurisdiction seeded
+    after it. Checked here via the exact same (template_key, version)
+    natural-key lookup upsert_report_template itself uses, so an
+    already-promoted row is skipped with a clear message instead of
+    raising — no template is ever edited in place either way; a
+    genuinely new version still upserts normally.
+    """
+    existing = (
+        db.query(ReportTemplate)
+        .filter(ReportTemplate.template_key == template_key, ReportTemplate.version == "1.0")
+        .first()
+    )
+    if existing is not None and existing.status not in ("Draft", "Review", "Approved"):
+        print(f"  SKIP {template_key} v{existing.version} — already {existing.status} in production (id={existing.id}); not re-seeding.")
+        return existing
+
     template = service.upsert_report_template(
         db, ReportTemplateUpsert(
             templateKey=template_key, name=name, reportType=report_type,
@@ -748,6 +775,57 @@ def run():
             ],
         )
 
+        print("Seeding Germany Lohnsteuerbescheinigung (annual wage tax certificate, per-employee)...")
+        # Uses PAYROLL_EMPLOYEE for employee_name/steuer_id/iban (not
+        # PAYSLIP_ITEM) — same reason as Canada T4/RL1/ROE and US W-2
+        # above: this is a non-run-based, generate_uk_employee_report
+        # document (see that function's own docstring — the "employee_
+        # name" PAYSLIP_ITEM field only resolves inside an actual
+        # PayrollRun context). "tax" lists Lohnsteuer/Soli/Kirchensteuer
+        # as three separately-persisted PayslipItem columns (tds/soli/
+        # church_tax) rather than one folded figure — the real form
+        # prints them as distinct lines. The "ytd" component carries the
+        # real annual totals a wage-tax certificate is actually about;
+        # "earnings"/"tax"/"contributions" mirror UK P60's own convention
+        # of also showing the final period's own (non-aggregated) figures.
+        _seed_template(
+            db, template_key="DE-LSTB", name="Lohnsteuerbescheinigung - Annual Wage Tax Certificate", report_type="LSTB",
+            country="DE", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Betriebsnummer / Steuernummer", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                    ("employee_steuer_id", "Tax ID (Steuer-ID)", "text", "PAYROLL_EMPLOYEE", "steuer_id", None),
+                    ("employee_iban", "IBAN", "text", "PAYROLL_EMPLOYEE", "iban", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Total Pay (Final Period)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)", [
+                    ("lohnsteuer", "Lohnsteuer", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("soli", "Solidaritätszuschlag", "currency", "PAYSLIP_ITEM", "soli", None),
+                    ("church_tax", "Kirchensteuer", "currency", "PAYSLIP_ITEM", "church_tax", None),
+                ]),
+                ("contributions", "Social Insurance", [
+                    ("pf", "Pension Insurance (Rentenversicherung, Employee)", "currency", "PAYSLIP_ITEM", "pf", None),
+                    ("esi", "Health / Unemployment / Care Insurance (Employee)", "currency", "PAYSLIP_ITEM", "esi", None),
+                ]),
+                ("employer_contributions", "Employer Contributions", [
+                    ("employer_pf", "Pension Insurance (Employer)", "currency", "PAYSLIP_ITEM", "employer_pf", None),
+                    ("employer_esi", "Health / Unemployment / Care Insurance (Employer)", "currency", "PAYSLIP_ITEM", "employer_esi", None),
+                ]),
+                ("ytd", "Year-to-Date", [
+                    ("gross_pay_ytd", "Total Pay (Year-to-Date)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                    ("lohnsteuer_ytd", "Lohnsteuer (Year-to-Date)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                    ("soli_ytd", "Solidaritätszuschlag (Year-to-Date)", "currency", "PAYSLIP_ITEM", "soli", "SUM_YTD"),
+                    ("church_tax_ytd", "Kirchensteuer (Year-to-Date)", "currency", "PAYSLIP_ITEM", "church_tax", "SUM_YTD"),
+                ]),
+            ],
+        )
+
         print("Seeding Guyana GRA Form 5 monthly PAYE return, employer-wide (real per-employee rows computed by generate_gy_form_5)...")
         _seed_template(
             db, template_key="GY-FORM-5", name="GRA Form 5 — Monthly PAYE Return", report_type="GY_FORM_5",
@@ -1028,6 +1106,48 @@ def run():
                 ]),
             ],
         )
+
+        print("Seeding Germany Payroll Summary (aggregate, per payroll run)...")
+        # AGGREGATE, run-based — uses the fully generic
+        # service.generate_report_from_template directly (no bespoke
+        # generator, same mechanism as UK's EPS/FPS-style summary above).
+        _seed_template(
+            db, template_key="DE-PAYROLL-SUMMARY", name="Germany Payroll Summary", report_type="DE_PAYROLL_SUMMARY",
+            country="DE", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Betriebsnummer / Steuernummer", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                ]),
+                ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)", [
+                    ("total_lohnsteuer", "Total Lohnsteuer", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                    ("total_soli", "Total Solidaritätszuschlag", "currency", "PAYSLIP_ITEM", "soli", "SUM_RUN"),
+                    ("total_church_tax", "Total Kirchensteuer", "currency", "PAYSLIP_ITEM", "church_tax", "SUM_RUN"),
+                ]),
+                ("contributions", "Social Insurance", [
+                    ("total_pf", "Total Pension Insurance (Employee)", "currency", "PAYSLIP_ITEM", "pf", "SUM_RUN"),
+                    ("total_esi", "Total Health / Unemployment / Care Insurance (Employee)", "currency", "PAYSLIP_ITEM", "esi", "SUM_RUN"),
+                ]),
+                ("employer_contributions", "Employer Contributions", [
+                    ("total_employer_pf", "Total Pension Insurance (Employer)", "currency", "PAYSLIP_ITEM", "employer_pf", "SUM_RUN"),
+                    ("total_employer_esi", "Total Health / Unemployment / Care Insurance (Employer)", "currency", "PAYSLIP_ITEM", "employer_esi", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # DEÜV (social-insurance registration/notification submission) and
+        # an ELSTER-transmitted Lohnsteuer-Anmeldung are explicitly NOT
+        # seeded here — REQUIRES STATUTORY EVIDENCE. DEÜV has zero code
+        # anywhere in this repository (confirmed by search; see docs/
+        # GERMANY_JURISDICTION_FINAL_BLOCKER_MATRIX.md's own DEÜV entry —
+        # "zero code, correctly blocked on missing specification"). ELSTER
+        # already has its own dedicated, more sophisticated transmission-
+        # lifecycle subsystem (elster-transmissions/elster-certificate-
+        # config — signature/certificate/retry, not a field-mapped
+        # document) — folding it into the generic ReportTemplate shape
+        # would duplicate, not reuse, that existing architecture.
 
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:

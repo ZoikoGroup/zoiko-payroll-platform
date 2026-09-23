@@ -14,6 +14,7 @@ export { default as GYReportTemplatesPage } from "./GYReportTemplatesPage";
 export { default as JMReportTemplatesPage } from "./JMReportTemplatesPage";
 export { default as BSReportTemplatesPage } from "./BSReportTemplatesPage";
 export { default as TTReportTemplatesPage } from "./TTReportTemplatesPage";
+export { default as DEReportTemplatesPage } from "./DEReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -21,10 +22,10 @@ export { default as TTReportTemplatesPage } from "./TTReportTemplatesPage";
 // templates — STP/SuperStream/8 state payroll-tax-returns — seeded,
 // Active, and live-verified against real payslip data). Caribbean 7 added
 // 2026-09-22 (one seeded Draft template each — see seed_statutory_report_
-// templates.py). DE still gets its own thin wrapper page in a later
-// phase, once its backend exists, following the exact same pattern (see
-// JurisdictionCompliance/index.js's COUNTRY_CODE_TO_ROUTE for the
-// precedent this mirrors).
+// templates.py). DE added (Lohnsteuerbescheinigung per-employee + a
+// Payroll Summary aggregate, scripts/seed_statutory_report_templates.py)
+// — same thin wrapper pattern as every other jurisdiction above, no
+// Germany-specific UI.
 export const COUNTRY_CODE_TO_ROUTE = {
   IN: "india",
   UK: "united-kingdom",
@@ -38,4 +39,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   JM: "jamaica",
   BS: "bahamas",
   TT: "trinidad-and-tobago",
+  DE: "germany",
 };

@@ -204,6 +204,7 @@ def convert_trial_to_paid(
     subscription.grace_period_ends_at = None
 
     org.workspace_type = "PRODUCTION"
+    org.billing_onboarding_status = "ACTIVE"
     if not org.is_active:
         org.is_active = True
 

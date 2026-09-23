@@ -148,11 +148,34 @@ class Settings(BaseSettings):
     DUNNING_SWEEP_ENABLED: bool = True
     DUNNING_SWEEP_INTERVAL_HOURS: int = 24
 
+    # ── BWM aggregation (modules/billing/bwm.py) ─────────────────────────
+    # Materializes billing_worker_month_records (Compute-only — never calls
+    # a gateway), the persistence that feeds the Exceptions & Reconciliation
+    # bwm_invoice_mismatches view and future invoicing. Runs the same batch
+    # function the manual POST /super-admin/billing/aggregate-bwm admin
+    # endpoint calls, mirroring ASSIST_SWEEP_ENABLED/TRIAL_SWEEP_ENABLED.
+    BWM_AGGREGATION_ENABLED: bool = True
+    BWM_AGGREGATION_INTERVAL_HOURS: int = 24
+
     # ── Self-service checkout (Stripe) ──────────────────────────────────
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_CHECKOUT_SUCCESS_URL: str = ""   # frontend route, e.g. .../checkout/success
     STRIPE_CHECKOUT_CANCEL_URL: str = ""    # frontend route, e.g. .../checkout/cancelled
+    # Stripe Tax requires a configured account head-office address and tax
+    # registration. Keep it opt-in so Checkout still works in local/test
+    # accounts that have not completed that Stripe Dashboard setup.
+    STRIPE_AUTOMATIC_TAX_ENABLED: bool = True
+
+    # ── Assisted Access (SafeGuard — session takeover, time-boxed) ──────
+    # Hard cap on how long a single support-assist session may live. The
+    # spec treats indefinite access as unacceptable by construction: a
+    # session is created with a fixed expires_at and MUST be re-requested
+    # (new reason, new session, new token) once it lapses. The background
+    # sweep auto-ends anything past this cap even if nobody manually ends it.
+    ASSISTED_ACCESS_SESSION_MINUTES: int = 30
+    ASSISTED_ACCESS_SWEEP_ENABLED: bool = True
+    ASSISTED_ACCESS_SWEEP_INTERVAL_MINUTES: int = 60
 
     # ── Staging/test billing isolation (Part 11) ────────────────────────
     # When true: refuse to boot with a Stripe LIVE key, force seed/demo

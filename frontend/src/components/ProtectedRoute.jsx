@@ -15,6 +15,7 @@ export default function ProtectedRoute() {
       pathname === "/payroll" ||
       pathname.startsWith("/payroll/") ||
       pathname.startsWith("/billing/") ||
+      pathname.startsWith("/register/") ||
       pathname.startsWith("/organization-admin/") ||
       pathname.startsWith("/hr-admin/");
     if (!allowed) {
