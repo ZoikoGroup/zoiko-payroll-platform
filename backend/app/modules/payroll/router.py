@@ -2754,6 +2754,58 @@ def generate_gy_form_7b(
     )
 
 
+# ── Trinidad and Tobago: Monthly PAYE/HS Return + NIBTT contribution
+# data (monthly) + TD4 (per-employee, annual) generation (Caribbean
+# forms gap-closure, country #2, 2026-09-23).
+
+@payroll_router.post(
+    "/tt/reports/monthly-return", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Trinidad and Tobago Monthly PAYE/Health Surcharge Return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_tt_monthly_return(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_tt_monthly_return(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/tt/reports/nibtt-data", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate Trinidad and Tobago NIBTT contribution data for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_tt_nibtt_data(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_tt_nibtt_data(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/tt/reports/td4", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Trinidad and Tobago TD4 annual employee certificate for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_tt_td4(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
 @payroll_router.get(
     "/generated-reports/{generated_report_id}/rti-xml",
     summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",

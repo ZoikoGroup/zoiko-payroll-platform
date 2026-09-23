@@ -748,6 +748,71 @@ def run():
             ],
         )
 
+        print("Seeding Trinidad and Tobago Monthly PAYE/Health Surcharge Return, employer-wide (real per-employee rows computed by generate_tt_monthly_return)...")
+        _seed_template(
+            db, template_key="TT-MONTHLY-RETURN", name="Monthly PAYE / Health Surcharge Return", report_type="TT_MONTHLY_RETURN",
+            country="TT", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bir_number", "BIR File Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_tt_monthly_return,
+                # same convention as US-941's own line1_employee_count field.
+                ("totals", "Employer Totals (PAYE / Health Surcharge / NIS)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_salary_wages", "Total Salary / Wages", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_paye_tax_deducted", "Total PAYE Tax Deducted", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("total_health_surcharge", "Total Health Surcharge", "currency", "PAYSLIP_ITEM", "professional_tax", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Trinidad and Tobago NIBTT contribution data, employer-wide (real per-employee rows computed by generate_tt_nibtt_data)...")
+        _seed_template(
+            db, template_key="TT-NIBTT-DATA", name="NIBTT Contribution Data", report_type="TT_NIBTT_DATA",
+            country="TT", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("totals", "Employer Totals (Insurable Earnings / NIS)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_insurable_earnings", "Total Insurable Earnings", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Trinidad and Tobago TD4 annual employee certificate, per-employee...")
+        _seed_template(
+            db, template_key="TT-TD4", name="TD4 — Annual Employee Certificate", report_type="TD4",
+            country="TT", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_bir_number", "BIR File Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("earnings", "Earnings (Year-to-Date)", [
+                    ("gross_pay_ytd", "Total Salary / Wages (YTD)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                ]),
+                ("tax", "PAYE / Health Surcharge (Year-to-Date)", [
+                    ("tds_ytd", "PAYE Tax Deducted (YTD)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                    ("professional_tax_ytd", "Health Surcharge (YTD)", "currency", "PAYSLIP_ITEM", "professional_tax", "SUM_YTD"),
+                ]),
+                ("contributions", "NIS (Year-to-Date)", [
+                    ("nis_employee_ytd", "NIS Employee (YTD)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                ]),
+            ],
+        )
+
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:
         db.close()
