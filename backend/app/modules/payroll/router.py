@@ -2949,6 +2949,28 @@ def generate_bs_c10(
     )
 
 
+# ── Cayman Islands: monthly Pension contribution submission generation
+# (Caribbean forms gap-closure, country #7 — the last of the 7,
+# 2026-09-23). The Wage/Gratuity Statement needs no dedicated endpoint —
+# it uses the fully generic POST /generated-reports above unchanged,
+# same as STP/CA/India/UK's own generic-engine report types.
+
+@payroll_router.post(
+    "/ky/reports/pension-submission", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Cayman Islands monthly Pension contribution submission — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_ky_pension_submission(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_ky_pension_submission(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
 @payroll_router.get(
     "/generated-reports/{generated_report_id}/rti-xml",
     summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",

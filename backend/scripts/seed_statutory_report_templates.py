@@ -584,6 +584,49 @@ def run():
             ],
         )
 
+        print("Seeding Cayman Islands Wage/Gratuity Statement, per-employee, per-run (generic mapper — gratuity itself not populated, no gratuity/tip figure is computed anywhere in cayman_islands.py)...")
+        _seed_template(
+            db, template_key="KY-WAGE-GRATUITY", name="Wage / Gratuity Statement", report_type="KY_WAGE_GRATUITY_STATEMENT",
+            country="KY", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Wages", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("contributions", "Mandatory Pension (Employee)", [
+                    ("employee_pension", "Mandatory Pension (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                ]),
+                ("employer_contributions", "Mandatory Pension (Employer)", [
+                    ("employer_pension", "Mandatory Pension (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Cayman Islands monthly Pension contribution submission, employer-wide (real per-employee rows computed by generate_ky_pension_submission)...")
+        _seed_template(
+            db, template_key="KY-PENSION-SUBMISSION", name="Monthly Pension Contribution Submission", report_type="KY_PENSION_SUBMISSION",
+            country="KY", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_ky_pension_submission,
+                # same convention as US-941's own line1_employee_count field.
+                ("totals", "Employer Totals (Pensionable Earnings / Pension)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_pensionable_earnings", "Total Pensionable Earnings", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_pension_employee", "Total Pension (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_pension_employer", "Total Pension (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ]),
+            ],
+        )
+
         print("Seeding Dominican Republic payroll statement, per-employee...")
         _seed_template(
             db, template_key="DO-PAYROLL", name="ISR + SFS/SVDS/SRL/INFOTEP Statement", report_type="DO_PAYROLL_STATEMENT",

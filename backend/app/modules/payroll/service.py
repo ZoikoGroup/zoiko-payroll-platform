@@ -8660,6 +8660,27 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"),
         ("totals", "Employer Totals (Insurable Earnings / NIB)"),
     ],
+    # Cayman Islands real named forms (Caribbean forms gap-closure,
+    # country #7 — the last of the 7, 2026-09-23). Wage/Gratuity
+    # Statement is per EMPLOYEE, per PAYROLL RUN — uses the fully
+    # generic generate_report_from_template mapper unchanged (no
+    # bespoke function), same architecture as the existing KY_PENSION_
+    # STATEMENT/BB_PAYE_NIS templates. Gratuity itself has no field here
+    # — no gratuity/tip figure is computed anywhere in cayman_islands.py,
+    # so it's omitted rather than fabricated (see the seed script's own
+    # comment). Pension Submission is per MONTH, employer-level
+    # components only — the real per-employee rows are computed by
+    # generate_ky_pension_submission directly, same reasoning as
+    # GY_FORM_5 above.
+    "KY_WAGE_GRATUITY_STATEMENT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Wages"), ("contributions", "Mandatory Pension (Employee)"),
+        ("employer_contributions", "Mandatory Pension (Employer)"),
+    ],
+    "KY_PENSION_SUBMISSION": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Pensionable Earnings / Pension)"),
+    ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -12200,6 +12221,138 @@ def generate_bs_c10(
             "variant only.",
             "Employee address and BS §9's own real field ordering/layout were not re-acquired for this "
             "pass — only real, engine-computed figures (gross pay, NIB employee/employer) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Cayman Islands: monthly Pension contribution submission (bespoke) —
+# the last of the 7-country real-forms plan ─────────────────────────────
+# (Caribbean forms gap-closure, country #7, 2026-09-23). KY's Wage/
+# Gratuity Statement (KY-018) needed NO new code at all — it's the SAME
+# per-employee, per-payroll-run generic mapper the existing KY_PENSION_
+# STATEMENT template already uses (see _REPORT_COMPONENTS_BY_TYPE's own
+# "KY_WAGE_GRATUITY_STATEMENT" entry below), just under the form's real
+# name. Gratuity itself is NOT populated — no gratuity/tip figure is
+# computed anywhere in cayman_islands.py, so it is omitted rather than
+# fabricated (disclosed in the seed script's own comment, mirroring
+# every other disclosed-but-unmapped field in this pass).
+#
+# The Pension contribution submission (KY-009) DOES need a bespoke
+# monthly cross-run generator, same per-employee-row-plus-employer-
+# totals shape as the other 6 countries — reuses _walk_us_aggregate_
+# report_components for the employer-totals side.
+#
+# DISCLOSED SCOPE (see "knownGaps"): KY-009's real submission groups
+# contributions BY PLAN/PROVIDER — this platform has no per-employee
+# pension-plan/provider field anywhere, so every employee is reported
+# under a single implicit bucket rather than fabricating a provider
+# breakdown that doesn't exist in this platform's data model.
+
+_KY_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def generate_ky_pension_submission(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Cayman Islands's monthly Pension contribution submission. Per-
+    employee rows for the calendar month plus an employer-totals row,
+    summed from real FINALIZED KY PayslipItems (never Draft/Review) —
+    see this section's own module-level note on the plan/provider
+    grouping gap."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "KY_PENSION_SUBMISSION":
+        raise BadRequestException(f"generate_ky_pension_submission is only for KY_PENSION_SUBMISSION templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "KY",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_KY_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    employee_rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        pension_employee = sum((i.employee_pension or z for i in emp_items), z)
+        pension_employer = sum((i.employer_pension or z for i in emp_items), z)
+        employee_rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "pensionMemberNumber": cf.get("nib_member_number"),
+            "pensionableEarnings": float(gross),
+            "pensionEmployee": float(pension_employee), "pensionEmployer": float(pension_employer),
+        })
+    employee_rows.sort(key=lambda r: r["employeeName"] or "")
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_pensionable_earnings": float(sum((i.gross_pay or z for i in items), z)),
+        "total_pension_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_pension_employer": float(sum((i.employer_pension or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "KY-009's real submission groups contributions BY PLAN/PROVIDER — this platform has no "
+            "per-employee pension-plan/provider field, so every employee is reported under a single "
+            "implicit bucket rather than a fabricated provider breakdown.",
+            "Employee address and KY-009's own real field ordering/layout were not re-acquired for "
+            "this pass — only real, engine-computed figures (gross pay, mandatory pension employee/"
+            "employer) are populated.",
         ],
     }
 
