@@ -709,6 +709,29 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
             old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
             reason=data.reason,
         )
+        _audit_pack_change_email_fields = (
+            "pack_id", "version", "jurisdiction_country", "jurisdiction_state", "jurisdiction_locality",
+            "pack_type", "status", "effective_from", "effective_to", "compliance_owner", "engineering_owner",
+            "regulatory_authority", "compliance_category", "change_summary", "next_review_date",
+            "tax_year", "tax_regime", "currency", "source_document_id",
+        )
+        _pack_change_labels = {
+            "pack_id": "Pack ID", "version": "Version", "jurisdiction_country": "Country",
+            "jurisdiction_state": "State", "jurisdiction_locality": "Locality", "pack_type": "Pack type",
+            "status": "Status", "effective_from": "Effective from", "effective_to": "Effective to",
+            "compliance_owner": "Compliance owner", "engineering_owner": "Engineering owner",
+            "regulatory_authority": "Regulatory authority", "compliance_category": "Compliance category",
+            "change_summary": "Change summary", "next_review_date": "Next review date",
+            "tax_year": "Tax year", "tax_regime": "Tax regime", "currency": "Currency",
+            "source_document_id": "Source document",
+        }
+        _pack_changes = []
+        for _k in _audit_pack_change_email_fields:
+            _old = old_value.get(_k)
+            _new = str(fields.get(_k)) if fields.get(_k) is not None else None
+            if _old != _new:
+                _pack_changes.append((_pack_change_labels.get(_k, _k), _old, _new))
+        _notify_jurisdiction_pack_changed(db, row, _pack_changes)
         return row
 
     previous = (
@@ -20295,6 +20318,7 @@ def attempt_transmit_elster_transmission(db: Session, transmission_id: int, orga
         db, actor_id=actor_id, action="status_change", entity_type="germany_elster_transmission", entity_id=row.id,
         old_value={"status": old_status}, new_value={"status": row.status, "blockedReason": row.blocked_reason},
     )
+    _notify_elster_transmission(db, row, organization_id)
     return row
 
 
@@ -20499,6 +20523,8 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
         except Exception:
             pass
 
+    _notify_employee_created(db, employee, organization_id)
+
     return employee
 
 
@@ -20540,6 +20566,17 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
     )
     old_declaration_values = {f: getattr(employee, f, None) for f in declaration_fields}
 
+    # Payroll-Core sensitive-field snapshot — before mutation, for the
+    # employee notification diff. Curated to what actually matters for pay
+    # and tax identity (bank details, tax identifiers, pay rate, and the
+    # status transition that is a termination); the employee's own email
+    # change is deliberately excluded (it's the delivery channel).
+    sensitive_columns = (
+        "bank_name", "bank_account", "ifsc", "pan", "uan", "ctc", "basic", "hra", "status",
+    )
+    old_sensitive_values = {f: getattr(employee, f, None) for f in sensitive_columns}
+    old_compliance_values = dict(employee.compliance_fields or {})
+
     for field, value in updates.items():
         if value == "":
             continue
@@ -20557,6 +20594,38 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
                 old_value={field: str(old_value) if old_value is not None else None},
                 new_value={field: str(new_value) if new_value is not None else None},
             )
+
+    _sensitive_field_labels = {
+        "bank_name": "Bank name",
+        "bank_account": "Bank account number",
+        "ifsc": "IFSC code",
+        "pan": "PAN / tax identifier",
+        "uan": "UAN number",
+        "ctc": "Annual CTC",
+        "basic": "Basic pay",
+        "hra": "HRA",
+        "status": "Employment status",
+    }
+    sensitive_changes = []
+    for field in sensitive_columns:
+        old_value = old_sensitive_values[field]
+        new_value = getattr(employee, field, None)
+        if old_value != new_value:
+            sensitive_changes.append((
+                _sensitive_field_labels.get(field, field),
+                str(old_value) if old_value is not None else None,
+                str(new_value) if new_value is not None else None,
+            ))
+    new_compliance_values = employee.compliance_fields or {}
+    if old_compliance_values != new_compliance_values:
+        import json as _json
+        sensitive_changes.append((
+            "Tax identifiers / compliance details",
+            _json.dumps(old_compliance_values, sort_keys=True, default=str) or "—",
+            _json.dumps(new_compliance_values, sort_keys=True, default=str) or "—",
+        ))
+    _notify_employee_sensitive_fields_changed(db, employee, sensitive_changes, organization_id)
+
     return employee
 
 
@@ -20832,8 +20901,14 @@ def delete_employee(db: Session, employee_id: int, organization_id: int):
         PayrollLeaveRequest.employee_id == employee_id,
     ).delete(synchronize_session=False)
     db.flush()
+    _deleted_employee_email = employee.email
+    _deleted_employee_name = employee.name
+    _deleted_employee_code = employee.employee_code
     db.delete(employee)
     db.commit()
+    _notify_employee_deleted(
+        db, _deleted_employee_email, _deleted_employee_name, _deleted_employee_code or "", organization_id,
+    )
 
 
 def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id: int) -> dict:
@@ -20997,6 +21072,7 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
 
     log_activity(db, organization_id, f"Payroll run '{run.period_label}' created.",
                  ActivityStatus.INFO, actor_id=created_by)
+    _notify_payroll_run_created(db, run, organization_id)
     return run
 
 
@@ -21170,6 +21246,254 @@ def _run_notifications_in_background(run_id: int, organization_id: int, kind: st
         db.close()
 
 
+# ── Payroll-Core notification triggers (best-effort) ────────────────────────
+# One helper per product state. Each wraps its send in try/except + a warning
+# log so a failed or slow notification can never block or roll back the
+# payroll action that triggered it — same discipline as the leave-review
+# status email below. Admin-facing sends go to the org's own contact address
+# (Organization.email); employee-facing sends to the employee's own address.
+
+def _notify_employee_created(db: Session, employee, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not employee or not employee.email:
+            return
+        from app.services.email_service import send_employee_created_email
+        send_employee_created_email(
+            employee.email, employee.name, employee.employee_code or "",
+            department=employee.department or "", designation=employee.designation or "",
+            date_of_joining=str(employee.date_of_joining) if employee.date_of_joining else "",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] employee-created email failed for org {organization_id}: {exc}")
+
+
+def _notify_employee_deleted(db: Session, employee_email: str, employee_name: str,
+                             employee_code: str, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not employee_email:
+            return
+        from app.services.email_service import send_employee_deleted_email
+        send_employee_deleted_email(
+            employee_email, employee_name, employee_code or "",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] employee-deleted email failed for org {organization_id}: {exc}")
+
+
+def _notify_employee_sensitive_fields_changed(db: Session, employee, changes, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not changes or not employee or not employee.email:
+            return
+        from app.services.email_service import send_employee_sensitive_fields_changed_email
+        send_employee_sensitive_fields_changed_email(
+            employee.email, employee.name, changes,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] employee-sensitive-change email failed for org {organization_id}: {exc}")
+
+
+def _notify_payroll_run_created(db: Session, run, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_payroll_run_created_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        employee_count = db.query(PayslipItem.id).filter(PayslipItem.payroll_run_id == run.id).count()
+        send_payroll_run_created_email(
+            org_email, run.period_label or "",
+            pay_date=str(run.pay_date) if run.pay_date else "",
+            run_code=run.run_code or "", employee_count=employee_count,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] run-created email failed for run {run.id}: {exc}")
+
+
+def _notify_payroll_run_deleted(db: Session, period_label: str, run_code: str, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_payroll_run_deleted_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_payroll_run_deleted_email(
+            org_email, period_label or "", run_code=run_code or "",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] run-deleted email failed for org {organization_id}: {exc}")
+
+
+def _notify_payslip_deleted(db: Session, item, run, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == item.employee_id).first()
+        if not employee or not employee.email:
+            return
+        from app.services.email_service import send_payslip_deleted_email
+        send_payslip_deleted_email(
+            employee.email, item.employee_name or employee.name,
+            item.payslip_number or "", run.period_label if run else "",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] payslip-deleted email failed for payslip {item.id}: {exc}")
+
+
+def _notify_leave_request_submitted(db: Session, record, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_leave_request_submitted_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == record.employee_id).first()
+        send_leave_request_submitted_email(
+            org_email, employee.name if employee else f"Employee #{record.employee_id}",
+            str(record.leave_type), str(record.start_date), str(record.end_date),
+            record.days, record.request_code or "", reason=record.reason or "",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] leave-submitted email failed for request {record.id}: {exc}")
+
+
+def _notify_elster_transmission(db: Session, row, organization_id: int) -> None:
+    """Status-accurate: the template variant is chosen from the row's own
+    persisted status — BLOCKED_EXTERNAL/REJECTED is never reported as
+    submitted (see send_elster_filing_status_email's docstring)."""
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_elster_filing_status_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_elster_filing_status_email(
+            org_email, row.status, row.transmission_type or "",
+            str(row.period_start), str(row.period_end),
+            blocked_reason=row.blocked_reason,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] ELSTER status email failed for transmission {row.id}: {exc}")
+
+
+def _notify_jurisdiction_pack_changed(db: Session, pack, changes, organization_id: int = None) -> None:
+    """Jurisdiction packs are platform-global (no owning organization), so
+    the notification fans out to every org that actually depends on this pack
+    — orgs whose CompanyComplianceDetails.active_pack_id points at it, plus
+    orgs with payslips that snapshotted it. With organization_id set (caller
+    knows a specific org), that single org is used instead."""
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not changes:
+            return
+        from app.services.email_service import (
+            _get_org_contact_email, send_jurisdiction_pack_changed_email,
+        )
+        jurisdiction = " / ".join(
+            filter(None, [pack.jurisdiction_country, pack.jurisdiction_state, pack.jurisdiction_locality]),
+        )
+        if organization_id is not None:
+            recipient_org_ids = [organization_id]
+        else:
+            linked_org_ids = {
+                r[0] for r in db.query(CompanyComplianceDetails.organization_id).filter(
+                    CompanyComplianceDetails.active_pack_id == pack.id,
+                ).all()
+            }
+            payslip_org_ids = {
+                r[0] for r in db.query(PayslipItem.organization_id).filter(
+                    PayslipItem.tax_policy_pack_id == pack.id,
+                ).all()
+            }
+            recipient_org_ids = sorted(linked_org_ids | payslip_org_ids)
+        sent_any = False
+        for org_id in recipient_org_ids:
+            org_email = _get_org_contact_email(db, org_id)
+            if not org_email:
+                continue
+            send_jurisdiction_pack_changed_email(
+                org_email, pack.pack_id or "", pack.version or "", jurisdiction or "Unscoped",
+                changes, organization_id=org_id, db=db,
+            )
+            sent_any = True
+        if not sent_any and recipient_org_ids:
+            logger.info(
+                f"[payroll-mail] jurisdiction-pack change for {pack.pack_id} had no "
+                "recipient orgs with a contact email.",
+            )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] jurisdiction-pack email failed for pack {pack.pack_id}: {exc}")
+
+
+def _notify_organization_details_changed(db: Session, organization_id: int, changes) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not changes:
+            return
+        from app.services.email_service import _get_org_contact_email, send_organization_details_changed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_organization_details_changed_email(
+            org_email, changes, organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] org-details email failed for org {organization_id}: {exc}")
+
+
+def _notify_report_generated(db: Session, report, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_report_generated_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_report_generated_email(
+            org_email, report.report_type or "Report", report.reporting_period or "",
+            report.id, template_version=str(report.template_version or ""),
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] report-ready email failed for report {report.id}: {exc}")
+
+
+def _notify_report_generation_failed(db: Session, organization_id: int, report_label: str,
+                                     pay_period: str, reason: str) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_report_generation_failed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_report_generation_failed_email(
+            org_email, report_label, pay_period, reason,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] report-failed email failed for org {organization_id}: {exc}")
+
+
 def advance_payroll_run_status(
     db: Session, run_id: int, approver_id: int, organization_id: int = None,
     background_tasks: "BackgroundTasks" = None,
@@ -21242,8 +21566,11 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft runs can be deleted.")
+    _deleted_run_period = run.period_label
+    _deleted_run_code = run.run_code
     db.delete(run)
     db.commit()
+    _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id)
 
 
 def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
@@ -21276,6 +21603,7 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
         )
     db.delete(item)
     db.commit()
+    _notify_payslip_deleted(db, item, run, organization_id)
 
 
 # ── Payslip Items ──────────────────────────────────────────────────────
@@ -26135,14 +26463,16 @@ def create_payroll_leave_request(db: Session, data, organization_id: int) -> dic
     db.add(record)
     db.commit()
     db.refresh(record)
+    _notify_leave_request_submitted(db, record, organization_id)
 
     try:
         log_activity(db, organization_id, f"Leave request submitted by employee {record.employee_id} ({record.leave_type}, {record.days}d).", ActivityStatus.INFO)
     except Exception:
         pass
 
-    # No email is sent on submission — status emails (approved / rejected)
-    # are sent by review_payroll_leave_request once an admin acts on the request.
+    # Notify the org's payroll administrator so the request actually gets
+    # reviewed (best-effort — see _notify_leave_request_submitted). Status
+    # emails (approved / rejected) are reserved for review_payroll_leave_request.
 
     return _enrich_leave_request(db, record, organization_id)
 

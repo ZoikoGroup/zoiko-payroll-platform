@@ -26,6 +26,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy.orm import relationship
 
@@ -125,3 +126,53 @@ class RevokedToken(Base):
     jti = Column(String(64), unique=True, index=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AuthEmailEvent(Base):
+    """Persisted audit + double-send guard for every auth-module email.
+
+    The row is INSERTed (outcome="pending") BEFORE any SMTP call; the UNIQUE
+    idempotency_key is the structural guard — a duplicate request hits the
+    constraint, records outcome="skipped_duplicate", and never reaches SMTP.
+    After the send the same row's outcome is updated from the real smtplib
+    result. This table is the record of truth; the legacy "email_audit"
+    logger.info lines are kept only as cheap extra visibility (§04).
+
+    Two idempotency key families (see auth/service.py):
+      - link-free notification events (password changed / replaced / reset
+        completed / role changed / deactivated): strict unique on the base
+        key, so a double-click or retried request collapses to one send.
+      - token-link flows (reset request / invite): the base key is suffixed
+        with the fresh token's hash prefix, so every legitimate re-request
+        (each mints a new superseding token, and the latest email carries the
+        only live link) records its own row while still being structurally
+        unique.
+    """
+
+    __tablename__ = "auth_email_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    template_id = Column(String(20), nullable=False)
+    recipient_email = Column(String(200), index=True, nullable=False)
+    # NULL before a User row exists (e.g. mid-registration).
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    organization_id = Column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Who triggered the event (e.g. the org admin who deactivated someone).
+    actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    # tenant | event | recipient | template | material version (+ token hash
+    # prefix for token-link flows).
+    idempotency_key = Column(String(220), unique=True, index=True, nullable=False)
+    # sent / failed / skipped_duplicate (pending is the transient in-flight state).
+    outcome = Column(String(24), nullable=False, default="pending")
+    # SMTP provider detail on failure (e.g. "smtplib.SMTPAuthenticationError: ...").
+    provider_response = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<AuthEmailEvent id={self.id} event_type={self.event_type} outcome={self.outcome} recipient={self.recipient_email}>"

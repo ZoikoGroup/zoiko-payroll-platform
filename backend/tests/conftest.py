@@ -68,6 +68,42 @@ def _reset_rollout_switches():
         current.update(original)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_smtp(monkeypatch):
+    """Guarantee no test ever opens a real SMTP connection.
+
+    backend/.env carries live SMTP credentials (info@zoikopayroll.com /
+    smtpout.secureserver.net:465) and the app reads them eagerly via
+    app.config at first import. Several auth flows (reset link, invite,
+    and now the notification sends) fire through email_service at normal
+    call sites; without this neutralizer a single unpatched test would
+    attempt — and routinely succeed at — delivering mail through the real
+    outbound server. Everyone's tests: forbid it, globally.
+
+    The mechanism: `_get_smtp_settings()` is the one chokepoint every
+    email_service send path resolves its SMTP endpoint through, and a
+    falsy `host` makes send_approval_email log "Mock sending email ..." and
+    return True without opening a socket. Patching it (not `settings`) keeps
+    `settings.SMTP_HOST` untouched, so tests that assert on the loaded
+    configuration still see the real env value. Tests that want to prove
+    delivery mechanics monkeypatch the service/auth-level `_send_*_email`
+    wrappers or `smtplib` directly on top of this."""
+
+    def _fake_get_smtp_settings(db=None) -> dict:
+        return {
+            "host": "",
+            "port": 0,
+            "username": "",
+            "password": "",
+            "from_email": "test@example.com",
+            "use_tls": False,
+        }
+
+    from app.services import email_service
+
+    monkeypatch.setattr(email_service, "_get_smtp_settings", _fake_get_smtp_settings)
+
+
 @pytest.fixture()
 def db():
     """A fresh, isolated SQLite in-memory database for one test.

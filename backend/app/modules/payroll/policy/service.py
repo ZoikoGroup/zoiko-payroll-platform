@@ -429,6 +429,10 @@ def get_policy_by_id(db: Session, policy_id: int, organization_id: int) -> Payro
 def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organization_id: int) -> PayrollPolicy:
     policy = get_policy_by_id(db, policy_id, organization_id)
 
+    old_scalars = _policy_curated_scalars(policy)
+    old_overtime = _policy_overtime_snapshot(policy)
+    old_allowances = _policy_allowances_snapshot(policy)
+
     updates = data.model_dump(exclude_unset=True, by_alias=False)
     category_updates = updates.pop("employee_categories", None)
     overtime_update = updates.pop("overtime_rule", None)
@@ -520,6 +524,7 @@ def update_policy(db: Session, policy_id: int, data: PayrollPolicyUpdate, organi
     db.refresh(policy)
     log_activity(db, organization_id, f"Payroll policy '{policy.name}' updated.", ActivityStatus.SUCCESS)
     policy.policy_locks = locks
+    _notify_policy_changed(db, policy, old_scalars, old_overtime, old_allowances, organization_id)
     return policy
 
 
@@ -541,6 +546,7 @@ def set_integration_enabled(
     if not row:
         raise NotFoundException("PolicyIntegration", f"{category}/{provider_key}")
 
+    old_enabled = bool(row.enabled)
     row.enabled = enabled
     db.commit()
     db.refresh(row)
@@ -550,4 +556,110 @@ def set_integration_enabled(
         f"Integration '{provider_key}' ({category}) {action} on policy '{policy.name}'.",
         ActivityStatus.SUCCESS,
     )
+    if old_enabled != bool(row.enabled):
+        _notify_integration_status_changed(db, policy, category, provider_key, bool(row.enabled), organization_id)
     return row
+
+
+# ── Curated-change snapshots & best-effort notifications ────────────────────
+
+_POLICY_CURATED_FIELDS = (
+    "name", "description", "status", "effective_date", "calculation_mode",
+    "basic_pct", "hra_pct", "bank_export_format",
+)
+
+
+def _policy_curated_scalars(policy: PayrollPolicy) -> dict:
+    return {f: getattr(policy, f) for f in _POLICY_CURATED_FIELDS if hasattr(policy, f)}
+
+
+def _policy_overtime_snapshot(policy: PayrollPolicy) -> dict:
+    ot = policy.overtime_rule
+    if not ot:
+        return {}
+    return {
+        "enabled": bool(ot.enabled),
+        "minimum_overtime_minutes": ot.minimum_overtime_minutes,
+        "approval_required": bool(ot.approval_required),
+    }
+
+
+def _policy_allowances_snapshot(policy: PayrollPolicy) -> dict:
+    return {
+        c.key: {"label": c.label, "pct": c.pct, "flat_amount": c.flat_amount}
+        for c in (policy.allowance_components or [])
+    }
+
+
+def _policy_value_text(value) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _policy_curated_changes(policy: PayrollPolicy, old_scalars: dict, old_overtime: dict, old_allowances: dict) -> list:
+    changes = []
+    for field in _POLICY_CURATED_FIELDS:
+        if field not in old_scalars:
+            continue
+        old_val = old_scalars[field]
+        new_val = getattr(policy, field, None)
+        if _policy_value_text(old_val) != _policy_value_text(new_val):
+            changes.append((field.replace("_", " ").title(), _policy_value_text(old_val), _policy_value_text(new_val)))
+    for field, old_val in old_overtime.items():
+        new_val = getattr(policy.overtime_rule, field, None)
+        if _policy_value_text(old_val) != _policy_value_text(new_val):
+            changes.append((f"Overtime · {field.replace('_', ' ').title()}", _policy_value_text(old_val), _policy_value_text(new_val)))
+    for key, old_comp in old_allowances.items():
+        comp = next((c for c in (policy.allowance_components or []) if c.key == key), None)
+        if comp is None:
+            changes.append(("Allowance", key, "—"))
+            continue
+        for field, old_comp_val in old_comp.items():
+            new_comp_val = getattr(comp, field, None)
+            if _policy_value_text(old_comp_val) != _policy_value_text(new_comp_val):
+                changes.append((f"Allowance · {key} · {field.replace('_', ' ').title()}",
+                                f"{old_comp.get('label', key)}: {_policy_value_text(old_comp_val)}",
+                                f"{comp.label}: {_policy_value_text(new_comp_val)}"))
+    for comp in (policy.allowance_components or []):
+        if comp.key not in old_allowances:
+            changes.append(("Allowance", "—", f"{comp.label} ({comp.key})"))
+    return changes
+
+
+def _notify_policy_changed(db: Session, policy, old_scalars, old_overtime, old_allowances, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        changes = _policy_curated_changes(policy, old_scalars, old_overtime, old_allowances)
+        if not changes:
+            return
+        from app.services.email_service import _get_org_contact_email, send_payroll_policy_changed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_payroll_policy_changed_email(
+            org_email, policy.name or "", changes, organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] policy-changed email failed for org {organization_id}: {exc}")
+
+
+def _notify_integration_status_changed(db: Session, policy, category, provider_key, enabled, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_integration_status_changed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_integration_status_changed_email(
+            org_email, policy.name or "", provider_key, category, enabled,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] integration-status email failed for org {organization_id}: {exc}")

@@ -461,11 +461,47 @@ def update_organization(
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     if org is None:
         raise NotFoundException("Organization", "id")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+
+    _org_change_labels = {
+        "organization_name": "Organization name",
+        "industry": "Industry",
+        "company_type": "Company type",
+        "address": "Address",
+        "city": "City",
+        "state": "State",
+        "country": "Country",
+        "email": "Contact email",
+        "phone": "Contact phone",
+        "tax_no": "Tax number",
+        "registration_number": "Registration number",
+    }
+    _old_values = {k: (str(getattr(org, k)) if getattr(org, k) is not None else None) for k in updates}
+
+    for field, value in updates.items():
         setattr(org, field, value)
     db.commit()
     db.refresh(org)
+
     logger.info("Super Admin %s updated organization %s", current_user.email, org.organization_code)
+
+    # Notify the org's own contact email of any registered-detail changes
+    # (old → new), best-effort only — a failed mail never changes the update.
+    changes = []
+    for k, old_value in _old_values.items():
+        new_value = str(getattr(org, k)) if getattr(org, k) is not None else None
+        if old_value != new_value:
+            changes.append((_org_change_labels.get(k, k), old_value, new_value))
+    if changes and org.email:
+        try:
+            from app.services.email_service import send_organization_details_changed_email
+            send_organization_details_changed_email(
+                org.email, changes, organization_id=organization_id, db=db,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Organization details-changed email failed for org %s: %s", organization_id, exc,
+            )
     return org
 
 
@@ -570,6 +606,17 @@ def update_organization_status(
         "Super Admin %s set organization %s is_active=%s",
         current_user.email, org.organization_code, is_active,
     )
+    org_name = getattr(org, "organization_name", None) or org.organization_code or ""
+    org_email = getattr(org, "email", None) or ""
+    try:
+        from app.services.email_service import send_organization_suspended_email
+        if org_email:
+            send_organization_suspended_email(
+                org_email, org_name, suspended=not is_active,
+                reason="", organization_id=org.id, db=db,
+            )
+    except Exception as exc:  # pragma: no cover — notification never blocks the status flip
+        logger.warning("Failed to send org status email for org %s: %s", org.id, exc)
     return org
 
 
@@ -642,6 +689,7 @@ def delete_organization(
 
     org_name = org.organization_name
     org_code = org.organization_code
+    org_email = org.email
 
     # Child → parent order. Org-scoped rows only. Three tables (inbound
     # attachments, policy sub-rules) carry no organization_id column — they
@@ -767,4 +815,10 @@ def delete_organization(
         "Super Admin %s hard-deleted organization %s (%s) and all its data",
         current_user.email, org_name, org_code,
     )
+    try:
+        from app.services.email_service import send_organization_deleted_email
+        if org_email:
+            send_organization_deleted_email(org_email, org_name, db=db)
+    except Exception as exc:  # pragma: no cover — notification never blocks the deletion
+        logger.warning("Failed to send org deletion email for org %s: %s", organization_id, exc)
     return {"message": f"Organization '{org_name}' and all of its data deleted."}

@@ -1209,7 +1209,15 @@ def set_kill_switch(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_super_admin),
 ):
-    return {"enabled": service.set_assist_kill_switch(db, payload.enabled, current_user)}
+    enabled = service.set_assist_kill_switch(db, payload.enabled, current_user)
+    toggled_by = getattr(current_user, "email", "") or ""
+    try:
+        from app.services.email_service import send_assist_kill_switch_alert_email
+        send_assist_kill_switch_alert_email(payload.enabled, toggled_by, db=db)
+    except Exception as exc:  # pragma: no cover — notifications never block the switch flip
+        import logging
+        logging.getLogger("zoiko").warning(f"[assist-kill-switch] alert email failed: {exc}")
+    return {"enabled": enabled}
 
 
 @assist_router.get(

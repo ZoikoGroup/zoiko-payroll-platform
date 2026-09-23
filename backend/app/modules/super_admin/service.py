@@ -272,10 +272,33 @@ def update_organization_currency(db: Session, organization_id: int, currency: Op
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     if not org:
         raise NotFoundException("Organization", organization_id)
+    old_currency = org.currency
     org.currency = currency.upper() if currency else None
     db.commit()
     db.refresh(org)
+    _notify_organization_currency_changed(db, org, old_currency, organization_id)
     return org
+
+
+def _notify_organization_currency_changed(db: Session, org, old_currency: Optional[str], organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if old_currency == org.currency:
+            return
+        from app.services.email_service import _get_org_contact_email, send_organization_currency_changed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_organization_currency_changed_email(
+            org_email,
+            org_name=getattr(org, "organization_name", None) or org.organization_code or "",
+            old_currency=old_currency or "",
+            new_currency=org.currency or "",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[super-admin] org-currency email failed for org {organization_id}: {exc}")
 
 
 def list_known_jurisdictions(db: Session) -> List[dict]:
