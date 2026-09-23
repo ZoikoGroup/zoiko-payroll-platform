@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Plus, Trash2, Power, RefreshCw, Pencil, Building2, Receipt, Headphones } from "lucide-react";
+import React, { useEffect, useState, useCallback } from "react";
+import { Plus, Trash2, Power, RefreshCw, Pencil, Building2, Receipt } from "lucide-react";
 
 import { apiFetch } from "../api/client";
 import { useToast } from "../context/ToastContext";
@@ -64,12 +64,6 @@ export default function OrganizationsPage() {
   const [billingOrg, setBillingOrg] = useState(null); // org currently being reclassified
   const [billingClassification, setBillingClassification] = useState("");
   const [billingReason, setBillingReason] = useState("");
-  const [assistOrg, setAssistOrg] = useState(null); // org with Safeguard assist open
-  const [assistReason, setAssistReason] = useState("");
-  const [assistBusy, setAssistBusy] = useState(false);
-  const [assistSession, setAssistSession] = useState(null); // {token, expires_at, session_id}
-  const [assistCountdown, setAssistCountdown] = useState("");
-  const assistExpiryRef = useRef(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -123,77 +117,6 @@ export default function OrganizationsPage() {
       setBusy(false);
     }
   }
-
-  function openAssistModal(org) {
-    setAssistOrg(org);
-    setAssistReason("");
-    setAssistSession(null);
-    setAssistCountdown("");
-    setAssistBusy(false);
-  }
-
-  async function handleAssistStart(e) {
-    e.preventDefault();
-    if (!assistReason.trim()) return;
-    setAssistBusy(true);
-    try {
-      const data = await apiFetch(`/api/super-admin/assisted-access/${assistOrg.id}/start`, {
-        method: "POST",
-        body: { reason: assistReason.trim() },
-      });
-      setAssistSession({
-        token: data.token,
-        session_id: data.session_id,
-        expires_at: data.expires_at,
-        started_at: data.started_at,
-        organization_id: data.organization_id,
-      });
-      assistExpiryRef.current = new Date(data.expires_at).getTime();
-      addToast?.(`Assisted-access session started for "${assistOrg.organization_name}".`);
-    } catch (err) {
-      addToast?.(err.message, "error");
-    } finally {
-      setAssistBusy(false);
-    }
-  }
-
-  async function handleAssistEnd() {
-    if (!assistSession) return;
-    setAssistBusy(true);
-    try {
-      await apiFetch(`/api/super-admin/assisted-access/${assistSession.session_id}/end`, {
-        method: "POST",
-      });
-      addToast?.("Assisted-access session ended.");
-      setAssistSession(null);
-      setAssistCountdown("");
-    } catch (err) {
-      addToast?.(err.message, "error");
-    } finally {
-      setAssistBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!assistSession || !assistExpiryRef.current) return;
-    let interval = null;
-    const tick = () => {
-      const msLeft = assistExpiryRef.current - Date.now();
-      if (msLeft <= 0) {
-        setAssistCountdown("expired");
-        if (interval) clearInterval(interval);
-        return;
-      }
-      const totalSec = Math.floor(msLeft / 1000);
-      const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
-      const ss = String(totalSec % 60).padStart(2, "0");
-      setAssistCountdown(`${mm}:${ss}`);
-    };
-    tick();
-    interval = setInterval(tick, 1000);
-    return () => { if (interval) clearInterval(interval); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!assistSession]);
 
   async function handleDelete() {
     setBusy(true);
@@ -357,15 +280,6 @@ export default function OrganizationsPage() {
                     </button>
                     <button
                       disabled={busy}
-                      title="Start SafeGuard assisted-access session"
-                      onClick={() => openAssistModal(org)}
-                      className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                    >
-                      <Headphones size={12} />
-                      Assist
-                    </button>
-                    <button
-                      disabled={busy}
                       title={org.is_active ? "Suspend organization" : "Activate organization"}
                       onClick={() => toggleStatus(org)}
                       className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
@@ -516,92 +430,6 @@ export default function OrganizationsPage() {
               </button>
             </div>
           </form>
-        </Modal>
-      )}
-
-      {assistOrg && (
-        <Modal
-          title={`SafeGuard Assist — ${assistOrg.organization_name}`}
-          onClose={() => { if (!assistBusy) { setAssistOrg(null); setAssistSession(null); } }}
-          maxWidth="max-w-md"
-        >
-          {!assistSession ? (
-            <form onSubmit={handleAssistStart} className="space-y-4">
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Starts a narrowly-scoped assisted-access session for{" "}
-                <span className="font-semibold text-slate-700">{assistOrg.organization_name}</span>.
-                Your org admin will see a live banner. Every API call made under this
-                session is written to the Security & Audit log as <em>assisted access</em>.
-                The session auto-expires in 30 minutes.
-              </p>
-
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">Reason *</span>
-                <textarea
-                  className={INPUT}
-                  rows={3}
-                  value={assistReason}
-                  onChange={(e) => setAssistReason(e.target.value)}
-                  placeholder="e.g. Investigating a startup failure for the org admin"
-                />
-              </label>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setAssistOrg(null)}
-                  disabled={assistBusy}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={assistBusy || !assistReason.trim()}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50"
-                >
-                  {assistBusy ? "Starting…" : "Start session"}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="space-y-4">
-              <p className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-xs text-green-800">
-                Session active for {assistOrg.organization_name}. Ends in{" "}
-                <span className="font-mono font-bold">{assistCountdown || "—"}</span>.
-              </p>
-
-              <div>
-                <span className="text-xs font-medium text-slate-600">Session token (share with the org via Slack)</span>
-                <textarea
-                  readOnly
-                  rows={3}
-                  className="mt-1 w-full rounded-lg border border-border bg-slate-50 p-2.5 font-mono text-xs text-slate-700"
-                  value={assistSession.token}
-                  onFocus={(e) => e.currentTarget.select()}
-                />
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setAssistOrg(null); setAssistSession(null); }}
-                  disabled={assistBusy}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAssistEnd}
-                  disabled={assistBusy}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50"
-                >
-                  {assistBusy ? "Ending…" : "End session now"}
-                </button>
-              </div>
-            </div>
-          )}
         </Modal>
       )}
     </div>

@@ -73,23 +73,36 @@ async def lifespan(app: FastAPI):
     from app.modules.billing.scheduler import (
         start_trial_scheduler, stop_trial_scheduler,
         start_dunning_scheduler, stop_dunning_scheduler,
+        start_bwm_aggregation_scheduler, stop_bwm_aggregation_scheduler,
     )
     from app.modules.assisted_access.scheduler import (
         start_assisted_access_scheduler, stop_assisted_access_scheduler,
     )
 
-    start_assist_scheduler()
-    start_trial_scheduler()
-    start_dunning_scheduler()
-    start_assisted_access_scheduler()
-    start_token_cleanup_scheduler()
+    start_assist_scheduler(run_now=True)
+    start_trial_scheduler(run_now=True)
+    start_dunning_scheduler(run_now=True)
+    start_bwm_aggregation_scheduler(run_now=True)
+    start_assisted_access_scheduler(run_now=True)
+    start_token_cleanup_scheduler(run_now=True)
     ensure_tables()
+
+    from app.modules.billing.router import _missing_checkout_config
+    missing_checkout_config = _missing_checkout_config()
+    if missing_checkout_config:
+        logger.warning(
+            "[startup] Checkout is not fully configured — missing: %s. "
+            "POST /billing/checkout will fail until these are set.",
+            ", ".join(missing_checkout_config),
+        )
+
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
     stop_token_cleanup_scheduler()
     stop_assist_scheduler()
     stop_trial_scheduler()
     stop_dunning_scheduler()
+    stop_bwm_aggregation_scheduler()
     stop_assisted_access_scheduler()
 
 

@@ -1,62 +1,9 @@
-"""
-tests/test_alembic_metadata.py
-------------------------------
-Phase 8CG / 8DQ / 8DT — metadata-only verification of the reconciled Alembic
-graph. Loads the migration script directory directly (no database, no
-`alembic upgrade`/`stamp`/`downgrade` — purely exercises the revision chain
-as it exists on disk, exactly the same way `alembic heads`/`branches`/
-`history` do).
+"""Metadata-only checks for the checked-in Alembic revision graph.
 
-Phase 8DT — this file previously asserted `nikhil`'s own standalone chain
-(single head `abaca1105dbb`, 76 files). This branch (`reconcile/germany-
-2026-main-integration`) merges `nikhil` into `origin/main`, which brings in
-`main`'s own 126 files (including a pre-existing, unrelated two-heads split
-of its own: `1dc04f15a9b7`/AU SAPTO and `a3f5c9d1b2e4`/legal entities) plus
-the 4 previously-collided rename pairs each branch had independently
-resolved differently. Reconciliation, in order:
-
-1. The 4 rename-collision pairs were unified onto `main`'s canonical IDs
-   (`main` is the actually-deployed lineage): `65bc3ca96fd6`,
-   `0800e995078f`, `185332840016`, `b4241285b6dd`. `nikhil`'s redundant,
-   byte-identical renamed duplicates (`a6b7c8d9e0f2`, `a4dcd30e7ec1`,
-   `cda89a810e94`, `824bb1b61dc2`) were dropped.
-2. `nikhil`'s own `b7c8d9e0f2a3` (the Germany production chain recovery
-   graft, which has no `main` equivalent) was re-parented from the dropped
-   `a6b7c8d9e0f2` onto `main`'s canonical `65bc3ca96fd6`.
-3. `nikhil`'s Germany-schema-only migrations (`13ce5f1cf7a1`, `abaca1105dbb`)
-   are unchanged, still descending from the shared fork point
-   `2b3c4d5e6f70`.
-4. A new no-op merge migration, `752aa7829541`, unifies all three remaining
-   tips (`1dc04f15a9b7`, `a3f5c9d1b2e4`, `abaca1105dbb`) into a single head.
-
-Total: 126 (main) + 4 new/kept (`b7c8d9e0f2a3`, `13ce5f1cf7a1`,
-`abaca1105dbb`, `752aa7829541`) = 130. The 4 dropped nikhil-only duplicates
-were never part of `main`'s 126, so they don't need subtracting.
-
-Checks enforced here:
-
-1. Exactly one head: `799b28d80edd`.
-2. Branch points are exactly the reconciled set — `main`'s own pre-existing
-   ones plus `2b3c4d5e6f70` (where `main`'s and Germany's post-fork
-   histories diverge).
-3. No duplicate revision IDs in the versions directory; total count is 132.
-4. The Germany chain wiring is intact: `65bc3ca96fd6 -> b7c8d9e0f2a3 ->
-   d3e4f5a6b7c8` and `2b3c4d5e6f70 -> 13ce5f1cf7a1 -> abaca1105dbb`.
-5. `nikhil`'s 4 redundant renamed duplicates no longer appear as an ACTIVE
-   revision anywhere (dropped in favor of `main`'s canonical IDs).
-
-Germany 2026 all-Länder jurisdiction task — two more additive, linear
-migrations landed on top of `752aa7829541` (schema-drift fixes found while
-seeding the real Germany 2026 registries against Postgres for the first
-time; SQLite doesn't enforce VARCHAR length so these went uncaught until
-now): `00a912d5306c` (widen GermanyEarningTaxabilityRule.gkv_pv_treatment/
-rv_alv_treatment to match the model's already-declared String(40)) ->
-`799b28d80edd` (widen TaxConfigurationAudit.entity_type from String(30) to
-String(50) — several existing Germany audit call sites already exceeded
-30 chars). Neither touches a branchpoint or the Germany chain wiring below
-— they're a new, single-parent tail after the existing head, so only the
-head literal and total revision count change; the 5 checks above except
-1 and 3 are otherwise unaffected. 130 + 2 = 132.
+The graph must have one head, no duplicate revision IDs, and retain the
+known Germany migration chain wiring. These tests inspect the files directly
+and also load the real Alembic ScriptDirectory without touching a database.
+The current graph has head ``a5f6e7d8c9b0`` and 142 revisions.
 """
 
 import re
@@ -113,11 +60,11 @@ def _children_map(revs: dict) -> dict:
     return children
 
 
-def test_alembic_heads_is_single_head_259146357852():
+def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["259146357852"]
+    assert heads == ["a5f6e7d8c9b0"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -129,7 +76,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["259146357852"]
+    assert list(script.get_heads()) == ["a5f6e7d8c9b0"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -152,11 +99,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    # 132 (pre-merge main) + 5 commercial billing (b7e1f4a9c3d2, c9a2d6e5f1b8,
-    # d4f8a2c7e6b1, e5b3f9a1d7c4, f6c8b1a4e9d3) + 1 reconciliation merge
-    # (767a807fc98e) = 138, + 1 venu-only addition (3a1b4cff7f0e, revoked_tokens)
-    # + 1 venu/main reconciliation merge (259146357852) = 140.
-    assert len(revs) == 140
+    assert len(revs) == 142
 
 
 def test_germany_head_chain_wiring_is_intact():

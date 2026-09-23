@@ -36,13 +36,19 @@ from app.modules.payroll.schemas import JurisdictionPackUpsert
 def _register_data(country, email="new-admin@example.com", **overrides):
     fields = dict(
         organization="Test Co", name="Ada Admin", email=email, password="a-strong-password-1",
-        country=country,
+        country=country, terms_accepted=True,
     )
     fields.update(overrides)
     return RegisterRequest(**fields)
 
 
 # ── Registration gate ────────────────────────────────────────────────────
+
+def test_registration_rejects_unaccepted_terms(db):
+    with pytest.raises(BadRequestException, match="accept the registration terms"):
+        register_enterprise(db, _register_data("Australia", terms_accepted=False))
+    assert db.query(Organization).count() == 0
+    assert db.query(User).count() == 0
 
 def test_registration_rejects_country_with_no_active_pack(db):
     with pytest.raises(BadRequestException):

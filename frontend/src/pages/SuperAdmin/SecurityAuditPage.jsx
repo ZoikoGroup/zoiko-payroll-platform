@@ -14,7 +14,7 @@ const SOURCE_LABELS = {
 export default function SecurityAuditPage() {
   const { addToast } = useToast() || {};
   const [searchParams, setSearchParams] = useSearchParams();
-  const [data, setData] = useState({ entries: [], page: 1, page_size: 50, returned: 0 });
+  const [data, setData] = useState({ entries: [], page: 1, page_size: 50, returned: 0, total: 0 });
   const [loading, setLoading] = useState(true);
 
   const [source, setSource] = useState(searchParams.get("source") || "");
@@ -47,8 +47,8 @@ export default function SecurityAuditPage() {
     }
   }, [source, actorId, startDate, endDate, page]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [source, actorId, startDate, endDate]);
+  useEffect(() => { load(); }, [load]); // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => { setPage(1); }, [source, actorId, startDate, endDate]); // eslint-disable-line react-hooks/set-state-in-effect
 
   return (
     <div>
@@ -133,10 +133,10 @@ export default function SecurityAuditPage() {
       </div>
 
       <div className="flex items-center justify-between mt-3 text-sm text-foreground-muted">
-        <span>Page {data.page} · {data.returned} shown</span>
+        <span>Page {data.page} · {data.returned} shown of {data.total} total</span>
         <div className="flex gap-2">
           <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Previous</button>
-          <button disabled={data.returned < data.page_size} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Next</button>
+          <button disabled={page * data.page_size >= data.total} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-40">Next</button>
         </div>
       </div>
     </div>

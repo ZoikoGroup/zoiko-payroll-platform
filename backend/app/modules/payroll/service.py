@@ -47,7 +47,7 @@ from app.modules.payroll.models import (
     PAYROLL_STATUS_ORDER,
     EmployerTaxProfile, ReciprocityRule, SourceArtifact, LocalityDataset, LocalityRate, NewHireReport,
     ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField, GeneratedReport,
-    StatutoryFilingCalendar, PayrollYtdAccumulator, OrganizationYtdAccumulator,
+    StatutoryFilingCalendar, StatutoryFiling, PayrollYtdAccumulator, OrganizationYtdAccumulator,
     EmployeeEstablishment, PayrollNiReliefFact, CourtOrderedDeduction, RtiSubmission, SuperGuaranteeLiability,
     PackHotfixActivation, TestCertificationRun, TaxabilityRule, StateLocalProgramReadiness,
     SalaryTdsDeclaration, SalaryTdsClaim, EmployeeBenefitValuation,
@@ -9054,6 +9054,124 @@ def set_filing_calendar_status(db: Session, entry_id: int, status: str, actor_id
     db.commit()
     db.refresh(row)
     return row
+
+
+# ── Statutory Filing (per-org filing-status tracker) ────────────────────────
+# The persisted model behind the Super Admin Filings & Remittances dashboard.
+# Status vocabulary is the filing WORKFLOW (NOT_STARTED -> IN_PROGRESS ->
+# FILED | OVERDUE | BLOCKED), deliberately distinct from Germany's ELSTER
+# transport states. Upsert keys on the model's natural unique
+# (organization, jurisdiction, filing_type, period_label), so re-recording
+# the same period updates the existing row instead of stacking duplicates.
+
+_STATUTORY_FILING_VALID_STATUSES = {"NOT_STARTED", "IN_PROGRESS", "FILED", "OVERDUE", "BLOCKED"}
+
+
+def list_statutory_filings(db: Session, organization_id: int) -> list[StatutoryFiling]:
+    """Org's own filing-status rows, most recently updated first."""
+    return (
+        db.query(StatutoryFiling)
+        .filter(StatutoryFiling.organization_id == organization_id)
+        .order_by(StatutoryFiling.updated_at.desc().nullslast())
+        .all()
+    )
+
+
+def upsert_statutory_filing(
+    db: Session, organization_id: int, data: "StatutoryFilingUpsert", actor_id: Optional[int] = None,
+) -> StatutoryFiling:
+    """Create or update one (org, jurisdiction, filing type, period) filing
+    record. The jurisdiction is always derived from the org's configured
+    compliance country — a filing cannot be recorded for an org that has
+    none."""
+    jurisdiction = _resolve_org_country(db, organization_id, required=True)
+    filing_type = (data.filingType or "").strip()
+    period_label = (data.periodLabel or "").strip()
+    if not filing_type:
+        raise BadRequestException("filingType is required.")
+    if not period_label:
+        raise BadRequestException("periodLabel is required.")
+    if data.status not in _STATUTORY_FILING_VALID_STATUSES:
+        raise BadRequestException(
+            f"Unknown status {data.status!r} — expected one of {sorted(_STATUTORY_FILING_VALID_STATUSES)}."
+        )
+    if data.periodEnd and data.periodStart and data.periodEnd < data.periodStart:
+        raise BadRequestException("periodEnd must not be before periodStart.")
+
+    existing = (
+        db.query(StatutoryFiling)
+        .filter(
+            StatutoryFiling.organization_id == organization_id,
+            StatutoryFiling.jurisdiction == jurisdiction,
+            StatutoryFiling.filing_type == filing_type,
+            StatutoryFiling.period_label == period_label,
+        )
+        .first()
+    )
+    fields = dict(
+        jurisdiction=jurisdiction, filing_type=filing_type, period_label=period_label,
+        period_start=data.periodStart, period_end=data.periodEnd,
+        status=data.status, blocked_reason=data.blockedReason, submitted_at=data.submittedAt,
+    )
+    if existing:
+        old_value = {
+            "status": existing.status, "periodLabel": existing.period_label,
+            "periodStart": str(existing.period_start) if existing.period_start else None,
+            "periodEnd": str(existing.period_end) if existing.period_end else None,
+            "blockedReason": existing.blocked_reason,
+        }
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        db.commit()
+        db.refresh(existing)
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type="statutory_filing", entity_id=existing.id,
+            old_value=old_value,
+            new_value={
+                "status": existing.status, "periodLabel": existing.period_label,
+                "periodStart": str(existing.period_start) if existing.period_start else None,
+                "periodEnd": str(existing.period_end) if existing.period_end else None,
+                "blockedReason": existing.blocked_reason,
+            },
+        )
+        return existing
+
+    row = StatutoryFiling(organization_id=organization_id, **fields)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="statutory_filing", entity_id=row.id,
+        old_value=None,
+        new_value={
+            "status": row.status, "filingType": row.filing_type, "periodLabel": row.period_label,
+            "periodStart": str(row.period_start) if row.period_start else None,
+            "periodEnd": str(row.period_end) if row.period_end else None,
+            "blockedReason": row.blocked_reason,
+        },
+    )
+    return row
+
+
+def delete_statutory_filing(db: Session, filing_id: int, actor_id: Optional[int] = None, *, organization_id: Optional[int] = None) -> None:
+    """Remove a filing-status record. Super Admin passes every org's rows;
+    an org-scoped caller passes organization_id so it can only delete its own."""
+    query = db.query(StatutoryFiling).filter(StatutoryFiling.id == filing_id)
+    if organization_id is not None:
+        query = query.filter(StatutoryFiling.organization_id == organization_id)
+    row = query.first()
+    if not row:
+        raise NotFoundException("StatutoryFiling", filing_id)
+    db.delete(row)
+    db.commit()
+    record_tax_audit(
+        db, actor_id=actor_id, action="delete", entity_type="statutory_filing", entity_id=filing_id,
+        old_value={
+            "organizationId": row.organization_id, "jurisdiction": row.jurisdiction,
+            "filingType": row.filing_type, "periodLabel": row.period_label, "status": row.status,
+        },
+        new_value=None,
+    )
 
 
 def get_upcoming_filing_dates_for_org(db: Session, organization_id: int, limit: int = 10) -> List[StatutoryFilingCalendar]:

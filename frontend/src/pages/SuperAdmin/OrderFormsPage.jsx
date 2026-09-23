@@ -11,8 +11,8 @@ import {
 import Modal from "../../components/Modal";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
-import { listOrganizationsForPicker } from "../../service/superAdminService";
 import {
+  listOrderFormEligibleOrgs,
   createOrderForm,
   listOrderForms,
 } from "../../service/commandCenterService";
@@ -83,21 +83,21 @@ export default function OrderFormsPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load]); // eslint-disable-line react-hooks/set-state-in-effect
 
   useEffect(() => {
-    listOrganizationsForPicker()
+    listOrderFormEligibleOrgs()
       .then(setOrganizations)
       .catch((err) => addToast?.(err.message, "error"));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Org ids that already have an Order Form on file — choosing one of these
-  // would hit the backend's uniqueness rule (409), so keep them out of the
-  // "create" path up front instead of letting the user find out on submit.
-  const orgsWithOrderForm = useMemo(() => new Set(rows.map((r) => r.organization_id)), [rows]);
-
+  // Organizations a signed Order Form literally cannot be recorded for
+  // today (already on file, or already tied to a non-Enterprise billing
+  // relationship) — the backend computes this with the exact same refusal
+  // paths as record_order_form, so a disabled option can never be one that
+  // submit would 403/409 on.
   const selectedOrg = useMemo(
-    () => organizations.find((o) => o.id === Number(form.organization_id)) || null,
+    () => organizations.find((o) => o.organization_id === Number(form.organization_id)) || null,
     [organizations, form.organization_id]
   );
 
@@ -118,13 +118,8 @@ export default function OrderFormsPage() {
 
   function handleRecordClick(e) {
     e.preventDefault();
-    setConfirming(true);
-  }
-
-  async function handleConfirmRecord() {
     if (!selectedOrg) {
       setFormError("Choose an organization.");
-      setConfirming(false);
       return;
     }
     let scaleLimits;
@@ -134,7 +129,6 @@ export default function OrderFormsPage() {
       priceTerms = parseJsonField(form.price_terms, "Price terms");
     } catch (err) {
       setFormError(err.message);
-      setConfirming(false);
       return;
     }
 
@@ -147,24 +141,23 @@ export default function OrderFormsPage() {
     };
     if (!payload.contract_reference) {
       setFormError("Contract reference is required.");
-      setConfirming(false);
       return;
     }
     if (!payload.term_start) {
       setFormError("Term start is required.");
-      setConfirming(false);
       return;
     }
 
     setPendingPayload({ payload, org: selectedOrg });
     setFormError("");
+    setConfirming(true);
   }
 
   async function handleSubmit() {
     const { payload, org } = pendingPayload;
     setBusy(true);
     try {
-      await createOrderForm(org.id, payload);
+      await createOrderForm(org.organization_id, payload);
       addToast?.(
         `Order Form ${payload.contract_reference} recorded for ${org.organization_name}. The org is now commercially active with custom, contract-defined limits.`
       );
@@ -201,14 +194,16 @@ export default function OrderFormsPage() {
         </button>
       </div>
 
-      {/* ── Record a new Order Form ───────────────────────────────────────── */}
+      {/* ── Record a new Order Form — the highest-stakes, least-frequent
+          action on this page, so it gets more visual weight than a routine
+          panel: a primary-tinted border, generous spacing, a larger heading. ── */}
       <form
         onSubmit={handleRecordClick}
-        className="bg-surface rounded-xl shadow-sm border border-border p-5 mb-6"
+        className="bg-surface rounded-xl shadow-md border-2 border-primary/20 p-7 mb-6"
       >
-        <div className="flex items-center gap-2 mb-4">
-          <Plus size={16} className="text-primary" />
-          <h2 className="text-base font-semibold text-foreground">Record a signed Order Form</h2>
+        <div className="flex items-center gap-2.5 mb-5">
+          <Plus size={19} className="text-primary" />
+          <h2 className="text-lg font-bold text-foreground">Record a signed Order Form</h2>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -220,15 +215,12 @@ export default function OrderFormsPage() {
               className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
             >
               <option value="">Choose an organization…</option>
-              {organizations.map((org) => {
-                const hasForm = orgsWithOrderForm.has(org.id);
-                return (
-                  <option key={org.id} value={org.id} disabled={hasForm}>
-                    {org.organization_name}
-                    {hasForm ? " (Order Form already on file)" : ""}
-                  </option>
-                );
-              })}
+              {organizations.map((org) => (
+                <option key={org.organization_id} value={org.organization_id} disabled={!org.eligible}>
+                  {org.organization_name}
+                  {!org.eligible ? ` — ${org.block_reason}` : ""}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -294,19 +286,21 @@ export default function OrderFormsPage() {
           <p className="mt-3 rounded-lg border border-error/30 bg-error-light px-3 py-2 text-xs text-error">{formError}</p>
         )}
 
-        <div className="mt-4 flex justify-end">
+        <div className="mt-5 flex justify-end">
           <button
             type="submit"
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover"
+            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-base font-semibold text-white hover:bg-primary-hover"
           >
-            <FileSignature size={15} /> Review &amp; record
+            <FileSignature size={16} /> Review &amp; record
           </button>
         </div>
       </form>
 
-      {/* ── Existing Order Forms ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <h2 className="text-base font-semibold text-foreground">On file ({rows.length})</h2>
+      {/* ── Existing Order Forms — reference/history, visually secondary
+          to the record panel above: no shadow, quieter section-label
+          heading instead of a page-level one. ── */}
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground-muted">On file ({rows.length})</h2>
         <input
           type="text"
           value={keyword}
@@ -316,7 +310,7 @@ export default function OrderFormsPage() {
         />
       </div>
 
-      <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">
+      <div className="bg-surface rounded-xl border border-border-light overflow-hidden overflow-x-auto">
         <table className="w-full text-sm min-w-[760px]">
           <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>

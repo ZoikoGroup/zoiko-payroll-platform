@@ -38,16 +38,22 @@ def _run_sweep() -> None:
         db.close()
 
 
-def start_token_cleanup_scheduler() -> BackgroundScheduler | None:
+def start_token_cleanup_scheduler(run_now: bool = False) -> BackgroundScheduler | None:
     """Start the background revoked-token cleanup sweep on app startup.
     No-op if disabled via TOKEN_CLEANUP_SWEEP_ENABLED or already running
-    (safe to call more than once)."""
+    (safe to call more than once). `run_now` executes one sweep immediately
+    before scheduling (used once at startup so service-health shows a real
+    last-run rather than 'unknown' for one full interval)."""
     global _scheduler
     if not settings.TOKEN_CLEANUP_SWEEP_ENABLED:
         logger.info("[token-cleanup] Disabled via TOKEN_CLEANUP_SWEEP_ENABLED=false; not starting.")
         return None
     if _scheduler is not None:
         return _scheduler
+
+    if run_now:
+        logger.info("[token-cleanup] Running initial sweep at startup.")
+        _run_sweep()
 
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(

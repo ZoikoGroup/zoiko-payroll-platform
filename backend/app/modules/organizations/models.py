@@ -62,6 +62,10 @@ class Organization(Base):
     # /auth/register-trial). Existing rows created before this column existed
     # read as PRODUCTION (NULL == PRODUCTION).
     workspace_type = Column(String(20), nullable=False, default="PRODUCTION")
+    # Explicit onboarding state for paid self-service registration. A failed
+    # Checkout leaves the organization recoverable instead of looking subscribed.
+    billing_onboarding_status = Column(String(30), nullable=False, default="PENDING_CHECKOUT")
+    terms_accepted_at = Column(DateTime, nullable=True)
 
     # UK "connected employer" grouping (ZP-TAX-UK-2026-27-001 §14
     # gap-closure Part 7B, 2026-09-09) — HMRC requires connected employers

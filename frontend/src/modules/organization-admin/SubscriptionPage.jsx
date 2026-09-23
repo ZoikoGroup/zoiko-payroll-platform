@@ -16,6 +16,8 @@ import {
   getMySubscription,
   listPublishedPlans,
   createCheckoutSession,
+  cancelMySubscription,
+  createBillingPortalSession,
   listMyInvoices,
   getMyInvoiceExplanation,
 } from "../../service/billingService";
@@ -489,6 +491,7 @@ export default function SubscriptionPage() {
   const [error, setError] = useState(null);
   const [checkoutLoading, setCheckoutLoading] = useState(null);
   const [toast, setToast] = useState({ msg: null, type: "success" });
+  const [billingActionLoading, setBillingActionLoading] = useState(false);
 
   const fetchAll = () => {
     setLoading(true);
@@ -523,6 +526,31 @@ export default function SubscriptionPage() {
         type: "error",
       });
       setCheckoutLoading(null);
+    }
+  };
+
+  const handleBillingPortal = async () => {
+    setBillingActionLoading(true);
+    try {
+      const { portal_url } = await createBillingPortalSession();
+      window.location.href = portal_url;
+    } catch (err) {
+      setToast({ msg: err.message || "Could not open the billing portal.", type: "error" });
+      setBillingActionLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!window.confirm("Cancel this subscription at the end of the current billing period?")) return;
+    setBillingActionLoading(true);
+    try {
+      const result = await cancelMySubscription();
+      setToast({ msg: result.message || "Cancellation scheduled.", type: "success" });
+      fetchAll();
+    } catch (err) {
+      setToast({ msg: err.message || "Could not schedule cancellation.", type: "error" });
+    } finally {
+      setBillingActionLoading(false);
     }
   };
 
@@ -596,9 +624,14 @@ export default function SubscriptionPage() {
           </div>
           <div className="head-actions">
             {canManage && (
-            <button className="btn btn-ghost" onClick={() => navigate("/billing/plans")}>
-              <ExternalLink className="w-3.5 h-3.5" /> View All Plans
-            </button>
+              <>
+                <button className="btn btn-ghost" onClick={handleBillingPortal} disabled={billingActionLoading || !subscription?.stripe_subscription_id}>
+                  <CreditCard className="w-3.5 h-3.5" /> Manage Payment Method
+                </button>
+                <button className="btn btn-ghost" onClick={() => navigate("/billing/plans")}>
+                  <ExternalLink className="w-3.5 h-3.5" /> View All Plans
+                </button>
+              </>
           )}
           </div>
         </div>
@@ -738,9 +771,15 @@ export default function SubscriptionPage() {
                   </div>
                 </div>
                 <div style={{ padding: "16px 24px 20px" }}>
-                  <button className="btn btn-primary" onClick={() => navigate("/billing/plans")}>
-                    <Zap className="w-3.5 h-3.5" /> Upgrade Plan
-                  </button>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button className="btn btn-primary" onClick={() => navigate("/billing/plans")}>
+                      <Zap className="w-3.5 h-3.5" /> Upgrade Plan
+                    </button>
+                    <button className="btn btn-danger" onClick={handleCancel} disabled={billingActionLoading || !!subscription.cancel_requested_at}>
+                      <X className="w-3.5 h-3.5" />
+                      {subscription.cancel_requested_at ? "Cancellation Scheduled" : "Cancel Subscription"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
