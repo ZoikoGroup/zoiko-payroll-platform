@@ -2305,6 +2305,11 @@ class GYMonthlyReportGenerateRequest(BaseModel):
     month: int  # 1-12
 
 
+class JMAnnualReportGenerateRequest(BaseModel):
+    report_template_id: int
+    year: int
+
+
 class RtiSubmissionCreate(BaseModel):
     generated_report_id: int
 

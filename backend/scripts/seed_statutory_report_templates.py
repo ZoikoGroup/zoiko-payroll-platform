@@ -697,6 +697,55 @@ def run():
             ],
         )
 
+        print("Seeding Jamaica S01 monthly PAYE/NIS/NHT/Education Tax/HEART return, employer-wide (real per-employee rows computed by generate_jm_s01)...")
+        _seed_template(
+            db, template_key="JM-S01", name="S01 — Monthly Return", report_type="JM_S01",
+            country="JM", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_jm_s01, same
+                # convention as US-941's own line1_employee_count field.
+                ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_salary_wages", "Total Salary / Wages", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_paye_tax_deducted", "Total PAYE Tax Deducted", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("total_nht_employee", "Total NHT (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_nht_employer", "Total NHT (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("total_education_tax_employee", "Total Education Tax (Employee)", "currency", "PAYSLIP_ITEM", "ni_employee", None),
+                    ("total_education_tax_employer", "Total Education Tax (Employer)", "currency", "PAYSLIP_ITEM", "employer_ni", None),
+                    ("total_heart_employer", "Total HEART (Employer)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Jamaica S02 annual employer return, employer-wide (real per-employee rows computed by generate_jm_s02)...")
+        _seed_template(
+            db, template_key="JM-S02", name="S02 — Annual Employer Return", report_type="JM_S02",
+            country="JM", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART, Annual)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_salary_wages", "Total Salary / Wages", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_paye_tax_deducted", "Total PAYE Tax Deducted", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("total_nht_employee", "Total NHT (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_nht_employer", "Total NHT (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("total_education_tax_employee", "Total Education Tax (Employee)", "currency", "PAYSLIP_ITEM", "ni_employee", None),
+                    ("total_education_tax_employer", "Total Education Tax (Employer)", "currency", "PAYSLIP_ITEM", "employer_ni", None),
+                    ("total_heart_employer", "Total HEART (Employer)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                ]),
+            ],
+        )
+
         print("Seeding The Bahamas NIB statement, per-employee (no personal income tax)...")
         _seed_template(
             db, template_key="BS-NIB", name="NIB Contribution Statement", report_type="BS_NIB_STATEMENT",

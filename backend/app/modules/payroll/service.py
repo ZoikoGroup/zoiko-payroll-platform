@@ -8604,6 +8604,19 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("earnings", "Earnings (Year-to-Date)"), ("tax", "PAYE / Health Surcharge (Year-to-Date)"),
         ("contributions", "NIS (Year-to-Date)"),
     ],
+    # Jamaica real named forms (Caribbean forms gap-closure, country #3,
+    # 2026-09-23). Both per MONTH/YEAR, employer-level components only
+    # (Super Admin sees the box structure) — the real per-employee rows
+    # are computed by generate_jm_s01/generate_jm_s02 directly, same
+    # reasoning as Guyana's GY_FORM_5/Trinidad's TT_MONTHLY_RETURN above.
+    "JM_S01": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART)"),
+    ],
+    "JM_S02": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART, Annual)"),
+    ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -11342,6 +11355,233 @@ def generate_tt_nibtt_data(
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
         jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
         reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Jamaica: S01 (monthly PAYE/NIS/NHT/Education Tax/HEART return) + S02
+# (annual employer return) ──────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #3, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as Guyana's Form 5 and
+# Trinidad's Monthly Return above — reuses _walk_us_aggregate_report_
+# components for the employer-totals side. HEART (jm.heart via
+# employer_payroll_tax) is deliberately EMPLOYER-ONLY on both S01 and
+# S02 — it's already correctly aggregated across the whole employer's
+# payroll by the org-levy accumulator (JM-008, Step 3 of the earlier
+# gap-closure plan), so re-attributing it to any one employee's row
+# here would misrepresent a genuinely employer-wide liability as a
+# per-employee one.
+#
+# DISCLOSED SCOPE (see "knownGaps"): S01/S02's own exact field ordering/
+# layout was not re-acquired verbatim for this pass — only real, engine-
+# computed figures (gross pay, PAYE via `tds`, NIS via `social_security`/
+# `employer_social_security`, NHT via `employee_pension`/`employer_
+# pension`, Education Tax via `ni_employee`/`employer_ni`, HEART via
+# `employer_payroll_tax`) are populated.
+
+_JM_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _jm_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "JM",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_JM_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _jm_employee_rows(db: Session, items: list) -> list:
+    """Groups a period's finalized JM PayslipItems by employee and sums
+    each employee's real, engine-computed figures (HEART excluded — see
+    this section's own module-level note)."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        paye = sum((i.tds or z for i in emp_items), z)
+        nis_employee = sum((i.social_security or z for i in emp_items), z)
+        nis_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        nht_employee = sum((i.employee_pension or z for i in emp_items), z)
+        nht_employer = sum((i.employer_pension or z for i in emp_items), z)
+        edu_tax_employee = sum((i.ni_employee or z for i in emp_items), z)
+        edu_tax_employer = sum((i.employer_ni or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "trn": cf.get("trn"),
+            "salaryWages": float(gross),
+            "payeTaxDeducted": float(paye),
+            "nisEmployee": float(nis_employee), "nisEmployer": float(nis_employer),
+            "nhtEmployee": float(nht_employee), "nhtEmployer": float(nht_employer),
+            "educationTaxEmployee": float(edu_tax_employee), "educationTaxEmployer": float(edu_tax_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+_JM_FORM_KNOWN_GAPS = [
+    "Employee address and S01/S02's own real field ordering/layout were not re-acquired for this "
+    "pass — only real, engine-computed figures (gross pay, PAYE, NIS, NHT, Education Tax, HEART) "
+    "are populated.",
+    "HEART is shown as an EMPLOYER-ONLY total, never attributed to any one employee's row — it is "
+    "a genuinely employer-wide liability, already correctly aggregated across the whole employer's "
+    "payroll by the org-levy accumulator (JM-008); showing it per-employee would misrepresent it.",
+]
+
+
+def generate_jm_s01(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Jamaica's S01 monthly PAYE/NIS/NHT/Education Tax/HEART return.
+    Per-employee rows for the calendar month plus an employer-totals
+    row, summed from real FINALIZED JM PayslipItems (never Draft/
+    Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "JM_S01":
+        raise BadRequestException(f"generate_jm_s01 is only for JM_S01 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _jm_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _jm_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_salary_wages": float(sum((i.gross_pay or z for i in items), z)),
+        "total_paye_tax_deducted": float(sum((i.tds or z for i in items), z)),
+        "total_nis_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nis_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_nht_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_nht_employer": float(sum((i.employer_pension or z for i in items), z)),
+        "total_education_tax_employee": float(sum((i.ni_employee or z for i in items), z)),
+        "total_education_tax_employer": float(sum((i.employer_ni or z for i in items), z)),
+        "total_heart_employer": float(sum((i.employer_payroll_tax or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": _JM_FORM_KNOWN_GAPS,
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_jm_s02(
+    db: Session, organization_id: int, report_template_id: int, year: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Jamaica's S02 annual employer return — same figures as S01, over
+    the full calendar year rather than one month."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "JM_S02":
+        raise BadRequestException(f"generate_jm_s02 is only for JM_S02 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = date(year, 1, 1), date(year, 12, 31)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _jm_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _jm_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_salary_wages": float(sum((i.gross_pay or z for i in items), z)),
+        "total_paye_tax_deducted": float(sum((i.tds or z for i in items), z)),
+        "total_nis_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nis_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_nht_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_nht_employer": float(sum((i.employer_pension or z for i in items), z)),
+        "total_education_tax_employee": float(sum((i.ni_employee or z for i in items), z)),
+        "total_education_tax_employer": float(sum((i.employer_ni or z for i in items), z)),
+        "total_heart_employer": float(sum((i.employer_payroll_tax or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": _JM_FORM_KNOWN_GAPS,
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=None,
         status="Generated", generated_by_id=actor_id,
         rendered_data=rendered_data, reconciliation=None,
     )

@@ -122,6 +122,7 @@ from app.modules.payroll.schemas import (
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
     CAPd7aGenerateRequest,
     GYMonthlyReportGenerateRequest,
+    JMAnnualReportGenerateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
     AUSchedule5CalculateRequest, AUSchedule5CalculateResponse,
     AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
@@ -2803,6 +2804,41 @@ def generate_tt_td4(
     return service.generate_uk_employee_report(
         db, current_user.organization_id, data.report_template_id, data.employee_id,
         data.as_of_date, actor_id=current_user.id,
+    )
+
+
+# ── Jamaica: S01 (monthly) + S02 (annual) return generation (Caribbean
+# forms gap-closure, country #3, 2026-09-23).
+
+@payroll_router.post(
+    "/jamaica/reports/s01", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Jamaica S01 monthly PAYE/NIS/NHT/Education Tax/HEART return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_jm_s01(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_jm_s01(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/jamaica/reports/s02", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Jamaica S02 annual employer return for one calendar year — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_jm_s02(
+    data: JMAnnualReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_jm_s02(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
     )
 
 
