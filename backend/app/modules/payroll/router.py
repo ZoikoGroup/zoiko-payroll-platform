@@ -2842,6 +2842,41 @@ def generate_jm_s02(
     )
 
 
+# ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule
+# generation (Caribbean forms gap-closure, country #4, 2026-09-23).
+
+@payroll_router.post(
+    "/barbados/reports/tamis-monthly-paye", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Barbados TAMIS Monthly PAYE return — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_bb_tamis_monthly_paye(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_bb_tamis_monthly_paye(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/barbados/reports/nis-earnings-schedule", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Barbados NIS Earnings Schedule for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_bb_nis_earnings_schedule(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_bb_nis_earnings_schedule(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
 @payroll_router.get(
     "/generated-reports/{generated_report_id}/rti-xml",
     summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",

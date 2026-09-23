@@ -520,6 +520,47 @@ def run():
             ],
         )
 
+        print("Seeding Barbados TAMIS Monthly PAYE return, employer-wide (real per-employee rows computed by generate_bb_tamis_monthly_paye)...")
+        _seed_template(
+            db, template_key="BB-TAMIS-MONTHLY-PAYE", name="TAMIS Monthly PAYE Return", report_type="BB_TAMIS_MONTHLY_PAYE",
+            country="BB", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tamis_tin", "TAMIS TIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_bb_tamis_monthly_paye,
+                # same convention as US-941's own line1_employee_count field.
+                ("totals", "Employer Totals (PAYE / NIS / R&R Levy)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_remuneration", "Total Remuneration", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_paye_tax_deducted", "Total PAYE Tax Deducted", "currency", "PAYSLIP_ITEM", "tds", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("total_rr_levy_employee", "Total R&R Levy (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_rr_levy_employer", "Total R&R Levy (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Barbados NIS Earnings Schedule, employer-wide (real per-employee rows computed by generate_bb_nis_earnings_schedule)...")
+        _seed_template(
+            db, template_key="BB-NIS-EARNINGS-SCHEDULE", name="NIS Earnings Schedule", report_type="BB_NIS_EARNINGS_SCHEDULE",
+            country="BB", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                ("totals", "Employer Totals (Insurable Earnings / NIS)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_insurable_earnings", "Total Insurable Earnings", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_nis_employee", "Total NIS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_nis_employer", "Total NIS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                ]),
+            ],
+        )
+
         print("Seeding Cayman Islands pension statement, per-employee (no personal income tax)...")
         _seed_template(
             db, template_key="KY-PENSION", name="Mandatory Pension Statement", report_type="KY_PENSION_STATEMENT",

@@ -8617,6 +8617,19 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"),
         ("totals", "Employer Totals (PAYE / NIS / NHT / Education Tax / HEART, Annual)"),
     ],
+    # Barbados real named forms (Caribbean forms gap-closure, country #4,
+    # 2026-09-23). Both per MONTH, employer-level components only (Super
+    # Admin sees the box structure) — the real per-employee rows are
+    # computed by generate_bb_tamis_monthly_paye/generate_bb_nis_
+    # earnings_schedule directly, same reasoning as GY_FORM_5 above.
+    "BB_TAMIS_MONTHLY_PAYE": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (PAYE / NIS / R&R Levy)"),
+    ],
+    "BB_NIS_EARNINGS_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Insurable Earnings / NIS)"),
+    ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -11582,6 +11595,258 @@ def generate_jm_s02(
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
         jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
         reporting_year=str(year), reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule (both
+# monthly) ──────────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #4, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as Guyana's Form 5/Trinidad's
+# Monthly Return/Jamaica's S01 above — reuses _walk_us_aggregate_report_
+# components for the employer-totals side and _tt_week_of_month for the
+# NIS Earnings Schedule's weekly columns (that helper is genuinely
+# generic day-of-month bucketing despite its TT-prefixed name, the same
+# "reused despite the name" precedent as generate_uk_employee_report/
+# _walk_us_aggregate_report_components).
+#
+# DISCLOSED SCOPE (see "knownGaps"): BB-009's own real field list (basic
+# salary vs. allowance breakdown, worker-type classification) and
+# BB-013's real Monday-count weekly-column rule were not re-acquired
+# verbatim for this pass — only real, engine-computed figures (gross
+# pay, PAYE via `tds`, NIS via `social_security`/`employer_social_
+# security`, R&R Levy via `employee_pension`/`employer_pension`) are
+# populated, and the weekly bucketing reuses the SAME best-effort day-
+# of-month convention already disclosed for Trinidad's NIBTT data, not
+# independently verified against BB-013's actual Monday-count rule.
+
+_BB_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _bb_month_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "BB",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_BB_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _bb_employee_rows(db: Session, items: list) -> list:
+    """Groups a month's finalized BB PayslipItems by employee and sums
+    each employee's real, engine-computed figures — shared shape used
+    by both the TAMIS Monthly PAYE return and the NIS Earnings Schedule
+    below."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        basic_salary = sum((i.basic_salary or z for i in emp_items), z)
+        paye = sum((i.tds or z for i in emp_items), z)
+        nis_employee = sum((i.social_security or z for i in emp_items), z)
+        nis_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        rr_employee = sum((i.employee_pension or z for i in emp_items), z)
+        rr_employer = sum((i.employer_pension or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "tamisTin": cf.get("tamis_tin"),
+            "nisNumber": cf.get("nis_number"),
+            "totalRemuneration": float(gross),
+            "basicSalary": float(basic_salary),
+            "payeTaxDeducted": float(paye),
+            "nisEmployee": float(nis_employee), "nisEmployer": float(nis_employer),
+            "rrLevyEmployee": float(rr_employee), "rrLevyEmployer": float(rr_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+def generate_bb_tamis_monthly_paye(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Barbados's TAMIS Monthly PAYE return. Per-employee rows for the
+    calendar month plus an employer-totals row, summed from real
+    FINALIZED BB PayslipItems (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "BB_TAMIS_MONTHLY_PAYE":
+        raise BadRequestException(f"generate_bb_tamis_monthly_paye is only for BB_TAMIS_MONTHLY_PAYE templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _bb_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _bb_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_tamis_tin": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_remuneration": float(sum((i.gross_pay or z for i in items), z)),
+        "total_paye_tax_deducted": float(sum((i.tds or z for i in items), z)),
+        "total_nis_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_nis_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_rr_levy_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_rr_levy_employer": float(sum((i.employer_pension or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Employee address and BB-009's own basic-salary-vs-allowance breakdown were not re-acquired "
+            "for this pass — only real, engine-computed figures (gross pay, basic salary, PAYE, NIS, "
+            "R&R Levy) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_bb_nis_earnings_schedule(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Barbados's NIS Earnings Schedule — monthly, per-employee NIS
+    number/earnings/contributions, bucketed into this platform's own
+    best-effort Week 1-5 columns (see this section's own module-level
+    caveat), plus an employer-totals row."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "BB_NIS_EARNINGS_SCHEDULE":
+        raise BadRequestException(f"generate_bb_nis_earnings_schedule is only for BB_NIS_EARNINGS_SCHEDULE templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _bb_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _bb_employee_rows(db, items)
+
+    z = Decimal("0")
+    total_earnings = sum((i.gross_pay or z for i in items), z)
+    total_nis_employee = sum((i.social_security or z for i in items), z)
+    total_nis_employer = sum((i.employer_social_security or z for i in items), z)
+
+    by_employee_week: dict = {}
+    for i in items:
+        week = _tt_week_of_month(i.payroll_run.pay_date) if i.payroll_run else None
+        entry = by_employee_week.setdefault(i.employee_id, {})
+        week_entry = entry.setdefault(week, {"earnings": z, "nisEmployee": z, "nisEmployer": z})
+        week_entry["earnings"] += i.gross_pay or z
+        week_entry["nisEmployee"] += i.social_security or z
+        week_entry["nisEmployer"] += i.employer_social_security or z
+
+    weekly_rows = []
+    for r in employee_rows:
+        weeks = by_employee_week.get(r["employeeId"], {})
+        weekly_rows.append({
+            "employeeId": r["employeeId"], "employeeName": r["employeeName"], "nisNumber": r["nisNumber"],
+            "roundedEarnings": round(r["totalRemuneration"]), "nisEmployee": r["nisEmployee"], "nisEmployer": r["nisEmployer"],
+            "weeks": {
+                f"week{w}": {
+                    "earnings": float(v["earnings"]), "nisEmployee": float(v["nisEmployee"]), "nisEmployer": float(v["nisEmployer"]),
+                }
+                for w, v in sorted(weeks.items()) if w is not None
+            },
+        })
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_nis_number": (company.tax_identifiers or {}).get("nis_employer_number") if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_insurable_earnings": float(total_earnings),
+        "total_nis_employee": float(total_nis_employee),
+        "total_nis_employer": float(total_nis_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": weekly_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Worker-type classification (regular employed / domestic / self-employed) is not modeled — "
+            "every row is treated identically.",
+            "The Week 1-5 bucketing reuses the same best-effort day-of-month convention already "
+            "disclosed for Trinidad's NIBTT data (days 1-7 = Week 1, 8-14 = Week 2, ...), not "
+            "independently verified against BB-013's real Monday-count rule.",
+            "roundedEarnings is a simple round-to-nearest-dollar of the real gross pay figure, not "
+            "independently verified against BB's own official NIS earnings-rounding rule.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
         status="Generated", generated_by_id=actor_id,
         rendered_data=rendered_data, reconciliation=None,
     )
