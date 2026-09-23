@@ -2877,6 +2877,58 @@ def generate_bb_nis_earnings_schedule(
     )
 
 
+# ── Dominican Republic: DGII IR-3 + TSS/SUIR (monthly) + IR-13
+# (per-employee, annual) generation (Caribbean forms gap-closure,
+# country #5, 2026-09-23).
+
+@payroll_router.post(
+    "/do/reports/ir3", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Dominican Republic DGII IR-3 monthly withholding declaration — employer-wide, sums every finalized payslip in the calendar month",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_do_ir3(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_do_ir3(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/do/reports/tss-suir", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Dominican Republic TSS/SUIR contribution submission for a calendar month — employer-wide, sums every finalized payslip",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_do_tss_suir(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_do_tss_suir(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/do/reports/ir13", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Dominican Republic DGII IR-13 annual withholding declaration for one employee — not tied to any single PayrollRun",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_do_ir13(
+    data: UKEmployeeReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_uk_employee_report(
+        db, current_user.organization_id, data.report_template_id, data.employee_id,
+        data.as_of_date, actor_id=current_user.id,
+    )
+
+
 @payroll_router.get(
     "/generated-reports/{generated_report_id}/rti-xml",
     summary="Download a FPS/EPS/P45 GeneratedReport as HMRC RTI-shaped XML (correctly shaped, not yet transmittable)",

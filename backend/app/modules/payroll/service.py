@@ -8630,6 +8630,27 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"),
         ("totals", "Employer Totals (Insurable Earnings / NIS)"),
     ],
+    # Dominican Republic real named forms (Caribbean forms gap-closure,
+    # country #5, 2026-09-23). DO_IR3/DO_TSS_SUIR are per MONTH,
+    # employer-level components only (Super Admin sees the box
+    # structure) — the real per-employee rows are computed by
+    # generate_do_ir3/generate_do_tss_suir directly, same reasoning as
+    # GY_FORM_5 above.
+    "DO_IR3": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (Gross Pay / ISR)"),
+    ],
+    "DO_TSS_SUIR": [
+        ("employer_info", "Employer Information"),
+        ("totals", "Employer Totals (SFS / Pensión / SRL / INFOTEP)"),
+    ],
+    # IR-13 — per EMPLOYEE, annual (calendar-year-end), no PayrollRun.
+    # Real fields resolved by the generic generate_uk_employee_report
+    # mapper (SUM_YTD), same as GY's FORM_7B/TT's TD4 above.
+    "IR13": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings (Year-to-Date)"), ("tax", "ISR (Year-to-Date)"),
+    ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
     ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
@@ -9666,10 +9687,12 @@ def generate_uk_employee_report(
     of Employment, triggered by an interruption of earnings — the same
     "leaving/trigger date" shape as a P45, ZP-TAX-CA-2026-001 forms/
     reports gap-closure), Guyana's Form 7B annual employee earnings
-    statement (triggered by calendar-year end, GY-023), or Trinidad and
+    statement (triggered by calendar-year end, GY-023), Trinidad and
     Tobago's TD4 employee annual certificate (triggered by calendar-year
-    end, TT-023) — added here rather than as separate functions since
-    this function's own logic was never actually UK-specific, just
+    end, TT-023), or the Dominican Republic's DGII IR-13 annual
+    withholding declaration (triggered by calendar-year end) — added
+    here rather than as separate functions since this function's own
+    logic was never actually UK-specific, just
     gated to a report_type allow-list; kept its original name for
     backward compatibility with existing callers/tests. `as_of_date` is
     the YTD boundary every SUM_YTD field on the template resolves
@@ -9691,8 +9714,8 @@ def generate_uk_employee_report(
     maps one simply resolves it to None here, the same as any other
     field this engine can't currently resolve."""
     template = get_report_template(db, report_template_id)
-    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE", "FORM_7B", "TD4"):
-        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE/FORM_7B/TD4 templates, not {template.report_type!r}.")
+    if template.report_type not in ("P45", "P60", "FORM_130", "T4", "RL1", "ROE", "FORM_7B", "TD4", "IR13"):
+        raise BadRequestException(f"generate_uk_employee_report is only for P45/P60/FORM_130/T4/RL1/ROE/FORM_7B/TD4/IR13 templates, not {template.report_type!r}.")
     if template.status != "Active":
         raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
     employee = db.query(PayrollEmployee).filter(
@@ -11826,6 +11849,224 @@ def generate_bb_nis_earnings_schedule(
             "independently verified against BB-013's real Monday-count rule.",
             "roundedEarnings is a simple round-to-nearest-dollar of the real gross pay figure, not "
             "independently verified against BB's own official NIS earnings-rounding rule.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Dominican Republic: DGII IR-3 (monthly withholding declaration) +
+# TSS/SUIR contribution submission (monthly) + IR-13 (per-employee,
+# annual) ────────────────────────────────────────────────────────────
+# (Caribbean forms gap-closure, country #5, 2026-09-23). Same per-
+# employee-row-plus-employer-totals shape as the prior 4 countries —
+# reuses _walk_us_aggregate_report_components for the employer-totals
+# side; IR-13 needed no new function, just another entry on generate_
+# uk_employee_report's allow-list (same as GY's FORM_7B/TT's TD4).
+#
+# DISCLOSED SCOPE (see "knownGaps"): only real, engine-computed figures
+# (gross pay, ISR via `tds`, SFS via `social_security`/`employer_
+# social_security`, Pensión/SVDS via `employee_pension`/`employer_
+# pension`, SRL via `employer_payroll_tax`, INFOTEP via `employer_ni`)
+# are populated. TSS/SUIR's real "novelty" (novedad) reporting — new
+# hires, terminations, and mid-month changes reported alongside that
+# month's contributions — is NOT modeled; this report only carries
+# contribution data, never movement/novelty records.
+
+_DO_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+
+
+def _do_month_finalized_items(db: Session, organization_id: int, period_start: date, period_end: date) -> list:
+    return (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "DO",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_DO_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+
+def _do_employee_rows(db: Session, items: list) -> list:
+    """Groups a month's finalized DO PayslipItems by employee and sums
+    each employee's real, engine-computed figures — shared shape used
+    by both DGII IR-3 and the TSS/SUIR submission below."""
+    z = Decimal("0")
+    by_employee: dict = {}
+    for i in items:
+        by_employee.setdefault(i.employee_id, []).append(i)
+
+    rows = []
+    for employee_id, emp_items in by_employee.items():
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == employee_id).first()
+        cf = (employee.compliance_fields if employee else None) or {}
+        gross = sum((i.gross_pay or z for i in emp_items), z)
+        isr = sum((i.tds or z for i in emp_items), z)
+        sfs_employee = sum((i.social_security or z for i in emp_items), z)
+        sfs_employer = sum((i.employer_social_security or z for i in emp_items), z)
+        pension_employee = sum((i.employee_pension or z for i in emp_items), z)
+        pension_employer = sum((i.employer_pension or z for i in emp_items), z)
+        srl_employer = sum((i.employer_payroll_tax or z for i in emp_items), z)
+        infotep_employer = sum((i.employer_ni or z for i in emp_items), z)
+        rows.append({
+            "employeeId": employee_id,
+            "employeeName": employee.name if employee else emp_items[0].employee_name,
+            "employeeCode": employee.employee_code if employee else None,
+            "cedula": cf.get("cedula"),
+            "grossPay": float(gross),
+            "isrWithheld": float(isr),
+            "sfsEmployee": float(sfs_employee), "sfsEmployer": float(sfs_employer),
+            "pensionEmployee": float(pension_employee), "pensionEmployer": float(pension_employer),
+            "srlEmployer": float(srl_employer), "infotepEmployer": float(infotep_employer),
+        })
+    rows.sort(key=lambda r: r["employeeName"] or "")
+    return rows
+
+
+def generate_do_ir3(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """DGII IR-3 monthly withholding declaration. Per-employee rows for
+    the calendar month plus an employer-totals row, summed from real
+    FINALIZED DO PayslipItems (never Draft/Review)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "DO_IR3":
+        raise BadRequestException(f"generate_do_ir3 is only for DO_IR3 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _do_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _do_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_rnc": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_gross_pay": float(sum((i.gross_pay or z for i in items), z)),
+        "total_isr_withheld": float(sum((i.tds or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "Employee address and DGII IR-3's own real field ordering/layout were not re-acquired for "
+            "this pass — only real, engine-computed figures (gross pay, ISR withheld) are populated.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"{year}-{month:02d}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_do_tss_suir(
+    db: Session, organization_id: int, report_template_id: int, year: int, month: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Dominican Republic's TSS/SUIR contribution submission — monthly,
+    per-employee SFS/Pensión/SRL/INFOTEP contribution data plus an
+    employer-totals row (see this section's own module-level note on
+    the "novelty" reporting gap)."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "DO_TSS_SUIR":
+        raise BadRequestException(f"generate_do_tss_suir is only for DO_TSS_SUIR templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _gy_month_date_range(year, month)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    items = _do_month_finalized_items(db, organization_id, period_start, period_end)
+    employee_rows = _do_employee_rows(db, items)
+
+    z = Decimal("0")
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_rnc": company.tax_no if company else None,
+        "total_employee_count": len(employee_rows),
+        "total_gross_pay": float(sum((i.gross_pay or z for i in items), z)),
+        "total_sfs_employee": float(sum((i.social_security or z for i in items), z)),
+        "total_sfs_employer": float(sum((i.employer_social_security or z for i in items), z)),
+        "total_pension_employee": float(sum((i.employee_pension or z for i in items), z)),
+        "total_pension_employer": float(sum((i.employer_pension or z for i in items), z)),
+        "total_srl_employer": float(sum((i.employer_payroll_tax or z for i in items), z)),
+        "total_infotep_employer": float(sum((i.employer_ni or z for i in items), z)),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "month": month, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeRows": employee_rows,
+        "employerTotals": box_values,
+        "knownGaps": [
+            "TSS/SUIR's real \"novelty\" (novedad) reporting — new hires, terminations, and mid-month "
+            "changes reported alongside that month's contributions — is NOT modeled; this report only "
+            "carries contribution data, never movement/novelty records.",
+            "SRL's risk-type add-on (I-IV) resolves from a single org-level EmployerTaxProfile rate, not "
+            "a per-employee risk classification.",
         ],
     }
 

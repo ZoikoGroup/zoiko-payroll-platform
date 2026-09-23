@@ -615,6 +615,69 @@ def run():
             ],
         )
 
+        print("Seeding Dominican Republic DGII IR-3 monthly withholding declaration, employer-wide (real per-employee rows computed by generate_do_ir3)...")
+        _seed_template(
+            db, template_key="DO-IR3", name="DGII IR-3 — Monthly Withholding Declaration", report_type="DO_IR3",
+            country="DO", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_rnc", "RNC", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # source_column below is a real-column placeholder only (schema requires
+                # one) — actual values are bespoke-computed by generate_do_ir3, same
+                # convention as US-941's own line1_employee_count field.
+                ("totals", "Employer Totals (Gross Pay / ISR)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_isr_withheld", "Total ISR Withheld", "currency", "PAYSLIP_ITEM", "tds", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Dominican Republic TSS/SUIR contribution submission, employer-wide (real per-employee rows computed by generate_do_tss_suir)...")
+        _seed_template(
+            db, template_key="DO-TSS-SUIR", name="TSS/SUIR Contribution Submission", report_type="DO_TSS_SUIR",
+            country="DO", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_rnc", "RNC", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("totals", "Employer Totals (SFS / Pensión / SRL / INFOTEP)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_sfs_employee", "Total SFS (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("total_sfs_employer", "Total SFS (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("total_pension_employee", "Total Pensión / SVDS (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_pension_employer", "Total Pensión / SVDS (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("total_srl_employer", "Total SRL (Employer)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                    ("total_infotep_employer", "Total INFOTEP (Employer)", "currency", "PAYSLIP_ITEM", "employer_ni", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Dominican Republic DGII IR-13 annual withholding declaration, per-employee...")
+        _seed_template(
+            db, template_key="DO-IR13", name="DGII IR-13 — Annual Withholding Declaration", report_type="IR13",
+            country="DO", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_rnc", "RNC", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("earnings", "Earnings (Year-to-Date)", [
+                    ("gross_pay_ytd", "Total Gross Pay (YTD)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                ]),
+                ("tax", "ISR (Year-to-Date)", [
+                    ("tds_ytd", "ISR Withheld (YTD)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                ]),
+            ],
+        )
+
         print("Seeding Guyana PAYE + NIS statement, per-employee...")
         _seed_template(
             db, template_key="GY-PAYE-NIS", name="PAYE + NIS Statement", report_type="GY_PAYE_NIS",
