@@ -247,6 +247,181 @@ const COUNTRY_TAX_CONFIG = {
       },
     ],
   },
+  // ── Caribbean production jurisdictions (2026-09-21) — all country-
+  // level only (no stateAware group needed), same reasoning as DE above.
+  BB: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [{ key: "paye", label: "PAYE", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "nis-levies", label: "NIS & Levies",
+        items: [
+          {
+            key: "nis", label: "NIS (code R)", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nis")),
+            noStatePlaceholder: "NIS isn't configured for this organization yet.",
+          },
+          {
+            key: "resilience-regeneration", label: "Resilience & Regeneration Levy", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "resilience")),
+            noStatePlaceholder: "Resilience & Regeneration Levy isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  KY: {
+    groups: [
+      {
+        key: "pension", label: "Mandatory Pension",
+        items: [
+          {
+            key: "pension", label: "Mandatory Pension", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "pension")),
+            noStatePlaceholder: "Mandatory Pension isn't configured for this organization yet.",
+          },
+        ],
+      },
+      // No income-tax group — Cayman has no personal income tax (KY-002);
+      // there is deliberately no fake 0% tax band to show here.
+    ],
+  },
+  DO: {
+    groups: [
+      {
+        key: "isr", label: "ISR",
+        items: [{ key: "isr", label: "ISR", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "tss-levies", label: "TSS & Levies",
+        items: [
+          {
+            key: "sfs", label: "SFS (health)", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "sfs")),
+            noStatePlaceholder: "SFS isn't configured for this organization yet.",
+          },
+          {
+            key: "pension", label: "Pension (SVDS)", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "svds") || labelIncludes(r, "pension")),
+            noStatePlaceholder: "Pension (SVDS) isn't configured for this organization yet.",
+          },
+          {
+            key: "srl", label: "Occupational Risk (SRL)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "risk") || labelIncludes(r, "srl")),
+            noStatePlaceholder: "SRL isn't configured for this organization yet.",
+          },
+          {
+            key: "infotep", label: "INFOTEP", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "infotep")),
+            noStatePlaceholder: "INFOTEP isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  GY: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [{ key: "paye", label: "PAYE", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "nis", label: "NIS",
+        items: [
+          {
+            key: "nis", label: "NIS", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nis")),
+            noStatePlaceholder: "NIS isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  JM: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [{ key: "paye", label: "PAYE", source: "slabs", matches: () => true, filter: (rows) => rows }],
+      },
+      {
+        key: "contributions", label: "Contributions",
+        items: [
+          {
+            key: "nis", label: "NIS", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nis")),
+            noStatePlaceholder: "NIS isn't configured for this organization yet.",
+          },
+          {
+            key: "nht", label: "NHT", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nht")),
+            noStatePlaceholder: "NHT isn't configured for this organization yet.",
+          },
+          {
+            key: "education-tax", label: "Education Tax", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "education")),
+            noStatePlaceholder: "Education Tax isn't configured for this organization yet.",
+          },
+          {
+            key: "heart", label: "HEART", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "heart")),
+            noStatePlaceholder: "HEART isn't configured for this organization yet.",
+          },
+        ],
+      },
+    ],
+  },
+  BS: {
+    groups: [
+      {
+        key: "nib", label: "NIB",
+        items: [
+          {
+            key: "nib", label: "NIB", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "nib")),
+            noStatePlaceholder: "NIB isn't configured for this organization yet.",
+          },
+        ],
+      },
+      // No income-tax group — the Bahamas has no personal income tax
+      // (BS-005); there is deliberately no fake 0% tax band to show here.
+    ],
+  },
+  TT: {
+    groups: [
+      {
+        key: "paye", label: "PAYE",
+        items: [
+          {
+            key: "paye", label: "PAYE", source: "slabs", matches: () => true,
+            // Excludes TT_NIS_CLASS rows (see engine/countries/shared.py's
+            // docstring) — those carry rate_pct=0 with the real weekly
+            // dollar figures in flat_amount/employer_rate_pct, which this
+            // generic SlabsTable would otherwise render as a misleading
+            // "0%" income-tax bracket.
+            filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
+          },
+        ],
+      },
+      {
+        key: "health-surcharge", label: "Health Surcharge",
+        items: [
+          {
+            key: "health-surcharge", label: "Health Surcharge", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "health surcharge")),
+            noStatePlaceholder: "Health Surcharge isn't configured for this organization yet.",
+          },
+        ],
+      },
+      // NIS (the fixed 16-class table, rule_type="TT_NIS_CLASS") is
+      // deliberately NOT shown here yet — it needs its own table
+      // component (this generic SlabsTable would render a misleading
+      // "0%" rate for it, same reasoning as the PAYE filter above). See
+      // Super Admin's TTCompliancePage.jsx for the equivalent disclosed
+      // gap on that side.
+    ],
+  },
 };
 
 // Local-tax rows (LocalityRateResponse) have a different shape from a

@@ -55,6 +55,18 @@ from app.modules.payroll.engine.countries import germany as _germany
 from app.modules.payroll.engine.countries import canada as _canada
 from app.modules.payroll.engine.countries import generic as _generic
 
+# Caribbean production jurisdictions (2026-09-21) — each is its own file
+# under engine/countries/, same one-file-per-country doctrine as every
+# country above. See each module's own docstring for its statutory scope
+# and which generic PayrollResult fields it reuses.
+from app.modules.payroll.engine.countries import barbados as _barbados
+from app.modules.payroll.engine.countries import cayman_islands as _cayman_islands
+from app.modules.payroll.engine.countries import dominican_republic as _dominican_republic
+from app.modules.payroll.engine.countries import guyana as _guyana
+from app.modules.payroll.engine.countries import jamaica as _jamaica
+from app.modules.payroll.engine.countries import bahamas as _bahamas
+from app.modules.payroll.engine.countries import trinidad_and_tobago as _trinidad_and_tobago
+
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
 # countries/ split — kept importable from exactly this path, exactly
@@ -112,6 +124,14 @@ _calc_canada = _canada.calculate
 
 _calc_generic = _generic.calculate
 
+_calc_barbados = _barbados.calculate
+_calc_cayman_islands = _cayman_islands.calculate
+_calc_dominican_republic = _dominican_republic.calculate
+_calc_guyana = _guyana.calculate
+_calc_jamaica = _jamaica.calculate
+_calc_bahamas = _bahamas.calculate
+_calc_trinidad_and_tobago = _trinidad_and_tobago.calculate
+
 
 _COUNTRY_CALC = {
     "IN": _calc_india,
@@ -120,6 +140,19 @@ _COUNTRY_CALC = {
     "AU": _calc_australia,
     "DE": _calc_germany,
     "CA": _calc_canada,
+    # Caribbean production jurisdictions (2026-09-21). Every other
+    # Caribbean code (see app.core.caribbean_regions — "Coming Soon")
+    # is deliberately ABSENT here: it must never resolve to a real
+    # calculator, and falls through to _calc_generic only in the
+    # theoretical case registration/onboarding somehow failed to block
+    # it first (see tests/test_registration_jurisdiction_gate.py).
+    "BB": _calc_barbados,
+    "KY": _calc_cayman_islands,
+    "DO": _calc_dominican_republic,
+    "GY": _calc_guyana,
+    "JM": _calc_jamaica,
+    "BS": _calc_bahamas,
+    "TT": _calc_trinidad_and_tobago,
 }
 
 
@@ -134,8 +167,9 @@ class StandardStrategy(PayrollStrategy):
 
     def calculate(self, ctx: PayrollContext) -> PayrollResult:
         payroll_days = ctx.payroll_days or PAYROLL_DAYS
+        calendar_days = max(ctx.calendar_days or payroll_days, 0)
         unpaid = max(ctx.unpaid_leave_days, 0)
-        payable_days = max(payroll_days - unpaid, 0)
+        payable_days = max(calendar_days - unpaid, 0)
 
         per_day_salary = _round2(ctx.gross / Decimal(payroll_days)) if payroll_days else Decimal("0")
         attendance_deduction = min(_round2(per_day_salary * Decimal(unpaid)), ctx.gross)
@@ -193,6 +227,7 @@ class StandardStrategy(PayrollStrategy):
 
         return PayrollResult(
             payroll_days=payroll_days,
+            calendar_days=calendar_days,
             unpaid_leave_days=unpaid,
             payable_days=payable_days,
             per_day_salary=per_day_salary,
@@ -241,6 +276,7 @@ class StandardStrategy(PayrollStrategy):
             employer_cpp2=deductions.get("employer_cpp2", Decimal("0")),
             employer_eht=deductions.get("employer_eht", Decimal("0")),
             on_eht_ytd_remuneration_after=deductions.get("on_eht_ytd_remuneration_after"),
+            jm_heart_ytd_remuneration_after=deductions.get("jm_heart_ytd_remuneration_after"),
             employer_apprenticeship_levy=deductions.get("employer_apprenticeship_levy", Decimal("0")),
             auto_enrolment_status=deductions.get("auto_enrolment_status"),
             tax_week=deductions.get("tax_week"),
@@ -275,6 +311,8 @@ class StandardStrategy(PayrollStrategy):
             ytd_medicare_wages_after=deductions.get("ytd_medicare_wages_after"),
             ytd_sg_qualifying_earnings_after=deductions.get("ytd_sg_qualifying_earnings_after"),
             ytd_whm_earnings_after=deductions.get("ytd_whm_earnings_after"),
+            ytd_ky_mandatory_pensionable_earnings_after=deductions.get("ytd_ky_mandatory_pensionable_earnings_after"),
+            ytd_gy_paye_credit_after=deductions.get("ytd_gy_paye_credit_after"),
             au_whm_cap_exceeded=deductions.get("au_whm_cap_exceeded", False),
             sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),
             sg_rate_pct=deductions.get("sg_rate_pct"),
