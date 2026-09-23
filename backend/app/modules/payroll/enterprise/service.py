@@ -97,6 +97,7 @@ def add_jurisdiction(db: Session, organization_id: int, country_code: str, actor
         ActivityStatus.INFO, actor_id=actor_id,
     )
     _recompute_enterprise_status(db, organization_id)
+    _notify_jurisdiction_added(db, row, organization_id)
     return row
 
 
@@ -110,6 +111,7 @@ def remove_jurisdiction(db: Session, organization_id: int, jurisdiction_id: int,
         ActivityStatus.INFO, actor_id=actor_id,
     )
     _recompute_enterprise_status(db, organization_id)
+    _notify_jurisdiction_removed(db, label, organization_id)
 
 
 def update_jurisdiction_config(
@@ -118,6 +120,10 @@ def update_jurisdiction_config(
 ) -> EnterpriseJurisdiction:
     row = get_jurisdiction_by_id(db, organization_id, jurisdiction_id)
     old_status = row.status
+    country_label = _country_label(row.country_code)
+    old_general = dict(row.general_config or {})
+    old_compliance = dict(row.compliance_config or {})
+    old_payroll_rules = dict(row.payroll_rules_config or {})
 
     if data.general_config is not None:
         row.general_config = data.general_config.model_dump(by_alias=True, exclude_none=True)
@@ -149,6 +155,15 @@ def update_jurisdiction_config(
             ActivityStatus.INFO, actor_id=actor_id,
         )
     _recompute_enterprise_status(db, organization_id)
+
+    section_changes = []
+    section_changes += _jurisdiction_config_diff("General", old_general, row.general_config or {})
+    section_changes += _jurisdiction_config_diff("Compliance", old_compliance, row.compliance_config or {})
+    section_changes += _jurisdiction_config_diff("Payroll Rules", old_payroll_rules, row.payroll_rules_config or {})
+    if data.mark_configured and old_status != row.status:
+        section_changes.append(("Status", old_status, row.status))
+    if section_changes:
+        _notify_jurisdiction_config_updated(db, country_label, section_changes, row, organization_id)
     return row
 
 
@@ -176,7 +191,8 @@ def verify_jurisdiction(db: Session, organization_id: int, jurisdiction_id: int,
     # same convention the existing Compliance > Company Details dropdown
     # already uses (it stores the 2-letter code, not the full name).
     company = get_company_details(db, organization_id)
-    if company.jurisdiction_country != row.country_code:
+    country_switched = company.jurisdiction_country != row.country_code
+    if country_switched:
         company.jurisdiction_country = row.country_code
         # jurisdiction_state belongs to whichever country was previously
         # active — carrying it over would show a stale state (e.g. "Bremen")
@@ -191,6 +207,7 @@ def verify_jurisdiction(db: Session, organization_id: int, jurisdiction_id: int,
         )
 
     _recompute_enterprise_status(db, organization_id)
+    _notify_jurisdiction_verified(db, row, country_switched, organization_id)
     return row
 
 
@@ -295,6 +312,7 @@ def activate_enterprise(db: Session, organization_id: int, actor_id: Optional[in
         db, organization_id, f"Enterprise Payroll activated with jurisdictions: {jurisdictions_label}.",
         ActivityStatus.SUCCESS, actor_id=actor_id,
     )
+    _notify_enterprise_activated(db, jurisdictions_label, organization_id)
     return {
         "activated": True,
         "enterprise_status": policy.enterprise_status,
@@ -312,6 +330,7 @@ def deactivate_enterprise(db: Session, organization_id: int, actor_id: Optional[
         db, organization_id, "Enterprise Payroll disabled (reverted to Standard).",
         ActivityStatus.INFO, actor_id=actor_id,
     )
+    _notify_enterprise_deactivated(db, organization_id)
     return {"activated": False, "enterprise_status": policy.enterprise_status, "activated_jurisdictions": []}
 
 
@@ -374,3 +393,120 @@ def get_dashboard(db: Session, organization_id: int) -> dict:
         "upcoming_filings": upcoming_filings,
         "recent_changes": recent_changes,
     }
+
+
+# ── Email notifications (best-effort, never block the action) ───────────────
+
+def _jurisdiction_config_diff(section_label: str, old_cfg: dict, new_cfg: dict) -> list:
+    """key-by-key diff of one JSON config section, labels are section-prefixed."""
+    changes = []
+    for key in sorted(set(old_cfg) | set(new_cfg)):
+        old_val = _config_value_text(old_cfg.get(key))
+        new_val = _config_value_text(new_cfg.get(key))
+        if old_val != new_val:
+            changes.append((f"{section_label} · {key.replace('_', ' ').title()}", old_val, new_val))
+    return changes
+
+
+def _config_value_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return "; ".join(f"{k}={_config_value_text(v)}" for k, v in value.items())
+    return str(value)
+
+
+def _notify_jurisdiction_added(db: Session, row, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_jurisdiction_added_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_jurisdiction_added_email(
+            org_email, _country_label(row.country_code), row.country_code,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] jurisdiction-added email failed for org {organization_id}: {exc}")
+
+
+def _notify_jurisdiction_removed(db: Session, label: str, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_jurisdiction_removed_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_jurisdiction_removed_email(
+            org_email, label, organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] jurisdiction-removed email failed for org {organization_id}: {exc}")
+
+
+def _notify_jurisdiction_config_updated(db: Session, country_label: str, changes, row, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_jurisdiction_config_updated_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_jurisdiction_config_updated_email(
+            org_email, country_label, changes, organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] jurisdiction-config email failed for org {organization_id}: {exc}")
+
+
+def _notify_jurisdiction_verified(db: Session, row, country_switched: bool, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_jurisdiction_verified_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_jurisdiction_verified_email(
+            org_email, _country_label(row.country_code), active_switched=country_switched,
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] jurisdiction-verified email failed for org {organization_id}: {exc}")
+
+
+def _notify_enterprise_activated(db: Session, jurisdictions_label: str, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_enterprise_activated_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_enterprise_activated_email(
+            org_email, jurisdictions_label, organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] enterprise-activated email failed for org {organization_id}: {exc}")
+
+
+def _notify_enterprise_deactivated(db: Session, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_enterprise_deactivated_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_enterprise_deactivated_email(
+            org_email, organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] enterprise-deactivated email failed for org {organization_id}: {exc}")

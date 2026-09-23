@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Zoiko Payroll role has changed</title>
+</head>
+<body style="margin:0; padding:0; background:#F3F8FF; font-family:Arial,Helvetica,sans-serif;">
+  <!-- Preheader (§10): verbatim, hidden from visible body -->
+  <div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; color:#F3F8FF;">Your access role changed.</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F3F8FF; padding:24px 12px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%; background:#FFFFFF; border:1px solid #D8E4F5; border-radius:12px;">
+
+        <!-- Header branding (blue/white design system) -->
+        <tr><td style="background:#0B2D5C; padding:28px 32px 22px 32px; border-radius:12px 12px 0 0;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td align="left" style="font-size:0; line-height:0;">
+              {{#if logo_url}}<a href="{{frontend_url}}" target="_blank" style="text-decoration:none;"><img src="{{logo_url}}" alt="Zoiko Payroll" height="34" style="height:34px; width:auto; display:block; border:0;"></a>{{/if}}
+            </td>
+            <td align="right" valign="middle" style="font-family:'Courier New',monospace; font-size:11px; color:#FFFFFF; background:#1E4FA0; border-radius:9999px; padding:4px 10px;">Account Notice</td>
+          </tr></table>
+        </td></tr>
+
+        <!-- Body (IAM-011) -->
+        <tr><td style="padding:28px 32px 8px 32px;">
+          <h1 style="color:#0F172A; font-size:20px; font-weight:bold; margin:0 0 16px 0;">Your Zoiko Payroll role has changed</h1>
+          <p style="color:#0F172A; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Hello {{first_name}},</p>
+          <p style="color:#475569; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+            Your access role in Zoiko Payroll was changed by
+            <span style="color:#0B2D5C; font-weight:bold;">{{actor_name}}</span>
+            on <span style="color:#0B2D5C; font-weight:bold;">{{changed_at_display}}</span> (UTC).
+          </p>
+        </td></tr>
+
+        <!-- Role change metadata -->
+        <tr><td style="padding:0 32px 4px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F3F8FF; border:1px solid #D8E4F5; border-radius:8px;">
+            <tr>
+              <td style="padding:9px 14px; color:#475569; font-size:11px;">Previous Role</td>
+              <td align="right" style="padding:9px 14px; font-size:11px; color:#475569;">{{old_role_label}}</td>
+            </tr>
+            <tr>
+              <td style="padding:9px 14px; border-top:1px solid #D8E4F5; color:#475569; font-size:11px;">New Role</td>
+              <td align="right" style="padding:9px 14px; border-top:1px solid #D8E4F5; font-size:11px; font-weight:bold; color:#0B2D5C;">{{new_role_label}}</td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <tr><td style="padding:14px 32px 0 32px;">
+          <p style="color:#475569; font-size:12px; line-height:1.6; margin:0;">Your permissions adjust to the new role. Re-check your access when you next sign in.</p>
+        </td></tr>
+
+        <!-- Security disclaimer: shared partial (§10, no duplication) -->
+        <tr><td style="padding:16px 32px 24px 32px;">
+          {{security_advisory_block}}
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding:18px 32px; background:#F3F8FF; border-top:1px solid #D8E4F5; text-align:center; border-radius:0 0 12px 12px;">
+          <p style="color:#475569; font-size:11px; line-height:1.6; margin:0;">&copy; 2026 Zoiko Payroll Inc. &bull; Privacy Policy &bull; Terms of Service</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

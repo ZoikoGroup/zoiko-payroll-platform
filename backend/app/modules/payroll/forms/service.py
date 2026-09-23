@@ -219,6 +219,7 @@ def submit_public_form(db: Session, token: str, values: dict) -> dict:
     send.status = FormSendStatus.SUBMITTED.value
     send.submitted_at = now
     db.commit()
+    _notify_public_submission(db, send, form, organization_id=send.organization_id)
     return {"message": "Thank you — your response has been submitted for review."}
 
 
@@ -318,4 +319,46 @@ def review_submission(db: Session, organization_id: int, submission_id: int, app
         f"{'Approved' if approve else 'Rejected'} '{form.name}' submission from '{employee.name}'.",
         ActivityStatus.INFO, actor_id=actor_id,
     )
+    _notify_submission_review(db, employee, form, approve, notes, organization_id)
     return {"message": "Submission approved and applied." if approve else "Submission rejected."}
+
+
+# ── Email notifications (best-effort, never block the action) ───────────────
+
+def _notify_submission_review(db: Session, employee, form, approve: bool, notes, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not employee or not employee.email:
+            return
+        from app.services.email_service import (
+            send_form_submission_approved_email, send_form_submission_rejected_email,
+        )
+        if approve:
+            send_form_submission_approved_email(
+                employee.email, employee.name or "there", form.name or "Payroll update form",
+                organization_id=organization_id, db=db,
+            )
+        else:
+            send_form_submission_rejected_email(
+                employee.email, employee.name or "there", form.name or "Payroll update form",
+                notes=notes or "", organization_id=organization_id, db=db,
+            )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] form-review email failed for org {organization_id}: {exc}")
+
+
+def _notify_public_submission(db: Session, send, form, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
+        if not employee or not employee.email:
+            return
+        from app.services.email_service import send_form_public_submission_confirmation_email
+        send_form_public_submission_confirmation_email(
+            employee.email, employee.name or "there", form.name or "Payroll update form",
+            organization_id=organization_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] public-submission email failed for org {organization_id}: {exc}")

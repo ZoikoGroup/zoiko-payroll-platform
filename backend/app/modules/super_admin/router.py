@@ -184,6 +184,16 @@ def set_user_status(
         raise BadRequestException("You cannot deactivate your own account.")
     user.is_active = is_active
     db.commit()
+    try:
+        from app.services.email_service import send_user_status_changed_email
+        if user.email:
+            send_user_status_changed_email(
+                user.email, user.full_name or "there", is_active,
+                organization_id=user.organization_id, db=db,
+            )
+    except Exception as exc:  # pragma: no cover — notification never blocks the status flip
+        import logging
+        logging.getLogger("zoiko").warning(f"[super-admin] user-status email failed for user {user_id}: {exc}")
     return {"message": "User status updated."}
 
 
@@ -603,6 +613,31 @@ def assign_compliance_policy(
     from app.modules.payroll import service as payroll_service
 
     result = payroll_service.assign_pack_to_organizations(db, id, payload.organizationIds, actor_id=current_user.id)
+    try:
+        from app.modules.payroll.models import JurisdictionPack
+        from app.services.email_service import (
+            _get_org_contact_email, send_policy_assigned_to_organization_email,
+        )
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == id).first()
+        pack_label = (pack.pack_id if pack else "") or f"policy #{id}"
+        version = str(pack.version) if pack and pack.version is not None else ""
+        country_label = ""
+        if pack and pack.jurisdiction_country:
+            country_label = {
+                "US": "United States", "UK": "United Kingdom", "AU": "Australia",
+                "DE": "Germany", "CA": "Canada", "IN": "India",
+            }.get(str(pack.jurisdiction_country).upper(), str(pack.jurisdiction_country))
+        for org_id in payload.organizationIds:
+            org_email = _get_org_contact_email(db, org_id)
+            if not org_email:
+                continue
+            send_policy_assigned_to_organization_email(
+                org_email, pack_label, version=version, country_label=country_label,
+                organization_id=org_id, db=db,
+            )
+    except Exception as exc:  # pragma: no cover — notification never blocks the assignment
+        import logging
+        logging.getLogger("zoiko").warning(f"[super-admin] policy-assign emails failed for pack {id}: {exc}")
     if result["isTax"]:
         return {
             "message": f"Tax applied to {result['updated']} organization(s) — "

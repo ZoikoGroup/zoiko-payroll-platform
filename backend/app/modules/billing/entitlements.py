@@ -509,6 +509,7 @@ def create_entitlement_override(
     )
     db.commit()
     db.refresh(override)
+    _notify_entitlement_override_granted(db, override, organization_id)
     return override
 
 
@@ -661,3 +662,24 @@ def require_scope_limit(resource: str, requested_qty: int = 1):
         return True
 
     return _check
+
+
+def _notify_entitlement_override_granted(db: Session, override, organization_id: int) -> None:
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        from app.services.email_service import _get_org_contact_email, send_entitlement_override_granted_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        send_entitlement_override_granted_email(
+            org_email,
+            feature_key=override.feature_key,
+            limit_value=override.limit_value,
+            reason=override.reason or "",
+            expires_at=override.expires_at,
+            organization_id=organization_id,
+            db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[billing] entitlement-override email failed for org {organization_id}: {exc}")
