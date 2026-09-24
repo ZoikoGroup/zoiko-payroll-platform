@@ -456,8 +456,9 @@ def test_ported_templates_keep_test_asserted_copy():
     assert ">Reset password</a>" in reset
     assert "{{expires_at_local}}" in reset
     assert "If this was not you" in reset
-    assert 'alt="Zoiko Payroll"' in reset
-    assert "{{logo_url}}" in reset
+    # Header brand mark is a text lockup (white "Zoiko" + light blue "Payroll"),
+    # not an <img>, since {{logo_url}} may be blank/unset per-org.
+    assert '<span style="color:#ffffff;">Zoiko</span><span style="color:#7dabff;"> Payroll</span>' in reset
     assert "temporary_password" not in reset
 
 

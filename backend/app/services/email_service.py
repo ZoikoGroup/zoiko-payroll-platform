@@ -17,6 +17,7 @@ import os
 import re
 import smtplib
 import ssl
+from typing import Optional
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -55,6 +56,7 @@ PALETTE = {
     "error": "#b91c1c",
     "footer_bg": "#f0f6ff",
     "footer_text": "#5b7290",
+    "brand_accent": "#7dabff",
 }
 
 # Shared security advisory, restyled to the canonical palette (the wording —
@@ -1268,12 +1270,23 @@ def send_organization_created_email(
     organization_name: str,
     reference_id: str = "",
     product_route: str = "standalone_payroll",
+    plan_display_name: Optional[str] = None,
     setup_link: str = "",
     organization_id=None,
     db=None,
 ) -> bool:
     """COM-001 (Class P1): Organization account created notification.
-    Sent only to the primary administrator upon organization creation."""
+    Sent only to the primary administrator upon organization creation.
+
+    plan_display_name is the real BillingPlan.name (e.g. "Professional"),
+    resolved by the caller from the plan_code the customer picked on
+    RegisterPage.jsx — checkout hasn't happened yet at send time, so this
+    is informational only, not a billing/entitlement source of truth.
+    Previously this template received product_route ("standalone_payroll")
+    and never rendered it at all — every plan's welcome email was
+    byte-identical, naming no plan. None (unresolved code, or a trial/
+    Enterprise path this parameter doesn't apply to) omits the line
+    entirely rather than showing a blank or a raw code string."""
     from app.config import settings
     if not reference_id:
         import uuid
@@ -1292,6 +1305,7 @@ def send_organization_created_email(
             "recipient_first_name": recipient_first_name or "Admin",
             "organization_name": organization_name,
             "product_route": product_route,
+            "plan_display_name": plan_display_name,
             "reference_id": reference_id,
             "cta_url": setup_link,
             "cta_label": "Begin organization setup",

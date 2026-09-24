@@ -684,6 +684,23 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
                 send_super_admin_org_created_notification_email,
             )
             ref_id = f"ORG-{org.id:04d}-INIT"
+
+            # data.plan_code is Stage 1's plan-picker choice, carried
+            # through purely so the welcome email can name the actual plan
+            # — checkout hasn't happened yet at this point (that's
+            # PlanReviewPage, a separate later call), so there's no
+            # BillingSubscription/plan_version to resolve from yet, only
+            # this code string. Resolve it to the real BillingPlan.name
+            # (never show the raw code — "PROFESSIONAL" means nothing to a
+            # customer) rather than hardcoding a second code->name map.
+            plan_display_name = None
+            if data.plan_code:
+                from app.modules.billing.models import BillingPlan
+
+                plan_row = db.query(BillingPlan).filter(BillingPlan.code == data.plan_code.upper()).first()
+                if plan_row is not None:
+                    plan_display_name = plan_row.name
+
             _dispatch_email_guarded(
                 db,
                 event_type="commercial.organization_created",
@@ -700,6 +717,7 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
                     recipient_first_name=first_name,
                     organization_name=org.organization_name,
                     reference_id=ref_id,
+                    plan_display_name=plan_display_name,
                     organization_id=org.id,
                     db=db,
                 ),
