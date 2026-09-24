@@ -51,6 +51,7 @@ from app.modules.payroll.models import (
     EmployeeEstablishment, PayrollNiReliefFact, CourtOrderedDeduction, RtiSubmission, SuperGuaranteeLiability,
     PackHotfixActivation, TestCertificationRun, TaxabilityRule, StateLocalProgramReadiness,
     SalaryTdsDeclaration, SalaryTdsClaim, EmployeeBenefitValuation,
+    PRWithholdingCertificate,
     EmployeeStatutoryProfile, PapAlgorithmAsset, GermanyHealthFund,
     GermanyContributionCeiling, GermanyPvConfiguration, GermanyPapRelease, GermanyMinijobMidijobParameter,
     GermanyElstamChangeListBatch, GermanyElstamImportAttempt, GermanyEarningTaxabilityRule,
@@ -60,6 +61,8 @@ from app.modules.payroll.models import (
     GermanyOvertimeWageTaxResult, GermanyOvertimeSocialInsuranceResult,
     GermanyOvertimePremiumComponent, GermanyAccidentInsuranceProfile,
     GermanyChurchTaxException,
+    EmployerFranceProfile, FranceEstablishmentRatePack, FrancePASRate,
+    FranceDsnSubmission, FranceDsnOutboxItem,
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
 from app.modules.payroll.employee_validation import get_employee_validation_strategy, _STRATEGIES
@@ -77,6 +80,9 @@ from app.modules.payroll.schemas import (
     GermanyElstamChangeListBatchCreate, GermanyElstamChangeListBatchStatusUpdate,
     GermanyEarningTaxabilityRuleCreate, GermanyHealthFundU1TariffCreate,
     GermanyOvertimeWorkRecordCreate,
+    EmployerFranceProfileUpsert, FranceEstablishmentRatePackUpsert,
+    FrancePASRateUpsert, FranceDsnSubmissionCreate, FranceDsnStatusUpdate,
+    FranceDsnOutboxCreate,
 )
 from app.core.exceptions import NotFoundException, BadRequestException, GermanyPapGateBlockedException
 from fastapi import HTTPException, status as http_status
@@ -115,7 +121,20 @@ def _normalize_country(country: str) -> str:
     if not country:
         return "IN"
     key = country.strip().lower()
-    return _COUNTRY_NAME_TO_CODE.get(key, country.strip().upper()[:2])
+    if key in _COUNTRY_NAME_TO_CODE:
+        return _COUNTRY_NAME_TO_CODE[key]
+    # Countries not in the small dict above (e.g. the Caribbean/Puerto Rico
+    # jurisdictions) still need a real full-name lookup before falling back
+    # to a blind [:2] truncation, which mis-resolves multi-word names (e.g.
+    # "Cayman Islands" -> "CA", colliding with Canada's real code).
+    # app.core.jurisdiction is the complete/authoritative registry for
+    # these; imported locally to avoid a module-load-time import cycle,
+    # matching this file's existing pattern (see get_company_details below).
+    from app.core.jurisdiction import get_jurisdiction_code
+    code = get_jurisdiction_code(country)
+    if code:
+        return code
+    return country.strip().upper()[:2]
 
 
 def _round2(value: Decimal) -> Decimal:
@@ -1505,6 +1524,59 @@ def _resolve_pack_scoped_rows(db: Session, rows: list, as_of) -> list:
     return [r for r in rows if getattr(r, "jurisdiction_pack_id", None) == winning_pack_id]
 
 
+# Canonical state/province-scoped TaxSlab/ContributionRate rows (seeded via
+# Super Admin) are keyed by the 2-letter code for the two countries whose
+# own statutory convention uses one (US/CA) — confirmed live: Canada's
+# CA-SK-2026-V1 pack's brackets are stored with jurisdiction_state="SK".
+# An org's own CompanyComplianceDetails.jurisdiction_state, however, can
+# hold the FULL region name captured at registration (frontend's
+# registrationRegions.js dropdown lists "Saskatchewan", "California", ...,
+# not codes) — found 2026-09-24 when a real Canada org's Compliance >
+# Tax Configuration page showed "no provincial tax slabs configured" for
+# Saskatchewan despite an Active, populated SK pack existing. An exact
+# string match between the two never matches. UK/India/Australia are
+# deliberately NOT included here: their canonical data already uses full
+# region names ("England"/"Telangana"/...) as the real convention, so
+# normalizing those would break a currently-correct match, not fix one.
+_CA_PROVINCE_NAME_TO_CODE = {
+    "ontario": "ON", "quebec": "QC", "british columbia": "BC", "alberta": "AB",
+    "manitoba": "MB", "saskatchewan": "SK", "nova scotia": "NS",
+    "new brunswick": "NB", "newfoundland and labrador": "NL",
+    "prince edward island": "PE", "northwest territories": "NT",
+    "yukon": "YT", "nunavut": "NU",
+}
+_US_STATE_NAME_TO_CODE = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA", "hawaii": "HI",
+    "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
+
+
+def _normalize_jurisdiction_state(country: Optional[str], state: Optional[str]) -> Optional[str]:
+    """Map a full state/province name to its 2-letter code for the
+    countries where that's the real canonical convention (US/CA). Passes
+    an already-correct code (or any value from a country not in scope)
+    through unchanged — a dict-lookup miss is a safe no-op, so this never
+    breaks an already-working exact match."""
+    if not state or not country:
+        return state
+    if country == "CA":
+        return _CA_PROVINCE_NAME_TO_CODE.get(state.strip().lower(), state)
+    if country == "US":
+        return _US_STATE_NAME_TO_CODE.get(state.strip().lower(), state)
+    return state
+
+
 def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_of=None, filing_status: str = None, locality: Optional[str] = None) -> Tuple[dict, list]:
     """Region-specific rates/slabs for a country+state combination — a
     DELIBERATELY SEPARATE, simpler lookup from _resolve_effective_rate_inputs
@@ -1566,6 +1638,7 @@ def get_state_scoped_config(db: Session, country: str, state: Optional[str], as_
     at all."""
     if not state:
         return {}, []
+    state = _normalize_jurisdiction_state(country, state)
     rate_locality_clause = (
         or_(ContributionRate.jurisdiction_locality.is_(None), ContributionRate.jurisdiction_locality == locality)
         if locality else ContributionRate.jurisdiction_locality.is_(None)
@@ -7765,7 +7838,7 @@ def get_organizations_eligible_for_pack(db: Session, pack_row_id: int) -> List[d
         country_code = details.jurisdiction_country if details and details.jurisdiction_country else None
         state = details.jurisdiction_state if details and details.jurisdiction_state else None
         if not country_code:
-            country_code = org.country and _COUNTRY_NAME_TO_JURISDICTION_CODE.get(org.country.strip().lower())
+            country_code = _jurisdiction_code_for_org_country(org.country)
             state = org.state or None
         if country_code != pack.jurisdiction_country:
             continue
@@ -8328,6 +8401,17 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "TT": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "tds", "professional_tax", "social_security", "total_deductions",
            "employer_social_security", "net_pay"],
+    # Puerto Rico (2026-09-23, ZP-PR-ENG-001) — exactly the PayslipItem
+    # columns engine/countries/puerto_rico.py's calculate() actually
+    # returns (see that module's own "Reused fields" docstring): local
+    # Hacienda withholding (tds), Social Security, Medicare (incl.
+    # Additional Medicare), FUTA-equivalent (employer_futa), DTRH
+    # Unemployment (employer_sui), SINOT (state_disability_insurance /
+    # employer_state_program_contributions).
+    "PR": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "tds", "social_security", "medicare", "state_disability_insurance", "total_deductions",
+           "employer_social_security", "employer_medicare", "employer_futa", "employer_sui",
+           "employer_state_program_contributions", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -8454,6 +8538,46 @@ _REPORT_COMPONENTS_BY_TYPE = {
     "940": [
         ("employer_info", "Employer Information"),
         ("futa", "FUTA Wages & Tax"),
+    ],
+    # Puerto Rico Form 499 R-1B — per QUARTER, employer-level only,
+    # cross-run aggregation via generate_pr_499r1b (bespoke, independent
+    # from every US report_type above — see that function's own docstring).
+    "PR_499R1B": [
+        ("employer_info", "Employer Information"),
+        ("withholding", "Wages & Withholding"),
+    ],
+    # Federal Form 941 for a Puerto Rico employer — same box structure as
+    # "941" above (FICA is the same federal law), but its own report_type
+    # so it is never confused with a mainland US 941 template, and
+    # generate_pr_941 (never generate_us_941) is what fills it.
+    "PR_941": [
+        ("employer_info", "Employer Information (Line 1 area)"),
+        ("wages_tax", "Wages & Federal Tax (Line 2-3)"),
+        ("ss_medicare", "Social Security & Medicare (Line 5a/5c)"),
+        ("totals", "Totals (Line 6/12)"),
+    ],
+    # Federal Form 940 (FUTA-equivalent) for a Puerto Rico employer — same
+    # reasoning as PR_941 above.
+    "PR_940": [
+        ("employer_info", "Employer Information"),
+        ("futa", "FUTA-equivalent Wages & Tax"),
+    ],
+    # Puerto Rico Form 499R-2/W-2PR — per EMPLOYEE per YEAR, the annual
+    # year-end withholding statement (generate_pr_w2pr, independent from
+    # generate_us_w2/report_type "W2").
+    "PR_W2PR": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("box_wages", "Wages & PR Tax Withheld"), ("box_ss_medicare", "Social Security & Medicare"),
+        ("box_sinot", "SINOT"),
+    ],
+    # DTRH quarterly wage/contribution return (PR-020) — per QUARTER,
+    # employer-level only, cross-run aggregation via
+    # generate_pr_dtrh_quarterly (bespoke, independent from every US
+    # report_type above).
+    "PR_DTRH_QUARTERLY": [
+        ("employer_info", "Employer Information"),
+        ("unemployment", "Unemployment Wages & Tax"),
+        ("sinot", "SINOT Wages & Contributions"),
     ],
     # Distinct report_type keys for named forms that would otherwise share
     # the generic "TDS" category — report_type is the disambiguating key
@@ -10370,6 +10494,17 @@ def generate_india_form_123(
 
 _US_NEW_HIRE_REPORT_DEFAULT_DAYS = 20
 
+# ASUME (Puerto Rico's own new/rehired-employee reporting registry,
+# PR-007/PR-023 — ZP-PR-ENG-001) — a DIFFERENT legal authority from the US
+# state new-hire registries above (ASUME is Puerto Rico's child-support
+# enforcement agency, not a state workforce agency), reusing the SAME
+# NewHireReport model/table (organization_id/employee_id/work_state/
+# hire_date/due_date/status are all generic, not US-specific) but with its
+# own named constant so the 20-day figure's provenance is never confused
+# between the two. PR-023: "no later than 20 days after hire" per current
+# official ASUME new-hire guidance.
+_PR_ASUME_NEW_HIRE_REPORT_DEFAULT_DAYS = 20
+
 
 def create_new_hire_report(
     db: Session, organization_id: int, employee_id: int,
@@ -10953,6 +11088,573 @@ def generate_us_940(
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
         jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
         reporting_year=str(year), reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Puerto Rico: Form 499 R-1B (quarterly local withholding return) +
+# federal-equivalent 941/940 (ZP-PR-ENG-001 §10) ────────────────────────
+# All three filter on PayslipItem.country_code == "PR" ONLY — deliberately
+# NEVER extending generate_us_941/generate_us_940's own "US" filter or
+# calling into them, per engine/countries/puerto_rico.py's "never share
+# state with us.py" doctrine (Venu's explicit instruction: PR is a
+# sibling of the Caribbean countries, not a US-dependent variant). Reuses
+# genuinely country-agnostic shared infrastructure only — _US_REPORT_
+# FINALIZED_STATUSES (a plain PayrollStatus tuple despite its name),
+# _us_federal_quarter_date_range (ordinary IRS calendar quarters, not
+# US-specific math), and _walk_us_aggregate_report_components (a generic
+# template-field walker) — the same kind of shared-infrastructure reuse
+# every country's report generator already does via ReportTemplate/
+# GeneratedReport themselves.
+
+_PR_499R1B_QUARTER_DUE_DATES = {1: (4, 30), 2: (7, 31), 3: (10, 31), 4: (1, 31)}  # Q4 due date is in the FOLLOWING year
+
+
+def generate_pr_499r1b(
+    db: Session, organization_id: int, report_template_id: int, year: int, quarter: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Puerto Rico Hacienda Form 499 R-1B — quarterly local income-tax
+    withholding return (PR-012). Aggregate, employer-level, from real
+    committed PR payslips only."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_499R1B":
+        raise BadRequestException(f"generate_pr_499r1b is only for PR_499R1B templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _us_federal_quarter_date_range(year, quarter)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in period_items), z)
+    total_withholding = sum((i.tds or z for i in period_items), z)
+    employee_count = len({i.employee_id for i in period_items})
+    due_month, due_day = _PR_499R1B_QUARTER_DUE_DATES[quarter]
+    due_year = year + 1 if quarter == 4 else year
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_hacienda_ein": company.tax_no if company else None,
+        "employee_count": employee_count,
+        "total_wages": float(total_wages),
+        "total_pr_withholding": float(total_withholding),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "quarter": quarter, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "dueDate": date(due_year, due_month, due_day).isoformat(),
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "Deposit-category classification (monthly/semiweekly/quarterly-exception/$100k-next-business-day — "
+            "PR-011) is NOT computed here — no deposits-made ledger exists anywhere in this platform.",
+            "Prior-period corrections (append-only deltas by original statutory period, PR-039) are not yet "
+            "reflected — this reads only currently-committed payslips as of generation time.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"Q{quarter}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_pr_941(
+    db: Session, organization_id: int, report_template_id: int, year: int, quarter: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Federal Form 941 for a Puerto Rico employer (PR-013/PR-017 — the
+    same real IRS quarterly employment-tax return US employers file,
+    reporting FICA on PR wages; Form 941-PR is discontinued for 2024+
+    periods). Computed entirely from PR's own independently-tracked FICA
+    figures — never reads a US PayslipItem or calls generate_us_941."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_941":
+        raise BadRequestException(f"generate_pr_941 is only for PR_941 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _us_federal_quarter_date_range(year, quarter)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in period_items), z)
+    total_ss_tax_employee = sum((i.social_security or z for i in period_items), z)
+    total_ss_tax_employer = sum((i.employer_social_security or z for i in period_items), z)
+    total_medicare_tax_employee = sum((i.medicare or z for i in period_items), z)
+    total_medicare_tax_employer = sum((i.employer_medicare or z for i in period_items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_SS_RATE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    ss_rate_employee = resolve_jurisdiction_parameter(rate_map, "pr_ss", _PR_SS_RATE, side="employee", country="PR")
+    ss_wages = (total_ss_tax_employee / ss_rate_employee) if ss_rate_employee else z
+    medicare_wages = total_wages  # Medicare has no wage cap.
+
+    total_ss_tax = total_ss_tax_employee + total_ss_tax_employer
+    total_medicare_tax = total_medicare_tax_employee + total_medicare_tax_employer
+    total_taxes_before_adjustments = total_ss_tax + total_medicare_tax
+    employee_count = len({i.employee_id for i in period_items})
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_ein": company.tax_no if company else None,
+        "line1_employee_count": employee_count,
+        "line2_wages": float(total_wages),
+        "line3_federal_tax_withheld": 0.0,  # PR-010/PR-014: Federal FIT is a separate, employee-level obligation, never populated from PR withholding
+        "line5a_ss_wages": float(ss_wages),
+        "line5a_ss_tax": float(total_ss_tax),
+        "line5c_medicare_wages": float(medicare_wages),
+        "line5c_medicare_tax": float(total_medicare_tax),
+        "line6_total_taxes_before_adjustments": float(total_taxes_before_adjustments),
+        "line12_total_taxes_after_adjustments_and_credits": float(total_taxes_before_adjustments),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "quarter": quarter, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "Line 3 (federal income tax withheld) is always $0 — Puerto Rico federal FIT applicability is a "
+            "separate, employee-level determination not yet modeled anywhere in this engine (PR-006's MSRRA/FIT "
+            "applicability routing is disclosed as deferred).",
+            "Lines 5c/5d (regular Medicare vs. Additional Medicare) are combined — same disclosed gap as "
+            "generate_us_941.",
+            "Line 13 (total deposits)/balance due are NOT computed — no deposits-made ledger exists.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"Q{quarter}",
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_pr_940(
+    db: Session, organization_id: int, report_template_id: int, year: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Federal Form 940 (FUTA) for a Puerto Rico employer (PR-016/PR-017).
+    Computed entirely from PR's own independently-tracked FUTA-equivalent
+    figures — never reads a US PayslipItem or calls generate_us_940."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_940":
+        raise BadRequestException(f"generate_pr_940 is only for PR_940 templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    year_start, year_end = date(year, 1, 1), date(year, 12, 31)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    year_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= year_start, PayrollRun.pay_date <= year_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_payments = sum((i.gross_pay or z for i in year_items), z)
+    total_futa_tax = sum((i.employer_futa or z for i in year_items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_FUTA_WAGE_BASE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    futa_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_futa_wage_base", _PR_FUTA_WAGE_BASE, country="PR")
+    per_employee_gross: dict = {}
+    for i in year_items:
+        per_employee_gross[i.employee_id] = per_employee_gross.get(i.employee_id, z) + (i.gross_pay or z)
+    futa_taxable_wages = sum((min(g, futa_wage_base) for g in per_employee_gross.values()), z)
+    employee_count = len(per_employee_gross)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_ein": company.tax_no if company else None,
+        "total_payments": float(total_payments),
+        "futa_taxable_wages": float(futa_taxable_wages),
+        "futa_tax_due": float(total_futa_tax),
+        "employee_count": employee_count,
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year},
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "\"Payments exempt from FUTA tax\" is not modeled — same disclosed gap as generate_us_940.",
+            "Credit-reduction states are not flagged or auto-detected — whatever effective FUTA-equivalent rate "
+            "was actually configured (or the 6.0% gross default) is what futa_tax_due already reflects.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{year_start.isoformat()}:{year_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+# ── Puerto Rico: Form 499R-2/W-2PR (employee year-end withholding
+# statement) + DTRH quarterly wage/contribution return (§10, PR-020) ────
+# Same "independent from every US report_type, never touches
+# generate_us_w2/country_code=='US'" doctrine as the PR forms above.
+
+def generate_pr_w2pr(
+    db: Session, organization_id: int, report_template_id: int, employee_id: int, tax_year: str,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Puerto Rico Form 499R-2/W-2PR — the annual employee year-end
+    withholding statement (§10 table), Puerto Rico's own analog to the US
+    W-2. Per-employee, PAY-DATE-attributed (a run whose period straddles
+    Dec 31 is attributed to the year it was actually paid, same
+    constructive-receipt convention as generate_us_w2). Computed entirely
+    from PR's own independently-tracked figures — never reads a US
+    PayslipItem or calls generate_us_w2."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_W2PR":
+        raise BadRequestException(f"generate_pr_w2pr is only for PR_W2PR templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    try:
+        year_int = int(tax_year)
+    except (TypeError, ValueError):
+        raise BadRequestException('tax_year must be a 4-digit year, e.g. "2026".')
+    year_start, year_end = date(year_int, 1, 1), date(year_int, 12, 31)
+
+    items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= year_start, PayrollRun.pay_date <= year_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in items), z)
+    total_pr_tax = sum((i.tds or z for i in items), z)
+    total_ss_tax = sum((i.social_security or z for i in items), z)
+    total_medicare_tax = sum((i.medicare or z for i in items), z)
+    total_sinot = sum((i.state_disability_insurance or z for i in items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_SS_WAGE_BASE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    ss_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_ss_wage_base", _PR_SS_WAGE_BASE, country="PR")
+    ss_wages = min(total_wages, ss_wage_base)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_hacienda_ein": company.tax_no if company else None,
+        "employee_name": employee.name,
+        "employee_ssn": (employee.compliance_fields or {}).get("ssn"),
+        "box_wages": float(total_wages),
+        "box_pr_tax_withheld": float(total_pr_tax),
+        "box_ss_wages": float(ss_wages),
+        "box_ss_tax": float(total_ss_tax),
+        "box_medicare_wages": float(total_wages),
+        "box_medicare_tax": float(total_medicare_tax),
+        "box_sinot": float(total_sinot),
+    }
+
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == template.id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    component_snapshots = []
+    values: dict = {}
+    for component in components:
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        field_snapshots = []
+        for field in fields:
+            field_snapshots.append({
+                "fieldKey": field.field_key, "label": field.label, "type": field.field_type,
+                "dataSourceKind": field.data_source_kind, "sourceColumn": field.source_column,
+                "aggregation": field.aggregation,
+            })
+            values[field.field_key] = box_values.get(field.field_key)
+        component_snapshots.append({"componentKey": component.component_key, "label": component.label, "fields": field_snapshots})
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": {
+            "name": company.name if company else None, "hacienda_ein": company.tax_no if company else None,
+        },
+        "employees": [{"employeeId": employee.id, "employeeName": employee.name, "values": values}],
+        "taxYear": tax_year,
+        "knownGaps": [
+            "No Act 60/other PR tax-exempt-income boxes are populated — no such classification exists on a "
+            "PR PayslipItem today.",
+            "Dependents/deduction-allowance detail from the employee's own PRWithholdingCertificate is not "
+            "broken out on this statement — only the resulting withheld tax total (box_pr_tax_withheld) is shown.",
+            "Additional Medicare is combined into box_medicare_tax, same disclosed gap as generate_us_w2's Box 6.",
+        ],
+    }
+
+    scope_key = f"EMPLOYEE:{employee.id}:{tax_year}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=employee.id, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=tax_year, reporting_period=None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def generate_pr_dtrh_quarterly(
+    db: Session, organization_id: int, report_template_id: int, year: int, quarter: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """DTRH quarterly wage/contribution return (PR-020) — unemployment
+    (employer_sui) and SINOT wage/contribution data, generated from
+    committed PR payroll only. The portal's own calculation is an
+    external reference per PR-020, never a substitute for this
+    deterministic ledger."""
+    template = get_report_template(db, report_template_id)
+    if template.report_type != "PR_DTRH_QUARTERLY":
+        raise BadRequestException(f"generate_pr_dtrh_quarterly is only for PR_DTRH_QUARTERLY templates, not {template.report_type!r}.")
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    period_start, period_end = _us_federal_quarter_date_range(year, quarter)
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+
+    period_items = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.country_code == "PR",
+            PayrollRun.pay_date >= period_start, PayrollRun.pay_date <= period_end,
+            PayrollRun.status.in_(_US_REPORT_FINALIZED_STATUSES),
+        )
+        .all()
+    )
+
+    z = Decimal("0")
+    total_wages = sum((i.gross_pay or z for i in period_items), z)
+
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+    from app.modules.payroll.engine.countries.puerto_rico import _PR_UNEMPLOYMENT_WAGE_BASE, _PR_SINOT_WAGE_BASE
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    unemployment_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_unemployment_wage_base", _PR_UNEMPLOYMENT_WAGE_BASE, country="PR")
+    sinot_wage_base = resolve_jurisdiction_parameter(rate_map, "pr_sinot_wage_base", _PR_SINOT_WAGE_BASE, country="PR")
+
+    # Per-employee, THIS-QUARTER-ONLY wage-base capping — a documented
+    # simplification (see knownGaps): the real annual cap is enforced by
+    # the engine's own real-time YTD accumulator at calculation time
+    # (see puerto_rico.py's _capped_wage_base), so employer_sui/SINOT
+    # amounts already reflect the correct capped contribution. The
+    # "taxable wages" figures below are independently recomputed
+    # (same reasoning as generate_pr_940's own FUTA-taxable-wages
+    # recompute) but ONLY within this quarter's own wages, not full
+    # year-to-date — an employee whose annual cap was already reached in
+    # an earlier quarter would show an overstated taxable-wages figure
+    # here even though the actual contribution amounts (summed directly
+    # from committed payslips) remain correct.
+    per_employee_gross: dict = {}
+    for i in period_items:
+        per_employee_gross[i.employee_id] = per_employee_gross.get(i.employee_id, z) + (i.gross_pay or z)
+    unemployment_taxable_wages = sum((min(g, unemployment_wage_base) for g in per_employee_gross.values()), z)
+    sinot_taxable_wages = sum((min(g, sinot_wage_base) for g in per_employee_gross.values()), z)
+
+    total_unemployment_tax = sum((i.employer_sui or z for i in period_items), z)
+    total_sinot_employee = sum((i.state_disability_insurance or z for i in period_items), z)
+    total_sinot_employer = sum((i.employer_state_program_contributions or z for i in period_items), z)
+    employee_count = len(per_employee_gross)
+
+    box_values = {
+        "employer_name": company.name if company else None,
+        "employer_dtrh_account": company.tax_no if company else None,
+        "employee_count": employee_count,
+        "total_wages": float(total_wages),
+        "unemployment_taxable_wages": float(unemployment_taxable_wages),
+        "unemployment_tax_due": float(total_unemployment_tax),
+        "sinot_taxable_wages": float(sinot_taxable_wages),
+        "sinot_employee_contribution": float(total_sinot_employee),
+        "sinot_employer_contribution": float(total_sinot_employer),
+    }
+    component_snapshots, values = _walk_us_aggregate_report_components(db, template, box_values)
+
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version, "components": component_snapshots},
+        "employer": values,
+        "period": {"year": year, "quarter": quarter, "periodStart": period_start.isoformat(), "periodEnd": period_end.isoformat()},
+        "employeeCount": employee_count,
+        "knownGaps": [
+            "Taxable-wages figures are capped within THIS QUARTER's own wages only, not full year-to-date — "
+            "see this function's own docstring for the exact scenario this understates/overstates.",
+            "The employer-specific DTRH unemployment rate and any special DTRH contribution component "
+            "(PR-018/DTRH component in §5) are not separately broken out here beyond the already-computed "
+            "unemployment_tax_due total.",
+        ],
+    }
+
+    scope_key = f"PERIOD:{period_start.isoformat()}:{period_end.isoformat()}"
+    existing = (
+        db.query(GeneratedReport)
+        .filter(
+            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=str(year), reporting_period=f"Q{quarter}",
         status="Generated", generated_by_id=actor_id,
         rendered_data=rendered_data, reconciliation=None,
     )
@@ -13435,7 +14137,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _load_ky_pension_ytd(db, emp.id, period_end or date.today())
             if emp_country == "KY" else
             _load_gy_paye_credit_ytd(db, emp.id, period_end or date.today())
-            if emp_country == "GY" else {}
+            if emp_country == "GY" else
+            _load_pr_ytd(db, emp.id, period_end or date.today())
+            if emp_country == "PR" else {}
         )
         option2_inputs = (
             _load_ca_option2_ytd(db, emp.id, period_end or date.today(), work_state) if emp_country == "CA" else {}
@@ -13496,6 +14200,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             get_india_salary_tds_inputs(db, organization_id, emp.id, india_tax_year_for_date(period_end or date.today()))
             if emp_country == "IN" else {}
         )
+        pr_certificate_inputs = (
+            get_pr_certificate_inputs(db, organization_id, emp.id) if emp_country == "PR" else {}
+        )
         employee_name = getattr(emp, "name", None) or f"Employee #{emp.id}"
 
         # Delegate to the strategy engine
@@ -13523,6 +14230,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             **ytd_inputs,
             **org_levy_inputs,
             **option2_inputs,
+            **pr_certificate_inputs,
         )
         try:
             calc = calculate_payroll(ctx, calculation_mode)
@@ -14167,6 +14875,360 @@ def _upsert_us_ytd_accumulator(db: Session, employee_id: int, pay_date, result, 
         row.ytd_taxable_wages = value
         row.last_updated_payslip_id = payslip_id
     db.flush()
+
+
+# ── Puerto Rico: five independent wage-base/threshold YTD trackers ─────
+# (ZP-PR-ENG-001 §13/§14 — SS $184,500, Additional Medicare $200,000,
+# FUTA-equivalent $7,000, DTRH unemployment $7,000, SINOT $9,000). Same
+# read/write/multi-component-in-one-call shape as _load_us_ytd/
+# _upsert_us_ytd_accumulator above, but with its OWN PayrollYtdAccumulator
+# component keys and its OWN calendar-year accumulator key — entirely
+# independent of _US_YTD_COMPONENTS/_us_ytd_tax_year, per
+# engine/countries/puerto_rico.py's "never import from or share state
+# with us.py" doctrine.
+_PR_YTD_COMPONENTS = (
+    "pr_ss_wages", "pr_medicare_wages", "pr_futa_wages", "pr_unemployment_wages", "pr_sinot_wages",
+)
+
+
+def _pr_ytd_tax_year(pay_date) -> str:
+    """Calendar-year accumulator key for Puerto Rico wage-base tracking —
+    same deliberate "its own concept, not a display label" reasoning as
+    _us_ytd_tax_year's own docstring."""
+    return f"PR-CY-{pay_date.year}"
+
+
+def _load_pr_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's ytd_pr_*_before
+    params — empty dict when PR hasn't opted into the rollout switch, or
+    when no accumulator rows exist yet for this employee/tax-year (a
+    brand-new PR employee's first payslip of the year). Never guesses/
+    backfills a starting value."""
+    if "PR" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    tax_year = _pr_ytd_tax_year(pay_date)
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == tax_year,
+            PayrollYtdAccumulator.tax_component.in_(_PR_YTD_COMPONENTS),
+        )
+        .all()
+    )
+    by_component = {r.tax_component: r.ytd_taxable_wages for r in rows}
+    ss_key, medicare_key, futa_key, unemployment_key, sinot_key = _PR_YTD_COMPONENTS
+    return dict(
+        ytd_pr_ss_wages_before=by_component.get(ss_key, Decimal("0")),
+        ytd_pr_medicare_wages_before=by_component.get(medicare_key, Decimal("0")),
+        ytd_pr_futa_wages_before=by_component.get(futa_key, Decimal("0")),
+        ytd_pr_unemployment_wages_before=by_component.get(unemployment_key, Decimal("0")),
+        ytd_pr_sinot_wages_before=by_component.get(sinot_key, Decimal("0")),
+    )
+
+
+def _upsert_pr_ytd_accumulator(db: Session, employee_id: int, pay_date, result, payslip_id: int = None):
+    """Writes this period's post-calculation cumulative wage figures back
+    to PayrollYtdAccumulator — get-or-create per (employee, tax_year,
+    component), flush (not commit; caller's own transaction boundary
+    still governs). No-op if the result carries no YTD figures (i.e. the
+    calculation ran dormant — result.ytd_pr_ss_wages_after is None), so
+    calling this unconditionally from every persisting entry point is
+    safe even while the rollout switch is off."""
+    if result.ytd_pr_ss_wages_after is None:
+        return
+    tax_year = _pr_ytd_tax_year(pay_date)
+    ss_key, medicare_key, futa_key, unemployment_key, sinot_key = _PR_YTD_COMPONENTS
+    values = {
+        ss_key: result.ytd_pr_ss_wages_after,
+        medicare_key: result.ytd_pr_medicare_wages_after,
+        futa_key: result.ytd_pr_futa_wages_after,
+        unemployment_key: result.ytd_pr_unemployment_wages_after,
+        sinot_key: result.ytd_pr_sinot_wages_after,
+    }
+    for component, value in values.items():
+        if value is None:
+            continue
+        row = (
+            db.query(PayrollYtdAccumulator)
+            .filter(
+                PayrollYtdAccumulator.employee_id == employee_id,
+                PayrollYtdAccumulator.tax_year == tax_year,
+                PayrollYtdAccumulator.tax_component == component,
+            )
+            .first()
+        )
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=tax_year, tax_component=component)
+            db.add(row)
+        row.ytd_taxable_wages = value
+        row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+# ── Puerto Rico: Form 499 R-4/R-4.1 withholding certificate (PR-005) ───
+# Same create-Draft -> submit -> approve-supersedes-prior immutable-
+# versioning CRUD pattern as create_salary_tds_declaration/
+# submit_salary_tds_declaration/approve_salary_tds_declaration above —
+# see PRWithholdingCertificate's own model docstring. Not tax-year-scoped.
+
+def create_pr_withholding_certificate(
+    db: Session, organization_id: int, employee_id: int,
+    personal_exemption_amount: Decimal = Decimal("0"), dependents_count: int = 0,
+    dependent_exemption_per_dependent: Decimal = Decimal("0"), deduction_allowance_amount: Decimal = Decimal("0"),
+    optional_married_computation: bool = False, msrra_election: bool = False,
+    additional_withholding_amount: Decimal = Decimal("0"),
+) -> PRWithholdingCertificate:
+    _get_employee_or_404(db, organization_id, employee_id)
+    row = PRWithholdingCertificate(
+        employee_id=employee_id, organization_id=organization_id,
+        personal_exemption_amount=personal_exemption_amount, dependents_count=dependents_count,
+        dependent_exemption_per_dependent=dependent_exemption_per_dependent,
+        deduction_allowance_amount=deduction_allowance_amount,
+        optional_married_computation=optional_married_computation, msrra_election=msrra_election,
+        additional_withholding_amount=additional_withholding_amount,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _get_pr_withholding_certificate_or_404(db: Session, organization_id: int, certificate_id: int) -> PRWithholdingCertificate:
+    row = db.query(PRWithholdingCertificate).filter(
+        PRWithholdingCertificate.id == certificate_id, PRWithholdingCertificate.organization_id == organization_id,
+    ).first()
+    if not row:
+        raise NotFoundException(f"Puerto Rico withholding certificate {certificate_id} not found.")
+    return row
+
+
+def submit_pr_withholding_certificate(db: Session, organization_id: int, certificate_id: int) -> PRWithholdingCertificate:
+    row = _get_pr_withholding_certificate_or_404(db, organization_id, certificate_id)
+    if row.status != "Draft":
+        raise BadRequestException(f"Certificate is {row.status}, not Draft — cannot submit.")
+    row.status = "Submitted"
+    row.submitted_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def approve_pr_withholding_certificate(db: Session, organization_id: int, certificate_id: int, approver_id: int) -> PRWithholdingCertificate:
+    row = _get_pr_withholding_certificate_or_404(db, organization_id, certificate_id)
+    if row.status != "Submitted":
+        raise BadRequestException(f"Certificate is {row.status}, not Submitted — cannot approve.")
+    existing = (
+        db.query(PRWithholdingCertificate)
+        .filter(
+            PRWithholdingCertificate.organization_id == organization_id, PRWithholdingCertificate.employee_id == row.employee_id,
+            PRWithholdingCertificate.status == "Approved",
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "Superseded"
+        db.add(existing)
+    row.status = "Approved"
+    row.approved_by_id = approver_id
+    row.approved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_pr_withholding_certificates(db: Session, organization_id: int, employee_id: Optional[int] = None) -> List[PRWithholdingCertificate]:
+    query = db.query(PRWithholdingCertificate).filter(PRWithholdingCertificate.organization_id == organization_id)
+    if employee_id:
+        query = query.filter(PRWithholdingCertificate.employee_id == employee_id)
+    return query.order_by(PRWithholdingCertificate.created_at.desc()).all()
+
+
+def accrue_pr_monthly_leave(
+    db: Session, organization_id: int, employee_id: int,
+    hired_before_2017: bool, years_of_service: Decimal, qualifying_small_employer: bool,
+    qualifying_hours_in_month: Decimal, period_label: Optional[str] = None,
+) -> PayrollLeaveAllocation:
+    """PR-028/PR-029: monthly vacation (Act 4-2017/Law 180, cohort-based)
+    + sick leave (flat 1 day/month at 130 hours) accrual — calls
+    engine/countries/puerto_rico.py's own pure calculators, then adds
+    this month's days to the SAME generic PayrollLeaveAllocation.
+    leave_balances JSON every other country's leave management already
+    uses (get_leave_allocations/bulk_save_leaves), reusing the existing
+    "sick" key and a new "vacation" key rather than a bespoke parallel
+    ledger. ADDITIVE only — this adds to whatever "total" already
+    exists, never resets or overwrites a balance an Org Admin has
+    separately edited. Not itself scheduled/automatic (no monthly job
+    calls this yet) — a manual/triggered action per month, same
+    "mechanism exists, orchestration is follow-up scope" contract as
+    every other PR calculator in this build."""
+    from app.modules.payroll.engine.countries import puerto_rico
+
+    _get_employee_or_404(db, organization_id, employee_id)
+    vacation_days = puerto_rico.calculate_pr_vacation_accrual(
+        hired_before_2017=hired_before_2017, years_of_service=years_of_service,
+        qualifying_small_employer=qualifying_small_employer, qualifying_hours_in_month=qualifying_hours_in_month,
+    )
+    sick_days = puerto_rico.calculate_pr_sick_leave_accrual(qualifying_hours_in_month)
+
+    row = (
+        db.query(PayrollLeaveAllocation)
+        .filter(PayrollLeaveAllocation.organization_id == organization_id, PayrollLeaveAllocation.employee_id == employee_id)
+        .first()
+    )
+    if row is None:
+        row = PayrollLeaveAllocation(organization_id=organization_id, employee_id=employee_id, leave_balances={})
+        db.add(row)
+        db.flush()
+
+    balances = dict(row.leave_balances or {})
+    vacation = dict(balances.get("vacation") or {"used": 0, "total": 0})
+    vacation["total"] = float(Decimal(str(vacation.get("total") or 0)) + vacation_days)
+    balances["vacation"] = vacation
+
+    sick = dict(balances.get("sick") or {"used": 0, "total": 0})
+    sick["total"] = float(Decimal(str(sick.get("total") or 0)) + sick_days)
+    balances["sick"] = sick
+
+    row.leave_balances = balances
+    if period_label:
+        row.period_label = period_label
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# Puerto Rico Christmas Bonus bonus-year accumulator (PR-032) — the bonus
+# year runs Oct 1-Sep 30, NOT a calendar/tax year, so this reuses the SAME
+# PayrollYtdAccumulator table every other wage-base tracker in this build
+# uses, but with its own "PR-BONUS-<year>" pseudo-tax-year key rather than
+# a calendar-year one. Two component keys under that key: cumulative
+# bonus-year WAGES and cumulative bonus-year HOURS — the hours figure is
+# stored in the SAME ytd_taxable_wages numeric column as a plain hours
+# count (not a dollar amount), the same "reuse an existing generic column
+# for a different unit" convention Trinidad's own NIS-class
+# adjustment_amount reuse already establishes elsewhere in this codebase.
+_PR_BONUS_YEAR_WAGES_COMPONENT = "pr_bonus_year_wages"
+_PR_BONUS_YEAR_HOURS_COMPONENT = "pr_bonus_year_hours"
+
+
+def _pr_bonus_year_key(as_of_date) -> str:
+    """PR-032: Puerto Rico's Christmas Bonus bonus year runs Oct 1-Sep
+    30 — "PR-BONUS-2026" for any date from 2025-10-01 through
+    2026-09-30 (the bonus year named for the calendar year it ENDS in,
+    matching the doc's own "Oct 1-Sep 30" framing)."""
+    start_year = as_of_date.year if as_of_date.month >= 10 else as_of_date.year - 1
+    return f"PR-BONUS-{start_year + 1}"
+
+
+def accrue_pr_bonus_year_totals(
+    db: Session, organization_id: int, employee_id: int, as_of_date,
+    wages_this_period: Decimal, hours_this_period: Decimal,
+) -> dict:
+    """Adds this period's wages/hours to the employee's running Christmas
+    Bonus bonus-year totals. ADDITIVE only — never resets. Not itself
+    scheduled/automatic (no payroll-run hook calls this yet); a manual/
+    triggered action per pay period, same "mechanism exists, orchestration
+    is follow-up scope" contract as accrue_pr_monthly_leave above."""
+    _get_employee_or_404(db, organization_id, employee_id)
+    bonus_year = _pr_bonus_year_key(as_of_date)
+
+    def _upsert(component: str, delta: Decimal):
+        row = (
+            db.query(PayrollYtdAccumulator)
+            .filter(
+                PayrollYtdAccumulator.employee_id == employee_id,
+                PayrollYtdAccumulator.tax_year == bonus_year,
+                PayrollYtdAccumulator.tax_component == component,
+            )
+            .first()
+        )
+        if row is None:
+            row = PayrollYtdAccumulator(employee_id=employee_id, tax_year=bonus_year, tax_component=component, ytd_taxable_wages=Decimal("0"))
+            db.add(row)
+        row.ytd_taxable_wages = (row.ytd_taxable_wages or Decimal("0")) + delta
+        return row
+
+    wages_row = _upsert(_PR_BONUS_YEAR_WAGES_COMPONENT, wages_this_period)
+    hours_row = _upsert(_PR_BONUS_YEAR_HOURS_COMPONENT, hours_this_period)
+    db.commit()
+    db.refresh(wages_row)
+    db.refresh(hours_row)
+    return dict(bonus_year=bonus_year, cumulative_wages=wages_row.ytd_taxable_wages, cumulative_hours=hours_row.ytd_taxable_wages)
+
+
+def get_pr_bonus_year_totals(db: Session, organization_id: int, employee_id: int, as_of_date) -> dict:
+    """Returns {bonus_year, cumulative_wages, cumulative_hours} (Decimal)
+    for the bonus year containing as_of_date — Decimal("0") for either
+    figure when nothing has been accrued yet this bonus year. Never
+    guesses/backfills."""
+    bonus_year = _pr_bonus_year_key(as_of_date)
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == bonus_year,
+            PayrollYtdAccumulator.tax_component.in_((_PR_BONUS_YEAR_WAGES_COMPONENT, _PR_BONUS_YEAR_HOURS_COMPONENT)),
+        )
+        .all()
+    )
+    by_component = {r.tax_component: r.ytd_taxable_wages for r in rows}
+    return dict(
+        bonus_year=bonus_year,
+        cumulative_wages=by_component.get(_PR_BONUS_YEAR_WAGES_COMPONENT, Decimal("0")),
+        cumulative_hours=by_component.get(_PR_BONUS_YEAR_HOURS_COMPONENT, Decimal("0")),
+    )
+
+
+def calculate_pr_christmas_bonus_from_accumulator(
+    db: Session, organization_id: int, employee_id: int, as_of_date,
+    hired_before_2017: bool, employer_size_over_threshold: bool, is_first_year: bool = False,
+) -> dict:
+    """Convenience wrapper: reads this employee's real accrued bonus-year
+    wages/hours (get_pr_bonus_year_totals) and feeds them straight into
+    engine/countries/puerto_rico.py's calculate_pr_christmas_bonus — the
+    full end-to-end path from real accumulated data to a real statutory
+    bonus figure, closing the gap the pure calculator's own module
+    docstring discloses (previously the caller had to supply final
+    totals itself)."""
+    from app.modules.payroll.engine.countries import puerto_rico
+
+    totals = get_pr_bonus_year_totals(db, organization_id, employee_id, as_of_date)
+    result = puerto_rico.calculate_pr_christmas_bonus(
+        hired_before_2017=hired_before_2017, employer_size_over_threshold=employer_size_over_threshold,
+        qualifying_hours=totals["cumulative_hours"], bonus_year_wages=totals["cumulative_wages"],
+        is_first_year=is_first_year,
+    )
+    result["bonus_year"] = totals["bonus_year"]
+    result["cumulative_wages"] = totals["cumulative_wages"]
+    result["cumulative_hours"] = totals["cumulative_hours"]
+    return result
+
+
+def get_pr_certificate_inputs(db: Session, organization_id: int, employee_id: int) -> dict:
+    """Returns kwargs for build_context_from_employee's
+    pr_certificate_* params — empty dict (PR-006: engine falls back to
+    its own default treatment) when no Approved certificate exists for
+    this employee. Never guesses/backfills a certificate."""
+    row = (
+        db.query(PRWithholdingCertificate)
+        .filter(
+            PRWithholdingCertificate.organization_id == organization_id,
+            PRWithholdingCertificate.employee_id == employee_id,
+            PRWithholdingCertificate.status == "Approved",
+        )
+        .first()
+    )
+    if row is None:
+        return {}
+    return dict(
+        pr_certificate_personal_exemption=row.personal_exemption_amount,
+        pr_certificate_dependents_count=row.dependents_count,
+        pr_certificate_dependent_exemption_per_dependent=row.dependent_exemption_per_dependent,
+        pr_certificate_deduction_allowance=row.deduction_allowance_amount,
+        pr_certificate_additional_withholding=row.additional_withholding_amount,
+        pr_certificate_msrra_election=row.msrra_election,
+    )
 
 
 # ── Australia: Superannuation Guarantee Maximum Contribution Base YTD ───
@@ -15523,6 +16585,104 @@ def calculate_us_federal_deposit_schedule(
     }
 
 
+# ── Puerto Rico: Hacienda deposit-category classification (PR-011) ─────
+# (ZP-PR-ENG-001 §3). Standalone, ORG-scoped calculator, same "not woven
+# into the regular per-period calculate() path" shape as
+# calculate_us_federal_deposit_schedule immediately above — reuses that
+# function's own pure date-math helpers (_next_business_day/
+# _next_weekday_on_or_after/_fifteenth_of_next_month, which carry no
+# country-specific state) but is its OWN independent function reading
+# PR-scoped rates only (country="PR"), never calling or modifying
+# calculate_us_federal_deposit_schedule itself — that function is
+# hardcoded to country="US" internally (its own get_contribution_rates
+# call), so it could not be reused directly without touching US's own
+# mechanism, which this build deliberately never does.
+#
+# PR-011's own FOUR-way classification (genuinely different from the
+# federal MONTHLY/SEMIWEEKLY/next-day-only shape above): a quarterly
+# remittance EXCEPTION (current-quarter withholding under $2,500) takes
+# precedence over the lookback-based Monthly/Semiweekly test entirely —
+# an employer below that threshold never has a per-payroll deposit due
+# date at all, only the quarterly 499 R-1B's own due date (PR-012).
+
+def calculate_pr_deposit_schedule(
+    db: Session, organization_id: int, lookback_period_liability: Decimal, current_quarter_withholding: Decimal,
+    payroll_date, accumulated_undeposited_liability: Optional[Decimal] = None,
+) -> dict:
+    """Returns this Puerto Rico employer's Hacienda withholding deposit
+    category (QUARTERLY_EXCEPTION/MONTHLY/SEMIWEEKLY) and the resulting
+    deposit due date for `payroll_date`, plus the $100,000 next-business-
+    day rule check when accumulated_undeposited_liability is supplied,
+    plus the Form 499R-2/W-2PR January 31-equivalent deadline for the
+    calendar year `payroll_date` falls in. Thresholds are Super-Admin-
+    configurable via rate_map (resolve_jurisdiction_parameter), falling
+    back to Administrative Determination 18-14's own 2026 figures. Same
+    weekend-only date adjustment as the federal version — no PR authority
+    holiday calendar is sourced anywhere in this engine, so a due date
+    landing on an actual PR government holiday is NOT further adjusted
+    (PR-012's own "unless an authority-approved holiday/weekend rule
+    shifts the date" caveat)."""
+    from app.modules.payroll.engine.countries.shared import resolve_jurisdiction_parameter
+
+    if lookback_period_liability is None or lookback_period_liability < 0:
+        raise BadRequestException("lookback_period_liability must be zero or positive.")
+    if current_quarter_withholding is None or current_quarter_withholding < 0:
+        raise BadRequestException("current_quarter_withholding must be zero or positive.")
+    if payroll_date is None:
+        raise BadRequestException("payroll_date is required.")
+    if accumulated_undeposited_liability is not None and accumulated_undeposited_liability < 0:
+        raise BadRequestException("accumulated_undeposited_liability must be zero or positive.")
+
+    rate_map = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="PR")
+    }
+    monthly_semiweekly_threshold = resolve_jurisdiction_parameter(
+        rate_map, "pr_deposit_monthly_semiweekly_thresh", Decimal("50000"), country="PR",
+    )
+    quarterly_exception_threshold = resolve_jurisdiction_parameter(
+        rate_map, "pr_deposit_quarterly_exception_thresh", Decimal("2500"), country="PR",
+    )
+    next_day_threshold = resolve_jurisdiction_parameter(
+        rate_map, "pr_deposit_next_day_thresh", Decimal("100000"), country="PR",
+    )
+
+    if current_quarter_withholding <= quarterly_exception_threshold:
+        depositor_status = "QUARTERLY_EXCEPTION"
+        deposit_due_date = None
+    elif lookback_period_liability <= monthly_semiweekly_threshold:
+        depositor_status = "MONTHLY"
+        deposit_due_date = _next_business_day(_fifteenth_of_next_month(payroll_date))
+    else:
+        depositor_status = "SEMIWEEKLY"
+        if payroll_date.weekday() in (2, 3, 4):
+            deposit_due_date = _next_weekday_on_or_after(payroll_date, 2)
+        else:
+            deposit_due_date = _next_weekday_on_or_after(payroll_date, 4)
+
+    next_day_rule_triggered = (
+        accumulated_undeposited_liability is not None and accumulated_undeposited_liability >= next_day_threshold
+    )
+    next_day_deposit_due_date = (
+        _next_business_day(payroll_date + timedelta(days=1)) if next_day_rule_triggered else None
+    )
+
+    form_499r2_deadline = _next_business_day(date(payroll_date.year + 1, 1, 31))
+
+    return {
+        "depositor_status": depositor_status,
+        "lookback_period_liability": lookback_period_liability,
+        "current_quarter_withholding": current_quarter_withholding,
+        "monthly_semiweekly_threshold": monthly_semiweekly_threshold,
+        "quarterly_exception_threshold": quarterly_exception_threshold,
+        "deposit_due_date": deposit_due_date,
+        "next_day_rule_triggered": next_day_rule_triggered,
+        "next_day_deposit_threshold": next_day_threshold,
+        "next_day_deposit_due_date": next_day_deposit_due_date,
+        "form_499r2_deadline": form_499r2_deadline,
+    }
+
+
 # ── Canada: retiring allowance / severance withholding ───────────────────
 # (ZP-TAX-CA-2026-001 §19). A rate-TABLE lookup by amount (CRA's real
 # lump-sum withholding method), not a marginal bracket sum — see
@@ -16716,6 +17876,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         get_india_salary_tds_inputs(db, run.organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
     )
+    pr_certificate_inputs = (
+        get_pr_certificate_inputs(db, run.organization_id, employee.id) if country == "PR" else {}
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -16764,6 +17927,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         **(reciprocity or {}),
         **(ytd_inputs or {}),
         **(org_levy_inputs or {}),
+        **(pr_certificate_inputs or {}),
     )
     try:
         result = calculate_payroll(ctx, calculation_mode)
@@ -16955,6 +18119,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # (KY-008) — a separate key since it's gated on ITS OWN result
         # field.
         "_ky_pension_ytd_result": result if result.ytd_ky_mandatory_pensionable_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for Puerto
+        # Rico's five wage-base/threshold trackers (ZP-PR-ENG-001) — a
+        # separate key since it's gated on ITS OWN result field.
+        "_pr_ytd_result": result if result.ytd_pr_ss_wages_after is not None else None,
         # Same splat-then-pop contract as "_ytd_result" above, for the
         # Guyana PAYE statutory credit ledger (GY-010) — a separate key
         # since it's gated on ITS OWN result field.
@@ -17081,6 +18249,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
     ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
+    pr_ytd_result = values.pop("_pr_ytd_result", None)
     au_statutory_deductions_detail = values.pop("_au_statutory_deductions_detail", None)
     option2_ytd_result = values.pop("_option2_ytd_result", None)
     org_levy_result = values.pop("_org_levy_result", None)
@@ -17139,6 +18308,9 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if gy_paye_credit_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, gy_paye_credit_ytd_result, payslip_id=item.id)
+    if pr_ytd_result is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_pr_ytd_accumulator(db, employee.id, run.pay_date, pr_ytd_result, payslip_id=item.id)
     if au_statutory_deductions_detail is not None:
         _apply_au_statutory_deduction_collections(db, au_statutory_deductions_detail)
     if option2_ytd_result is not None:
@@ -17487,7 +18659,9 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
             _load_ky_pension_ytd(db, emp.id, run.pay_date)
             if country == "KY" else
             _load_gy_paye_credit_ytd(db, emp.id, run.pay_date)
-            if country == "GY" else None
+            if country == "GY" else
+            _load_pr_ytd(db, emp.id, run.pay_date)
+            if country == "PR" else None
         )
         # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
         # persisted into the calculation snapshot, not just used to pick
@@ -17733,6 +18907,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
     values.pop("_ky_pension_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
     values.pop("_gy_paye_credit_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
+    values.pop("_pr_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
     # the ORIGINAL run already collected against.
@@ -20522,6 +21697,15 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
             create_new_hire_report(db, organization_id, employee.id)
         except Exception:
             pass
+    # ASUME new/rehire reporting (PR-007/PR-023) — same auto-trigger shape
+    # as US new-hire reporting above, reusing the identical NewHireReport
+    # model/table with its own PR-scoped due-days constant (see that
+    # constant's own docstring for why it's separately named).
+    elif country_code == "PR":
+        try:
+            create_new_hire_report(db, organization_id, employee.id, due_date_days=_PR_ASUME_NEW_HIRE_REPORT_DEFAULT_DAYS)
+        except Exception:
+            pass
 
     _notify_employee_created(db, employee, organization_id)
 
@@ -21718,6 +22902,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         else {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)} if country == "AU"
         else _load_ky_pension_ytd(db, employee.id, run.pay_date) if country == "KY"
         else _load_gy_paye_credit_ytd(db, employee.id, run.pay_date) if country == "GY"
+        else _load_pr_ytd(db, employee.id, run.pay_date) if country == "PR"
         else {}
     )
 
@@ -21772,6 +22957,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         get_india_salary_tds_inputs(db, organization_id, employee.id, india_tax_year_for_date(run.pay_date))
         if country == "IN" else {}
     )
+    pr_certificate_inputs = (
+        get_pr_certificate_inputs(db, organization_id, employee.id) if country == "PR" else {}
+    )
     ctx = build_context_from_employee(
         employee, gross=gross, basic=data.basic_salary,
         hra=data.hra or Decimal("0"), special_allowance=data.special_allowance or Decimal("0"),
@@ -21800,6 +22988,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
+        **pr_certificate_inputs,
     )
     try:
         calc = calculate_payroll(ctx, calculation_mode)
@@ -21991,6 +23180,9 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_gy_paye_credit_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_gy_paye_credit_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ytd_pr_ss_wages_after is not None:
+        db.flush()  # need item.id for last_updated_payslip_id
+        _upsert_pr_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
     if calc.au_statutory_deductions_detail:
         _apply_au_statutory_deduction_collections(db, calc.au_statutory_deductions_detail)
     if calc.option2_cumulative_gross_after is not None:
@@ -22460,12 +23652,20 @@ def _get_currency_symbol(country: str) -> str:
         "OMR": "OMR", "PKR": "\u20a8", "QAR": "QAR", "RWF": "RF",
         "SAR": "SAR", "SEK": "kr", "SGD": "S$", "THB": "\u0e3f",
         "TZS": "TSh", "UGX": "USh", "ZAR": "R",
+        # Caribbean production jurisdictions (2026-09-21) + Puerto Rico
+        # (2026-09-23) \u2014 symbols mirror frontend/src/utils/currency.js's
+        # CURRENCY_MASTER exactly so the BTF/payslip PDF never disagrees
+        # with the frontend's own currency display.
+        "BBD": "Bds$", "KYD": "CI$", "DOP": "RD$", "GYD": "G$",
+        "JMD": "J$", "BSD": "B$", "TTD": "TT$",
     }
     if country and country.upper() in _iso_to_sym:
         return _iso_to_sym[country.upper()]
     return {
         "IN": "\u20b9", "US": "$", "UK": "\u00a3",
         "AU": "A$", "DE": "\u20ac", "CA": "C$",
+        "BB": "Bds$", "KY": "CI$", "DO": "RD$", "GY": "G$",
+        "JM": "J$", "BS": "B$", "TT": "TT$", "PR": "$",
     }.get(country, "$")
 
 
@@ -22477,12 +23677,17 @@ def _get_currency_code(country: str) -> str:
         "BRL", "CHF", "CNY", "DKK", "GHS", "HKD", "JPY", "KES", "KRW",
         "KWD", "LKR", "MXN", "MYR", "NGN", "NOK", "NPR", "NZD", "OMR",
         "PKR", "QAR", "RWF", "SAR", "SEK", "SGD", "THB", "TZS", "UGX", "ZAR",
+        # Caribbean production jurisdictions (2026-09-21) + Puerto Rico
+        # (2026-09-23) — mirrors frontend/src/utils/currency.js exactly.
+        "BBD", "KYD", "DOP", "GYD", "JMD", "BSD", "TTD",
     }
     if country and country.upper() in _iso_codes:
         return country.upper()
     return {
         "IN": "INR", "US": "USD", "UK": "GBP",
         "AU": "AUD", "DE": "EUR", "CA": "CAD",
+        "BB": "BBD", "KY": "KYD", "DO": "DOP", "GY": "GYD",
+        "JM": "JMD", "BS": "BSD", "TT": "TTD", "PR": "USD",
     }.get(country, "USD")
 
 
@@ -22595,6 +23800,23 @@ def _payslip_identity_rows(country: str, data: dict) -> list:
         "AU": [("TFN", cf.get("tfn")), ("Super Fund USI", cf.get("super_fund_usi")), ("BSB Code", cf.get("bsb_code"))],
         "CA": [("SIN", cf.get("sin")), ("Province", cf.get("province")), ("Transit No.", cf.get("transit_number"))],
         "DE": [("Steuer-ID", cf.get("steuer_id")), ("Steuerklasse", cf.get("steuerklasse")), ("IBAN", cf.get("iban"))],
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # mirrors frontend/src/utils/jurisdictionLabels.js's IDENTITY_FIELD.
+        # This data was already captured end-to-end (compliance_fields);
+        # only this display mapping was missing, so these payslips
+        # previously fell through to the generic fallback below.
+        # Countries with only one captured statutory identifier fill the
+        # middle slot with the jurisdiction's real payment-rail name
+        # (bank_routing.payment_mode_label) rather than a fabricated/blank
+        # field — every other row on this table is a real value.
+        "BB": [("TAMIS TIN", cf.get("tamis_tin")), ("NIS Number", cf.get("nis_number")), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "KY": [("NIB Member No.", cf.get("nib_member_number")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "DO": [("Cédula", cf.get("cedula")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "GY": [("GRA TIN", cf.get("gra_tin")), ("NIS Number", cf.get("nis_number")), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "JM": [("TRN", cf.get("trn")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "BS": [("NIB Number", cf.get("nib_number")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("ACH Routing No.", cf.get("ach_routing_number"))],
+        "TT": [("BIR File No.", cf.get("bir_file_number")), ("NIBTT No.", cf.get("nibtt_number")), ("Bank/Branch Code", cf.get("bank_branch_code"))],
+        "PR": [("SSN", cf.get("ssn")), ("Payment Mode", bank_routing.payment_mode_label(country)), ("ACH Routing No.", cf.get("ach_routing_number"))],
     }
     return rows_by_country.get(country, [("Tax ID", None), ("Reference", None), ("Routing", None)])
 
@@ -22762,6 +23984,16 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     income_tax_labels = {
         "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
         "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # real terms verified from each country's own engine module
+        # docstring (engine/countries/*.py), not guessed. Bahamas/Cayman
+        # deliberately have no entry here: `tds` is always Decimal("0") for
+        # both (no personal income tax — see bahamas.py/cayman_islands.py's
+        # own module docstrings), so the existing `if v > 0` filter below
+        # already omits the line correctly; adding a label would risk it
+        # being read as "this country's income tax happened to be zero".
+        "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
+        "PR": "Hacienda Withholding",
     }
     # US: federal/state/local are stored (and shown here) as three separate
     # lines instead of one combined "Federal Withholding" figure — `tds`
@@ -22795,11 +24027,16 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
         "CA": {"esi": "Employment Insurance (EI)"},
     }.get(country, {})
+    # Trinidad reuses the `professional_tax` field for its Health Surcharge
+    # (see trinidad_and_tobago.py's own comment on that field) — it was
+    # previously shown under the literal "Professional Tax" for every
+    # country, mislabeling Trinidad's deduction with an India-specific term.
+    professional_tax_label = "Health Surcharge" if country == "TT" else "Professional Tax"
     for lbl, key in [
         *income_tax_line_items,
         (pf_esi_labels.get("pf", "Provident Fund (PF)"), "pf"),
         (pf_esi_labels.get("esi", "Employee State Insurance (ESI)"), "esi"),
-        ("Professional Tax", "professionalTax"),
+        (professional_tax_label, "professionalTax"),
     ]:
         v = float(data.get(key, 0) or 0)
         if v > 0:
@@ -22819,15 +24056,28 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     other_labels = {
         "CA": {"socialSecurity": "Canada Pension Plan (CPP)"},
         "AU": {"medicare": "Medicare Levy"},
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # real terms verified from each country's own engine module
+        # docstring. `employeePension` and `niEmployee` are both reused/
+        # repurposed fields in these countries, NOT a literal pension or UK
+        # National Insurance — see barbados.py/dominican_republic.py/
+        # jamaica.py's own comments on those fields.
+        "BB": {"socialSecurity": "NIS", "employeePension": "Reserve & Retraining (R&R) Levy"},
+        "DO": {"socialSecurity": "SFS (Seguro Familiar de Salud)", "employeePension": "Pension (SVDS)"},
+        "GY": {"socialSecurity": "NIS"},
+        "JM": {"socialSecurity": "NIS", "employeePension": "National Housing Trust (NHT)", "niEmployee": "Education Tax"},
+        "TT": {"socialSecurity": "NIS"},
+        "BS": {"socialSecurity": "NIB"},
+        "KY": {"socialSecurity": "NIB Pension"},
     }.get(country, {})
     for lbl, key in [
         (other_labels.get("socialSecurity", "Social Security"), "socialSecurity"),
         (other_labels.get("medicare", "Medicare"), "medicare"),
-        ("National Insurance", "niEmployee"),
+        (other_labels.get("niEmployee", "National Insurance"), "niEmployee"),
         # UK: Workplace Pension (employee side) and Student/Postgraduate
         # Loan — both correctly computed/persisted but previously invisible
         # on every UK payslip PDF (see _serialize_payslip's own fix note).
-        ("Workplace Pension", "employeePension"),
+        (other_labels.get("employeePension", "Workplace Pension"), "employeePension"),
         ("Student Loan Deduction", "studyLoanDeduction"),
         ("Postgraduate Loan Deduction", "postgradLoanDeduction"),
     ]:
@@ -24950,6 +26200,21 @@ _COUNTRY_NAME_TO_JURISDICTION_CODE = {
 }
 
 
+def _jurisdiction_code_for_org_country(country_name: Optional[str]) -> Optional[str]:
+    """Resolve Organization.country (a full name) to the 2-letter jurisdiction
+    code. Falls back to app.core.jurisdiction's complete registry for
+    countries not in the small dict above (the Caribbean jurisdictions +
+    Puerto Rico) instead of returning None and silently skipping the
+    Compliance-row jurisdiction backfill for those orgs."""
+    if not country_name:
+        return None
+    code = _COUNTRY_NAME_TO_JURISDICTION_CODE.get(country_name.strip().lower())
+    if code:
+        return code
+    from app.core.jurisdiction import get_jurisdiction_code
+    return get_jurisdiction_code(country_name)
+
+
 def _merge_tax_identifiers(existing: dict | None, incoming: dict | None) -> dict:
     """Merge two tax-identifier maps, keeping existing values for any key that
     is already set — the deduplication rule for compliance sync. New keys (or
@@ -25025,7 +26290,7 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
                 row.phone = org.phone
                 changed = True
         if org and needs_jurisdiction_backfill:
-            code = org.country and _COUNTRY_NAME_TO_JURISDICTION_CODE.get(org.country.strip().lower())
+            code = _jurisdiction_code_for_org_country(org.country)
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -26235,11 +27500,27 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
     income_tax_labels = {
         "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
         "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
+        # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
+        # mirrors generate_payslip_pdf_bytes's own label map. Bahamas/Cayman
+        # have no entry: `tds` is always 0 for both (no personal income
+        # tax), so income_tax_labels.get(country, "TDS") is never reached
+        # with a nonzero value for them.
+        "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
+        "PR": "Hacienda Withholding",
     }
     pf_esi_labels = {
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
         "CA": {"esi": "Employment Insurance (EI)"},
     }.get(country, {})
+    other_labels = {
+        "CA": "Canada Pension Plan (CPP)",
+        "AU": None,  # AU's "medicare" label is handled separately below
+        "BB": "NIS", "DO": "SFS (Seguro Familiar de Salud)", "GY": "NIS",
+        "JM": "NIS", "TT": "NIS", "BS": "NIB", "KY": "NIB Pension",
+    }.get(country)
+    ni_employee_label = "Education Tax" if country == "JM" else "National Insurance"
+    professional_tax_label = "Health Surcharge" if country == "TT" else "Professional Tax"
+    medicare_label = "Medicare Levy" if country == "AU" else "Medicare"
     # US: federal/state/local shown as three separate slices instead of one
     # combined "Federal Withholding" total — falls back to the combined
     # `tds` figure when the split is all-zero (a US org with no payslips
@@ -26258,10 +27539,10 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
         *income_tax_fields,
         (pf_esi_labels.get("pf", "Provident Fund (PF)"), "pf"),
         (pf_esi_labels.get("esi", "Employee State Insurance (ESI)"), "esi"),
-        ("Professional Tax", "professional_tax"),
-        ("Social Security", "social_security"),
-        ("Medicare", "medicare"),
-        ("National Insurance", "ni_employee"),
+        (professional_tax_label, "professional_tax"),
+        (other_labels or "Social Security", "social_security"),
+        (medicare_label, "medicare"),
+        (ni_employee_label, "ni_employee"),
     ]
     stat_deductions = []
     total_stat_ded = Decimal("0")
@@ -26696,3 +27977,588 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
             logging.getLogger("zoiko").warning(f"[payroll-mail] leave-request status email failed: {exc}")
 
     return _enrich_leave_request(db, record, organization_id)
+
+
+# ── France (ZP-FR-ENG-001) ───────────────────────────────────────────────
+
+_FR_FILING_DUE_DATE_CLASSES = {"M5", "M15", "DEFERRED_M15"}
+_FR_READINESS_STATUSES = {"NOT_READY", "READY", "LIVE"}
+_FR_PAS_RATE_TYPES = {"PERSONALIZED", "NEUTRAL"}
+_FR_PAS_SOURCES = {"CRM", "NEUTRAL_GRID"}
+_FR_DSN_STATUSES = (
+    "DRAFT", "VALIDATED", "QUEUED", "TRANSMITTED", "ACKNOWLEDGED",
+    "BUSINESS_REJECTED", "CRM_RESOLVED", "UNKNOWN", "SETTLED",
+)
+_FR_DSN_TRANSITIONS = {
+    "DRAFT": {"VALIDATED"},
+    "VALIDATED": {"QUEUED"},
+    "QUEUED": {"TRANSMITTED", "UNKNOWN"},
+    "TRANSMITTED": {"ACKNOWLEDGED", "BUSINESS_REJECTED", "UNKNOWN"},
+    "ACKNOWLEDGED": {"CRM_RESOLVED", "SETTLED"},
+    "BUSINESS_REJECTED": {"CRM_RESOLVED", "CORRECTION"},
+    "CRM_RESOLVED": {"SETTLED"},
+    "UNKNOWN": {"QUEUED", "TRANSMITTED"},
+    "SETTLED": set(),
+}
+_FR_DSN_OUTBOX_ACTIONS = {"TRANSMIT", "PAS_RATE_EXCHANGE", "CRM_CLOSE", "CORRECTION"}
+_FR_DSN_OUTBOX_STATUSES = ("PENDING", "SENT", "UNKNOWN", "ACKNOWLEDGED", "FAILED")
+
+
+def _fr_dsn_payload_hash(organization_id: int, period_start, period_end, release_ref: str, due_date) -> str:
+    canonical = json.dumps(
+        {
+            "organization_id": organization_id,
+            "period_start": str(period_start),
+            "period_end": str(period_end),
+            "release_ref": release_ref,
+            "dsn_version": "P26V01",
+            "due_date": str(due_date),
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def get_employer_france_profile(db: Session, organization_id: int) -> EmployerFranceProfile:
+    row = (db.query(EmployerFranceProfile)
+           .filter(EmployerFranceProfile.organization_id == organization_id).first())
+    if not row:
+        raise NotFoundException(f"France employer profile for organization {organization_id} not found.")
+    return row
+
+
+def upsert_employer_france_profile(
+    db: Session, organization_id: int, data: "EmployerFranceProfileUpsert", actor_id: Optional[int] = None,
+) -> EmployerFranceProfile:
+    """Create or update the org 1:1 France employer profile (FR §11 panels
+    C/D). Authority-held write-once facts that DGFiP/Urssaf own
+    (pas_crm_status, pas exchange) are deliberately absent from the
+    payload — the CRM intake flows through ingest_france_pas_rate + the
+    outbox, never through freeform admin editing."""
+    siren = (data.siren or "").strip()
+    if not re.match(r"^\d{9}$", siren):
+        raise BadRequestException("French SIREN must be exactly 9 digits.")
+    if data.filingDueDateClass not in _FR_FILING_DUE_DATE_CLASSES:
+        raise BadRequestException(
+            f"filingDueDateClass must be one of {sorted(_FR_FILING_DUE_DATE_CLASSES)}, "
+            f"got {data.filingDueDateClass!r}."
+        )
+    if data.readinessStatus is not None and data.readinessStatus not in _FR_READINESS_STATUSES:
+        raise BadRequestException(
+            f"readinessStatus must be one of {sorted(_FR_READINESS_STATUSES)}, got {data.readinessStatus!r}."
+        )
+
+    row = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    action = "update" if row else "create"
+    if not row:
+        row = EmployerFranceProfile(organization_id=organization_id, siren=siren)
+        db.add(row)
+    row.siren = siren
+    row.legal_name = data.legalName
+    row.legal_form = data.legalForm
+    if data.idcc is not None:
+        row.idcc = data.idcc
+    if data.urssafAccount is not None:
+        row.urssaf_account = data.urssafAccount
+    if data.dsnDeclarant is not None:
+        row.dsn_declarant = data.dsnDeclarant
+    row.filing_due_date_class = data.filingDueDateClass
+    if data.paymentMandateRef is not None:
+        row.payment_mandate_ref = data.paymentMandateRef
+    if data.pasCollectorIdentity is not None:
+        row.pas_collector_identity = data.pasCollectorIdentity
+    if data.effectifState is not None:
+        row.effectif_state = data.effectifState
+    if data.readinessStatus is not None:
+        row.readiness_status = data.readinessStatus
+    if data.readinessEvidence is not None:
+        row.readiness_evidence = data.readinessEvidence
+
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(
+        db, actor_id=actor_id, action=action, entity_type="france_employer_profile",
+        entity_id=row.id, new_value={
+            "organization_id": organization_id, "siren": siren,
+            "idcc": row.idcc, "filing_due_date_class": row.filing_due_date_class,
+            "readiness_status": row.readiness_status,
+        },
+    )
+    log_activity(db, organization_id, f"France employer profile {action}d (SIREN {siren}).",
+                 actor_id=actor_id)
+    return row
+
+
+def record_france_effectif(
+    db: Session, organization_id: int, data: "FranceEffectifRecord", actor_id: Optional[int] = None,
+) -> EmployerFranceProfile:
+    """Governed annual effectif with threshold history (FR-015/FR-036) —
+    a dict merge into effectif_state, never a thunder-clobber."""
+    profile = get_employer_france_profile(db, organization_id)
+    if data.value < 0:
+        raise BadRequestException("Annual effectif cannot be negative.")
+    state = dict(profile.effectif_state or {})
+    if not (1980 <= data.year <= 2100):
+        raise BadRequestException(f"Effectif year {data.year} is outside a plausible range.")
+    state[str(data.year)] = {
+        "value": data.value,
+        "source": data.source,
+        "validatedAt": datetime.utcnow().isoformat(),
+    }
+    profile.effectif_state = state
+    db.commit()
+    db.refresh(profile)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="france_employer_profile",
+        entity_id=profile.id, new_value={f"effectif.{data.year}": state[str(data.year)]},
+    )
+    log_activity(db, organization_id, f"France annual effectif {data.year} recorded = {data.value}.", actor_id=actor_id)
+    return profile
+
+
+def upsert_france_establishment_rate_pack(
+    db: Session, organization_id: int, data: "FranceEstablishmentRatePackUpsert", actor_id: Optional[int] = None,
+) -> FranceEstablishmentRatePack:
+    """Append a new effective-dated SIRET rate-pack period row, auto-closing
+    the previous period's row (effective_to = day before new effective_from)
+    so Jan/Jul history is never rewritten (FR-002/FR-013)."""
+    siret = (data.siret or "").strip()
+    if not re.match(r"^\d{14}$", siret):
+        raise BadRequestException("French SIRET must be exactly 14 digits.")
+    if data.atMpRatePct is not None and data.atMpRatePct < 0:
+        raise BadRequestException("AT/MP rate cannot be negative.")
+    if data.atMpRatePct is not None and not data.atMpEvidence and not data.atMpSource:
+        raise BadRequestException(
+            "An AT/MP rate is authority decision data (FR-013) — provide atMpEvidence and/or atMpSource."
+        )
+
+    profile = (db.query(FranceEstablishmentRatePack)
+               .filter(
+                   FranceEstablishmentRatePack.organization_id == organization_id,
+                   FranceEstablishmentRatePack.siret == siret,
+                   FranceEstablishmentRatePack.effective_to.is_(None),
+               )
+               .first())
+    if profile:
+        if profile.effective_from >= data.effectiveFrom:
+            raise BadRequestException(
+                f"A rate pack for SIRET {siret} is already effective from {profile.effective_from}; "
+                "a new period must start after it."
+            )
+        profile.effective_to = data.effectiveFrom - timedelta(days=1)
+    new_pack = FranceEstablishmentRatePack(
+        organization_id=organization_id,
+        siret=siret,
+        commune_insee=data.communeInsee,
+        workplace_label=data.workplaceLabel,
+        at_mp_rate_pct=data.atMpRatePct,
+        at_mp_risk_code=data.atMpRiskCode,
+        at_mp_evidence=data.atMpEvidence,
+        at_mp_source=data.atMpSource,
+        vm_rate_pct=data.vmRatePct,
+        vm_threshold_applies=data.vmThresholdApplies,
+        vm_source=data.vmSource,
+        fnal_class=data.fnalClass,
+        cfp_class=data.cfpClass,
+        effectif=data.effectif,
+        effective_from=data.effectiveFrom,
+        effective_to=data.effectiveTo,
+        created_by_id=actor_id,
+    )
+    db.add(new_pack)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BadRequestException(
+            f"A France rate pack for SIRET {siret} effective {data.effectiveFrom} already exists for this "
+            "organization — a new period must start on a different date."
+        )
+    db.refresh(new_pack)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_establishment_rate_pack",
+                     entity_id=new_pack.id, legal_reference="FR-002/FR-013",
+                     new_value={"siret": siret, "effective_from": str(data.effectiveFrom),
+                                "at_mp_rate_pct": str(new_pack.at_mp_rate_pct)})
+    log_activity(db, organization_id, f"France SIRET {siret} rate pack effective {data.effectiveFrom} recorded.",
+                 actor_id=actor_id)
+    return new_pack
+
+
+def list_france_establishment_rate_packs(
+    db: Session, organization_id: int, siret: Optional[str] = None,
+) -> List[FranceEstablishmentRatePack]:
+    query = db.query(FranceEstablishmentRatePack).filter(
+        FranceEstablishmentRatePack.organization_id == organization_id)
+    if siret:
+        query = query.filter(FranceEstablishmentRatePack.siret == siret)
+    return query.order_by(FranceEstablishmentRatePack.siret, FranceEstablishmentRatePack.effective_from.desc()).all()
+
+
+def ingest_france_pas_rate(
+    db: Session, organization_id: int, data: "FrancePASRateUpsert", actor_id: Optional[int] = None,
+) -> FrancePASRate:
+    """PAS rate intake (FR-008/FR-010). Personalized rates are DGFiP CRM
+    supply and carry authority provenance; NEUTRAL rows carry no percentage.
+    Corrections keep lineage via correction_of_id; the previous active row
+    is closed effective_to = effective_from - 1 day (never deleted)."""
+    if data.rateType not in _FR_PAS_RATE_TYPES:
+        raise BadRequestException(f"rateType must be one of {sorted(_FR_PAS_RATE_TYPES)}, got {data.rateType!r}.")
+    if data.source not in _FR_PAS_SOURCES:
+        raise BadRequestException(f"source must be one of {sorted(_FR_PAS_SOURCES)}, got {data.source!r}.")
+    if data.rateType == "PERSONALIZED":
+        if data.ratePct is None:
+            raise BadRequestException("A PERSONALIZED PAS rate requires ratePct (DGFiP authority value).")
+    elif data.rateType == "NEUTRAL" and data.ratePct is not None:
+        raise BadRequestException(
+            "NEUTRAL PAS rows carry no percentage — the statutory neutral grid is resolved by the engine "
+            "from the payroll date (ratePct must be null)."
+        )
+
+    employee = (db.query(PayrollEmployee)
+                .filter(PayrollEmployee.id == data.employeeId,
+                        PayrollEmployee.organization_id == organization_id).first())
+    if not employee:
+        raise NotFoundException("PayrollEmployee", data.employeeId)
+
+    if data.correctionOfId is not None:
+        prior = (db.query(FrancePASRate)
+                 .filter(FrancePASRate.id == data.correctionOfId,
+                         FrancePASRate.organization_id == organization_id).first())
+        if not prior:
+            raise NotFoundException("FrancePASRate", data.correctionOfId)
+
+    previous = (db.query(FrancePASRate)
+                .filter(FrancePASRate.organization_id == organization_id,
+                        FrancePASRate.employee_id == data.employeeId,
+                        FrancePASRate.status == "ACTIVE").first())
+    if previous and previous.effective_from >= data.effectiveFrom:
+        raise BadRequestException(
+            f"Employee {data.employeeId} already has an ACTIVE PAS rate from {previous.effective_from}; "
+            "a replacement must start after it."
+        )
+    if previous:
+        previous.status = "STALE"
+        previous.effective_to = data.effectiveFrom - timedelta(days=1)
+
+    new_rate = FrancePASRate(
+        organization_id=organization_id,
+        employee_id=data.employeeId,
+        rate_type=data.rateType,
+        rate_pct=data.ratePct,
+        dgfip_rate_id=data.dgfipRateId,
+        source=data.source,
+        received_date=data.receivedDate,
+        effective_from=data.effectiveFrom,
+        effective_to=data.effectiveTo,
+        status="ACTIVE" if data.effectiveFrom <= date.today() else "PENDING",
+        correction_of_id=data.correctionOfId,
+        created_by_id=actor_id,
+    )
+    db.add(new_rate)
+    db.commit()
+    db.refresh(new_rate)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_pas_rate",
+                     entity_id=new_rate.id, legal_reference="FR-008/FR-010",
+                     new_value={"employee_id": data.employeeId, "rate_type": data.rateType,
+                                "rate_pct": str(data.ratePct), "source": data.source,
+                                "effective_from": str(data.effectiveFrom)})
+    log_activity(db, organization_id, f"France PAS {data.rateType} rate recorded for employee {data.employeeId}.",
+                 actor_id=actor_id)
+    return new_rate
+
+
+def get_active_france_pas_rate(
+    db: Session, organization_id: int, employee_id: int, as_of: Optional[date] = None,
+) -> Optional[FrancePASRate]:
+    """Resolve the PAS rate governing a France employee at as_of (default
+    today) — the engine wiring in service.py reads this when building
+    PayrollContext.france_pas (PERSONALIZED ratePct/rate_type or NEUTRAL
+    resolved by france.py from the payroll date)."""
+    as_of = as_of or date.today()
+    row = (db.query(FrancePASRate)
+           .filter(FrancePASRate.organization_id == organization_id,
+                   FrancePASRate.employee_id == employee_id,
+                   FrancePASRate.effective_from <= as_of)
+           .filter((FrancePASRate.effective_to.is_(None)) | (FrancePASRate.effective_to >= as_of))
+           .filter(FrancePASRate.status.in_(["ACTIVE", "PENDING"]))
+           .order_by(FrancePASRate.effective_from.desc())
+           .first())
+    return row
+
+
+def list_france_pas_rates(
+    db: Session, organization_id: int, employee_id: Optional[int] = None,
+) -> List[FrancePASRate]:
+    query = db.query(FrancePASRate).filter(FrancePASRate.organization_id == organization_id)
+    if employee_id:
+        query = query.filter(FrancePASRate.employee_id == employee_id)
+    return query.order_by(FrancePASRate.employee_id, FrancePASRate.effective_from.desc()).all()
+
+
+def _validate_france_dsn_completeness(
+    db: Session, organization_id: int, period_start: date,
+) -> Tuple[List[str], Optional[str]]:
+    """FR-031 pre-submit validator. Returns (errors, blocked_reason). A clean
+    run passes into VALIDATED; any error keeps the submission DRAFT with the
+    detail recorded — approval is blocked, never bypassed (FR-027)."""
+    errors: List[str] = []
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    if not profile:
+        return ["France employer profile is not configured (SIREN, filing due-date class)."], None
+    if profile.readiness_status not in {"READY", "LIVE"}:
+        errors.append(
+            f"France employer profile readiness is {profile.readiness_status!r}; evidence-gate H (FR §11) "
+            "requires READY or LIVE before a DSN may be opened."
+        )
+    if profile.filing_due_date_class not in _FR_FILING_DUE_DATE_CLASSES:
+        errors.append(f"filingDueDateClass {profile.filing_due_date_class!r} is not a valid Urssaf class.")
+
+    has_pack = (db.query(FranceEstablishmentRatePack)
+                .filter(FranceEstablishmentRatePack.organization_id == organization_id,
+                        FranceEstablishmentRatePack.effective_from <= period_start)
+                .filter((FranceEstablishmentRatePack.effective_to.is_(None))
+                        | (FranceEstablishmentRatePack.effective_to >= period_start))
+                .first())
+    if not has_pack:
+        errors.append("No France establishment rate pack (SIRET, AT/MP) is effective at period start.")
+
+    if not profile.effectif_state:
+        errors.append("No governed annual effectif recorded (FR-015) — FNAL/CFP/apprenticeship predicates need it.")
+    else:
+        latest_year = max((int(k) for k in profile.effectif_state or {} if str(k).isdigit()), default=None)
+        if latest_year is not None and latest_year < period_start.year - 1:
+            errors.append(
+                f"Latest governed effectif is for {latest_year}; expected {period_start.year - 1} or later."
+            )
+
+    fr_employees = (db.query(PayrollEmployee)
+                    .filter(PayrollEmployee.organization_id == organization_id,
+                            PayrollEmployee.country_code == "FR").all())
+    missing_pas = 0
+    for emp in fr_employees:
+        rate = get_active_france_pas_rate(db, organization_id, emp.id, as_of=period_start)
+        if rate is None or rate.status not in {"ACTIVE", "PENDING"}:
+            missing_pas += 1
+    if missing_pas:
+        errors.append(f"{missing_pas} France employee(s) have no active PAS rate at period start.")
+
+    blocked = "; ".join(errors) if errors else None
+    return errors, blocked
+
+
+def create_france_dsn_submission(
+    db: Session, organization_id: int, data: "FranceDsnSubmissionCreate", actor_id: Optional[int] = None,
+) -> FranceDsnSubmission:
+    """Open a FranceDsnSubmission (FR-030..033). payload_hash is computed
+    over the immutable original identity; due_date follows the profile's
+    filing_due_date_class (5th or 15th of M+1). Runs the FR-031 validator:
+    clean → VALIDATED, blocked → DRAFT with validation_errors recorded."""
+    period_start = data.periodStart
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    if profile:
+        due_day = 5 if profile.filing_due_date_class == "M5" else 15
+    else:
+        due_day = 15
+    period_end = data.periodEnd or (period_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    due_date = (period_end.replace(day=28) + timedelta(days=4)).replace(day=1) + timedelta(days=due_day - 1)
+
+    errors, blocked = _validate_france_dsn_completeness(db, organization_id, period_start)
+    submission = FranceDsnSubmission(
+        organization_id=organization_id,
+        dsn_version="P26V01",
+        release_ref=data.releaseRef,
+        payload_hash=_fr_dsn_payload_hash(organization_id, period_start, period_end, data.releaseRef, due_date),
+        period_start=period_start,
+        period_end=period_end,
+        due_date=due_date,
+        status="DRAFT" if errors else "VALIDATED",
+        validation_errors=errors or [],
+        blocked_reason=blocked,
+        created_by_id=actor_id,
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_dsn_submission",
+                     entity_id=submission.id, legal_reference="FR-030/FR-031",
+                     new_value={"period_start": str(period_start), "period_end": str(period_end),
+                                "due_date": str(due_date), "status": submission.status})
+    log_activity(db, organization_id,
+                 f"France DSN {submission.dsn_version} for {period_start} opened ({submission.status}).",
+                 actor_id=actor_id)
+    return submission
+
+
+def list_france_dsn_submissions(
+    db: Session, organization_id: int, status: Optional[str] = None,
+) -> List[FranceDsnSubmission]:
+    query = db.query(FranceDsnSubmission).filter(FranceDsnSubmission.organization_id == organization_id)
+    if status:
+        if status not in _FR_DSN_STATUSES:
+            raise BadRequestException(f"Unknown DSN status {status!r}.")
+        query = query.filter(FranceDsnSubmission.status == status)
+    return query.order_by(FranceDsnSubmission.period_start.desc()).all()
+
+
+def transition_france_dsn_submission(
+    db: Session, organization_id: int, submission_id: int, data: "FranceDsnStatusUpdate",
+    actor_id: Optional[int] = None,
+) -> FranceDsnSubmission:
+    """State-machine DSN lifecycle (FR-032): transport acknowledgement,
+    business CRM, anomaly resolution and payment settlement are separate
+    columns — a correct net-pay calc is not evidence of successful
+    reporting, so each signal lands in its own field."""
+    if data.status not in _FR_DSN_STATUSES:
+        raise BadRequestException(f"Unknown DSN status {data.status!r}.")
+    submission = (db.query(FranceDsnSubmission)
+                  .filter(FranceDsnSubmission.id == submission_id,
+                          FranceDsnSubmission.organization_id == organization_id).first())
+    if not submission:
+        raise NotFoundException("FranceDsnSubmission", submission_id)
+    allowed = _FR_DSN_TRANSITIONS.get(submission.status, set())
+    if data.status not in allowed:
+        raise BadRequestException(
+            f"Cannot transition a France DSN from {submission.status} to {data.status}."
+        )
+    if data.status == "CORRECTION":
+        raise BadRequestException(
+            "CORRECTION is not a lifecycle status — open a correction submission via correction_of_id."
+        )
+    submission.status = data.status
+    if data.technicalAck is not None:
+        submission.technical_ack = data.technicalAck
+    if data.businessCrm is not None:
+        submission.business_crm = data.businessCrm
+    if data.paymentState is not None:
+        submission.payment_state = data.paymentState
+    if data.blockedReason is not None:
+        submission.blocked_reason = data.blockedReason
+    if data.status == "TRANSMITTED":
+        submission.submitted_at = datetime.utcnow()
+    if data.status in {"ACKNOWLEDGED", "CRM_RESOLVED"}:
+        submission.acknowledged_at = datetime.utcnow()
+    db.commit()
+    db.refresh(submission)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_dsn_submission",
+                     entity_id=submission.id, legal_reference="FR-032", new_value={"status": data.status})
+    return submission
+
+
+def create_france_dsn_outbox_item(
+    db: Session, organization_id: int, data: "FranceDsnOutboxCreate", actor_id: Optional[int] = None,
+) -> FranceDsnOutboxItem:
+    """Durable idempotent outbox (FR-033). A unique idempotency_key makes a
+    retry resubmit-safe: a duplicate returns the existing row instead of
+    re-transmitting."""
+    if data.action not in _FR_DSN_OUTBOX_ACTIONS:
+        raise BadRequestException(f"action must be one of {sorted(_FR_DSN_OUTBOX_ACTIONS)}, got {data.action!r}.")
+    submission = (db.query(FranceDsnSubmission)
+                  .filter(FranceDsnSubmission.id == data.submissionId,
+                          FranceDsnSubmission.organization_id == organization_id).first())
+    if not submission:
+        raise NotFoundException("FranceDsnSubmission", data.submissionId)
+
+    payload = data.payload or {}
+    idempotency_key = hashlib.sha256(
+        json.dumps({"org": organization_id, "submission": data.submissionId, "action": data.action,
+                    "payload": payload}, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:64]
+
+    existing = (db.query(FranceDsnOutboxItem)
+                .filter(FranceDsnOutboxItem.idempotency_key == idempotency_key).first())
+    if existing:
+        return existing
+
+    item = FranceDsnOutboxItem(
+        submission_id=data.submissionId,
+        action=data.action,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        status="PENDING",
+    )
+    db.add(item)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = (db.query(FranceDsnOutboxItem)
+                    .filter(FranceDsnOutboxItem.idempotency_key == idempotency_key).first())
+        if existing:
+            return existing
+        raise
+    db.refresh(item)
+    return item
+
+
+def list_france_dsn_outbox_items(
+    db: Session, organization_id: int, submission_id: Optional[int] = None,
+) -> List[FranceDsnOutboxItem]:
+    query = (db.query(FranceDsnOutboxItem)
+             .join(FranceDsnSubmission, FranceDsnSubmission.id == FranceDsnOutboxItem.submission_id)
+             .filter(FranceDsnSubmission.organization_id == organization_id))
+    if submission_id:
+        query = query.filter(FranceDsnOutboxItem.submission_id == submission_id)
+    return query.order_by(FranceDsnOutboxItem.created_at.desc()).all()
+
+
+def transition_france_dsn_outbox_item(
+    db: Session, organization_id: int, item_id: int, status: str,
+    last_error: Optional[str] = None, actor_id: Optional[int] = None,
+) -> FranceDsnOutboxItem:
+    """Transport-side outbox acknowledgement (FR-033): PENDING → SENT →
+    UNKNOWN/ACKNOWLEDGED/FAILED. UNKNOWN deliberately stays terminal for
+    the initiating action — reconciliation, not blind replay."""
+    if status not in _FR_DSN_OUTBOX_STATUSES:
+        raise BadRequestException(f"Outbox status must be one of {_FR_DSN_OUTBOX_STATUSES}, got {status!r}.")
+    item = (db.query(FranceDsnOutboxItem)
+            .join(FranceDsnSubmission, FranceDsnSubmission.id == FranceDsnOutboxItem.submission_id)
+            .filter(FranceDsnOutboxItem.id == item_id,
+                    FranceDsnSubmission.organization_id == organization_id).first())
+    if not item:
+        raise NotFoundException("FranceDsnOutboxItem", item_id)
+    if item.status == "ACKNOWLEDGED":
+        raise BadRequestException("An acknowledged outbox item cannot be re-transitioned.")
+    item.status = status
+    item.attempts += 1
+    item.last_error = last_error
+    if status in {"SENT", "ACKNOWLEDGED"}:
+        item.sent_at = item.sent_at or datetime.utcnow()
+    if status == "ACKNOWLEDGED":
+        item.acknowledged_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_dsn_outbox_item",
+                     entity_id=item.id, legal_reference="FR-033", new_value={"status": status})
+    return item
+
+
+def get_france_readiness(db: Session, organization_id: int, for_period: Optional[date] = None) -> dict:
+    """Per-org France launch readiness (FR §11 gate H + FR-031 dry-run).
+    Returns the same block list the next DSN open would hit, so the UI can
+    show exactly what is missing without writing a submission row."""
+    period = for_period or (date.today().replace(day=28) + timedelta(days=4)).replace(day=1)
+    errors, blocked = _validate_france_dsn_completeness(db, organization_id, period)
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    packs = list_france_establishment_rate_packs(db, organization_id)
+
+    def _effective_pack_count():
+        return sum(1 for p in packs if p.effective_from <= period and (p.effective_to is None or p.effective_to >= period))
+
+    return {
+        "asOf": str(date.today()),
+        "forPeriod": str(period),
+        "ready": not bool(errors),
+        "organizationId": organization_id,
+        "profileConfigured": profile is not None,
+        "readinessStatus": profile.readiness_status if profile else "NOT_READY",
+        "pasCrmStatus": profile.pas_crm_status if profile else "NOT_CONNECTED",
+        "effectiveRatePacks": _effective_pack_count(),
+        "effectifGoverned": bool(profile and profile.effectif_state),
+        "dsnBlockedReason": blocked,
+        "missing": errors,
+    }

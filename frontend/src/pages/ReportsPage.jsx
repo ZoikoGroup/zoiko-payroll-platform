@@ -208,7 +208,7 @@ export default function ReportsPage() {
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p className="mb-4 rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">{error}</p>
       )}
 
       <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden overflow-x-auto">

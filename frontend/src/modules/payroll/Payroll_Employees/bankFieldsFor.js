@@ -20,7 +20,7 @@
 
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
-export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU"];
+export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR"];
 
 // Mirrors backend bank_routing.py's PAYMENT_MODE_LABEL.
 const PAYMENT_MODE_LABEL = {
@@ -30,6 +30,15 @@ const PAYMENT_MODE_LABEL = {
   CA: "EFT",
   DE: "SEPA",
   AU: "Direct Entry",
+  FR: "SEPA",
+  BB: "EFT",
+  KY: "EFT",
+  DO: "EFT",
+  GY: "EFT",
+  JM: "EFT",
+  TT: "EFT",
+  BS: "ACH",
+  PR: "ACH",
 };
 
 // Mirrors backend bank_routing.py's BTF_ROUTING_LABEL — the canonical name
@@ -42,6 +51,15 @@ const BTF_ROUTING_LABEL = {
   CA: "Transit No.",
   DE: "IBAN",
   AU: "BSB",
+  FR: "IBAN",
+  BB: "Bank/Branch Code",
+  KY: "Bank/Branch Code",
+  DO: "Bank/Branch Code",
+  GY: "Bank/Branch Code",
+  JM: "Bank/Branch Code",
+  TT: "Bank/Branch Code",
+  BS: "ACH Routing #",
+  PR: "ACH Routing #",
 };
 
 // Mirrors backend bank_routing.py's _IN_IFSC_PATTERN + ifsc_warning().
@@ -55,6 +73,15 @@ const BANKING_COMPLIANCE_KEYS = {
   CA: ["transit_number", "financial_institution_number"],
   DE: ["iban", "bic"],
   AU: ["bsb_code"],
+  FR: ["iban", "bic"],
+  BB: ["bank_branch_code"],
+  KY: ["bank_branch_code"],
+  DO: ["bank_branch_code"],
+  GY: ["bank_branch_code"],
+  JM: ["bank_branch_code"],
+  TT: ["bank_branch_code"],
+  BS: ["ach_routing_number"],
+  PR: ["ach_routing_number"],
 };
 
 function normalizeCountry(country) {

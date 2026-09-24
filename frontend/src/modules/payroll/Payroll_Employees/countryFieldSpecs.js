@@ -22,6 +22,10 @@ export const COUNTRIES = [
   { code: "JM", name: "Jamaica" },
   { code: "BS", name: "Bahamas" },
   { code: "TT", name: "Trinidad and Tobago" },
+  { code: "PR", name: "Puerto Rico" },
+  // France (2026-09-24, ZP-FR-ENG-001) — mirrors employee_validation.py's
+  // FREmployeeValidation exactly.
+  { code: "FR", name: "France" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {
@@ -145,6 +149,13 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "iban", label: "IBAN", type: "text", placeholder: "DE + 20 digits", required: true, upper: true, strip: " ", pattern: /^DE\d{20}$/, error: "German IBAN must be DE followed by 20 digits." },
     { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
   ],
+  FR: [
+    { key: "nir", label: "NIR", type: "text", placeholder: "15 digits", required: true, strip: " ", pattern: /^\d{15}$/, error: "NIR must be exactly 15 digits." },
+    { key: "siret", label: "SIRET", type: "text", placeholder: "14 digits", strip: " ", pattern: /^\d{14}$/, error: "SIRET must be exactly 14 digits." },
+    { key: "nif", label: "NIF (transfert)", type: "text", upper: true, strip: " ", pattern: /^[0-9A-Z]{12}$/, error: "FV/IFU-style foreign tax identifier is not valid (12 alphanumeric)." },
+    { key: "iban", label: "IBAN", type: "text", placeholder: "FR + 25 characters", upper: true, strip: " ", pattern: /^FR\d{12}[0-9A-Z]{11}\d{2}$/, error: "French IBAN must be FR followed by 25 characters (12 digits, 11 alphanumeric, 2 digits)." },
+    { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
+  ],
   // Caribbean production jurisdictions (2026-09-21, fields added
   // 2026-09-22) — matches backend/employee_validation.py's FIELD_SPECS
   // exactly. Every field is optional (not required) and uses the same
@@ -153,29 +164,47 @@ export const COUNTRY_FIELD_SPECS = {
   // specs confirm the exact current issuing form for the EMPLOYEE-level
   // identifier, so a strict pattern/requirement would risk rejecting a
   // real ID or blocking onboarding before a number is issued.
+  // Bank-routing fields (ZP-MJR-2026-002, 2026-09-24) — mirrors
+  // employee_validation.py exactly. Barbados/Cayman/Dominican Republic/
+  // Guyana/Jamaica/Trinidad have no confirmed national bank-clearing code
+  // format, so `bank_branch_code` is a lenient free-text field (same
+  // discipline as the tax-ID fields above). Bahamas and Puerto Rico both
+  // ride a NACHA-style 9-digit ACH routing rail, so they get
+  // `ach_routing_number` instead, shaped like US's aba_routing_number.
   BB: [
     { key: "tamis_tin", label: "TAMIS TIN", type: "text", placeholder: "9-13 digits", pattern: /^\d{9,13}$/, error: "TAMIS TIN must be 9 to 13 digits." },
     { key: "nis_number", label: "Barbados NIS number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIS number looks incorrect." },
+    { key: "bank_branch_code", label: "Bank/branch code", type: "text", pattern: /^[A-Za-z0-9-]{3,20}$/, error: "Bank/branch code looks incorrect." },
   ],
   KY: [
     { key: "nib_member_number", label: "NIB member number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIB member number looks incorrect." },
+    { key: "bank_branch_code", label: "Bank/branch code", type: "text", pattern: /^[A-Za-z0-9-]{3,20}$/, error: "Bank/branch code looks incorrect." },
   ],
   DO: [
     { key: "cedula", label: "Cédula", type: "text", placeholder: "000-0000000-0", pattern: /^\d{3}-\d{7}-\d{1}$/, error: "Cédula must be in the format 000-0000000-0." },
+    { key: "bank_branch_code", label: "Bank/branch code", type: "text", pattern: /^[A-Za-z0-9-]{3,20}$/, error: "Bank/branch code looks incorrect." },
   ],
   GY: [
     { key: "gra_tin", label: "GRA TIN", type: "text", placeholder: "7-10 digits", pattern: /^\d{7,10}$/, error: "GRA TIN must be 7 to 10 digits." },
     { key: "nis_number", label: "Guyana NIS number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIS number looks incorrect." },
+    { key: "bank_branch_code", label: "Bank/branch code", type: "text", pattern: /^[A-Za-z0-9-]{3,20}$/, error: "Bank/branch code looks incorrect." },
   ],
   JM: [
     { key: "trn", label: "TRN", type: "text", placeholder: "123456789", strip: "-", pattern: /^\d{9}$/, error: "TRN must be 9 digits (e.g. 123456789 or 123-456-789)." },
+    { key: "bank_branch_code", label: "Bank/branch code", type: "text", pattern: /^[A-Za-z0-9-]{3,20}$/, error: "Bank/branch code looks incorrect." },
   ],
   BS: [
     { key: "nib_number", label: "NIB number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIB number looks incorrect." },
+    { key: "ach_routing_number", label: "ACH routing number", type: "text", placeholder: "9 digits", pattern: /^\d{9}$/, error: "ACH routing number must be exactly 9 digits." },
   ],
   TT: [
     { key: "bir_file_number", label: "BIR file number", type: "text", placeholder: "9-10 digits", pattern: /^\d{9,10}$/, error: "BIR file number must be 9 to 10 digits." },
     { key: "nibtt_number", label: "NIBTT number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIBTT number looks incorrect." },
+    { key: "bank_branch_code", label: "Bank/branch code", type: "text", pattern: /^[A-Za-z0-9-]{3,20}$/, error: "Bank/branch code looks incorrect." },
+  ],
+  PR: [
+    { key: "ssn", label: "Social Security Number", type: "text", placeholder: "000-00-0000", pattern: /^\d{3}-?\d{2}-?\d{4}$/, error: "Social Security Number must be in the format 000-00-0000." },
+    { key: "ach_routing_number", label: "ACH routing number", type: "text", placeholder: "9 digits", pattern: /^\d{9}$/, error: "ACH routing number must be exactly 9 digits." },
   ],
 };
 

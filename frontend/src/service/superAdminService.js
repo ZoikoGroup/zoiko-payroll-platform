@@ -617,3 +617,42 @@ export const upsertFilingCalendarEntry = (payload) =>
 
 export const setFilingCalendarEntryStatus = (id, status) =>
   apiFetch(`/api/super-admin/report-templates/filing-calendar/${id}/status`, { method: "PUT", body: { status } });
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Super-Admin-owned authority data for the France Compliance workspace:
+// SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate
+// packs, DGFiP PAS rates, governed effectif, plus the read-only DSN/outbox
+// transport diagnostics and the launch-gate H readiness dry-run.
+//
+// Everything below is organization-scoped (organizationId travels as a
+// query param, the body stays the authority payload) — the org itself only
+// opens DSN filings via /payroll/france/* (see payrollService).
+export const getFranceReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/france/readiness", { params });
+
+export const getFranceEmployerProfile = (params) =>
+  apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
+
+export const upsertFranceEmployerProfile = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/employer-profile", { method: "PUT", body: payload, params });
+
+export const recordFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif", { method: "POST", body: payload, params });
+
+export const upsertFranceEstablishmentRatePack = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { method: "PUT", body: payload, params });
+
+export const listFranceEstablishmentRatePacks = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { params });
+
+export const ingestFrancePASRate = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { method: "POST", body: payload, params });
+
+export const listFrancePASRates = (params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { params });
+
+export const listFranceDsnSubmissions = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-submissions", { params });
+
+export const listFranceDsnOutboxItems = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-outbox", { params });

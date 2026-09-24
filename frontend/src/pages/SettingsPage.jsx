@@ -45,11 +45,11 @@ export default function SettingsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Platform Settings</h1>
+        <h1 className="text-2xl font-bold text-foreground">Platform Settings</h1>
         <button
           onClick={load}
           disabled={loading}
-          className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-surface-muted disabled:opacity-50"
         >
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
           Refresh
@@ -57,14 +57,14 @@ export default function SettingsPage() {
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <p className="mb-4 rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
           {error}
         </p>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">Key</th>
               <th className="px-4 py-3">Description</th>
@@ -75,22 +75,22 @@ export default function SettingsPage() {
           </thead>
           <tbody>
             {settings.map((s) => (
-              <tr key={s.key} className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-slate-700">{s.key}</td>
-                <td className="px-4 py-3 text-slate-500">{s.description || "—"}</td>
+              <tr key={s.key} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
+                <td className="px-4 py-3 font-mono text-xs text-foreground-secondary">{s.key}</td>
+                <td className="px-4 py-3 text-foreground-muted">{s.description || "—"}</td>
                 <td className="px-4 py-3">
                   <input
                     value={edits[s.key] ?? ""}
                     onChange={(e) => setEdits((d) => ({ ...d, [s.key]: e.target.value }))}
-                    className="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                    className="w-64 rounded-lg border border-border bg-surface text-foreground px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
                   />
                 </td>
-                <td className="px-4 py-3 text-slate-500">{s.is_public ? "Yes" : "No"}</td>
+                <td className="px-4 py-3 text-foreground-muted">{s.is_public ? "Yes" : "No"}</td>
                 <td className="px-4 py-3">
                   <button
                     disabled={busyKey === s.key}
                     onClick={() => save(s.key)}
-                    className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                    className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
                   >
                     <Save size={12} />
                     Save
@@ -102,8 +102,8 @@ export default function SettingsPage() {
         </table>
         {!loading && settings.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <SettingsIcon size={28} className="text-slate-300" />
-            <p className="text-sm text-slate-400">No settings configured.</p>
+            <SettingsIcon size={28} className="text-foreground-disabled" />
+            <p className="text-sm text-foreground-disabled">No settings configured.</p>
           </div>
         )}
       </div>

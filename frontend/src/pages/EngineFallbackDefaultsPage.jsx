@@ -20,6 +20,7 @@ const COUNTRIES = [
   { code: "AU", name: "Australia" },
   { code: "CA", name: "Canada" },
   { code: "DE", name: "Germany" },
+  { code: "FR", name: "France" },
 ];
 
 function toNumber(v) {

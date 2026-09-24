@@ -2,9 +2,9 @@
 scripts/seed_caribbean_canonical_packs.py
 -------------------------------------------------
 Seeds the canonical (organization_id IS NULL) JurisdictionPack + TaxSlab +
-ContributionRate rows for the 7 production-ready Caribbean countries
-(Barbados, Cayman Islands, Dominican Republic, Guyana, Jamaica, Bahamas,
-Trinidad and Tobago). This is what makes each country's engine module
+ContributionRate rows for the 8 production-ready Caribbean/adjacent
+countries (Barbados, Cayman Islands, Dominican Republic, Guyana, Jamaica,
+Bahamas, Trinidad and Tobago, Puerto Rico). This is what makes each country's engine module
 (engine/countries/<country>.py) DB-driven rather than Python-hardcoded —
 every rate/threshold/ceiling/band below is a real row an org's payroll
 run and Super Admin's Compliance UI both read the exact same way IN/US/
@@ -261,6 +261,39 @@ def seed_trinidad_and_tobago(db):
         )
 
 
+def seed_puerto_rico(db):
+    """ZP-PR-ENG-001 canonical rates. Withholding brackets (§13, 5 real
+    current Hacienda brackets) reverse-verified against fixture F1's own
+    published cross-check ($48,000 annual gross - $3,500 exemption =
+    $44,500 taxable -> $4,180.00 tax, exact to the cent). pr_unemployment
+    (DTRH, employer-specific by law, PR-018) and pr_cfse (CFSE workers'
+    compensation, employer-policy/risk-class-specific by law, PR-021) are
+    DELIBERATELY NOT seeded here — see engine/countries/puerto_rico.py's
+    own docstring: no canonical default exists for either genuinely
+    employer-specific rate, and leaving them unconfigured is what makes
+    PayrollResult.pr_unemployment_rate_configured/pr_cfse_rate_configured
+    correctly read False (never a fabricated statewide percentage or
+    policy premium) until a real org enters its own DTRH rate notice /
+    CFSE policy rate."""
+    pack = _upsert_pack(db, "PR", "USD")
+    _add_slab(db, pack, "PR", 0, 9000, 0, "0%", sort_order=1)
+    _add_slab(db, pack, "PR", 9000, 25000, 7, "7%", sort_order=2)
+    _add_slab(db, pack, "PR", 25000, 41500, 14, "14%", sort_order=3)
+    _add_slab(db, pack, "PR", 41500, 61500, 25, "25%", sort_order=4)
+    _add_slab(db, pack, "PR", 61500, None, 33, "33%", sort_order=5)
+    _add_rate(db, pack, "PR", "pr_personal_exemption", "Personal Exemption (annual, Form 499 R-4/R-4.1 default)", flat_amount=3500)
+    _add_rate(db, pack, "PR", "pr_ss", "Social Security", employee_rate_pct=0.0620, employer_rate_pct=0.0620)
+    _add_rate(db, pack, "PR", "pr_ss_wage_base", "Social Security Wage Base (annual)", flat_amount=184500)
+    _add_rate(db, pack, "PR", "pr_medicare", "Medicare", employee_rate_pct=0.0145, employer_rate_pct=0.0145)
+    _add_rate(db, pack, "PR", "pr_additional_medicare", "Additional Medicare", employee_rate_pct=0.0090)
+    _add_rate(db, pack, "PR", "pr_additional_medicare_threshold", "Additional Medicare Threshold (annual)", flat_amount=200000)
+    _add_rate(db, pack, "PR", "pr_futa", "FUTA-equivalent (gross rate)", employer_rate_pct=0.0600)
+    _add_rate(db, pack, "PR", "pr_futa_wage_base", "FUTA-equivalent Wage Base (annual)", flat_amount=7000)
+    _add_rate(db, pack, "PR", "pr_unemployment_wage_base", "PR Unemployment (DTRH) Wage Base (annual)", flat_amount=7000)
+    _add_rate(db, pack, "PR", "pr_sinot", "SINOT (temporary non-occupational disability)", employee_rate_pct=0.0030, employer_rate_pct=0.0030)
+    _add_rate(db, pack, "PR", "pr_sinot_wage_base", "SINOT Wage Base (annual)", flat_amount=9000)
+
+
 SEEDERS = [
     seed_barbados,
     seed_cayman_islands,
@@ -269,6 +302,7 @@ SEEDERS = [
     seed_jamaica,
     seed_bahamas,
     seed_trinidad_and_tobago,
+    seed_puerto_rico,
 ]
 
 

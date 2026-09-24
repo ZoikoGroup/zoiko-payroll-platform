@@ -66,6 +66,8 @@ from app.modules.payroll.engine.countries import guyana as _guyana
 from app.modules.payroll.engine.countries import jamaica as _jamaica
 from app.modules.payroll.engine.countries import bahamas as _bahamas
 from app.modules.payroll.engine.countries import trinidad_and_tobago as _trinidad_and_tobago
+from app.modules.payroll.engine.countries import puerto_rico as _puerto_rico
+from app.modules.payroll.engine.countries import france as _france
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -131,6 +133,8 @@ _calc_guyana = _guyana.calculate
 _calc_jamaica = _jamaica.calculate
 _calc_bahamas = _bahamas.calculate
 _calc_trinidad_and_tobago = _trinidad_and_tobago.calculate
+_calc_puerto_rico = _puerto_rico.calculate
+_calc_france = _france.calculate
 
 
 _COUNTRY_CALC = {
@@ -153,6 +157,15 @@ _COUNTRY_CALC = {
     "JM": _calc_jamaica,
     "BS": _calc_bahamas,
     "TT": _calc_trinidad_and_tobago,
+    # Puerto Rico (2026-09-23) — dual-jurisdiction (local Hacienda +
+    # independently-computed federal-equivalent layer), but architecturally
+    # a sibling of the Caribbean entries above, not a US-dependent variant —
+    # see engine/countries/puerto_rico.py's own module docstring.
+    "PR": _calc_puerto_rico,
+    # France (2026-09-24, ZP-FR-ENG-001) — European expansion, metropolitan
+    # private-sector wedge. Engine/countries/france.py; calculation is
+    # establishment-aware and returns separate net_social/net_imposable.
+    "FR": _calc_france,
 }
 
 
@@ -196,6 +209,11 @@ class StandardStrategy(PayrollStrategy):
             + deductions.get("state_disability_insurance", Decimal("0"))
             + deductions.get("state_program_deductions", Decimal("0"))
             + deductions.get("au_statutory_deductions_total", Decimal("0"))
+            # France: combined employee-side total (all France employee
+            # contributions incl. PAS withholding). Same additive mechanism
+            # as au_statutory_deductions_total above — every other country's
+            # .get() returns the 0 default, so no other calculation changes.
+            + deductions.get("fr_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -298,6 +316,20 @@ class StandardStrategy(PayrollStrategy):
             au_statutory_deductions_detail=deductions.get("au_statutory_deductions_detail", []),
             au_workers_compensation_premium=deductions.get("au_workers_compensation_premium", Decimal("0")),
             au_calculation_trace=deductions.get("au_calculation_trace"),
+            # France (ZP-FR-ENG-001, 2026-09-24) — fields returned by
+            # engine/countries/france.calculate() and propagated to the result
+            fr_net_social=deductions.get("fr_net_social"),
+            fr_net_imposable=deductions.get("fr_net_imposable"),
+            fr_employee_total=deductions.get("fr_employee_total", Decimal("0")),
+            fr_employer_total=deductions.get("fr_employer_total", Decimal("0")),
+            fr_contributions=deductions.get("fr_contributions"),
+            fr_bases=deductions.get("fr_bases"),
+            fr_pas_withheld=deductions.get("fr_pas_withheld", Decimal("0")),
+            fr_pas_rate_type=deductions.get("fr_pas_rate_type"),
+            fr_pas_rate_pct=deductions.get("fr_pas_rate_pct"),
+            fr_pas_rate_id=deductions.get("fr_pas_rate_id"),
+            fr_calculation_snapshot=deductions.get("fr_calculation_snapshot"),
+            fr_not_configured=deductions.get("fr_not_configured"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),
@@ -313,6 +345,13 @@ class StandardStrategy(PayrollStrategy):
             ytd_whm_earnings_after=deductions.get("ytd_whm_earnings_after"),
             ytd_ky_mandatory_pensionable_earnings_after=deductions.get("ytd_ky_mandatory_pensionable_earnings_after"),
             ytd_gy_paye_credit_after=deductions.get("ytd_gy_paye_credit_after"),
+            ytd_pr_ss_wages_after=deductions.get("ytd_pr_ss_wages_after"),
+            ytd_pr_medicare_wages_after=deductions.get("ytd_pr_medicare_wages_after"),
+            ytd_pr_futa_wages_after=deductions.get("ytd_pr_futa_wages_after"),
+            ytd_pr_unemployment_wages_after=deductions.get("ytd_pr_unemployment_wages_after"),
+            ytd_pr_sinot_wages_after=deductions.get("ytd_pr_sinot_wages_after"),
+            pr_unemployment_rate_configured=deductions.get("pr_unemployment_rate_configured", True),
+            pr_cfse_rate_configured=deductions.get("pr_cfse_rate_configured", True),
             au_whm_cap_exceeded=deductions.get("au_whm_cap_exceeded", False),
             sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),
             sg_rate_pct=deductions.get("sg_rate_pct"),

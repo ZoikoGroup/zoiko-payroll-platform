@@ -37,6 +37,14 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "hrb", label: "HRB", pattern: "^HRB\\s?[0-9]{1,6}$", example: "HRB 123456", primary: false },
     ],
   },
+  FR: {
+    label: "SIREN / SIRET / TVA intracommunautaire",
+    fields: [
+      { key: "siren", label: "SIREN", pattern: "^\\d{9}$", example: "552100554", primary: true },
+      { key: "siret", label: "SIRET", pattern: "^\\d{14}$", example: "55210055400021", primary: false },
+      { key: "vat_intracom", label: "TVA intracommunautaire", pattern: "^FR[0-9]{11}$", example: "FR23392106162", primary: false },
+    ],
+  },
   AU: {
     label: "ABN / ACN",
     fields: [
@@ -54,6 +62,7 @@ const COUNTRY_NAME_TO_CODE = {
   uk: "UK",
   germany: "DE",
   australia: "AU",
+  france: "FR",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -62,6 +71,7 @@ const CODE_TO_COUNTRY_NAME = {
   UK: "United Kingdom",
   DE: "Germany",
   AU: "Australia",
+  FR: "France",
 };
 
 export function getJurisdictionCode(country) {

@@ -658,6 +658,14 @@ class DEEmployeeValidation(EmployeeValidationStrategy):
 # required field would incorrectly block. Tightening any of these to a
 # confirmed real format/requirement is a follow-up once each country's
 # exact current form is acquired — same gate the specs themselves impose.
+# Bank-routing fields (ZP-MJR-2026-002, 2026-09-24) — same lenient-pattern/
+# not-required discipline as the tax IDs above: none of these 7 countries has
+# a single confirmed national bank-clearing code format the way IFSC/sort-
+# code/ABA do, so `bank_branch_code` is a generic free-text field rather
+# than a guessed strict one. Bahamas and Puerto Rico are the two exceptions
+# — both ride a NACHA-style 9-digit ACH routing rail (Puerto Rico via the
+# US banking system directly), so they get `ach_routing_number` with the
+# same shape as USEmployeeValidation's `aba_routing_number` instead.
 class BBEmployeeValidation(EmployeeValidationStrategy):
     country_code = "BB"
     FIELD_SPECS = {
@@ -669,6 +677,10 @@ class BBEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIS number looks incorrect.",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
 
 
@@ -678,6 +690,10 @@ class KYEmployeeValidation(EmployeeValidationStrategy):
         "nib_member_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIB member number looks incorrect.",
+        },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
         },
     }
 
@@ -691,6 +707,10 @@ class DOEmployeeValidation(EmployeeValidationStrategy):
         "cedula": {
             "pattern": re.compile(r"^\d{3}-\d{7}-\d{1}$"),
             "error": "Cédula must be in the format 000-0000000-0.",
+        },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
         },
     }
 
@@ -706,6 +726,10 @@ class GYEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIS number looks incorrect.",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
 
 
@@ -717,6 +741,10 @@ class JMEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{9}$"),
             "error": "TRN must be 9 digits (e.g. 123456789 or 123-456-789).",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
 
 
@@ -726,6 +754,10 @@ class BSEmployeeValidation(EmployeeValidationStrategy):
         "nib_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIB number looks incorrect.",
+        },
+        "ach_routing_number": {
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "ACH routing number must be exactly 9 digits.",
         },
     }
 
@@ -740,6 +772,65 @@ class TTEmployeeValidation(EmployeeValidationStrategy):
         "nibtt_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIBTT number looks incorrect.",
+        },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
+    }
+
+
+class PREmployeeValidation(EmployeeValidationStrategy):
+    country_code = "PR"
+    FIELD_SPECS = {
+        # US Social Security Number — Puerto Rico employees are US
+        # citizens and are issued a real federal SSN, not a
+        # territory-specific ID (ZP-PR-ENG-001 §2's "Worker identity"
+        # object).
+        "ssn": {
+            "pattern": re.compile(r"^\d{3}-?\d{2}-?\d{4}$"),
+            "error": "Social Security Number must be in the format 000-00-0000.",
+        },
+        "ach_routing_number": {
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "ACH routing number must be exactly 9 digits.",
+        },
+    }
+
+
+class FREmployeeValidation(EmployeeValidationStrategy):
+    """France (ZP-FR-ENG-001 §13/§15). The `nir` is authority identity
+    (FR-037: never 'fixed' by synthesising a statutory identifier) and the
+    employing establishment flows through the employee's `siret`. Both are
+    format-validated here; the payroll-side mandatory-data gate (which
+    blocks when NIR is unknown rather than guessing) lives in service.py,
+    exactly as France's launch run-workspace requires (section 13:
+    "Missing NIR material exceptions block approval")."""
+    country_code = "FR"
+    FIELD_SPECS = {
+        "nir": {
+            "pattern": re.compile(r"^\d{15}$"),
+            "error": "NIR (numéro d'inscription au répertoire) must be exactly 15 digits.",
+            "required": True,
+        },
+        "siret": {
+            "pattern": re.compile(r"^\d{14}$"),
+            "error": "SIRET must be exactly 14 digits.",
+        },
+        "nif": {
+            "pattern": re.compile(r"^[0-9A-Za-z]{12}$"),
+            "error": "FV/IFU-style foreign tax identifier is not valid (12 alphanumeric).",
+        },
+        "iban": {
+            "upper": True, "strip_chars": " ",
+            # FR (2) + 12 bank/branch digits + 11 account + 2 key = 27 chars
+            "pattern": re.compile(r"^FR\d{12}[0-9A-Z]{11}\d{2}$"),
+            "error": "French IBAN must be FR followed by 25 characters (12 digits, 11 alphanumeric, 2 digits).",
+        },
+        "bic": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "BIC must be 8 or 11 characters.",
         },
     }
 
@@ -758,6 +849,8 @@ _STRATEGIES = {
     "JM": JMEmployeeValidation,
     "BS": BSEmployeeValidation,
     "TT": TTEmployeeValidation,
+    "PR": PREmployeeValidation,
+    "FR": FREmployeeValidation,
 }
 
 

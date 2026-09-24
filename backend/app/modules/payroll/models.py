@@ -5392,6 +5392,58 @@ class NewHireReport(Base):
         return f"<NewHireReport employee={self.employee_id} due={self.due_date} status={self.status}>"
 
 
+class PRWithholdingCertificate(Base):
+    """Puerto Rico Form 499 R-4/R-4.1 (ZP-PR-ENG-001 PR-005) — an
+    employee's own versioned Puerto Rico withholding exemption
+    certificate: personal exemption, dependents, deduction allowance, an
+    optional married-computation election, a Military Spouses Residency
+    Relief Act (MSRRA) election, and additional withholding. A NEW
+    certificate is a new row, never an edit — the prior Approved row (if
+    any) is marked Superseded on approval, the exact same immutable-
+    versioning convention as SalaryTdsDeclaration/JurisdictionPack/
+    ReportTemplate (create Draft -> submit -> approve, see
+    service.create_pr_withholding_certificate/submit_.../approve_...).
+
+    PR-006: an employee with no Approved certificate on file gets the
+    current default treatment (engine/countries/puerto_rico.py's
+    _PR_PERSONAL_EXEMPTION constant) — never a guessed certificate; see
+    service.get_pr_certificate_inputs, whose empty-dict return for that
+    case is what makes puerto_rico.py fall back to the engine default.
+
+    Not tax-year-scoped (unlike India's SalaryTdsDeclaration) — the real
+    Form 499 R-4/R-4.1 stays in effect until the employee files a new one,
+    it does not expire at year-end."""
+    __tablename__ = "payroll_pr_withholding_certificates"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    personal_exemption_amount         = Column(Numeric(12, 2), nullable=False, default=0)
+    dependents_count                  = Column(Integer, nullable=False, default=0)
+    dependent_exemption_per_dependent = Column(Numeric(12, 2), nullable=False, default=0)
+    deduction_allowance_amount        = Column(Numeric(12, 2), nullable=False, default=0)
+    optional_married_computation      = Column(Boolean, nullable=False, default=False)
+    # MSRRA: a validly-elected, supported claim routes to specialist
+    # validation per PR-005/PR §3's own table — this engine only records
+    # the election and, once Approved, suppresses Puerto Rico wage
+    # withholding for that employee (see puerto_rico.py's own comment);
+    # it does not independently verify MSRRA eligibility.
+    msrra_election                    = Column(Boolean, nullable=False, default=False)
+    additional_withholding_amount     = Column(Numeric(12, 2), nullable=False, default=0)
+
+    status         = Column(String(20), nullable=False, default="Draft")  # Draft | Submitted | Approved | Superseded
+    submitted_at   = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at    = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<PRWithholdingCertificate employee={self.employee_id} status={self.status}>"
+
+
 class SuperGuaranteeLiability(Base):
     """Australia Payday Super (ZP-TAX-AU-2026-27-001 §10, Payday Super
     Phase 2, 2026-09-16) — the one genuinely NEW concept that phase
@@ -5528,3 +5580,242 @@ class StatutoryFiling(Base):
 
     def __repr__(self):
         return f"<StatutoryFiling org={self.organization_id} {self.jurisdiction} {self.filing_type} {self.period_label} {self.status}>"
+
+
+# ── France (ZP-FR-ENG-001, 2026-09-24) ─────────────────────────────────────
+# France breaks its payroll on a THIRD dimension the generic pack model
+# (jurisdiction_country / jurisdiction_state) does not express: the SIRET /
+# establishment (FR-002). The four France tables below are therefore
+# deliberately NOT re-implementations of the generic pack/rate/slab system —
+# statutory rates and tax slabs stay in ContributionRate / TaxSlab / 
+# JurisdictionPack exactly like every other country. These tables only cover
+# the concepts France mandates that GENERIC infrastructure cannot carry:
+#   - EmployerFranceProfile         → org-level SIREN/IDCC/Urssaf/DSN/PAS/effectif
+#   - FranceEstablishmentRatePack  → SIRET-scoped AT/MP + versement mobilité + effectif
+#   - FrancePASRate                → authority-supplied DGFiP PAS rate (CRM ingestion)
+#   - FranceDsnSubmission/Outbox   → P26V01 outbox lifecycle (durable, idempotent)
+# Precedent for dedicated country extension tables: the Germany family
+# (GermanyElsterTransmission, GermanyElstamChangeListBatch, …).
+
+class EmployerFranceProfile(Base):
+    """1:1 org-level France employer profile. Carries the governed annual
+    effectif with threshold history (FR-015/FR-036), IDCC scope (FR-035),
+    the Urssaf/DSN collector identity + filing due-date class (5th M+1 for
+    50+, 15th M+1 otherwise — FR §10), the DGFiP PAS collector identity, and
+    the evidence-driven readiness gate (FR-034). SIRET-scoped things live on
+    FranceEstablishmentRatePack, not here — one row per SIRET."""
+    __tablename__ = "payroll_fr_employer_profiles"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+
+    siren          = Column(String(9), nullable=False)
+    legal_name     = Column(String(200), nullable=True)
+    legal_form     = Column(String(50), nullable=True)
+    # Convention collective / IDCC — mandatory or explicitly "unknown under
+    # review" (FR-035); never silently defaults to Code du travail floor.
+    idcc           = Column(String(20), nullable=True)
+
+    # Urssaf / DSN (FR §11 panel C)
+    urssaf_account         = Column(String(50), nullable=True)
+    dsn_declarant          = Column(String(50), nullable=True)
+    filing_due_date_class  = Column(String(20), nullable=False, default="M15", server_default="M15")
+    #     "M5" (50+ employees: 5th M+1) | "M15" (<50: 15th M+1) |
+    #     "DEFERRED_M15" (50+ on deferred payroll, 15th rule)
+    payment_mandate_ref    = Column(String(100), nullable=True)
+
+    # DGFiP PAS (FR §11 panel D) — authority rate exchange, never admin-edited
+    pas_collector_identity = Column(String(100), nullable=True)
+    pas_crm_status         = Column(String(20), nullable=False, default="NOT_CONNECTED", server_default="NOT_CONNECTED")
+    #     NOT_CONNECTED | CONNECTED | RATE_EXCHANGE_OK | STALE
+
+    # Governed annual effectif + threshold history (FR-015/FR-036) — JSON
+    # {year: {"value": n, "source": ..., "validatedAt": ...}, ...}; used for
+    # FNAL/CFP/apprenticeship/versement mobilité 11+/50+ predicates.
+    effectif_state    = Column(JSON, nullable=True)
+
+    # Evidence-driven launch gate H (FR §11): RulePack/DSN/rates/benefits/
+    # bank/labor/parallel-run evidence bundle.
+    readiness_status  = Column(String(30), nullable=False, default="NOT_READY", server_default="NOT_READY")
+    #     NOT_READY | READY | LIVE
+    readiness_evidence = Column(JSON, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<EmployerFranceProfile org={self.organization_id} siren={self.siren} readiness={self.readiness_status}>"
+
+
+class FranceEstablishmentRatePack(Base):
+    """Per-SIRET employer/establishment rate pack (FR-002/FR-013). AT/MP is
+    establishment-specific authority data imported by risk decision, never
+    generic; versement mobilité/VMRR is location + effectif + threshold
+    driven (11+ employee threshold with threshold-neutralization history).
+    Each row is effective-dated so January/July rate changes keep full
+    history (FR §2/§5/§9)."""
+    __tablename__ = "payroll_fr_establishment_rate_packs"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    # Optional link to the employer profile; not a hard dependency so a
+    # SIRET pack can exist before the full profile row is finalised.
+    employer_profile_id = Column(Integer, ForeignKey("payroll_fr_employer_profiles.id"), nullable=True)
+
+    siret            = Column(String(14), nullable=False)
+    commune_insee    = Column(String(10), nullable=True)
+    workplace_label  = Column(String(200), nullable=True)
+
+    # AT/MP — authority decision with evidence (FR-013/FR-027)
+    at_mp_rate_pct     = Column(Numeric(7, 4), nullable=True)
+    at_mp_risk_code    = Column(String(30), nullable=True)
+    at_mp_evidence     = Column(Text, nullable=True)
+    at_mp_source       = Column(String(120), nullable=True)
+
+    # Versement mobilité / VMRR — location + effectif driven
+    vm_rate_pct            = Column(Numeric(7, 4), nullable=True)
+    vm_threshold_applies   = Column(Boolean, nullable=True)  # 11+ employee threshold
+    vm_threshold_history   = Column(JSON, nullable=True)     # threshold-neutralization history
+    vm_source              = Column(String(120), nullable=True)
+
+    # Employer-size classes used by FNAL/CFP/apprenticeship predicates
+    fnal_class  = Column(String(20), nullable=True)  # "UNDER_50" | "OVER_50"
+    cfp_class   = Column(String(20), nullable=True)  # "UNDER_11" | "OVER_11"
+    effectif    = Column(Integer, nullable=True)
+
+    effective_from = Column(Date, nullable=False)
+    effective_to   = Column(Date, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        # Historical rows kept per period (Jan/Jul rate changes).
+        UniqueConstraint("organization_id", "siret", "effective_from", name="uq_fr_estab_pack_per_period"),
+    )
+
+    def __repr__(self):
+        return f"<FranceEstablishmentRatePack org={self.organization_id} siret={self.siret} from={self.effective_from} at_mp={self.at_mp_rate_pct}>"
+
+
+class FrancePASRate(Base):
+    """Prélèvement à la source authority rate (FR-008/FR-010). Personalized
+    rates are DGFiP CRM supply, ingested with rate identifier + receipt date
+    + legal application window (60 days); NEUTRAL rows come from the
+    statutory grid when no personalized rate may be used (employee opt-out /
+    new starter). Never an admin-editable percentage — the UI is read-only.
+    Corrections link back to the originating period/rate (FR §4) instead of
+    retro-applying a newer personalized rate."""
+    __tablename__ = "payroll_fr_pas_rates"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    # PERSONALIZED | NEUTRAL
+    rate_type      = Column(String(20), nullable=False)
+    # Personalized authority rate (null for NEUTRAL — the neutral grid is
+    # statutory content, resolved by the engine from the payroll date).
+    rate_pct       = Column(Numeric(7, 4), nullable=True)
+    dgfip_rate_id  = Column(String(100), nullable=True)   # personalized provenance (FR-010)
+    source         = Column(String(20), nullable=False)   # "CRM" | "NEUTRAL_GRID"
+    received_date  = Column(Date, nullable=True)          # CRM receipt date
+    effective_from = Column(Date, nullable=False)         # legal application start
+    effective_to   = Column(Date, nullable=True)          # end of 60-day window / superseded
+
+    # ACTIVE | PENDING | EXPIRED | STALE
+    status = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+
+    # Correction lineage — link to the prior rate this row replaces.
+    correction_of_id = Column(Integer, ForeignKey("payroll_fr_pas_rates.id"), nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_fr_pas_rate_org_emp_window", "organization_id", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<FrancePASRate employee={self.employee_id} {self.rate_type} {self.status}>"
+
+
+class FranceDsnSubmission(Base):
+    """One monthly DSN P26V01 submission (FR-030..033). The four lifecycle
+    states the spec mandates — transport acknowledgement, business
+    acceptance (CRM), anomaly resolution, payment settlement — are SEPARATE
+    columns, never one merged status; a correct net-pay calculation is not
+    evidence of successful tax reporting (FR-011). Immutable original with
+    correction lineage via correction_of_id."""
+    __tablename__ = "payroll_fr_dsn_submissions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    dsn_version  = Column(String(20), nullable=False, default="P26V01", server_default="P26V01")
+    release_ref  = Column(String(50), nullable=False)   # pinned reference-table release (FR-030)
+    payload_hash = Column(String(64), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end   = Column(Date, nullable=False)
+    due_date     = Column(Date, nullable=False)
+
+    # DRAFT | VALIDATED | QUEUED | TRANSMITTED | ACKNOWLEDGED |
+    # BUSINESS_REJECTED | CRM_RESOLVED | UNKNOWN | SETTLED
+    status = Column(String(30), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    validation_errors = Column(JSON, nullable=True)   # pre-submit validator (FR-031)
+    blocked_reason    = Column(Text, nullable=True)
+
+    # Separate lifecycle columns (FR-032) — nullable until the signal exists.
+    technical_ack     = Column(String(30), nullable=True)
+    business_crm      = Column(JSON, nullable=True)   # report/anomaly codes per DSN version
+    payment_state     = Column(String(20), nullable=True)  # SEPA/direct-debit, independent of DSN
+    submitted_at      = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at   = Column(DateTime(timezone=True), nullable=True)
+
+    # Correction lineage: replaces/regularizes the referenced submission;
+    # the prior row is never deleted (FR-033).
+    correction_of_id = Column(Integer, ForeignKey("payroll_fr_dsn_submissions.id"), nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_fr_dsn_org_period", "organization_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return f"<FranceDsnSubmission org={self.organization_id} {self.period_start} {self.status}>"
+
+
+class FranceDsnOutboxItem(Base):
+    """Durable idempotent outbox record for outbound DSN/payment actions
+    (FR-033). A network timeout results in UNKNOWN and reconciliation —
+    never blind replay. idempotency_key prevents duplicate transmission when
+    a transport success is uncertain."""
+    __tablename__ = "payroll_fr_dsn_outbox_items"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    submission_id = Column(Integer, ForeignKey("payroll_fr_dsn_submissions.id"), nullable=False, index=True)
+
+    # TRANSMIT | PAS_RATE_EXCHANGE | CRM_CLOSE | CORRECTION
+    action          = Column(String(30), nullable=False)
+    payload         = Column(JSON, nullable=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True)
+
+    # PENDING | SENT | UNKNOWN | ACKNOWLEDGED | FAILED
+    status          = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    attempts        = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error      = Column(Text, nullable=True)
+    sent_at         = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<FranceDsnOutboxItem submission={self.submission_id} {self.action} {self.status}>"

@@ -12,6 +12,14 @@ export const REGISTRATION_COUNTRIES = [
   // already does for any country absent from that map.
   "Barbados", "Cayman Islands", "Dominican Republic", "Guyana", "Jamaica",
   "Bahamas", "Trinidad and Tobago",
+  // Puerto Rico (2026-09-23) — dual-jurisdiction, but architecturally a
+  // sibling of the 7 Caribbean entries above (country-level only, no
+  // state/province division), not a US-dependent variant.
+  "Puerto Rico",
+  // France (2026-09-24, ZP-FR-ENG-001) - Europe expansion. Has a real
+  // region list below (18 regions incl. overseas d-partements), unlike the
+  // country-level Caribbean entries.
+  "France",
 ];
 
 const STATES_BY_COUNTRY = {
@@ -310,6 +318,7 @@ const TIMEZONES_BY_COUNTRY = {
   "Barbados": ["America/Barbados"],
   "Cayman Islands": ["America/Cayman"],
   "Dominican Republic": ["America/Santo_Domingo"],
+  "Puerto Rico": ["America/Puerto_Rico"],
   "Guyana": ["America/Guyana"],
   "Jamaica": ["America/Jamaica"],
   "Bahamas": ["America/Nassau"],

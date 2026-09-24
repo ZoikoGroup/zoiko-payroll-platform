@@ -47,6 +47,12 @@ const US_940_TAB = { id: "us-940", label: "Form 940", icon: Landmark };
 // list), not report generation like 941/940 above — still its own tab,
 // same "doesn't fit the run-scoped Generate Report flow" reasoning.
 const US_NEW_HIRE_TAB = { id: "us-new-hire", label: "New Hire Reporting", icon: FileText };
+// ASUME reporting (PR-007/PR-023) reuses the exact same NewHireReport
+// tracking mechanism/API as US New Hire Reporting above (org-scoped only,
+// no country filter server-side — see USNewHireReportingPanel's own
+// comment) — its own tab/copy since Puerto Rico orgs shouldn't see "state
+// new-hire registry" language for a Puerto Rico child-support agency.
+const PR_ASUME_TAB = { id: "pr-asume", label: "ASUME Reporting", icon: FileText };
 
 export default function ReportsPage() {
   const { addToast } = useToast();
@@ -58,12 +64,14 @@ export default function ReportsPage() {
   const isIndia = !jurisdictionCountry || jurisdictionCountry === "IN";
   const isCanada = jurisdictionCountry === "CA";
   const isUs = jurisdictionCountry === "US";
+  const isPr = jurisdictionCountry === "PR";
   const tabs = [
     ...BASE_TABS,
     ...(isUk ? [UK_EMPLOYER_CHARGES_TAB] : []),
     ...(isIndia ? [IN_FORM_138_TAB] : []),
     ...(isCanada ? [CA_PD7A_TAB, CA_WSDRF_TAB] : []),
     ...(isUs ? [US_941_TAB, US_940_TAB, US_NEW_HIRE_TAB] : []),
+    ...(isPr ? [PR_ASUME_TAB] : []),
   ];
   const [activeTab, setActiveTab] = useState("payroll-reports");
   const [reports, setReports] = useState([]);
@@ -309,6 +317,17 @@ export default function ReportsPage() {
       {isUs && activeTab === "us-941" && <USForm941Panel />}
       {isUs && activeTab === "us-940" && <USForm940Panel />}
       {isUs && activeTab === "us-new-hire" && <USNewHireReportingPanel />}
+      {isPr && activeTab === "pr-asume" && (
+        <USNewHireReportingPanel
+          title="ASUME Reporting"
+          subtitle={
+            "Every new or rehired Puerto Rico employee is required to be reported to ASUME within the statutory window. " +
+            "A Pending row is created automatically when a new Puerto Rico employee is added. The due date shown is a " +
+            "SUGGESTION (hire date + 20 days, per current official ASUME new-hire guidance) — verify and mark filed once " +
+            "actually reported."
+          }
+        />
+      )}
     </div>
   );
 }
