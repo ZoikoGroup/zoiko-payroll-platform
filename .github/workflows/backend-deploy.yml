@@ -68,10 +68,10 @@ jobs:
 
             echo "--- Migration diagnostics (read-only) ---"
             git rev-parse HEAD
-            alembic heads
-            alembic branches
+            alembic heads || true
+            alembic branches || true
             alembic history | head -n 40 || true
-            alembic current
+            alembic current || true
             echo "Database alembic_version:"
             python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' || true
             from sqlalchemy import text
