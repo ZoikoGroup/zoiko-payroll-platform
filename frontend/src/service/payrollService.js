@@ -41,6 +41,10 @@ export const COMPLIANCE_COUNTRIES = [
   { code: "JM", name: "Jamaica" },
   { code: "BS", name: "Bahamas" },
   { code: "TT", name: "Trinidad and Tobago" },
+  // France (2026-09-24, ZP-FR-ENG-001) — Europe expansion.
+  { code: "FR", name: "France" },
+  // Ireland (2026-09-25, ZP-IE-ENG-001) — Europe expansion.
+  { code: "IE", name: "Ireland" },
 ];
 
 export const DEFAULT_COUNTRY = "IN";
@@ -1442,6 +1446,7 @@ export const ENTERPRISE_JURISDICTIONS = [
   { code: "AU", name: "Australia", flag: "🇦🇺", currency: "AUD", financialYear: "Jul 1 – Jun 30" },
   { code: "DE", name: "Germany", flag: "🇩🇪", currency: "EUR", financialYear: "Jan 1 – Dec 31" },
   { code: "CA", name: "Canada", flag: "🇨🇦", currency: "CAD", financialYear: "Jan 1 – Dec 31" },
+{ code: "FR", name: "France", flag: "FR", currency: "EUR", financialYear: "Jan 1 - Dec 31" },
 ];
 
 export const ENTERPRISE_STATUS_LABELS = {
@@ -2145,4 +2150,63 @@ export const calculateCaWsdrf = async (payload) => {
     period_end: payload.periodEnd,
     training_expenditure_override: payload.trainingExpenditureOverride || null,
   });
+};
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Org-facing surface: the employer opens its France DSN, follows the four
+// lifecycle signals (FR-032) and drives its own idempotent outbox
+// (FR-033). Authority data — PAS rates, establishment AT/MP rate packs,
+// governed effectif, employer profile — is Super Admin-owned and lives in
+// superAdminService (compliance/france/*), exactly as the backend splits
+// them.
+export const createFranceDsnSubmission = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-submissions", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listFranceDsnSubmissionsForOrg = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/france/dsn-submissions", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnSubmission = async (submissionId, payload) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-submissions/${submissionId}/status`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createFranceDsnOutboxItem = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-outbox", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
+      params: { status, last_error: lastError || null },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getFranceReadinessForOrg = async (forPeriod) => {
+  try {
+    return await api.get("/api/payroll/france/readiness", {
+      params: { for_period: forPeriod || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
 };

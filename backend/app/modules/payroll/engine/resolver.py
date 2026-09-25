@@ -80,6 +80,24 @@ def calculate_payroll(
             "GERMANY_SIMPLE_MODE_UNSUPPORTED",
             "Germany payroll cannot use simple calculation mode; use standard or enterprise.",
         )
+    if (ctx.country or "").upper() == "FR" and key == "simple":
+        # Same boundary for France: simple mode would silently skip every
+        # statutory contribution and PAS (FR-027).
+        from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
+
+        raise FranceCalculationBlockedError(
+            "FRANCE_SIMPLE_MODE_UNSUPPORTED",
+            "France payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+    if (ctx.country or "").upper() == "IE" and key == "simple":
+        # Ireland: simple mode would silently skip PAYE/USC/PRSI/MyFutureFund
+        # and hand back a plausible net pay built on an absent RPN (IE-001).
+        from app.modules.payroll.engine.countries.ireland import IrelandCalculationBlockedError
+
+        raise IrelandCalculationBlockedError(
+            "IRELAND_SIMPLE_MODE_UNSUPPORTED",
+            "Ireland payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
 
     strategy = resolve_strategy(calculation_mode)
     try:
@@ -178,6 +196,7 @@ def build_context_from_employee(
     ytd_director_ni_employer_paid: Decimal | None = None,
     is_final_ni_period: bool = False,
     ni_category_override: str | None = None,
+    france_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -315,4 +334,7 @@ def build_context_from_employee(
         au_payroll_tax_charity_exempt=au_payroll_tax_charity_exempt,
         au_national_taxable_wages_ytd_before=au_national_taxable_wages_ytd_before,
         au_statutory_deduction_orders=au_statutory_deduction_orders or [],
+        # France (ZP-FR-ENG-001): the france_* context fields resolved by
+        # service._resolve_france_calc_inputs (PAS, SIRET rate pack, YTD).
+        **(france_inputs or {}),
     )

@@ -117,6 +117,10 @@ from app.modules.payroll.schemas import (
     AUSuperstreamGenerateRequest, AUPayrollTaxReturnGenerateRequest,
     NewHireReportCreate, NewHireReportMarkFiledRequest, NewHireReportResponse,
     SalaryTdsDeclarationCreate, SalaryTdsDeclarationResponse,
+    PRWithholdingCertificateCreate, PRWithholdingCertificateResponse,
+    PRAccrueMonthlyLeaveRequest,
+    PRAccrueBonusYearRequest, PRBonusYearTotalsResponse,
+    PRChristmasBonusCalculateRequest, PRChristmasBonusCalculateResponse,
     SalaryTdsClaimCreate, SalaryTdsClaimResponse, SalaryTdsClaimRejectRequest,
     EmployeeBenefitValuationCreate, EmployeeBenefitValuationResponse,
     UKEmployeeReportGenerateRequest, UKEpsGenerateRequest,
@@ -128,6 +132,7 @@ from app.modules.payroll.schemas import (
     AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
     USSupplementalWageCalculateRequest, USSupplementalWageCalculateResponse,
     USFederalDepositScheduleRequest, USFederalDepositScheduleResponse,
+    PRDepositScheduleRequest, PRDepositScheduleResponse,
     CARetiringAllowanceCalculateRequest, CARetiringAllowanceCalculateResponse,
     CATd1xCommissionCalculateRequest, CATd1xCommissionCalculateResponse,
     CAWsdrfCalculateRequest, CAWsdrfCalculateResponse,
@@ -135,6 +140,10 @@ from app.modules.payroll.schemas import (
     HolidayCreate, BulkHolidayRequest, HolidayResponse,
     ApplicableTemplateResponse, GenerateReportRequest, GeneratedReportResponse, VoidGeneratedReportRequest,
     FilingCalendarResponse,
+    EmployerFranceProfileUpsert, FranceEstablishmentRatePackUpsert,
+    FrancePASRateUpsert, FranceEffectifRecord,
+    FranceDsnSubmissionCreate, FranceDsnStatusUpdate, FranceDsnOutboxCreate,
+    FranceDsnSubmissionResponse, FranceDsnOutboxItemResponse,
 )
 
 payroll_router = APIRouter(
@@ -1434,6 +1443,23 @@ def calculate_us_federal_deposit_schedule(
 
 
 @payroll_router.post(
+    "/pr/deposit-schedule/calculate", response_model=PRDepositScheduleResponse, response_model_by_alias=True,
+    summary="Calculate Puerto Rico Hacienda deposit category (Quarterly Exception/Monthly/Semiweekly), deposit due date, "
+            "$100,000 next-day rule, and Form 499R-2 deadline (PR-011)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_pr_deposit_schedule(
+    data: PRDepositScheduleRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_pr_deposit_schedule(
+        db, current_user.organization_id, data.lookback_period_liability, data.current_quarter_withholding,
+        data.payroll_date, accumulated_undeposited_liability=data.accumulated_undeposited_liability,
+    )
+
+
+@payroll_router.post(
     "/canada/retiring-allowance/calculate", response_model=CARetiringAllowanceCalculateResponse, response_model_by_alias=True,
     summary="Calculate federal lump-sum withholding for a Canada retiring allowance/severance payment (rate-table lookup, no hardcoded rate)",
     dependencies=[Depends(get_current_payroll_operator)],
@@ -1535,6 +1561,118 @@ def approve_salary_tds_declaration(
     current_user=Depends(get_current_user),
 ):
     return service.approve_salary_tds_declaration(db, current_user.organization_id, declaration_id, current_user.id)
+
+
+# ── Puerto Rico: Form 499 R-4/R-4.1 withholding certificate (PR-005) ────
+
+@payroll_router.post(
+    "/pr/withholding-certificates", response_model=PRWithholdingCertificateResponse, response_model_by_alias=True,
+    summary="Create a Form 499 R-4/R-4.1 Puerto Rico withholding certificate (Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_pr_withholding_certificate(
+    data: PRWithholdingCertificateCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_pr_withholding_certificate(
+        db, current_user.organization_id, data.employee_id,
+        personal_exemption_amount=data.personal_exemption_amount, dependents_count=data.dependents_count,
+        dependent_exemption_per_dependent=data.dependent_exemption_per_dependent,
+        deduction_allowance_amount=data.deduction_allowance_amount,
+        optional_married_computation=data.optional_married_computation, msrra_election=data.msrra_election,
+        additional_withholding_amount=data.additional_withholding_amount,
+    )
+
+
+@payroll_router.get(
+    "/pr/withholding-certificates", response_model=List[PRWithholdingCertificateResponse], response_model_by_alias=True,
+    summary="List Form 499 R-4/R-4.1 Puerto Rico withholding certificates",
+)
+def list_pr_withholding_certificates(
+    employeeId: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_pr_withholding_certificates(db, current_user.organization_id, employee_id=employeeId)
+
+
+@payroll_router.put(
+    "/pr/withholding-certificates/{certificate_id}/submit", response_model=PRWithholdingCertificateResponse, response_model_by_alias=True,
+    summary="Submit a Form 499 R-4/R-4.1 certificate (Draft -> Submitted)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def submit_pr_withholding_certificate(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.submit_pr_withholding_certificate(db, current_user.organization_id, certificate_id)
+
+
+@payroll_router.put(
+    "/pr/withholding-certificates/{certificate_id}/approve", response_model=PRWithholdingCertificateResponse, response_model_by_alias=True,
+    summary="Approve a Form 499 R-4/R-4.1 certificate (Submitted -> Approved) — supersedes any prior Approved certificate for this employee",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def approve_pr_withholding_certificate(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.approve_pr_withholding_certificate(db, current_user.organization_id, certificate_id, current_user.id)
+
+
+@payroll_router.post(
+    "/pr/leave/accrue-monthly", response_model=LeaveAllocationResponse, response_model_by_alias=True,
+    summary="Accrue one month of Puerto Rico vacation (Act 4-2017/Law 180) + sick leave (PR-028/PR-029) into the "
+            "employee's existing leave balances",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def accrue_pr_monthly_leave(
+    data: PRAccrueMonthlyLeaveRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.accrue_pr_monthly_leave(
+        db, current_user.organization_id, data.employee_id,
+        hired_before_2017=data.hired_before_2017, years_of_service=data.years_of_service,
+        qualifying_small_employer=data.qualifying_small_employer,
+        qualifying_hours_in_month=data.qualifying_hours_in_month, period_label=data.period_label,
+    )
+
+
+@payroll_router.post(
+    "/pr/christmas-bonus/accrue", response_model=PRBonusYearTotalsResponse, response_model_by_alias=True,
+    summary="Add one pay period's wages/hours to an employee's Puerto Rico Christmas Bonus bonus-year (Oct 1-Sep 30) totals (PR-032)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def accrue_pr_bonus_year_totals(
+    data: PRAccrueBonusYearRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.accrue_pr_bonus_year_totals(
+        db, current_user.organization_id, data.employee_id, data.as_of_date,
+        data.wages_this_period, data.hours_this_period,
+    )
+
+
+@payroll_router.post(
+    "/pr/christmas-bonus/calculate", response_model=PRChristmasBonusCalculateResponse, response_model_by_alias=True,
+    summary="Calculate an employee's Puerto Rico Christmas Bonus (Act 148) from their real accrued bonus-year totals",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def calculate_pr_christmas_bonus(
+    data: PRChristmasBonusCalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.calculate_pr_christmas_bonus_from_accumulator(
+        db, current_user.organization_id, data.employee_id, data.as_of_date,
+        hired_before_2017=data.hired_before_2017, employer_size_over_threshold=data.employer_size_over_threshold,
+        is_first_year=data.is_first_year,
+    )
 
 
 # ── India: Form 124 (Chapter VIII claims/evidence) ───────────────────────
@@ -2611,6 +2749,93 @@ def generate_us_940(
     )
 
 
+# ── Puerto Rico: Form 499 R-1B + federal-equivalent 941/940 (ZP-PR-ENG-001
+# §10) ────────────────────────────────────────────────────────────────
+# Reuses the SAME generic request schemas as the US 941/940 endpoints
+# above (report_template_id/year[/quarter] — no country-specific fields),
+# but routes to PR's own independently-computed service functions, never
+# service.generate_us_941/generate_us_940.
+
+@payroll_router.post(
+    "/pr/reports/499r1b", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Puerto Rico Form 499 R-1B (quarterly Hacienda withholding return) for one calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_499r1b(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_499r1b(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/941", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a federal Form 941 for a Puerto Rico employer (FICA on PR wages) for one IRS calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_941(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_941(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/940", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a federal Form 940 (FUTA-equivalent) for a Puerto Rico employer for one calendar year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_940(
+    data: USForm940GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_940(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/w2pr", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Puerto Rico Form 499R-2/W-2PR (annual employee withholding statement) for one calendar tax year",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_w2pr(
+    data: USW2GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_w2pr(
+        db, current_user.organization_id, data.report_template_id, data.employee_id, data.tax_year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/pr/reports/dtrh-quarterly", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Puerto Rico DTRH quarterly wage/contribution return for one calendar quarter",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_pr_dtrh_quarterly(
+    data: USForm941GenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_pr_dtrh_quarterly(
+        db, current_user.organization_id, data.report_template_id, data.year, data.quarter,
+        actor_id=current_user.id,
+    )
+
+
 # ── US: New Hire Reporting (Production-Readiness Plan Phase 5) ──────────
 
 @payroll_router.get(
@@ -3142,3 +3367,105 @@ def dashboard_breakdowns(
     current_user=Depends(get_current_user),
 ):
     return service.get_dashboard_breakdowns(db, current_user.organization_id, year=year, month=month)
+
+
+# ── France filing lifecycle (ZP-FR-ENG-001 §10/§13) ─────────────────────
+# Org-facing: the employer opens its DSN, follows the four lifecycle signals
+# and drives its own outbox. Authority data (PAS rates, AT/MP rate packs,
+# effectif, employer profile) is Super Admin-owned — see
+# super_admin/router.py /compliance/france/*.
+
+@payroll_router.post(
+    "/france/dsn-submissions", response_model=FranceDsnSubmissionResponse, response_model_by_alias=True,
+    summary="Open a France DSN P26V01 submission for a period (runs the FR-031 pre-submit validator: clean → VALIDATED, blocked → DRAFT with recorded errors)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def create_france_dsn_submission(
+    data: FranceDsnSubmissionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_france_dsn_submission(db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/france/dsn-submissions", response_model=list[FranceDsnSubmissionResponse], response_model_by_alias=True,
+    summary="List this organization's France DSN submissions, optionally by lifecycle status",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_france_dsn_submissions(
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_france_dsn_submissions(db, current_user.organization_id, status)
+
+
+@payroll_router.put(
+    "/france/dsn-submissions/{submission_id}/status",
+    response_model=FranceDsnSubmissionResponse, response_model_by_alias=True,
+    summary="Transition a France DSN lifecycle state (FR-032); transport/business/payment signals land in separate columns",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def transition_france_dsn_submission(
+    submission_id: int,
+    data: FranceDsnStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_france_dsn_submission(db, current_user.organization_id, submission_id, data, actor_id=current_user.id)
+
+
+@payroll_router.post(
+    "/france/dsn-outbox", response_model=FranceDsnOutboxItemResponse, response_model_by_alias=True,
+    summary="Enqueue a durable idempotent DSN outbox action (FR-033)",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def create_france_dsn_outbox_item(
+    data: FranceDsnOutboxCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_france_dsn_outbox_item(db, current_user.organization_id, data, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/france/dsn-outbox", response_model=list[FranceDsnOutboxItemResponse], response_model_by_alias=True,
+    summary="List this organization's France DSN outbox actions",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_france_dsn_outbox_items(
+    submission_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_france_dsn_outbox_items(db, current_user.organization_id, submission_id)
+
+
+@payroll_router.put(
+    "/france/dsn-outbox/{item_id}/status", response_model=FranceDsnOutboxItemResponse, response_model_by_alias=True,
+    summary="Record a transport-side outbox acknowledgement (FR-033); UNKNOWN triggers reconciliation, never blind replay",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def transition_france_dsn_outbox_item(
+    item_id: int,
+    status: str = Query(...),
+    last_error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_france_dsn_outbox_item(
+        db, current_user.organization_id, item_id, status, last_error=last_error, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/france/readiness",
+    summary="France launch readiness for this organization (FR §11 gate H + FR-031 dry-run for the open period)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def france_readiness(
+    for_period: Optional[date] = Query(None, description="Period start to dry-run, defaults to next month"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_france_readiness(db, current_user.organization_id, for_period=for_period)

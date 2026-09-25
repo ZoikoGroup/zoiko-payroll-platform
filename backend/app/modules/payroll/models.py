@@ -798,6 +798,46 @@ class EmployeeStatutoryProfile(Base):
     # establishes the source of truth for a later phase to consume.
     de_grundlohn_hourly               = Column(Numeric(10, 2), nullable=True)
 
+    # ── Ireland (IE) statutory attributes (ZP-IE-ENG-001 §12) ────────────
+    # EmployeeIrelandProfile's employee-OWNED facts. Deliberately NOT here:
+    # the RPN snapshot (its own table — authority-supplied and immutable per
+    # IE-022/IE-045), MyFutureFund status (its own table — NAERSA-owned per
+    # IE-018/IE-030), and the RPN-derived credits/bands/LPT (IE-004: never
+    # admin-typed). What lives here is exactly what the employer legitimately
+    # records about the worker and must be able to evidence. NULL everywhere
+    # for every non-Irish employee.
+    ie_ppsn                    = Column(String(15), nullable=True)   # 7 digits, optional trailing letter
+    # The employer's own Revenue registration reference for this worker —
+    # distinct from the org's PAYE/ROS registration numbers.
+    ie_employer_reference      = Column(String(32), nullable=True)
+    ie_revenue_employment_id   = Column(String(64), nullable=True)
+    # A0 | AX | AL | A1 only (IE-001/IE-016: the certified launch cohort).
+    # A value outside that set must be rejected at the validation layer, not
+    # coerced here, so an uncertified class can never reach the engine.
+    ie_prsi_class              = Column(String(10), nullable=True)
+    ie_prsi_exemption_reference = Column(String(64), nullable=True)
+    # Standard | Reduced | Exempt. USC has its OWN accumulator and rate
+    # bands (IE-009/IE-010) and must never be inferred from PAYE treatment.
+    ie_usc_status              = Column(String(20), nullable=True)
+    # Occupational pension/PRSA scheme — represented SEPARATELY from
+    # MyFutureFund (IE-021): an auto-enrolment exemption is proved by
+    # citing a real scheme, not by a bare checkbox.
+    ie_pension_scheme_reference = Column(String(64), nullable=True)
+    ie_pension_qualifying_exemption_reference = Column(String(64), nullable=True)
+    ie_pension_qualifying_exemption_effective_from = Column(Date, nullable=True)
+    # Working-hours evidence for the minimum-wage check. IE-035 forbids
+    # deriving this from a salary divided by a generic 40-hour week, so it
+    # is captured contractually and the engine BLOCKS without it.
+    ie_contracted_weekly_hours = Column(Numeric(5, 2), nullable=True)
+    # NONE | ERO | SEO. A sector wage order selects a certified sectoral rate
+    # instead of the national minimum wage; ERO/SEO BLOCK until that
+    # certified content exists (§11 gates sectoral rates explicitly).
+    ie_sector_wage_order       = Column(String(10), nullable=True)
+    # Emergency basis needs a reason AND the week counter (IE-008/IE-031);
+    # neither may be inferred, so both are recorded explicitly.
+    ie_emergency_reason        = Column(Text, nullable=True)
+    ie_emergency_week          = Column(Integer, nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1226,6 +1266,11 @@ class PayslipItem(Base):
     # this phase touched).
     employee_statutory_profile_id = Column(Integer, ForeignKey("payroll_employee_statutory_profiles.id"), nullable=True, index=True)
     germany_calculation_snapshot  = Column(JSON, nullable=True)
+    # France (ZP-FR-ENG-001) — frozen France result: the three nets
+    # (FR-042), PAS provenance (FR-010), the base-to-contribution trace
+    # (FR-040), RGDU and `ytd_after` — the RGDU/CSG accumulator state the
+    # NEXT period's calculation reads back (FR-023). NULL for non-France.
+    fr_calculation_snapshot       = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -5392,6 +5437,58 @@ class NewHireReport(Base):
         return f"<NewHireReport employee={self.employee_id} due={self.due_date} status={self.status}>"
 
 
+class PRWithholdingCertificate(Base):
+    """Puerto Rico Form 499 R-4/R-4.1 (ZP-PR-ENG-001 PR-005) — an
+    employee's own versioned Puerto Rico withholding exemption
+    certificate: personal exemption, dependents, deduction allowance, an
+    optional married-computation election, a Military Spouses Residency
+    Relief Act (MSRRA) election, and additional withholding. A NEW
+    certificate is a new row, never an edit — the prior Approved row (if
+    any) is marked Superseded on approval, the exact same immutable-
+    versioning convention as SalaryTdsDeclaration/JurisdictionPack/
+    ReportTemplate (create Draft -> submit -> approve, see
+    service.create_pr_withholding_certificate/submit_.../approve_...).
+
+    PR-006: an employee with no Approved certificate on file gets the
+    current default treatment (engine/countries/puerto_rico.py's
+    _PR_PERSONAL_EXEMPTION constant) — never a guessed certificate; see
+    service.get_pr_certificate_inputs, whose empty-dict return for that
+    case is what makes puerto_rico.py fall back to the engine default.
+
+    Not tax-year-scoped (unlike India's SalaryTdsDeclaration) — the real
+    Form 499 R-4/R-4.1 stays in effect until the employee files a new one,
+    it does not expire at year-end."""
+    __tablename__ = "payroll_pr_withholding_certificates"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    personal_exemption_amount         = Column(Numeric(12, 2), nullable=False, default=0)
+    dependents_count                  = Column(Integer, nullable=False, default=0)
+    dependent_exemption_per_dependent = Column(Numeric(12, 2), nullable=False, default=0)
+    deduction_allowance_amount        = Column(Numeric(12, 2), nullable=False, default=0)
+    optional_married_computation      = Column(Boolean, nullable=False, default=False)
+    # MSRRA: a validly-elected, supported claim routes to specialist
+    # validation per PR-005/PR §3's own table — this engine only records
+    # the election and, once Approved, suppresses Puerto Rico wage
+    # withholding for that employee (see puerto_rico.py's own comment);
+    # it does not independently verify MSRRA eligibility.
+    msrra_election                    = Column(Boolean, nullable=False, default=False)
+    additional_withholding_amount     = Column(Numeric(12, 2), nullable=False, default=0)
+
+    status         = Column(String(20), nullable=False, default="Draft")  # Draft | Submitted | Approved | Superseded
+    submitted_at   = Column(DateTime(timezone=True), nullable=True)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at    = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<PRWithholdingCertificate employee={self.employee_id} status={self.status}>"
+
+
 class SuperGuaranteeLiability(Base):
     """Australia Payday Super (ZP-TAX-AU-2026-27-001 §10, Payday Super
     Phase 2, 2026-09-16) — the one genuinely NEW concept that phase
@@ -5528,3 +5625,691 @@ class StatutoryFiling(Base):
 
     def __repr__(self):
         return f"<StatutoryFiling org={self.organization_id} {self.jurisdiction} {self.filing_type} {self.period_label} {self.status}>"
+
+
+# ── France (ZP-FR-ENG-001, 2026-09-24) ─────────────────────────────────────
+# France breaks its payroll on a THIRD dimension the generic pack model
+# (jurisdiction_country / jurisdiction_state) does not express: the SIRET /
+# establishment (FR-002). The four France tables below are therefore
+# deliberately NOT re-implementations of the generic pack/rate/slab system —
+# statutory rates and tax slabs stay in ContributionRate / TaxSlab / 
+# JurisdictionPack exactly like every other country. These tables only cover
+# the concepts France mandates that GENERIC infrastructure cannot carry:
+#   - EmployerFranceProfile         → org-level SIREN/IDCC/Urssaf/DSN/PAS/effectif
+#   - FranceEstablishmentRatePack  → SIRET-scoped AT/MP + versement mobilité + effectif
+#   - FrancePASRate                → authority-supplied DGFiP PAS rate (CRM ingestion)
+#   - FranceDsnSubmission/Outbox   → P26V01 outbox lifecycle (durable, idempotent)
+# Precedent for dedicated country extension tables: the Germany family
+# (GermanyElsterTransmission, GermanyElstamChangeListBatch, …).
+
+class EmployerFranceProfile(Base):
+    """1:1 org-level France employer profile. Carries the governed annual
+    effectif with threshold history (FR-015/FR-036), IDCC scope (FR-035),
+    the Urssaf/DSN collector identity + filing due-date class (5th M+1 for
+    50+, 15th M+1 otherwise — FR §10), the DGFiP PAS collector identity, and
+    the evidence-driven readiness gate (FR-034). SIRET-scoped things live on
+    FranceEstablishmentRatePack, not here — one row per SIRET."""
+    __tablename__ = "payroll_fr_employer_profiles"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+
+    siren          = Column(String(9), nullable=False)
+    legal_name     = Column(String(200), nullable=True)
+    legal_form     = Column(String(50), nullable=True)
+    # Convention collective / IDCC — mandatory or explicitly "unknown under
+    # review" (FR-035); never silently defaults to Code du travail floor.
+    idcc           = Column(String(20), nullable=True)
+    # APPLICABLE | NOT_APPLICABLE | UNDER_REVIEW — FR-035's explicit
+    # "unknown under review" state, so an empty idcc is never ambiguous.
+    idcc_status    = Column(String(20), nullable=True)
+    address        = Column(Text, nullable=True)             # panel A
+    payroll_contact = Column(String(200), nullable=True)     # panel A
+
+    # Urssaf / DSN (FR §11 panel C)
+    urssaf_account         = Column(String(50), nullable=True)
+    dsn_declarant          = Column(String(50), nullable=True)
+    filing_due_date_class  = Column(String(20), nullable=False, default="M15", server_default="M15")
+    #     "M5" (50+ employees: 5th M+1) | "M15" (<50: 15th M+1) |
+    #     "DEFERRED_M15" (50+ on deferred payroll, 15th rule)
+    payment_mandate_ref    = Column(String(100), nullable=True)
+
+    # DGFiP PAS (FR §11 panel D) — authority rate exchange, never admin-edited
+    pas_collector_identity = Column(String(100), nullable=True)
+    pas_crm_status         = Column(String(20), nullable=False, default="NOT_CONNECTED", server_default="NOT_CONNECTED")
+    #     NOT_CONNECTED | CONNECTED | RATE_EXCHANGE_OK | STALE
+
+    # Governed annual effectif + threshold history (FR-015/FR-036) — JSON
+    # {year: {"value": n, "source": ..., "validatedAt": ...}, ...}; used for
+    # FNAL/CFP/apprenticeship/versement mobilité 11+/50+ predicates.
+    effectif_state    = Column(JSON, nullable=True)
+
+    # Evidence-driven launch gate H (FR §11): RulePack/DSN/rates/benefits/
+    # bank/labor/parallel-run evidence bundle.
+    readiness_status  = Column(String(30), nullable=False, default="NOT_READY", server_default="NOT_READY")
+    #     NOT_READY | READY | LIVE
+    readiness_evidence = Column(JSON, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<EmployerFranceProfile org={self.organization_id} siren={self.siren} readiness={self.readiness_status}>"
+
+
+class FranceEstablishment(Base):
+    """An employer's SIRET establishment registry (FR §11 panel B, FR-002).
+    AT/MP and versement mobilité rate-pack periods attach to it
+    (FranceEstablishmentRatePack.establishment_id). Deactivated, never
+    deleted — historical rate packs and DSN filings keep referring to it."""
+    __tablename__ = "payroll_fr_establishments"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employer_profile_id = Column(Integer, ForeignKey("payroll_fr_employer_profiles.id"), nullable=True)
+
+    siret              = Column(String(14), nullable=False)
+    name               = Column(String(200), nullable=True)
+    address            = Column(Text, nullable=True)
+    commune_insee      = Column(String(10), nullable=True)
+    workforce_location = Column(String(200), nullable=True)
+    payroll_identifier = Column(String(50), nullable=True)
+    is_active          = Column(Boolean, nullable=False, default=True, server_default="true")
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "siret", name="uq_fr_establishment_org_siret"),
+    )
+
+    def __repr__(self):
+        return f"<FranceEstablishment org={self.organization_id} siret={self.siret} active={self.is_active}>"
+
+
+class FranceEstablishmentRatePack(Base):
+    """Per-SIRET employer/establishment rate pack (FR-002/FR-013). AT/MP is
+    establishment-specific authority data imported by risk decision, never
+    generic; versement mobilité/VMRR is location + effectif + threshold
+    driven (11+ employee threshold with threshold-neutralization history).
+    Each row is effective-dated so January/July rate changes keep full
+    history (FR §2/§5/§9)."""
+    __tablename__ = "payroll_fr_establishment_rate_packs"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    # Optional link to the employer profile; not a hard dependency so a
+    # SIRET pack can exist before the full profile row is finalised.
+    employer_profile_id = Column(Integer, ForeignKey("payroll_fr_employer_profiles.id"), nullable=True)
+    establishment_id    = Column(Integer, ForeignKey("payroll_fr_establishments.id"), nullable=True)
+
+    siret            = Column(String(14), nullable=False)
+    commune_insee    = Column(String(10), nullable=True)
+    workplace_label  = Column(String(200), nullable=True)
+
+    # AT/MP — authority decision with evidence (FR-013/FR-027)
+    at_mp_rate_pct     = Column(Numeric(7, 4), nullable=True)
+    at_mp_risk_code    = Column(String(30), nullable=True)
+    at_mp_evidence     = Column(Text, nullable=True)
+    at_mp_source       = Column(String(120), nullable=True)
+
+    # Versement mobilité / VMRR — location + effectif driven
+    vm_rate_pct            = Column(Numeric(7, 4), nullable=True)
+    vm_threshold_applies   = Column(Boolean, nullable=True)  # 11+ employee threshold
+    vm_threshold_history   = Column(JSON, nullable=True)     # threshold-neutralization history
+    vm_source              = Column(String(120), nullable=True)
+    vm_evidence            = Column(Text, nullable=True)     # authority evidence, like AT/MP (FR-013)
+    ags_special_status     = Column(String(30), nullable=True)  # panel E unemployment/AGS special status
+
+    # Employer-size classes used by FNAL/CFP/apprenticeship predicates
+    fnal_class  = Column(String(20), nullable=True)  # "UNDER_50" | "OVER_50"
+    cfp_class   = Column(String(20), nullable=True)  # "UNDER_11" | "OVER_11"
+    effectif    = Column(Integer, nullable=True)
+
+    effective_from = Column(Date, nullable=False)
+    effective_to   = Column(Date, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        # Historical rows kept per period (Jan/Jul rate changes).
+        UniqueConstraint("organization_id", "siret", "effective_from", name="uq_fr_estab_pack_per_period"),
+    )
+
+    def __repr__(self):
+        return f"<FranceEstablishmentRatePack org={self.organization_id} siret={self.siret} from={self.effective_from} at_mp={self.at_mp_rate_pct}>"
+
+
+class FrancePASRate(Base):
+    """Prélèvement à la source authority rate (FR-008/FR-010). Personalized
+    rates are DGFiP CRM supply, ingested with rate identifier + receipt date
+    + legal application window (60 days); NEUTRAL rows come from the
+    statutory grid when no personalized rate may be used (employee opt-out /
+    new starter). Never an admin-editable percentage — the UI is read-only.
+    Corrections link back to the originating period/rate (FR §4) instead of
+    retro-applying a newer personalized rate."""
+    __tablename__ = "payroll_fr_pas_rates"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    # PERSONALIZED | NEUTRAL
+    rate_type      = Column(String(20), nullable=False)
+    # Personalized authority rate (null for NEUTRAL — the neutral grid is
+    # statutory content, resolved by the engine from the payroll date).
+    rate_pct       = Column(Numeric(7, 4), nullable=True)
+    dgfip_rate_id  = Column(String(100), nullable=True)   # personalized provenance (FR-010)
+    crm_reference  = Column(String(100), nullable=True)   # DGFiP CRM message the rate came from
+    source         = Column(String(20), nullable=False)   # "CRM" | "NEUTRAL_GRID"
+    received_date  = Column(Date, nullable=True)          # CRM receipt date
+    effective_from = Column(Date, nullable=False)         # legal application start
+    effective_to   = Column(Date, nullable=True)          # end of 60-day window / superseded
+
+    # ACTIVE | PENDING | EXPIRED | STALE
+    status = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+
+    # Correction lineage — link to the prior rate this row replaces.
+    correction_of_id = Column(Integer, ForeignKey("payroll_fr_pas_rates.id"), nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_fr_pas_rate_org_emp_window", "organization_id", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<FrancePASRate employee={self.employee_id} {self.rate_type} {self.status}>"
+
+
+class FranceDsnSubmission(Base):
+    """One monthly DSN P26V01 submission (FR-030..033). The four lifecycle
+    states the spec mandates — transport acknowledgement, business
+    acceptance (CRM), anomaly resolution, payment settlement — are SEPARATE
+    columns, never one merged status; a correct net-pay calculation is not
+    evidence of successful tax reporting (FR-011). Immutable original with
+    correction lineage via correction_of_id."""
+    __tablename__ = "payroll_fr_dsn_submissions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    dsn_version  = Column(String(20), nullable=False, default="P26V01", server_default="P26V01")
+    release_ref  = Column(String(50), nullable=False)   # pinned reference-table release (FR-030)
+    payload_hash = Column(String(64), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end   = Column(Date, nullable=False)
+    due_date     = Column(Date, nullable=False)
+
+    # DRAFT | VALIDATED | QUEUED | TRANSMITTED | ACKNOWLEDGED |
+    # BUSINESS_REJECTED | CRM_RESOLVED | UNKNOWN | SETTLED
+    status = Column(String(30), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    validation_errors = Column(JSON, nullable=True)   # pre-submit validator (FR-031)
+    blocked_reason    = Column(Text, nullable=True)
+
+    # Separate lifecycle columns (FR-032) — nullable until the signal exists.
+    technical_ack     = Column(String(30), nullable=True)
+    business_crm      = Column(JSON, nullable=True)   # report/anomaly codes per DSN version
+    payment_state     = Column(String(20), nullable=True)  # SEPA/direct-debit, independent of DSN
+    submitted_at      = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at   = Column(DateTime(timezone=True), nullable=True)
+
+    # Correction lineage: replaces/regularizes the referenced submission;
+    # the prior row is never deleted (FR-033).
+    correction_of_id = Column(Integer, ForeignKey("payroll_fr_dsn_submissions.id"), nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_fr_dsn_org_period", "organization_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return f"<FranceDsnSubmission org={self.organization_id} {self.period_start} {self.status}>"
+
+
+class FranceDsnOutboxItem(Base):
+    """Durable idempotent outbox record for outbound DSN/payment actions
+    (FR-033). A network timeout results in UNKNOWN and reconciliation —
+    never blind replay. idempotency_key prevents duplicate transmission when
+    a transport success is uncertain."""
+    __tablename__ = "payroll_fr_dsn_outbox_items"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    submission_id = Column(Integer, ForeignKey("payroll_fr_dsn_submissions.id"), nullable=False, index=True)
+
+    # TRANSMIT | PAS_RATE_EXCHANGE | CRM_CLOSE | CORRECTION
+    action          = Column(String(30), nullable=False)
+    payload         = Column(JSON, nullable=True)
+    idempotency_key = Column(String(64), nullable=False, unique=True)
+
+    # PENDING | SENT | UNKNOWN | ACKNOWLEDGED | FAILED
+    status          = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    attempts        = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error      = Column(Text, nullable=True)
+    sent_at         = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<FranceDsnOutboxItem submission={self.submission_id} {self.action} {self.status}>"
+
+
+# ══ Ireland (IE) — ZP-IE-ENG-001 ═══════════════════════════════════════
+# Five tables, matching §12's "Ireland-specific minimum" object list. The
+# spec's RulePackIE object is NOT a new table: PAYE rates, the Emergency
+# basis, USC bands, PRSI rates/thresholds/credit, the minimum wage and their
+# effective dates are all already modelled, effective-dated and Super-Admin
+# configurable by the generic JurisdictionPack / ContributionRate / TaxSlab
+# tables (see jurisdiction.py's IE pack_type wiring). EmployeeIrelandProfile
+# is likewise NOT a new table — its employee-owned facts are the Ireland
+# block on EmployeeStatutoryProfile above, which already provides the
+# effective-dating §12 needs for a PRSI-class or pension-exemption change.
+
+
+class EmployerIrelandProfile(Base):
+    """1:1 org-level Ireland employer profile (§12 EmployerIrelandProfile:
+    PAYE registration, ROS cert reference, remitter frequency, bank config,
+    supported PRSI scope, MyFutureFund employer status).
+
+    The revenue/gating fields are deliberately explicit rather than derived.
+    IE-028 forbids the employer reaching LIVE until the ROS certificate is
+    validated, an RPN request succeeds, a submission test path is proven,
+    remitter frequency is confirmed and MyFutureFund operating status is
+    established — so each of those is its own column a readiness evaluation
+    can read without inferring it."""
+    __tablename__ = "payroll_ie_employer_profiles"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+
+    # Revenue registration. Authoritative copy; the generic registration form
+    # (CompanyComplianceDetails.tax_identifiers, keyed by the same field keys
+    # as jurisdiction.py's IE schema) remains the capture surface, exactly as
+    # France keeps siren/siret on EmployerFranceProfile alongside its own.
+    paye_registration_number  = Column(String(20), nullable=True)
+    prsi_registration_number  = Column(String(20), nullable=True)
+    ros_sub_user_reference    = Column(String(64), nullable=True)
+    eircode                   = Column(String(10), nullable=True)
+
+    # ROS certificate (IE-028). Status is the authority-reported state, never
+    # an admin self-declaration of "working fine".
+    ros_certificate_status    = Column(String(30), nullable=False, default="NOT_VALIDATED", server_default="NOT_VALIDATED")
+    # NOT_VALIDATED | VALID | EXPIRED | REVOKED
+    ros_certificate_reference = Column(String(100), nullable=True)
+    ros_certificate_expires_on = Column(Date, nullable=True)
+
+    # Revenue remitter/payment frequency — an employer-level filing fact that
+    # drives the submission schedule, confirmed with Revenue (IE-028).
+    remitter_frequency        = Column(String(20), nullable=True)
+    revenue_collector_identity = Column(String(100), nullable=True)
+
+    # SEPA/domestic Irish bank configuration for employee settlement (IE-041).
+    settlement_bank           = Column(String(100), nullable=True)
+    settlement_account_iban   = Column(String(34), nullable=True)
+    settlement_account_bic    = Column(String(11), nullable=True)
+    bank_adapter_version      = Column(String(30), nullable=True)
+    bank_cutoff_reference     = Column(String(100), nullable=True)
+
+    # PRSI scope actually enabled for this employer. The certified launch
+    # cohort is Class A only (IE-001/IE-016); anything else must stay off
+    # rather than be attempted.
+    # A_ONLY is the only supported value until a later cohort is certified.
+    prsi_scope                = Column(String(30), nullable=False, default="A_ONLY", server_default="A_ONLY")
+    prsi_supported_classes    = Column(JSON, nullable=True)   # ["A0","AX","AL","A1"]
+
+    # Employer-side MyFutureFund operating status (IE-018/IE-030) — what the
+    # EMPLOYER has established with NAERSA, kept distinct from each
+    # employee's own authority status on IrelandMyFutureFundStatus.
+    myfuturefund_employer_status = Column(String(30), nullable=False, default="UNKNOWN", server_default="UNKNOWN")
+    # UNKNOWN | NOT_OPERATING | OPERATING
+    myfuturefund_payment_method = Column(String(50), nullable=True)
+
+    # Evidence-driven launch gate (IE-028). NOT_READY until every predicate
+    # above is satisfied; mirrors EmployerFranceProfile.readiness_status.
+    readiness_status   = Column(String(30), nullable=False, default="NOT_READY", server_default="NOT_READY")
+    # NOT_READY | READY | LIVE
+    readiness_evidence = Column(JSON, nullable=True)
+
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<EmployerIrelandProfile org={self.organization_id} paye={self.paye_registration_number} readiness={self.readiness_status}>"
+
+
+class IrelandRpnSnapshot(Base):
+    """Immutable frozen Revenue Payroll Notification (§12 RpnSnapshot; IE-005,
+    IE-022, IE-045).
+
+    IE-022 forbids the core calculator making live Revenue calls, so the
+    snapshot retrieved during preflight IS the calculation input. Every
+    historical payroll must be reproducible from the snapshot that was in
+    force, which is why this is an append-only content-addressed record and
+    not mutable "current RPN" columns on the employee: IE-045 explicitly
+    forbids substituting current tax tables into a historical replay.
+
+    raw_hash is the deterministic content hash over the authority response
+    (IE-033/IE-047): approval is invalidated by any changed RPN, and the
+    golden vectors hash the snapshot, so the exact bytes Revenue returned are
+    preserved rather than re-serialized."""
+    __tablename__ = "payroll_ie_rpn_snapshots"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    # The statutory-profile version this snapshot was resolved against, so a
+    # later profile edit can never silently apply to a frozen instruction.
+    statutory_profile_id = Column(Integer, ForeignKey("payroll_employee_statutory_profiles.id"), nullable=True)
+
+    rpn_number      = Column(String(50), nullable=False)
+    issued_at       = Column(DateTime(timezone=True), nullable=False)
+    # The tax year the instruction belongs to. Selected by PAY DATE, never by
+    # earning period (IE-006) — income earned in 2025 and paid in 2026 is
+    # processed under the 2026 RPN.
+    tax_year        = Column(String(10), nullable=False)   # "2026"
+
+    # CUMULATIVE | WEEK_1 | EMERGENCY — Revenue's instruction, never inferred
+    # (IE-005/IE-007/IE-008).
+    calculation_basis = Column(String(20), nullable=False)
+    # PPSN present drives whether Emergency uses the prescribed initial
+    # standard-rate treatment or the higher-rate/no-credit one (IE-008).
+    ppsn_supplied     = Column(Boolean, nullable=False, default=True, server_default="true")
+
+    # Annual values as issued, preserved for traceability. The engine
+    # assesses per-period values derived from these, so BOTH are stored
+    # rather than one being recomputed on read (IE-005: preserve annual
+    # values for traceability only).
+    standard_rate_band        = Column(Numeric(14, 2), nullable=True)
+    tax_credit                = Column(Numeric(14, 2), nullable=True)
+    standard_rate_band_period = Column(Numeric(14, 2), nullable=True)
+    tax_credit_period         = Column(Numeric(14, 2), nullable=True)
+    # Cumulative state as at the start of this period, for CUMULATIVE basis.
+    previous_taxable_pay_ytd  = Column(Numeric(14, 2), nullable=True)
+    previous_pay_ytd          = Column(Numeric(14, 2), nullable=True)
+    # Number of pay periods already elapsed in the tax year INCLUDING this
+    # one. The cumulative credit position cannot be derived without it, so a
+    # snapshot with prior pay but no counter is BLOCKED, not guessed.
+    periods_elapsed           = Column(Integer, nullable=True)
+
+    # LPT: deducted only when Revenue instructs it, and always kept separate
+    # from PAYE/USC/PRSI (IE-003/IE spec §3).
+    lpt_instructed   = Column(Boolean, nullable=False, default=False, server_default="false")
+    lpt_rate_pct     = Column(Numeric(5, 2), nullable=True)
+
+    # Emergency-basis weekly credit for a PPSN-supplied employee.
+    emergency_tax_credit_weekly = Column(Numeric(10, 2), nullable=True)
+
+    # Deterministic content hash over the authority response (IE-033/IE-047).
+    raw_hash         = Column(String(64), nullable=False, index=True)
+    # The full response as received, so a disputed payroll can be replayed
+    # against exactly what Revenue returned.
+    raw_payload      = Column(JSON, nullable=True)
+    retrieved_at     = Column(DateTime(timezone=True), server_default=func.now())
+    # Staleness is a preflight concern (IE-005/IE-033), recorded so a run can
+    # explain WHY a refresh was required.
+    is_stale         = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # One snapshot per (employee, tax year, raw_hash): a refresh that
+        # returns byte-identical authority content is a no-op, while any real
+        # change is a new immutable row rather than an overwrite.
+        UniqueConstraint(
+            "employee_id", "tax_year", "raw_hash",
+            name="uq_ie_rpn_snapshot_employee_year_hash",
+        ),
+        Index("ix_ie_rpn_snapshot_org_employee", "organization_id", "employee_id"),
+    )
+
+    def __repr__(self):
+        return f"<IrelandRpnSnapshot emp={self.employee_id} {self.rpn_number} {self.tax_year} {self.calculation_basis}>"
+
+
+class IrelandMyFutureFundStatus(Base):
+    """Per-employee MyFutureFund authority status (§12 MyFutureFundStatus;
+    IE-018, IE-020, IE-021, IE-030).
+
+    NAERSA is the eligibility authority; payroll applies the notified status
+    and never becomes the authority itself. There is deliberately no admin
+    "enrol this employee" control anywhere in the codebase (IE-018/IE-021) —
+    status rows are written only from a NAERSA notification.
+
+    Effective dating is the whole point: status changes are versioned, so a
+    historical payroll replays the status that was notified at the time
+    rather than today's."""
+    __tablename__ = "payroll_ie_myfuturefund_statuses"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    # NOT_ENROLLED | ENROLLED | SELF_EMPLOYED | RETIRED | SUSPENDED | EXEMPT
+    status          = Column(String(30), nullable=False)
+    # Why this status — the evidence an auditor needs, and the only way to
+    # distinguish a genuine occupational-pension/qualifying exemption from an
+    # ordinary enrolment (IE-021).
+    status_reason   = Column(Text, nullable=True)
+    effective_from  = Column(Date, nullable=False)
+    effective_to    = Column(Date, nullable=True)   # NULL = current
+
+    # Contribution results as notified/applied. The 0.5% State contribution is
+    # administered separately by the State/NAERSA and must never appear as an
+    # employee payroll deduction (IE §6) — employee_contribution_pct is
+    # therefore the only rate that deducts from pay.
+    employee_contribution_pct = Column(Numeric(5, 2), nullable=True)
+    employer_contribution_pct = Column(Numeric(5, 2), nullable=True)
+    state_contribution_pct    = Column(Numeric(5, 2), nullable=True)
+    # The earnings threshold and how the current payroll sits against it
+    # (IE-020). The threshold itself is pack content; this records the
+    # authority's own threshold state, because the "payroll in which the
+    # threshold is exceeded can remain contributable and later payrolls cease"
+    # rule must NOT be approximated by capping each payslip at a pro-rata
+    # amount locally.
+    threshold_state = Column(String(30), nullable=True)
+    # BELOW | AT_OR_ABOVE | CEASED
+    contributions_ceased = Column(Boolean, nullable=False, default=False, server_default="false")
+    ceased_from_pay_date  = Column(Date, nullable=True)
+
+    # Occupational-pension/PRSA exemption evidence, kept separate from the
+    # status itself (IE-021) so payroll can always prove WHY an employment is
+    # exempt from auto-enrolment.
+    exemption_reference    = Column(String(64), nullable=True)
+    exemption_effective_from = Column(Date, nullable=True)
+
+    # Authority provenance (IE-030: every authority-derived status must show
+    # source, effective date and last refresh).
+    source                 = Column(String(30), nullable=False, default="NAERSA_NOTIFICATION", server_default="NAERSA_NOTIFICATION")
+    source_notification_hash = Column(String(64), nullable=True)
+    last_refreshed_at      = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ie_mff_emp_effective", "employee_id", "effective_from"),
+        Index("ix_ie_mff_org_employee", "organization_id", "employee_id"),
+    )
+
+    def __repr__(self):
+        return f"<IrelandMyFutureFundStatus emp={self.employee_id} {self.status} from={self.effective_from}>"
+
+
+class IrelandYtdAccumulator(Base):
+    """Running year-to-date state for Ireland's INDEPENDENT statutory bases
+    (IE-009/IE-010/IE-032/IE-039).
+
+    A dedicated table rather than the generic PayrollYtdAccumulator because
+    that table's single (taxable_wages, tax_withheld) pair is a poor fit:
+    USC needs a payable base AND a paid figure, PRSI has no employee tax at
+    all (only a reckonable-pay total), and MyFutureFund has an earnings
+    threshold state. Overloading one column pair to carry a bare reckonable
+    total would make the stored meaning ambiguous.
+
+    PREVIEW MUST NOT WRITE HERE (IE-032) — only COMMIT advances these.
+    IE-039 requires commits that can affect cumulative PAYE/USC or the annual
+    MyFutureFund threshold to be serialised, so a second commit can never
+    consume stale year-to-date values; the service layer takes a row lock
+    before reading and writing."""
+    __tablename__ = "payroll_ie_ytd_accumulators"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    # Selected by PAY DATE (IE-006), so a run straddling new year resets to a
+    # fresh row rather than carrying the prior year's totals.
+    tax_year        = Column(String(10), nullable=False)   # "2026"
+
+    # USC — its own base and its own accumulator, never assumed equal to the
+    # PAYE base (IE-009/IE-010).
+    usc_payable_ytd  = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    usc_paid_ytd     = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+
+    # PRSI — contribution weeks and the annual reckonable-pay ceiling are
+    # separate concerns; the weekly rate bands are applied per period, but
+    # the accumulated reckonable figure is what a threshold test reads.
+    prsi_reckonable_ytd = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    prsi_contribution_weeks_ytd = Column(Numeric(8, 3), nullable=False, default=0, server_default="0")
+
+    # MyFutureFund annual threshold state (IE-020). Earnings accumulated
+    # BEFORE the current period; the payroll in which the threshold is
+    # exceeded may remain contributable, so the service layer records
+    # crossed_at_pay_date rather than re-deriving it from this figure alone.
+    mff_earnings_ytd_before = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    mff_threshold_crossed_at_pay_date = Column(Date, nullable=True)
+
+    last_payslip_id  = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "tax_year", name="uq_ie_ytd_accumulator_employee_year"),
+        Index("ix_ie_ytd_org_employee", "organization_id", "employee_id"),
+    )
+
+    def __repr__(self):
+        return f"<IrelandYtdAccumulator emp={self.employee_id} {self.tax_year} usc_paid={self.usc_paid_ytd}>"
+
+
+class IrelandRevenueSubmission(Base):
+    """Append-only record of one payroll line item reported to Revenue
+    (§12 RevenueSubmission; IE-038, IE-044).
+
+    IE-038 makes corrections APPEND-ONLY: the original calculation and the
+    original Revenue line item are preserved, and a correction references its
+    predecessor through previous_line_item_id rather than overwriting it. A
+    reporting correction is deliberately distinguishable from an economic
+    over/underpayment (IE-040) via correction_kind.
+
+    A timeout is recorded as UNKNOWN and reconciled — never blind-replayed
+    (IE-044). payload_hash plus the RPN snapshot id together reproduce the
+    exact submission for a historical audit."""
+    __tablename__ = "payroll_ie_revenue_submissions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    run_id          = Column(Integer, ForeignKey("payroll_runs.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    payslip_id      = Column(Integer, ForeignKey("payslip_items.id"), nullable=True, index=True)
+
+    # Revenue's own identifier for the reported line item.
+    line_item_id      = Column(String(50), nullable=True)
+    previous_line_item_id = Column(String(50), nullable=True)
+    rpn_snapshot_id   = Column(Integer, ForeignKey("payroll_ie_rpn_snapshots.id"), nullable=True)
+
+    # ORIGINAL | REPORTING_CORRECTION | ECONOMIC_CORRECTION (IE-038/IE-040).
+    correction_kind   = Column(String(30), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    period_start      = Column(Date, nullable=False)
+    period_end        = Column(Date, nullable=False)
+    pay_date          = Column(Date, nullable=False)
+
+    # The amount actually reported, kept alongside the calculated figures so
+    # a correction can explain a difference rather than only restate it.
+    reported_gross    = Column(Numeric(14, 2), nullable=True)
+    reported_paye     = Column(Numeric(14, 2), nullable=True)
+    reported_prsi_employee = Column(Numeric(14, 2), nullable=True)
+    reported_prsi_employer = Column(Numeric(14, 2), nullable=True)
+
+    payload      = Column(JSON, nullable=True)
+    payload_hash = Column(String(64), nullable=False)
+
+    # SENT | ACKNOWLEDGED | REJECTED | UNKNOWN
+    status           = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    sent_at          = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at  = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    # Set when status is UNKNOWN: what still has to be reconciled with
+    # Revenue before any replay is safe (IE-044).
+    reconciliation_note = Column(Text, nullable=True)
+    idempotency_key  = Column(String(64), nullable=False, unique=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_ie_revsub_org_period", "organization_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return f"<IrelandRevenueSubmission org={self.organization_id} {self.period_start} {self.status}>"
+
+
+class IrelandRevenueMonthlyReturn(Base):
+    """One Revenue monthly return / statement period (§12
+    RevenueMonthlyReturn) and its reconciliation.
+
+    A versioned, append-only statement record: accepted/deemed date and the
+    reconciled liability are stored so a later version supersedes rather than
+    overwrites, and the parallel-run evidence IE-048 requires (no unexplained
+    employee-level difference) can be reconstructed afterwards."""
+    __tablename__ = "payroll_ie_revenue_monthly_returns"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+
+    statement_period_start = Column(Date, nullable=False)
+    statement_period_end   = Column(Date, nullable=False)
+    # Monotonic per (org, period): a restatement adds a version, it never
+    # edits the version Revenue already accepted.
+    version              = Column(Integer, nullable=False, default=1, server_default="1")
+
+    # DRAFT | SUBMITTED | ACCEPTED | DEEMED_ACCEPTED | REJECTED
+    status               = Column(String(30), nullable=False, default="DRAFT", server_default="DRAFT")
+    submitted_at         = Column(DateTime(timezone=True), nullable=True)
+    accepted_at          = Column(DateTime(timezone=True), nullable=True)
+    deemed_accepted_at    = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason     = Column(Text, nullable=True)
+
+    # Reconciled liability as returned by Revenue, alongside what Zoiko
+    # calculated, so a difference is visible rather than silently absorbed.
+    calculated_liability  = Column(Numeric(14, 2), nullable=True)
+    revenue_liability     = Column(Numeric(14, 2), nullable=True)
+    reconciled_at         = Column(DateTime(timezone=True), nullable=True)
+    reconciliation_notes  = Column(Text, nullable=True)
+    reconciliation_state  = Column(JSON, nullable=True)
+
+    payload_hash = Column(String(64), nullable=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at   = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "statement_period_start", "statement_period_end", "version",
+            name="uq_ie_monthly_return_org_period_version",
+        ),
+        Index("ix_ie_monthly_return_org_period", "organization_id", "statement_period_start"),
+    )
+
+    def __repr__(self):
+        return f"<IrelandRevenueMonthlyReturn org={self.organization_id} {self.statement_period_start} v{self.version} {self.status}>"

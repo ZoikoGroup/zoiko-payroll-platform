@@ -64,7 +64,7 @@ class MissingComplianceConfigurationError(Exception):
 #   US — same unresolved risk applies (never actually attempted).
 #   UK — also blocked by its tax pack still being Draft (see history above
 #        this rewrite) — _find_active_tax_pack only matches status=="Active".
-_VALIDATION_ENABLED_COUNTRIES: set[str] = set()
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
@@ -132,7 +132,17 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = set()
 # credit_before > 0 — so every employee is byte-for-byte unaffected
 # until a real credit balance is manually entered (which, per this
 # feature's own disclosed scope, no UI/API path exists to do yet).
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY"}
+# PR added 2026-09-23 for Puerto Rico's five independent wage-base caps/
+# thresholds (SS $184,500, Additional Medicare $200,000, FUTA-equivalent
+# $7,000, DTRH unemployment $7,000, SINOT $9,000 — ZP-PR-ENG-001 §13/§14).
+# Puerto Rico is a brand-new country with zero existing payroll history to
+# create a partial-year gap (same "0 real employees exist for this country
+# in the live DB at enable time" safety reasoning as every other brand-new
+# country's own addition above), so enabling it from day one is the
+# correct default. Entirely independent of "US" above — service.py's
+# _load_pr_ytd/_upsert_pr_ytd_accumulator use their own PR-scoped
+# PayrollYtdAccumulator component keys, never the US ones.
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY", "PR"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE

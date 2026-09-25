@@ -124,6 +124,14 @@ class GermanyCalculationBlockedException(ZoikoException):
         self.trace = trace or {}
 
 
+class FranceCalculationBlockedException(GermanyCalculationBlockedException):
+    """France (ZP-FR-ENG-001) twin of GermanyCalculationBlockedException —
+    raised when engine/countries/france.py blocks (FR-027: missing PAS
+    rate, SIRET rate pack, mandatory pack content, SMIC/IDCC breach…).
+    Subclassing keeps every existing handler (400 response, FAILED payslip
+    per blocked employee in a run) working unchanged for France."""
+
+
 class GermanyPapGateBlockedException(ZoikoException):
     """Phase 8G-1 — raised when an activation attempt against a
     GermanyPapRelease fails the compound production-release gate (see
@@ -200,8 +208,21 @@ async def database_schema_error_handler(request: Request, exc: Exception):
 
     from psycopg.errors import UndefinedTable, UndefinedColumn
 
+    schema_error_types = [UndefinedTable, UndefinedColumn]
+    # requirements.txt installs psycopg2-binary alongside psycopg 3, and a
+    # plain postgresql:// URL makes SQLAlchemy use psycopg2 — whose
+    # missing-table/column classes are distinct types. Without them a
+    # missing migration on such an environment surfaced as a bare 500
+    # (found on the France super-admin endpoints, whose tables' migration
+    # had not been applied).
+    try:
+        from psycopg2.errors import UndefinedTable as Pg2UndefinedTable, UndefinedColumn as Pg2UndefinedColumn
+        schema_error_types += [Pg2UndefinedTable, Pg2UndefinedColumn]
+    except ImportError:
+        pass
+
     orig = getattr(exc, "orig", None)
-    if not isinstance(orig, (UndefinedTable, UndefinedColumn)):
+    if not isinstance(orig, tuple(schema_error_types)):
         return await generic_exception_handler(request, exc)
 
     logging.getLogger("zoiko_payroll").error(

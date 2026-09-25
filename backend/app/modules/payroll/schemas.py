@@ -1309,6 +1309,27 @@ class USFederalDepositScheduleResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class PRDepositScheduleRequest(BaseModel):
+    lookback_period_liability: Decimal
+    current_quarter_withholding: Decimal
+    payroll_date: date
+    accumulated_undeposited_liability: Optional[Decimal] = None
+
+
+class PRDepositScheduleResponse(BaseModel):
+    depositorStatus: str = Field(validation_alias="depositor_status", serialization_alias="depositorStatus")
+    lookbackPeriodLiability: Decimal = Field(validation_alias="lookback_period_liability", serialization_alias="lookbackPeriodLiability")
+    currentQuarterWithholding: Decimal = Field(validation_alias="current_quarter_withholding", serialization_alias="currentQuarterWithholding")
+    monthlySemiweeklyThreshold: Decimal = Field(validation_alias="monthly_semiweekly_threshold", serialization_alias="monthlySemiweeklyThreshold")
+    quarterlyExceptionThreshold: Decimal = Field(validation_alias="quarterly_exception_threshold", serialization_alias="quarterlyExceptionThreshold")
+    depositDueDate: Optional[date] = Field(default=None, validation_alias="deposit_due_date", serialization_alias="depositDueDate")
+    nextDayRuleTriggered: bool = Field(validation_alias="next_day_rule_triggered", serialization_alias="nextDayRuleTriggered")
+    nextDayDepositThreshold: Decimal = Field(validation_alias="next_day_deposit_threshold", serialization_alias="nextDayDepositThreshold")
+    nextDayDepositDueDate: Optional[date] = Field(default=None, validation_alias="next_day_deposit_due_date", serialization_alias="nextDayDepositDueDate")
+    form499R2Deadline: date = Field(validation_alias="form_499r2_deadline", serialization_alias="form499R2Deadline")
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class CARetiringAllowanceCalculateRequest(BaseModel):
     employee_id: int
     amount: Decimal
@@ -2386,6 +2407,12 @@ class CanonicalTaxSlabUpsert(BaseModel):
     taxFormula: str = ""
     ruleType: str = "MARGINAL_RATE"
     formulaExpression: Optional[str] = None
+    # Optional row-level dating inside the pack (e.g. France's 1 May 2026
+    # PAS neutral grid). Only applied when the caller actually sends the
+    # field, so an edit from a form that doesn't know about dates never
+    # wipes a row's existing window.
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
     # PT_FLAT only (India state-level Professional Tax, bracketed by gross
     # salary): a fixed monthly amount instead of a percentage, plus an
     # optional override for whichever month absorbs annual-cap rounding.
@@ -2450,6 +2477,8 @@ class CanonicalTaxSlabResponse(BaseModel):
     filingStatus: Optional[str] = Field(None, validation_alias="filing_status", serialization_alias="filingStatus")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
 
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
@@ -2468,6 +2497,10 @@ class CanonicalContributionRateResponse(BaseModel):
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     textValue: Optional[str] = Field(None, validation_alias="text_value", serialization_alias="textValue")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+    # Row-level dating inside the pack (e.g. France's 1 June SMIC row) —
+    # read-only here; without it two dated rows look like duplicates.
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -2871,6 +2904,73 @@ class SalaryTdsDeclarationResponse(BaseModel):
     priorEmployerTdsDeducted: Decimal = Field(Decimal("0"), validation_alias="prior_employer_tds_deducted", serialization_alias="priorEmployerTdsDeducted")
     otherIncome: Decimal = Field(Decimal("0"), validation_alias="other_income", serialization_alias="otherIncome")
     housePropertyLoss: Decimal = Field(Decimal("0"), validation_alias="house_property_loss", serialization_alias="housePropertyLoss")
+    status: str
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class PRAccrueBonusYearRequest(BaseModel):
+    employee_id: int
+    as_of_date: date
+    wages_this_period: Decimal
+    hours_this_period: Decimal
+
+
+class PRBonusYearTotalsResponse(BaseModel):
+    bonusYear: str = Field(..., validation_alias="bonus_year", serialization_alias="bonusYear")
+    cumulativeWages: Decimal = Field(..., validation_alias="cumulative_wages", serialization_alias="cumulativeWages")
+    cumulativeHours: Decimal = Field(..., validation_alias="cumulative_hours", serialization_alias="cumulativeHours")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class PRChristmasBonusCalculateRequest(BaseModel):
+    employee_id: int
+    as_of_date: date
+    hired_before_2017: bool
+    employer_size_over_threshold: bool
+    is_first_year: bool = False
+
+
+class PRChristmasBonusCalculateResponse(BaseModel):
+    eligible: bool
+    bonusAmount: Decimal = Field(..., validation_alias="bonus_amount", serialization_alias="bonusAmount")
+    dollarCap: Decimal = Field(..., validation_alias="dollar_cap", serialization_alias="dollarCap")
+    hoursThreshold: Decimal = Field(..., validation_alias="hours_threshold", serialization_alias="hoursThreshold")
+    bonusYear: str = Field(..., validation_alias="bonus_year", serialization_alias="bonusYear")
+    cumulativeWages: Decimal = Field(..., validation_alias="cumulative_wages", serialization_alias="cumulativeWages")
+    cumulativeHours: Decimal = Field(..., validation_alias="cumulative_hours", serialization_alias="cumulativeHours")
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class PRAccrueMonthlyLeaveRequest(BaseModel):
+    employee_id: int
+    hired_before_2017: bool
+    years_of_service: Decimal = Decimal("0")
+    qualifying_small_employer: bool = False
+    qualifying_hours_in_month: Decimal
+    period_label: Optional[str] = None
+
+
+class PRWithholdingCertificateCreate(BaseModel):
+    employee_id: int
+    personal_exemption_amount: Decimal = Decimal("0")
+    dependents_count: int = 0
+    dependent_exemption_per_dependent: Decimal = Decimal("0")
+    deduction_allowance_amount: Decimal = Decimal("0")
+    optional_married_computation: bool = False
+    msrra_election: bool = False
+    additional_withholding_amount: Decimal = Decimal("0")
+
+
+class PRWithholdingCertificateResponse(BaseModel):
+    id: int
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    personalExemptionAmount: Decimal = Field(Decimal("0"), validation_alias="personal_exemption_amount", serialization_alias="personalExemptionAmount")
+    dependentsCount: int = Field(0, validation_alias="dependents_count", serialization_alias="dependentsCount")
+    dependentExemptionPerDependent: Decimal = Field(Decimal("0"), validation_alias="dependent_exemption_per_dependent", serialization_alias="dependentExemptionPerDependent")
+    deductionAllowanceAmount: Decimal = Field(Decimal("0"), validation_alias="deduction_allowance_amount", serialization_alias="deductionAllowanceAmount")
+    optionalMarriedComputation: bool = Field(False, validation_alias="optional_married_computation", serialization_alias="optionalMarriedComputation")
+    msrraElection: bool = Field(False, validation_alias="msrra_election", serialization_alias="msrraElection")
+    additionalWithholdingAmount: Decimal = Field(Decimal("0"), validation_alias="additional_withholding_amount", serialization_alias="additionalWithholdingAmount")
     status: str
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -3496,4 +3596,292 @@ class ComplianceDocumentResponse(BaseModel):
     extracted:     Optional[ExtractedComplianceData] = Field(None, validation_alias="extracted_data", serialization_alias="extracted")
     error:         Optional[str] = Field(None, validation_alias="error_message", serialization_alias="error")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── France (ZP-FR-ENG-001) ───────────────────────────────────────────────
+# Endpoints wire 1:1 to service functions; authority data (PAS rates,
+# AT/MP rates, DSN lifecycle) is never admin-editable freeform — the
+# request models carry provenance so corrections keep lineage (FR §4/§10/§13).
+
+class EmployerFranceProfileUpsert(BaseModel):
+    """Super-admin/provider upsert of the org 1:1 France employer profile
+    (FR §11 panels A/C/D). Deliberately NOT in this payload: pas_crm_status
+    (authority-held), effectif (governed history — record/correct it via
+    the effectif endpoints) and readiness (computed from real checks; LIVE
+    only via the go-live action) — so a profile save can never overwrite
+    them wholesale."""
+    siren:                  str
+    legalName:              Optional[str] = None
+    legalForm:              Optional[str] = None
+    address:                Optional[str] = None
+    payrollContact:         Optional[str] = None
+    # Convention collective — mandatory or explicitly "unknown under review"
+    # (FR-035); never silently defaulted to the Code du travail floor.
+    idcc:                   Optional[str] = None
+    idccStatus:             Optional[str] = None  # APPLICABLE | NOT_APPLICABLE | UNDER_REVIEW
+    urssafAccount:          Optional[str] = None
+    dsnDeclarant:           Optional[str] = None
+    # M5 (50+ / 5th of M+1) | M15 (<50 / 15th of M+1) | DEFERRED_M15
+    filingDueDateClass:     str = Field("M15", validation_alias="filingDueDateClass")
+    paymentMandateRef:      Optional[str] = None
+    pasCollectorIdentity:   Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEstablishmentUpsert(BaseModel):
+    """A SIRET establishment of the employer (FR §11 panel B)."""
+    siret:              str
+    name:               Optional[str] = None
+    address:            Optional[str] = None
+    communeInsee:       Optional[str] = None
+    workforceLocation:  Optional[str] = None
+    payrollIdentifier:  Optional[str] = None
+    isActive:           bool = True
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEstablishmentResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    siret:              str
+    name:               Optional[str] = None
+    address:            Optional[str] = None
+    communeInsee:       Optional[str] = Field(None, validation_alias="commune_insee", serialization_alias="communeInsee")
+    workforceLocation:  Optional[str] = Field(None, validation_alias="workforce_location", serialization_alias="workforceLocation")
+    payrollIdentifier:  Optional[str] = Field(None, validation_alias="payroll_identifier", serialization_alias="payrollIdentifier")
+    isActive:           bool = Field(..., validation_alias="is_active", serialization_alias="isActive")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class FranceEstablishmentRatePackUpsert(BaseModel):
+    """Effective-dated per-SIRET rate pack (FR-002/FR-013). Every write
+    creates a NEW period row (Jan/Jul history preserved); a unique
+    (org, siret, effective_from) collision is a clean batch-style error.
+    `establishmentId` links the period to the SIRET registry (its SIRET and
+    commune then come from the establishment)."""
+    establishmentId:      Optional[int] = None
+    siret:                Optional[str] = None
+    communeInsee:         Optional[str] = None
+    workplaceLabel:       Optional[str] = None
+    atMpRatePct:          Optional[Decimal] = None
+    atMpRiskCode:         Optional[str] = None
+    atMpEvidence:         Optional[str] = None
+    atMpSource:           Optional[str] = None
+    vmRatePct:            Optional[Decimal] = None
+    vmThresholdApplies:   Optional[bool] = None
+    vmSource:             Optional[str] = None
+    vmEvidence:           Optional[str] = None
+    agsSpecialStatus:     Optional[str] = None
+    fnalClass:            Optional[str] = None  # UNDER_50 | OVER_50
+    cfpClass:             Optional[str] = None  # UNDER_11 | OVER_11
+    effectif:             Optional[int] = None
+    effectiveFrom:        date
+    effectiveTo:          Optional[date] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEstablishmentRatePackUpdate(BaseModel):
+    """Edit a rate-pack period that has NOT started yet (effective_from in
+    the future). A period already in force is never edited in place — add a
+    new period instead, so history the payroll ran on stays intact."""
+    communeInsee:         Optional[str] = None
+    workplaceLabel:       Optional[str] = None
+    atMpRatePct:          Optional[Decimal] = None
+    atMpRiskCode:         Optional[str] = None
+    atMpEvidence:         Optional[str] = None
+    atMpSource:           Optional[str] = None
+    vmRatePct:            Optional[Decimal] = None
+    vmThresholdApplies:   Optional[bool] = None
+    vmSource:             Optional[str] = None
+    vmEvidence:           Optional[str] = None
+    agsSpecialStatus:     Optional[str] = None
+    fnalClass:            Optional[str] = None
+    cfpClass:             Optional[str] = None
+    effectif:             Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceRatePackClose(BaseModel):
+    """Close an open rate-pack period (e.g. establishment closed)."""
+    effectiveTo:  date
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FrancePASRateUpsert(BaseModel):
+    """PAS rate intake (FR-008/FR-010). PERSONALIZED carries the DGFiP CRM
+    rate with authority provenance; NEUTRAL rows carry no percentage (the
+    engine resolves the neutral grid from the payroll date)."""
+    employeeId:      int
+    rateType:        str  # PERSONALIZED | NEUTRAL
+    ratePct:         Optional[Decimal] = None
+    dgfipRateId:     Optional[str] = None
+    crmReference:    Optional[str] = None     # DGFiP CRM message the PERSONALIZED rate came from
+    source:          Optional[str] = None     # derived: CRM for PERSONALIZED, NEUTRAL_GRID for NEUTRAL
+    receivedDate:    Optional[date] = None
+    effectiveFrom:   date
+    effectiveTo:     Optional[date] = None
+    correctionOfId:  Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEffectifRecord(BaseModel):
+    year:    int
+    value:   int
+    source:  str
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEffectifCorrection(BaseModel):
+    """Correct an already-recorded year: the previous value is kept in that
+    year's `history`, never silently overwritten (FR-015/FR-036)."""
+    year:    int
+    value:   int
+    source:  str
+    reason:  str
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceGoLiveRequest(BaseModel):
+    """Mark an org's France payroll LIVE — only accepted when every computed
+    readiness check passes (gate H); `evidence` is kept on the profile."""
+    evidence: Optional[dict] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceDsnSubmissionCreate(BaseModel):
+    """Body for opening a FranceDsnSubmission. periodEnd defaults to the
+    month end of periodStart; the service computes payload_hash, due_date
+    (from the profile's filing_due_date_class) and runs the FR-031
+    pre-submit validator (READY profile, effective SIRET pack, resolved
+    PAS, governed effectif)."""
+    periodStart: date
+    periodEnd:   Optional[date] = None
+    releaseRef:  str
+    # Open a correction of an earlier submission for the same period; the
+    # original stays immutable (FR-033/FR-053).
+    correctionOfId: Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceDsnStatusUpdate(BaseModel):
+    status:        str  # DRAFT|VALIDATED|QUEUED|TRANSMITTED|ACKNOWLEDGED|BUSINESS_REJECTED|CRM_RESOLVED|UNKNOWN|SETTLED
+    technicalAck:  Optional[str] = None  # e.g. "OK"
+    businessCrm:   Optional[dict] = None # report/anomaly codes
+    paymentState:  Optional[str] = None  # SEPA/direct-debit state
+    blockedReason: Optional[str] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceDsnOutboxCreate(BaseModel):
+    submissionId: int
+    action:       str  # TRANSMIT | PAS_RATE_EXCHANGE | CRM_CLOSE | CORRECTION
+    payload:      Optional[dict] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceDsnSubmissionResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    dsnVersion:         str = Field(..., validation_alias="dsn_version", serialization_alias="dsnVersion")
+    releaseRef:         str = Field(..., validation_alias="release_ref", serialization_alias="releaseRef")
+    payloadHash:        str = Field(..., validation_alias="payload_hash", serialization_alias="payloadHash")
+    periodStart:        date = Field(..., validation_alias="period_start", serialization_alias="periodStart")
+    periodEnd:          date = Field(..., validation_alias="period_end", serialization_alias="periodEnd")
+    dueDate:            date = Field(..., validation_alias="due_date", serialization_alias="dueDate")
+    status:             str
+    validationErrors:   Optional[list] = Field(None, validation_alias="validation_errors", serialization_alias="validationErrors")
+    blockedReason:      Optional[str] = Field(None, validation_alias="blocked_reason", serialization_alias="blockedReason")
+    technicalAck:       Optional[str] = Field(None, validation_alias="technical_ack", serialization_alias="technicalAck")
+    businessCrm:        Optional[dict] = Field(None, validation_alias="business_crm", serialization_alias="businessCrm")
+    paymentState:       Optional[str] = Field(None, validation_alias="payment_state", serialization_alias="paymentState")
+    correctionOfId:     Optional[int] = Field(None, validation_alias="correction_of_id", serialization_alias="correctionOfId")
+    submittedAt:        Optional[datetime] = Field(None, validation_alias="submitted_at", serialization_alias="submittedAt")
+    acknowledgedAt:      Optional[datetime] = Field(None, validation_alias="acknowledged_at", serialization_alias="acknowledgedAt")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class EmployerFranceProfileResponse(BaseModel):
+    id:                  int
+    organizationId:      int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    siren:               str
+    legalName:           Optional[str] = Field(None, validation_alias="legal_name", serialization_alias="legalName")
+    legalForm:           Optional[str] = Field(None, validation_alias="legal_form", serialization_alias="legalForm")
+    address:             Optional[str] = None
+    payrollContact:      Optional[str] = Field(None, validation_alias="payroll_contact", serialization_alias="payrollContact")
+    idcc:                Optional[str] = None
+    idccStatus:          Optional[str] = Field(None, validation_alias="idcc_status", serialization_alias="idccStatus")
+    urssafAccount:       Optional[str] = Field(None, validation_alias="urssaf_account", serialization_alias="urssafAccount")
+    dsnDeclarant:        Optional[str] = Field(None, validation_alias="dsn_declarant", serialization_alias="dsnDeclarant")
+    filingDueDateClass:  str = Field(..., validation_alias="filing_due_date_class", serialization_alias="filingDueDateClass")
+    paymentMandateRef:   Optional[str] = Field(None, validation_alias="payment_mandate_ref", serialization_alias="paymentMandateRef")
+    pasCollectorIdentity: Optional[str] = Field(None, validation_alias="pas_collector_identity", serialization_alias="pasCollectorIdentity")
+    pasCrmStatus:        str = Field(..., validation_alias="pas_crm_status", serialization_alias="pasCrmStatus")
+    effectifState:       Optional[dict] = Field(None, validation_alias="effectif_state", serialization_alias="effectifState")
+    readinessStatus:     str = Field(..., validation_alias="readiness_status", serialization_alias="readinessStatus")
+    readinessEvidence:   Optional[dict] = Field(None, validation_alias="readiness_evidence", serialization_alias="readinessEvidence")
+    createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class FranceEstablishmentRatePackResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    establishmentId:    Optional[int] = Field(None, validation_alias="establishment_id", serialization_alias="establishmentId")
+    siret:              str
+    communeInsee:       Optional[str] = Field(None, validation_alias="commune_insee", serialization_alias="communeInsee")
+    workplaceLabel:     Optional[str] = Field(None, validation_alias="workplace_label", serialization_alias="workplaceLabel")
+    atMpRatePct:        Optional[Decimal] = Field(None, validation_alias="at_mp_rate_pct", serialization_alias="atMpRatePct")
+    atMpRiskCode:       Optional[str] = Field(None, validation_alias="at_mp_risk_code", serialization_alias="atMpRiskCode")
+    atMpEvidence:       Optional[str] = Field(None, validation_alias="at_mp_evidence", serialization_alias="atMpEvidence")
+    atMpSource:         Optional[str] = Field(None, validation_alias="at_mp_source", serialization_alias="atMpSource")
+    vmRatePct:          Optional[Decimal] = Field(None, validation_alias="vm_rate_pct", serialization_alias="vmRatePct")
+    vmThresholdApplies: Optional[bool] = Field(None, validation_alias="vm_threshold_applies", serialization_alias="vmThresholdApplies")
+    vmSource:           Optional[str] = Field(None, validation_alias="vm_source", serialization_alias="vmSource")
+    vmEvidence:         Optional[str] = Field(None, validation_alias="vm_evidence", serialization_alias="vmEvidence")
+    agsSpecialStatus:   Optional[str] = Field(None, validation_alias="ags_special_status", serialization_alias="agsSpecialStatus")
+    fnalClass:          Optional[str] = Field(None, validation_alias="fnal_class", serialization_alias="fnalClass")
+    cfpClass:           Optional[str] = Field(None, validation_alias="cfp_class", serialization_alias="cfpClass")
+    effectif:           Optional[int] = None
+    effectiveFrom:      date = Field(..., validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:        Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class FrancePASRateResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    employeeId:         int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    rateType:           str = Field(..., validation_alias="rate_type", serialization_alias="rateType")
+    ratePct:            Optional[Decimal] = Field(None, validation_alias="rate_pct", serialization_alias="ratePct")
+    dgfipRateId:        Optional[str] = Field(None, validation_alias="dgfip_rate_id", serialization_alias="dgfipRateId")
+    crmReference:       Optional[str] = Field(None, validation_alias="crm_reference", serialization_alias="crmReference")
+    source:             str
+    receivedDate:       Optional[date] = Field(None, validation_alias="received_date", serialization_alias="receivedDate")
+    effectiveFrom:      date = Field(..., validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo:        Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    status:             str
+    correctionOfId:     Optional[int] = Field(None, validation_alias="correction_of_id", serialization_alias="correctionOfId")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class FranceDsnOutboxItemResponse(BaseModel):
+    id:                 int
+    submissionId:       int = Field(..., validation_alias="submission_id", serialization_alias="submissionId")
+    action:             str
+    payload:            Optional[dict] = None
+    idempotencyKey:     str = Field(..., validation_alias="idempotency_key", serialization_alias="idempotencyKey")
+    status:             str  # PENDING|SENT|UNKNOWN|ACKNOWLEDGED|FAILED
+    attempts:           int
+    lastError:          Optional[str] = Field(None, validation_alias="last_error", serialization_alias="lastError")
+    sentAt:             Optional[datetime] = Field(None, validation_alias="sent_at", serialization_alias="sentAt")
+    acknowledgedAt:     Optional[datetime] = Field(None, validation_alias="acknowledged_at", serialization_alias="acknowledgedAt")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

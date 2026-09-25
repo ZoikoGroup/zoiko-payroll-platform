@@ -168,9 +168,46 @@ function TrinidadAndTobago() {
   );
 }
 
+function PuertoRico() {
+  const stripeH = 16 / 5;
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <rect key={i} y={i * stripeH} width="24" height={stripeH} fill={i % 2 === 0 ? "#ED1B34" : "#fff"} />
+      ))}
+      <path d="M0,0 L10,8 L0,16 Z" fill="#0050A4" />
+      <path
+        d="M3.6,8 l1.2,-0.9 l1.2,0.9 l-0.46,-1.4 l1.2,-0.9 h-1.48 l-0.46,-1.4 l-0.46,1.4 h-1.48 l1.2,0.9 z"
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
+function France() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="8" height="16" fill="#002395" />
+      <rect x="8" width="8" height="16" fill="#fff" />
+      <rect x="16" width="8" height="16" fill="#ED2939" />
+    </svg>
+  );
+}
+
+function Ireland() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="8" height="16" fill="#169B62" />
+      <rect x="8" width="8" height="16" fill="#fff" />
+      <rect x="16" width="8" height="16" fill="#FF883E" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
+  PR: PuertoRico, FR: France, IE: Ireland,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

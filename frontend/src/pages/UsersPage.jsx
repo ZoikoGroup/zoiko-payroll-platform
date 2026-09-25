@@ -85,8 +85,8 @@ export default function UsersPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Platform Users</h1>
-        <p className="text-sm text-slate-500 mt-0.5">{loading ? "Loading…" : `${total} user${total === 1 ? "" : "s"}`}</p>
+        <h1 className="text-2xl font-bold text-foreground">Platform Users</h1>
+        <p className="text-sm text-foreground-muted mt-0.5">{loading ? "Loading…" : `${total} user${total === 1 ? "" : "s"}`}</p>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4">
@@ -94,7 +94,7 @@ export default function UsersPage() {
         <select
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+          className="rounded-lg border border-border bg-surface text-foreground px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
         >
           <option value="">All roles</option>
           {ROLES.map((r) => (
@@ -106,7 +106,7 @@ export default function UsersPage() {
         <button
           onClick={load}
           disabled={loading}
-          className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-surface-muted disabled:opacity-50"
         >
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
           Refresh
@@ -114,14 +114,14 @@ export default function UsersPage() {
       </div>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <p className="mb-4 rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
           {error}
         </p>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="bg-background text-left text-xs text-foreground-muted">
             <tr>
               <th className="px-4 py-3">User</th>
               <th className="px-4 py-3">Email</th>
@@ -134,8 +134,8 @@ export default function UsersPage() {
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors">
-                <td className="px-4 py-3 font-medium text-slate-800">
+              <tr key={u.id} className="border-t border-border-light hover:bg-surface-muted/60 transition-colors">
+                <td className="px-4 py-3 font-medium text-foreground-secondary">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-light text-xs font-semibold text-primary-hover">
                       {initialsFor(u.first_name, u.last_name, u.email)}
@@ -143,17 +143,17 @@ export default function UsersPage() {
                     {u.first_name} {u.last_name}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-slate-600">{u.email}</td>
+                <td className="px-4 py-3 text-foreground-secondary">{u.email}</td>
                 <td className="px-4 py-3">
-                  <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  <span className="inline-block rounded-full bg-surface-muted px-2 py-0.5 text-xs font-medium text-foreground-secondary">
                     {u.role}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-slate-500">{u.organization_name || "—"}</td>
+                <td className="px-4 py-3 text-foreground-muted">{u.organization_name || "—"}</td>
                 <td className="px-4 py-3">
                   <StatusPill status={u.is_active ? "active" : "inactive"} />
                 </td>
-                <td className="px-4 py-3 text-slate-500">
+                <td className="px-4 py-3 text-foreground-muted">
                   {new Date(u.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3">
@@ -164,8 +164,8 @@ export default function UsersPage() {
                       onClick={() => toggleStatus(u)}
                       className={`rounded-lg px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
                         u.is_active
-                          ? "bg-red-50 text-red-600 hover:bg-red-100"
-                          : "bg-green-50 text-green-700 hover:bg-green-100"
+                          ? "bg-error-light text-error hover:bg-error/20"
+                          : "bg-success-light text-success hover:bg-success/20"
                       }`}
                     >
                       {u.is_active ? "Deactivate" : "Activate"}
@@ -173,7 +173,7 @@ export default function UsersPage() {
                     <button
                       disabled={busyId === u.id}
                       onClick={() => resetPassword(u)}
-                      className="flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                      className="flex items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary hover:bg-border-light disabled:opacity-40"
                     >
                       <KeyRound size={12} />
                       Reset PW
@@ -186,8 +186,8 @@ export default function UsersPage() {
         </table>
         {!loading && users.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
-            <UsersIcon size={28} className="text-slate-300" />
-            <p className="text-sm text-slate-400">
+            <UsersIcon size={28} className="text-foreground-disabled" />
+            <p className="text-sm text-foreground-disabled">
               {search || role ? "No users match your filters." : "No users found."}
             </p>
           </div>

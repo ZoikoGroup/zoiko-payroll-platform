@@ -658,6 +658,14 @@ class DEEmployeeValidation(EmployeeValidationStrategy):
 # required field would incorrectly block. Tightening any of these to a
 # confirmed real format/requirement is a follow-up once each country's
 # exact current form is acquired — same gate the specs themselves impose.
+# Bank-routing fields (ZP-MJR-2026-002, 2026-09-24) — same lenient-pattern/
+# not-required discipline as the tax IDs above: none of these 7 countries has
+# a single confirmed national bank-clearing code format the way IFSC/sort-
+# code/ABA do, so `bank_branch_code` is a generic free-text field rather
+# than a guessed strict one. Bahamas and Puerto Rico are the two exceptions
+# — both ride a NACHA-style 9-digit ACH routing rail (Puerto Rico via the
+# US banking system directly), so they get `ach_routing_number` with the
+# same shape as USEmployeeValidation's `aba_routing_number` instead.
 class BBEmployeeValidation(EmployeeValidationStrategy):
     country_code = "BB"
     FIELD_SPECS = {
@@ -669,6 +677,10 @@ class BBEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIS number looks incorrect.",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
 
 
@@ -678,6 +690,10 @@ class KYEmployeeValidation(EmployeeValidationStrategy):
         "nib_member_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIB member number looks incorrect.",
+        },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
         },
     }
 
@@ -691,6 +707,10 @@ class DOEmployeeValidation(EmployeeValidationStrategy):
         "cedula": {
             "pattern": re.compile(r"^\d{3}-\d{7}-\d{1}$"),
             "error": "Cédula must be in the format 000-0000000-0.",
+        },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
         },
     }
 
@@ -706,6 +726,10 @@ class GYEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIS number looks incorrect.",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
 
 
@@ -717,6 +741,10 @@ class JMEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{9}$"),
             "error": "TRN must be 9 digits (e.g. 123456789 or 123-456-789).",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
 
 
@@ -726,6 +754,10 @@ class BSEmployeeValidation(EmployeeValidationStrategy):
         "nib_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIB number looks incorrect.",
+        },
+        "ach_routing_number": {
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "ACH routing number must be exactly 9 digits.",
         },
     }
 
@@ -741,7 +773,156 @@ class TTEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
             "error": "NIBTT number looks incorrect.",
         },
+        "bank_branch_code": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,20}$"),
+            "error": "Bank/branch code looks incorrect.",
+        },
     }
+
+
+class PREmployeeValidation(EmployeeValidationStrategy):
+    country_code = "PR"
+    FIELD_SPECS = {
+        # US Social Security Number — Puerto Rico employees are US
+        # citizens and are issued a real federal SSN, not a
+        # territory-specific ID (ZP-PR-ENG-001 §2's "Worker identity"
+        # object).
+        "ssn": {
+            "pattern": re.compile(r"^\d{3}-?\d{2}-?\d{4}$"),
+            "error": "Social Security Number must be in the format 000-00-0000.",
+        },
+        "ach_routing_number": {
+            "pattern": re.compile(r"^\d{9}$"),
+            "error": "ACH routing number must be exactly 9 digits.",
+        },
+    }
+
+
+class FREmployeeValidation(EmployeeValidationStrategy):
+    """France (ZP-FR-ENG-001 §13/§15). The `nir` is authority identity
+    (FR-037: never 'fixed' by synthesising a statutory identifier) and the
+    employing establishment flows through the employee's `siret`. Both are
+    format-validated here; the payroll-side mandatory-data gate (which
+    blocks when NIR is unknown rather than guessing) lives in service.py,
+    exactly as France's launch run-workspace requires (section 13:
+    "Missing NIR material exceptions block approval")."""
+    country_code = "FR"
+    FIELD_SPECS = {
+        "nir": {
+            "pattern": re.compile(r"^\d{15}$"),
+            "error": "NIR (numéro d'inscription au répertoire) must be exactly 15 digits.",
+            "required": True,
+        },
+        "siret": {
+            "pattern": re.compile(r"^\d{14}$"),
+            "error": "SIRET must be exactly 14 digits.",
+        },
+        "nif": {
+            "pattern": re.compile(r"^[0-9A-Za-z]{12}$"),
+            "error": "FV/IFU-style foreign tax identifier is not valid (12 alphanumeric).",
+        },
+        "iban": {
+            "upper": True, "strip_chars": " ",
+            # FR (2) + 12 bank/branch digits + 11 account + 2 key = 27 chars
+            "pattern": re.compile(r"^FR\d{12}[0-9A-Z]{11}\d{2}$"),
+            "error": "French IBAN must be FR followed by 25 characters (12 digits, 11 alphanumeric, 2 digits).",
+        },
+        "bic": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "BIC must be 8 or 11 characters.",
+        },
+    }
+
+
+class IEEmployeeValidation(EmployeeValidationStrategy):
+    """Ireland (ZP-IE-ENG-001 §9).
+
+    Deliberately does NOT expose a manual MyFutureFund enrolment toggle
+    (IE-018/IE-021, §9 "MyFutureFund"): NAERSA is the eligibility authority
+    and payroll only applies a notified status. PRSI class is restricted to
+    the certified launch cohort (A0/AX/AL/A1) so an uncertified class can
+    never pass validation and reach the engine as if it were supported
+    (IE-016) — anything outside this set is rejected here and therefore
+    BLOCKED at preflight. RPN values (credits, rate bands, LPT) are
+    likewise absent by design: they are authority-supplied and come from a
+    frozen RpnSnapshot, never from an admin-typed field (IE-004)."""
+    country_code = "IE"
+    duplicate_field = "ppsn"
+    FIELD_SPECS = {
+        "ppsn": {
+            "upper": True,
+            "pattern": re.compile(r"^\d{7}[A-Z]?$"),
+            "error": "PPSN must be 7 digits (an optional trailing letter is accepted for non-individual registrations).",
+        },
+        "employer_reference": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,32}$"),
+            "error": "Employer Reference must be 3-32 letters, digits or hyphens.",
+        },
+        "revenue_employment_id": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z0-9-]{3,64}$"),
+            "error": "Revenue Employment Identifier must be 3-64 letters, digits or hyphens.",
+        },
+        "prsi_class": {
+            "choices": ["A0", "AX", "AL", "A1"],
+        },
+        "prsi_exemption_reference": {
+            "pattern": re.compile(r"^[A-Za-z0-9/._-]{3,64}$"),
+            "error": "PRSI exemption evidence reference looks incorrect.",
+        },
+        "usc_status": {
+            "choices": ["Standard", "Reduced", "Exempt"],
+        },
+        "pension_scheme_reference": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z0-9-]{3,64}$"),
+            "error": "Pension scheme reference must be 3-64 letters, digits or hyphens.",
+        },
+        "pension_qualifying_exemption_reference": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z0-9-]{3,64}$"),
+            "error": "Qualifying pension exemption must cite a scheme reference (IE-021 — a bare checkbox is not an exemption).",
+        },
+        "pension_qualifying_exemption_effective_from": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Qualifying pension exemption effective date must be YYYY-MM-DD.",
+        },
+        "contracted_weekly_hours": {
+            "pattern": re.compile(r"^\d{1,2}(\.\d{1,2})?$"),
+            "error": "Contracted weekly hours must be a number (IE-035 requires working-hours evidence for the minimum-wage check).",
+        },
+        "sector_wage_order": {
+            "choices": ["NONE", "ERO", "SEO"],
+        },
+        "iban": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^IE\d{2}[A-Z]{4}\d{6}\d{8}\d{2}$"),
+            "error": "Irish IBAN must be IE followed by 22 characters (4 letters, then 16 digits).",
+        },
+        "bic": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "BIC must be 8 or 11 characters.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        errors = []
+        claimed = cleaned.get("pension_qualifying_exemption_reference")
+        if claimed and not cleaned.get("pension_qualifying_exemption_effective_from"):
+            errors.append(
+                "pension_qualifying_exemption_effective_from is required when a qualifying "
+                "pension exemption is claimed."
+            )
+        if cleaned.get("pension_qualifying_exemption_effective_from") and not claimed:
+            errors.append(
+                "pension_qualifying_exemption_reference is required when a qualifying "
+                "pension exemption effective date is supplied."
+            )
+        if errors:
+            raise BadRequestException("; ".join(errors))
 
 
 _STRATEGIES = {
@@ -758,6 +939,9 @@ _STRATEGIES = {
     "JM": JMEmployeeValidation,
     "BS": BSEmployeeValidation,
     "TT": TTEmployeeValidation,
+    "PR": PREmployeeValidation,
+    "FR": FREmployeeValidation,
+    "IE": IEEmployeeValidation,
 }
 
 

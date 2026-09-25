@@ -3585,3 +3585,117 @@ _POLICY_DEFAULT_GRACE_TIME_MINUTES = 10
 
 # PolicyOvertimeRule default.
 _POLICY_DEFAULT_MINIMUM_OVERTIME_MINUTES = 30
+
+
+# ═════════════════════════════════════════════════════════════════════
+# France (ZP-FR-ENG-001, 2026-09-24) — 2026 statutory content FALLBACKS,
+# consumed by engine/countries/france.py via `rate_map` + this module.
+# Every rate amount explicitly quoted by the spec carries its section
+# reference; the few universally-known standard-regime employer values
+# that the spec deliberately leaves to "authoritative 2026 content"
+# (§5/§9) are flagged PENDING_G1_SIGN_OFF and MUST be source-hash signed
+# by a French payroll specialist at gate G1 before any production France
+# payroll (FR-027). None of these numbers ever beats a configured
+# ContributionRate row.
+# ═════════════════════════════════════════════════════════════════════
+
+# PASS / PMSS (§2, S1): annual €48,060 / monthly €4,005.
+_FR_PASS_ANNUAL = Decimal("48060")
+_FR_PASS_MONTHLY = Decimal("4005")
+_FR_QUADRUPLE_PASS_ANNUAL = Decimal("192240")
+
+# SMIC (§2, S3): 1 Jan 2026 €12.02/h (monthly 1,823.03, annual 21,876.64);
+# revalued 1 Jun 2026 to €12.31/h and €1,867.02/month. The RGDU reference
+# is FROZEN at the 1-Jan value for all of 2026 (décret n° 2026-509 of
+# 12 Jun 2026, BOSS communiqué 5 Jun 2026) — hence the separate frozen
+# annual/hourly constants used by the Relief engine only (FR-024).
+_FR_SMIC_2026_HOURLY_JAN_MAY = Decimal("12.02")
+_FR_SMIC_2026_MONTHLY_JAN_MAY = Decimal("1823.03")
+_FR_SMIC_2026_ANNUAL_FROZEN = Decimal("21876.64")
+_FR_SMIC_2026_HOURLY_FROZEN = Decimal("12.02")
+_FR_SMIC_2026_HOURLY_JUN = Decimal("12.31")
+_FR_SMIC_2026_MONTHLY_JUN = Decimal("1867.02")
+_FR_SMIC_2026_FULLTIME_HOURS = Decimal("151.67")   # 35 h × 52 / 12
+
+# Old-age (§5): capped EE 6.90% / ER 8.55% within PASS; uncapped
+# EE 0.40% / ER 2.11% on the applicable total base.
+_FR_VIEILLESSE_CAPPED_EE = Decimal("6.90")
+_FR_VIEILLESSE_CAPPED_ER = Decimal("8.55")
+_FR_VIEILLESSE_UNCAPPED_EE = Decimal("0.40")
+_FR_VIEILLESSE_UNCAPPED_ER = Decimal("2.11")
+
+# Unemployment / AGS (§2/§8): employer 4.00% / 0.25% within 4×PASS.
+_FR_CHOMAGE_ER = Decimal("4.00")
+_FR_AGS_ER = Decimal("0.25")
+
+# Health (§5 — "loaded from authoritative 2026 content"; standard-regime
+# values well-known but NOT numerically quoted by the spec:
+# PENDING_G1_SIGN_OFF).
+_FR_SANTE_ER_STANDARD = Decimal("13.00")
+_FR_SANTE_ER_REDUCED = Decimal("7.00")               # <11 employees
+_FR_SANTE_REDUCED_2_5_SMIC_BAND = True               # banded: reduced up to 2.5×SMIC, standard above
+
+# Family allowances (§5 — content; do NOT inherit obsolete reduced-rate
+# assumptions per the spec's own warning; PENDING_G1_SIGN_OFF).
+_FR_FAMILLE_ER = Decimal("5.25")
+
+# CSA — employer solidarity-autonomy contribution (content;
+# PENDING_G1_SIGN_OFF).
+_FR_CSA_ER_DEFAULT = Decimal("0.50")
+
+# FNAL (§9/F6, S14): 0.10% within PASS (<50 employees), 0.50% total (50+).
+_FR_FNAL_ER_0P10 = Decimal("0.10")
+_FR_FNAL_ER_0P50 = Decimal("0.50")
+
+# CFP / formation (§9): 0.55% (<11) / 1.00% (11+), within PASS.
+_FR_CFP_ER_0P55 = Decimal("0.55")
+_FR_CFP_ER_1P00 = Decimal("1.00")
+
+# Apprenticeship (§9): 0.59% main share + 0.09% balance, total base,
+# outside Alsace-Moselle.
+_FR_APPRENTISSAGE_ER = Decimal("0.59")
+_FR_APPRENTISSAGE_BALANCE_ER = Decimal("0.09")
+
+# Agirc-Arrco (§7): T1 7.87% (ER 4.72 / EE 3.15) on 0–1 PSS; T2 21.59%
+# (ER 12.95 / EE 8.64) on 1–8 PSS; CEG T1 2.15% (1.29/0.86), CEG T2
+# 2.70% (1.62/1.08); CET 0.35% (0.21/0.14) when remuneration exceeds T1
+# (FR-021); Apec 0.06% (0.036/0.024) up to 4 PSS for cadres.
+_FR_AGIRC_T1_EE = Decimal("3.15")
+_FR_AGIRC_T1_ER = Decimal("4.72")
+_FR_AGIRC_T2_EE = Decimal("8.64")
+_FR_AGIRC_T2_ER = Decimal("12.95")
+_FR_CEG_T1_EE = Decimal("0.86")
+_FR_CEG_T1_ER = Decimal("1.29")
+_FR_CEG_T2_EE = Decimal("1.08")
+_FR_CEG_T2_ER = Decimal("1.62")
+_FR_CET_EE = Decimal("0.14")
+_FR_CET_ER = Decimal("0.21")
+_FR_APEC_EE = Decimal("0.024")
+_FR_APEC_ER = Decimal("0.036")
+
+# CSG / CRDS (§6): CSG 9.20% split 6.80% deductible / 2.40% non-deductible
+# (FR-017); CRDS 0.50%; 98.25% base factor on qualifying salary within the
+# 4×PASS annual boundary (§2/FR-016 — never applied as a universal
+# "98.25% × gross" shortcut).
+_FR_CSG_EE_DEDUCTIBLE = Decimal("6.80")
+_FR_CSG_EE_NONDEDUCTIBLE = Decimal("2.40")
+_FR_CRDS_EE = Decimal("0.50")
+_FR_CSG_BASE_FACTOR_98_25 = Decimal("98.25")
+
+# RGDU (§8, décret n° 2026-509 of 12 Jun 2026): coefficient =
+# Tmin + Tdelta × [(1/2) × (3 × SMIC_annuel / rémunération_annuelle − 1)]^P,
+# P = 1.75; envelope extends to 3×SMIC; Tdelta by FNAL class
+# (0.3781 <50 / 0.3821 50+); 2026 SMIC reference frozen at 1-Jan.
+_FR_RGDU_TMIN = Decimal("0.02")
+_FR_RGDU_TDELTA_FNAL_0P10 = Decimal("0.3781")
+_FR_RGDU_TDELTA_FNAL_0P50 = Decimal("0.3821")
+_FR_RGDU_POWER = Decimal("1.75")
+_FR_RGDU_ELIGIBILITY_MULTIPLE = Decimal("3")
+
+# PAS (§4, S7/S8): short-contract base abatement €748 (2026); apprentice
+# PAS-exemption threshold €21,876 annualised (legally-eligible remuneration
+# only — the resolver confirms conditions, the engine only applies the
+# abatement/exemption). The neutral-grid BRACKETS are authority content
+# selected by service.py Phase 7, never hardcoded here (FR-009/FR-008).
+_FR_PAS_SHORT_CONTRACT_ABATEMENT = Decimal("748")
+_FR_PAS_APPRENTICE_THRESHOLD = Decimal("21876")

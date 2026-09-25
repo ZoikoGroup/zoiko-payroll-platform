@@ -19,6 +19,7 @@ import { listAlerts } from "../service/commandCenterService";
 import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
 import CommandPalette from "./CommandPalette";
+import PageErrorBoundary from "./PageErrorBoundary";
 import { NAV_GROUPS, isItemActive, getPageLabel } from "./superAdminNav";
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_super_admin_sidebar_collapsed";
@@ -201,7 +202,7 @@ function GeneratedPasswordModal({ password, onClose }) {
   return (
     <Modal title="New password generated" onClose={onClose} maxWidth="max-w-md">
       <p className="text-sm text-foreground-secondary mb-4">
-        Save this now — it won't be shown again. Use it to sign in, then change it to something memorable.
+        Save this now — it won&apos;t be shown again. Use it to sign in, then change it to something memorable.
       </p>
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background-secondary px-3.5 py-3">
         <code className="truncate text-sm font-mono text-foreground">{password}</code>
@@ -384,6 +385,7 @@ export default function SuperAdminShell({ children }) {
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
   const wasOpenRef = useRef(false);
+  const { pathname } = useLocation();
 
   useEffect(() => {
     let cancelled = false;
@@ -464,7 +466,9 @@ export default function SuperAdminShell({ children }) {
             visible regardless of `sidebarOpen`. */}
         <div className={`transition-[padding] duration-200 ${sidebarOpen ? "pl-72" : ""} ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
           <Header onOpenSidebar={() => setSidebarOpen(true)} onToggleCollapse={toggleCollapse} collapsed={collapsed} />
-          <main className="w-full p-4 sm:p-6 lg:p-8">{children}</main>
+          <main className="w-full p-4 sm:p-6 lg:p-8">
+            <PageErrorBoundary resetKey={pathname}>{children}</PageErrorBoundary>
+          </main>
         </div>
 
         <ToastStack />

@@ -31,6 +31,7 @@ skips them rather than flagging a false positive.
 from decimal import Decimal
 
 from app.modules.payroll.engine.countries import australia, canada, germany, india, uk, us
+from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
     "india": india,
@@ -39,6 +40,7 @@ _MODULES = {
     "australia": australia,
     "canada": canada,
     "germany": germany,
+    "hardcoded_defaults": hardcoded_defaults,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -161,6 +163,64 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "DE", "module": "germany", "attr": "_DE_ALV_EMPLOYER_RATE", "label": "Unemployment Insurance (ALV) Rate — Employer", "resolverKey": "alv_employer_rate", "side": "employer"},
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYEE_RATE", "label": "Health Insurance (GKV) General Rate — Employee", "resolverKey": "gkv_general_employee_rate", "side": "employee"},
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYER_RATE", "label": "Health Insurance (GKV) General Rate — Employer", "resolverKey": "gkv_general_employer_rate", "side": "employer"},
+
+    # ── France ──────────────────────────────────────────────────────────
+    # France statutory values are pack data (ZP-FR-ENG-001 FR-003):
+    # engine/countries/france.py resolves every key below from the active
+    # France JurisdictionPack's ContributionRate rows (seeded Draft by
+    # scripts/seed_france_canonical_packs.py from
+    # engine/countries/france_content.py) and BLOCKS when a key has no row —
+    # these constants are the published 2026 fallbacks shown for reference.
+    # skip_discrepancy_check: France has no legacy per-country seed dict in
+    # service.py, so the viewer's seed-vs-engine callout does not apply.
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PASS_ANNUAL", "label": "PASS — annual Social Security ceiling (2026)", "resolverKey": "fr_pass_annual", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PASS_MONTHLY", "label": "PMSS — monthly Social Security ceiling (2026)", "resolverKey": "fr_pmss", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_HOURLY_JAN_MAY", "label": "SMIC hourly — Jan–May 2026 (dated pack row)", "resolverKey": "fr_smic_hourly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_HOURLY_JUN", "label": "SMIC hourly — from 1 Jun 2026 (dated pack row)", "resolverKey": "fr_smic_hourly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_MONTHLY_JAN_MAY", "label": "SMIC monthly 35h — Jan–May 2026 (dated pack row)", "resolverKey": "fr_smic_monthly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_MONTHLY_JUN", "label": "SMIC monthly 35h — from 1 Jun 2026 (dated pack row)", "resolverKey": "fr_smic_monthly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_ANNUAL_FROZEN", "label": "RGDU SMIC reference — annual (frozen 1 Jan 2026)", "resolverKey": "fr_smic_rgdu_annual", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_HOURLY_FROZEN", "label": "RGDU SMIC reference — hourly (frozen 1 Jan 2026)", "resolverKey": "fr_smic_rgdu_hourly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_FULLTIME_HOURS", "label": "Full-time monthly hours (35h × 52 / 12)", "resolverKey": "fr_fulltime_monthly_hours", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_CAPPED_EE", "label": "Old-age capped (PSS) — employee", "resolverKey": "fr_vieillesse_capped_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_UNCAPPED_EE", "label": "Old-age uncapped (total) — employee", "resolverKey": "fr_vieillesse_uncapped_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_CAPPED_ER", "label": "Old-age capped (PSS) — employer", "resolverKey": "fr_vieillesse_capped_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_UNCAPPED_ER", "label": "Old-age uncapped (total) — employer", "resolverKey": "fr_vieillesse_uncapped_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CHOMAGE_ER", "label": "Unemployment — employer (within 4 PASS)", "resolverKey": "fr_chomage_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGS_ER", "label": "AGS — employer (within 4 PASS)", "resolverKey": "fr_ags_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SANTE_ER_STANDARD", "label": "Health — employer, standard rate [PENDING G1]", "resolverKey": "fr_sante_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SANTE_ER_REDUCED", "label": "Health — employer, reduced rate [PENDING G1]", "resolverKey": "fr_sante_er_reduced", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_FAMILLE_ER", "label": "Family allowances — employer [PENDING G1]", "resolverKey": "fr_famille_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSA_ER_DEFAULT", "label": "CSA — employer [PENDING G1]", "resolverKey": "fr_csa_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_FNAL_ER_0P10", "label": "FNAL — employer, under 50 employees (capped base)", "resolverKey": "fr_fnal_er_0p10", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_FNAL_ER_0P50", "label": "FNAL — employer, 50+ employees (total pay)", "resolverKey": "fr_fnal_er_0p50", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CFP_ER_0P55", "label": "CFP — employer, under 11 employees", "resolverKey": "fr_cfp_er_0p55", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CFP_ER_1P00", "label": "CFP — employer, 11+ employees", "resolverKey": "fr_cfp_er_1p00", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APPRENTISSAGE_ER", "label": "Apprenticeship tax — main share", "resolverKey": "fr_apprentissage_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APPRENTISSAGE_BALANCE_ER", "label": "Apprenticeship tax — balance", "resolverKey": "fr_apprentissage_balance_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T1_EE", "label": "Agirc-Arrco T1 — employee", "resolverKey": "fr_agirc_t1_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T1_ER", "label": "Agirc-Arrco T1 — employer", "resolverKey": "fr_agirc_t1_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T2_EE", "label": "Agirc-Arrco T2 — employee", "resolverKey": "fr_agirc_t2_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T2_ER", "label": "Agirc-Arrco T2 — employer", "resolverKey": "fr_agirc_t2_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T1_EE", "label": "CEG T1 — employee", "resolverKey": "fr_ceg_t1_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T1_ER", "label": "CEG T1 — employer", "resolverKey": "fr_ceg_t1_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T2_EE", "label": "CEG T2 — employee", "resolverKey": "fr_ceg_t2_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T2_ER", "label": "CEG T2 — employer", "resolverKey": "fr_ceg_t2_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CET_EE", "label": "CET — employee (on T1+T2 when pay exceeds T1)", "resolverKey": "fr_cet_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CET_ER", "label": "CET — employer (on T1+T2 when pay exceeds T1)", "resolverKey": "fr_cet_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APEC_EE", "label": "Apec — employee (cadres, up to 4 PSS)", "resolverKey": "fr_apec_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APEC_ER", "label": "Apec — employer (cadres, up to 4 PSS)", "resolverKey": "fr_apec_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSG_EE_DEDUCTIBLE", "label": "CSG — deductible part", "resolverKey": "fr_csg_deductible", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSG_EE_NONDEDUCTIBLE", "label": "CSG — non-deductible part", "resolverKey": "fr_csg_nondeductible", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CRDS_EE", "label": "CRDS (non-deductible)", "resolverKey": "fr_crds", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSG_BASE_FACTOR_98_25", "label": "CSG/CRDS base factor (98.25%, within cumulative 4 PSS)", "resolverKey": "fr_csg_base_factor", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_TMIN", "label": "RGDU — Tmin (stored as % in the pack: 2.00 = 0.0200)", "resolverKey": "fr_rgdu_tmin", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_TDELTA_FNAL_0P10", "label": "RGDU — Tdelta, under 50 employees (pack %: 37.81)", "resolverKey": "fr_rgdu_tdelta_lt50", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_TDELTA_FNAL_0P50", "label": "RGDU — Tdelta, 50+ employees (pack %: 38.21)", "resolverKey": "fr_rgdu_tdelta_ge50", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_POWER", "label": "RGDU — exponent", "resolverKey": "fr_rgdu_power", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_ELIGIBILITY_MULTIPLE", "label": "RGDU — eligibility envelope (× SMIC)", "resolverKey": "fr_rgdu_smic_multiple", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PAS_SHORT_CONTRACT_ABATEMENT", "label": "PAS — short-contract base abatement (€ amount)", "resolverKey": "fr_pas_short_contract_abatement", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PAS_APPRENTICE_THRESHOLD", "label": "PAS — apprentice exemption threshold (€ / year)", "resolverKey": "fr_pas_apprentice_threshold", "skip_discrepancy_check": True},
 ]
 
 

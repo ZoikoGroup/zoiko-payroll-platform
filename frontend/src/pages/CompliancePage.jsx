@@ -23,8 +23,10 @@ export default function CompliancePage() {
   useEffect(() => {
     getComplianceJurisdictions()
       .then(setJurisdictions)
-      .finally(() => setLoading(false));
+      .finally(setLoading(false));
   }, []);
+
+  const unmapped = jurisdictions.filter((j) => !COUNTRY_CODE_TO_ROUTE[j.code]);
 
   return (
     <div>
@@ -73,9 +75,23 @@ export default function CompliancePage() {
         <p className="py-12 text-center text-sm text-foreground-disabled">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {unmapped.map((j) => (
+            <div
+              key={j.code}
+              className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-surface-muted p-5"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface">
+                <CountryFlag code={j.code} className="h-full w-full" fallback={<Globe2 size={18} className="text-foreground-disabled" />} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-foreground-muted">{j.name}</p>
+                <p className="text-xs text-foreground-disabled">No Compliance workspace yet</p>
+              </div>
+            </div>
+          ))}
           {jurisdictions.map((j) => {
             const slug = COUNTRY_CODE_TO_ROUTE[j.code];
-            if (!slug) return null; // a jurisdiction with no dedicated page yet — shouldn't happen for the six supported countries, but fails safe rather than a broken link
+            if (!slug) return null;
             return (
               <Link
                 key={j.code}

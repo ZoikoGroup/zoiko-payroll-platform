@@ -26,7 +26,20 @@ function isOverdue(row) {
   return new Date(row.dueDate) < new Date(new Date().toDateString());
 }
 
-export default function USNewHireReportingPanel() {
+// title/subtitle: optional overrides so this same component/API (the
+// backend's NewHireReport table and /api/payroll/us/new-hire-reports
+// endpoints are org-scoped only, with no country column/filter at all —
+// see service.list_new_hire_reports) can serve Puerto Rico's ASUME
+// reporting too (PR-007/PR-023, auto-created by service.create_employee's
+// own PR branch) without duplicating this panel. Defaults preserve
+// today's exact US copy unchanged.
+export default function USNewHireReportingPanel({
+  title = "New Hire Reporting",
+  subtitle = "Every US employee's hire is required to be reported to a state new-hire registry within a short window. " +
+    "A Pending row is created automatically when a new US employee is added. The due date shown is a " +
+    "SUGGESTION (hire date + 20 days) — this platform does not model each state's exact deadline, which " +
+    "genuinely varies; verify and mark filed once actually reported.",
+} = {}) {
   const [rows, setRows] = useState([]);
   const [statusFilter, setStatusFilter] = useState("Pending");
   const [loading, setLoading] = useState(true);
@@ -63,13 +76,8 @@ export default function USNewHireReportingPanel() {
   return (
     <div className="max-w-4xl space-y-4">
       <div className="rounded-[14px] border border-border bg-surface p-5">
-        <h3 className="mb-1 text-[15px] font-bold text-foreground">New Hire Reporting</h3>
-        <p className="mb-4 text-[12px] text-foreground-secondary">
-          Every US employee's hire is required to be reported to a state new-hire registry within a short window.
-          A Pending row is created automatically when a new US employee is added. The due date shown is a
-          SUGGESTION (hire date + 20 days) — this platform does not model each state's exact deadline, which
-          genuinely varies; verify and mark filed once actually reported.
-        </p>
+        <h3 className="mb-1 text-[15px] font-bold text-foreground">{title}</h3>
+        <p className="mb-4 text-[12px] text-foreground-secondary">{subtitle}</p>
 
         <div className="mb-3 flex items-center gap-2">
           {["Pending", "Filed", "All"].map((s) => (

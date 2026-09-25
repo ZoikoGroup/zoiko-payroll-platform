@@ -3,7 +3,12 @@
 The graph must have one head, no duplicate revision IDs, and retain the
 known Germany migration chain wiring. These tests inspect the files directly
 and also load the real Alembic ScriptDirectory without touching a database.
-The current graph has head ``e7f1a2b3c4d5`` and 144 revisions.
+The current graph has head ``4b13831d574b`` (ensure communication_events,
+on top of merge ``5ae06cfda828``) and 151 revisions — the
+merge of venu's branch (PR withholding certificates -> France compliance
+tables -> France establishments/editable fields -> Ireland) with main's
+(communication_events -> drop orphan SGP columns), which forked at
+``d4e5f6a7c8b9`` (Rugvedh's auth_email_events table).
 """
 
 import re
@@ -64,7 +69,7 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["e7f1a2b3c4d5"]
+    assert heads == ["4b13831d574b"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -76,7 +81,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["e7f1a2b3c4d5"]
+    assert list(script.get_heads()) == ["4b13831d574b"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -84,22 +89,24 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
     adds exactly one new branchpoint (`2b3c4d5e6f70`, where Germany's
     post-fork history diverges from `main`'s own); every other branchpoint
     here is pre-existing on `main`'s own independently-evolved graph, plus
-    the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`."""
+    the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`,
+    and `d4e5f6a7c8b9` where venu's France/Ireland chain and main's
+    communications chain fork (rejoined by merge `5ae06cfda828`)."""
     revs = _parse_revisions()
     children = _children_map(revs)
     branchpoints = sorted(k for k, v in children.items() if len(v) > 1)
     assert branchpoints == [
         "1dc04f15a9b7", "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181",
         "737e7bfa2d77", "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
-        "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf", "f1b78410d568",
-        "fbfe6d7eeb2e",
+        "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
+        "f1b78410d568", "fbfe6d7eeb2e",
     ]
 
 
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 144
+    assert len(revs) == 151
 
 
 def test_germany_head_chain_wiring_is_intact():

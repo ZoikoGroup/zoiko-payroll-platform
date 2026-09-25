@@ -1107,6 +1107,175 @@ def run():
             ],
         )
 
+        print("Seeding Puerto Rico Withholding + Social Security/Medicare + SINOT statement, per-employee...")
+        # Same "generic PER_EMPLOYEE statement, no bespoke generator"
+        # baseline every other Caribbean country got first — the real
+        # named Hacienda/SSA forms (499 R-1B, 499R-2/W-2PR, Form
+        # 940/941-equivalent) are deferred to a follow-up phase, same
+        # sequencing KY's own real-forms commit followed its own base
+        # country build by.
+        _seed_template(
+            db, template_key="PR-WITHHOLDING-STATEMENT", name="Withholding + Social Security/Medicare + SINOT Statement",
+            report_type="PR_WITHHOLDING_STATEMENT",
+            country="PR", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_hacienda_ein", "Hacienda EIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "Hacienda Withholding", [
+                    ("tds", "Puerto Rico Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", None),
+                ]),
+                ("contributions", "Social Security / Medicare / SINOT (Employee)", [
+                    ("social_security", "Social Security (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("medicare", "Medicare (incl. Additional Medicare, Employee)", "currency", "PAYSLIP_ITEM", "medicare", None),
+                    ("state_disability_insurance", "SINOT (Employee)", "currency", "PAYSLIP_ITEM", "state_disability_insurance", None),
+                ]),
+                ("employer_contributions", "Social Security / Medicare / FUTA-equivalent / Unemployment / SINOT (Employer)", [
+                    ("employer_social_security", "Social Security (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("employer_medicare", "Medicare (Employer)", "currency", "PAYSLIP_ITEM", "employer_medicare", None),
+                    ("employer_futa", "FUTA-equivalent (Employer)", "currency", "PAYSLIP_ITEM", "employer_futa", None),
+                    ("employer_sui", "DTRH Unemployment (Employer)", "currency", "PAYSLIP_ITEM", "employer_sui", None),
+                    ("employer_state_program_contributions", "SINOT (Employer)", "currency", "PAYSLIP_ITEM", "employer_state_program_contributions", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Puerto Rico Form 499 R-1B (quarterly Hacienda withholding return, aggregate)...")
+        _seed_template(
+            db, template_key="PR-499R1B", name="Form 499 R-1B - Puerto Rico Quarterly Withholding Return", report_type="PR_499R1B",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_hacienda_ein", "Hacienda Employer Identification Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("employee_count", "Number of Employees", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+                ("withholding", "Wages & Withholding", [
+                    ("total_wages", "Total Wages Paid", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("total_pr_withholding", "Total Puerto Rico Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # service.generate_pr_499r1b independently sums real committed PR
+        # payslips only (never derives from these mapped source_columns
+        # directly) — see that function's own docstring for disclosed gaps
+        # (no deposit-category classification, no prior-period-correction
+        # deltas reflected yet).
+
+        print("Seeding federal Form 941 for Puerto Rico employers (FICA on PR wages, aggregate)...")
+        _seed_template(
+            db, template_key="PR-941", name="Form 941 - Employer's Quarterly Federal Tax Return (Puerto Rico)", report_type="PR_941",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information (Line 1 area)", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_ein", "Employer Identification Number (EIN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("line1_employee_count", "Line 1 - Number of Employees", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+                ("wages_tax", "Wages & Federal Tax (Line 2-3)", [
+                    ("line2_wages", "Line 2 - Wages, Tips, Other Compensation", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("line3_federal_tax_withheld", "Line 3 - Federal Income Tax Withheld", "currency", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — always $0, see generate_pr_941's own docstring
+                ]),
+                ("ss_medicare", "Social Security & Medicare (Line 5a/5c)", [
+                    ("line5a_ss_wages", "Line 5a - Taxable Social Security Wages (col. 1)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("line5a_ss_tax", "Line 5a - Social Security Tax (col. 2, both shares)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("line5c_medicare_wages", "Line 5c - Taxable Medicare Wages (col. 1)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("line5c_medicare_tax", "Line 5c - Medicare Tax (col. 2, both shares, incl. Additional)", "currency", "PAYSLIP_ITEM", "medicare", "SUM_RUN"),
+                ]),
+                ("totals", "Totals (Line 6/12)", [
+                    ("line6_total_taxes_before_adjustments", "Line 6 - Total Taxes Before Adjustments", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("line12_total_taxes_after_adjustments_and_credits", "Line 12 - Total Taxes After Adjustments and Credits", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # Independent from US-941/generate_us_941 — see
+        # generate_pr_941's own docstring (Line 3 always $0: PR federal FIT
+        # applicability is a separate, undetermined employee-level fact).
+
+        print("Seeding federal Form 940 (FUTA-equivalent) for Puerto Rico employers, aggregate/annual...")
+        _seed_template(
+            db, template_key="PR-940", name="Form 940 - Employer's Annual Federal Unemployment (FUTA) Tax Return (Puerto Rico)", report_type="PR_940",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_ein", "Employer Identification Number (EIN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("futa", "FUTA-equivalent Wages & Tax", [
+                    ("total_payments", "Total Payments to All Employees", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("futa_taxable_wages", "Total Taxable FUTA-equivalent Wages ($7,000/employee cap)", "currency", "PAYSLIP_ITEM", "employer_futa", "SUM_RUN"),
+                    ("futa_tax_due", "FUTA-equivalent Tax (before deposits)", "currency", "PAYSLIP_ITEM", "employer_futa", "SUM_RUN"),
+                    ("employee_count", "Number of Employees Paid", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+            ],
+        )
+        # Independent from US-940/generate_us_940 — see generate_pr_940's
+        # own docstring.
+
+        print("Seeding Puerto Rico Form 499R-2/W-2PR (annual employee withholding statement, per-employee)...")
+        _seed_template(
+            db, template_key="PR-W2PR", name="Form 499R-2/W-2PR - Withholding Statement", report_type="PR_W2PR",
+            country="PR", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_hacienda_ein", "Hacienda Employer Identification Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("box_wages", "Wages & PR Tax Withheld", [
+                    ("box_wages", "Total Wages Paid", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                    ("box_pr_tax_withheld", "Puerto Rico Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                ]),
+                ("box_ss_medicare", "Social Security & Medicare", [
+                    ("box_ss_wages", "Social Security Wages (wage-base capped)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                    ("box_ss_tax", "Social Security Tax Withheld", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                    ("box_medicare_wages", "Medicare Wages", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                    ("box_medicare_tax", "Medicare Tax Withheld (incl. Additional Medicare)", "currency", "PAYSLIP_ITEM", "medicare", "SUM_YTD"),
+                ]),
+                ("box_sinot", "SINOT", [
+                    ("box_sinot", "SINOT Withheld (Employee)", "currency", "PAYSLIP_ITEM", "state_disability_insurance", "SUM_YTD"),
+                ]),
+            ],
+        )
+        # Independent from US-W2/generate_us_w2 — see generate_pr_w2pr's
+        # own docstring for disclosed gaps (no Act 60 boxes, dependents/
+        # deduction-allowance detail not broken out).
+
+        print("Seeding Puerto Rico DTRH quarterly wage/contribution return (PR-020, aggregate)...")
+        _seed_template(
+            db, template_key="PR-DTRH-QUARTERLY", name="DTRH Quarterly Wage & Contribution Return", report_type="PR_DTRH_QUARTERLY",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_dtrh_account", "DTRH Employer Account Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("employee_count", "Number of Employees", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+                ("unemployment", "Unemployment Wages & Tax", [
+                    ("total_wages", "Total Wages Paid", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("unemployment_taxable_wages", "Taxable Unemployment Wages ($7,000/employee cap)", "currency", "PAYSLIP_ITEM", "employer_sui", "SUM_RUN"),
+                    ("unemployment_tax_due", "DTRH Unemployment Tax Due", "currency", "PAYSLIP_ITEM", "employer_sui", "SUM_RUN"),
+                ]),
+                ("sinot", "SINOT Wages & Contributions", [
+                    ("sinot_taxable_wages", "Taxable SINOT Wages ($9,000/employee cap)", "currency", "PAYSLIP_ITEM", "state_disability_insurance", "SUM_RUN"),
+                    ("sinot_employee_contribution", "SINOT Employee Contribution", "currency", "PAYSLIP_ITEM", "state_disability_insurance", "SUM_RUN"),
+                    ("sinot_employer_contribution", "SINOT Employer Contribution", "currency", "PAYSLIP_ITEM", "employer_state_program_contributions", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # Independent from every US report_type — see
+        # generate_pr_dtrh_quarterly's own docstring for the disclosed
+        # this-quarter-only wage-base-capping simplification.
+
         print("Seeding Germany Payroll Summary (aggregate, per payroll run)...")
         # AGGREGATE, run-based — uses the fully generic
         # service.generate_report_from_template directly (no bespoke

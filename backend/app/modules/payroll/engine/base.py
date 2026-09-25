@@ -456,6 +456,40 @@ class PayrollContext:
     # field existed. Never guesses/backfills a starting value.
     ytd_gy_paye_credit_before: Decimal = None
 
+    # Puerto Rico (ZP-PR-ENG-001) — this employee's cumulative wages
+    # toward each of PR's independent wage-base caps/thresholds, as of
+    # BEFORE this pay period. Same dormancy contract as every other YTD
+    # field in this file: None means "no accumulator wired yet" —
+    # engine/countries/puerto_rico.py MUST fall back to a per-period
+    # pro-rated cap share (Additional Medicare: $0) rather than treat
+    # None as $0 already-used. Read from PayrollYtdAccumulator by
+    # service.py's _load_pr_ytd, gated on shared.
+    # _YTD_ACCUMULATOR_ENABLED_COUNTRIES — entirely independent of the US
+    # ytd_ss_wages_before/ytd_futa_wages_before/ytd_medicare_wages_before
+    # fields above and their own PayrollYtdAccumulator component keys,
+    # per this module's "never import from or share state with us.py"
+    # doctrine.
+    ytd_pr_ss_wages_before: Decimal = None
+    ytd_pr_medicare_wages_before: Decimal = None
+    ytd_pr_futa_wages_before: Decimal = None
+    ytd_pr_unemployment_wages_before: Decimal = None
+    ytd_pr_sinot_wages_before: Decimal = None
+
+    # Puerto Rico Form 499 R-4/R-4.1 withholding certificate (PR-005) —
+    # resolved from the employee's currently-Approved
+    # PRWithholdingCertificate by service.get_pr_certificate_inputs.
+    # pr_certificate_personal_exemption is None when no certificate is on
+    # file (PR-006: engine/countries/puerto_rico.py falls back to its own
+    # _PR_PERSONAL_EXEMPTION constant) — every other field defaults to its
+    # own "no effect" value (0 / False) so a certificate that only sets
+    # SOME fields never silently zeroes out the ones it didn't touch.
+    pr_certificate_personal_exemption: Decimal = None
+    pr_certificate_dependents_count: int = 0
+    pr_certificate_dependent_exemption_per_dependent: Decimal = Decimal("0")
+    pr_certificate_deduction_allowance: Decimal = Decimal("0")
+    pr_certificate_additional_withholding: Decimal = Decimal("0")
+    pr_certificate_msrra_election: bool = False
+
     # Australia Working Holiday Maker Schedule 15 (NAT 75331) cumulative
     # $45,000 first-bracket test — this employee's cumulative WHM earnings
     # for the current Australian financial year, as of BEFORE this pay
@@ -632,6 +666,48 @@ class PayrollContext:
     # final NIC period of the tax year.
     is_final_ni_period: bool = False
 
+    # France (ZP-FR-ENG-001, 2026-09-24) — pre-resolved France statutory
+    # inputs, threaded through exactly like rate_map/slabs so
+    # engine/countries/france.py stays a pure function of its context (no
+    # DB access from the engine layer, matching every other country's
+    # calculator). None/absent for every non-France calculation — existing
+    # calculations for every other country are unaffected. Resolved
+    # per-employee, per-payroll-date by service.py (the same shape as the
+    # Germany `germany_*` fields above).
+    france_payroll_date: date = None          # pay date — gates intrayear content (SMIC / PAS neutral grid)
+    france_pas: dict = field(default_factory=dict)
+    #     personalized DGFiP authority rate:
+    #     {rate_pct, rate_id, received_date, effective_from, effective_to, status} | {}
+    france_establishment: dict = field(default_factory=dict)
+    #     SIRET-scoped (FR-002/FR-013):
+    #     {siret, at_mp_rate_pct, at_mp_risk_code, vm_rate_pct, fnal_class,
+    #      cfp_class, effectif, commune_insee}
+    france_ytd: dict = field(default_factory=dict)
+    #     accumulators as of BEFORE this period (None-means-not-wired
+    #     contract, same as the ytd_* fields above):
+    #     {rgdu_remuneration, rgdu_smic_reference, pass_used,
+    #      agirc_t1_used, agirc_t2_used}
+    france_cadre: bool = False                 # cadre/non-cadre — drives Apec eligibility
+    france_idcc_minimum: Decimal = None        # IDCC conventional minimum for classification + period | None = no check
+    france_social_coverage: str = "GENERAL"    # "GENERAL" | unsupported special value → france.py BLOCKS
+    france_working_hours: Decimal = None       # hours worked in the period; None = full-time 151.67
+    france_overtime_hours: Decimal = None      # OT/CB hours in the period, for the RGDU SMIC add-back
+    france_employee_id: int = None
+    france_organization_id: int = None
+
+    ireland_pay_date: date = None
+    ireland_rpn: dict = field(default_factory=dict)
+    ireland_employee: dict = field(default_factory=dict)
+    ireland_myfuturefund: dict = field(default_factory=dict)
+    ireland_ytd: dict = field(default_factory=dict)
+    ireland_paye_payable: Decimal = None
+    ireland_usc_payable: Decimal = None
+    ireland_usc_paid_ytd: Decimal = None
+    ireland_prsi_reckonable: Decimal = None
+    ireland_mff_base: Decimal = None
+    ireland_employee_id: int = None
+    ireland_organization_id: int = None
+
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
     # affects a figure. None means "caller didn't supply one," in which
@@ -751,6 +827,27 @@ class PayrollResult:
     # YTD-adjacent field above. See PayrollContext's matching
     # ytd_gy_paye_credit_before field for the disclosed scope limitation.
     ytd_gy_paye_credit_after: Decimal = None
+    # Puerto Rico (ZP-PR-ENG-001) — cumulative wages toward each of PR's
+    # independent wage-base caps/thresholds AFTER this period, same
+    # None-means-"not applicable"/dormant contract as every YTD-adjacent
+    # field above. See PayrollContext's matching ytd_pr_*_before fields.
+    ytd_pr_ss_wages_after: Decimal = None
+    ytd_pr_medicare_wages_after: Decimal = None
+    ytd_pr_futa_wages_after: Decimal = None
+    ytd_pr_unemployment_wages_after: Decimal = None
+    ytd_pr_sinot_wages_after: Decimal = None
+    # PR-018: whether a real employer-specific DTRH unemployment rate was
+    # configured this period — False means employer_sui was computed as
+    # $0 for a missing-rate reason, not a genuine 0% statutory rate; the
+    # Payroll Run Validation / Employee Trace Drawer surfaces this rather
+    # than silently showing $0 as if it were a real figure.
+    pr_unemployment_rate_configured: bool = True
+    # PR-021: whether a real employer-specific CFSE workers'-compensation
+    # rate was configured this period — False means
+    # au_workers_compensation_premium was computed as $0 for a
+    # missing-rate reason (never a fabricated policy premium), same
+    # contract as pr_unemployment_rate_configured above.
+    pr_cfse_rate_configured: bool = True
     # True once ytd_whm_earnings_after crosses $45,000 for an employee
     # whose WHM YTD tracking is wired — informational (the withholding
     # itself is now genuinely computed using the real above-cap brackets
@@ -987,6 +1084,74 @@ class PayrollResult:
     # which isn't an "authorized deduction" in the Code's sense, against
     # 50% of gross wages).
     wage_deduction_cap_exceeded: bool = False
+
+    # France (ZP-FR-ENG-001, 2026-09-24) — net values and per-line
+    # contribution trace, additive/None for every non-France calculation.
+    # FR-042: net social, net imposable and net à payer are three SEPARATE
+    # values — never one "net". fr_employee_total / fr_employer_total are
+    # the combined France employee/employer totals (fr_employee_total is
+    # explicitly summed into total_deductions by engine/standard.py — the
+    # same mechanism au_statutory_deductions_total already uses).
+    fr_net_social: Decimal = None
+    fr_net_imposable: Decimal = None
+    fr_employee_total: Decimal = Decimal("0")
+    fr_employer_total: Decimal = Decimal("0")
+    fr_contributions: list = None              # per-line base→contribution trace (FR-040)
+    fr_bases: dict = None                      # independent statutory bases (FR-005)
+    fr_pas_withheld: Decimal = Decimal("0")
+    fr_pas_rate_type: str = None               # "PERSONALIZED" | "NEUTRAL"
+    fr_pas_rate_pct: Decimal = None
+    fr_pas_rate_id: str = None
+    fr_calculation_snapshot: dict = None
+    # RGDU/CSG accumulator state AFTER this period — the service persists
+    # it on commit so the next period accumulates (FR-023).
+    fr_ytd_after: dict = None
+    # Non-empty whenever a mandatory rate/base input is genuinely not
+    # configured — service.py turns this into a BLOCKED payroll (FR-027:
+    # unknown mandatory rate = NOT_READY, never zero-as-final).
+    fr_not_configured: list = None
+
+    ie_paye: Decimal = Decimal("0")
+    ie_employee_total: Decimal = Decimal("0")
+    ie_paye_basis: str = None
+    ie_paye_unrounded: Decimal = None
+    ie_standard_rate_pay: Decimal = Decimal("0")
+    ie_higher_rate_pay: Decimal = Decimal("0")
+    ie_tax_credit_applied: Decimal = Decimal("0")
+    ie_rpn_number: str = None
+    ie_rpn_snapshot_id: int = None
+    ie_rpn_hash: str = None
+    ie_rpn_issued_at: str = None
+    ie_usc: Decimal = Decimal("0")
+    ie_usc_unrounded: Decimal = None
+    ie_usc_payable_ytd_after: Decimal = None
+    ie_employee_prsi: Decimal = Decimal("0")
+    ie_employer_prsi: Decimal = Decimal("0")
+    ie_employer_prsi_total: Decimal = Decimal("0")
+    ie_prsi_class: str = None
+    ie_prsi_declaration: str = None
+    ie_prsi_ax_credit: Decimal = Decimal("0")
+    ie_prsi_contribution_weeks: Decimal = None
+    ie_prsi_weekly_reckonable: Decimal = None
+    ie_prsi_reckonable_ytd_after: Decimal = None
+    ie_mff_employee: Decimal = Decimal("0")
+    ie_mff_employer: Decimal = Decimal("0")
+    ie_mff_state_topup: Decimal = Decimal("0")
+    ie_mff_status: str = None
+    ie_mff_contributory: bool = False
+    ie_mff_ceased_reason: str = None
+    ie_mff_earnings_ytd_after: Decimal = None
+    ie_lpt: Decimal = Decimal("0")
+    ie_lpt_instructed: bool = False
+    ie_lpt_rate_pct: Decimal = None
+    ie_employee_pension: Decimal = Decimal("0")
+    ie_employer_pension: Decimal = Decimal("0")
+    ie_nmw_rate: Decimal = None
+    ie_nmw_band: str = None
+    ie_effective_hourly: Decimal = None
+    ie_tax_year: int = None
+    ie_calculation_trace: dict = None
+    ie_ytd_after: dict = None
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through
