@@ -18,26 +18,35 @@ France production calculation path (ZP-FR-ENG-001, 2026-09-24).
 
 2. Computes each contribution on its OWN independent statutory base
    (FR-005): vieillesse capped (PSS), vieillesse uncapped (total),
-   chomage/AGS (4×PASS, YTD-accumulated), CSG/CRDS (98.25% base up to
-   4×PASS annual, then full base, deductible split preserved — FR-017),
+   chomage/AGS (4×PASS, period ceiling), CSG/CRDS (98.25% base within a
+   cumulative 4×PSS ceiling, full base above, deductible split preserved —
+   FR-017), CFP on total remuneration, CET on T1+T2 (capped at 8 PSS),
    Agirc-Arrco T1/T2 + CEG + CET + Apec (monthly PSS tranches — FR-019),
    SIRET-scoped AT/MP and versement mobilité — FR-013, FNAL/CFP by
    governed effectif — FR-015.
 
 3. Returns three separate nets (FR-042): net social, net imposable
-   (returns non-deductible CSG to the taxable base — FR-017) and net à
-   payer (net social − PAS). Pas customer-visible.
+   (returns non-deductible CSG AND CRDS to the taxable base — FR-017) and
+   net à payer (net social − PAS), plus `fr_ytd_after` (the RGDU/CSG
+   accumulator state after this period) for the service to persist.
 
 4. Computes the 2026 réduction générale dégressive unique (RGDU) as a
    year-to-date accumulator (FR-023) using the décret n° 2026-509 frozen
    1-January SMIC reference (FR-024), producing gross theoretical relief,
    Urssaf/Agirc-Arrco split, monthly delta and cumulative total (FR-026).
 
-Rate values are DATA, resolved through `ctx.rate_map` with the published
-2026 fallbacks in `hardcoded_defaults._FR_*`. This module never varies a
-rate by hand: personalized PAS and SIRET establishment rates arrive
-pre-resolved via `ctx.france_pas` / `ctx.france_establishment`, selected
-by the same resolver that must NOT be per-tenant-editable (FR-008/FR-013).
+Rate AND ceiling/threshold values are DATA (FR-003), resolved through
+`ctx.rate_map` — the France canonical JurisdictionPack's ContributionRate
+rows (scripts/seed_france_canonical_packs.py), editable by Super Admin in a
+Draft pack version — with the published 2026 values in
+`hardcoded_defaults._FR_*` as last-resort fallbacks only. Every mandatory
+key (rates AND the PASS/SMIC/RGDU/CSG/PAS parameters below) with no
+configured row blocks the calculation (FR-027), so a fallback constant can
+never silently become the production value. Percent-type parameters
+(`employee_rate_pct`/`employer_rate_pct`) are PERCENT numbers (6.90 = 6.90%);
+amount-type parameters use `flat_amount`. This module never varies a rate
+by hand: personalized PAS and SIRET establishment rates arrive pre-resolved
+via `ctx.france_pas` / `ctx.france_establishment` (FR-008/FR-013).
 
 Earning-level base awareness (FR-016 — never "98.25% × gross" as a
 universal shortcut; replacement-income strategies FR-018; mutuelle/
@@ -57,7 +66,6 @@ from app.modules.payroll.engine.countries.shared import (
 )
 from app.modules.payroll.hardcoded_defaults import (
     _FR_PASS_ANNUAL, _FR_PASS_MONTHLY,
-    _FR_QUADRUPLE_PASS_ANNUAL,
     _FR_SMIC_2026_HOURLY_JAN_MAY, _FR_SMIC_2026_HOURLY_JUN,
     _FR_SMIC_2026_MONTHLY_JAN_MAY, _FR_SMIC_2026_MONTHLY_JUN,
     _FR_SMIC_2026_ANNUAL_FROZEN, _FR_SMIC_2026_HOURLY_FROZEN,
@@ -87,6 +95,22 @@ from app.modules.payroll.hardcoded_defaults import (
 _ALSACE_MOSELLE_DEPARTEMENTS = ("57", "67", "68")
 
 _FULL_TIME_HOURS = Decimal(_FR_SMIC_2026_FULLTIME_HOURS)  # 151.67
+
+# Employer-size classes. The stored/admin vocabulary (models.py,
+# schemas.py, the Super Admin rate-pack form) is UNDER_50/OVER_50 and
+# UNDER_11/OVER_11; the engine's rate keys are named by rate (0p10 = 0.10%).
+# Both spellings are accepted so an admin-entered pack never blocks on
+# vocabulary alone.
+_FNAL_CLASS_ALIASES = {"UNDER_50": "0p10", "OVER_50": "0p50", "0p10": "0p10", "0p50": "0p50"}
+_CFP_CLASS_ALIASES = {"UNDER_11": "0p55", "OVER_11": "1p00", "0p55": "0p55", "1p00": "1p00"}
+
+
+def normalize_fnal_class(value):
+    return _FNAL_CLASS_ALIASES.get(str(value)) if value not in (None, "") else None
+
+
+def normalize_cfp_class(value):
+    return _CFP_CLASS_ALIASES.get(str(value)) if value not in (None, "") else None
 
 
 class FranceCalculationBlockedError(ValueError):
@@ -135,6 +159,40 @@ def _optional(rate_map: dict, key: str, side: str, default: Decimal, ctx: Payrol
     )
 
 
+def _amount(rate_map: dict, key: str, default: Decimal, missing: list, ctx: PayrollContext) -> Decimal:
+    """Mandatory flat-amount parameter (ceiling, SMIC, threshold) — the
+    amount twin of _required(). Row-level effective dating inside the pack
+    (tax_resolver.resolve_tax_configuration) is what switches e.g. the SMIC
+    on 1 June: the rate_map already holds the row in force on the pay date."""
+    return Decimal(str(_required(rate_map, key, None, default, missing, ctx)))
+
+
+def _ratio(rate_map: dict, key: str, side: str, default_pct: Decimal, missing: list, ctx: PayrollContext) -> Decimal:
+    """Mandatory percent parameter returned as a fraction (37.81 → 0.3781).
+    Used for RGDU coefficients/CSG factor: ContributionRate.flat_amount is
+    Numeric(14,2), which would round 0.3781 to 0.38, so these live in the
+    4-decimal percent columns instead."""
+    return _pct(_required(rate_map, key, side, default_pct, missing, ctx))
+
+
+# Parameter keys (FR-003 content catalog). Kept together so the seed
+# script, the Super Admin component picker and the engine share one list.
+FR_PARAMETER_KEYS = {
+    "fr_pass_annual": "amount", "fr_pmss": "amount",
+    "fr_smic_hourly": "amount", "fr_smic_monthly": "amount",
+    "fr_smic_rgdu_annual": "amount", "fr_smic_rgdu_hourly": "amount",
+    "fr_fulltime_monthly_hours": "amount",
+    "fr_chomage_ceiling_pass_multiple": "amount",
+    "fr_agirc_t2_ceiling_pss_multiple": "amount",
+    "fr_apec_ceiling_pss_multiple": "amount",
+    "fr_csg_abatement_ceiling_pss_multiple": "amount",
+    "fr_csg_base_factor": "employee_pct",
+    "fr_rgdu_tmin": "employer_pct", "fr_rgdu_tdelta_lt50": "employer_pct", "fr_rgdu_tdelta_ge50": "employer_pct",
+    "fr_rgdu_power": "amount", "fr_rgdu_smic_multiple": "amount",
+    "fr_pas_short_contract_abatement": "amount", "fr_pas_apprentice_threshold": "amount",
+}
+
+
 def _pct(rate: Decimal) -> Decimal:
     # Coerce defensive exactly like germany.py's Decimal(u1_rate) call sites —
     # rate_map rows may surface str or Decimal depending on the caller.
@@ -143,7 +201,8 @@ def _pct(rate: Decimal) -> Decimal:
 
 # ── PAS ────────────────────────────────────────────────────────────────
 
-def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decimal) -> dict:
+def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decimal,
+                 short_contract_abatement: Decimal, apprentice_threshold: Decimal) -> dict:
     pas = ctx.france_pas or {}
     rate_type = pas.get("rate_type")
     rate_pct = pas.get("rate_pct")
@@ -172,20 +231,24 @@ def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decima
     # Short-contract base abatement (spec §4): only on the NEUTRAL path and
     # only when the resolver confirmed the legal conditions hold.
     if rate_type == "NEUTRAL" and pas.get("short_contract"):
-        abatement = min(_FR_PAS_SHORT_CONTRACT_ABATEMENT, pas_base)
+        abatement = min(short_contract_abatement, pas_base)
         pas_base = pas_base - abatement
 
-    withheld = Decimal("0")
     exempt = False
-    # Apprentice/trainee exemption threshold (spec §4): only when the
-    # resolver confirmed eligibility AND the annualised remuneration stays
-    # under the legal threshold.
-    if pas.get("apprentice") and net_social * MONTHS_PER_YEAR <= _FR_PAS_APPRENTICE_THRESHOLD:
-        exempt = True
-        withheld = Decimal("0")
-    else:
-        withheld = _round2(rate * pas_base / Decimal("100"))
-        withheld = max(Decimal("0"), min(withheld, net_social))
+    apprentice_exempt_amount = Decimal("0")
+    # Apprentice/trainee exemption (spec §4): the legally-eligible
+    # remuneration is exempt UP TO the annual threshold (monthly share =
+    # threshold / 12) — only the part above it is taxable. Measured on the
+    # PAS base (net imposable), never on net social, and never all-or-
+    # nothing: a remuneration just above the threshold is taxed only on the
+    # excess.
+    if pas.get("apprentice"):
+        monthly_threshold = _round2(apprentice_threshold / MONTHS_PER_YEAR)
+        apprentice_exempt_amount = min(pas_base, monthly_threshold)
+        pas_base = pas_base - apprentice_exempt_amount
+        exempt = pas_base <= Decimal("0")
+    withheld = _round2(rate * pas_base / Decimal("100"))
+    withheld = max(Decimal("0"), min(withheld, net_social))
 
     return {
         "rate_type": rate_type,
@@ -193,6 +256,7 @@ def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decima
         "rate_id": pas.get("rate_id") or None,
         "grid_version": pas.get("grid_version") or None,
         "apprentice_exempt": exempt,
+        "apprentice_exempt_amount": _round2(apprentice_exempt_amount),
         "pas_base": _round2(pas_base),
         "pas_base_gross": _round2(net_imposable),
         "short_contract_abatement": _round2(abatement),
@@ -202,27 +266,32 @@ def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decima
 
 # ── RGDU (2026 réduction générale dégressive unique, FR-023/FR-026) ────
 
-def _rgdu_coefficient(remuneration_ytd: Decimal, smic_reference_ytd: Decimal, tdelta: Decimal) -> Decimal:
+def _rgdu_coefficient(remuneration_ytd: Decimal, smic_reference_ytd: Decimal, tdelta: Decimal,
+                      tmin: Decimal, power: Decimal, multiple: Decimal) -> Decimal:
     if remuneration_ytd <= Decimal("0"):
         return Decimal("0")
-    bracket = (Decimal("0.5")) * (Decimal("3") * smic_reference_ytd / remuneration_ytd - Decimal("1"))
+    bracket = (Decimal("0.5")) * (multiple * smic_reference_ytd / remuneration_ytd - Decimal("1"))
     if bracket <= Decimal("0"):
         return Decimal("0")  # at/above 3×SMIC → out of the eligibility envelope
-    coefficient = _FR_RGDU_TMIN + tdelta * (min(bracket, Decimal("1")) ** _FR_RGDU_POWER)
-    return min(coefficient, _FR_RGDU_TMIN + tdelta)
+    coefficient = tmin + tdelta * (min(bracket, Decimal("1")) ** power)
+    return min(coefficient, tmin + tdelta)
 
 
-def _compute_rgdu(ctx: PayrollContext, employer_reducible: Decimal, employer_atmp_vm: Decimal, retraite_share: Decimal) -> dict:
+def _compute_rgdu(ctx: PayrollContext, params: dict, fnal_class: str,
+                  employer_reducible: Decimal, retraite_share: Decimal) -> dict:
     """RGDU as a YTD accumulator (FR-023). `employer_reducible` is the sum
-    of employer contributions actually eligible for the reduction (used to
-    cap relief at theoretical contributions), `employer_atmp_vm` the
-    excluded lines (AT/MP, versement mobilité) — reported but never
-    reduced (FR-026), and `retraite_share` the Agirc-Arrco/CEG/CET/Apec
-    employer portion so the Urssaf/Agirc-Arrco relief split is weighted on
-    the reducible contributions only."""
-    establishment = ctx.france_establishment or {}
-    fnal_0p50 = str(establishment.get("fnal_class", "")) == "0p50"
-    tdelta = _FR_RGDU_TDELTA_FNAL_0P50 if fnal_0p50 else _FR_RGDU_TDELTA_FNAL_0P10
+    of the period's employer contributions within the RGDU scope — the
+    relief granted this period can never exceed them — and `retraite_share`
+    the Agirc-Arrco T1 + CEG T1 employer portion inside that scope, so the
+    Urssaf/Agirc-Arrco relief split is weighted on in-scope contributions
+    only (FR-026).
+
+    SMIC reference: each period contributes ONE period's worth of the
+    frozen annual SMIC (annual / 12, prorated by hours) plus overtime hours
+    at the frozen hourly SMIC — never the whole annual amount per period
+    (which overstated the reference ~12× and the relief with it)."""
+    tdelta = params["tdelta_ge50"] if fnal_class == "0p50" else params["tdelta_lt50"]
+    tmin, power, multiple = params["tmin"], params["power"], params["multiple"]
 
     ytd = ctx.france_ytd or {}
     remuneration_before = Decimal(str(ytd.get("rgdu_remuneration") or 0))
@@ -234,12 +303,19 @@ def _compute_rgdu(ctx: PayrollContext, employer_reducible: Decimal, employer_atm
 
     remuneration_ytd = remuneration_before + ctx.gross
     smic_reference_period = (
-        _FR_SMIC_2026_ANNUAL_FROZEN * _hours_ratio(working_hours)
-        + _FR_SMIC_2026_HOURLY_FROZEN * Decimal(str(overtime_hours))
+        params["smic_annual"] / MONTHS_PER_YEAR * _hours_ratio(working_hours)
+        + params["smic_hourly"] * Decimal(str(overtime_hours))
     )
     smic_reference_ytd = smic_reference_before + smic_reference_period
 
-    if remuneration_ytd >= _FR_RGDU_ELIGIBILITY_MULTIPLE * smic_reference_ytd:
+    def _ytd_after(relief_total):
+        return {
+            "rgdu_remuneration": _round2(remuneration_ytd),
+            "rgdu_smic_reference": _round2(smic_reference_ytd),
+            "rgdu_relief": _round2(relief_total),
+        }
+
+    if remuneration_ytd >= multiple * smic_reference_ytd:
         return {
             "eligible": False, "reason": "remuneration_at_or_above_3x_smic",
             "annual_remuneration": _round2(remuneration_ytd),
@@ -248,13 +324,15 @@ def _compute_rgdu(ctx: PayrollContext, employer_reducible: Decimal, employer_atm
             "already_granted": _round2(relief_granted_before),
             "monthly_delta": Decimal("0"),
             "relief_urssaf": Decimal("0"), "relief_agirc": Decimal("0"),
-            "tdelta": tdelta, "fnal_class": establishment.get("fnal_class"),
+            "tdelta": tdelta, "fnal_class": fnal_class,
+            "ytd_after": _ytd_after(relief_granted_before),
         }
 
-    coefficient = _rgdu_coefficient(remuneration_ytd, smic_reference_ytd, tdelta)
+    coefficient = _rgdu_coefficient(remuneration_ytd, smic_reference_ytd, tdelta, tmin, power, multiple)
     theoretical_ytd = _round2(coefficient * remuneration_ytd)
-    theoretical_ytd = min(theoretical_ytd, employer_reducible)  # relief never exceeds reducible contributions
-    monthly_delta = max(Decimal("0"), theoretical_ytd - relief_granted_before)
+    # The period's relief (YTD theoretical minus what earlier periods
+    # already granted) never exceeds THIS period's in-scope contributions.
+    monthly_delta = min(max(Decimal("0"), theoretical_ytd - relief_granted_before), employer_reducible)
 
     urssaf_bucket = max(Decimal("0"), employer_reducible - retraite_share)
     agirc_bucket = retraite_share
@@ -273,12 +351,13 @@ def _compute_rgdu(ctx: PayrollContext, employer_reducible: Decimal, employer_atm
         "overtime_hours": Decimal(str(overtime_hours)),
         "coefficient": coefficient,
         "tdelta": tdelta,
-        "fnal_class": establishment.get("fnal_class"),
+        "fnal_class": fnal_class,
         "theoretical_relief": _round2(theoretical_ytd),
         "already_granted": _round2(relief_granted_before),
         "monthly_delta": _round2(monthly_delta),
         "relief_urssaf": _round2(relief_urssaf),
         "relief_agirc": _round2(relief_agirc),
+        "ytd_after": _ytd_after(relief_granted_before + monthly_delta),
     }
 
 
@@ -305,13 +384,15 @@ def calculate(ctx: PayrollContext) -> dict:
         )
 
     establishment = ctx.france_establishment or {}
+    fnal_class = normalize_fnal_class(establishment.get("fnal_class"))
+    cfp_class = normalize_cfp_class(establishment.get("cfp_class"))
     missing_est = [
         k for k in ("siret", "at_mp_rate_pct")
         if establishment.get(k) in (None, "")
     ]
-    if establishment.get("fnal_class") not in ("0p10", "0p50"):
+    if fnal_class is None:
         missing_est.append("fnal_class")
-    if establishment.get("cfp_class") not in ("0p55", "1p00"):
+    if cfp_class is None:
         missing_est.append("cfp_class")
     if missing_est:
         raise FranceCalculationBlockedError(
@@ -329,17 +410,41 @@ def calculate(ctx: PayrollContext) -> dict:
         )
 
     rate_map = ctx.rate_map or {}
-    org_id = getattr(ctx, "france_organization_id", None)
 
-    # ── Ceiling inputs (content) ──────────────────────────────────────
-    pss_monthly = _FR_PASS_MONTHLY * _hours_ratio(getattr(ctx, "france_working_hours", None))
-    four_pass_monthly = _FR_QUADRUPLE_PASS_ANNUAL / MONTHS_PER_YEAR * _hours_ratio(getattr(ctx, "france_working_hours", None))
+    # ── Statutory parameters (FR-003 content, pack rows) ──────────────
+    pass_annual = _amount(rate_map, "fr_pass_annual", _FR_PASS_ANNUAL, missing, ctx)
+    pmss = _amount(rate_map, "fr_pmss", _FR_PASS_MONTHLY, missing, ctx)
+    smic_hourly = _amount(rate_map, "fr_smic_hourly", _smic_hourly(pay_date), missing, ctx)
+    smic_monthly = _amount(rate_map, "fr_smic_monthly", _smic_monthly(pay_date), missing, ctx)
+    full_time_hours = _amount(rate_map, "fr_fulltime_monthly_hours", _FULL_TIME_HOURS, missing, ctx)
+    chomage_multiple = _amount(rate_map, "fr_chomage_ceiling_pass_multiple", Decimal("4"), missing, ctx)
+    t2_multiple = _amount(rate_map, "fr_agirc_t2_ceiling_pss_multiple", Decimal("8"), missing, ctx)
+    apec_multiple = _amount(rate_map, "fr_apec_ceiling_pss_multiple", Decimal("4"), missing, ctx)
+    csg_abatement_multiple = _amount(rate_map, "fr_csg_abatement_ceiling_pss_multiple", Decimal("4"), missing, ctx)
+    csg_factor = _ratio(rate_map, "fr_csg_base_factor", "employee", _FR_CSG_BASE_FACTOR_98_25, missing, ctx)
+    rgdu_params = {
+        "tmin": _ratio(rate_map, "fr_rgdu_tmin", "employer", _FR_RGDU_TMIN * 100, missing, ctx),
+        "tdelta_lt50": _ratio(rate_map, "fr_rgdu_tdelta_lt50", "employer", _FR_RGDU_TDELTA_FNAL_0P10 * 100, missing, ctx),
+        "tdelta_ge50": _ratio(rate_map, "fr_rgdu_tdelta_ge50", "employer", _FR_RGDU_TDELTA_FNAL_0P50 * 100, missing, ctx),
+        "power": _amount(rate_map, "fr_rgdu_power", _FR_RGDU_POWER, missing, ctx),
+        "multiple": _amount(rate_map, "fr_rgdu_smic_multiple", _FR_RGDU_ELIGIBILITY_MULTIPLE, missing, ctx),
+        "smic_annual": _amount(rate_map, "fr_smic_rgdu_annual", _FR_SMIC_2026_ANNUAL_FROZEN, missing, ctx),
+        "smic_hourly": _amount(rate_map, "fr_smic_rgdu_hourly", _FR_SMIC_2026_HOURLY_FROZEN, missing, ctx),
+    }
+    pas_short_contract_abatement = _amount(rate_map, "fr_pas_short_contract_abatement", _FR_PAS_SHORT_CONTRACT_ABATEMENT, missing, ctx)
+    pas_apprentice_threshold = _amount(rate_map, "fr_pas_apprentice_threshold", _FR_PAS_APPRENTICE_THRESHOLD, missing, ctx)
+
+    # ── Ceilings (FR-012: period PSS prorated by hours; every multiple of
+    # the PSS is prorated the same way so part-time T2/Apec/4×PASS limits
+    # stay consistent with T1) ─────────────────────────────────────────
+    working_hours = getattr(ctx, "france_working_hours", None)
+    ratio = (min(working_hours, full_time_hours) / full_time_hours
+             if working_hours is not None and working_hours > Decimal("0") else Decimal("1"))
+    pss_monthly = pmss * ratio
+    four_pass_monthly = pass_annual * chomage_multiple / MONTHS_PER_YEAR * ratio
     gross = ctx.gross
 
-    # cumulées-4-PASS annual-envelope state (chomage/AGS/CSG boundary)
     ytd = ctx.france_ytd or {}
-    pass_used_before = Decimal(str(ytd.get("pass_used") or 0))
-    eligible_4pass_before = max(Decimal("0"), _FR_QUADRUPLE_PASS_ANNUAL - pass_used_before)
 
     # ── Employee-side contributions (independent bases, FR-005) ───────
     vieillesse_capped_base = min(gross, pss_monthly)
@@ -354,9 +459,11 @@ def calculate(ctx: PayrollContext) -> dict:
 
     # Agirc-Arrco T1/T2 + CEG + CET + Apec (monthly PSS tranches, FR-019)
     t1_base = min(gross, pss_monthly)
-    t2_base = min(max(gross - pss_monthly, Decimal("0")), _FR_PASS_MONTHLY * Decimal("8") - pss_monthly)
-    cet_base = (gross if gross > pss_monthly else Decimal("0"))  # CET only when remuneration exceeds T1 (FR-021)
-    apec_base = (min(gross, _FR_PASS_MONTHLY * Decimal("4")) if ctx.france_cadre else Decimal("0"))
+    t2_base = min(max(gross - pss_monthly, Decimal("0")), pss_monthly * t2_multiple - pss_monthly)
+    # CET (FR-021): applies only when remuneration exceeds T1; its base is
+    # then T1 + T2 (i.e. capped at 8 PSS), never the uncapped gross.
+    cet_base = (t1_base + t2_base) if gross > pss_monthly else Decimal("0")
+    apec_base = (min(gross, pss_monthly * apec_multiple) if ctx.france_cadre else Decimal("0"))
 
     agirc_t1_ee = _round2(t1_base * _pct(_required(rate_map, "fr_agirc_t1_ee", "employee", _FR_AGIRC_T1_EE, missing, ctx)))
     agirc_t1_er = _round2(t1_base * _pct(_required(rate_map, "fr_agirc_t1_er", "employer", _FR_AGIRC_T1_ER, missing, ctx)))
@@ -371,11 +478,15 @@ def calculate(ctx: PayrollContext) -> dict:
     apec_ee = _round2(apec_base * _pct(_required(rate_map, "fr_apec_ee", "employee", _FR_APEC_EE, missing, ctx)))
     apec_er = _round2(apec_base * _pct(_required(rate_map, "fr_apec_er", "employer", _FR_APEC_ER, missing, ctx)))
 
-    # CSG/CRDS — 98.25% factor on qualifying salary up to the 4×PASS
-    # annual envelope, full base above (FR-016 base builder; launch = all
-    # qualifying). Deductible split preserved (FR-017).
-    csg_factor = _FR_CSG_BASE_FACTOR_98_25 / Decimal("100")
-    in_envelope = min(gross, eligible_4pass_before)
+    # CSG/CRDS — the 98.25% factor applies to qualifying salary within a
+    # CUMULATIVE 4×PSS ceiling (4 × PSS × periods elapsed this year,
+    # regularised against YTD gross), full base above it (FR-016/§6). A
+    # January high earner therefore gets the abatement on at most 4×PSS,
+    # not on the whole remaining annual 4×PASS envelope.
+    csg_gross_before = Decimal(str(ytd.get("csg_gross") or 0))
+    periods_before = int(ytd.get("periods") or 0)
+    cumulative_ceiling = pss_monthly * csg_abatement_multiple * Decimal(periods_before + 1)
+    in_envelope = max(Decimal("0"), min(gross, cumulative_ceiling - csg_gross_before))
     above_envelope = max(Decimal("0"), gross - in_envelope)
     csg_base = _round2(in_envelope * csg_factor + above_envelope)
 
@@ -384,13 +495,16 @@ def calculate(ctx: PayrollContext) -> dict:
     crds = _round2(csg_base * _pct(_required(rate_map, "fr_crds", "employee", _FR_CRDS_EE, missing, ctx)))
 
     # ── Employer-only contributions ───────────────────────────────────
+    # Health employer rate: logic unchanged pending G1 sign-off (the
+    # reduced-rate predicate is a remuneration threshold under current law,
+    # not a headcount band — flagged, not guessed).
     sante_er_rate = (
         _required(rate_map, "fr_sante_er", "employer", _FR_SANTE_ER_STANDARD, missing, ctx)
         if int(establishment.get("effectif") or 0) >= 11
         else _required(rate_map, "fr_sante_er_reduced", "employer", _FR_SANTE_ER_REDUCED, missing, ctx)
     )
     if int(establishment.get("effectif") or 0) < 11 and _FR_SANTE_REDUCED_2_5_SMIC_BAND:
-        band_ceiling = _FR_SMIC_2026_ANNUAL_FROZEN / MONTHS_PER_YEAR * Decimal("2.5")
+        band_ceiling = rgdu_params["smic_annual"] / MONTHS_PER_YEAR * Decimal("2.5")
         low = min(gross, band_ceiling)
         high = max(Decimal("0"), gross - low)
         sante_er = _round2(
@@ -406,25 +520,34 @@ def calculate(ctx: PayrollContext) -> dict:
     chomage_er = _round2(chomage_base * _pct(_required(rate_map, "fr_chomage_er", "employer", _FR_CHOMAGE_ER, missing, ctx)))
     ags_er = _round2(chomage_base * _pct(_required(rate_map, "fr_ags_er", "employer", _FR_AGS_ER, missing, ctx)))
 
-    fnal_rate = _FR_FNAL_ER_0P50 if establishment.get("fnal_class") == "0p50" else _FR_FNAL_ER_0P10
-    fnal_base = gross if establishment.get("fnal_class") == "0p50" else vieillesse_capped_base
-    fnal_er = _round2(fnal_base * _pct(_required(rate_map, f"fr_fnal_er_{establishment.get('fnal_class')}", "employer", fnal_rate, missing, ctx)))
+    fnal_rate = _FR_FNAL_ER_0P50 if fnal_class == "0p50" else _FR_FNAL_ER_0P10
+    fnal_base = gross if fnal_class == "0p50" else vieillesse_capped_base
+    fnal_er = _round2(fnal_base * _pct(_required(rate_map, f"fr_fnal_er_{fnal_class}", "employer", fnal_rate, missing, ctx)))
 
-    cfp_rate = _FR_CFP_ER_1P00 if establishment.get("cfp_class") == "1p00" else _FR_CFP_ER_0P55
-    cfp_er = _round2(vieillesse_capped_base * _pct(_required(rate_map, f"fr_cfp_er_{establishment.get('cfp_class')}", "employer", cfp_rate, missing, ctx)))
+    # CFP (formation professionnelle) is due on total remuneration, not the
+    # PSS-capped base.
+    cfp_rate = _FR_CFP_ER_1P00 if cfp_class == "1p00" else _FR_CFP_ER_0P55
+    cfp_base = gross
+    cfp_er = _round2(cfp_base * _pct(_required(rate_map, f"fr_cfp_er_{cfp_class}", "employer", cfp_rate, missing, ctx)))
 
     appr_er = _round2(gross * _pct(_required(rate_map, "fr_apprentissage_er", "employer", _FR_APPRENTISSAGE_ER, missing, ctx)))
     appr_balance_er = _round2(gross * _pct(_required(rate_map, "fr_apprentissage_balance_er", "employer", _FR_APPRENTISSAGE_BALANCE_ER, missing, ctx)))
 
-    atmp_er = _round2(gross * Decimal(str(establishment.get("at_mp_rate_pct"))) / Decimal("100"))
+    atmp_rate_pct = Decimal(str(establishment.get("at_mp_rate_pct")))
+    atmp_er = _round2(gross * atmp_rate_pct / Decimal("100"))
 
     vm_disclosures = []
     vm_er = Decimal("0")
     vm_rate_pct = establishment.get("vm_rate_pct")
     if vm_rate_pct not in (None, ""):
         vm_er = _round2(gross * Decimal(str(vm_rate_pct)) / Decimal("100"))
+    elif establishment.get("vm_threshold_applies") is False:
+        vm_disclosures.append("versement_mobilite: establishment below the 11-employee threshold; not due")
     else:
-        vm_disclosures.append("versement_mobilite: no rate for SIRET; liability unresolved for this period")
+        # FR-027: unknown mandatory rate = NOT_READY, never a silent zero.
+        # Only an explicit "threshold does not apply" (vm_threshold_applies
+        # is False) makes a missing VM rate legitimately zero.
+        missing.append("versement_mobilite (SIRET rate pack vm_rate_pct)")
 
     # ── NETS (FR-042: three separate values, never one "net") ──────────
     employee_ss_total = (
@@ -433,12 +556,16 @@ def calculate(ctx: PayrollContext) -> dict:
         + csg_deductible + csg_nondeductible + crds
     )
     net_social = _round2(gross - employee_ss_total)
-    net_imposable = _round2(net_social + csg_nondeductible)  # non-deductible CSG returns to taxable base (FR-017)
+    # FR-017: both non-deductible levies — CSG non-déductible AND CRDS —
+    # return to the taxable base.
+    net_imposable = _round2(net_social + csg_nondeductible + crds)
 
     # ── Labor compliance (FR-044/FR-039) ───────────────────────────────
-    working_hours = ctx.france_working_hours
-    effective_hours = working_hours if working_hours is not None else _FULL_TIME_HOURS
-    smic_minimum = _round2(_smic_hourly(pay_date) * effective_hours)
+    effective_hours = working_hours if working_hours is not None else full_time_hours
+    # Full-time: the published monthly SMIC (€1,867.02 from 1 Jun 2026) —
+    # hourly × 151.67 rounds to a few cents above it. Part-time: hourly × hours.
+    smic_minimum = (smic_monthly if effective_hours >= full_time_hours
+                    else _round2(smic_hourly * effective_hours))
     if gross < smic_minimum:
         raise FranceCalculationBlockedError(
             "SMIC_MINIMUM_BREACH",
@@ -452,29 +579,43 @@ def calculate(ctx: PayrollContext) -> dict:
             f"conventional minimum {ctx.france_idcc_minimum} for this classification (FR-039).",
         )
 
+    if missing:
+        raise FranceCalculationBlockedError(
+            "MANDATORY_RATE_NOT_CONFIGURED",
+            "France payroll block — mandatory 2026 content has no configured value in the active "
+            "France pack (FR-027): " + ", ".join(sorted(missing)),
+        )
+
     # ── PAS (authority rate, FR-008/FR-010) ─────────────────────────────
-    pas_result = _compute_pas(ctx, net_imposable, net_social)
+    pas_result = _compute_pas(ctx, net_imposable, net_social, pas_short_contract_abatement, pas_apprentice_threshold)
     pas_withheld = pas_result["withheld"]
     net_a_payer = _round2(net_social - pas_withheld)
 
     # ── Employer total + RGDU relief (FR-026) ──────────────────────────
-    employer_reducible = (
+    # RGDU scope: health, old-age, family, CSA, FNAL, unemployment and the
+    # Agirc-Arrco T1 + CEG T1 employer contributions. Outside it: AGS, CFP,
+    # apprenticeship tax, Agirc T2/CEG T2/CET/Apec, versement mobilité and
+    # AT/MP (AT/MP's reducible share is content-pending — optional
+    # fr_rgdu_atmp_reducible_pct row, capped at the establishment's rate).
+    atmp_reducible_pct = (
+        _optional(rate_map, "fr_rgdu_atmp_reducible_pct", "employer", Decimal("0"), ctx)
+        if is_parameter_configured(rate_map, "fr_rgdu_atmp_reducible_pct", "employer") else Decimal("0")
+    )
+    atmp_reducible = _round2(gross * min(atmp_rate_pct, Decimal(str(atmp_reducible_pct))) / Decimal("100"))
+    retraite_share = agirc_t1_er + ceg_t1_er
+    rgdu_reducible = (
+        vieillesse_capped_er + vieillesse_uncapped_er + sante_er + famille_er + csa_er
+        + chomage_er + fnal_er + retraite_share + atmp_reducible
+    )
+    employer_total_before_relief = _round2(
         vieillesse_capped_er + vieillesse_uncapped_er + sante_er + famille_er + csa_er
         + chomage_er + ags_er + fnal_er + cfp_er + appr_er + appr_balance_er
         + agirc_t1_er + agirc_t2_er + ceg_t1_er + ceg_t2_er + cet_er + apec_er
+        + atmp_er + vm_er
     )
-    retraite_share = agirc_t1_er + agirc_t2_er + ceg_t1_er + ceg_t2_er + cet_er + apec_er
-    employer_atmp_vm = atmp_er + vm_er
-    rgdu = _compute_rgdu(ctx, employer_reducible, employer_atmp_vm, retraite_share)
+    rgdu = _compute_rgdu(ctx, rgdu_params, fnal_class, rgdu_reducible, retraite_share)
     relief = rgdu["monthly_delta"]
-    employer_after_relief = max(Decimal("0"), _round2(employer_reducible + employer_atmp_vm - relief))
-
-    if missing:
-        raise FranceCalculationBlockedError(
-            "MANDATORY_RATE_NOT_CONFIGURED",
-            "France payroll block — mandatory 2026 contribution rate(s) have no configured "
-            "rate_map row and no published default (FR-027): " + ", ".join(sorted(missing)),
-        )
+    employer_after_relief = max(Decimal("0"), _round2(employer_total_before_relief - relief))
 
     # ── FR-040 contribution trace + FR-005 bases ──────────────────────
     contributions = [
@@ -486,7 +627,7 @@ def calculate(ctx: PayrollContext) -> dict:
         {"family": "chomage", "code": "AC1P", "base": chomage_base, "ee": Decimal("0"), "er": chomage_er},
         {"family": "ags", "code": "AGSP", "base": chomage_base, "ee": Decimal("0"), "er": ags_er},
         {"family": "fnal", "code": "FNAL", "base": fnal_base, "ee": Decimal("0"), "er": fnal_er},
-        {"family": "cfp", "code": "CFP", "base": vieillesse_capped_base, "ee": Decimal("0"), "er": cfp_er},
+        {"family": "cfp", "code": "CFP", "base": cfp_base, "ee": Decimal("0"), "er": cfp_er},
         {"family": "apprentissage", "code": "APP", "base": gross, "ee": Decimal("0"), "er": appr_er + appr_balance_er},
         {"family": "atmp", "code": "ATMP", "base": gross, "ee": Decimal("0"), "er": atmp_er},
         {"family": "versement_mobilite", "code": "VMRR", "base": gross, "ee": Decimal("0"), "er": vm_er},
@@ -501,12 +642,20 @@ def calculate(ctx: PayrollContext) -> dict:
         {"family": "crds", "code": "CRDS", "base": csg_base, "ee": crds, "er": Decimal("0")},
     ]
 
+    # YTD state after this period — persisted by the service after commit
+    # so the next period's CSG ceiling and RGDU accumulate correctly.
+    ytd_after = dict(rgdu.get("ytd_after") or {})
+    ytd_after.update({
+        "csg_gross": _round2(csg_gross_before + gross),
+        "periods": periods_before + 1,
+    })
+
     result.update({
         "fr_net_social": net_social,
         "fr_net_imposable": net_imposable,
         "fr_employee_total": _round2(employee_ss_total + pas_withheld),
         "fr_employer_total": employer_after_relief,
-        "fr_employer_theoretical": _round2(employer_reducible + employer_atmp_vm),
+        "fr_employer_theoretical": employer_total_before_relief,
         "fr_contributions": contributions,
         # FR-005: independent statutory bases — every contribution is a rate
         # × ITS OWN base; no shared "gross" shorthand anywhere in the trace.
@@ -521,7 +670,7 @@ def calculate(ctx: PayrollContext) -> dict:
             "apec": _round2(apec_base),
             "csg_crds": _round2(csg_base),
             "fnal": _round2(fnal_base),
-            "cfp": _round2(vieillesse_capped_base),
+            "cfp": _round2(cfp_base),
             "pas": _round2(pas_result["pas_base"]),
             "net_social": net_social,
             "net_imposable": net_imposable,
@@ -531,21 +680,25 @@ def calculate(ctx: PayrollContext) -> dict:
         "fr_pas_rate_type": pas_result["rate_type"],
         "fr_pas_rate_pct": pas_result["rate_pct"],
         "fr_pas_rate_id": pas_result["rate_id"],
+        "fr_ytd_after": ytd_after,
         "fr_calculation_snapshot": {
             "pay_date": pay_date.isoformat(),
             "employment": "REGULAR",
             "social_coverage": ctx.france_social_coverage,
             "siret": establishment.get("siret"),
             "effectif": establishment.get("effectif"),
-            "smic_minimum": _smic_hourly(pay_date),
-            "smic_monthly": _smic_monthly(pay_date),
+            "fnal_class": fnal_class,
+            "cfp_class": cfp_class,
+            "smic_minimum": smic_hourly,
+            "smic_monthly": smic_monthly,
             "pss_monthly": _round2(pss_monthly),
             "csg_base": csg_base,
-            "csg_base_factor": _FR_CSG_BASE_FACTOR_98_25,
+            "csg_base_factor": _round2(csg_factor * 100),
             "net_a_payer": net_a_payer,
+            "pas": pas_result,
             "rgdu": rgdu,
             "relief_granted_period": relief,
-            "employer_before_relief": _round2(employer_reducible + employer_atmp_vm),
+            "employer_before_relief": employer_total_before_relief,
             "disclosures": vm_disclosures,
         },
         "fr_rgdu": rgdu,

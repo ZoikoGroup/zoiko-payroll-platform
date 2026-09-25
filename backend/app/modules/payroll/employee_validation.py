@@ -835,6 +835,96 @@ class FREmployeeValidation(EmployeeValidationStrategy):
     }
 
 
+class IEEmployeeValidation(EmployeeValidationStrategy):
+    """Ireland (ZP-IE-ENG-001 §9).
+
+    Deliberately does NOT expose a manual MyFutureFund enrolment toggle
+    (IE-018/IE-021, §9 "MyFutureFund"): NAERSA is the eligibility authority
+    and payroll only applies a notified status. PRSI class is restricted to
+    the certified launch cohort (A0/AX/AL/A1) so an uncertified class can
+    never pass validation and reach the engine as if it were supported
+    (IE-016) — anything outside this set is rejected here and therefore
+    BLOCKED at preflight. RPN values (credits, rate bands, LPT) are
+    likewise absent by design: they are authority-supplied and come from a
+    frozen RpnSnapshot, never from an admin-typed field (IE-004)."""
+    country_code = "IE"
+    duplicate_field = "ppsn"
+    FIELD_SPECS = {
+        "ppsn": {
+            "upper": True,
+            "pattern": re.compile(r"^\d{7}[A-Z]?$"),
+            "error": "PPSN must be 7 digits (an optional trailing letter is accepted for non-individual registrations).",
+        },
+        "employer_reference": {
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,32}$"),
+            "error": "Employer Reference must be 3-32 letters, digits or hyphens.",
+        },
+        "revenue_employment_id": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z0-9-]{3,64}$"),
+            "error": "Revenue Employment Identifier must be 3-64 letters, digits or hyphens.",
+        },
+        "prsi_class": {
+            "choices": ["A0", "AX", "AL", "A1"],
+        },
+        "prsi_exemption_reference": {
+            "pattern": re.compile(r"^[A-Za-z0-9/._-]{3,64}$"),
+            "error": "PRSI exemption evidence reference looks incorrect.",
+        },
+        "usc_status": {
+            "choices": ["Standard", "Reduced", "Exempt"],
+        },
+        "pension_scheme_reference": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z0-9-]{3,64}$"),
+            "error": "Pension scheme reference must be 3-64 letters, digits or hyphens.",
+        },
+        "pension_qualifying_exemption_reference": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Z0-9-]{3,64}$"),
+            "error": "Qualifying pension exemption must cite a scheme reference (IE-021 — a bare checkbox is not an exemption).",
+        },
+        "pension_qualifying_exemption_effective_from": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Qualifying pension exemption effective date must be YYYY-MM-DD.",
+        },
+        "contracted_weekly_hours": {
+            "pattern": re.compile(r"^\d{1,2}(\.\d{1,2})?$"),
+            "error": "Contracted weekly hours must be a number (IE-035 requires working-hours evidence for the minimum-wage check).",
+        },
+        "sector_wage_order": {
+            "choices": ["NONE", "ERO", "SEO"],
+        },
+        "iban": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^IE\d{2}[A-Z]{4}\d{6}\d{8}\d{2}$"),
+            "error": "Irish IBAN must be IE followed by 22 characters (4 letters, then 16 digits).",
+        },
+        "bic": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "BIC must be 8 or 11 characters.",
+        },
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        errors = []
+        claimed = cleaned.get("pension_qualifying_exemption_reference")
+        if claimed and not cleaned.get("pension_qualifying_exemption_effective_from"):
+            errors.append(
+                "pension_qualifying_exemption_effective_from is required when a qualifying "
+                "pension exemption is claimed."
+            )
+        if cleaned.get("pension_qualifying_exemption_effective_from") and not claimed:
+            errors.append(
+                "pension_qualifying_exemption_reference is required when a qualifying "
+                "pension exemption effective date is supplied."
+            )
+        if errors:
+            raise BadRequestException("; ".join(errors))
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -851,6 +941,7 @@ _STRATEGIES = {
     "TT": TTEmployeeValidation,
     "PR": PREmployeeValidation,
     "FR": FREmployeeValidation,
+    "IE": IEEmployeeValidation,
 }
 
 

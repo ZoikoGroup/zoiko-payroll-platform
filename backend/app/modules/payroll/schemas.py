@@ -2489,6 +2489,10 @@ class CanonicalContributionRateResponse(BaseModel):
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     textValue: Optional[str] = Field(None, validation_alias="text_value", serialization_alias="textValue")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+    # Row-level dating inside the pack (e.g. France's 1 June SMIC row) —
+    # read-only here; without it two dated rows look like duplicates.
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -3594,31 +3598,64 @@ class ComplianceDocumentResponse(BaseModel):
 
 class EmployerFranceProfileUpsert(BaseModel):
     """Super-admin/provider upsert of the org 1:1 France employer profile
-    (FR §11 panels C/D + gate H). Parts the authority holds READ-ONLY
-    later (pas_crm_status) are not in this payload."""
+    (FR §11 panels A/C/D). Deliberately NOT in this payload: pas_crm_status
+    (authority-held), effectif (governed history — record/correct it via
+    the effectif endpoints) and readiness (computed from real checks; LIVE
+    only via the go-live action) — so a profile save can never overwrite
+    them wholesale."""
     siren:                  str
     legalName:              Optional[str] = None
     legalForm:              Optional[str] = None
+    address:                Optional[str] = None
+    payrollContact:         Optional[str] = None
     # Convention collective — mandatory or explicitly "unknown under review"
     # (FR-035); never silently defaulted to the Code du travail floor.
     idcc:                   Optional[str] = None
+    idccStatus:             Optional[str] = None  # APPLICABLE | NOT_APPLICABLE | UNDER_REVIEW
     urssafAccount:          Optional[str] = None
     dsnDeclarant:           Optional[str] = None
     # M5 (50+ / 5th of M+1) | M15 (<50 / 15th of M+1) | DEFERRED_M15
     filingDueDateClass:     str = Field("M15", validation_alias="filingDueDateClass")
     paymentMandateRef:      Optional[str] = None
     pasCollectorIdentity:   Optional[str] = None
-    effectifState:          Optional[dict] = None
-    readinessStatus:        Optional[str] = None
-    readinessEvidence:      Optional[dict] = None
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEstablishmentUpsert(BaseModel):
+    """A SIRET establishment of the employer (FR §11 panel B)."""
+    siret:              str
+    name:               Optional[str] = None
+    address:            Optional[str] = None
+    communeInsee:       Optional[str] = None
+    workforceLocation:  Optional[str] = None
+    payrollIdentifier:  Optional[str] = None
+    isActive:           bool = True
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEstablishmentResponse(BaseModel):
+    id:                 int
+    organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    siret:              str
+    name:               Optional[str] = None
+    address:            Optional[str] = None
+    communeInsee:       Optional[str] = Field(None, validation_alias="commune_insee", serialization_alias="communeInsee")
+    workforceLocation:  Optional[str] = Field(None, validation_alias="workforce_location", serialization_alias="workforceLocation")
+    payrollIdentifier:  Optional[str] = Field(None, validation_alias="payroll_identifier", serialization_alias="payrollIdentifier")
+    isActive:           bool = Field(..., validation_alias="is_active", serialization_alias="isActive")
+    createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt:          Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class FranceEstablishmentRatePackUpsert(BaseModel):
     """Effective-dated per-SIRET rate pack (FR-002/FR-013). Every write
     creates a NEW period row (Jan/Jul history preserved); a unique
-    (org, siret, effective_from) collision is a clean batch-style error."""
-    siret:                str
+    (org, siret, effective_from) collision is a clean batch-style error.
+    `establishmentId` links the period to the SIRET registry (its SIRET and
+    commune then come from the establishment)."""
+    establishmentId:      Optional[int] = None
+    siret:                Optional[str] = None
     communeInsee:         Optional[str] = None
     workplaceLabel:       Optional[str] = None
     atMpRatePct:          Optional[Decimal] = None
@@ -3628,11 +3665,40 @@ class FranceEstablishmentRatePackUpsert(BaseModel):
     vmRatePct:            Optional[Decimal] = None
     vmThresholdApplies:   Optional[bool] = None
     vmSource:             Optional[str] = None
+    vmEvidence:           Optional[str] = None
+    agsSpecialStatus:     Optional[str] = None
     fnalClass:            Optional[str] = None  # UNDER_50 | OVER_50
     cfpClass:             Optional[str] = None  # UNDER_11 | OVER_11
     effectif:             Optional[int] = None
     effectiveFrom:        date
     effectiveTo:          Optional[date] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceEstablishmentRatePackUpdate(BaseModel):
+    """Edit a rate-pack period that has NOT started yet (effective_from in
+    the future). A period already in force is never edited in place — add a
+    new period instead, so history the payroll ran on stays intact."""
+    communeInsee:         Optional[str] = None
+    workplaceLabel:       Optional[str] = None
+    atMpRatePct:          Optional[Decimal] = None
+    atMpRiskCode:         Optional[str] = None
+    atMpEvidence:         Optional[str] = None
+    atMpSource:           Optional[str] = None
+    vmRatePct:            Optional[Decimal] = None
+    vmThresholdApplies:   Optional[bool] = None
+    vmSource:             Optional[str] = None
+    vmEvidence:           Optional[str] = None
+    agsSpecialStatus:     Optional[str] = None
+    fnalClass:            Optional[str] = None
+    cfpClass:             Optional[str] = None
+    effectif:             Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceRatePackClose(BaseModel):
+    """Close an open rate-pack period (e.g. establishment closed)."""
+    effectiveTo:  date
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -3644,7 +3710,8 @@ class FrancePASRateUpsert(BaseModel):
     rateType:        str  # PERSONALIZED | NEUTRAL
     ratePct:         Optional[Decimal] = None
     dgfipRateId:     Optional[str] = None
-    source:          str = "CRM"  # CRM | NEUTRAL_GRID
+    crmReference:    Optional[str] = None     # DGFiP CRM message the PERSONALIZED rate came from
+    source:          Optional[str] = None     # derived: CRM for PERSONALIZED, NEUTRAL_GRID for NEUTRAL
     receivedDate:    Optional[date] = None
     effectiveFrom:   date
     effectiveTo:     Optional[date] = None
@@ -3659,6 +3726,23 @@ class FranceEffectifRecord(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class FranceEffectifCorrection(BaseModel):
+    """Correct an already-recorded year: the previous value is kept in that
+    year's `history`, never silently overwritten (FR-015/FR-036)."""
+    year:    int
+    value:   int
+    source:  str
+    reason:  str
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class FranceGoLiveRequest(BaseModel):
+    """Mark an org's France payroll LIVE — only accepted when every computed
+    readiness check passes (gate H); `evidence` is kept on the profile."""
+    evidence: Optional[dict] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
 class FranceDsnSubmissionCreate(BaseModel):
     """Body for opening a FranceDsnSubmission. periodEnd defaults to the
     month end of periodStart; the service computes payload_hash, due_date
@@ -3668,6 +3752,9 @@ class FranceDsnSubmissionCreate(BaseModel):
     periodStart: date
     periodEnd:   Optional[date] = None
     releaseRef:  str
+    # Open a correction of an earlier submission for the same period; the
+    # original stays immutable (FR-033/FR-053).
+    correctionOfId: Optional[int] = None
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -3716,7 +3803,10 @@ class EmployerFranceProfileResponse(BaseModel):
     siren:               str
     legalName:           Optional[str] = Field(None, validation_alias="legal_name", serialization_alias="legalName")
     legalForm:           Optional[str] = Field(None, validation_alias="legal_form", serialization_alias="legalForm")
+    address:             Optional[str] = None
+    payrollContact:      Optional[str] = Field(None, validation_alias="payroll_contact", serialization_alias="payrollContact")
     idcc:                Optional[str] = None
+    idccStatus:          Optional[str] = Field(None, validation_alias="idcc_status", serialization_alias="idccStatus")
     urssafAccount:       Optional[str] = Field(None, validation_alias="urssaf_account", serialization_alias="urssafAccount")
     dsnDeclarant:        Optional[str] = Field(None, validation_alias="dsn_declarant", serialization_alias="dsnDeclarant")
     filingDueDateClass:  str = Field(..., validation_alias="filing_due_date_class", serialization_alias="filingDueDateClass")
@@ -3734,6 +3824,7 @@ class EmployerFranceProfileResponse(BaseModel):
 class FranceEstablishmentRatePackResponse(BaseModel):
     id:                 int
     organizationId:     int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    establishmentId:    Optional[int] = Field(None, validation_alias="establishment_id", serialization_alias="establishmentId")
     siret:              str
     communeInsee:       Optional[str] = Field(None, validation_alias="commune_insee", serialization_alias="communeInsee")
     workplaceLabel:     Optional[str] = Field(None, validation_alias="workplace_label", serialization_alias="workplaceLabel")
@@ -3744,6 +3835,8 @@ class FranceEstablishmentRatePackResponse(BaseModel):
     vmRatePct:          Optional[Decimal] = Field(None, validation_alias="vm_rate_pct", serialization_alias="vmRatePct")
     vmThresholdApplies: Optional[bool] = Field(None, validation_alias="vm_threshold_applies", serialization_alias="vmThresholdApplies")
     vmSource:           Optional[str] = Field(None, validation_alias="vm_source", serialization_alias="vmSource")
+    vmEvidence:         Optional[str] = Field(None, validation_alias="vm_evidence", serialization_alias="vmEvidence")
+    agsSpecialStatus:   Optional[str] = Field(None, validation_alias="ags_special_status", serialization_alias="agsSpecialStatus")
     fnalClass:          Optional[str] = Field(None, validation_alias="fnal_class", serialization_alias="fnalClass")
     cfpClass:           Optional[str] = Field(None, validation_alias="cfp_class", serialization_alias="cfpClass")
     effectif:           Optional[int] = None
@@ -3760,6 +3853,7 @@ class FrancePASRateResponse(BaseModel):
     rateType:           str = Field(..., validation_alias="rate_type", serialization_alias="rateType")
     ratePct:            Optional[Decimal] = Field(None, validation_alias="rate_pct", serialization_alias="ratePct")
     dgfipRateId:        Optional[str] = Field(None, validation_alias="dgfip_rate_id", serialization_alias="dgfipRateId")
+    crmReference:       Optional[str] = Field(None, validation_alias="crm_reference", serialization_alias="crmReference")
     source:             str
     receivedDate:       Optional[date] = Field(None, validation_alias="received_date", serialization_alias="receivedDate")
     effectiveFrom:      date = Field(..., validation_alias="effective_from", serialization_alias="effectiveFrom")

@@ -45,6 +45,15 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "vat_intracom", label: "TVA intracommunautaire", pattern: "^FR[0-9]{11}$", example: "FR23392106162", primary: false },
     ],
   },
+  IE: {
+    label: "Revenue PAYE / PRSI Registration / ROS Sub-User",
+    fields: [
+      { key: "paye_registration_number", label: "Revenue PAYE Registration Number", pattern: "^[0-9A-Z]{6,12}$", example: "1234567", primary: true },
+      { key: "prsi_registration_number", label: "PRSI Registration Number", pattern: "^[0-9A-Z]{6,12}$", example: "7654321", primary: false },
+      { key: "ros_sub_user_reference", label: "ROS Sub-User Reference", pattern: "^[A-Za-z0-9._-]{3,64}$", example: "ZOIKO-IE-ROS-01", primary: false },
+      { key: "eircode", label: "Eircode", pattern: "^[A-Z][0-9]{2}\\s?[A-Z0-9]{4}$", example: "D02 AF30", primary: false },
+    ],
+  },
   AU: {
     label: "ABN / ACN",
     fields: [
@@ -63,6 +72,7 @@ const COUNTRY_NAME_TO_CODE = {
   germany: "DE",
   australia: "AU",
   france: "FR",
+  ireland: "IE",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -72,6 +82,7 @@ const CODE_TO_COUNTRY_NAME = {
   DE: "Germany",
   AU: "Australia",
   FR: "France",
+  IE: "Ireland",
 };
 
 export function getJurisdictionCode(country) {

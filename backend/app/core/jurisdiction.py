@@ -54,6 +54,7 @@ REGISTRATION_COUNTRIES = [
     # metropolitan private-sector wedge. SIREN/SIRET establishment-aware
     # collection keys; engine/countries/france.py wired into _COUNTRY_CALC.
     "France",
+    "Ireland",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -346,6 +347,40 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    "IE": {
+        "label": "Revenue PAYE / PRSI Registration / ROS Sub-User",
+        "currency": "EUR",
+        "fields": [
+            {
+                "key": "paye_registration_number",
+                "label": "Revenue PAYE Registration Number",
+                "pattern": r"^[0-9A-Z]{6,12}$",
+                "example": "1234567",
+                "primary": True,
+            },
+            {
+                "key": "prsi_registration_number",
+                "label": "PRSI Registration Number",
+                "pattern": r"^[0-9A-Z]{6,12}$",
+                "example": "7654321",
+                "primary": False,
+            },
+            {
+                "key": "ros_sub_user_reference",
+                "label": "ROS Sub-User Reference",
+                "pattern": r"^[A-Za-z0-9._-]{3,64}$",
+                "example": "ZOIKO-IE-ROS-01",
+                "primary": False,
+            },
+            {
+                "key": "eircode",
+                "label": "Eircode",
+                "pattern": r"^[A-Z][0-9]{2}\s?[A-Z0-9]{4}$",
+                "example": "D02 AF30",
+                "primary": False,
+            },
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -371,6 +406,7 @@ COUNTRY_NAME_TO_CODE = {
     "trinidad & tobago": "TT",
     "puerto rico": "PR",
     "france": "FR",
+    "ireland": "IE",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -388,6 +424,7 @@ CODE_TO_COUNTRY_NAME = {
     "TT": "Trinidad and Tobago",
     "PR": "Puerto Rico",
     "FR": "France",
+    "IE": "Ireland",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

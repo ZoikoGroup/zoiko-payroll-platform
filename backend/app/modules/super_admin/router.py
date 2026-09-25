@@ -81,6 +81,9 @@ from app.modules.payroll.schemas import (
     FranceEstablishmentRatePackUpsert, FranceEstablishmentRatePackResponse,
     FrancePASRateUpsert, FrancePASRateResponse, FranceEffectifRecord,
     FranceDsnSubmissionResponse, FranceDsnOutboxItemResponse,
+    FranceEstablishmentUpsert, FranceEstablishmentResponse,
+    FranceEstablishmentRatePackUpdate, FranceRatePackClose,
+    FranceEffectifCorrection, FranceGoLiveRequest,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -1204,12 +1207,22 @@ def upsert_employer_tax_profile(
 # as §11's panels C/D; the org itself only opens DSN filings (payroll
 # router /payroll/france/*).
 
+
+def _france_organization_id(organizationId: int = Query(...), db: Session = Depends(get_db)) -> int:
+    """Validates the France endpoints' organizationId: must exist and be a
+    France (FR) organization — see payroll_service.require_france_organization."""
+    from app.modules.payroll import service as payroll_service
+
+    payroll_service.require_france_organization(db, organizationId)
+    return organizationId
+
+
 @router.get(
     "/compliance/france/employer-profile", response_model=EmployerFranceProfileResponse, response_model_by_alias=True,
     summary="Read a France employer profile (Super Admin only)",
 )
 def get_employer_france_profile(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
@@ -1223,7 +1236,7 @@ def get_employer_france_profile(
     summary="Create or update a France employer profile (FR §11 panels C/D; authority-held write-once facts are not payload-editable)",
 )
 def upsert_employer_france_profile(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     payload: EmployerFranceProfileUpsert = Body(...),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1238,7 +1251,7 @@ def upsert_employer_france_profile(
     summary="Record a governed annual France effectif with threshold history (FR-015/FR-036)",
 )
 def record_france_effectif(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     payload: FranceEffectifRecord = Body(...),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1254,7 +1267,7 @@ def record_france_effectif(
     summary="Append a France establishment (SIRET) rate pack period row (FR-002/FR-013); Jan/Jul history is never rewritten",
 )
 def upsert_france_establishment_rate_pack(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     payload: FranceEstablishmentRatePackUpsert = Body(...),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1270,7 +1283,7 @@ def upsert_france_establishment_rate_pack(
     summary="List France establishment rate packs, optionally by SIRET",
 )
 def list_france_establishment_rate_packs(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     siret: Optional[str] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1285,7 +1298,7 @@ def list_france_establishment_rate_packs(
     summary="Ingest a France PAS rate (FR-008/FR-010): PERSONALIZED is DGFiP CRM supply with provenance; NEUTRAL carries no percentage",
 )
 def ingest_france_pas_rate(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     payload: FrancePASRateUpsert = Body(...),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1300,7 +1313,7 @@ def ingest_france_pas_rate(
     summary="List France PAS rates (read-only; corrections keep lineage, never overwrite)",
 )
 def list_france_pas_rates(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     employeeId: Optional[int] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1315,7 +1328,7 @@ def list_france_pas_rates(
     summary="Inspect an organization's France DSN submissions (transport/CRM diagnostics view)",
 )
 def list_france_dsn_submissions(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     status: Optional[str] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1330,7 +1343,7 @@ def list_france_dsn_submissions(
     summary="Inspect an organization's France DSN outbox items (transport diagnostics view)",
 )
 def list_france_dsn_outbox_items(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     submissionId: Optional[int] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1345,7 +1358,7 @@ def list_france_dsn_outbox_items(
     summary="France launch readiness for an organization (FR §11 gate H + FR-031 dry-run)",
 )
 def get_france_readiness(
-    organizationId: int = Query(...),
+    organizationId: int = Depends(_france_organization_id),
     for_period: Optional[date] = Query(None),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
@@ -1353,6 +1366,136 @@ def get_france_readiness(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.get_france_readiness(db, organizationId, for_period=for_period)
+
+
+@router.post(
+    "/compliance/france/effectif/corrections", response_model=EmployerFranceProfileResponse, response_model_by_alias=True,
+    summary="Correct an already-recorded France effectif year (prior value kept in that year's history)",
+)
+def correct_france_effectif(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEffectifCorrection = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.correct_france_effectif(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.get(
+    "/compliance/france/establishments", response_model=List[FranceEstablishmentResponse], response_model_by_alias=True,
+    summary="List an organization's France establishments (SIRET registry, FR §11 panel B)",
+)
+def list_france_establishments(
+    organizationId: int = Depends(_france_organization_id),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_france_establishments(db, organizationId)
+
+
+@router.post(
+    "/compliance/france/establishments", response_model=FranceEstablishmentResponse, response_model_by_alias=True,
+    summary="Register a France establishment (SIRET)",
+)
+def create_france_establishment(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_france_establishment(db, organizationId, payload, actor_id=current_user.id)
+
+
+@router.put(
+    "/compliance/france/establishments/{establishment_id}", response_model=FranceEstablishmentResponse,
+    response_model_by_alias=True,
+    summary="Update or deactivate a France establishment (its SIRET is immutable)",
+)
+def update_france_establishment(
+    establishment_id: int,
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_france_establishment(
+        db, organizationId, payload, establishment_id=establishment_id, actor_id=current_user.id,
+    )
+
+
+@router.patch(
+    "/compliance/france/establishment-rate-packs/{pack_id}",
+    response_model=FranceEstablishmentRatePackResponse, response_model_by_alias=True,
+    summary="Edit a France rate-pack period that has not started yet (in-force periods are append-only)",
+)
+def update_france_establishment_rate_pack(
+    pack_id: int,
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceEstablishmentRatePackUpdate = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.update_france_establishment_rate_pack(
+        db, organizationId, pack_id, payload, actor_id=current_user.id,
+    )
+
+
+@router.post(
+    "/compliance/france/establishment-rate-packs/{pack_id}/close",
+    response_model=FranceEstablishmentRatePackResponse, response_model_by_alias=True,
+    summary="Close an open France rate-pack period",
+)
+def close_france_establishment_rate_pack(
+    pack_id: int,
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceRatePackClose = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.close_france_establishment_rate_pack(
+        db, organizationId, pack_id, payload, actor_id=current_user.id,
+    )
+
+
+@router.post(
+    "/compliance/france/packs/{pack_id}/load-statutory-defaults",
+    summary="Fill a France tax pack's missing statutory rows from the 2026 content catalog (insert-only, editable packs only)",
+)
+def load_france_statutory_defaults(
+    pack_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.load_france_statutory_defaults(db, pack_id, actor_id=current_user.id)
+
+
+@router.post(
+    "/compliance/france/go-live",
+    summary="Mark France payroll LIVE for an organization (only when every computed readiness check passes)",
+)
+def set_france_live(
+    organizationId: int = Depends(_france_organization_id),
+    payload: FranceGoLiveRequest = Body(default_factory=FranceGoLiveRequest),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_france_live(db, organizationId, payload, actor_id=current_user.id)
 
 
 @router.delete(

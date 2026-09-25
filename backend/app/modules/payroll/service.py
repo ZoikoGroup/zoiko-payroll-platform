@@ -61,7 +61,7 @@ from app.modules.payroll.models import (
     GermanyOvertimeWageTaxResult, GermanyOvertimeSocialInsuranceResult,
     GermanyOvertimePremiumComponent, GermanyAccidentInsuranceProfile,
     GermanyChurchTaxException,
-    EmployerFranceProfile, FranceEstablishmentRatePack, FrancePASRate,
+    EmployerFranceProfile, FranceEstablishment, FranceEstablishmentRatePack, FrancePASRate,
     FranceDsnSubmission, FranceDsnOutboxItem,
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
@@ -84,7 +84,9 @@ from app.modules.payroll.schemas import (
     FrancePASRateUpsert, FranceDsnSubmissionCreate, FranceDsnStatusUpdate,
     FranceDsnOutboxCreate,
 )
-from app.core.exceptions import NotFoundException, BadRequestException, GermanyPapGateBlockedException
+from app.core.exceptions import (
+    NotFoundException, BadRequestException, GermanyPapGateBlockedException, FranceCalculationBlockedException,
+)
 from fastapi import HTTPException, status as http_status
 
 # Sourced from engine/standard.py — the real calculation engine — instead of
@@ -6477,6 +6479,134 @@ def assess_germany_pack_completeness(db: Session, jurisdiction_pack_id: int, as_
     }
 
 
+# ── France: engine input resolution (ZP-FR-ENG-001 Phase 5 wiring) ────
+# engine/countries/france.py is a pure function of PayrollContext's
+# france_* fields; this is the ONE place those fields are resolved from the
+# France authority tables, for every calculation entry point (preview,
+# batch generation, manual payslip). Nothing here guesses: anything
+# unresolvable is passed through empty, and the engine blocks with the
+# precise reason (FR-027) — surfaced as FranceCalculationBlockedException.
+
+def _load_fr_ytd(db: Session, employee_id: int, payroll_date, exclude_run_id: Optional[int] = None) -> dict:
+    """The RGDU/CSG accumulator state after the employee's latest earlier
+    France payslip in the same calendar year (read from its frozen
+    fr_calculation_snapshot["ytd_after"]) — empty for the first period."""
+    if payroll_date is None:
+        return {}
+    query = (db.query(PayslipItem)
+             .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+             .filter(PayslipItem.employee_id == employee_id,
+                     PayslipItem.fr_calculation_snapshot.isnot(None),
+                     PayslipItem.status != PayslipStatus.FAILED,
+                     PayrollRun.pay_date < payroll_date,
+                     PayrollRun.pay_date >= date(payroll_date.year, 1, 1)))
+    if exclude_run_id is not None:
+        query = query.filter(PayrollRun.id != exclude_run_id)
+    previous = query.order_by(PayrollRun.pay_date.desc(), PayslipItem.id.desc()).first()
+    if previous is None:
+        return {}
+    return dict((previous.fr_calculation_snapshot or {}).get("ytd_after") or {})
+
+
+def _resolve_france_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
+                                exclude_run_id: Optional[int] = None) -> dict:
+    """Build build_context_from_employee(france_inputs=...) for one France
+    employee on payroll_date: the SIRET rate pack in force (the employee's
+    compliance_fields["siret"], or the org's only establishment), the PAS
+    rate governing that date, prior-period YTD, and contract facts."""
+    compliance = getattr(employee, "compliance_fields", None) or {}
+    siret = (compliance.get("siret") or "").strip() or None
+
+    packs = [p for p in list_france_establishment_rate_packs(db, organization_id)
+             if p.effective_from <= payroll_date and (p.effective_to is None or p.effective_to >= payroll_date)]
+    if siret:
+        packs = [p for p in packs if p.siret == siret]
+    elif len({p.siret for p in packs}) > 1:
+        packs = []   # several establishments and no SIRET on the employee → engine blocks, never guesses
+    pack = packs[0] if packs else None
+
+    establishment = {}
+    if pack is not None:
+        profile = db.query(EmployerFranceProfile).filter(
+            EmployerFranceProfile.organization_id == organization_id).first()
+        effectif = pack.effectif
+        if effectif is None and profile is not None and profile.effectif_state:
+            years = [int(k) for k in profile.effectif_state if str(k).isdigit() and int(k) < payroll_date.year]
+            if years:
+                effectif = (profile.effectif_state.get(str(max(years))) or {}).get("value")
+        establishment = {
+            "siret": pack.siret,
+            "commune_insee": pack.commune_insee,
+            "at_mp_rate_pct": pack.at_mp_rate_pct,
+            "vm_rate_pct": pack.vm_rate_pct,
+            "vm_threshold_applies": pack.vm_threshold_applies,
+            "fnal_class": pack.fnal_class,
+            "cfp_class": pack.cfp_class,
+            "effectif": effectif,
+        }
+
+    pas_row = get_active_france_pas_rate(db, organization_id, employee.id, as_of=payroll_date)
+    pas = {}
+    if pas_row is not None:
+        pas = {
+            "rate_type": pas_row.rate_type,
+            "rate_pct": pas_row.rate_pct,
+            "rate_id": pas_row.dgfip_rate_id,
+            "short_contract": bool(compliance.get("short_contract")),
+            "apprentice": bool(compliance.get("apprentice")),
+        }
+
+    idcc_minimum = compliance.get("idcc_minimum")
+    return {
+        "france_payroll_date": payroll_date,
+        "france_pas": pas,
+        "france_establishment": establishment,
+        "france_ytd": _load_fr_ytd(db, employee.id, payroll_date, exclude_run_id=exclude_run_id),
+        "france_cadre": str(compliance.get("cadre", "")).lower() in ("1", "true", "yes", "cadre"),
+        "france_idcc_minimum": Decimal(str(idcc_minimum)) if idcc_minimum not in (None, "") else None,
+        "france_social_coverage": compliance.get("social_coverage") or "GENERAL",
+        "france_employee_id": employee.id,
+        "france_organization_id": organization_id,
+    }
+
+
+def _jsonable_decimal(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _jsonable_decimal(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_decimal(v) for v in value]
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _fr_payslip_snapshot(result) -> Optional[dict]:
+    """PayslipItem.fr_calculation_snapshot for a France result (None for
+    every other country) — the three nets, PAS provenance, trace, RGDU and
+    ytd_after, JSON-safe."""
+    if getattr(result, "fr_net_social", None) is None:
+        return None
+    return _jsonable_decimal({
+        "net_social": result.fr_net_social,
+        "net_imposable": result.fr_net_imposable,
+        "net_a_payer": (result.fr_bases or {}).get("net_a_payer"),
+        "employee_total": result.fr_employee_total,
+        "employer_total": result.fr_employer_total,
+        "pas": {"withheld": result.fr_pas_withheld, "rate_type": result.fr_pas_rate_type,
+                "rate_pct": result.fr_pas_rate_pct, "rate_id": result.fr_pas_rate_id},
+        "bases": result.fr_bases,
+        "contributions": result.fr_contributions,
+        "calculation": result.fr_calculation_snapshot,
+        "ytd_after": result.fr_ytd_after,
+    })
+
+
+def _france_blocked(exc) -> "FranceCalculationBlockedException":
+    return FranceCalculationBlockedException(exc.code, exc.message, trace={"code": exc.code, "message": exc.message})
+
+
 def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, payroll_date) -> dict:
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         GermanyCalculationError, resolve_pv_child_category,
@@ -6591,6 +6721,7 @@ def preview_germany_calculation(db: Session, organization_id: int, employee_id: 
     real payroll run for this employee."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
 
     employee = get_employee_by_id(db, employee_id, organization_id)
     payroll_date = payroll_date or date.today()
@@ -13932,6 +14063,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     deduction is applied and the engine falls back to the 30-day basis."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
 
     country = _normalize_country(country)
     calculation_mode = _resolve_calculation_mode(db, organization_id, calculation_mode)
@@ -14097,6 +14229,10 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             )
         state_rate_map, state_slabs = _state_scoped_cache[state_cache_key]
 
+        france_inputs = (
+            _resolve_france_calc_inputs(db, organization_id, emp, period_end or date.today())
+            if emp_country == "FR" else None
+        )
         germany_kwargs = {}
         if emp_country == "DE":
             resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
@@ -14225,6 +14361,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             annual_perquisites_total=salary_tds_inputs.get("perquisites_total", Decimal("0")),
             work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
             **germany_kwargs,
+            france_inputs=france_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -14234,6 +14371,20 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
         )
         try:
             calc = calculate_payroll(ctx, calculation_mode)
+        except FranceCalculationBlockedError as exc:
+            # Same diagnostic contract as Germany below: one blocked France
+            # employee never aborts the whole preview (FR-027 reason shown).
+            results.append({
+                "employeeId": emp.id,
+                "employeeName": employee_name,
+                "department": getattr(emp, "department", None),
+                "attendanceStatus": "active" if is_active else "inactive",
+                "blocked": True,
+                "blockedReasonCode": exc.code,
+                "blockedReasonMessage": exc.message,
+                "calculationTrace": None,
+            })
+            continue
         except GermanyCalculationError as exc:
             # Preview is diagnostic across a batch — one blocked German
             # employee must not abort the whole preview. Surface the
@@ -17796,6 +17947,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     calculation, and CA until the caller opts in) means no YTD wired."""
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
     from app.core.exceptions import GermanyCalculationBlockedException
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
@@ -17879,6 +18031,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     pr_certificate_inputs = (
         get_pr_certificate_inputs(db, run.organization_id, employee.id) if country == "PR" else {}
     )
+    france_inputs = (
+        _resolve_france_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "FR" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -17922,6 +18078,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         locality_rate=locality_rate,
         residence_locality_rate=residence_locality_rate,
         **germany_kwargs,
+        france_inputs=france_inputs,
         pay_date=run.pay_date,
         ni_category_override=ni_category_override,
         **(reciprocity or {}),
@@ -17931,6 +18088,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     )
     try:
         result = calculate_payroll(ctx, calculation_mode)
+    except FranceCalculationBlockedError as exc:
+        raise _france_blocked(exc)
     except GermanyCalculationError as exc:
         raise GermanyCalculationBlockedException(
             exc.code, exc.message, trace=(exc.trace.to_dict() if exc.trace else None),
@@ -18058,6 +18217,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # and for any German payslip generated before this column existed.
         "employee_statutory_profile_id": result.germany_statutory_profile_id,
         "germany_calculation_snapshot": result.germany_calculation_snapshot,
+        # France — frozen result + the YTD state the next period reads back.
+        "fr_calculation_snapshot": _fr_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
         # above, for the before/after cumulative figures this payslip
         # actually consumed per component. None unless YTD accumulation
@@ -22870,6 +23031,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # batch path (_compute_payslip_values) uses for DE. Without this, a manual
     # DE payslip would bypass statutory-profile/health-fund/ceiling/PV wiring
     # and could not be reproducibly snapshotted.
+    france_inputs = (
+        _resolve_france_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "FR" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved_de = _resolve_germany_calc_inputs(db, organization_id, employee, run.pay_date)
@@ -22925,6 +23090,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     # Delegate to the strategy engine (no attendance data for manual payslips)
     from app.modules.payroll.engine.resolver import calculate_payroll, build_context_from_employee
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import GermanyCalculationError
+    from app.modules.payroll.engine.countries.france import FranceCalculationBlockedError
     from app.core.exceptions import GermanyCalculationBlockedException
     ni_category_override = (
         _resolve_uk_ni_category_override(db, employee, run.pay_date, rate_map) if country == "UK" else None
@@ -22985,6 +23151,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         calendar_days=_calendar_days(run.period_start, run.period_end),
         **reciprocity,
         **germany_kwargs,
+        france_inputs=france_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -22992,6 +23159,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     )
     try:
         calc = calculate_payroll(ctx, calculation_mode)
+    except FranceCalculationBlockedError as exc:
+        raise _france_blocked(exc)
     except GermanyCalculationError as exc:
         # Same structured 400 the batch path returns — never fabricate a
         # Germany payslip when wage-tax execution is unavailable (§25).
@@ -23124,6 +23293,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         # batch path; None for every non-German manual payslip.
         employee_statutory_profile_id=calc.germany_statutory_profile_id,
         germany_calculation_snapshot=calc.germany_calculation_snapshot,
+        fr_calculation_snapshot=_fr_payslip_snapshot(calc),
         # Phase 8BU: same PARTIAL-vs-PENDING decision as the batch path
         # (_generate_single_payslip) — a manually-added Germany payslip
         # must not silently present a PARTIAL calculation as complete.
@@ -26197,6 +26367,7 @@ _COUNTRY_NAME_TO_JURISDICTION_CODE = {
     "australia": "AU",
     "germany": "DE",
     "canada": "CA",
+    "france": "FR",
 }
 
 
@@ -27982,7 +28153,6 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
 # ── France (ZP-FR-ENG-001) ───────────────────────────────────────────────
 
 _FR_FILING_DUE_DATE_CLASSES = {"M5", "M15", "DEFERRED_M15"}
-_FR_READINESS_STATUSES = {"NOT_READY", "READY", "LIVE"}
 _FR_PAS_RATE_TYPES = {"PERSONALIZED", "NEUTRAL"}
 _FR_PAS_SOURCES = {"CRM", "NEUTRAL_GRID"}
 _FR_DSN_STATUSES = (
@@ -27990,18 +28160,135 @@ _FR_DSN_STATUSES = (
     "BUSINESS_REJECTED", "CRM_RESOLVED", "UNKNOWN", "SETTLED",
 )
 _FR_DSN_TRANSITIONS = {
-    "DRAFT": {"VALIDATED"},
+    "DRAFT": {"VALIDATED"},              # re-runs the FR-031 validator
     "VALIDATED": {"QUEUED"},
     "QUEUED": {"TRANSMITTED", "UNKNOWN"},
     "TRANSMITTED": {"ACKNOWLEDGED", "BUSINESS_REJECTED", "UNKNOWN"},
     "ACKNOWLEDGED": {"CRM_RESOLVED", "SETTLED"},
-    "BUSINESS_REJECTED": {"CRM_RESOLVED", "CORRECTION"},
+    "BUSINESS_REJECTED": {"CRM_RESOLVED"},  # a correction is a NEW submission (correction_of_id)
     "CRM_RESOLVED": {"SETTLED"},
-    "UNKNOWN": {"QUEUED", "TRANSMITTED"},
+    # UNKNOWN (timeout / uncertain transport) is resolved by reconciliation
+    # only — never re-queued or re-transmitted blind (FR-033/FR-058).
+    "UNKNOWN": {"ACKNOWLEDGED", "BUSINESS_REJECTED"},
     "SETTLED": set(),
 }
 _FR_DSN_OUTBOX_ACTIONS = {"TRANSMIT", "PAS_RATE_EXCHANGE", "CRM_CLOSE", "CORRECTION"}
 _FR_DSN_OUTBOX_STATUSES = ("PENDING", "SENT", "UNKNOWN", "ACKNOWLEDGED", "FAILED")
+
+
+def seed_france_pack_rows(db: Session, pack: JurisdictionPack) -> List[ContributionRate]:
+    """Insert every France statutory content row (engine/countries/
+    france_content.py — the catalog france.py reads) that `pack` is missing.
+    INSERT-ONLY: a (component_key, effective_from) row already in the pack
+    is never overwritten, so a Super Admin's edits survive. Row-dated
+    content (the 1 June SMIC) is included only where its window overlaps
+    the pack's own window. Shared by the Super Admin "load statutory
+    defaults" action and scripts/seed_france_canonical_packs.py."""
+    from app.modules.payroll.engine.countries.france_content import FR_2026_CONTENT
+
+    existing = {
+        (r.component_key, r.effective_from)
+        for r in db.query(ContributionRate).filter(
+            ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))
+    }
+    added: List[ContributionRate] = []
+    for sort_order, (key, label, _category, kind, value, eff_from, eff_to, note) in enumerate(FR_2026_CONTENT):
+        if pack.effective_from is not None and eff_to is not None and eff_to < pack.effective_from:
+            continue
+        if pack.effective_to is not None and eff_from is not None and eff_from > pack.effective_to:
+            continue
+        if (key, eff_from) in existing:
+            continue
+        amount = Decimal(value)
+        display = f"{amount}%" if kind in ("ee", "er") else str(amount)
+        row = ContributionRate(
+            jurisdiction_pack_id=pack.id,
+            jurisdiction_country="FR",
+            organization_id=None,
+            component_key=key,
+            label=label if note != "PENDING_G1" else f"{label} [PENDING G1]",
+            employee_share=display if kind in ("ee", "amount") else "—",
+            employer_share=display if kind == "er" else "—",
+            total=display,
+            employee_rate_pct=amount if kind == "ee" else None,
+            employer_rate_pct=amount if kind == "er" else None,
+            flat_amount=amount if kind == "amount" else None,
+            effective_from=eff_from,
+            effective_to=eff_to,
+            sort_order=sort_order,
+        )
+        db.add(row)
+        added.append(row)
+    db.flush()
+    return added
+
+
+def load_france_statutory_defaults(db: Session, pack_id: int, actor_id: Optional[int] = None) -> dict:
+    """Super Admin action: fill a France tax pack's missing statutory rows
+    from the content catalog. Only a France pack_type='tax' pack that is
+    still editable (never an Active/published one); insert-only and audited
+    row by row; an existing approval is invalidated like any other edit."""
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+    if not pack:
+        raise NotFoundException("JurisdictionPack", pack_id)
+    if _normalize_country(pack.jurisdiction_country) != "FR" or pack.pack_type != "tax":
+        raise BadRequestException("France statutory defaults can only be loaded into a France tax pack.")
+    _require_editable_pack(pack)
+    added = seed_france_pack_rows(db, pack)
+    if added:
+        _invalidate_pack_approval_on_edit(pack)
+    db.commit()
+    for row in added:
+        db.refresh(row)
+        record_tax_audit(
+            db, actor_id=actor_id, action="create", entity_type="contribution_rate", entity_id=row.id,
+            jurisdiction_pack_id=pack.id, tax_version=pack.version,
+            new_value={"component_key": row.component_key, "employee_rate_pct": str(row.employee_rate_pct),
+                       "employer_rate_pct": str(row.employer_rate_pct), "flat_amount": str(row.flat_amount),
+                       "effective_from": str(row.effective_from), "effective_to": str(row.effective_to)},
+            reason="Loaded France 2026 statutory defaults (ZP-FR-ENG-001 content catalog)",
+        )
+    pending = sorted({r.component_key for r in added if r.label.endswith("[PENDING G1]")})
+    return {
+        "packId": pack.id,
+        "added": len(added),
+        "addedKeys": sorted({r.component_key for r in added}),
+        "pendingG1Keys": pending,
+        "message": (f"Added {len(added)} France statutory row(s)." if added
+                    else "Nothing to add — the pack already has every France statutory row."),
+    }
+
+
+_FR_FNAL_CLASSES = {"UNDER_50", "OVER_50"}
+_FR_CFP_CLASSES = {"UNDER_11", "OVER_11"}
+
+
+def require_france_organization(db: Session, organization_id: int):
+    """Every France authority endpoint is organization-scoped; reject an id
+    that is not an existing organization whose country resolves to FR, so a
+    typo or a non-French org can never silently accumulate France records
+    (or report a misleading "not ready")."""
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise NotFoundException("Organization", organization_id)
+    if get_jurisdiction_code(getattr(org, "country", None)) != "FR":
+        raise BadRequestException(
+            f"Organization {organization_id} is not a France organization "
+            f"(country={getattr(org, 'country', None)!r}); France compliance data is FR-only."
+        )
+    return org
+
+
+def _validate_france_employer_classes(fnal_class: Optional[str], cfp_class: Optional[str]) -> None:
+    """The stored FNAL/CFP vocabulary — the engine maps these to its rate
+    keys (france.normalize_fnal_class / normalize_cfp_class)."""
+    if fnal_class is not None and fnal_class not in _FR_FNAL_CLASSES:
+        raise BadRequestException(f"fnalClass must be one of {sorted(_FR_FNAL_CLASSES)}, got {fnal_class!r}.")
+    if cfp_class is not None and cfp_class not in _FR_CFP_CLASSES:
+        raise BadRequestException(f"cfpClass must be one of {sorted(_FR_CFP_CLASSES)}, got {cfp_class!r}.")
 
 
 def _fr_dsn_payload_hash(organization_id: int, period_start, period_end, release_ref: str, due_date) -> str:
@@ -28028,14 +28315,18 @@ def get_employer_france_profile(db: Session, organization_id: int) -> EmployerFr
     return row
 
 
+_FR_IDCC_STATUSES = {"APPLICABLE", "NOT_APPLICABLE", "UNDER_REVIEW"}
+_FR_INSEE_RE = re.compile(r"^(\d{5}|2[AB]\d{3})$")
+
+
 def upsert_employer_france_profile(
     db: Session, organization_id: int, data: "EmployerFranceProfileUpsert", actor_id: Optional[int] = None,
 ) -> EmployerFranceProfile:
     """Create or update the org 1:1 France employer profile (FR §11 panels
-    C/D). Authority-held write-once facts that DGFiP/Urssaf own
-    (pas_crm_status, pas exchange) are deliberately absent from the
-    payload — the CRM intake flows through ingest_france_pas_rate + the
-    outbox, never through freeform admin editing."""
+    A/C/D). Not payload-writable (never overwritten by a profile save):
+    pas_crm_status (authority-held), effectif_state (governed history —
+    record_france_effectif / correct_france_effectif) and readiness_status
+    (computed by get_france_readiness; LIVE only via set_france_live)."""
     siren = (data.siren or "").strip()
     if not re.match(r"^\d{9}$", siren):
         raise BadRequestException("French SIREN must be exactly 9 digits.")
@@ -28044,46 +28335,53 @@ def upsert_employer_france_profile(
             f"filingDueDateClass must be one of {sorted(_FR_FILING_DUE_DATE_CLASSES)}, "
             f"got {data.filingDueDateClass!r}."
         )
-    if data.readinessStatus is not None and data.readinessStatus not in _FR_READINESS_STATUSES:
-        raise BadRequestException(
-            f"readinessStatus must be one of {sorted(_FR_READINESS_STATUSES)}, got {data.readinessStatus!r}."
-        )
+    if data.idccStatus is not None and data.idccStatus not in _FR_IDCC_STATUSES:
+        raise BadRequestException(f"idccStatus must be one of {sorted(_FR_IDCC_STATUSES)}, got {data.idccStatus!r}.")
+    if data.idccStatus == "APPLICABLE" and not (data.idcc or "").strip():
+        raise BadRequestException("idccStatus APPLICABLE requires the IDCC code (FR-035).")
 
     row = db.query(EmployerFranceProfile).filter(
         EmployerFranceProfile.organization_id == organization_id).first()
     action = "update" if row else "create"
-    if not row:
-        row = EmployerFranceProfile(organization_id=organization_id, siren=siren)
+    old_value = None
+    if row:
+        old_value = {"siren": row.siren, "idcc": row.idcc, "filing_due_date_class": row.filing_due_date_class}
+        if row.siren != siren:
+            siret_mismatch = (db.query(FranceEstablishment)
+                              .filter(FranceEstablishment.organization_id == organization_id,
+                                      ~FranceEstablishment.siret.startswith(siren)).first())
+            if siret_mismatch:
+                raise BadRequestException(
+                    f"SIREN {siren} does not match existing establishment SIRET {siret_mismatch.siret} "
+                    "(a SIRET is the SIREN + a 5-digit NIC)."
+                )
+    else:
+        row = EmployerFranceProfile(organization_id=organization_id, siren=siren, created_by_id=actor_id)
         db.add(row)
     row.siren = siren
     row.legal_name = data.legalName
     row.legal_form = data.legalForm
-    if data.idcc is not None:
-        row.idcc = data.idcc
-    if data.urssafAccount is not None:
-        row.urssaf_account = data.urssafAccount
-    if data.dsnDeclarant is not None:
-        row.dsn_declarant = data.dsnDeclarant
+    row.address = data.address
+    row.payroll_contact = data.payrollContact
+    row.idcc = (data.idcc or "").strip() or None
+    if data.idccStatus is not None:
+        row.idcc_status = data.idccStatus
+    elif row.idcc:
+        row.idcc_status = row.idcc_status or "APPLICABLE"
+    row.urssaf_account = data.urssafAccount
+    row.dsn_declarant = data.dsnDeclarant
     row.filing_due_date_class = data.filingDueDateClass
-    if data.paymentMandateRef is not None:
-        row.payment_mandate_ref = data.paymentMandateRef
-    if data.pasCollectorIdentity is not None:
-        row.pas_collector_identity = data.pasCollectorIdentity
-    if data.effectifState is not None:
-        row.effectif_state = data.effectifState
-    if data.readinessStatus is not None:
-        row.readiness_status = data.readinessStatus
-    if data.readinessEvidence is not None:
-        row.readiness_evidence = data.readinessEvidence
+    row.payment_mandate_ref = data.paymentMandateRef
+    row.pas_collector_identity = data.pasCollectorIdentity
 
     db.commit()
     db.refresh(row)
     record_tax_audit(
         db, actor_id=actor_id, action=action, entity_type="france_employer_profile",
-        entity_id=row.id, new_value={
+        entity_id=row.id, old_value=old_value, new_value={
             "organization_id": organization_id, "siren": siren,
-            "idcc": row.idcc, "filing_due_date_class": row.filing_due_date_class,
-            "readiness_status": row.readiness_status,
+            "idcc": row.idcc, "idcc_status": row.idcc_status,
+            "filing_due_date_class": row.filing_due_date_class,
         },
     )
     log_activity(db, organization_id, f"France employer profile {action}d (SIREN {siren}).",
@@ -28094,28 +28392,165 @@ def upsert_employer_france_profile(
 def record_france_effectif(
     db: Session, organization_id: int, data: "FranceEffectifRecord", actor_id: Optional[int] = None,
 ) -> EmployerFranceProfile:
-    """Governed annual effectif with threshold history (FR-015/FR-036) —
-    a dict merge into effectif_state, never a thunder-clobber."""
+    """Record a NEW year of governed annual effectif (FR-015/FR-036). An
+    already-recorded year is changed only through correct_france_effectif,
+    which keeps the previous value in that year's history."""
     profile = get_employer_france_profile(db, organization_id)
     if data.value < 0:
         raise BadRequestException("Annual effectif cannot be negative.")
-    state = dict(profile.effectif_state or {})
     if not (1980 <= data.year <= 2100):
         raise BadRequestException(f"Effectif year {data.year} is outside a plausible range.")
+    if not (data.source or "").strip():
+        raise BadRequestException("An effectif value needs its governed source (e.g. DSN, Urssaf notice).")
+    state = dict(profile.effectif_state or {})
+    if str(data.year) in state:
+        raise BadRequestException(
+            f"Effectif {data.year} is already recorded ({state[str(data.year)].get('value')}); "
+            "use the correction action to change it — history is never overwritten."
+        )
     state[str(data.year)] = {
         "value": data.value,
         "source": data.source,
         "validatedAt": datetime.utcnow().isoformat(),
+        "history": [],
+    }
+    profile.effectif_state = state
+    db.commit()
+    db.refresh(profile)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="france_employer_profile",
+        entity_id=profile.id, new_value={f"effectif.{data.year}": state[str(data.year)]},
+    )
+    log_activity(db, organization_id, f"France annual effectif {data.year} recorded = {data.value}.", actor_id=actor_id)
+    return profile
+
+
+def correct_france_effectif(
+    db: Session, organization_id: int, data: "FranceEffectifCorrection", actor_id: Optional[int] = None,
+) -> EmployerFranceProfile:
+    """Correct an already-recorded effectif year: the prior value/source
+    move into that year's `history` with the reason and actor — auditable,
+    never silently replaced."""
+    profile = get_employer_france_profile(db, organization_id)
+    if data.value < 0:
+        raise BadRequestException("Annual effectif cannot be negative.")
+    if not (data.reason or "").strip():
+        raise BadRequestException("A correction needs a reason.")
+    state = dict(profile.effectif_state or {})
+    current = state.get(str(data.year))
+    if not current:
+        raise NotFoundException(f"No effectif recorded for {data.year} — record it first.")
+    history = list(current.get("history") or [])
+    history.append({
+        "value": current.get("value"), "source": current.get("source"),
+        "validatedAt": current.get("validatedAt"),
+        "replacedAt": datetime.utcnow().isoformat(), "replacedBy": actor_id, "reason": data.reason,
+    })
+    state[str(data.year)] = {
+        "value": data.value, "source": data.source,
+        "validatedAt": datetime.utcnow().isoformat(), "history": history,
     }
     profile.effectif_state = state
     db.commit()
     db.refresh(profile)
     record_tax_audit(
         db, actor_id=actor_id, action="update", entity_type="france_employer_profile",
-        entity_id=profile.id, new_value={f"effectif.{data.year}": state[str(data.year)]},
+        entity_id=profile.id, legal_reference="FR-015/FR-036",
+        old_value={f"effectif.{data.year}": current.get("value")},
+        new_value={f"effectif.{data.year}": data.value, "reason": data.reason},
     )
-    log_activity(db, organization_id, f"France annual effectif {data.year} recorded = {data.value}.", actor_id=actor_id)
+    log_activity(db, organization_id,
+                 f"France annual effectif {data.year} corrected {current.get('value')} → {data.value}.",
+                 actor_id=actor_id)
     return profile
+
+
+# ── Establishments (SIRET registry, FR §11 panel B) ────────────────────
+
+def _validate_siret_for_org(db: Session, organization_id: int, siret: str) -> str:
+    siret = (siret or "").strip().replace(" ", "")
+    if not re.match(r"^\d{14}$", siret):
+        raise BadRequestException("French SIRET must be exactly 14 digits.")
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    if profile and not siret.startswith(profile.siren):
+        raise BadRequestException(
+            f"SIRET {siret} does not belong to SIREN {profile.siren} (SIRET = SIREN + 5-digit NIC)."
+        )
+    return siret
+
+
+def upsert_france_establishment(
+    db: Session, organization_id: int, data: "FranceEstablishmentUpsert",
+    establishment_id: Optional[int] = None, actor_id: Optional[int] = None,
+) -> FranceEstablishment:
+    """Create (establishment_id None) or update an establishment. The SIRET
+    of an existing establishment is immutable — rate packs and filings are
+    keyed on it; open a new establishment instead."""
+    siret = _validate_siret_for_org(db, organization_id, data.siret)
+    commune = (data.communeInsee or "").strip().upper() or None
+    if commune and not _FR_INSEE_RE.match(commune):
+        raise BadRequestException("Commune INSEE code must be 5 characters (e.g. 75056, or 2A004 / 2B033 for Corsica).")
+
+    if establishment_id is not None:
+        row = (db.query(FranceEstablishment)
+               .filter(FranceEstablishment.id == establishment_id,
+                       FranceEstablishment.organization_id == organization_id).first())
+        if not row:
+            raise NotFoundException("FranceEstablishment", establishment_id)
+        if row.siret != siret:
+            raise BadRequestException("An establishment's SIRET cannot change — create a new establishment.")
+        action = "update"
+    else:
+        if db.query(FranceEstablishment).filter(
+                FranceEstablishment.organization_id == organization_id,
+                FranceEstablishment.siret == siret).first():
+            raise BadRequestException(f"SIRET {siret} is already registered for this organization.")
+        profile = db.query(EmployerFranceProfile).filter(
+            EmployerFranceProfile.organization_id == organization_id).first()
+        row = FranceEstablishment(
+            organization_id=organization_id, siret=siret,
+            employer_profile_id=profile.id if profile else None, created_by_id=actor_id,
+        )
+        db.add(row)
+        action = "create"
+    row.name = data.name
+    row.address = data.address
+    row.commune_insee = commune
+    row.workforce_location = data.workforceLocation
+    row.payroll_identifier = data.payrollIdentifier
+    row.is_active = bool(data.isActive)
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(db, actor_id=actor_id, action=action, entity_type="france_establishment",
+                     entity_id=row.id, legal_reference="FR-002",
+                     new_value={"siret": siret, "commune_insee": commune, "is_active": row.is_active})
+    log_activity(db, organization_id, f"France establishment {siret} {action}d.", actor_id=actor_id)
+    return row
+
+
+def list_france_establishments(db: Session, organization_id: int, include_inactive: bool = True) -> List[FranceEstablishment]:
+    query = db.query(FranceEstablishment).filter(FranceEstablishment.organization_id == organization_id)
+    if not include_inactive:
+        query = query.filter(FranceEstablishment.is_active.is_(True))
+    return query.order_by(FranceEstablishment.siret).all()
+
+
+# ── Establishment rate packs (FR-002/FR-013) ───────────────────────────
+
+def _validate_rate_pack_values(at_mp, at_mp_evidence, at_mp_source, vm_rate, vm_evidence, vm_source, fnal, cfp):
+    for label, value in (("AT/MP", at_mp), ("Versement mobilité", vm_rate)):
+        if value is not None and not (Decimal("0") <= Decimal(str(value)) <= Decimal("100")):
+            raise BadRequestException(f"{label} rate must be between 0 and 100%.")
+    if at_mp is not None and not at_mp_evidence and not at_mp_source:
+        raise BadRequestException(
+            "An AT/MP rate is authority decision data (FR-013) — provide atMpEvidence and/or atMpSource."
+        )
+    if vm_rate is not None and not vm_evidence and not vm_source:
+        raise BadRequestException(
+            "A versement mobilité rate is authority data (FR-013) — provide vmEvidence and/or vmSource."
+        )
+    _validate_france_employer_classes(fnal, cfp)
 
 
 def upsert_france_establishment_rate_pack(
@@ -28123,36 +28558,46 @@ def upsert_france_establishment_rate_pack(
 ) -> FranceEstablishmentRatePack:
     """Append a new effective-dated SIRET rate-pack period row, auto-closing
     the previous period's row (effective_to = day before new effective_from)
-    so Jan/Jul history is never rewritten (FR-002/FR-013)."""
-    siret = (data.siret or "").strip()
-    if not re.match(r"^\d{14}$", siret):
-        raise BadRequestException("French SIRET must be exactly 14 digits.")
-    if data.atMpRatePct is not None and data.atMpRatePct < 0:
-        raise BadRequestException("AT/MP rate cannot be negative.")
-    if data.atMpRatePct is not None and not data.atMpEvidence and not data.atMpSource:
-        raise BadRequestException(
-            "An AT/MP rate is authority decision data (FR-013) — provide atMpEvidence and/or atMpSource."
-        )
+    so Jan/Jul history is never rewritten (FR-002/FR-013). Backdated periods
+    are accepted — Urssaf AT/MP notices are frequently retroactive."""
+    establishment = None
+    if data.establishmentId is not None:
+        establishment = (db.query(FranceEstablishment)
+                         .filter(FranceEstablishment.id == data.establishmentId,
+                                 FranceEstablishment.organization_id == organization_id).first())
+        if not establishment:
+            raise NotFoundException("FranceEstablishment", data.establishmentId)
+        siret = establishment.siret
+    else:
+        siret = _validate_siret_for_org(db, organization_id, data.siret or "")
+        establishment = (db.query(FranceEstablishment)
+                         .filter(FranceEstablishment.organization_id == organization_id,
+                                 FranceEstablishment.siret == siret).first())
+    _validate_rate_pack_values(data.atMpRatePct, data.atMpEvidence, data.atMpSource,
+                               data.vmRatePct, data.vmEvidence, data.vmSource, data.fnalClass, data.cfpClass)
+    if data.effectiveTo is not None and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
 
-    profile = (db.query(FranceEstablishmentRatePack)
-               .filter(
-                   FranceEstablishmentRatePack.organization_id == organization_id,
-                   FranceEstablishmentRatePack.siret == siret,
-                   FranceEstablishmentRatePack.effective_to.is_(None),
-               )
-               .first())
-    if profile:
-        if profile.effective_from >= data.effectiveFrom:
+    open_period = (db.query(FranceEstablishmentRatePack)
+                   .filter(
+                       FranceEstablishmentRatePack.organization_id == organization_id,
+                       FranceEstablishmentRatePack.siret == siret,
+                       FranceEstablishmentRatePack.effective_to.is_(None),
+                   )
+                   .first())
+    if open_period:
+        if open_period.effective_from >= data.effectiveFrom:
             raise BadRequestException(
-                f"A rate pack for SIRET {siret} is already effective from {profile.effective_from}; "
-                "a new period must start after it."
+                f"A rate pack for SIRET {siret} is already effective from {open_period.effective_from}; "
+                "a new period must start after it (edit the future period instead)."
             )
-        profile.effective_to = data.effectiveFrom - timedelta(days=1)
+        open_period.effective_to = data.effectiveFrom - timedelta(days=1)
     new_pack = FranceEstablishmentRatePack(
         organization_id=organization_id,
+        establishment_id=establishment.id if establishment else None,
         siret=siret,
-        commune_insee=data.communeInsee,
-        workplace_label=data.workplaceLabel,
+        commune_insee=(establishment.commune_insee if establishment and establishment.commune_insee else data.communeInsee),
+        workplace_label=data.workplaceLabel or (establishment.name if establishment else None),
         at_mp_rate_pct=data.atMpRatePct,
         at_mp_risk_code=data.atMpRiskCode,
         at_mp_evidence=data.atMpEvidence,
@@ -28160,6 +28605,8 @@ def upsert_france_establishment_rate_pack(
         vm_rate_pct=data.vmRatePct,
         vm_threshold_applies=data.vmThresholdApplies,
         vm_source=data.vmSource,
+        vm_evidence=data.vmEvidence,
+        ags_special_status=data.agsSpecialStatus,
         fnal_class=data.fnalClass,
         cfp_class=data.cfpClass,
         effectif=data.effectif,
@@ -28180,10 +28627,85 @@ def upsert_france_establishment_rate_pack(
     record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_establishment_rate_pack",
                      entity_id=new_pack.id, legal_reference="FR-002/FR-013",
                      new_value={"siret": siret, "effective_from": str(data.effectiveFrom),
-                                "at_mp_rate_pct": str(new_pack.at_mp_rate_pct)})
+                                "at_mp_rate_pct": str(new_pack.at_mp_rate_pct),
+                                "vm_rate_pct": str(new_pack.vm_rate_pct)})
     log_activity(db, organization_id, f"France SIRET {siret} rate pack effective {data.effectiveFrom} recorded.",
                  actor_id=actor_id)
     return new_pack
+
+
+def _get_france_rate_pack(db: Session, organization_id: int, pack_id: int) -> FranceEstablishmentRatePack:
+    pack = (db.query(FranceEstablishmentRatePack)
+            .filter(FranceEstablishmentRatePack.id == pack_id,
+                    FranceEstablishmentRatePack.organization_id == organization_id).first())
+    if not pack:
+        raise NotFoundException("FranceEstablishmentRatePack", pack_id)
+    return pack
+
+
+def update_france_establishment_rate_pack(
+    db: Session, organization_id: int, pack_id: int, data: "FranceEstablishmentRatePackUpdate",
+    actor_id: Optional[int] = None,
+) -> FranceEstablishmentRatePack:
+    """Edit a period that has not started yet. A period already in force (a
+    payroll may have run on it) is never edited in place — append a new
+    period instead."""
+    pack = _get_france_rate_pack(db, organization_id, pack_id)
+    if pack.effective_from <= date.today():
+        raise BadRequestException(
+            f"This period has been in force since {pack.effective_from}; it cannot be edited in place — "
+            "add a new rate-pack period (history the payroll ran on stays intact)."
+        )
+    fields = data.model_dump(exclude_unset=True)
+    merged = {
+        "at_mp": fields.get("atMpRatePct", pack.at_mp_rate_pct),
+        "at_mp_evidence": fields.get("atMpEvidence", pack.at_mp_evidence),
+        "at_mp_source": fields.get("atMpSource", pack.at_mp_source),
+        "vm_rate": fields.get("vmRatePct", pack.vm_rate_pct),
+        "vm_evidence": fields.get("vmEvidence", pack.vm_evidence),
+        "vm_source": fields.get("vmSource", pack.vm_source),
+        "fnal": fields.get("fnalClass", pack.fnal_class),
+        "cfp": fields.get("cfpClass", pack.cfp_class),
+    }
+    _validate_rate_pack_values(**merged)
+    old_value = {"at_mp_rate_pct": str(pack.at_mp_rate_pct), "vm_rate_pct": str(pack.vm_rate_pct),
+                 "fnal_class": pack.fnal_class, "cfp_class": pack.cfp_class}
+    column_for = {
+        "communeInsee": "commune_insee", "workplaceLabel": "workplace_label",
+        "atMpRatePct": "at_mp_rate_pct", "atMpRiskCode": "at_mp_risk_code",
+        "atMpEvidence": "at_mp_evidence", "atMpSource": "at_mp_source",
+        "vmRatePct": "vm_rate_pct", "vmThresholdApplies": "vm_threshold_applies",
+        "vmSource": "vm_source", "vmEvidence": "vm_evidence", "agsSpecialStatus": "ags_special_status",
+        "fnalClass": "fnal_class", "cfpClass": "cfp_class", "effectif": "effectif",
+    }
+    for key, value in fields.items():
+        setattr(pack, column_for[key], value)
+    db.commit()
+    db.refresh(pack)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_establishment_rate_pack",
+                     entity_id=pack.id, legal_reference="FR-002/FR-013", old_value=old_value,
+                     new_value={k: str(v) for k, v in fields.items()})
+    log_activity(db, organization_id, f"France SIRET {pack.siret} future rate pack ({pack.effective_from}) edited.",
+                 actor_id=actor_id)
+    return pack
+
+
+def close_france_establishment_rate_pack(
+    db: Session, organization_id: int, pack_id: int, data: "FranceRatePackClose", actor_id: Optional[int] = None,
+) -> FranceEstablishmentRatePack:
+    pack = _get_france_rate_pack(db, organization_id, pack_id)
+    if pack.effective_to is not None:
+        raise BadRequestException(f"This period is already closed ({pack.effective_to}).")
+    if data.effectiveTo < pack.effective_from:
+        raise BadRequestException("A period cannot close before it starts.")
+    pack.effective_to = data.effectiveTo
+    db.commit()
+    db.refresh(pack)
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_establishment_rate_pack",
+                     entity_id=pack.id, legal_reference="FR-013", new_value={"effective_to": str(data.effectiveTo)})
+    log_activity(db, organization_id, f"France SIRET {pack.siret} rate pack closed on {data.effectiveTo}.",
+                 actor_id=actor_id)
+    return pack
 
 
 def list_france_establishment_rate_packs(
@@ -28196,25 +28718,58 @@ def list_france_establishment_rate_packs(
     return query.order_by(FranceEstablishmentRatePack.siret, FranceEstablishmentRatePack.effective_from.desc()).all()
 
 
+# ── PAS (FR-008/FR-010) ────────────────────────────────────────────────
+
+_FR_PAS_APPLICATION_WINDOW_DAYS = 60
+
+
 def ingest_france_pas_rate(
     db: Session, organization_id: int, data: "FrancePASRateUpsert", actor_id: Optional[int] = None,
 ) -> FrancePASRate:
-    """PAS rate intake (FR-008/FR-010). Personalized rates are DGFiP CRM
-    supply and carry authority provenance; NEUTRAL rows carry no percentage.
-    Corrections keep lineage via correction_of_id; the previous active row
-    is closed effective_to = effective_from - 1 day (never deleted)."""
+    """Record a PAS rate (FR-008/FR-010).
+
+    PERSONALIZED = a DGFiP CRM rate transcribed WITH its provenance: the
+    DGFiP rate identifier, the CRM reference and the receipt date are all
+    mandatory, and the rate must be applied within the legal window —
+    no earlier than its receipt and no later than 60 days after it. NEUTRAL
+    rows carry no percentage (the engine resolves the statutory grid).
+    `source` is derived from the type, never chosen. A correction marks the
+    corrected row CORRECTED (excluded from lookups); a plain supersede
+    closes the previous row (STALE — still valid for its own window, so
+    re-running an old period uses the rate that governed it)."""
     if data.rateType not in _FR_PAS_RATE_TYPES:
         raise BadRequestException(f"rateType must be one of {sorted(_FR_PAS_RATE_TYPES)}, got {data.rateType!r}.")
-    if data.source not in _FR_PAS_SOURCES:
-        raise BadRequestException(f"source must be one of {sorted(_FR_PAS_SOURCES)}, got {data.source!r}.")
+    source = "CRM" if data.rateType == "PERSONALIZED" else "NEUTRAL_GRID"
+    if data.source is not None and data.source != source:
+        raise BadRequestException(f"A {data.rateType} rate's source is {source}, not {data.source!r}.")
     if data.rateType == "PERSONALIZED":
         if data.ratePct is None:
             raise BadRequestException("A PERSONALIZED PAS rate requires ratePct (DGFiP authority value).")
-    elif data.rateType == "NEUTRAL" and data.ratePct is not None:
+        if not (Decimal("0") <= Decimal(str(data.ratePct)) <= Decimal("100")):
+            raise BadRequestException("A PAS rate must be between 0 and 100%.")
+        missing = [label for label, value in (("dgfipRateId", data.dgfipRateId),
+                                              ("crmReference", data.crmReference),
+                                              ("receivedDate", data.receivedDate)) if not value]
+        if missing:
+            raise BadRequestException(
+                "A PERSONALIZED rate is DGFiP authority data — its provenance is mandatory (FR-008/FR-010): "
+                + ", ".join(missing)
+            )
+        if data.effectiveFrom < data.receivedDate:
+            raise BadRequestException("A PAS rate cannot be applied before the DGFiP CRM delivering it was received.")
+        if data.effectiveFrom > data.receivedDate + timedelta(days=_FR_PAS_APPLICATION_WINDOW_DAYS):
+            raise BadRequestException(
+                f"A DGFiP rate must be applied within {_FR_PAS_APPLICATION_WINDOW_DAYS} days of receipt "
+                f"(received {data.receivedDate}, latest start "
+                f"{data.receivedDate + timedelta(days=_FR_PAS_APPLICATION_WINDOW_DAYS)})."
+            )
+    elif data.ratePct is not None or data.dgfipRateId:
         raise BadRequestException(
-            "NEUTRAL PAS rows carry no percentage — the statutory neutral grid is resolved by the engine "
-            "from the payroll date (ratePct must be null)."
+            "NEUTRAL PAS rows carry no percentage or DGFiP rate id — the statutory neutral grid is resolved "
+            "by the engine from the payroll date."
         )
+    if data.effectiveTo is not None and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
 
     employee = (db.query(PayrollEmployee)
                 .filter(PayrollEmployee.id == data.employeeId,
@@ -28228,19 +28783,26 @@ def ingest_france_pas_rate(
                          FrancePASRate.organization_id == organization_id).first())
         if not prior:
             raise NotFoundException("FrancePASRate", data.correctionOfId)
-
-    previous = (db.query(FrancePASRate)
-                .filter(FrancePASRate.organization_id == organization_id,
-                        FrancePASRate.employee_id == data.employeeId,
-                        FrancePASRate.status == "ACTIVE").first())
-    if previous and previous.effective_from >= data.effectiveFrom:
-        raise BadRequestException(
-            f"Employee {data.employeeId} already has an ACTIVE PAS rate from {previous.effective_from}; "
-            "a replacement must start after it."
-        )
-    if previous:
-        previous.status = "STALE"
-        previous.effective_to = data.effectiveFrom - timedelta(days=1)
+        if prior.employee_id != data.employeeId:
+            raise BadRequestException(
+                f"correctionOfId {data.correctionOfId} belongs to employee {prior.employee_id}, "
+                f"not {data.employeeId} — a correction must replace the same employee's rate."
+            )
+        prior.status = "CORRECTED"
+    else:
+        open_rows = (db.query(FrancePASRate)
+                     .filter(FrancePASRate.organization_id == organization_id,
+                             FrancePASRate.employee_id == data.employeeId,
+                             FrancePASRate.status.in_(["ACTIVE", "PENDING"]),
+                             FrancePASRate.effective_to.is_(None)).all())
+        for previous in open_rows:
+            if previous.effective_from >= data.effectiveFrom:
+                raise BadRequestException(
+                    f"Employee {data.employeeId} already has a PAS rate from {previous.effective_from}; "
+                    "a replacement must start after it (or record it as a correction)."
+                )
+            previous.status = "STALE"
+            previous.effective_to = data.effectiveFrom - timedelta(days=1)
 
     new_rate = FrancePASRate(
         organization_id=organization_id,
@@ -28248,7 +28810,8 @@ def ingest_france_pas_rate(
         rate_type=data.rateType,
         rate_pct=data.ratePct,
         dgfip_rate_id=data.dgfipRateId,
-        source=data.source,
+        crm_reference=data.crmReference,
+        source=source,
         received_date=data.receivedDate,
         effective_from=data.effectiveFrom,
         effective_to=data.effectiveTo,
@@ -28262,8 +28825,11 @@ def ingest_france_pas_rate(
     record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_pas_rate",
                      entity_id=new_rate.id, legal_reference="FR-008/FR-010",
                      new_value={"employee_id": data.employeeId, "rate_type": data.rateType,
-                                "rate_pct": str(data.ratePct), "source": data.source,
-                                "effective_from": str(data.effectiveFrom)})
+                                "rate_pct": str(data.ratePct), "source": source,
+                                "crm_reference": data.crmReference,
+                                "received_date": str(data.receivedDate),
+                                "effective_from": str(data.effectiveFrom),
+                                "correction_of_id": data.correctionOfId})
     log_activity(db, organization_id, f"France PAS {data.rateType} rate recorded for employee {data.employeeId}.",
                  actor_id=actor_id)
     return new_rate
@@ -28272,20 +28838,20 @@ def ingest_france_pas_rate(
 def get_active_france_pas_rate(
     db: Session, organization_id: int, employee_id: int, as_of: Optional[date] = None,
 ) -> Optional[FrancePASRate]:
-    """Resolve the PAS rate governing a France employee at as_of (default
-    today) — the engine wiring in service.py reads this when building
-    PayrollContext.france_pas (PERSONALIZED ratePct/rate_type or NEUTRAL
-    resolved by france.py from the payroll date)."""
+    """The PAS rate governing a France employee at as_of (default today),
+    selected by its effective window: a superseded (STALE) row still
+    governs its own past window, so re-running an old period uses the rate
+    that applied then (FR §4 correction rule). CORRECTED / EXPIRED rows
+    never resolve."""
     as_of = as_of or date.today()
-    row = (db.query(FrancePASRate)
-           .filter(FrancePASRate.organization_id == organization_id,
-                   FrancePASRate.employee_id == employee_id,
-                   FrancePASRate.effective_from <= as_of)
-           .filter((FrancePASRate.effective_to.is_(None)) | (FrancePASRate.effective_to >= as_of))
-           .filter(FrancePASRate.status.in_(["ACTIVE", "PENDING"]))
-           .order_by(FrancePASRate.effective_from.desc())
-           .first())
-    return row
+    return (db.query(FrancePASRate)
+            .filter(FrancePASRate.organization_id == organization_id,
+                    FrancePASRate.employee_id == employee_id,
+                    FrancePASRate.effective_from <= as_of)
+            .filter((FrancePASRate.effective_to.is_(None)) | (FrancePASRate.effective_to >= as_of))
+            .filter(FrancePASRate.status.in_(["ACTIVE", "PENDING", "STALE"]))
+            .order_by(FrancePASRate.effective_from.desc(), FrancePASRate.id.desc())
+            .first())
 
 
 def list_france_pas_rates(
@@ -28297,57 +28863,164 @@ def list_france_pas_rates(
     return query.order_by(FrancePASRate.employee_id, FrancePASRate.effective_from.desc()).all()
 
 
+# ── Readiness (FR §11 gate H + FR-031 dry-run) ──────────────────────────
+
+def _france_employees(db: Session, organization_id: int) -> List[PayrollEmployee]:
+    """France employees of the org — explicit FR, or no country of their own
+    in a France organization (country_code is nullable and then inherits
+    the org's), so a NULL-country employee is never skipped by the checks."""
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    org_is_fr = bool(org) and get_jurisdiction_code(getattr(org, "country", None)) == "FR"
+    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    if org_is_fr:
+        query = query.filter((PayrollEmployee.country_code == "FR") | (PayrollEmployee.country_code.is_(None)))
+    else:
+        query = query.filter(PayrollEmployee.country_code == "FR")
+    return query.all()
+
+
+def compute_france_readiness_checks(db: Session, organization_id: int, period: date) -> List[dict]:
+    """Every §11 A–H launch check, computed from the real records — the ONE
+    readiness definition shared by the readiness endpoint, the go-live
+    action and the FR-031 DSN pre-submit validator."""
+    checks: List[dict] = []
+
+    def check(key, section, label, ok, detail):
+        checks.append({"key": key, "section": section, "label": label, "ok": bool(ok),
+                       "detail": None if ok else detail})
+
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    check("legal_entity", "A", "Legal entity (SIREN, legal name)",
+          profile is not None and profile.siren and profile.legal_name,
+          "France employer profile is not configured (SIREN, legal name).")
+    idcc_ok = bool(profile) and (
+        (profile.idcc_status in (None, "APPLICABLE") and profile.idcc)
+        or profile.idcc_status == "NOT_APPLICABLE"
+    )
+    check("idcc", "A", "Collective agreement (IDCC) resolved", idcc_ok,
+          "IDCC must be set, or explicitly NOT_APPLICABLE — UNDER_REVIEW/empty blocks launch (FR-035, gate G3).")
+
+    establishments = list_france_establishments(db, organization_id, include_inactive=False)
+    check("establishments", "B", "At least one active establishment (SIRET)", establishments,
+          "No active France establishment (SIRET) is registered.")
+
+    check("urssaf_dsn", "C", "Urssaf / DSN identity",
+          profile is not None and profile.urssaf_account and profile.dsn_declarant
+          and profile.filing_due_date_class in _FR_FILING_DUE_DATE_CLASSES,
+          "Urssaf account, DSN declarant and filing due-date class are all required.")
+    check("payment_mandate", "C", "Payment mandate", profile is not None and profile.payment_mandate_ref,
+          "No Urssaf payment mandate reference recorded.")
+    check("pas_collector", "D", "DGFiP PAS collector identity", profile is not None and profile.pas_collector_identity,
+          "No DGFiP PAS collector identity recorded.")
+
+    packs = list_france_establishment_rate_packs(db, organization_id)
+    uncovered = []
+    for est in establishments:
+        effective = [p for p in packs
+                     if (p.establishment_id == est.id or p.siret == est.siret)
+                     and p.effective_from <= period and (p.effective_to is None or p.effective_to >= period)]
+        pack = effective[0] if effective else None
+        if (pack is None or pack.at_mp_rate_pct is None
+                or (pack.vm_rate_pct is None and pack.vm_threshold_applies is not False)
+                or pack.fnal_class not in _FR_FNAL_CLASSES or pack.cfp_class not in _FR_CFP_CLASSES):
+            uncovered.append(est.siret)
+    check("employer_rates", "E", "Employer rates effective for every establishment (AT/MP, VM, FNAL, CFP)",
+          establishments and not uncovered,
+          f"No complete rate pack (AT/MP, versement mobilité, FNAL/CFP class) effective at {period} for SIRET "
+          + (", ".join(uncovered) if uncovered else "(no establishments)") + ".")
+
+    effectif_state = (profile.effectif_state if profile else None) or {}
+    latest_year = max((int(k) for k in effectif_state if str(k).isdigit()), default=None)
+    check("effectif", "E", "Governed annual effectif (FR-015)",
+          latest_year is not None and latest_year >= period.year - 1,
+          "No governed annual effectif recorded (FR-015)." if latest_year is None
+          else f"Latest governed effectif is for {latest_year}; expected {period.year - 1} or later.")
+
+    employees = _france_employees(db, organization_id)
+    missing_pas = [e for e in employees if get_active_france_pas_rate(db, organization_id, e.id, as_of=period) is None]
+    check("pas_rates", "D", "PAS rate for every France employee", not missing_pas,
+          f"{len(missing_pas)} France employee(s) have no active PAS rate at period start.")
+
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    _rates, _slabs, pack = resolve_tax_configuration(db, "FR", payroll_date=period)
+    check("statutory_pack", "H", "Active France statutory pack (gate G1)", pack is not None,
+          f"No Active France statutory pack covers {period} — approve and activate the FR pack (gate G1).")
+    return checks
+
+
 def _validate_france_dsn_completeness(
     db: Session, organization_id: int, period_start: date,
 ) -> Tuple[List[str], Optional[str]]:
-    """FR-031 pre-submit validator. Returns (errors, blocked_reason). A clean
-    run passes into VALIDATED; any error keeps the submission DRAFT with the
-    detail recorded — approval is blocked, never bypassed (FR-027)."""
-    errors: List[str] = []
-    profile = db.query(EmployerFranceProfile).filter(
-        EmployerFranceProfile.organization_id == organization_id).first()
-    if not profile:
-        return ["France employer profile is not configured (SIREN, filing due-date class)."], None
-    if profile.readiness_status not in {"READY", "LIVE"}:
-        errors.append(
-            f"France employer profile readiness is {profile.readiness_status!r}; evidence-gate H (FR §11) "
-            "requires READY or LIVE before a DSN may be opened."
-        )
-    if profile.filing_due_date_class not in _FR_FILING_DUE_DATE_CLASSES:
-        errors.append(f"filingDueDateClass {profile.filing_due_date_class!r} is not a valid Urssaf class.")
-
-    has_pack = (db.query(FranceEstablishmentRatePack)
-                .filter(FranceEstablishmentRatePack.organization_id == organization_id,
-                        FranceEstablishmentRatePack.effective_from <= period_start)
-                .filter((FranceEstablishmentRatePack.effective_to.is_(None))
-                        | (FranceEstablishmentRatePack.effective_to >= period_start))
-                .first())
-    if not has_pack:
-        errors.append("No France establishment rate pack (SIRET, AT/MP) is effective at period start.")
-
-    if not profile.effectif_state:
-        errors.append("No governed annual effectif recorded (FR-015) — FNAL/CFP/apprenticeship predicates need it.")
-    else:
-        latest_year = max((int(k) for k in profile.effectif_state or {} if str(k).isdigit()), default=None)
-        if latest_year is not None and latest_year < period_start.year - 1:
-            errors.append(
-                f"Latest governed effectif is for {latest_year}; expected {period_start.year - 1} or later."
-            )
-
-    fr_employees = (db.query(PayrollEmployee)
-                    .filter(PayrollEmployee.organization_id == organization_id,
-                            PayrollEmployee.country_code == "FR").all())
-    missing_pas = 0
-    for emp in fr_employees:
-        rate = get_active_france_pas_rate(db, organization_id, emp.id, as_of=period_start)
-        if rate is None or rate.status not in {"ACTIVE", "PENDING"}:
-            missing_pas += 1
-    if missing_pas:
-        errors.append(f"{missing_pas} France employee(s) have no active PAS rate at period start.")
-
+    """FR-031 pre-submit validator. Returns (errors, blocked_reason) from
+    the shared readiness checks. A clean run passes into VALIDATED; any
+    error keeps the submission DRAFT with the detail recorded — approval is
+    blocked, never bypassed (FR-027)."""
+    errors = [c["detail"] for c in compute_france_readiness_checks(db, organization_id, period_start) if not c["ok"]]
     blocked = "; ".join(errors) if errors else None
     return errors, blocked
 
+
+def get_france_readiness(db: Session, organization_id: int, for_period: Optional[date] = None) -> dict:
+    """Per-org France launch readiness (FR §11 gate H + FR-031 dry-run).
+    Computed from the real records on every call — the status is never a
+    hand-set flag. LIVE is shown only after set_france_live accepted it."""
+    period = for_period or (date.today().replace(day=28) + timedelta(days=4)).replace(day=1)
+    checks = compute_france_readiness_checks(db, organization_id, period)
+    errors = [c["detail"] for c in checks if not c["ok"]]
+    profile = db.query(EmployerFranceProfile).filter(
+        EmployerFranceProfile.organization_id == organization_id).first()
+    packs = list_france_establishment_rate_packs(db, organization_id)
+    ready = not errors
+    if profile is not None and profile.readiness_status == "LIVE":
+        status = "LIVE" if ready else "LIVE_CHECKS_FAILING"
+    else:
+        status = "READY" if ready else "NOT_READY"
+    return {
+        "asOf": str(date.today()),
+        "forPeriod": str(period),
+        "ready": ready,
+        "organizationId": organization_id,
+        "profileConfigured": profile is not None,
+        "readinessStatus": status,
+        "pasCrmStatus": profile.pas_crm_status if profile else "NOT_CONNECTED",
+        "effectiveRatePacks": sum(1 for p in packs if p.effective_from <= period
+                                  and (p.effective_to is None or p.effective_to >= period)),
+        "effectifGoverned": bool(profile and profile.effectif_state),
+        "dsnBlockedReason": "; ".join(errors) if errors else None,
+        "missing": errors,
+        "checks": checks,
+    }
+
+
+def set_france_live(
+    db: Session, organization_id: int, data: "FranceGoLiveRequest", actor_id: Optional[int] = None,
+) -> dict:
+    """Mark France payroll LIVE for an org — accepted only when every
+    computed check passes; evidence is recorded on the profile and audited."""
+    readiness = get_france_readiness(db, organization_id)
+    if not readiness["ready"]:
+        raise BadRequestException("France cannot go LIVE until every readiness check passes: "
+                                  + "; ".join(readiness["missing"]))
+    profile = get_employer_france_profile(db, organization_id)
+    old_status = profile.readiness_status
+    profile.readiness_status = "LIVE"
+    profile.readiness_evidence = {
+        **(data.evidence or {}),
+        "checks": readiness["checks"], "wentLiveAt": datetime.utcnow().isoformat(), "wentLiveBy": actor_id,
+    }
+    db.commit()
+    record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_employer_profile",
+                     entity_id=profile.id, legal_reference="FR §11 gate H",
+                     old_value={"readiness_status": old_status}, new_value={"readiness_status": "LIVE"})
+    log_activity(db, organization_id, "France payroll marked LIVE (all readiness checks passed).", actor_id=actor_id)
+    return get_france_readiness(db, organization_id)
+
+
+# ── DSN (FR-030..033) ───────────────────────────────────────────────────
 
 def create_france_dsn_submission(
     db: Session, organization_id: int, data: "FranceDsnSubmissionCreate", actor_id: Optional[int] = None,
@@ -28355,14 +29028,26 @@ def create_france_dsn_submission(
     """Open a FranceDsnSubmission (FR-030..033). payload_hash is computed
     over the immutable original identity; due_date follows the profile's
     filing_due_date_class (5th or 15th of M+1). Runs the FR-031 validator:
-    clean → VALIDATED, blocked → DRAFT with validation_errors recorded."""
+    clean → VALIDATED, blocked → DRAFT with validation_errors recorded.
+    `correctionOfId` opens a correction of an earlier same-period
+    submission; the original is never modified (FR-033/FR-053)."""
     period_start = data.periodStart
+    if data.correctionOfId is not None:
+        original = (db.query(FranceDsnSubmission)
+                    .filter(FranceDsnSubmission.id == data.correctionOfId,
+                            FranceDsnSubmission.organization_id == organization_id).first())
+        if not original:
+            raise NotFoundException("FranceDsnSubmission", data.correctionOfId)
+        if original.period_start != period_start:
+            raise BadRequestException("A correction must cover the same period as the submission it corrects.")
+        if original.status not in {"BUSINESS_REJECTED", "ACKNOWLEDGED", "CRM_RESOLVED", "SETTLED"}:
+            raise BadRequestException(
+                f"Only a filed submission can be corrected (status {original.status}); "
+                "an unfiled one is simply revalidated."
+            )
     profile = db.query(EmployerFranceProfile).filter(
         EmployerFranceProfile.organization_id == organization_id).first()
-    if profile:
-        due_day = 5 if profile.filing_due_date_class == "M5" else 15
-    else:
-        due_day = 15
+    due_day = 5 if profile is not None and profile.filing_due_date_class == "M5" else 15
     period_end = data.periodEnd or (period_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     due_date = (period_end.replace(day=28) + timedelta(days=4)).replace(day=1) + timedelta(days=due_day - 1)
 
@@ -28378,6 +29063,7 @@ def create_france_dsn_submission(
         status="DRAFT" if errors else "VALIDATED",
         validation_errors=errors or [],
         blocked_reason=blocked,
+        correction_of_id=data.correctionOfId,
         created_by_id=actor_id,
     )
     db.add(submission)
@@ -28386,7 +29072,8 @@ def create_france_dsn_submission(
     record_tax_audit(db, actor_id=actor_id, action="create", entity_type="france_dsn_submission",
                      entity_id=submission.id, legal_reference="FR-030/FR-031",
                      new_value={"period_start": str(period_start), "period_end": str(period_end),
-                                "due_date": str(due_date), "status": submission.status})
+                                "due_date": str(due_date), "status": submission.status,
+                                "correction_of_id": data.correctionOfId})
     log_activity(db, organization_id,
                  f"France DSN {submission.dsn_version} for {period_start} opened ({submission.status}).",
                  actor_id=actor_id)
@@ -28404,14 +29091,26 @@ def list_france_dsn_submissions(
     return query.order_by(FranceDsnSubmission.period_start.desc()).all()
 
 
+# Which lifecycle column must carry evidence for a target status (FR-032):
+# an authority state is never asserted without the signal that proves it.
+_FR_DSN_EVIDENCE_FOR_STATUS = {
+    "ACKNOWLEDGED": ("technical_ack", "technicalAck (transport acknowledgement)"),
+    "BUSINESS_REJECTED": ("business_crm", "businessCrm (the rejecting business CRM)"),
+    "CRM_RESOLVED": ("business_crm", "businessCrm (the CRM showing anomalies resolved)"),
+    "SETTLED": ("payment_state", "paymentState (the settlement reference)"),
+}
+
+
 def transition_france_dsn_submission(
     db: Session, organization_id: int, submission_id: int, data: "FranceDsnStatusUpdate",
     actor_id: Optional[int] = None,
 ) -> FranceDsnSubmission:
-    """State-machine DSN lifecycle (FR-032): transport acknowledgement,
-    business CRM, anomaly resolution and payment settlement are separate
-    columns — a correct net-pay calc is not evidence of successful
-    reporting, so each signal lands in its own field."""
+    """State-machine DSN lifecycle (FR-032/FR-033). Transport
+    acknowledgement, business CRM and payment settlement are separate
+    columns, and each authority state requires its evidence. DRAFT →
+    VALIDATED re-runs the FR-031 validator (never a bypass). UNKNOWN is
+    resolved only by reconciliation to ACKNOWLEDGED or BUSINESS_REJECTED —
+    never re-queued or re-transmitted blind (FR-058)."""
     if data.status not in _FR_DSN_STATUSES:
         raise BadRequestException(f"Unknown DSN status {data.status!r}.")
     submission = (db.query(FranceDsnSubmission)
@@ -28424,36 +29123,48 @@ def transition_france_dsn_submission(
         raise BadRequestException(
             f"Cannot transition a France DSN from {submission.status} to {data.status}."
         )
-    if data.status == "CORRECTION":
-        raise BadRequestException(
-            "CORRECTION is not a lifecycle status — open a correction submission via correction_of_id."
-        )
-    submission.status = data.status
+    if data.status == "VALIDATED":
+        errors, blocked = _validate_france_dsn_completeness(db, organization_id, submission.period_start)
+        if errors:
+            submission.validation_errors = errors
+            submission.blocked_reason = blocked
+            db.commit()
+            raise BadRequestException("The FR-031 pre-submit validator still fails: " + blocked)
+        submission.validation_errors = []
+        submission.blocked_reason = None
     if data.technicalAck is not None:
         submission.technical_ack = data.technicalAck
     if data.businessCrm is not None:
         submission.business_crm = data.businessCrm
     if data.paymentState is not None:
         submission.payment_state = data.paymentState
+    evidence = _FR_DSN_EVIDENCE_FOR_STATUS.get(data.status)
+    if evidence and not getattr(submission, evidence[0]):
+        db.rollback()
+        raise BadRequestException(f"Moving a DSN to {data.status} requires {evidence[1]}.")
+    old_status = submission.status
+    submission.status = data.status
     if data.blockedReason is not None:
         submission.blocked_reason = data.blockedReason
     if data.status == "TRANSMITTED":
         submission.submitted_at = datetime.utcnow()
     if data.status in {"ACKNOWLEDGED", "CRM_RESOLVED"}:
-        submission.acknowledged_at = datetime.utcnow()
+        submission.acknowledged_at = submission.acknowledged_at or datetime.utcnow()
     db.commit()
     db.refresh(submission)
     record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_dsn_submission",
-                     entity_id=submission.id, legal_reference="FR-032", new_value={"status": data.status})
+                     entity_id=submission.id, legal_reference="FR-032",
+                     old_value={"status": old_status}, new_value={"status": data.status})
     return submission
 
 
 def create_france_dsn_outbox_item(
     db: Session, organization_id: int, data: "FranceDsnOutboxCreate", actor_id: Optional[int] = None,
 ) -> FranceDsnOutboxItem:
-    """Durable idempotent outbox (FR-033). A unique idempotency_key makes a
-    retry resubmit-safe: a duplicate returns the existing row instead of
-    re-transmitting."""
+    """Durable idempotent outbox (FR-033). The idempotency key is the
+    (organization, submission, action) identity — NOT the payload — so a
+    retry with a changed payload still resolves to the one existing row
+    instead of queuing a second transmission of the same action."""
     if data.action not in _FR_DSN_OUTBOX_ACTIONS:
         raise BadRequestException(f"action must be one of {sorted(_FR_DSN_OUTBOX_ACTIONS)}, got {data.action!r}.")
     submission = (db.query(FranceDsnSubmission)
@@ -28462,10 +29173,9 @@ def create_france_dsn_outbox_item(
     if not submission:
         raise NotFoundException("FranceDsnSubmission", data.submissionId)
 
-    payload = data.payload or {}
     idempotency_key = hashlib.sha256(
-        json.dumps({"org": organization_id, "submission": data.submissionId, "action": data.action,
-                    "payload": payload}, sort_keys=True, default=str).encode("utf-8")
+        json.dumps({"org": organization_id, "submission": data.submissionId, "action": data.action},
+                   sort_keys=True).encode("utf-8")
     ).hexdigest()[:64]
 
     existing = (db.query(FranceDsnOutboxItem)
@@ -28476,7 +29186,7 @@ def create_france_dsn_outbox_item(
     item = FranceDsnOutboxItem(
         submission_id=data.submissionId,
         action=data.action,
-        payload=payload,
+        payload=data.payload or {},
         idempotency_key=idempotency_key,
         status="PENDING",
     )
@@ -28505,13 +29215,25 @@ def list_france_dsn_outbox_items(
     return query.order_by(FranceDsnOutboxItem.created_at.desc()).all()
 
 
+# Outbox transport states (FR-033/FR-058). UNKNOWN is resolved only by
+# reconciliation (ACKNOWLEDGED, or FAILED once non-receipt is proven) —
+# never straight back to SENT; only a DEFINITE failure may be re-sent.
+_FR_DSN_OUTBOX_TRANSITIONS = {
+    "PENDING": {"SENT", "UNKNOWN", "FAILED"},
+    "SENT": {"ACKNOWLEDGED", "UNKNOWN", "FAILED"},
+    "UNKNOWN": {"ACKNOWLEDGED", "FAILED"},
+    "FAILED": {"SENT"},
+    "ACKNOWLEDGED": set(),
+}
+
+
 def transition_france_dsn_outbox_item(
     db: Session, organization_id: int, item_id: int, status: str,
     last_error: Optional[str] = None, actor_id: Optional[int] = None,
 ) -> FranceDsnOutboxItem:
-    """Transport-side outbox acknowledgement (FR-033): PENDING → SENT →
-    UNKNOWN/ACKNOWLEDGED/FAILED. UNKNOWN deliberately stays terminal for
-    the initiating action — reconciliation, not blind replay."""
+    """Transport-side outbox transition (FR-033/FR-058) — see
+    _FR_DSN_OUTBOX_TRANSITIONS. Declaring an UNKNOWN item FAILED requires a
+    reconciliation note (last_error)."""
     if status not in _FR_DSN_OUTBOX_STATUSES:
         raise BadRequestException(f"Outbox status must be one of {_FR_DSN_OUTBOX_STATUSES}, got {status!r}.")
     item = (db.query(FranceDsnOutboxItem)
@@ -28520,10 +29242,14 @@ def transition_france_dsn_outbox_item(
                     FranceDsnSubmission.organization_id == organization_id).first())
     if not item:
         raise NotFoundException("FranceDsnOutboxItem", item_id)
-    if item.status == "ACKNOWLEDGED":
-        raise BadRequestException("An acknowledged outbox item cannot be re-transitioned.")
+    if status not in _FR_DSN_OUTBOX_TRANSITIONS.get(item.status, set()):
+        raise BadRequestException(f"Cannot move a France DSN outbox item from {item.status} to {status}.")
+    if item.status == "UNKNOWN" and status == "FAILED" and not (last_error or "").strip():
+        raise BadRequestException("Declaring an UNKNOWN transmission FAILED requires the reconciliation result (last_error).")
+    old_status = item.status
     item.status = status
-    item.attempts += 1
+    if status == "SENT":
+        item.attempts += 1
     item.last_error = last_error
     if status in {"SENT", "ACKNOWLEDGED"}:
         item.sent_at = item.sent_at or datetime.utcnow()
@@ -28532,33 +29258,6 @@ def transition_france_dsn_outbox_item(
     db.commit()
     db.refresh(item)
     record_tax_audit(db, actor_id=actor_id, action="update", entity_type="france_dsn_outbox_item",
-                     entity_id=item.id, legal_reference="FR-033", new_value={"status": status})
+                     entity_id=item.id, legal_reference="FR-033",
+                     old_value={"status": old_status}, new_value={"status": status})
     return item
-
-
-def get_france_readiness(db: Session, organization_id: int, for_period: Optional[date] = None) -> dict:
-    """Per-org France launch readiness (FR §11 gate H + FR-031 dry-run).
-    Returns the same block list the next DSN open would hit, so the UI can
-    show exactly what is missing without writing a submission row."""
-    period = for_period or (date.today().replace(day=28) + timedelta(days=4)).replace(day=1)
-    errors, blocked = _validate_france_dsn_completeness(db, organization_id, period)
-    profile = db.query(EmployerFranceProfile).filter(
-        EmployerFranceProfile.organization_id == organization_id).first()
-    packs = list_france_establishment_rate_packs(db, organization_id)
-
-    def _effective_pack_count():
-        return sum(1 for p in packs if p.effective_from <= period and (p.effective_to is None or p.effective_to >= period))
-
-    return {
-        "asOf": str(date.today()),
-        "forPeriod": str(period),
-        "ready": not bool(errors),
-        "organizationId": organization_id,
-        "profileConfigured": profile is not None,
-        "readinessStatus": profile.readiness_status if profile else "NOT_READY",
-        "pasCrmStatus": profile.pas_crm_status if profile else "NOT_CONNECTED",
-        "effectiveRatePacks": _effective_pack_count(),
-        "effectifGoverned": bool(profile and profile.effectif_state),
-        "dsnBlockedReason": blocked,
-        "missing": errors,
-    }

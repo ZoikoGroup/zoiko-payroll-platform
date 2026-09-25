@@ -64,7 +64,7 @@ class MissingComplianceConfigurationError(Exception):
 #   US — same unresolved risk applies (never actually attempted).
 #   UK — also blocked by its tax pack still being Draft (see history above
 #        this rewrite) — _find_active_tax_pack only matches status=="Active".
-_VALIDATION_ENABLED_COUNTRIES: set[str] = set()
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact

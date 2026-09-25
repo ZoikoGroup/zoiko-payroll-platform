@@ -630,8 +630,17 @@ export const setFilingCalendarEntryStatus = (id, status) =>
 export const getFranceReadiness = (params) =>
   apiFetch("/api/super-admin/compliance/france/readiness", { params });
 
-export const getFranceEmployerProfile = (params) =>
-  apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
+export const getFranceEmployerProfile = async (params) => {
+  // 404 is a legitimate empty state — the org has no France profile
+  // configured yet ("SIREN identity missing" / "Not configured" in the
+  // overview) — never a hard failure that should blank the whole dashboard.
+  try {
+    return await apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
+  } catch (err) {
+    if (err && err.status === 404) return null;
+    throw err;
+  }
+};
 
 export const upsertFranceEmployerProfile = (payload, params) =>
   apiFetch("/api/super-admin/compliance/france/employer-profile", { method: "PUT", body: payload, params });
@@ -656,3 +665,34 @@ export const listFranceDsnSubmissions = (params) =>
 
 export const listFranceDsnOutboxItems = (params) =>
   apiFetch("/api/super-admin/compliance/france/dsn-outbox", { params });
+
+// France organizations only (the org's country resolves to FR) — the France
+// endpoints reject any other organization.
+export const listFranceOrganizations = () =>
+  apiFetch("/api/organizations", { params: { limit: 200, country_code: "FR" } }).then((data) => data.organizations || []);
+
+export const correctFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif/corrections", { method: "POST", body: payload, params });
+
+export const listFranceEstablishments = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { params });
+
+export const createFranceEstablishment = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { method: "POST", body: payload, params });
+
+export const updateFranceEstablishment = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishments/${id}`, { method: "PUT", body: payload, params });
+
+export const updateFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}`, { method: "PATCH", body: payload, params });
+
+export const closeFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}/close`, { method: "POST", body: payload, params });
+
+// Fill a France tax pack's missing statutory rows from the 2026 catalog
+// (insert-only; editable packs only).
+export const loadFranceStatutoryDefaults = (packId) =>
+  apiFetch(`/api/super-admin/compliance/france/packs/${packId}/load-statutory-defaults`, { method: "POST" });
+
+export const setFranceLive = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/go-live", { method: "POST", body: payload, params });

@@ -26,6 +26,9 @@ export const COUNTRIES = [
   // France (2026-09-24, ZP-FR-ENG-001) — mirrors employee_validation.py's
   // FREmployeeValidation exactly.
   { code: "FR", name: "France" },
+  // Ireland (2026-09-25, ZP-IE-ENG-001) — mirrors employee_validation.py's
+  // IEEmployeeValidation exactly.
+  { code: "IE", name: "Ireland" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {
@@ -154,6 +157,21 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "siret", label: "SIRET", type: "text", placeholder: "14 digits", strip: " ", pattern: /^\d{14}$/, error: "SIRET must be exactly 14 digits." },
     { key: "nif", label: "NIF (transfert)", type: "text", upper: true, strip: " ", pattern: /^[0-9A-Z]{12}$/, error: "FV/IFU-style foreign tax identifier is not valid (12 alphanumeric)." },
     { key: "iban", label: "IBAN", type: "text", placeholder: "FR + 25 characters", upper: true, strip: " ", pattern: /^FR\d{12}[0-9A-Z]{11}\d{2}$/, error: "French IBAN must be FR followed by 25 characters (12 digits, 11 alphanumeric, 2 digits)." },
+    { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
+  ],
+  IE: [
+    { key: "ppsn", label: "PPSN", type: "text", required: true, upper: true, strip: " ", pattern: /^\d{7}[A-Z]?$/, error: "PPSN must be 7 digits (an optional trailing letter is accepted for non-individual registrations)." },
+    { key: "employer_reference", label: "Employer Reference", type: "text", required: true, strip: " ", pattern: /^[A-Za-z0-9-]{3,32}$/, error: "Employer Reference must be 3-32 letters, digits or hyphens." },
+    { key: "revenue_employment_id", label: "Revenue Employment Identifier", type: "text", upper: true, strip: " ", pattern: /^[A-Z0-9-]{3,64}$/, error: "Revenue Employment Identifier must be 3-64 letters, digits or hyphens." },
+    { key: "prsi_class", label: "PRSI Class", type: "select", required: true, choices: ["A0", "AX", "AL", "A1"], error: "PRSI class must be one of A0, AX, AL, A1 (the certified launch cohort)." },
+    { key: "prsi_exemption_reference", label: "PRSI Exemption Reference", type: "text", strip: " ", pattern: /^[A-Za-z0-9/._-]{3,64}$/, error: "PRSI exemption evidence reference looks incorrect." },
+    { key: "usc_status", label: "USC Status", type: "select", choices: ["Standard", "Reduced", "Exempt"] },
+    { key: "pension_scheme_reference", label: "Pension Scheme Reference", type: "text", upper: true, strip: " ", pattern: /^[A-Z0-9-]{3,64}$/, error: "Pension scheme reference must be 3-64 letters, digits or hyphens." },
+    { key: "pension_qualifying_exemption_reference", label: "Qualifying Pension Exemption Reference", type: "text", upper: true, strip: " ", pattern: /^[A-Z0-9-]{3,64}$/, error: "Qualifying pension exemption must cite a scheme reference (IE-021 - a bare checkbox is not an exemption)." },
+    { key: "pension_qualifying_exemption_effective_from", label: "Qualifying Pension Exemption Effective From", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Qualifying pension exemption effective date must be YYYY-MM-DD." },
+    { key: "contracted_weekly_hours", label: "Contracted Weekly Hours", type: "text", required: true, strip: " ", pattern: /^\d{1,2}(\.\d{1,2})?$/, error: "Contracted weekly hours must be a number (IE-035 requires working-hours evidence for the minimum-wage check)." },
+    { key: "sector_wage_order", label: "Sector Wage Order", type: "select", choices: ["NONE", "ERO", "SEO"] },
+    { key: "iban", label: "IBAN", type: "text", placeholder: "IE + 22 characters", upper: true, strip: " ", pattern: /^IE\d{2}[A-Z]{4}\d{6}\d{8}\d{2}$/, error: "Irish IBAN must be IE followed by 22 characters (4 letters, then 16 digits)." },
     { key: "bic", label: "BIC", type: "text", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "BIC must be 8 or 11 characters." },
   ],
   // Caribbean production jurisdictions (2026-09-21, fields added

@@ -20,6 +20,14 @@ export const REGISTRATION_COUNTRIES = [
   // region list below (18 regions incl. overseas d-partements), unlike the
   // country-level Caribbean entries.
   "France",
+  // Ireland (2026-09-25, ZP-IE-ENG-001) - Europe expansion. PAYE, PRSI,
+  // USC, LPT and the national minimum wage are all administered nationally
+  // by Revenue / the Department of Social Protection with no devolved payroll
+  // variation, so no statutory content ever varies by province. The
+  // pre-existing Connacht/Leinster/Munster/Ulster entry in
+  // STATES_BY_COUNTRY below therefore stays purely an address/province
+  // selector. Europe/Dublin is already in TIMEZONES_BY_COUNTRY below.
+  "Ireland",
 ];
 
 const STATES_BY_COUNTRY = {

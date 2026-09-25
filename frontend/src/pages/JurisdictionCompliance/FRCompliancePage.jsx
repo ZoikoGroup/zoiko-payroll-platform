@@ -1,104 +1,96 @@
-import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import {
-  LayoutDashboard, Building2, Users, Layers, Percent, Send,
-} from "lucide-react";
-import FROverviewDashboard from "./components/france/FROverviewDashboard";
-import FranceEmployerProfileTab from "./components/france/FranceEmployerProfileTab";
-import FranceEffectifTab from "./components/france/FranceEffectifTab";
-import FranceEstablishmentRatePacksTab from "./components/france/FranceEstablishmentRatePacksTab";
-import FrancePASRatesTab from "./components/france/FrancePASRatesTab";
-import FranceDsnTab from "./components/france/FranceDsnTab";
-import { listOrganizationsForPicker } from "../../service/superAdminService";
+import { useMemo } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { BookOpen } from "lucide-react";
+import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
+import FranceAuthorityPanel from "../../components/jurisdiction/france/FranceAuthorityPanel";
+import FranceStatutoryReferencePanel from "../../components/jurisdiction/france/FranceStatutoryReferencePanel";
 
-// France country compliance workspace (ZP-FR-ENG-001) — the primary landing
-// page for Compliance -> France.
+// France Compliance — the same pack-based jurisdiction architecture as every
+// other country, split into two views:
 //
-// France does NOT use the pack-based JurisdictionLayout every other country
-// here uses, for the same structural reason Germany already documented in
-// DECompliancePage.jsx: France's mandatory contributions and PAS are the
-// engine's content-as-data rate_map resolved from authority-held artifacts
-// (DGFiP personalized PAS rates, URSSAF AT/MP establishment rate packs,
-// governed effectif) rather than Land-style stat/tax packs. There is no
-// jurisdiction-level "Compliance Pack" to author — so this workspace is
-// organized around the five authority surfaces + DSN diagnostics instead.
+//   1. "Tax Configuration" — JurisdictionLayout(country="FR"). The France
+//      statutory content (PASS/SMIC/rates/RGDU/PAS parameters) is PACK DATA
+//      (ZP-FR-ENG-001 FR-003): the FR-2026-H1/H2 packs are edited in Draft on
+//      the "Statutory Values" tab, then approved and activated like any
+//      other country's pack. France has no income-tax brackets, so the
+//      shared "Tax Slabs" tab is hidden.
 //
-// Everything below is organization-scoped (the France authority data model
-// is per-employer: SIREN identity, SIRET rate packs, PAS rates, effectif),
-// so an Organization picker is surfaced once at the top and drives every
-// section.
-const SECTIONS = [
-  { key: "overview", label: "Overview", icon: LayoutDashboard },
-  { key: "employer-profile", label: "Employer Profile", icon: Building2 },
-  { key: "effectif", label: "Effectif", icon: Users },
-  { key: "rate-packs", label: "Establishment Rate Packs", icon: Layers },
-  { key: "pas-rates", label: "PAS Rates", icon: Percent },
-  { key: "dsn", label: "DSN & Outbox", icon: Send },
+//   2. "Employer & Authority Configuration" — FranceAuthorityPanel, the
+//      organization-scoped payroll_fr_* data (SIREN profile, establishments,
+//      governed effectif, SIRET rate packs, PAS rates, DSN, readiness). That
+//      data is not pack-versioned, so it is NOT a pack tab — it is always
+//      reachable, with or without a pack selected.
+//
+// The selected view and organization live in the URL (?view=&org=) so they
+// survive navigation and every France section shares ONE organization.
+const extraTabs = [
+  {
+    key: "statutory-reference", label: "Statutory Values", icon: BookOpen, after: "overview",
+    isVisible: (pack) => pack?.packType === "tax",
+    render: ({ pack, onReload }) => <FranceStatutoryReferencePanel pack={pack} onReload={onReload} />,
+  },
+];
+
+const VIEWS = [
+  { key: "tax", label: "Tax Configuration" },
+  { key: "employer", label: "Employer & Authority Configuration" },
 ];
 
 export default function FRCompliancePage() {
+  const { jurisdiction } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const sectionFromUrl = searchParams.get("section");
-  const [section, setSection] = useState(sectionFromUrl || "overview");
-  const [organizations, setOrganizations] = useState([]);
-  const [organizationId, setOrganizationId] = useState(null);
 
-  useEffect(() => {
-    setSection(sectionFromUrl || "overview");
-  }, [sectionFromUrl]);
+  const view = searchParams.get("view") === "employer" ? "employer" : "tax";
+  const organizationId = useMemo(() => {
+    const raw = Number(searchParams.get("org"));
+    return Number.isInteger(raw) && raw > 0 ? raw : null;
+  }, [searchParams]);
 
-  useEffect(() => {
-    listOrganizationsForPicker()
-      .then((orgs) => {
-        setOrganizations(orgs || []);
-        if (orgs?.length) setOrganizationId((current) => current || orgs[0].id);
-      })
-      .catch(() => setOrganizations([]));
-  }, []);
-
-  function selectSection(key) {
-    setSection(key);
-    setSearchParams(key === "overview" ? {} : { section: key });
+  function updateParams(changes) {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(changes).forEach(([k, v]) => (v == null ? next.delete(k) : next.set(k, String(v))));
+    setSearchParams(next, { replace: true });
   }
 
   return (
     <div>
-      <div className="mb-2">
-        <h1 className="text-lg font-bold text-foreground">France Payroll Compliance</h1>
-        <p className="text-xs text-foreground-muted">
-          Manage France's statutory payroll configuration — the SIREN employer profile (IDCC / URSSAF / filing due-date class),
-          governed effectif thresholds, URSSAF estate rate packs (AT/MP, FNAL, CFP), DGFiP PAS rates, the DSN transport
-          diagnostics, and the launch-gate H readiness dry-run.
-        </p>
-      </div>
-
-      <div className="mb-5 flex flex-wrap items-center gap-1 rounded-lg border border-border bg-surface-muted p-1">
-        {SECTIONS.map((s) => (
+      <div className="mb-5 flex gap-1 rounded-lg border border-border bg-surface-muted p-1 w-fit">
+        {VIEWS.map((v) => (
           <button
-            key={s.key}
-            onClick={() => selectSection(s.key)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-              section === s.key ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"
-            }`}
+            key={v.key} onClick={() => updateParams({ view: v.key === "tax" ? null : v.key })}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold ${view === v.key ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"}`}
           >
-            <s.icon size={13} />
-            {s.label}
+            {v.label}
           </button>
         ))}
       </div>
-
-      {section === "overview" && (
-        <FROverviewDashboard
+      {view === "tax" ? (
+        <>
+          <p className="mb-4 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
+            France statutory content ships as the Draft packs <span className="font-mono">FR-2026-H1</span> (Jan–Apr)
+            and <span className="font-mono">FR-2026-H2</span> (from 1 May, the PAS neutral-grid boundary). Review and edit
+            values on a pack&apos;s <b>Statutory Values</b> tab, then approve and set it Active. Organization data (PAS,
+            establishments, employer rates, DSN) is under <b>Employer &amp; Authority Configuration</b>.
+          </p>
+          <JurisdictionLayout
+            country="FR" countryName="France"
+            initialState={jurisdiction ? decodeURIComponent(jurisdiction) : ""}
+            onStateChange={(state) =>
+              navigate(state ? `/super-admin/compliance/france/${encodeURIComponent(state)}` : "/super-admin/compliance/france")
+            }
+            extraTabs={extraTabs}
+            hiddenTabs={["slabs"]}
+          />
+        </>
+      ) : (
+        <FranceAuthorityPanel
           organizationId={organizationId}
-          organizations={organizations}
-          onOrganizationChange={setOrganizationId}
+          onOrganizationIdChange={(id) => updateParams({ org: id })}
+          section={searchParams.get("section") || "overview"}
+          onSectionChange={(s) => updateParams({ section: s === "overview" ? null : s })}
         />
       )}
-      {section === "employer-profile" && <FranceEmployerProfileTab organizationId={organizationId} />}
-      {section === "effectif" && <FranceEffectifTab organizationId={organizationId} />}
-      {section === "rate-packs" && <FranceEstablishmentRatePacksTab organizationId={organizationId} />}
-      {section === "pas-rates" && <FrancePASRatesTab organizationId={organizationId} />}
-      {section === "dsn" && <FranceDsnTab organizationId={organizationId} />}
     </div>
   );
 }

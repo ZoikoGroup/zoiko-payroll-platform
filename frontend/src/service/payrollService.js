@@ -43,6 +43,8 @@ export const COMPLIANCE_COUNTRIES = [
   { code: "TT", name: "Trinidad and Tobago" },
   // France (2026-09-24, ZP-FR-ENG-001) — Europe expansion.
   { code: "FR", name: "France" },
+  // Ireland (2026-09-25, ZP-IE-ENG-001) — Europe expansion.
+  { code: "IE", name: "Ireland" },
 ];
 
 export const DEFAULT_COUNTRY = "IN";

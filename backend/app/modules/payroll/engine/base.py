@@ -695,6 +695,19 @@ class PayrollContext:
     france_employee_id: int = None
     france_organization_id: int = None
 
+    ireland_pay_date: date = None
+    ireland_rpn: dict = field(default_factory=dict)
+    ireland_employee: dict = field(default_factory=dict)
+    ireland_myfuturefund: dict = field(default_factory=dict)
+    ireland_ytd: dict = field(default_factory=dict)
+    ireland_paye_payable: Decimal = None
+    ireland_usc_payable: Decimal = None
+    ireland_usc_paid_ytd: Decimal = None
+    ireland_prsi_reckonable: Decimal = None
+    ireland_mff_base: Decimal = None
+    ireland_employee_id: int = None
+    ireland_organization_id: int = None
+
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
     # affects a figure. None means "caller didn't supply one," in which
@@ -1090,10 +1103,55 @@ class PayrollResult:
     fr_pas_rate_pct: Decimal = None
     fr_pas_rate_id: str = None
     fr_calculation_snapshot: dict = None
+    # RGDU/CSG accumulator state AFTER this period — the service persists
+    # it on commit so the next period accumulates (FR-023).
+    fr_ytd_after: dict = None
     # Non-empty whenever a mandatory rate/base input is genuinely not
     # configured — service.py turns this into a BLOCKED payroll (FR-027:
     # unknown mandatory rate = NOT_READY, never zero-as-final).
     fr_not_configured: list = None
+
+    ie_paye: Decimal = Decimal("0")
+    ie_employee_total: Decimal = Decimal("0")
+    ie_paye_basis: str = None
+    ie_paye_unrounded: Decimal = None
+    ie_standard_rate_pay: Decimal = Decimal("0")
+    ie_higher_rate_pay: Decimal = Decimal("0")
+    ie_tax_credit_applied: Decimal = Decimal("0")
+    ie_rpn_number: str = None
+    ie_rpn_snapshot_id: int = None
+    ie_rpn_hash: str = None
+    ie_rpn_issued_at: str = None
+    ie_usc: Decimal = Decimal("0")
+    ie_usc_unrounded: Decimal = None
+    ie_usc_payable_ytd_after: Decimal = None
+    ie_employee_prsi: Decimal = Decimal("0")
+    ie_employer_prsi: Decimal = Decimal("0")
+    ie_employer_prsi_total: Decimal = Decimal("0")
+    ie_prsi_class: str = None
+    ie_prsi_declaration: str = None
+    ie_prsi_ax_credit: Decimal = Decimal("0")
+    ie_prsi_contribution_weeks: Decimal = None
+    ie_prsi_weekly_reckonable: Decimal = None
+    ie_prsi_reckonable_ytd_after: Decimal = None
+    ie_mff_employee: Decimal = Decimal("0")
+    ie_mff_employer: Decimal = Decimal("0")
+    ie_mff_state_topup: Decimal = Decimal("0")
+    ie_mff_status: str = None
+    ie_mff_contributory: bool = False
+    ie_mff_ceased_reason: str = None
+    ie_mff_earnings_ytd_after: Decimal = None
+    ie_lpt: Decimal = Decimal("0")
+    ie_lpt_instructed: bool = False
+    ie_lpt_rate_pct: Decimal = None
+    ie_employee_pension: Decimal = Decimal("0")
+    ie_employer_pension: Decimal = Decimal("0")
+    ie_nmw_rate: Decimal = None
+    ie_nmw_band: str = None
+    ie_effective_hourly: Decimal = None
+    ie_tax_year: int = None
+    ie_calculation_trace: dict = None
+    ie_ytd_after: dict = None
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through

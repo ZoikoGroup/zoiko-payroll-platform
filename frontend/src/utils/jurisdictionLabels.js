@@ -22,6 +22,11 @@ const INCOME_TAX_LABELS = {
   // nonzero value for them.
   BB: "PAYE", DO: "ISR", GY: "PAYE", JM: "PAYE", TT: "PAYE",
   PR: "Hacienda Withholding",
+  // Ireland's PAYE is the `tds` column, same shape as the other PAYE
+  // jurisdictions. USC, PRSI and MyFutureFund ride on the payslip's
+  // complianceFields snapshot rather than dedicated columns, so they are
+  // labelled from the identity/compliance field path below.
+  IE: "PAYE",
 };
 
 const PF_LABELS = { DE: "Pension Insurance" };
@@ -149,6 +154,7 @@ const IDENTITY_FIELD = {
   BS: { label: "NIB No.", get: (p) => p.complianceFields?.nib_number },
   TT: { label: "BIR File No.", get: (p) => p.complianceFields?.bir_file_number },
   PR: { label: "SSN", get: (p) => p.complianceFields?.ssn },
+  IE: { label: "PPSN", get: (p) => p.complianceFields?.ppsn },
 };
 
 export function getIdentityField(payslip) {

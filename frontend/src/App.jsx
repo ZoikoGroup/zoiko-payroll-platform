@@ -25,7 +25,7 @@ import {
   AUCompliancePage, CACompliancePage, DECompliancePage,
   BBCompliancePage, KYCompliancePage, DOCompliancePage,
   GYCompliancePage, JMCompliancePage, BSCompliancePage, TTCompliancePage,
-  PRCompliancePage, FRCompliancePage,
+  PRCompliancePage, FRCompliancePage, IECompliancePage,
 } from "./pages/JurisdictionCompliance";
 import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
 import StatutoryRatesPage from "./pages/StatutoryRatesPage";
@@ -34,7 +34,7 @@ import {
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
   BBStatutoryPage, KYStatutoryPage, DOStatutoryPage,
   GYStatutoryPage, JMStatutoryPage, BSStatutoryPage, TTStatutoryPage,
-  PRStatutoryPage,
+  PRStatutoryPage, IEStatutoryPage,
 } from "./pages/JurisdictionStatutory";
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
@@ -186,6 +186,8 @@ export default function App() {
         <Route path="/super-admin/compliance/germany/:jurisdiction" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
             <Route path="/super-admin/compliance/france" element={<SuperAdminShell><FRCompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/france/:jurisdiction" element={<SuperAdminShell><FRCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/ireland" element={<SuperAdminShell><IECompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/ireland/:jurisdiction" element={<SuperAdminShell><IECompliancePage /></SuperAdminShell>} />
         {/* Caribbean production jurisdictions (2026-09-21) — each is
             country-level only, so no :jurisdiction sub-route is needed. */}
         <Route path="/super-admin/compliance/barbados" element={<SuperAdminShell><BBCompliancePage /></SuperAdminShell>} />
@@ -231,6 +233,8 @@ export default function App() {
         <Route path="/super-admin/statutory-rates/trinidad-and-tobago" element={<SuperAdminShell><TTStatutoryPage /></SuperAdminShell>} />
         <Route path="/super-admin/statutory-rates/puerto-rico" element={<SuperAdminShell><PRStatutoryPage /></SuperAdminShell>} />
         <Route path="/super-admin/statutory-rates/puerto-rico/:jurisdiction" element={<SuperAdminShell><PRStatutoryPage /></SuperAdminShell>} />
+      <Route path="/super-admin/statutory-rates/ireland" element={<SuperAdminShell><IEStatutoryPage /></SuperAdminShell>} />
+      <Route path="/super-admin/statutory-rates/ireland/:jurisdiction" element={<SuperAdminShell><IEStatutoryPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/report-templates"
           element={
