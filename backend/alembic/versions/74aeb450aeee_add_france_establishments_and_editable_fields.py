@@ -1,7 +1,7 @@
 """add france establishments and editable authority fields
 
 Revision ID: 74aeb450aeee
-Revises: d2e3c4b5a6f7
+Revises: 4856e62160ac
 
 France Super Admin "everything read-only" fix, Phase 2 (ZP-FR-ENG-001 §11
 panels A/B/E, §18 EmployerFranceProfile / EstablishmentRatePack):
@@ -33,7 +33,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '74aeb450aeee'
-down_revision: Union[str, Sequence[str], None] = 'd2e3c4b5a6f7'
+down_revision: Union[str, Sequence[str], None] = '4856e62160ac'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,6 +1,10 @@
 """add france establishment compliance tables
 
-Revision ID: d2e3c4b5a6f7
+(Previously revision d2e3c4b5a6f7 — renumbered 2026-09-25 because that id
+was already used by an unmerged Singapore branch migration that was stamped
+into production; see f0b1c2d3e4f5's docstring. Same schema, new id.)
+
+Revision ID: 4856e62160ac
 Revises: 8596179ade04
 
 France (ZP-FR-ENG-001, 2026-09-24) payroll-compliant schema landed in
@@ -30,7 +34,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'd2e3c4b5a6f7'
+revision: str = '4856e62160ac'
 down_revision: Union[str, Sequence[str], None] = '8596179ade04'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
