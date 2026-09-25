@@ -22,6 +22,7 @@ from app.modules.payroll.models import (
 )
 from app.modules.payroll.service import FIELD_MAP, log_activity, ActivityStatus
 from app.core.exceptions import NotFoundException
+from app.modules.communications.service import dispatch_email, idempotency_key
 from app.services.email_service import send_update_form_invite_email
 from app.config import settings
 
@@ -135,9 +136,17 @@ def send_form(db: Session, organization_id: int, form_id: int, employee_ids: Lis
         db.refresh(send)
 
         form_link = f"{settings.FRONTEND_URL}/forms/fill/{token}"
-        sent_ok = send_update_form_invite_email(
-            employee.email, employee.name, form.name, form_link,
-            expires_at.strftime("%b %d, %Y"), organization_id=organization_id, db=db,
+        # Deliberately synchronous (dispatch_email, not queue_email): this
+        # endpoint's response reports per-employee delivery ("sent"/"failed"),
+        # which the caller can only see if the send has actually happened.
+        # Each send row carries a fresh token, so the key is per send row.
+        sent_ok = dispatch_email(
+            "payroll", "payroll.form_assigned", None, employee.email,
+            idempotency_key(organization_id, "payroll.form_assigned", employee.email, None, f"form_send:{send.id}"),
+            send_update_form_invite_email, employee.email, employee.name, form.name, form_link,
+            expires_at.strftime("%b %d, %Y"),
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, recipient_user_id=None, db=db,
         )
         results.append({"employeeId": emp_id, "status": "sent" if sent_ok else "failed",
                          **({"reason": "Email delivery failed."} if not sent_ok else {})})
@@ -319,31 +328,38 @@ def review_submission(db: Session, organization_id: int, submission_id: int, app
         f"{'Approved' if approve else 'Rejected'} '{form.name}' submission from '{employee.name}'.",
         ActivityStatus.INFO, actor_id=actor_id,
     )
-    _notify_submission_review(db, employee, form, approve, notes, organization_id)
+    _notify_submission_review(db, employee, form, approve, notes, organization_id,
+                              submission_id=submission.id, actor_id=actor_id)
     return {"message": "Submission approved and applied." if approve else "Submission rejected."}
 
 
 # ── Email notifications (best-effort, never block the action) ───────────────
 
-def _notify_submission_review(db: Session, employee, form, approve: bool, notes, organization_id: int) -> None:
+def _notify_submission_review(db: Session, employee, form, approve: bool, notes, organization_id: int,
+                              submission_id: int = None, actor_id: int = None) -> None:
     import logging
     logger = logging.getLogger("zoiko")
     try:
         if not employee or not employee.email:
             return
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import (
             send_form_submission_approved_email, send_form_submission_rejected_email,
         )
-        if approve:
-            send_form_submission_approved_email(
-                employee.email, employee.name or "there", form.name or "Payroll update form",
-                organization_id=organization_id, db=db,
-            )
-        else:
-            send_form_submission_rejected_email(
-                employee.email, employee.name or "there", form.name or "Payroll update form",
-                notes=notes or "", organization_id=organization_id, db=db,
-            )
+        # A submission is reviewed exactly once (review_submission rejects
+        # anything no longer PENDING): strict key on the submission.
+        event_type = "payroll.form_submission_approved" if approve else "payroll.form_submission_rejected"
+        send_fn = send_form_submission_approved_email if approve else send_form_submission_rejected_email
+        send_kwargs = {"organization_id": organization_id}
+        if not approve:
+            send_kwargs["notes"] = notes or ""
+        queue_email(
+            "payroll", event_type, None, employee.email,
+            idempotency_key(organization_id, event_type, employee.email, None, f"submission:{submission_id}"),
+            send_fn, employee.email, employee.name or "there", form.name or "Payroll update form",
+            send_kwargs=send_kwargs,
+            organization_id=organization_id, actor_user_id=actor_id, db=db,
+        )
     except Exception as exc:
         logger.warning(f"[payroll-mail] form-review email failed for org {organization_id}: {exc}")
 
@@ -355,9 +371,18 @@ def _notify_public_submission(db: Session, send, form, organization_id: int) -> 
         employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
         if not employee or not employee.email:
             return
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_form_public_submission_confirmation_email
-        send_form_public_submission_confirmation_email(
+        # One submission per send token (submit_public_form rejects a second).
+        queue_email(
+            "payroll", "payroll.form_public_submission_confirmation", None, employee.email,
+            idempotency_key(
+                organization_id, "payroll.form_public_submission_confirmation", employee.email, None,
+                f"form_send:{send.id}",
+            ),
+            send_form_public_submission_confirmation_email,
             employee.email, employee.name or "there", form.name or "Payroll update form",
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:

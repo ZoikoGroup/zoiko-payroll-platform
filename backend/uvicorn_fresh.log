@@ -1,335 +1,134 @@
 <claude-code-hint v="1" type="plugin" value="stripe@claude-plugins-official" />
-INFO:     Started server process [22764]
+INFO:     Started server process [19532]
 INFO:     Waiting for application startup.
-2026-09-22 16:06:18,283 [INFO] Existing tables detected — skipping schema creation.
-2026-09-22 16:06:19,958 [INFO] [assist-sweep] Running initial sweep at startup.
-2026-09-22 16:06:58,699 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-09-22 16:06:58,700 [INFO] Added job "_sweep_all_organizations" to job store "default"
-2026-09-22 16:06:58,700 [INFO] Scheduler started
-2026-09-22 16:06:58,701 [INFO] [assist-sweep] Started, running every 24 hour(s).
-2026-09-22 16:06:58,701 [INFO] [trial-sweep] Running initial sweep at startup.
-2026-09-22 16:06:59,601 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-09-22 16:06:59,601 [INFO] Added job "_run_sweep" to job store "default"
-2026-09-22 16:06:59,601 [INFO] Scheduler started
-2026-09-22 16:06:59,602 [INFO] [trial-sweep] Started, running every 24 hour(s).
-2026-09-22 16:06:59,602 [INFO] [dunning-sweep] Running initial sweep at startup.
-2026-09-22 16:07:00,558 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-09-22 16:07:00,558 [INFO] Added job "_run_dunning_sweep" to job store "default"
-2026-09-22 16:07:00,558 [INFO] Scheduler started
-2026-09-22 16:07:00,559 [INFO] [dunning-sweep] Started, running every 24 hour(s).
-2026-09-22 16:07:00,559 [INFO] [bwm-aggregation] Running initial aggregation at startup.
-2026-09-22 16:07:09,702 [INFO] [bwm-aggregation] month=2026-09-01 orgs=3
-2026-09-22 16:07:10,149 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-09-22 16:07:10,149 [INFO] Added job "_bwm_sweep_job" to job store "default"
-2026-09-22 16:07:10,149 [INFO] Scheduler started
-2026-09-22 16:07:10,149 [INFO] [bwm-aggregation] Started, running every 24 hour(s).
-2026-09-22 16:07:10,150 [INFO] [assisted-access-sweep] Running initial sweep at startup.
-2026-09-22 16:07:11,212 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-09-22 16:07:11,213 [INFO] Added job "_run_sweep" to job store "default"
-2026-09-22 16:07:11,213 [INFO] Scheduler started
-2026-09-22 16:07:11,214 [INFO] [assisted-access-sweep] Started, running every 60 minute(s).
-2026-09-22 16:07:11,214 [INFO] [token-cleanup] Running initial sweep at startup.
-2026-09-22 16:07:12,154 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-09-22 16:07:12,155 [INFO] Added job "_run_sweep" to job store "default"
-2026-09-22 16:07:12,155 [INFO] Scheduler started
-2026-09-22 16:07:12,155 [INFO] [token-cleanup] Started, running every 24 hour(s).
-2026-09-22 16:07:13,730 [INFO] Zoiko Payroll Platform backend is ready.
+2026-09-23 19:44:52,673 [INFO] Existing tables detected — skipping schema creation.
+2026-09-23 19:44:54,815 [INFO] [assist-sweep] Running initial sweep at startup.
+2026-09-23 19:45:42,653 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:45:42,656 [INFO] Added job "_sweep_all_organizations" to job store "default"
+2026-09-23 19:45:42,656 [INFO] Scheduler started
+2026-09-23 19:45:42,657 [INFO] [assist-sweep] Started, running every 24 hour(s).
+2026-09-23 19:45:42,657 [INFO] [trial-sweep] Running initial sweep at startup.
+2026-09-23 19:45:43,300 [INFO] [trial-sweep] scanned=2 grace_started=0 closed=0
+2026-09-23 19:45:43,511 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:45:43,511 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-23 19:45:43,511 [INFO] Scheduler started
+2026-09-23 19:45:43,511 [INFO] [trial-sweep] Started, running every 24 hour(s).
+2026-09-23 19:45:43,512 [INFO] [dunning-sweep] Running initial sweep at startup.
+2026-09-23 19:45:44,361 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:45:44,361 [INFO] Added job "_run_dunning_sweep" to job store "default"
+2026-09-23 19:45:44,363 [INFO] Scheduler started
+2026-09-23 19:45:44,364 [INFO] [dunning-sweep] Started, running every 24 hour(s).
+2026-09-23 19:45:44,365 [INFO] [bwm-aggregation] Running initial aggregation at startup.
+2026-09-23 19:46:00,235 [INFO] [bwm-aggregation] month=2026-09-01 orgs=5
+2026-09-23 19:46:00,655 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:46:00,655 [INFO] Added job "_bwm_sweep_job" to job store "default"
+2026-09-23 19:46:00,655 [INFO] Scheduler started
+2026-09-23 19:46:00,656 [INFO] [bwm-aggregation] Started, running every 24 hour(s).
+2026-09-23 19:46:00,656 [INFO] [assisted-access-sweep] Running initial sweep at startup.
+2026-09-23 19:46:01,506 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:46:01,507 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-23 19:46:01,507 [INFO] Scheduler started
+2026-09-23 19:46:01,508 [INFO] [assisted-access-sweep] Started, running every 60 minute(s).
+2026-09-23 19:46:01,508 [INFO] [token-cleanup] Running initial sweep at startup.
+2026-09-23 19:46:02,355 [INFO] Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-09-23 19:46:02,355 [INFO] Added job "_run_sweep" to job store "default"
+2026-09-23 19:46:02,355 [INFO] Scheduler started
+2026-09-23 19:46:02,358 [INFO] [token-cleanup] Started, running every 24 hour(s).
+2026-09-23 19:46:03,855 [INFO] Zoiko Payroll Platform backend is ready.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:65189 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65191 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65193 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65194 - "GET /openapi.json HTTP/1.1" 200 OK
-2026-09-22 16:07:26,021 [INFO] New organization ST1 registered by start-trial-verify2@example.com
-INFO:     127.0.0.1:49682 - "POST /api/auth/register HTTP/1.1" 200 OK
-2026-09-22 16:07:31,022 [INFO] Org ST1 converted to trial via PlanReviewPage by start-trial-verify2@example.com
-INFO:     127.0.0.1:49689 - "POST /api/billing/start-trial HTTP/1.1" 200 OK
-2026-09-22 16:07:34,506 [ERROR] [email] Failed to send to start-trial-verify2@example.com | template=org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:07:34,506 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=start-trial-verify2@example.com org_id=69 reference_id=ORG-0069-INIT
-INFO:     127.0.0.1:49696 - "GET /api/payroll/dashboard/summary HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49701 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49705 - "POST /api/billing/start-trial HTTP/1.1" 200 OK
-2026-09-22 16:07:40,418 [ERROR] [email] Failed to send to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:07:49,710 [ERROR] [email] Failed to send to admin@test.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:07:55,588 [ERROR] [email] Failed to send to info@zoikopayroll.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-INFO:     127.0.0.1:57970 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62324 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62324 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62324 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
-2026-09-22 16:18:17,848 [INFO] New organization TR registered by trial-verify-core-1790074085332@example.com
-INFO:     127.0.0.1:63591 - "POST /api/auth/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63591 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56398 - "GET /api/billing/plans HTTP/1.1" 200 OK
-2026-09-22 16:18:24,520 [ERROR] [email] Failed to send to trial-verify-core-1790074085332@example.com | template=org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:24,520 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=trial-verify-core-1790074085332@example.com org_id=70 reference_id=ORG-0070-INIT
-INFO:     127.0.0.1:56398 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56398 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
-2026-09-22 16:18:30,521 [INFO] New organization TR1 registered by trial-verify-professional-1790074085332@example.com
-INFO:     127.0.0.1:51777 - "POST /api/auth/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51777 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
-2026-09-22 16:18:35,367 [ERROR] [email] Failed to send to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:39,262 [ERROR] [email] Failed to send to trial-verify-professional-1790074085332@example.com | template=org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:39,262 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=trial-verify-professional-1790074085332@example.com org_id=71 reference_id=ORG-0071-INIT
-2026-09-22 16:18:41,377 [ERROR] [email] Failed to send to admin@test.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:46,466 [ERROR] [email] Failed to send to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:48,161 [ERROR] [email] Failed to send to info@zoikopayroll.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:52,875 [ERROR] [email] Failed to send to admin@test.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:18:59,021 [ERROR] [email] Failed to send to info@zoikopayroll.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-INFO:     127.0.0.1:60948 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60948 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60948 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
-2026-09-22 16:19:08,935 [INFO] New organization TR2 registered by trial-verify2-core-1790074135530@example.com
-INFO:     127.0.0.1:55373 - "POST /api/auth/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55373 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51783 - "OPTIONS /api/billing/start-trial HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55373 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
-2026-09-22 16:19:14,135 [INFO] Org TR2 converted to trial via PlanReviewPage by trial-verify2-core-1790074135530@example.com
-INFO:     127.0.0.1:51783 - "POST /api/billing/start-trial HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51783 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55373 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53220 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50256 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51783 - "OPTIONS /api/payroll/dashboard/summary?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55373 - "OPTIONS /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53174 - "OPTIONS /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59399 - "OPTIONS /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50256 - "OPTIONS /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51783 - "OPTIONS /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53174 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50256 - "OPTIONS /api/payroll/dashboard/summary?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51783 - "OPTIONS /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53174 - "OPTIONS /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50256 - "OPTIONS /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51783 - "OPTIONS /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53174 - "OPTIONS /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53220 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-2026-09-22 16:19:15,699 [ERROR] [email] Failed to send to trial-verify2-core-1790074135530@example.com | template=org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:19:15,699 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=trial-verify2-core-1790074135530@example.com org_id=72 reference_id=ORG-0072-INIT
-INFO:     127.0.0.1:59399 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56123 - "GET /api/billing/plans HTTP/1.1" 200 OK
-2026-09-22 16:19:23,213 [ERROR] [email] Failed to send to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-INFO:     127.0.0.1:56123 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56123 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
-2026-09-22 16:19:28,057 [INFO] New organization TR3 registered by trial-verify2-professional-1790074135530@example.com
-INFO:     127.0.0.1:54611 - "POST /api/auth/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/billing/start-trial HTTP/1.1" 200 OK
-2026-09-22 16:19:29,148 [ERROR] [email] Failed to send to admin@test.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-INFO:     127.0.0.1:56123 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
-2026-09-22 16:19:31,491 [INFO] Org TR3 converted to trial via PlanReviewPage by trial-verify2-professional-1790074135530@example.com
-INFO:     127.0.0.1:54611 - "POST /api/billing/start-trial HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56123 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57367 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50060 - "OPTIONS /api/payroll/dashboard/summary?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56101 - "OPTIONS /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57999 - "OPTIONS /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50060 - "OPTIONS /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56101 - "OPTIONS /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57999 - "OPTIONS /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57999 - "OPTIONS /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54611 - "OPTIONS /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56123 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57367 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-2026-09-22 16:19:35,257 [ERROR] [email] Failed to send to trial-verify2-professional-1790074135530@example.com | template=org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:19:35,257 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=trial-verify2-professional-1790074135530@example.com org_id=73 reference_id=ORG-0073-INIT
-2026-09-22 16:19:36,205 [ERROR] [email] Failed to send to info@zoikopayroll.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:19:42,152 [ERROR] [email] Failed to send to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:19:48,044 [ERROR] [email] Failed to send to admin@test.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:19:54,037 [ERROR] [email] Failed to send to info@zoikopayroll.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-INFO:     127.0.0.1:56202 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "GET /api/billing/plans HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
-2026-09-22 16:20:10,280 [INFO] New organization BA registered by banner-check-1790074199629@example.com
-INFO:     127.0.0.1:56079 - "POST /api/auth/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56079 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56079 - "OPTIONS /api/billing/start-trial HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
-2026-09-22 16:20:13,733 [INFO] Org BA converted to trial via PlanReviewPage by banner-check-1790074199629@example.com
-INFO:     127.0.0.1:56079 - "POST /api/billing/start-trial HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56079 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56814 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61552 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56079 - "OPTIONS /api/payroll/dashboard/summary?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "OPTIONS /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55152 - "OPTIONS /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61552 - "OPTIONS /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "OPTIONS /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55152 - "OPTIONS /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61552 - "OPTIONS /api/payroll/dashboard/summary?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "OPTIONS /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55152 - "OPTIONS /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61552 - "OPTIONS /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "OPTIONS /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55152 - "OPTIONS /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56755 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56079 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56814 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56755 - "GET /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "GET /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-2026-09-22 16:20:17,185 [ERROR] [email] Failed to send to banner-check-1790074199629@example.com | template=org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:20:17,185 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=banner-check-1790074199629@example.com org_id=74 reference_id=ORG-0074-INIT
-INFO:     127.0.0.1:55152 - "GET /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61552 - "GET /api/payroll/dashboard/summary?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56755 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61552 - "GET /api/payroll/runs?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55152 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56755 - "GET /api/payroll/dashboard/trend?months=9&year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56814 - "GET /api/payroll/filings HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56202 - "GET /api/payroll/dashboard/breakdowns?year=2026&month=9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56079 - "GET /api/payroll/policy/active HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55152 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56755 - "GET /api/payroll/filings HTTP/1.1" 200 OK
-2026-09-22 16:20:23,485 [ERROR] [email] Failed to send to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:20:29,576 [ERROR] [email] Failed to send to admin@test.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-2026-09-22 16:20:36,180 [ERROR] [email] Failed to send to info@zoikopayroll.com | template=super_admin_org_created.html | error=(535, b'...authentication rejected')
-INFO:     127.0.0.1:64316 - "OPTIONS /api/auth/login HTTP/1.1" 200 OK
-2026-09-22 16:26:18,116 [INFO] User ravurirugvedh2@gmail.com (org_admin) logged in
-INFO:     127.0.0.1:52160 - "POST /api/auth/login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52160 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64316 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64142 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49676 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52160 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64316 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52160 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64316 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49676 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57993 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64142 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52160 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:59963 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49676 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57993 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64142 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52160 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 403 Forbidden
-INFO:     127.0.0.1:64316 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59963 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
-2026-09-22 16:26:28,083 [INFO] User info@zoikopayroll.com (super_admin) logged in
-INFO:     127.0.0.1:59963 - "POST /api/auth/login HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59963 - "OPTIONS /api/super-admin/dashboard/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57452 - "OPTIONS /api/super-admin/dashboard/charts?start_date=2026-01-01&end_date=2026-09-22 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52727 - "OPTIONS /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57452 - "OPTIONS /api/super-admin/alerts HTTP/1.1" 200 OK
-2026-09-22 16:26:29,730 [ERROR] Exception during reset or similar
-Traceback (most recent call last):
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 986, in _finalize_fairy
-    fairy._reset(
-    ~~~~~~~~~~~~^
-        pool,
-        ^^^^^
-    ...<2 lines>...
-        asyncio_safe=can_manipulate_connection,
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    )
-    ^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1441, in _reset
-    pool._dialect.do_rollback(self)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 712, in do_rollback
-    dbapi_connection.rollback()
-    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\connection.py", line 310, in rollback
-    self.wait(self._rollback_gen())
-    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\connection.py", line 484, in wait
-    return waiting.wait(gen, self.pgconn.socket, interval=interval)
-           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\waiting.py", line 281, in wait_select
-    s = gen.send(ready)
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\_connection_base.py", line 610, in _rollback_gen
-    yield from self._exec_command(b"ROLLBACK")
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\_connection_base.py", line 480, in _exec_command
-    result: PGresult = (yield from generators.execute(self.pgconn))[-1]
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "psycopg_binary/_psycopg/generators.pyx", line 128, in execute
-  File "psycopg_binary/_psycopg/generators.pyx", line 192, in fetch_many
-  File "psycopg_binary/_psycopg/generators.pyx", line 183, in psycopg_binary._psycopg.fetch_many
-  File "psycopg_binary/_psycopg/generators.pyx", line 247, in fetch
-psycopg.OperationalError: consuming input failed: server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-2026-09-22 16:26:29,855 [ERROR] Exception during reset or similar
-Traceback (most recent call last):
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 986, in _finalize_fairy
-    fairy._reset(
-    ~~~~~~~~~~~~^
-        pool,
-        ^^^^^
-    ...<2 lines>...
-        asyncio_safe=can_manipulate_connection,
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    )
-    ^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1441, in _reset
-    pool._dialect.do_rollback(self)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 712, in do_rollback
-    dbapi_connection.rollback()
-    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\connection.py", line 310, in rollback
-    self.wait(self._rollback_gen())
-    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\connection.py", line 484, in wait
-    return waiting.wait(gen, self.pgconn.socket, interval=interval)
-           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\waiting.py", line 281, in wait_select
-    s = gen.send(ready)
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\_connection_base.py", line 610, in _rollback_gen
-    yield from self._exec_command(b"ROLLBACK")
-  File "D:\zoiko-payroll-platform\backend\.venv\Lib\site-packages\psycopg\_connection_base.py", line 480, in _exec_command
-    result: PGresult = (yield from generators.execute(self.pgconn))[-1]
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "psycopg_binary/_psycopg/generators.pyx", line 128, in execute
-  File "psycopg_binary/_psycopg/generators.pyx", line 192, in fetch_many
-  File "psycopg_binary/_psycopg/generators.pyx", line 183, in psycopg_binary._psycopg.fetch_many
-  File "psycopg_binary/_psycopg/generators.pyx", line 247, in fetch
-psycopg.OperationalError: consuming input failed: server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-INFO:     127.0.0.1:53261 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52727 - "GET /api/super-admin/dashboard/charts?start_date=2026-01-01&end_date=2026-09-22 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59963 - "GET /api/super-admin/dashboard/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53261 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52727 - "GET /api/super-admin/dashboard/charts?start_date=2026-01-01&end_date=2026-09-22 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59963 - "GET /api/super-admin/dashboard/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51907 - "OPTIONS /api/super-admin/billing/order-forms HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54760 - "OPTIONS /api/super-admin/billing/order-form-eligible-orgs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52357 - "OPTIONS /api/super-admin/billing/order-forms HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62408 - "OPTIONS /api/super-admin/billing/order-form-eligible-orgs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54760 - "GET /api/super-admin/billing/order-form-eligible-orgs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51907 - "GET /api/super-admin/billing/order-forms HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54760 - "GET /api/super-admin/billing/order-form-eligible-orgs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51907 - "GET /api/super-admin/billing/order-forms HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56511 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55062 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58377 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52922 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59729 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59729 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59729 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59443 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57944 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56224 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56224 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50229 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50229 - "OPTIONS /api/super-admin/billing/organizations/67/order-form HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50229 - "POST /api/super-admin/billing/organizations/67/order-form HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50229 - "GET /api/super-admin/billing/order-forms HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50229 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56004 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55067 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55067 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56865 - "GET /api/super-admin/alerts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49291 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49292 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "GET /api/billing/plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "GET /api/billing/plans HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "OPTIONS /api/auth/register HTTP/1.1" 200 OK
+2026-09-23 19:46:22,871 [INFO] New organization PE3 registered by pending-eval3-1790172971005@example.com
+INFO:     127.0.0.1:54477 - "POST /api/auth/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54477 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54477 - "OPTIONS /api/billing/checkout HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53577 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+2026-09-23 19:46:29,627 [INFO] message='Request to Stripe api' method=post url=https://api.stripe.com/v1/checkout/sessions
+2026-09-23 19:46:30,302 [INFO] [email] Sent to pending-eval3-1790172971005@example.com | template=org_created.html
+2026-09-23 19:46:30,547 [INFO] message='Stripe API response' path=https://api.stripe.com/v1/checkout/sessions response_code=200
+INFO:     127.0.0.1:54477 - "POST /api/billing/checkout HTTP/1.1" 200 OK
+2026-09-23 19:46:30,949 [INFO] email_audit event=commercial.organization_created template_id=COM-001 recipient=pending-eval3-1790172971005@example.com org_id=81 reference_id=ORG-0081-INIT
+2026-09-23 19:46:36,485 [INFO] [email] Sent to zzz.throwaway.superadmin@zoiko.internal | template=super_admin_org_created.html
+2026-09-23 19:46:40,882 [INFO] Stripe webhook: unhandled event type=customer.created id=evt_1UIqyRDaBdRFbmee6svnpjdn
+INFO:     127.0.0.1:64385 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:41,624 [INFO] [email] Sent to admin@test.com | template=super_admin_org_created.html
+2026-09-23 19:46:41,991 [INFO] Stripe webhook: unhandled event type=invoice.finalized id=evt_1UIqyRDaBdRFbmeeRh59qZdt
+2026-09-23 19:46:42,653 [INFO] message='Request to Stripe api' method=get url=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13
+2026-09-23 19:46:43,090 [INFO] message='Stripe API response' path=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13 response_code=200
+2026-09-23 19:46:46,584 [INFO] [email] Sent to info@zoikopayroll.com | template=super_admin_org_created.html
+2026-09-23 19:46:46,629 [INFO] message='Request to Stripe api' method=get url=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13
+2026-09-23 19:46:46,876 [INFO] message='Stripe API response' path=https://api.stripe.com/v1/subscriptions/sub_1UIqyQDaBdRFbmee8GXvIK13 response_code=200
+2026-09-23 19:46:47,515 [INFO] [invoice] Skipping invoice write for organization_id=81 (not billable or not yet commenced).
+2026-09-23 19:46:49,026 [INFO] Stripe webhook: unhandled event type=customer.updated id=evt_1UIqyRDaBdRFbmeeKTSIn1jY
+2026-09-23 19:46:50,089 [INFO] Stripe webhook: unhandled event type=setup_intent.created id=evt_1UIqyRDaBdRFbmee2H3ELcO6
+2026-09-23 19:46:51,190 [INFO] Stripe webhook: unhandled event type=payment_method.attached id=evt_1UIqyRDaBdRFbmeeBvIAJiZM
+2026-09-23 19:46:52,248 [INFO] Stripe webhook: unhandled event type=customer.subscription.created id=evt_1UIqyRDaBdRFbmeetPJ3l8Tw
+INFO:     127.0.0.1:64387 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:53,354 [INFO] Stripe webhook: unhandled event type=setup_intent.succeeded id=evt_1UIqyRDaBdRFbmeeXslLNoSD
+INFO:     127.0.0.1:64389 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:54,445 [INFO] Stripe webhook: unhandled event type=invoice.created id=evt_1UIqyRDaBdRFbmeeCctrryUd
+INFO:     127.0.0.1:64392 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+2026-09-23 19:46:55,753 [INFO] Stripe webhook: unhandled event type=invoice.payment_succeeded id=evt_1UIqyRDaBdRFbmeePUgGoWtD
+INFO:     127.0.0.1:64394 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64396 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64398 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64400 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64402 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64404 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64406 - "POST /api/billing/webhooks/stripe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/auth/login HTTP/1.1" 200 OK
+2026-09-23 19:47:26,911 [INFO] User pending-eval3-1790172971005@example.com (org_admin) logged in
+INFO:     127.0.0.1:54866 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59203 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59203 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62222 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59203 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62222 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54866 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57306 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59265 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/auth/login HTTP/1.1" 200 OK
+2026-09-23 19:47:59,633 [INFO] User pending-eval3-1790172971005@example.com (org_admin) logged in
+INFO:     127.0.0.1:51716 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54405 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "OPTIONS /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "OPTIONS /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54405 - "OPTIONS /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "OPTIONS /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61858 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49675 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61858 - "GET /api/organization-admin/assisted-access/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51716 - "GET /api/billing/dunning-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/auth/me/trial-status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54405 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "GET /api/payroll/dashboard/activity?limit=8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49675 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51284 - "GET /api/organizations/me/dashboard-stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63705 - "GET /api/organizations/me/detail HTTP/1.1" 200 OK

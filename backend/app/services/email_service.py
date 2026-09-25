@@ -17,7 +17,11 @@ import os
 import re
 import smtplib
 import ssl
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Optional
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -55,6 +59,7 @@ PALETTE = {
     "error": "#b91c1c",
     "footer_bg": "#f0f6ff",
     "footer_text": "#5b7290",
+    "brand_accent": "#7dabff",
 }
 
 # Shared security advisory, restyled to the canonical palette (the wording —
@@ -67,6 +72,106 @@ _SECURITY_ADVISORY_HTML = (
     f'<p style="color:{PALETTE["muted"]}; font-size:12px; line-height:1.6; margin:0;">{SECURITY_ADVISORY_TEXT}</p>'
     "</td></tr></table>"
 )
+
+# Header logo — single source for every template (fragments get it through
+# _base_wrapper.html, standalone documents embed {{logo_header_block}}
+# directly). send_approval_email always fills {{logo_url}},
+# {{logo_dimension_attrs}} and {{frontend_url}} (see _resolve_logo):
+#   1. the organization's own logo_url, when it has an absolute http(s) one;
+#   2. else settings.EMAIL_LOGO_URL, when an operator points it at a public
+#      https copy of the email logo (lighter messages, remote image);
+#   3. else the logo is EMBEDDED in the message as an inline CID image, so it
+#      renders without depending on any server being publicly reachable.
+# The bundled asset is the white-lettering logo (correct on every template's
+# dark header), cropped and sized at 2x its 36px display height (205x72,
+# ~14KB) — not the 3353px, 115KB web original.
+# alt text is styled white/bold so the header still reads "Zoiko Payroll"
+# when a client blocks images. Explicit width/height attributes matter:
+# Outlook desktop ignores CSS width:auto and sizes from the attributes.
+LOGO_HEIGHT_PX = 36
+LOGO_WIDTH_PX = 102  # 205x72 asset at 36px high
+LOGO_CID = "zoiko-payroll-logo"
+EMAIL_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "email_assets", "zoikopayroll-logo-email.png")
+LOGO_HEADER_HTML = (
+    '<a href="{{frontend_url}}" target="_blank" style="text-decoration:none; display:inline-block;">'
+    '<img src="{{logo_url}}" alt="Zoiko Payroll"{{logo_dimension_attrs}} '
+    f'style="height:{LOGO_HEIGHT_PX}px; width:auto; display:block; border:0; outline:none; '
+    'text-decoration:none; color:#ffffff; font-family:Arial,Helvetica,sans-serif; '
+    'font-size:18px; font-weight:bold; line-height:36px;">'
+    "</a>"
+)
+_LOGO_HEADER_PLACEHOLDER = "{{logo_header_block}}"
+
+# Mobile layer — single source, embedded in every template's <head> via
+# {{mobile_styles}}. The templates are fluid on their own (max-width card,
+# wrapping values), which is what clients that strip <style> (e.g. Gmail app
+# with non-Google accounts) get; clients that honour media queries (Apple
+# Mail / iOS, Gmail app, Outlook mobile, Samsung) additionally get tighter
+# gutters, the header badge moved under the logo, and full-width buttons.
+# Class hooks: zk-outer (page gutter), zk-px (card cell side padding),
+# zk-brand / zk-badge (header row), zk-btn (primary CTA), zk-h1 (headline).
+MOBILE_STYLES_HTML = (
+    "<style>"
+    "body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}"
+    "@media only screen and (max-width:600px){"
+    ".zk-outer{padding:12px 8px !important;}"
+    ".zk-px{padding-left:20px !important;padding-right:20px !important;}"
+    ".zk-brand{display:block !important;width:100% !important;}"
+    ".zk-badge{display:inline-block !important;width:auto !important;margin-top:12px !important;text-align:left !important;}"
+    ".zk-btn{display:block !important;text-align:center !important;}"
+    ".zk-h1{font-size:20px !important;line-height:1.3 !important;}"
+    "}"
+    "</style>"
+)
+_MOBILE_STYLES_PLACEHOLDER = "{{mobile_styles}}"
+_DEFAULT_LOGO_DIMENSIONS = f' width="{LOGO_WIDTH_PX}" height="{LOGO_HEIGHT_PX}"'
+# A custom org logo's aspect ratio is unknown: pin the height only.
+_CUSTOM_LOGO_DIMENSIONS = f' height="{LOGO_HEIGHT_PX}"'
+
+
+def _resolve_logo(org_logo_url) -> tuple:
+    """(logo_url, dimension_attrs, embed_inline) for the header partial."""
+    from app.config import settings as _cfg
+
+    if org_logo_url and str(org_logo_url).startswith(("http://", "https://")):
+        return str(org_logo_url), _CUSTOM_LOGO_DIMENSIONS, False
+    hosted = (getattr(_cfg, "EMAIL_LOGO_URL", "") or "").strip()
+    if hosted.startswith(("http://", "https://")):
+        return hosted, _DEFAULT_LOGO_DIMENSIONS, False
+    return f"cid:{LOGO_CID}", _DEFAULT_LOGO_DIMENSIONS, True
+
+
+_LOGO_BYTES = None
+
+
+def _email_logo_bytes():
+    global _LOGO_BYTES
+    if _LOGO_BYTES is None:
+        try:
+            with open(EMAIL_LOGO_PATH, "rb") as f:
+                _LOGO_BYTES = f.read()
+        except OSError:
+            logger.exception(f"[email] Email logo asset missing: {EMAIL_LOGO_PATH}")
+            _LOGO_BYTES = b""
+    return _LOGO_BYTES
+
+
+# When set (by communications.dispatch_email), send_approval_email re-raises
+# the real SMTP exception instead of swallowing it into `return False`, so the
+# dispatcher can tell a transient failure (retry) from a permanent one and
+# record the provider's actual response. Direct callers keep the historical
+# best-effort bool contract.
+_propagate_delivery_errors: ContextVar[bool] = ContextVar("email_propagate_delivery_errors", default=False)
+
+
+@contextmanager
+def propagate_delivery_errors():
+    token = _propagate_delivery_errors.set(True)
+    try:
+        yield
+    finally:
+        _propagate_delivery_errors.reset(token)
+
 
 _IF_BLOCK_RE = re.compile(r"\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}", re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -82,6 +187,13 @@ def _load_template(name: str) -> str:
 
 
 def _render_template(template: str, context: dict) -> str:
+    # Expanded before substitution so the partial's own {{logo_url}} /
+    # {{frontend_url}} placeholders resolve in the same pass.
+    template = template.replace(_MOBILE_STYLES_PLACEHOLDER, MOBILE_STYLES_HTML)
+    template = template.replace(_LOGO_HEADER_PLACEHOLDER, LOGO_HEADER_HTML).replace(
+        "{{logo_dimension_attrs}}", str(context.get("logo_dimension_attrs", _DEFAULT_LOGO_DIMENSIONS)),
+    )
+
     def _eval_if(match):
         key, inner = match.group(1), match.group(2)
         return inner if context.get(key) else ""
@@ -140,11 +252,14 @@ def _details_rows(rows) -> str:
     user-originated)."""
     cells = []
     for label, value in rows:
+        # Label column capped at 38% and allowed to wrap (was nowrap, which
+        # starved the value column on phones); values break long unbroken
+        # tokens (emails, transfer tickets, IBANs) instead of overflowing.
         cells.append(
-            '<tr><td style="color:{muted}; font-size:12px; font-weight:bold; '
-            'padding:4px 0; vertical-align:top; white-space:nowrap;">{label}</td>'
-            '<td style="color:{heading}; font-size:12px; padding:4px 0 4px 12px; '
-            'vertical-align:top;">{value}</td></tr>'.format(
+            '<tr><td width="38%" style="width:38%; color:{muted}; font-size:12px; font-weight:bold; '
+            'padding:4px 12px 4px 0; vertical-align:top;">{label}</td>'
+            '<td style="color:{heading}; font-size:12px; padding:4px 0; '
+            'vertical-align:top; word-break:break-word; overflow-wrap:anywhere;">{value}</td></tr>'.format(
                 muted=PALETTE["muted"], heading=PALETTE["heading"],
                 label=_html.escape(str(label)), value=_html.escape(str(value)) if value is not None else "—",
             )
@@ -155,19 +270,24 @@ def _details_rows(rows) -> str:
 def _change_cells(changes) -> str:
     """old → new detail rows for config-change emails. `changes` is an
     iterable of (label, old_value, new_value) triples."""
+    # Two rows per change — the label spans the full width, then old → new
+    # sit side by side beneath it. The previous single 4-column row left each
+    # value ~60px wide on a phone; this gives old/new ~45% each at any width.
     cells = []
-    for label, old_value, new_value in changes:
+    for index, (label, old_value, new_value) in enumerate(changes):
         old = _html.escape(str(old_value)) if old_value is not None else "—"
         new = _html.escape(str(new_value)) if new_value is not None else "—"
+        divider = "" if index == 0 else f"border-top:1px solid {PALETTE['border']}; "
         cells.append(
-            '<tr><td style="color:{muted}; font-size:12px; font-weight:bold; '
-            'padding:4px 0; vertical-align:top;">{label}</td>'
-            '<td style="color:{warning}; font-size:12px; padding:4px 0 4px 12px; '
-            'vertical-align:top;">{old}</td>'
-            '<td style="color:{muted}; font-size:12px; padding:4px 8px; '
+            '<tr><td colspan="3" style="{divider}color:{muted}; font-size:12px; font-weight:bold; '
+            'padding:{top}px 0 2px 0;">{label}</td></tr>'
+            '<tr><td width="46%" style="width:46%; color:{warning}; font-size:12px; padding:0 0 6px 0; '
+            'vertical-align:top; word-break:break-word; overflow-wrap:anywhere;">{old}</td>'
+            '<td width="8%" align="center" style="width:8%; color:{muted}; font-size:12px; padding:0 4px 6px 4px; '
             'vertical-align:top;">&rarr;</td>'
-            '<td style="color:{heading}; font-size:12px; padding:4px 0; '
-            'vertical-align:top;">{new}</td></tr>'.format(
+            '<td width="46%" style="width:46%; color:{heading}; font-size:12px; padding:0 0 6px 0; '
+            'vertical-align:top; word-break:break-word; overflow-wrap:anywhere;">{new}</td></tr>'.format(
+                divider=divider, top=4 if index == 0 else 8,
                 muted=PALETTE["muted"], warning=PALETTE["warning"],
                 heading=PALETTE["heading"],
                 label=_html.escape(str(label)), old=old, new=new,
@@ -343,11 +463,17 @@ def send_approval_email(
     # Logo fallback: absolute URL to the SPA-hosted brand asset (public/ dir),
     # used by any template referencing {{logo_url}} / {{frontend_url}} when the
     # org has no configured logo.
-    if not full_context.get("logo_url") or not str(full_context.get("logo_url", "")).startswith("http"):
-        from app.config import settings as _cfg
-
-        frontend_base = os.environ.get("FRONTEND_BASE_URL", "").rstrip("/") or _cfg.FRONTEND_URL.rstrip("/")
-        full_context["logo_url"] = f"{frontend_base}/zoikopayroll-logo-light.png"
+    frontend_base = _frontend_base()
+    logo_url, logo_dimension_attrs, embed_logo = _resolve_logo(full_context.get("logo_url"))
+    if embed_logo and not _email_logo_bytes():
+        # Asset unreadable: never reference a CID part that won't exist —
+        # fall back to the hosted web logo (alt text covers it if unreachable).
+        logo_url, embed_logo = f"{frontend_base}/zoikopayroll-logo-light.png", False
+    full_context["logo_url"] = logo_url
+    full_context["logo_dimension_attrs"] = logo_dimension_attrs
+    # Header logo link target — set on every send, not only when the logo
+    # falls back (an org with its own logo_url previously got an empty href).
+    if not full_context.get("frontend_url"):
         full_context["frontend_url"] = frontend_base
     full_context.setdefault("security_advisory_block", _SECURITY_ADVISORY_HTML)
     body = _compose_email_html(template, full_context)
@@ -362,20 +488,35 @@ def send_approval_email(
     sender_name = from_display_name_override or full_context.get("company_name") or "Zoiko Payroll"
     reply_to = full_context.get("support_email")
 
-    msg = MIMEMultipart("alternative")
+    # RFC 2046 nesting: mixed[ related[ alternative[text, html], logo ], pdf... ].
+    # The inline logo lives in multipart/related beside the HTML that
+    # references it, so clients render it in place instead of listing it as
+    # an attachment; PDFs stay real attachments in the outer multipart/mixed.
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText(_html_to_text(body), "plain", "utf-8"))
+    alternative.attach(MIMEText(body, "html", "utf-8"))
+    content = alternative
+    if embed_logo and f"cid:{LOGO_CID}" in body:
+        content = MIMEMultipart("related")
+        content.attach(alternative)
+        logo_part = MIMEImage(_email_logo_bytes(), _subtype="png")
+        logo_part.add_header("Content-ID", f"<{LOGO_CID}>")
+        logo_part.add_header("Content-Disposition", "inline", filename="zoiko-payroll-logo.png")
+        content.attach(logo_part)
+    if attachments:
+        msg = MIMEMultipart("mixed")
+        msg.attach(content)
+        for filename, data in attachments:
+            part = MIMEApplication(data, _subtype="pdf")
+            part.add_header("Content-Disposition", "attachment", filename=filename)
+            msg.attach(part)
+    else:
+        msg = content
     msg["Subject"] = subject
     msg["From"] = f"{sender_name} <{header_from}>"
     msg["To"] = email
     if reply_to:
         msg["Reply-To"] = reply_to
-    msg.attach(MIMEText(_html_to_text(body), "plain", "utf-8"))
-    msg.attach(MIMEText(body, "html", "utf-8"))
-
-    if attachments:
-        for filename, data in attachments:
-            part = MIMEApplication(data, _subtype="pdf")
-            part.add_header("Content-Disposition", "attachment", filename=filename)
-            msg.attach(part)
 
     if not smtp["host"]:
         logger.info(f"[email] SMTP_HOST not configured. Mock sending email to {email} | subject='{subject}' | template={template_name}")
@@ -403,6 +544,8 @@ def send_approval_email(
         return True
     except Exception as e:
         logger.error(f"[email] Failed to send to {email} | template={template_name} | error={e}")
+        if _propagate_delivery_errors.get():
+            raise
         return False
 
 
@@ -811,6 +954,63 @@ def send_report_generation_failed_email(
     }, organization_id=organization_id, db=db, accent=PALETTE["error"])
 
 
+_BULK_OPERATION_WORDS = {"create": "import", "update": "update", "delete": "deletion"}
+
+
+def send_bulk_employee_operation_summary_email(
+    org_email: str, operation: str, succeeded_count: int, failures, employee_notice_line: str = "",
+    organization_id=None, db=None,
+) -> bool:
+    """Catalog ID pending. One summary to the org contact address per bulk
+    employee create/update/delete call (instead of N per-employee emails).
+    `failures` is an iterable of (row label, reason) pairs; only the first 20
+    are listed so a large failed import stays a readable email."""
+    failures = list(failures or [])
+    word = _BULK_OPERATION_WORDS.get(operation, operation)
+    rows = [("Operation", f"Bulk employee {word}"), ("Succeeded", succeeded_count), ("Failed", len(failures))]
+    rows += [(label, reason) for label, reason in failures[:20]]
+    if len(failures) > 20:
+        rows.append(("…", f"{len(failures) - 20} more failed row(s) not shown"))
+    return _payroll_send(org_email, "bulk_employee_operation_summary.html", {
+        "subject": f"Bulk employee {word} complete — {succeeded_count} succeeded, {len(failures)} failed | Zoiko Payroll",
+        "preheader": f"Bulk employee {word}: {succeeded_count} succeeded, {len(failures)} failed.",
+        "heading": f"Bulk employee {word} complete",
+        "operation_word": word,
+        "succeeded_count": succeeded_count,
+        "failed_count": len(failures),
+        "has_failures": bool(failures),
+        "employee_notice_line": employee_notice_line or "Employees were not emailed individually for this operation.",
+        "details_panel": _details_rows(rows),
+    }, organization_id=organization_id, db=db,
+        accent=PALETTE["warning"] if failures else PALETTE["success"])
+
+
+def send_overtime_record_decision_email(
+    email: str, employee_name: str, status: str, work_date: str, hours="",
+    organization_id=None, db=None,
+) -> bool:
+    """Catalog ID pending (approval-decision family, same shape as leave
+    approved/rejected). HR sign-off decision on a Germany overtime work
+    record, sent to the employee whose hours were decided."""
+    approved = status == "APPROVED"
+    word = "approved" if approved else "not approved"
+    return _payroll_send(email, "overtime_record_decision.html", {
+        "subject": f"Overtime {word} — {work_date} | Zoiko Payroll",
+        "preheader": f"Your recorded overtime for {work_date} was {word}.",
+        "heading": f"Overtime {word}",
+        "employee_name": employee_name,
+        "work_date": work_date,
+        "approved": approved,
+        "rejected": not approved,
+        "details_panel": _details_rows([
+            ("Work date", work_date),
+            ("Hours", hours),
+            ("Decision", "Approved" if approved else "Rejected"),
+        ]),
+    }, organization_id=organization_id, db=db,
+        accent=PALETTE["success"] if approved else PALETTE["error"])
+
+
 # ── Enterprise / Policy / Forms / Organizations / Billing / Super-Admin emails ──
 # Batch-2 canonical blue/white templates on the same shared wrapper. Senders are
 # best-effort: triggers call them inside try/except and log, so a failed
@@ -1141,12 +1341,22 @@ def send_org_admin_password_reset_email(
     reference_id: str = "",
     organization_id=None,
     db=None,
+    admin_initiated: bool = False,
 ) -> bool:
     """IAM-007 (Class P1): password reset requested. `expires_at_local` must be
-    an absolute date/time with named time zone, preformatted by the caller."""
+    an absolute date/time with named time zone, preformatted by the caller.
+
+    admin_initiated=True renders the "a platform administrator reset this for
+    you" copy variant (Super Admin forced reset) instead of "you requested
+    this" — same template, same catalog ID, same single-use link."""
     return send_approval_email(email, "org_admin_password_reset.html", {
-        "subject": "Reset your Zoiko Payroll password",
+        "subject": (
+            "A Zoiko Payroll administrator reset your password"
+            if admin_initiated else "Reset your Zoiko Payroll password"
+        ),
         "preheader": "Use the secure link only if you requested a reset.",
+        "admin_initiated": admin_initiated,
+        "self_requested": not admin_initiated,
         "first_name": first_name,
         "expires_at_local": expires_at_local,
         "reference_id": reference_id,
@@ -1181,7 +1391,8 @@ def send_password_reset_self_service_email(
     organization_id=None,
     db=None,
 ) -> bool:
-    """IAM-009 (Class P1): self-service random-password replacement. Same
+    """Catalog ID pending — see auth/service.py governance note (Class P1):
+    self-service random-password replacement. Same
     security-notice shape as IAM-008 — no link, no token."""
     return send_approval_email(email, "password_reset_self_service.html", {
         "subject": "Your Zoiko Payroll password was replaced",
@@ -1199,7 +1410,8 @@ def send_password_reset_completed_email(
     organization_id=None,
     db=None,
 ) -> bool:
-    """IAM-010 (Class P1): a password reset (via reset link) just completed.
+    """Catalog ID pending — see auth/service.py governance note (Class P1):
+    a password reset (via reset link) just completed.
     Confirmation only — no link, contact support if this wasn't the owner."""
     return send_approval_email(email, "password_reset_completed.html", {
         "subject": "Your Zoiko Payroll password has been reset",
@@ -1220,7 +1432,8 @@ def send_role_changed_email(
     organization_id=None,
     db=None,
 ) -> bool:
-    """IAM-011 (Class P1): the affected user's role changed. Recipient is the
+    """Catalog ID pending — see auth/service.py governance note (Class P1):
+    the affected user's role changed. Recipient is the
     affected user; broader admin-notify is a flagged follow-up, not built here."""
     return send_approval_email(email, "role_changed.html", {
         "subject": "Your Zoiko Payroll role has changed",
@@ -1242,7 +1455,8 @@ def send_account_deactivated_email(
     organization_id=None,
     db=None,
 ) -> bool:
-    """IAM-012 (Class P1): org-admin self-service deactivation notice. Sent to
+    """Catalog ID pending — see auth/service.py governance note (Class P1):
+    org-admin self-service deactivation notice. Sent to
     the deactivated user — their email is still a valid delivery target even
     though their account access is revoked (intended, not a bug)."""
     return send_approval_email(email, "account_deactivated.html", {
@@ -1268,12 +1482,23 @@ def send_organization_created_email(
     organization_name: str,
     reference_id: str = "",
     product_route: str = "standalone_payroll",
+    plan_display_name: Optional[str] = None,
     setup_link: str = "",
     organization_id=None,
     db=None,
 ) -> bool:
     """COM-001 (Class P1): Organization account created notification.
-    Sent only to the primary administrator upon organization creation."""
+    Sent only to the primary administrator upon organization creation.
+
+    plan_display_name is the real BillingPlan.name (e.g. "Professional"),
+    resolved by the caller from the plan_code the customer picked on
+    RegisterPage.jsx — checkout hasn't happened yet at send time, so this
+    is informational only, not a billing/entitlement source of truth.
+    Previously this template received product_route ("standalone_payroll")
+    and never rendered it at all — every plan's welcome email was
+    byte-identical, naming no plan. None (unresolved code, or a trial/
+    Enterprise path this parameter doesn't apply to) omits the line
+    entirely rather than showing a blank or a raw code string."""
     from app.config import settings
     if not reference_id:
         import uuid
@@ -1292,6 +1517,7 @@ def send_organization_created_email(
             "recipient_first_name": recipient_first_name or "Admin",
             "organization_name": organization_name,
             "product_route": product_route,
+            "plan_display_name": plan_display_name,
             "reference_id": reference_id,
             "cta_url": setup_link,
             "cta_label": "Begin organization setup",
@@ -1343,18 +1569,11 @@ def send_trial_organization_created_email(
     )
 
 
-def send_super_admin_org_created_notification_email(
-    org: object,
-    admin_user: object = None,
-    reference_id: str = "",
-    db=None,
-) -> bool:
-    """ADM-001: Operational alert sent to Super Admins whenever a new organization
-    is created in the platform, containing complete organization and admin metadata."""
+def resolve_super_admin_alert_recipients(db=None) -> list:
+    """Active Super Admin addresses for platform alerts (ADM-001), falling
+    back to the configured support inbox / SMTP origin when none exist."""
     from app.config import settings
-    from datetime import datetime
 
-    # 1. Resolve Super Admin recipients from DB
     recipients = []
     if db is not None:
         try:
@@ -1376,6 +1595,27 @@ def send_super_admin_org_created_notification_email(
         fallback = settings.ASSIST_SUPPORT_EMAIL or settings.SMTP_FROM_EMAIL
         if fallback:
             recipients = [fallback]
+    return recipients
+
+
+def send_super_admin_org_created_notification_email(
+    org: object,
+    admin_user: object = None,
+    reference_id: str = "",
+    db=None,
+    recipient_email: str = None,
+) -> bool:
+    """ADM-001: Operational alert sent to Super Admins whenever a new organization
+    is created in the platform, containing complete organization and admin metadata.
+
+    With recipient_email set, sends to that one address only — the audited
+    path (communications.dispatch_email) fans out per recipient itself so
+    every alert gets its own communication_events row. Without it, resolves
+    and sends to every recipient (legacy direct-call behavior)."""
+    from app.config import settings
+    from datetime import datetime
+
+    recipients = [recipient_email] if recipient_email else resolve_super_admin_alert_recipients(db)
 
     if not recipients:
         logger.warning("[email] No Super Admin recipients or fallback email configured; skipping org creation notification")
@@ -1395,7 +1635,7 @@ def send_super_admin_org_created_notification_email(
     created_at_display = created_at.strftime("%d %b %Y, %H:%M UTC") if created_at else datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
 
     context = {
-        "subject": f"[Platform Alert] New Organization Created — {getattr(org, 'organization_name', 'Org')}",
+        "subject": f"Zoiko Payroll Platform: New Organization Created — {getattr(org, 'organization_name', 'Org')}",
         "preheader": f"New organization {getattr(org, 'organization_name', '')} ({getattr(org, 'organization_code', '')}) created.",
         "organization_name": getattr(org, "organization_name", ""),
         "organization_code": getattr(org, "organization_code", ""),
@@ -1420,7 +1660,7 @@ def send_super_admin_org_created_notification_email(
             context,
             db=db,
             organization_id=getattr(org, "id", None),
-            from_display_name_override="Zoiko Platform Alert",
+            from_display_name_override="Zoiko Payroll Platform",
         )
         if not ok:
             success = False

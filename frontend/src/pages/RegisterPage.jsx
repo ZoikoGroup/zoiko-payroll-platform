@@ -340,6 +340,7 @@ export default function RegisterPage() {
             ? primaryTaxValue(form.country, form.taxIdentifiers)
             : form.taxNo,
           tax_identifiers: hasTaxIdentifiers ? form.taxIdentifiers : undefined,
+          plan_code: selectedPlanCode,
         },
       });
 

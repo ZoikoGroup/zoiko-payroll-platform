@@ -428,8 +428,12 @@ def _notify_jurisdiction_added(db: Session, row, organization_id: int) -> None:
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_jurisdiction_added_email(
-            org_email, _country_label(row.country_code), row.country_code,
+        from app.modules.communications.service import idempotency_key, queue_email
+        queue_email(
+            "payroll", "payroll.jurisdiction_added", None, org_email,
+            idempotency_key(organization_id, "payroll.jurisdiction_added", org_email, None, f"jurisdiction:{row.id}"),
+            send_jurisdiction_added_email, org_email, _country_label(row.country_code), row.country_code,
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -444,8 +448,16 @@ def _notify_jurisdiction_removed(db: Session, label: str, organization_id: int) 
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_jurisdiction_removed_email(
-            org_email, label, organization_id=organization_id, db=db,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        # The jurisdiction row is gone by now; key on its label within the window.
+        queue_email(
+            "payroll", "payroll.jurisdiction_removed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.jurisdiction_removed", org_email, None, f"jurisdiction:{label}", label,
+            ),
+            send_jurisdiction_removed_email, org_email, label,
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] jurisdiction-removed email failed for org {organization_id}: {exc}")
@@ -459,8 +471,16 @@ def _notify_jurisdiction_config_updated(db: Session, country_label: str, changes
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_jurisdiction_config_updated_email(
-            org_email, country_label, changes, organization_id=organization_id, db=db,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        queue_email(
+            "payroll", "payroll.jurisdiction_config_updated", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.jurisdiction_config_updated", org_email, None,
+                f"jurisdiction:{row.id}", changes,
+            ),
+            send_jurisdiction_config_updated_email, org_email, country_label, list(changes),
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] jurisdiction-config email failed for org {organization_id}: {exc}")
@@ -474,8 +494,17 @@ def _notify_jurisdiction_verified(db: Session, row, country_switched: bool, orga
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_jurisdiction_verified_email(
-            org_email, _country_label(row.country_code), active_switched=country_switched,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        # Repeatable: a config update returns the jurisdiction to draft, after
+        # which it is verified again.
+        queue_email(
+            "payroll", "payroll.jurisdiction_verified", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.jurisdiction_verified", org_email, None,
+                f"jurisdiction:{row.id}", {"active_switched": bool(country_switched)},
+            ),
+            send_jurisdiction_verified_email, org_email, _country_label(row.country_code),
+            send_kwargs={"active_switched": country_switched, "organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -490,8 +519,16 @@ def _notify_enterprise_activated(db: Session, jurisdictions_label: str, organiza
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_enterprise_activated_email(
-            org_email, jurisdictions_label, organization_id=organization_id, db=db,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        queue_email(
+            "payroll", "payroll.enterprise_activated", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.enterprise_activated", org_email, None,
+                f"org:{organization_id}", jurisdictions_label,
+            ),
+            send_enterprise_activated_email, org_email, jurisdictions_label,
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] enterprise-activated email failed for org {organization_id}: {exc}")
@@ -505,8 +542,16 @@ def _notify_enterprise_deactivated(db: Session, organization_id: int) -> None:
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_enterprise_deactivated_email(
-            org_email, organization_id=organization_id, db=db,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        queue_email(
+            "payroll", "payroll.enterprise_deactivated", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.enterprise_deactivated", org_email, None,
+                f"org:{organization_id}", "deactivated",
+            ),
+            send_enterprise_deactivated_email, org_email,
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] enterprise-deactivated email failed for org {organization_id}: {exc}")

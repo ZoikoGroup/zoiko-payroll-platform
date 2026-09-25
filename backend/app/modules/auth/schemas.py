@@ -39,6 +39,14 @@ class RegisterRequest(BaseModel):
     # ust_idnr/steuernummer/hrb, abn/acn). Validated server-side against the
     # selected country's schema before persisting.
     tax_identifiers: Optional[dict] = None
+    # The plan chosen on RegisterPage.jsx's Stage 1 plan picker — checkout
+    # itself doesn't happen until PlanReviewPage (a later, separate call),
+    # so this is purely informational at registration time: it lets the
+    # welcome email name the actual plan the customer is signing up for,
+    # instead of every plan's email being byte-identical. Never used for
+    # billing/entitlement decisions here — POST /billing/checkout remains
+    # the only place a plan is actually committed.
+    plan_code: Optional[str] = None
 
 
 class TrialRegisterRequest(BaseModel):

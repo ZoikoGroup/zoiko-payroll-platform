@@ -1,0 +1,11 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  A bulk employee {{operation_word}} for your organization finished:
+  <strong style="color:#0b1f3a;">{{succeeded_count}}</strong> succeeded and
+  <strong style="color:#0b1f3a;">{{failed_count}}</strong> failed.
+</p>
+{{#if has_failures}}<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Rows that failed were not applied. Review the reasons below, correct the source data and re-run the import for those rows only.
+</p>{{/if}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  {{employee_notice_line}}
+</p>

@@ -642,8 +642,15 @@ def _notify_policy_changed(db: Session, policy, old_scalars, old_overtime, old_a
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_payroll_policy_changed_email(
-            org_email, policy.name or "", changes, organization_id=organization_id, db=db,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        queue_email(
+            "payroll", "payroll.policy_changed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.policy_changed", org_email, None, f"policy:{policy.id}", changes,
+            ),
+            send_payroll_policy_changed_email, org_email, policy.name or "", list(changes),
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] policy-changed email failed for org {organization_id}: {exc}")
@@ -657,8 +664,16 @@ def _notify_integration_status_changed(db: Session, policy, category, provider_k
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_integration_status_changed_email(
-            org_email, policy.name or "", provider_key, category, enabled,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        # Repeatable toggle: keyed on the integration + new state.
+        queue_email(
+            "payroll", "payroll.integration_status_changed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.integration_status_changed", org_email, None,
+                f"policy:{policy.id}:integration:{category}:{provider_key}", {"enabled": bool(enabled)},
+            ),
+            send_integration_status_changed_email, org_email, policy.name or "", provider_key, category, enabled,
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
