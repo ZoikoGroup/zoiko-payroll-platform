@@ -6026,7 +6026,7 @@ class IrelandRpnSnapshot(Base):
     calculation_basis = Column(String(20), nullable=False)
     # PPSN present drives whether Emergency uses the prescribed initial
     # standard-rate treatment or the higher-rate/no-credit one (IE-008).
-    ppsn_supplied     = Column(Boolean, nullable=False, default=True, server_default="1")
+    ppsn_supplied     = Column(Boolean, nullable=False, default=True, server_default="true")
 
     # Annual values as issued, preserved for traceability. The engine
     # assesses per-period values derived from these, so BOTH are stored
@@ -6046,7 +6046,7 @@ class IrelandRpnSnapshot(Base):
 
     # LPT: deducted only when Revenue instructs it, and always kept separate
     # from PAYE/USC/PRSI (IE-003/IE spec §3).
-    lpt_instructed   = Column(Boolean, nullable=False, default=False, server_default="0")
+    lpt_instructed   = Column(Boolean, nullable=False, default=False, server_default="false")
     lpt_rate_pct     = Column(Numeric(5, 2), nullable=True)
 
     # Emergency-basis weekly credit for a PPSN-supplied employee.
@@ -6060,7 +6060,7 @@ class IrelandRpnSnapshot(Base):
     retrieved_at     = Column(DateTime(timezone=True), server_default=func.now())
     # Staleness is a preflight concern (IE-005/IE-033), recorded so a run can
     # explain WHY a refresh was required.
-    is_stale         = Column(Boolean, nullable=False, default=False, server_default="0")
+    is_stale         = Column(Boolean, nullable=False, default=False, server_default="false")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -6121,7 +6121,7 @@ class IrelandMyFutureFundStatus(Base):
     # amount locally.
     threshold_state = Column(String(30), nullable=True)
     # BELOW | AT_OR_ABOVE | CEASED
-    contributions_ceased = Column(Boolean, nullable=False, default=False, server_default="0")
+    contributions_ceased = Column(Boolean, nullable=False, default=False, server_default="false")
     ceased_from_pay_date  = Column(Date, nullable=True)
 
     # Occupational-pension/PRSA exemption evidence, kept separate from the
