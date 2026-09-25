@@ -428,19 +428,30 @@ def create_checkout_session(
     if settings.STRIPE_AUTOMATIC_TAX_ENABLED:
         session_kwargs["automatic_tax"] = {"enabled": True}
 
-    # Stripe rejects a billing_cycle_anchor that isn't strictly in the
-    # future — only set one for a genuinely negotiated delayed start, and
-    # let an immediate/near-immediate commencement use Stripe's own default
-    # (bill now) rather than risk a rejected anchor a few seconds in the past.
+    # Stripe rejects a trial_end that isn't strictly in the future — only
+    # set one for a genuinely negotiated delayed start, and let an
+    # immediate/near-immediate commencement use Stripe's own default (bill
+    # now) rather than risk a rejected value a few seconds in the past.
     if commencement > datetime.utcnow() + timedelta(minutes=5):
         # commencement is naive-UTC at this point (normalized above) — a
         # bare .timestamp() on a naive datetime is interpreted as LOCAL
-        # time by Python, silently shifting the anchor by the server's own
-        # UTC offset (confirmed: off by 5.5h on a server in IST). Attaching
-        # UTC tzinfo explicitly before converting is what actually makes
-        # this the UTC epoch Stripe expects.
-        anchor_epoch = int(commencement.replace(tzinfo=timezone.utc).timestamp())
-        session_kwargs["subscription_data"] = {"billing_cycle_anchor": anchor_epoch}
+        # time by Python, silently shifting this by the server's own UTC
+        # offset (confirmed: off by 5.5h on a server in IST). Attaching UTC
+        # tzinfo explicitly before converting is what actually makes this
+        # the UTC epoch Stripe expects.
+        #
+        # trial_end, NOT billing_cycle_anchor — confirmed live that
+        # billing_cycle_anchor alone does NOT defer the charge: Stripe
+        # still generates and pays a prorated invoice immediately
+        # (invoice.paid fired the same second as checkout.session.completed
+        # in testing, not commencement days later). trial_end is Stripe's
+        # actual "genuinely charge nothing until this date" mechanism —
+        # the subscription is real, but stays status=trialing on Stripe's
+        # own side until trial_end, matching exactly what "you won't be
+        # charged until X" and this app's own EVALUATION-until-paid webhook
+        # logic both need to be true, not just displayed.
+        trial_end_epoch = int(commencement.replace(tzinfo=timezone.utc).timestamp())
+        session_kwargs["subscription_data"] = {"trial_end": trial_end_epoch}
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
     try:
@@ -697,7 +708,13 @@ def _update_invoice_status_from_stripe_event(db: Session, stripe_invoice_id: Opt
 
 
 def _stripe_period_timestamp(subscription, item, field):
-    value = item.get(field)
+    # `item` here is a live stripe.SubscriptionItem (from a fresh
+    # stripe.Subscription.retrieve() call), NOT a plain dict — StripeObject
+    # raises AttributeError on .get(...) (it collides with the dict-method
+    # name check in its own __getattr__), so this must use getattr(), which
+    # StripeObject supports correctly for real field names. Confirmed via
+    # a live traceback: item.get(field) 500'd every checkout.session.completed.
+    value = getattr(item, field, None)
     if value is None:
         value = getattr(subscription, field, None)
     if value is None:
@@ -705,6 +722,21 @@ def _stripe_period_timestamp(subscription, item, field):
             f"Stripe subscription is missing required field: {field}"
         )
     return value
+
+
+def _invoice_subscription_id(data_object: dict) -> Optional[str]:
+    """The subscription an Invoice belongs to. Current Stripe API versions
+    (confirmed live against this account's pinned version) removed the flat
+    Invoice.subscription field entirely — it now only exists nested at
+    Invoice.parent.subscription_details.subscription. Checked first since
+    that's what a real event payload has today; the flat field is kept as
+    a fallback for older API versions rather than assumed gone everywhere."""
+    flat = data_object.get("subscription")
+    if flat:
+        return flat
+    parent = data_object.get("parent") or {}
+    subscription_details = parent.get("subscription_details") or {}
+    return subscription_details.get("subscription")
 
 
 def _subscription_period(subscription_object: dict) -> tuple[Optional[datetime], Optional[datetime]]:
@@ -843,18 +875,21 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
             # Deferred commencement -> stay/become EVALUATION until
             # invoice.paid confirms the real charge; immediate checkout ->
-            # PRODUCTION right away, same as before this change.
+            # PRODUCTION right away, same as before this change. period_end
+            # was already computed correctly above (via
+            # _stripe_period_timestamp, which uses getattr — a StripeObject
+            # raises AttributeError on .get(), it isn't a dict); no need to
+            # recompute it here.
             from app.modules.organizations.models import Organization
             org = db.query(Organization).filter(Organization.id == org_id).first()
             if org:
                 org.workspace_type = "EVALUATION" if is_deferred else "PRODUCTION"
-                sub_items = (stripe_sub.get("items") or {}).get("data") or []
-                sub_item = sub_items[0] if sub_items else {}
-                period_end_ts = _stripe_period_timestamp(
-                    stripe_sub, sub_item, "current_period_end"
-                )
-                # future replan/upgrade flows may reuse this handler) must
-                # never push a negotiated commencement date forward.
+                org.billing_onboarding_status = "TRIALING" if is_deferred else "ACTIVE"
+                # service_commencement_at is set once only — a later
+                # renewal's checkout.session.completed (there isn't one
+                # today, but future replan/upgrade flows may reuse this
+                # handler) must never push a negotiated commencement date
+                # forward.
                 if org.service_commencement_at is None and commencement_str:
                     try:
                         org.service_commencement_at = datetime.fromisoformat(commencement_str)
@@ -931,7 +966,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
 
     elif event_type == "invoice.paid":
-        stripe_sub_id = data_object.get("subscription")
+        stripe_sub_id = _invoice_subscription_id(data_object)
         sub = (
             db.query(BillingSubscription)
             .filter(BillingSubscription.stripe_subscription_id == stripe_sub_id)
@@ -948,19 +983,33 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             # above for why a naive fromtimestamp() silently shifts this by
             # the server's own local UTC offset.
             sub.current_period_end = datetime.utcfromtimestamp(period_end_ts)
-            sub.status = SubscriptionStatus.ACTIVE.value  # recover from PAST_DUE on payment
+
+            # A subscription created with trial_end (PlanReviewPage's
+            # deferred-billing checkout) generates a genuine $0 invoice
+            # immediately, as Stripe's own bookkeeping record for the trial
+            # starting — confirmed live (amount_paid=0,
+            # billing_reason=subscription_create). invoice.paid fires for
+            # that $0 invoice too. Treating ANY invoice.paid as "the real
+            # charge succeeded" would flip the org to PRODUCTION today,
+            # defeating the entire point of deferring it — only an invoice
+            # with money actually collected is a real payment.
+            amount_paid = data_object.get("amount_paid", 0) or 0
+            real_payment = amount_paid > 0
+
             from app.modules.organizations.models import Organization
             org = db.query(Organization).filter(Organization.id == sub.organization_id).first()
-            if org:
-                # The real charge succeeding is what "only after payment do
-                # you get the normal account" actually means — a deferred
-                # checkout parked the org in EVALUATION at
-                # checkout.session.completed; this is the one event allowed
-                # to move it to PRODUCTION. A no-op for an org that was
-                # already PRODUCTION (immediate checkout, or a later
-                # renewal's invoice.paid).
-                org.workspace_type = "PRODUCTION"
-                org.billing_onboarding_status = "ACTIVE"
+            if real_payment:
+                sub.status = SubscriptionStatus.ACTIVE.value  # recover from PAST_DUE on payment
+                if org:
+                    # The real charge succeeding is what "only after payment
+                    # do you get the normal account" actually means — a
+                    # deferred checkout parked the org in EVALUATION at
+                    # checkout.session.completed; this is the one event
+                    # allowed to move it to PRODUCTION. A no-op for an org
+                    # that was already PRODUCTION (immediate checkout, or a
+                    # later renewal's invoice.paid).
+                    org.workspace_type = "PRODUCTION"
+                    org.billing_onboarding_status = "ACTIVE"
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,
                 event_type="SUBSCRIPTION_RENEWED",
@@ -982,7 +1031,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
 
     elif event_type == "invoice.payment_failed":
-        stripe_sub_id = data_object.get("subscription")
+        stripe_sub_id = _invoice_subscription_id(data_object)
         sub = (
             db.query(BillingSubscription)
             .filter(BillingSubscription.stripe_subscription_id == stripe_sub_id)

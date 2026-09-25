@@ -4,6 +4,11 @@
   <span style="color:#0b1f3a; font-weight:bold;">{{organization_name}}</span> is
   ready for initial configuration.
 </p>
+{{#if plan_display_name}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+  Plan: <span style="color:#0b1f3a; font-weight:bold;">{{plan_display_name}}</span>
+</p>
+{{/if}}
 <p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
   Production payroll remains blocked until required readiness controls —
   including administrator setup, security configuration and role assignment —

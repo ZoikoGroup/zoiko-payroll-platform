@@ -34,6 +34,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # Idempotent: an environment upgraded along main's branch (revision
+    # e7f1a2b3c4d5) can already hold this table — see merge 5ae06cfda828.
+    if "payroll_pr_withholding_certificates" in sa.inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         'payroll_pr_withholding_certificates',
         sa.Column('id', sa.Integer(), primary_key=True, index=True),

@@ -1,14 +1,17 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px;">
-  <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table width="600" cellpadding="20" cellspacing="0" style="background: #ffffff; border-radius: 12px;">
-      <tr><td style="background: linear-gradient(135deg, #059669, #10B981); border-radius: 12px 12px 0 0; text-align: center; padding: 20px 20px 16px 20px;">
-        {{#if logo_url}}<img src="{{logo_url}}" alt="Zoiko Payroll" height="28" style="height:28px; width:auto; display:block; margin:0 auto 8px auto; border:0;">{{/if}}
-        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{company_name}}</h1>
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">{{mobile_styles}}
+</head>
+<body style="font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0;">
+  <table class="zk-outer" width="100%" cellpadding="0" cellspacing="0" border="0" style="padding:20px 12px;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" border="0" style="word-break:break-word; overflow-wrap:anywhere; max-width:600px; width:100%; background:#ffffff; border-radius:12px;">
+      <tr><td bgcolor="#059669" style="background-color:#059669; background-image: linear-gradient(135deg, #059669, #10B981); border-radius: 12px 12px 0 0; text-align: center; padding: 20px 20px 16px 20px;">
+        <!-- Logo on a navy chip: the white/blue lettering needs the brand navy behind it; these legacy gradients are too close to its blue. -->
+        <table align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px auto;"><tr><td bgcolor="#0b1f3a" style="background-color:#0b1f3a; border-radius:8px; padding:6px 12px; font-size:0; line-height:0;">{{logo_header_block}}</td></tr></table>
+        <h1 class="zk-h1" style="color: #ffffff; margin: 0; font-size: 24px;">{{company_name}}</h1>
       </td></tr>
-      <tr><td style="padding: 32px 28px;">
+      <tr><td class="zk-px" style="padding: 32px 28px;">
         <h2 style="color: #059669; margin: 0 0 16px 0; font-size: 20px;">Your Payslip is Ready</h2>
         <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Dear {{employee_name}},</p>
         <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 24px 0;">

@@ -157,16 +157,104 @@ if [ -n "$DRIFT" ]; then
   exit 1
 fi
 
-echo "==> Schema matches models. Re-stamping alembic to current head..."
-HEAD_REV="$(alembic heads | head -1 | awk '{print $1}')"
-if [ -z "$HEAD_REV" ]; then
-  echo "!! Could not resolve alembic head revision. State:"
+echo "==> Schema matches models. Finding correct stamp ancestor..."
+# Rather than stamping directly to HEAD (upgrade = no-op, missing tables stay
+# missing) or blindly one step before HEAD (only runs the last migration), we
+# walk the revision chain from HEAD backwards and find the deepest revision
+# whose expected DB objects already exist.  We stamp there so that
+# `alembic upgrade head` applies every migration that has NOT yet been run.
+#
+# The walk inspects the alembic_version table is irrelevant here — we query
+# the actual DB tables/columns via the SQLAlchemy inspector, which is
+# immune to the orphan revision ID.
+STAMP_REV="$(python - <<'PY'
+import sys
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+import sqlalchemy as sa
+
+cfg = Config("alembic.ini")
+script = ScriptDirectory.from_config(cfg)
+
+heads = script.get_heads()
+if len(heads) != 1:
+    raise SystemExit(f"Expected exactly 1 head, found {len(heads)}: {heads}")
+
+# Build the linear chain from HEAD back to base (handles simple linear chains
+# and merge-point chains by always following the first parent).
+chain = []
+rev_id = heads[0]
+while rev_id is not None:
+    rev = script.get_revision(rev_id)
+    chain.append(rev_id)
+    parents = rev.down_revision
+    if parents is None:
+        rev_id = None
+    elif isinstance(parents, str):
+        rev_id = parents
+    else:
+        rev_id = list(parents)[0]
+
+# Import here so DB is only touched once we need it.
+from app.database import engine
+with engine.connect() as conn:
+    insp = sa.inspect(engine)
+    db_tables = set(insp.get_table_names())
+    db_columns = {t: {c["name"] for c in insp.get_columns(t)} for t in db_tables}
+
+def rev_objects_present(rev_id):
+    """Return True if the migration file's upgrade() creates nothing new.
+
+    We read the migration source and look for op.create_table / op.add_column
+    calls. For each one we check the DB.  If all created objects already exist,
+    the migration has effectively been applied (or was never needed).
+    """
+    import re, importlib.util, pathlib
+    rev = script.get_revision(rev_id)
+    if rev is None:
+        return True
+    path = rev.module.__file__  # type: ignore[attr-defined]
+    src = pathlib.Path(path).read_text(encoding="utf-8")
+
+    # Tables created by this migration.
+    created_tables = re.findall(r'op\.create_table\s*\(\s*[\'"](\w+)[\'"]', src)
+    for t in created_tables:
+        if t not in db_tables:
+            return False  # table missing -> migration not applied
+
+    # Columns added by this migration.
+    added_cols = re.findall(
+        r'op\.add_column\s*\(\s*[\'"](\w+)[\'"].*?sa\.Column\s*\(\s*[\'"](\w+)[\'"]',
+        src, re.DOTALL
+    )
+    for tbl, col in added_cols:
+        if tbl in db_columns and col not in db_columns[tbl]:
+            return False  # column missing -> migration not applied
+
+    return True  # nothing new detected as missing
+
+# Walk from HEAD toward base; find the deepest rev whose changes are present.
+# We stamp to that revision, then upgrade head runs everything after it.
+stamp_to = "base"
+for rev_id in chain:
+    if rev_objects_present(rev_id):
+        stamp_to = rev_id
+        break  # found the deepest applied revision
+
+print(stamp_to)
+PY
+)"
+if [ -z "$STAMP_REV" ]; then
+  echo "!! Could not determine correct stamp revision. State:"
   print_diagnostics
   exit 1
 fi
 
-alembic stamp "$HEAD_REV"
-echo "==> Re-stamped to '${HEAD_REV}'. Re-running upgrade..."
+echo "==> Stamping to '${STAMP_REV}' (deepest revision already reflected in DB)..."
+# --purge truncates alembic_version unconditionally before writing the new
+# revision, so Alembic never tries to look up the orphan row.
+alembic stamp --purge "$STAMP_REV"
+echo "==> Running upgrade head from '${STAMP_REV}' to apply all pending migrations..."
 alembic upgrade head
 check_model_drift
 echo "==> Running sync_schema drift safety-net..."

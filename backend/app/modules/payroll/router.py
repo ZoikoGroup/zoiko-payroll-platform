@@ -216,7 +216,7 @@ def bulk_create_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = service.bulk_create_employees(db, data, current_user.organization_id)
+    result = service.bulk_create_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{result['created']} created, {len(result['failed'])} failed.",
         "created": result['created'],
@@ -235,7 +235,7 @@ def bulk_update_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = service.bulk_update_employees(db, data, current_user.organization_id)
+    result = service.bulk_update_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{result['updated']} updated, {len(result['failed'])} failed.",
         "updated": result['updated'],
@@ -254,7 +254,7 @@ def bulk_delete_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = service.bulk_delete_employees(db, data, current_user.organization_id)
+    result = service.bulk_delete_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{len(result['deleted'])} deleted, {len(result['failed'])} failed.",
         **result,

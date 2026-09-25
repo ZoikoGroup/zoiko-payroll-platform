@@ -141,6 +141,7 @@ def db():
     import app.modules.auth.models  # noqa: F401
     import app.modules.payroll.models  # noqa: F401
     import app.modules.billing.models  # noqa: F401
+    import app.modules.communications.models  # noqa: F401
 
     engine = create_engine(
         "sqlite:///:memory:",

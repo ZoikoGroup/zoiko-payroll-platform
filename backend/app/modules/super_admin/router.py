@@ -192,11 +192,20 @@ def set_user_status(
     user.is_active = is_active
     db.commit()
     try:
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
         from app.services.email_service import send_user_status_changed_email
         if user.email:
-            send_user_status_changed_email(
-                user.email, user.full_name or "there", is_active,
-                organization_id=user.organization_id, db=db,
+            # Repeatable toggle: keyed on the user + new state within the window.
+            queue_email(
+                "super_admin", "identity.user_status_changed", None, user.email,
+                repeatable_idempotency_key(
+                    user.organization_id, "identity.user_status_changed", user.email, None,
+                    f"user:{user.id}", {"is_active": is_active},
+                ),
+                send_user_status_changed_email, user.email, user.full_name or "there", is_active,
+                send_kwargs={"organization_id": user.organization_id},
+                organization_id=user.organization_id, actor_user_id=current_user.id,
+                recipient_user_id=user.id, db=db,
             )
     except Exception as exc:  # pragma: no cover — notification never blocks the status flip
         import logging
@@ -213,22 +222,12 @@ def admin_reset_password(
     """Force a password reset: email the user a single-use reset link."""
     from app.core.exceptions import NotFoundException
     from app.modules.auth import service as auth_service
-    from app.modules.auth.models import SecurityActionPurpose
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise NotFoundException("User", "id")
 
-    raw_token, expires_at = auth_service._issue_action_token(
-        db, user.email, user.organization_id, SecurityActionPurpose.RESET
-    )
-    link = auth_service._action_link(SecurityActionPurpose.RESET, raw_token)
-    auth_service._send_reset_email(
-        db, user, link,
-        expires_at_local=auth_service._format_expiry_local(expires_at),
-        reference_id=auth_service._reference_id(raw_token),
-    )
-    db.commit()
+    auth_service.admin_initiated_password_reset(db, user, current_user)
     logger.info("Super Admin %s reset password for %s", current_user.email, user.email)
     return {"message": "Password reset link sent to the user."}
 
@@ -644,13 +643,22 @@ def assign_compliance_policy(
                 "US": "United States", "UK": "United Kingdom", "AU": "Australia",
                 "DE": "Germany", "CA": "Canada", "IN": "India",
             }.get(str(pack.jurisdiction_country).upper(), str(pack.jurisdiction_country))
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
         for org_id in payload.organizationIds:
             org_email = _get_org_contact_email(db, org_id)
             if not org_email:
                 continue
-            send_policy_assigned_to_organization_email(
-                org_email, pack_label, version=version, country_label=country_label,
-                organization_id=org_id, db=db,
+            # Repeatable: the same pack can be re-assigned later (after another
+            # pack was active); keyed on org + pack version within the window.
+            queue_email(
+                "super_admin", "payroll.compliance_policy_assigned", None, org_email,
+                repeatable_idempotency_key(
+                    org_id, "payroll.compliance_policy_assigned", org_email, None,
+                    f"org:{org_id}", {"pack": id, "version": version},
+                ),
+                send_policy_assigned_to_organization_email, org_email, pack_label,
+                send_kwargs=dict(version=version, country_label=country_label, organization_id=org_id),
+                organization_id=org_id, actor_user_id=current_user.id, db=db,
             )
     except Exception as exc:  # pragma: no cover — notification never blocks the assignment
         import logging

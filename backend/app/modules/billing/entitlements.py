@@ -672,14 +672,21 @@ def _notify_entitlement_override_granted(db: Session, override, organization_id:
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_entitlement_override_granted_email(
-            org_email,
-            feature_key=override.feature_key,
-            limit_value=override.limit_value,
-            reason=override.reason or "",
-            expires_at=override.expires_at,
-            organization_id=organization_id,
-            db=db,
+        from app.modules.communications.service import idempotency_key, queue_email
+        queue_email(
+            "billing", "billing.entitlement_override_granted", None, org_email,
+            idempotency_key(
+                organization_id, "billing.entitlement_override_granted", org_email, None, f"override:{override.id}",
+            ),
+            send_entitlement_override_granted_email, org_email,
+            send_kwargs=dict(
+                feature_key=override.feature_key,
+                limit_value=override.limit_value,
+                reason=override.reason or "",
+                expires_at=override.expires_at,
+                organization_id=organization_id,
+            ),
+            organization_id=organization_id, actor_user_id=getattr(override, "granted_by_user_id", None), db=db,
         )
     except Exception as exc:
         logger.warning(f"[billing] entitlement-override email failed for org {organization_id}: {exc}")

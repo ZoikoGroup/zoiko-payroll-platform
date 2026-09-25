@@ -504,9 +504,17 @@ def update_organization(
             changes.append((_org_change_labels.get(k, k), old_value, new_value))
     if changes and org.email:
         try:
+            from app.modules.communications.service import queue_email, repeatable_idempotency_key
             from app.services.email_service import send_organization_details_changed_email
-            send_organization_details_changed_email(
-                org.email, changes, organization_id=organization_id, db=db,
+            queue_email(
+                "organizations", "organizations.details_changed", None, org.email,
+                repeatable_idempotency_key(
+                    organization_id, "organizations.details_changed", org.email, None,
+                    f"org:{organization_id}", changes,
+                ),
+                send_organization_details_changed_email, org.email, changes,
+                send_kwargs={"organization_id": organization_id},
+                organization_id=organization_id, actor_user_id=current_user.id, db=db,
             )
         except Exception as exc:
             logger.warning(
@@ -567,30 +575,31 @@ def create_organization(
     logger.info("Super Admin %s created organization %s (%s)", current_user.email, org.organization_name, code)
 
     try:
-        from app.services.email_service import (
-            send_organization_created_email,
-            send_super_admin_org_created_notification_email,
+        from app.modules.communications.service import idempotency_key, queue_email
+        from app.modules.organizations.notifications import (
+            ORG_CREATED_EVENT,
+            ORG_CREATED_TEMPLATE_ID,
+            queue_super_admin_org_created_alerts,
         )
+        from app.services.email_service import send_organization_created_email
         if org.email:
-            ref_id = f"ORG-{org.id:04d}-INIT"
-            send_organization_created_email(
-                email=org.email,
-                recipient_first_name="Admin",
-                organization_name=org.organization_name,
-                reference_id=ref_id,
-                organization_id=org.id,
-                db=db,
+            # Same key as auth's self-serve register_enterprise COM-001 send, so
+            # an organization is only ever welcomed once whichever path created it.
+            queue_email(
+                "organizations", ORG_CREATED_EVENT, ORG_CREATED_TEMPLATE_ID, org.email,
+                idempotency_key(org.id, ORG_CREATED_EVENT, org.email, ORG_CREATED_TEMPLATE_ID),
+                send_organization_created_email,
+                send_kwargs=dict(
+                    email=org.email,
+                    recipient_first_name="Admin",
+                    organization_name=org.organization_name,
+                    reference_id=f"ORG-{org.id:04d}-INIT",
+                    organization_id=org.id,
+                ),
+                organization_id=org.id, actor_user_id=current_user.id, db=db,
             )
-            logger.info(
-                "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
-                org.email, org.id, ref_id,
-            )
-        # Notify Super Admins of the new organization created
-        send_super_admin_org_created_notification_email(
-            org=org,
-            reference_id=f"ADM-ORG-{org.id:04d}",
-            db=db,
-        )
+        # Notify Super Admins of the new organization created (ADM-001)
+        queue_super_admin_org_created_alerts(db, org, module="organizations", actor_user_id=current_user.id)
     except Exception as exc:
         logger.warning("Failed to dispatch org creation notification emails for org %s: %s", org.id, exc)
 
@@ -619,11 +628,20 @@ def update_organization_status(
     org_name = getattr(org, "organization_name", None) or org.organization_code or ""
     org_email = getattr(org, "email", None) or ""
     try:
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
         from app.services.email_service import send_organization_suspended_email
         if org_email:
-            send_organization_suspended_email(
-                org_email, org_name, suspended=not is_active,
-                reason="", organization_id=org.id, db=db,
+            # Repeatable (suspend → reactivate → suspend): keyed on the new
+            # state within the dedup window, not on the organization alone.
+            queue_email(
+                "organizations", "organizations.status_changed", None, org_email,
+                repeatable_idempotency_key(
+                    org.id, "organizations.status_changed", org_email, None,
+                    f"org:{org.id}", {"is_active": is_active},
+                ),
+                send_organization_suspended_email, org_email, org_name,
+                send_kwargs=dict(suspended=not is_active, reason="", organization_id=org.id),
+                organization_id=org.id, actor_user_id=current_user.id, db=db,
             )
     except Exception as exc:  # pragma: no cover — notification never blocks the status flip
         logger.warning("Failed to send org status email for org %s: %s", org.id, exc)
@@ -826,9 +844,17 @@ def delete_organization(
         current_user.email, org_name, org_code,
     )
     try:
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_organization_deleted_email
         if org_email:
-            send_organization_deleted_email(org_email, org_name, db=db)
+            # organization_id is still recorded on the audit row: the column is
+            # deliberately FK-free so the evidence outlives the deleted tenant.
+            queue_email(
+                "organizations", "organizations.deleted", None, org_email,
+                idempotency_key(organization_id, "organizations.deleted", org_email, None, f"org:{organization_id}"),
+                send_organization_deleted_email, org_email, org_name,
+                organization_id=organization_id, actor_user_id=current_user.id, db=db,
+            )
     except Exception as exc:  # pragma: no cover — notification never blocks the deletion
         logger.warning("Failed to send org deletion email for org %s: %s", organization_id, exc)
     return {"message": f"Organization '{org_name}' and all of its data deleted."}

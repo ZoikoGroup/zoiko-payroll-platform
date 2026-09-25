@@ -298,7 +298,7 @@ def update_user(
     db.commit()
     db.refresh(user)
     if data.role is not None and data.role != old_role:
-        # IAM-011: notify AFTER the commit that applied the change, only when
+        # Role-changed notice (catalog ID pending): notify AFTER the commit that applied the change, only when
         # the role actually changed (report uses the pre-update role).
         service.notify_role_changed(
             db, user=user, actor=current_user, old_role=old_role, new_role=user.role,
@@ -323,7 +323,7 @@ def deactivate_user(
         raise BadRequestException("You cannot deactivate your own account.")
     user.is_active = False
     db.commit()
-    # IAM-012: notify AFTER the commit. The deactivated user's email is still
+    # Account-deactivated notice (catalog ID pending): notify AFTER the commit. The deactivated user's email is still
     # a valid delivery target; the notice names the same-org admin who acted.
     service.notify_user_deactivated(db, user=user, actor=current_user)
     return {"message": "User deactivated successfully."}

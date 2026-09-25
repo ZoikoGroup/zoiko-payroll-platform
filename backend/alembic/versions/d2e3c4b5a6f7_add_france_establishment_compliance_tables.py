@@ -38,6 +38,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # Idempotent (see merge 5ae06cfda828): an environment upgraded along
+    # main's branch can already hold all five tables. A PARTIAL set is a
+    # genuinely inconsistent schema — stop with the exact list, never guess.
+    france_tables = {
+        "payroll_fr_employer_profiles", "payroll_fr_establishment_rate_packs", "payroll_fr_pas_rates",
+        "payroll_fr_dsn_submissions", "payroll_fr_dsn_outbox_items",
+    }
+    present = france_tables & set(sa.inspect(op.get_bind()).get_table_names())
+    if present == france_tables:
+        return
+    if present:
+        raise RuntimeError(f"France compliance tables partially present ({sorted(present)}); reconcile manually.")
+
     # ── payroll_fr_employer_profiles (1:1 org-level France employer profile) ──
     op.create_table(
         'payroll_fr_employer_profiles',
