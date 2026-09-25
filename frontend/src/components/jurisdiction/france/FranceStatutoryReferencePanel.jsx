@@ -9,6 +9,7 @@ import { describeLoadError, loadErrorText } from "../../../service/errorClassifi
 import { useToast } from "../../../context/ToastContext";
 import { inputClass } from "../constants";
 import { FR_PACK_CATALOG, FR_PACK_CATEGORIES } from "./franceStatutoryConfig";
+import FrancePasNeutralGridPanel from "./FrancePasNeutralGridPanel";
 
 // France statutory values as PACK DATA (ZP-FR-ENG-001 FR-003). Every row
 // engine/countries/france.py reads — rates AND the PASS/SMIC/RGDU/CSG/PAS
@@ -242,6 +243,8 @@ export default function FranceStatutoryReferencePanel({ pack, onReload }) {
               </div>
             );
           })}
+
+          <FrancePasNeutralGridPanel pack={pack} editable={editable} />
 
           {otherRows.length > 0 && (
             <p className="text-[11px] text-foreground-muted">

@@ -2407,6 +2407,12 @@ class CanonicalTaxSlabUpsert(BaseModel):
     taxFormula: str = ""
     ruleType: str = "MARGINAL_RATE"
     formulaExpression: Optional[str] = None
+    # Optional row-level dating inside the pack (e.g. France's 1 May 2026
+    # PAS neutral grid). Only applied when the caller actually sends the
+    # field, so an edit from a form that doesn't know about dates never
+    # wipes a row's existing window.
+    effectiveFrom: Optional[date] = None
+    effectiveTo: Optional[date] = None
     # PT_FLAT only (India state-level Professional Tax, bracketed by gross
     # salary): a fixed monthly amount instead of a percentage, plus an
     # optional override for whichever month absorbs annual-cap rounding.
@@ -2471,6 +2477,8 @@ class CanonicalTaxSlabResponse(BaseModel):
     filingStatus: Optional[str] = Field(None, validation_alias="filing_status", serialization_alias="filingStatus")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
 
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 

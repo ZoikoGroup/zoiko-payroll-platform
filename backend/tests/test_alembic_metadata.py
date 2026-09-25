@@ -3,7 +3,8 @@
 The graph must have one head, no duplicate revision IDs, and retain the
 known Germany migration chain wiring. These tests inspect the files directly
 and also load the real Alembic ScriptDirectory without touching a database.
-The current graph has head ``5ae06cfda828`` and 150 revisions — the
+The current graph has head ``4b13831d574b`` (ensure communication_events,
+on top of merge ``5ae06cfda828``) and 151 revisions — the
 merge of venu's branch (PR withholding certificates -> France compliance
 tables -> France establishments/editable fields -> Ireland) with main's
 (communication_events -> drop orphan SGP columns), which forked at
@@ -68,7 +69,7 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["5ae06cfda828"]
+    assert heads == ["4b13831d574b"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -80,7 +81,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["5ae06cfda828"]
+    assert list(script.get_heads()) == ["4b13831d574b"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -105,7 +106,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 150
+    assert len(revs) == 151
 
 
 def test_germany_head_chain_wiring_is_intact():

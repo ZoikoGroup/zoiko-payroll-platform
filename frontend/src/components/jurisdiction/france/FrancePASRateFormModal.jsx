@@ -115,8 +115,8 @@ export default function FrancePASRateFormModal({ organizationId, rates = [], emp
         )}
         {isNeutral && (
           <p className="col-span-2 rounded-lg bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
-            No percentage — the statutory neutral grid applies. Note: the neutral grid is not loaded yet, so payroll for a
-            NEUTRAL employee blocks until it is (the official BOFiP grid is required).
+            No percentage — the rate comes from the PAS neutral grid in the active France pack (Tax Configuration →
+            Statutory Values). Payroll for this employee blocks until that grid is loaded.
           </p>
         )}
         {priorRates.length > 0 && (

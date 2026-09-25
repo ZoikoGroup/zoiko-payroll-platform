@@ -201,6 +201,22 @@ def _pct(rate: Decimal) -> Decimal:
 
 # ── PAS ────────────────────────────────────────────────────────────────
 
+FR_PAS_NEUTRAL_RULE_TYPE = "FR_PAS_NEUTRAL"
+
+
+def _neutral_grid_rate(slabs, monthly_base: Decimal):
+    """(rate_pct, row) of the FR_PAS_NEUTRAL grid band containing
+    `monthly_base` — min inclusive, max exclusive (open-ended when None) —
+    or (None, None) when the pack carries no matching band."""
+    for row in sorted((s for s in slabs if getattr(s, "rule_type", None) == FR_PAS_NEUTRAL_RULE_TYPE),
+                      key=lambda s: Decimal(str(s.min_amount))):
+        low = Decimal(str(row.min_amount))
+        high = Decimal(str(row.max_amount)) if row.max_amount is not None else None
+        if monthly_base >= low and (high is None or monthly_base < high):
+            return Decimal(str(row.rate_pct)), row
+    return None, None
+
+
 def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decimal,
                  short_contract_abatement: Decimal, apprentice_threshold: Decimal) -> dict:
     pas = ctx.france_pas or {}
@@ -219,10 +235,10 @@ def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decima
             f"Unsupported PAS rate_type '{rate_type}' — only PERSONALIZED and NEUTRAL are legal.",
         )
     rate = Decimal(str(rate_pct)) if rate_pct is not None else None
-    if rate is None or rate < 0:
+    if rate_type == "PERSONALIZED" and (rate is None or rate < 0):
         raise FranceCalculationBlockedError(
             "PAS_RATE_MISSING",
-            f"France PAS rate_type='{rate_type}' carried no usable rate_pct. "
+            "France PAS rate_type='PERSONALIZED' carried no usable rate_pct. "
             "Authority rates are data, never administrator-editable percentages (FR-008).",
         )
 
@@ -233,6 +249,21 @@ def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decima
     if rate_type == "NEUTRAL" and pas.get("short_contract"):
         abatement = min(short_contract_abatement, pas_base)
         pas_base = pas_base - abatement
+
+    grid_row = None
+    if rate_type == "NEUTRAL" and rate is None:
+        # FR-009: the statutory non-personalized grid is PACK content — the
+        # FR_PAS_NEUTRAL TaxSlab rows in force on the pay date (row-level
+        # dating switches the 1 May 2026 grid). Selected on the monthly PAS
+        # base after any short-contract abatement.
+        rate, grid_row = _neutral_grid_rate(ctx.slabs or [], pas_base)
+        if rate is None:
+            raise FranceCalculationBlockedError(
+                "PAS_NEUTRAL_GRID_MISSING",
+                "France NEUTRAL PAS needs the statutory non-personalized grid (FR_PAS_NEUTRAL rows) in the "
+                "active France pack for this pay date — none covers a monthly base of "
+                f"{_round2(pas_base)} (FR-009).",
+            )
 
     exempt = False
     apprentice_exempt_amount = Decimal("0")
@@ -254,7 +285,8 @@ def _compute_pas(ctx: PayrollContext, net_imposable: Decimal, net_social: Decima
         "rate_type": rate_type,
         "rate_pct": rate,
         "rate_id": pas.get("rate_id") or None,
-        "grid_version": pas.get("grid_version") or None,
+        "grid_version": pas.get("grid_version") or (
+            f"FR_PAS_NEUTRAL {grid_row.min_amount}–{grid_row.max_amount or '∞'}" if grid_row is not None else None),
         "apprentice_exempt": exempt,
         "apprentice_exempt_amount": _round2(apprentice_exempt_amount),
         "pas_base": _round2(pas_base),

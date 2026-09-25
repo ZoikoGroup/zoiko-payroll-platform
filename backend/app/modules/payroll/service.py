@@ -7348,6 +7348,13 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         ni_category=data.niCategory, employer_rate_pct=data.employerRatePct,
         sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
     )
+    # Row dating only when explicitly sent (see CanonicalTaxSlabUpsert).
+    if "effectiveFrom" in data.model_fields_set:
+        fields["effective_from"] = data.effectiveFrom
+    if "effectiveTo" in data.model_fields_set:
+        fields["effective_to"] = data.effectiveTo
+    if fields.get("effective_from") and fields.get("effective_to") and fields["effective_to"] < fields["effective_from"]:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
     action = "update" if data.id else "create"
     old_value = None
     if data.id:
@@ -29179,9 +29186,17 @@ def compute_france_readiness_checks(db: Session, organization_id: int, period: d
           f"{len(missing_pas)} France employee(s) have no active PAS rate at period start.")
 
     from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
-    _rates, _slabs, pack = resolve_tax_configuration(db, "FR", payroll_date=period)
+    _rates, fr_slabs, pack = resolve_tax_configuration(db, "FR", payroll_date=period)
     check("statutory_pack", "H", "Active France statutory pack (gate G1)", pack is not None,
           f"No Active France statutory pack covers {period} — approve and activate the FR pack (gate G1).")
+    neutral_employees = [e for e in employees
+                         if (lambda r: r is not None and r.rate_type == "NEUTRAL" and r.rate_pct is None)(
+                             get_active_france_pas_rate(db, organization_id, e.id, as_of=period))]
+    if neutral_employees:
+        has_grid = any(getattr(sl, "rule_type", None) == "FR_PAS_NEUTRAL" for sl in (fr_slabs or []))
+        check("pas_neutral_grid", "D", "PAS neutral grid loaded (FR-009)", has_grid,
+              f"{len(neutral_employees)} employee(s) are on the neutral PAS rate but the active France pack has no "
+              f"FR_PAS_NEUTRAL grid covering {period}.")
     return checks
 
 

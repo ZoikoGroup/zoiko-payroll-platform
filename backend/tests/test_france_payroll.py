@@ -828,6 +828,14 @@ def test_fr_service_dsn_draft_revalidation_and_correction(db):
     from app.modules.payroll.schemas import FrancePASRateUpsert
     s.ingest_france_pas_rate(db, 1, FrancePASRateUpsert(
         employeeId=stray.id, rateType="NEUTRAL", effectiveFrom=date(2026, 1, 1)), actor_id=1)
+    with pytest.raises(BadRequestException):   # NEUTRAL needs the grid loaded in the active pack
+        s.transition_france_dsn_submission(db, 1, dsn.id, FranceDsnStatusUpdate(status="VALIDATED"), actor_id=1)
+    from app.modules.payroll.models import JurisdictionPack, TaxSlab
+    h2 = db.query(JurisdictionPack).filter_by(pack_id="FR-2026-H2").one()
+    db.add(TaxSlab(jurisdiction_pack_id=h2.id, jurisdiction_country="FR", organization_id=None,
+                   min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("0"), rate_label="test band",
+                   tax_formula="", rule_type="FR_PAS_NEUTRAL"))
+    db.commit()
     dsn = s.transition_france_dsn_submission(db, 1, dsn.id, FranceDsnStatusUpdate(status="VALIDATED"), actor_id=1)
     assert dsn.status == "VALIDATED" and dsn.validation_errors == []
 
@@ -1159,3 +1167,63 @@ def test_fr_load_statutory_defaults_refuses_active_and_non_france_packs(db):
         s.load_france_statutory_defaults(db, _mk_pack(db, "DE-X", country="DE").id, actor_id=1)
     with pytest.raises(NotFoundException):
         s.load_france_statutory_defaults(db, 999999, actor_id=1)
+
+
+# ── H. PAS neutral grid as pack content (FR-009) ────────────────────────
+
+@dataclass
+class Slab:
+    min_amount: Decimal
+    max_amount: Decimal
+    rate_pct: Decimal
+    rule_type: str = "FR_PAS_NEUTRAL"
+
+
+# Illustrative bands only — NOT the official BOFiP grid (which must be
+# loaded as pack content by Super Admin); they just exercise the mechanism.
+TEST_GRID = [Slab(Decimal("0"), Decimal("1600"), Decimal("0")),
+             Slab(Decimal("1600"), Decimal("2000"), Decimal("2.5")),
+             Slab(Decimal("2000"), None, Decimal("7.5"))]
+
+
+def _neutral_ctx(gross, slabs, **pas_kw):
+    ctx = PayrollContext(
+        country="FR", gross=Decimal(str(gross)), basic=Decimal(str(gross)), rate_map=FR_RATES, slabs=slabs,
+        pay_date=date(2026, 6, 30), france_payroll_date=date(2026, 6, 30),
+        france_establishment=FR_ESTABLISHMENT, france_pas={"rate_type": "NEUTRAL", **pas_kw},
+        france_ytd=dict(FR_YTD), france_cadre=True,
+    )
+    return StandardStrategy().calculate(ctx)
+
+
+def test_fr_neutral_rate_resolved_from_pack_grid():
+    r = _neutral_ctx(3000, TEST_GRID)                 # net imposable 2459.55 → 7.5% band
+    assert r.fr_pas_rate_type == "NEUTRAL"
+    assert r.fr_pas_rate_pct == Decimal("7.5")
+    assert r.fr_pas_withheld == Decimal("184.47")     # 2459.55 × 7.5%
+    # short-contract abatement is applied BEFORE the band is chosen
+    r2 = _neutral_ctx(3000, TEST_GRID, short_contract=True)   # 2459.55 − 748 = 1711.55 → 2.5%
+    assert r2.fr_pas_rate_pct == Decimal("2.5")
+
+
+def test_fr_neutral_without_grid_blocks_clearly():
+    with pytest.raises(FranceCalculationBlockedError) as exc:
+        _neutral_ctx(3000, [])
+    assert exc.value.code == "PAS_NEUTRAL_GRID_MISSING"
+
+
+def test_fr_slab_row_dates_only_change_when_sent(db):
+    from app.modules.payroll import service as s
+    from app.modules.payroll.schemas import CanonicalTaxSlabUpsert
+
+    pack = _mk_pack(db)
+    row = s.upsert_canonical_tax_slab(db, CanonicalTaxSlabUpsert(
+        jurisdictionPackId=pack.id, jurisdictionCountry="FR", minAmount=Decimal("0"), maxAmount=Decimal("1600"),
+        ratePct=Decimal("0"), rateLabel="0%", ruleType="FR_PAS_NEUTRAL",
+        effectiveFrom=date(2026, 5, 1)), actor_id=1)
+    assert row.effective_from == date(2026, 5, 1)
+    # an edit that doesn't send dates (every non-France form) keeps them
+    row = s.upsert_canonical_tax_slab(db, CanonicalTaxSlabUpsert(
+        id=row.id, jurisdictionPackId=pack.id, jurisdictionCountry="FR", minAmount=Decimal("0"),
+        maxAmount=Decimal("1620"), ratePct=Decimal("0"), rateLabel="0%", ruleType="FR_PAS_NEUTRAL"), actor_id=1)
+    assert row.effective_from == date(2026, 5, 1) and row.max_amount == Decimal("1620")
