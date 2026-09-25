@@ -135,8 +135,10 @@ class AuthEmailEvent(Base):
     idempotency_key is the structural guard — a duplicate request hits the
     constraint, records outcome="skipped_duplicate", and never reaches SMTP.
     After the send the same row's outcome is updated from the real smtplib
-    result. This table is the record of truth; the legacy "email_audit"
-    logger.info lines are kept only as cheap extra visibility (§04).
+    result. This table is auth's record of truth; every send is also written
+    to the platform-wide communication_events table (modules/communications),
+    which carries retry attempt counts. The old log-only "email_audit" lines
+    have been removed (§04).
 
     Two idempotency key families (see auth/service.py):
       - link-free notification events (password changed / replaced / reset

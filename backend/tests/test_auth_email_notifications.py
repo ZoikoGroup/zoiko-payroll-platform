@@ -2,13 +2,15 @@
 tests/test_auth_email_notifications.py
 --------------------------------------
 Coverage for the "record of truth" email audit + the five missing IAM
-notification emails (IAM-008..012) plus the COM-001 registration email:
+notification emails (IAM-008 plus four notices whose catalog IDs are
+pending — they were previously mis-tagged IAM-009..012, which the spec
+assigns to MFA/sign-in templates) plus the COM-001 registration email:
 
   - IAM-008  change_password ("Your Zoiko Payroll password was changed")
-  - IAM-009  generate_random_password (self-service replacement notice)
-  - IAM-010  password-reset completion confirmation
-  - IAM-011  role change notice (affected user only)
-  - IAM-012  account deactivation notice (names the acting org admin)
+  - (pending) generate_random_password (self-service replacement notice)
+  - (pending) password-reset completion confirmation
+  - (pending) role change notice (affected user only)
+  - (pending) account deactivation notice (names the acting org admin)
   - COM-001  organization created (register_enterprise) — now audited
 
 Structural idempotency (Part 1): every dispatch INSERTs an auth_email_events
@@ -157,7 +159,7 @@ def test_change_password_double_submit_sends_once_and_records_duplicate(db, memb
     assert outcomes.count("skipped_duplicate") == 1
 
 
-# ── IAM-009: generate_random_password ──────────────────────────────────────
+# ── Password replaced (catalog ID pending): generate_random_password ──────────────────────────────────────
 
 def test_generate_random_password_sends_iam009(db, member, monkeypatch):
     calls = _make_recorder(monkeypatch, "_send_password_reset_self_service_email")
@@ -170,11 +172,11 @@ def test_generate_random_password_sends_iam009(db, member, monkeypatch):
 
     row = _audit_rows(db)[0]
     assert row.event_type == service.PASSWORD_REPLACED_EVENT_TYPE
-    assert row.template_id == service.PASSWORD_REPLACED_TEMPLATE_ID == "IAM-009"
+    assert row.template_id == service.PASSWORD_REPLACED_TEMPLATE_ID == "IAM-TBD-PWD-REPLACED"
     assert row.outcome == "sent"
 
 
-# ── IAM-010: reset completed ───────────────────────────────────────────────
+# ── Reset completed (catalog ID pending) ───────────────────────────────────────────────
 
 def test_complete_reset_sends_iam010_confirmation(db, member, monkeypatch):
     calls = _reset_link_capture(monkeypatch)
@@ -190,7 +192,7 @@ def test_complete_reset_sends_iam010_confirmation(db, member, monkeypatch):
     assert len(confirmations) == 1
     assert _sent_user(confirmations[0]).email == member.email
 
-    completed = [r for r in _audit_rows(db) if r.template_id == "IAM-010"]
+    completed = [r for r in _audit_rows(db) if r.template_id == service.RESET_COMPLETED_TEMPLATE_ID]
     assert len(completed) == 1
     assert completed[0].event_type == service.RESET_COMPLETED_EVENT_TYPE
     assert completed[0].outcome == "sent"
@@ -221,7 +223,7 @@ def test_invite_and_resend_are_distinct_sends_double_row(db, member, manager, mo
     assert rows[0].idempotency_key != rows[1].idempotency_key
 
 
-# ── IAM-011: role changed ──────────────────────────────────────────────────
+# ── Role changed (catalog ID pending) ──────────────────────────────────────────────────
 
 def test_role_changed_notify_addresses_affected_user_with_actor(db, member, manager, monkeypatch):
     calls = _make_recorder(monkeypatch, "_send_role_changed_email")
@@ -239,7 +241,7 @@ def test_role_changed_notify_addresses_affected_user_with_actor(db, member, mana
     assert actor_name == "Rina Banerjee"
 
     row = _audit_rows(db)[0]
-    assert row.template_id == "IAM-011"
+    assert row.template_id == service.ROLE_CHANGED_TEMPLATE_ID == "IAM-TBD-ROLE-CHANGED"
     assert row.actor_user_id == manager.id
     assert row.outcome == "sent"
 
@@ -290,7 +292,7 @@ def test_router_update_user_ignores_role_when_unchanged(db, member, manager, mon
     assert _audit_rows(db) == []
 
 
-# ── IAM-012: account deactivated ───────────────────────────────────────────
+# ── Account deactivated (catalog ID pending) ───────────────────────────────────────────
 
 def test_deactivate_notify_names_acting_admin(db, member, manager, monkeypatch):
     calls = _make_recorder(monkeypatch, "_send_account_deactivated_email")
@@ -300,7 +302,7 @@ def test_deactivate_notify_names_acting_admin(db, member, manager, monkeypatch):
     assert calls[0][0][2] == "Rina Banerjee"
 
     row = _audit_rows(db)[0]
-    assert row.template_id == "IAM-012"
+    assert row.template_id == service.DEACTIVATED_TEMPLATE_ID == "IAM-TBD-DEACTIVATED"
     assert row.outcome == "sent"
 
 
@@ -456,9 +458,10 @@ def test_ported_templates_keep_test_asserted_copy():
     assert ">Reset password</a>" in reset
     assert "{{expires_at_local}}" in reset
     assert "If this was not you" in reset
-    # Header brand mark is a text lockup (white "Zoiko" + light blue "Payroll"),
-    # not an <img>, since {{logo_url}} may be blank/unset per-org.
-    assert '<span style="color:#ffffff;">Zoiko</span><span style="color:#7dabff;"> Payroll</span>' in reset
+    # Header brand mark is the single-source logo partial (a real <img> of
+    # the hosted logo); the old text lockup must be gone, not stacked.
+    assert "{{logo_header_block}}" in reset
+    assert '<span style="color:#ffffff;">Zoiko</span>' not in reset
     assert "temporary_password" not in reset
 
 

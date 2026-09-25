@@ -18356,6 +18356,33 @@ def get_germany_overtime_work_record_by_id(
     return row
 
 
+def _notify_overtime_record_decision(db: Session, row, status: str, organization_id: int,
+                                    actor_id: Optional[int] = None) -> None:
+    """Employee notice for an HR approval decision on an overtime work record
+    (approval-decision family, like leave approved/rejected). Best-effort.
+    Repeatable: a decision can be reversed (APPROVED → REJECTED → APPROVED)."""
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == row.employee_id).first()
+        if not employee or not employee.email:
+            return
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        from app.services.email_service import send_overtime_record_decision_email
+        event_type = f"payroll.overtime_record_{status.lower()}"
+        queue_email(
+            "payroll", event_type, None, employee.email,
+            repeatable_idempotency_key(
+                organization_id, event_type, employee.email, None, f"overtime_record:{row.id}", {"status": status},
+            ),
+            send_overtime_record_decision_email, employee.email, employee.name, status, str(row.work_date),
+            send_kwargs={"hours": str(row.hours) if row.hours is not None else "", "organization_id": organization_id},
+            organization_id=organization_id, actor_user_id=actor_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] overtime-decision email failed for record {row.id}: {exc}")
+
+
 def set_germany_overtime_work_record_approval(
     db: Session, record_id: int, organization_id: int, status: str, actor_id: Optional[int],
 ) -> GermanyOvertimeWorkRecord:
@@ -18375,6 +18402,8 @@ def set_germany_overtime_work_record_approval(
         db, actor_id=actor_id, action="status_change", entity_type="germany_overtime_work_record", entity_id=row.id,
         old_value={"hr_approval_status": old_status}, new_value={"hr_approval_status": status},
     )
+    if status != old_status and status in ("APPROVED", "REJECTED"):
+        _notify_overtime_record_decision(db, row, status, organization_id, actor_id)
     # Phase 8AQ: rejecting a record removes it from overlap consideration
     # entirely — this may resolve (never create) an ambiguity for its
     # former siblings. Recompute regardless of which way status changed,
@@ -20567,15 +20596,8 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
     old_declaration_values = {f: getattr(employee, f, None) for f in declaration_fields}
 
     # Payroll-Core sensitive-field snapshot — before mutation, for the
-    # employee notification diff. Curated to what actually matters for pay
-    # and tax identity (bank details, tax identifiers, pay rate, and the
-    # status transition that is a termination); the employee's own email
-    # change is deliberately excluded (it's the delivery channel).
-    sensitive_columns = (
-        "bank_name", "bank_account", "ifsc", "pan", "uan", "ctc", "basic", "hra", "status",
-    )
-    old_sensitive_values = {f: getattr(employee, f, None) for f in sensitive_columns}
-    old_compliance_values = dict(employee.compliance_fields or {})
+    # employee notification diff (see _snapshot_sensitive_fields).
+    sensitive_snapshot = _snapshot_sensitive_fields(employee)
 
     for field, value in updates.items():
         if value == "":
@@ -20595,38 +20617,102 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
                 new_value={field: str(new_value) if new_value is not None else None},
             )
 
-    _sensitive_field_labels = {
-        "bank_name": "Bank name",
-        "bank_account": "Bank account number",
-        "ifsc": "IFSC code",
-        "pan": "PAN / tax identifier",
-        "uan": "UAN number",
-        "ctc": "Annual CTC",
-        "basic": "Basic pay",
-        "hra": "HRA",
-        "status": "Employment status",
+    sensitive_changes = _sensitive_field_changes(employee, sensitive_snapshot)
+    _notify_employee_sensitive_fields_changed(db, employee, sensitive_changes, organization_id)
+
+    return employee
+
+
+# Curated to what actually matters for pay and tax identity (bank details, tax
+# identifiers, pay rate, and the status transition that is a termination);
+# the employee's own email change is deliberately excluded (it's the delivery
+# channel). Shared by update_employee and bulk_update_employees so both send
+# the identical sensitive-field notice.
+_SENSITIVE_EMPLOYEE_COLUMNS = (
+    "bank_name", "bank_account", "ifsc", "pan", "uan", "ctc", "basic", "hra", "status",
+)
+_SENSITIVE_FIELD_LABELS = {
+    "bank_name": "Bank name",
+    "bank_account": "Bank account number",
+    "ifsc": "IFSC code",
+    "pan": "PAN / tax identifier",
+    "uan": "UAN number",
+    "ctc": "Annual CTC",
+    "basic": "Basic pay",
+    "hra": "HRA",
+    "status": "Employment status",
+}
+
+
+def _snapshot_sensitive_fields(employee) -> dict:
+    return {
+        "columns": {f: getattr(employee, f, None) for f in _SENSITIVE_EMPLOYEE_COLUMNS},
+        "compliance": dict(employee.compliance_fields or {}),
     }
-    sensitive_changes = []
-    for field in sensitive_columns:
-        old_value = old_sensitive_values[field]
+
+
+def _sensitive_field_changes(employee, snapshot: dict) -> list:
+    """(label, old, new) triples for every sensitive field that changed since
+    `snapshot` (taken by _snapshot_sensitive_fields before the mutation)."""
+    changes = []
+    for field in _SENSITIVE_EMPLOYEE_COLUMNS:
+        old_value = snapshot["columns"][field]
         new_value = getattr(employee, field, None)
         if old_value != new_value:
-            sensitive_changes.append((
-                _sensitive_field_labels.get(field, field),
+            changes.append((
+                _SENSITIVE_FIELD_LABELS.get(field, field),
                 str(old_value) if old_value is not None else None,
                 str(new_value) if new_value is not None else None,
             ))
     new_compliance_values = employee.compliance_fields or {}
-    if old_compliance_values != new_compliance_values:
+    if snapshot["compliance"] != new_compliance_values:
         import json as _json
-        sensitive_changes.append((
+        changes.append((
             "Tax identifiers / compliance details",
-            _json.dumps(old_compliance_values, sort_keys=True, default=str) or "—",
+            _json.dumps(snapshot["compliance"], sort_keys=True, default=str) or "—",
             _json.dumps(new_compliance_values, sort_keys=True, default=str) or "—",
         ))
-    _notify_employee_sensitive_fields_changed(db, employee, sensitive_changes, organization_id)
+    return changes
 
-    return employee
+
+def _notify_bulk_employee_operation(
+    db: Session, organization_id: int, operation: str, succeeded_ids, failed, employee_notice_line: str = "",
+    actor_id: Optional[int] = None,
+) -> None:
+    """One summary to the org contact per bulk create/update/delete call.
+    Best-effort, like every other payroll notice. Keyed on the operation's
+    actual outcome (which employees succeeded + which rows failed why)
+    within the repeatable-event window, so a retried/double-submitted bulk
+    request with the same result sends one summary, while a later distinct
+    import still sends its own."""
+    import logging
+    logger = logging.getLogger("zoiko")
+    try:
+        if not succeeded_ids and not failed:
+            return
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        from app.services.email_service import _get_org_contact_email, send_bulk_employee_operation_summary_email
+        org_email = _get_org_contact_email(db, organization_id)
+        if not org_email:
+            return
+        failures = []
+        for entry in failed:
+            row = entry.get("row") if isinstance(entry.get("row"), dict) else {}
+            label = row.get("name") or row.get("id") or entry.get("id") or "Row"
+            failures.append((f"Failed: {label}", str(entry.get("reason") or "Unknown error")))
+        event_type = f"payroll.bulk_employees_{operation}d"
+        queue_email(
+            "payroll", event_type, None, org_email,
+            repeatable_idempotency_key(
+                organization_id, event_type, org_email, None, f"bulk:{operation}",
+                {"succeeded": sorted(succeeded_ids), "failed": failures},
+            ),
+            send_bulk_employee_operation_summary_email, org_email, operation, len(succeeded_ids), failures,
+            send_kwargs={"employee_notice_line": employee_notice_line, "organization_id": organization_id},
+            organization_id=organization_id, actor_user_id=actor_id, db=db,
+        )
+    except Exception as exc:
+        logger.warning(f"[payroll-mail] bulk-{operation} summary email failed for org {organization_id}: {exc}")
 
 
 FIELD_MAP = {
@@ -20672,7 +20758,8 @@ def _map_employee_row(row: BulkEmployeeItem) -> dict:
     return mapped
 
 
-def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_id: int) -> dict:
+def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_id: int,
+                          actor_id: Optional[int] = None) -> dict:
     from app.core.code_generation import generate_employee_code
 
     created_employees = []
@@ -20778,16 +20865,24 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
         if log_db:
             log_db.close()
 
+    # One summary to the org admin contact — not N per-employee welcome emails.
+    _notify_bulk_employee_operation(
+        db, organization_id, "create", [emp.id for emp in created_employees], failed,
+        employee_notice_line="New employees were not emailed individually for this import.",
+        actor_id=actor_id,
+    )
     return {"created": len(created_employees), "employees": created_employees, "failed": failed}
 
 
-def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_id: int) -> dict:
+def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_id: int,
+                          actor_id: Optional[int] = None) -> dict:
     """Partial bulk update, keyed by `id`. Reuses the same FIELD_MAP/
     _map_employee_row mapping bulk_create_employees uses — only the write
     path differs (lookup + setattr, mirroring the single-employee
     update_employee, instead of insert)."""
     updated_employees = []
     failed = []
+    sensitive_snapshots = {}
 
     # One IN(...) lookup for the whole batch instead of one SELECT per row —
     # the per-row round trip was the dominant cost on large bulk-update
@@ -20843,6 +20938,7 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
             })
             continue
 
+        sensitive_snapshots[employee.id] = _snapshot_sensitive_fields(employee)
         try:
             with db.begin_nested():
                 for column, value in mapped.items():
@@ -20877,6 +20973,22 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
         if log_db:
             log_db.close()
 
+    # Per-employee notices only for sensitive-field changes (same notice and
+    # key as the single-employee update), plus one summary to the org admin.
+    sensitive_notified = 0
+    for emp in updated_employees:
+        changes = _sensitive_field_changes(emp, sensitive_snapshots[emp.id])
+        if changes and emp.email:
+            _notify_employee_sensitive_fields_changed(db, emp, changes, organization_id)
+            sensitive_notified += 1
+    _notify_bulk_employee_operation(
+        db, organization_id, "update", [emp.id for emp in updated_employees], failed,
+        employee_notice_line=(
+            f"{sensitive_notified} employee(s) with changed bank, tax or pay details were notified individually; "
+            "other updated employees were not emailed."
+        ),
+        actor_id=actor_id,
+    )
     return {"updated": len(updated_employees), "employees": updated_employees, "failed": failed}
 
 
@@ -20908,10 +21020,12 @@ def delete_employee(db: Session, employee_id: int, organization_id: int):
     db.commit()
     _notify_employee_deleted(
         db, _deleted_employee_email, _deleted_employee_name, _deleted_employee_code or "", organization_id,
+        employee_id=employee_id,
     )
 
 
-def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id: int) -> dict:
+def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id: int,
+                          actor_id: Optional[int] = None) -> dict:
     deleted = []
     failed = []
 
@@ -20952,6 +21066,11 @@ def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id:
         except Exception:
             pass
 
+    _notify_bulk_employee_operation(
+        db, organization_id, "delete", deleted, failed,
+        employee_notice_line="Removed employees were not emailed individually for this operation.",
+        actor_id=actor_id,
+    )
     return {"deleted": deleted, "failed": failed}
 
 
@@ -21171,17 +21290,29 @@ def _notify_payroll_run_approved(db: Session, run: "PayrollRun", organization_id
         employees_by_id = {
             e.id: e for e in db.query(PayrollEmployee).filter(PayrollEmployee.id.in_(employee_ids)).all()
         } if employee_ids else {}
+        from app.modules.communications.service import idempotency_key, queue_email
+
+        # Resolve plain values up front: each dispatch commits its audit row,
+        # which would otherwise expire (and re-query) every ORM row per send.
+        recipients = []
         for item in items:
             employee = employees_by_id.get(item.employee_id)
-            if not employee or not employee.email:
-                continue
+            if employee and employee.email:
+                recipients.append((employee.id, employee.email, item.employee_name or employee.name))
+        run_id, period_label = run.id, run.period_label
+        for employee_id, email, name in recipients:
             try:
-                send_payroll_run_approved_email(
-                    employee.email, item.employee_name or employee.name,
-                    run.period_label, organization_id=organization_id, db=db,
+                # Runs only move forward (Draft → … → Closed), so approval
+                # happens once per run: strict key on run + recipient.
+                queue_email(
+                    "payroll", "payroll.run_approved", None, email,
+                    idempotency_key(organization_id, "payroll.run_approved", email, None, f"run:{run_id}"),
+                    send_payroll_run_approved_email, email, name, period_label,
+                    send_kwargs={"organization_id": organization_id},
+                    organization_id=organization_id, db=db,
                 )
             except Exception as exc:
-                logger.warning(f"[payroll-mail] run-approved email failed for employee {employee.id}: {exc}")
+                logger.warning(f"[payroll-mail] run-approved email failed for employee {employee_id}: {exc}")
     except Exception as exc:
         logger.warning(f"[payroll-mail] run-approved notification pass failed for run {run.id}: {exc}")
 
@@ -21202,24 +21333,35 @@ def _notify_payslips_ready(db: Session, run: "PayrollRun", organization_id: int)
         employees_by_id = {
             e.id: e for e in db.query(PayrollEmployee).filter(PayrollEmployee.id.in_(employee_ids)).all()
         } if employee_ids else {}
+        from app.modules.communications.service import idempotency_key, queue_email
+
+        recipients = []
         for item in items:
             employee = employees_by_id.get(item.employee_id)
-            if not employee or not employee.email:
-                continue
+            if employee and employee.email:
+                recipients.append((item.id, item.payslip_number, employee.id, employee.email,
+                                   item.employee_name or employee.name))
+        period_label = run.period_label
+        for item_id, payslip_number, employee_id, email, name in recipients:
             try:
-                pdf_bytes = generate_payslip_pdf_bytes(db, item.id, organization_id)
+                pdf_bytes = generate_payslip_pdf_bytes(db, item_id, organization_id)
             except Exception as exc:
-                logger.warning(f"[payroll-mail] payslip PDF generation failed for payslip {item.id}: {exc}")
+                logger.warning(f"[payroll-mail] payslip PDF generation failed for payslip {item_id}: {exc}")
                 pdf_bytes = None
             try:
-                send_payslip_ready_email(
-                    employee.email, item.employee_name or employee.name,
-                    run.period_label, organization_id=organization_id, db=db,
-                    pdf_bytes=pdf_bytes,
-                    pdf_filename=f"{item.payslip_number or 'payslip'}.pdf" if pdf_bytes else None,
+                queue_email(
+                    "payroll", "payroll.payslip_ready", None, email,
+                    idempotency_key(organization_id, "payroll.payslip_ready", email, None, f"payslip:{item_id}"),
+                    send_payslip_ready_email, email, name, period_label,
+                    send_kwargs={
+                        "organization_id": organization_id,
+                        "pdf_bytes": pdf_bytes,
+                        "pdf_filename": f"{payslip_number or 'payslip'}.pdf" if pdf_bytes else None,
+                    },
+                    organization_id=organization_id, db=db,
                 )
             except Exception as exc:
-                logger.warning(f"[payroll-mail] payslip-ready email failed for employee {employee.id}: {exc}")
+                logger.warning(f"[payroll-mail] payslip-ready email failed for employee {employee_id}: {exc}")
     except Exception as exc:
         logger.warning(f"[payroll-mail] payslip-ready notification pass failed for run {run.id}: {exc}")
 
@@ -21231,15 +21373,17 @@ def _run_notifications_in_background(run_id: int, organization_id: int, kind: st
     import logging
     from app.database import SessionLocal
     logger = logging.getLogger("zoiko")
+    from app.modules.communications.service import dispatch_inline
     db = SessionLocal()
     try:
         run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
         if not run:
             return
-        if kind == "approved":
-            _notify_payroll_run_approved(db, run, organization_id)
-        elif kind == "paid":
-            _notify_payslips_ready(db, run, organization_id)
+        with dispatch_inline():
+            if kind == "approved":
+                _notify_payroll_run_approved(db, run, organization_id)
+            elif kind == "paid":
+                _notify_payslips_ready(db, run, organization_id)
     except Exception as exc:
         logger.warning(f"[payroll-mail] background notification pass failed for run {run_id}: {exc}")
     finally:
@@ -21259,11 +21403,17 @@ def _notify_employee_created(db: Session, employee, organization_id: int) -> Non
     try:
         if not employee or not employee.email:
             return
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_employee_created_email
-        send_employee_created_email(
-            employee.email, employee.name, employee.employee_code or "",
-            department=employee.department or "", designation=employee.designation or "",
-            date_of_joining=str(employee.date_of_joining) if employee.date_of_joining else "",
+        queue_email(
+            "payroll", "payroll.employee_created", None, employee.email,
+            idempotency_key(organization_id, "payroll.employee_created", employee.email, None, f"employee:{employee.id}"),
+            send_employee_created_email, employee.email, employee.name, employee.employee_code or "",
+            send_kwargs=dict(
+                department=employee.department or "", designation=employee.designation or "",
+                date_of_joining=str(employee.date_of_joining) if employee.date_of_joining else "",
+                organization_id=organization_id,
+            ),
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21271,15 +21421,22 @@ def _notify_employee_created(db: Session, employee, organization_id: int) -> Non
 
 
 def _notify_employee_deleted(db: Session, employee_email: str, employee_name: str,
-                             employee_code: str, organization_id: int) -> None:
+                             employee_code: str, organization_id: int, employee_id: int = None) -> None:
     import logging
     logger = logging.getLogger("zoiko")
     try:
         if not employee_email:
             return
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_employee_deleted_email
-        send_employee_deleted_email(
-            employee_email, employee_name, employee_code or "",
+        queue_email(
+            "payroll", "payroll.employee_deleted", None, employee_email,
+            idempotency_key(
+                organization_id, "payroll.employee_deleted", employee_email, None,
+                f"employee:{employee_id if employee_id is not None else employee_code}",
+            ),
+            send_employee_deleted_email, employee_email, employee_name, employee_code or "",
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21292,9 +21449,18 @@ def _notify_employee_sensitive_fields_changed(db: Session, employee, changes, or
     try:
         if not changes or not employee or not employee.email:
             return
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
         from app.services.email_service import send_employee_sensitive_fields_changed_email
-        send_employee_sensitive_fields_changed_email(
-            employee.email, employee.name, changes,
+        # Repeatable: the same employee can be edited many times. Keyed on the
+        # change itself within the dedup window.
+        queue_email(
+            "payroll", "payroll.employee_sensitive_fields_changed", None, employee.email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.employee_sensitive_fields_changed", employee.email, None,
+                f"employee:{employee.id}", changes,
+            ),
+            send_employee_sensitive_fields_changed_email, employee.email, employee.name, list(changes),
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21310,17 +21476,24 @@ def _notify_payroll_run_created(db: Session, run, organization_id: int) -> None:
         if not org_email:
             return
         employee_count = db.query(PayslipItem.id).filter(PayslipItem.payroll_run_id == run.id).count()
-        send_payroll_run_created_email(
-            org_email, run.period_label or "",
-            pay_date=str(run.pay_date) if run.pay_date else "",
-            run_code=run.run_code or "", employee_count=employee_count,
+        from app.modules.communications.service import idempotency_key, queue_email
+        queue_email(
+            "payroll", "payroll.run_created", None, org_email,
+            idempotency_key(organization_id, "payroll.run_created", org_email, None, f"run:{run.id}"),
+            send_payroll_run_created_email, org_email, run.period_label or "",
+            send_kwargs=dict(
+                pay_date=str(run.pay_date) if run.pay_date else "",
+                run_code=run.run_code or "", employee_count=employee_count,
+                organization_id=organization_id,
+            ),
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] run-created email failed for run {run.id}: {exc}")
 
 
-def _notify_payroll_run_deleted(db: Session, period_label: str, run_code: str, organization_id: int) -> None:
+def _notify_payroll_run_deleted(db: Session, period_label: str, run_code: str, organization_id: int,
+                                run_id: int = None) -> None:
     import logging
     logger = logging.getLogger("zoiko")
     try:
@@ -21328,8 +21501,15 @@ def _notify_payroll_run_deleted(db: Session, period_label: str, run_code: str, o
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_payroll_run_deleted_email(
-            org_email, period_label or "", run_code=run_code or "",
+        from app.modules.communications.service import idempotency_key, queue_email
+        queue_email(
+            "payroll", "payroll.run_deleted", None, org_email,
+            idempotency_key(
+                organization_id, "payroll.run_deleted", org_email, None,
+                f"run:{run_id if run_id is not None else run_code}",
+            ),
+            send_payroll_run_deleted_email, org_email, period_label or "",
+            send_kwargs={"run_code": run_code or "", "organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21343,10 +21523,14 @@ def _notify_payslip_deleted(db: Session, item, run, organization_id: int) -> Non
         employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == item.employee_id).first()
         if not employee or not employee.email:
             return
+        from app.modules.communications.service import idempotency_key, queue_email
         from app.services.email_service import send_payslip_deleted_email
-        send_payslip_deleted_email(
-            employee.email, item.employee_name or employee.name,
+        queue_email(
+            "payroll", "payroll.payslip_deleted", None, employee.email,
+            idempotency_key(organization_id, "payroll.payslip_deleted", employee.email, None, f"payslip:{item.id}"),
+            send_payslip_deleted_email, employee.email, item.employee_name or employee.name,
             item.payslip_number or "", run.period_label if run else "",
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21362,10 +21546,15 @@ def _notify_leave_request_submitted(db: Session, record, organization_id: int) -
         if not org_email:
             return
         employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == record.employee_id).first()
-        send_leave_request_submitted_email(
+        from app.modules.communications.service import idempotency_key, queue_email
+        queue_email(
+            "payroll", "payroll.leave_submitted", None, org_email,
+            idempotency_key(organization_id, "payroll.leave_submitted", org_email, None, f"leave:{record.id}"),
+            send_leave_request_submitted_email,
             org_email, employee.name if employee else f"Employee #{record.employee_id}",
             str(record.leave_type), str(record.start_date), str(record.end_date),
-            record.days, record.request_code or "", reason=record.reason or "",
+            record.days, record.request_code or "",
+            send_kwargs={"reason": record.reason or "", "organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21383,10 +21572,17 @@ def _notify_elster_transmission(db: Session, row, organization_id: int) -> None:
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_elster_filing_status_email(
-            org_email, row.status, row.transmission_type or "",
+        from app.modules.communications.service import idempotency_key, queue_email
+        # One notice per transmission per status (QUEUED → TRANSMITTED → ...
+        # are distinct, legitimate notices).
+        queue_email(
+            "payroll", "payroll.elster_filing_status", None, org_email,
+            idempotency_key(
+                organization_id, "payroll.elster_filing_status", org_email, None, f"elster:{row.id}:{row.status}",
+            ),
+            send_elster_filing_status_email, org_email, row.status, row.transmission_type or "",
             str(row.period_start), str(row.period_end),
-            blocked_reason=row.blocked_reason,
+            send_kwargs={"blocked_reason": row.blocked_reason, "organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21404,6 +21600,7 @@ def _notify_jurisdiction_pack_changed(db: Session, pack, changes, organization_i
     try:
         if not changes:
             return
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
         from app.services.email_service import (
             _get_org_contact_email, send_jurisdiction_pack_changed_email,
         )
@@ -21429,9 +21626,15 @@ def _notify_jurisdiction_pack_changed(db: Session, pack, changes, organization_i
             org_email = _get_org_contact_email(db, org_id)
             if not org_email:
                 continue
-            send_jurisdiction_pack_changed_email(
-                org_email, pack.pack_id or "", pack.version or "", jurisdiction or "Unscoped",
-                changes, organization_id=org_id, db=db,
+            queue_email(
+                "payroll", "payroll.jurisdiction_pack_changed", None, org_email,
+                repeatable_idempotency_key(
+                    org_id, "payroll.jurisdiction_pack_changed", org_email, None, f"pack:{pack.id}", changes,
+                ),
+                send_jurisdiction_pack_changed_email, org_email, pack.pack_id or "", pack.version or "",
+                jurisdiction or "Unscoped", list(changes),
+                send_kwargs={"organization_id": org_id},
+                organization_id=org_id, db=db,
             )
             sent_any = True
         if not sent_any and recipient_org_ids:
@@ -21453,8 +21656,15 @@ def _notify_organization_details_changed(db: Session, organization_id: int, chan
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_organization_details_changed_email(
-            org_email, changes, organization_id=organization_id, db=db,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        queue_email(
+            "payroll", "organizations.details_changed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "organizations.details_changed", org_email, None, f"org:{organization_id}", changes,
+            ),
+            send_organization_details_changed_email, org_email, list(changes),
+            send_kwargs={"organization_id": organization_id},
+            organization_id=organization_id, db=db,
         )
     except Exception as exc:
         logger.warning(f"[payroll-mail] org-details email failed for org {organization_id}: {exc}")
@@ -21468,9 +21678,13 @@ def _notify_report_generated(db: Session, report, organization_id: int) -> None:
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_report_generated_email(
-            org_email, report.report_type or "Report", report.reporting_period or "",
-            report.id, template_version=str(report.template_version or ""),
+        from app.modules.communications.service import idempotency_key, queue_email
+        queue_email(
+            "payroll", "payroll.report_generated", None, org_email,
+            idempotency_key(organization_id, "payroll.report_generated", org_email, None, f"report:{report.id}"),
+            send_report_generated_email, org_email, report.report_type or "Report", report.reporting_period or "",
+            report.id,
+            send_kwargs={"template_version": str(report.template_version or ""), "organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21486,8 +21700,17 @@ def _notify_report_generation_failed(db: Session, organization_id: int, report_l
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_report_generation_failed_email(
-            org_email, report_label, pay_period, reason,
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        # No report row exists for a failed generation: key on what was
+        # attempted (label + period) and why it failed, within the window.
+        queue_email(
+            "payroll", "payroll.report_generation_failed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "payroll.report_generation_failed", org_email, None,
+                f"report:{report_label}:{pay_period}", reason,
+            ),
+            send_report_generation_failed_email, org_email, report_label, pay_period, reason,
+            send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, db=db,
         )
     except Exception as exc:
@@ -21570,7 +21793,7 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     _deleted_run_code = run.run_code
     db.delete(run)
     db.commit()
-    _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id)
+    _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id, run_id=run_id)
 
 
 def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
@@ -26680,16 +26903,26 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
                     send_leave_request_approved_email,
                     send_leave_request_rejected_email,
                 )
+                from app.modules.communications.service import queue_email, repeatable_idempotency_key
+
                 sender = (
                     send_leave_request_approved_email
                     if record.status == "approved"
                     else send_leave_request_rejected_email
                 )
-                sender(
-                    employee.email, employee.name,
+                event_type = f"payroll.leave_{record.status}"
+                # Repeatable: a request can go approved → rejected → approved.
+                queue_email(
+                    "payroll", event_type, None, employee.email,
+                    repeatable_idempotency_key(
+                        organization_id, event_type, employee.email, None, f"leave:{record.id}",
+                        {"status": record.status},
+                    ),
+                    sender, employee.email, employee.name,
                     record.leave_type, str(record.start_date), str(record.end_date),
                     record.days, record.request_code,
-                    organization_id=organization_id, db=db,
+                    send_kwargs={"organization_id": organization_id},
+                    organization_id=organization_id, actor_user_id=reviewer_id, db=db,
                 )
         except Exception as exc:
             import logging

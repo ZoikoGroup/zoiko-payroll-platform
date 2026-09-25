@@ -290,11 +290,21 @@ def _notify_organization_currency_changed(db: Session, org, old_currency: Option
         org_email = _get_org_contact_email(db, organization_id)
         if not org_email:
             return
-        send_organization_currency_changed_email(
-            org_email,
-            org_name=getattr(org, "organization_name", None) or org.organization_code or "",
-            old_currency=old_currency or "",
-            new_currency=org.currency or "",
+        from app.modules.communications.service import queue_email, repeatable_idempotency_key
+        # Repeatable (A → B → A → B): keyed on the transition within the window.
+        queue_email(
+            "super_admin", "organizations.currency_changed", None, org_email,
+            repeatable_idempotency_key(
+                organization_id, "organizations.currency_changed", org_email, None,
+                f"org:{organization_id}", {"old": old_currency, "new": org.currency},
+            ),
+            send_organization_currency_changed_email, org_email,
+            send_kwargs=dict(
+                org_name=getattr(org, "organization_name", None) or org.organization_code or "",
+                old_currency=old_currency or "",
+                new_currency=org.currency or "",
+                organization_id=organization_id,
+            ),
             organization_id=organization_id, db=db,
         )
     except Exception as exc:

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{subject}}</title>
+{{mobile_styles}}
 </head>
 <!-- Shared base partial — every payroll-core email renders through this shell
      (see email_service._compose_email_html). Palette values are the canonical
@@ -11,21 +12,17 @@
 <body style="margin:0; padding:0; background:#f0f6ff; font-family:Arial,Helvetica,sans-serif;">
   <div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; color:#f0f6ff;">{{preheader}}</div>
 
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f6ff; padding:24px 12px;">
+  <table class="zk-outer" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f6ff; padding:24px 12px;">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%; background:#ffffff; border:1px solid #d6e4f7; border-radius:12px;">
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="word-break:break-word; overflow-wrap:anywhere; max-width:600px; width:100%; background:#ffffff; border:1px solid #d6e4f7; border-radius:12px;">
 
         <!-- Header branding (canonical blue/white design system) -->
-        <tr><td style="background:#0b1f3a; padding:28px 32px 22px 32px; border-radius:12px 12px 0 0;">
+        <tr><td class="zk-px" bgcolor="#0b1f3a" style="background-color:#0b1f3a; padding:28px 32px 22px 32px; border-radius:12px 12px 0 0;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td align="left" style="font-size:0; line-height:0;">
-              <a href="{{frontend_url}}" target="_blank" style="text-decoration:none;">
-                <span style="font-family:Arial,Helvetica,sans-serif; font-size:20px; font-weight:bold; letter-spacing:0.2px;">
-                  <span style="color:#ffffff;">Zoiko</span><span style="color:#7dabff;"> Payroll</span>
-                </span>
-              </a>
+            <td align="left" class="zk-brand" style="font-size:0; line-height:0;">
+              {{logo_header_block}}
             </td>
-            <td align="right" valign="middle" style="font-size:11px; color:#ffffff; background:#1e40af; border-radius:9999px; padding:4px 10px;">{{company_name}}</td>
+            <td align="right" valign="middle" class="zk-badge" style="font-size:12px; color:#ffffff; background:#1e40af; border-radius:9999px; padding:4px 10px;">{{company_name}}</td>
           </tr></table>
         </td></tr>
 
@@ -35,14 +32,14 @@
         {{/if}}
 
         <!-- Body -->
-        <tr><td style="padding:28px 32px 8px 32px;">
-          <h1 style="color:#0b1f3a; font-size:20px; font-weight:bold; margin:0 0 16px 0;">{{heading}}</h1>
+        <tr><td class="zk-px" style="padding:28px 32px 8px 32px;">
+          <h1 class="zk-h1" style="color:#0b1f3a; font-size:20px; font-weight:bold; margin:0 0 16px 0;">{{heading}}</h1>
           {{body_slot}}
         </td></tr>
 
         <!-- Details panel (optional) -->
         {{#if details_panel}}
-        <tr><td style="padding:4px 32px;">
+        <tr><td class="zk-px" style="padding:4px 32px;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eaf2ff; border:1px solid #d6e4f7; border-radius:8px;">
             <tr><td style="padding:14px 16px;">{{details_panel}}</td></tr>
           </table>
@@ -51,21 +48,21 @@
 
         <!-- Primary CTA (optional) -->
         {{#if cta_url}}
-        <tr><td style="padding:20px 32px;">
+        <tr><td class="zk-px" style="padding:20px 32px;">
           <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td>
-            <a href="{{cta_url}}" target="_blank" style="display:inline-block; background:#1d4ed8; color:#ffffff; font-size:14px; font-weight:bold; text-decoration:none; border-radius:6px; padding:12px 22px;">{{cta_label}}</a>
+            <a class="zk-btn" href="{{cta_url}}" target="_blank" style="display:inline-block; background:#1d4ed8; color:#ffffff; font-size:14px; font-weight:bold; text-decoration:none; border-radius:6px; padding:12px 22px;">{{cta_label}}</a>
           </td></tr></table>
         </td></tr>
         {{/if}}
 
         <!-- Shared security advisory (wording fixed in email_service.py) -->
-        <tr><td style="padding:16px 32px 24px 32px;">
+        <tr><td class="zk-px" style="padding:16px 32px 24px 32px;">
           {{security_advisory_block}}
         </td></tr>
 
         <!-- Footer -->
-        <tr><td style="padding:18px 32px; background:#f0f6ff; border-top:1px solid #d6e4f7; text-align:center; border-radius:0 0 12px 12px;">
-          <p style="color:#5b7290; font-size:11px; line-height:1.6; margin:0;">
+        <tr><td class="zk-px" style="padding:18px 32px; background:#f0f6ff; border-top:1px solid #d6e4f7; text-align:center; border-radius:0 0 12px 12px;">
+          <p style="color:#5b7290; font-size:12px; line-height:1.6; margin:0;">
             &copy; 2026 Zoiko Payroll Inc.
             {{#if support_email}}&bull; Questions? Reply to <a href="mailto:{{support_email}}" style="color:#1d4ed8; text-decoration:none;">{{support_email}}</a>{{/if}}
           </p>
