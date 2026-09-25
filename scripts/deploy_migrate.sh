@@ -158,14 +158,28 @@ if [ -n "$DRIFT" ]; then
 fi
 
 echo "==> Schema matches models. Re-stamping alembic to current head..."
-HEAD_REV="$(alembic heads | head -1 | awk '{print $1}')"
+# Resolve the head revision purely from the migration files (no DB query),
+# so the orphan row in alembic_version cannot interfere.
+HEAD_REV="$(python - <<'PY'
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+cfg = Config("alembic.ini")
+script = ScriptDirectory.from_config(cfg)
+heads = script.get_heads()
+if len(heads) != 1:
+    raise SystemExit(f"Expected exactly 1 head, found {len(heads)}: {heads}")
+print(heads[0])
+PY
+)"
 if [ -z "$HEAD_REV" ]; then
   echo "!! Could not resolve alembic head revision. State:"
   print_diagnostics
   exit 1
 fi
 
-alembic stamp "$HEAD_REV"
+# --purge truncates alembic_version unconditionally before writing the new
+# revision, so Alembic never tries to look up the orphan row.
+alembic stamp --purge "$HEAD_REV"
 echo "==> Re-stamped to '${HEAD_REV}'. Re-running upgrade..."
 alembic upgrade head
 check_model_drift
