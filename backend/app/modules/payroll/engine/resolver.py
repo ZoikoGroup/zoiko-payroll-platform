@@ -197,6 +197,7 @@ def build_context_from_employee(
     is_final_ni_period: bool = False,
     ni_category_override: str | None = None,
     france_inputs: dict | None = None,
+    ireland_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -337,4 +338,8 @@ def build_context_from_employee(
         # France (ZP-FR-ENG-001): the france_* context fields resolved by
         # service._resolve_france_calc_inputs (PAS, SIRET rate pack, YTD).
         **(france_inputs or {}),
+        # Ireland (ZP-IE-ENG-001): the ireland_* context fields resolved by
+        # service._resolve_ie_calc_inputs (frozen RPN snapshot, MyFutureFund
+        # authority status, independent YTD bases, preflight PRSI class).
+        **(ireland_inputs or {}),
     )

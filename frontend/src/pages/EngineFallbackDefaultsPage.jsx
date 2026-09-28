@@ -21,6 +21,12 @@ const COUNTRIES = [
   { code: "CA", name: "Canada" },
   { code: "DE", name: "Germany" },
   { code: "FR", name: "France" },
+  // Ireland (ZP-IE-ENG-001). 41 engine parameter keys across 47 rows — the
+  // six PRSI rate keys each carry a pre/post 2026-10-01 window, so Ireland is
+  // the first entry here whose row count exceeds its key count. Without this
+  // entry Ireland's catalog would be invisible and uneditable on the very
+  // page that owns it.
+  { code: "IE", name: "Ireland" },
 ];
 
 function toNumber(v) {

@@ -16,6 +16,10 @@ export { default as BSReportTemplatesPage } from "./BSReportTemplatesPage";
 export { default as TTReportTemplatesPage } from "./TTReportTemplatesPage";
 export { default as DEReportTemplatesPage } from "./DEReportTemplatesPage";
 export { default as PRReportTemplatesPage } from "./PRReportTemplatesPage";
+// Ireland (ZP-IE-ENG-001) — ROS (Revenue Online System) per-employee
+// certificate plus the three ROS report types Revenue's ROS requires for a
+// period. Same thin wrapper pattern as every other jurisdiction above.
+export { default as IEReportTemplatesPage } from "./IEReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -42,4 +46,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   TT: "trinidad-and-tobago",
   DE: "germany",
   PR: "puerto-rico",
+  IE: "ireland",
 };

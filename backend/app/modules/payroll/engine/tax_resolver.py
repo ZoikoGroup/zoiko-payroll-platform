@@ -32,6 +32,16 @@ from sqlalchemy.orm import Session
 
 from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
 
+from app.core.cache import (
+    get_canonical_rates,
+    set_canonical_rates,
+    get_canonical_slabs,
+    set_canonical_slabs,
+    get_canonical_pack,
+    set_canonical_pack,
+    invalidate_canonical_cache,
+)
+
 
 # Rule types that represent a genuine income-tax bracket (something
 # _calculate_annual_tax can actually compute a progressive tax from).
@@ -182,32 +192,26 @@ def resolve_tax_configuration(
     both fields NULL is unaffected by this filter and is governed
     entirely by the pack's own window (already checked above) —
     completely additive to every rate/slab that exists today.
+
+    Caching: the JurisdictionPack lookup is cached per (country, state, tax_regime, payroll_date)
+    to avoid repeated DB queries for the same jurisdiction/date combination.
     """
     as_of = payroll_date or date_cls.today()
-    pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
+
+    # Cache key for pack lookup
+    cache_key = f"{country}:{state or ''}:{tax_regime or ''}:{as_of.isoformat()}"
+
+    # Try to get pack from cache (synchronous cache)
+    cached_pack = get_canonical_pack(country, cache_key)
+    if cached_pack is not None:
+        pack = cached_pack
+    else:
+        pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
+        if pack:
+            set_canonical_pack(country, cache_key, pack, ttl=3600)
+
     if not pack:
         return [], [], None
-
-    rates = (
-        db.query(ContributionRate)
-        .filter(
-            ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack.id,
-            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
-            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of),
-        )
-        .order_by(ContributionRate.sort_order)
-        .all()
-    )
-    slabs = (
-        db.query(TaxSlab)
-        .filter(
-            TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == pack.id,
-            or_(TaxSlab.effective_from.is_(None), TaxSlab.effective_from <= as_of),
-            or_(TaxSlab.effective_to.is_(None), TaxSlab.effective_to >= as_of),
-        )
-        .order_by(TaxSlab.sort_order, TaxSlab.min_amount)
-        .all()
-    )
     # A single pack can hold MARGINAL_RATE rows for more than one regime
     # (e.g. India's one pack carries both the New and Old regime bracket
     # tables, since the pack itself isn't split per regime the way a

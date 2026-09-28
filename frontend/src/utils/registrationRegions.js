@@ -111,7 +111,16 @@ const STATES_BY_COUNTRY = {
     "Provence-Alpes-Côte d'Azur", "Guadeloupe", "Martinique", "Guyane",
     "La Réunion", "Mayotte",
   ],
-  "Ireland": ["Connacht", "Leinster", "Munster", "Ulster"],
+  // Ireland deliberately has NO entry (ZP-IE-ENG-001). Connacht,
+  // Leinster, Munster and Ulster are real provinces, but none of PAYE, USC,
+  // PRSI, MyFutureFund, LPT or the NMW is administered by province, and
+  // Revenue's RPN is issued per PPSN nationally. Offering them here would
+  // have implied a statutory state dimension that does not exist, and would
+  // have pushed users toward jurisdiction_state values the Ireland engine
+  // has no rate resolution for. Omitting the key makes
+  // getStatesForCountryName("Ireland") return [] and Ireland resolve as
+  // country-level, matching how every Ireland pack is stored
+  // (jurisdiction_state = NULL).
   "Netherlands": [
     "Drenthe", "Flevoland", "Friesland", "Gelderland", "Groningen", "Limburg",
     "North Brabant", "North Holland", "Overijssel", "South Holland", "Utrecht",

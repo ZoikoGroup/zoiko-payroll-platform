@@ -63,6 +63,8 @@ from app.modules.payroll.models import (
     GermanyChurchTaxException,
     EmployerFranceProfile, FranceEstablishment, FranceEstablishmentRatePack, FrancePASRate,
     FranceDsnSubmission, FranceDsnOutboxItem,
+    IrelandRpnSnapshot, IrelandMyFutureFundStatus,
+    IrelandStatutorySickLeaveRecord,
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
 from app.modules.payroll.employee_validation import get_employee_validation_strategy, _STRATEGIES
@@ -100,6 +102,7 @@ from app.modules.payroll.engine.countries.shared import (
     _YTD_ACCUMULATOR_ENABLED_COUNTRIES, _ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES,
     _CA_ASSOCIATED_GROUP_ENABLED_COUNTRIES, _CA_OPTION2_WITHHOLDING_ENABLED_COUNTRIES,
     _UK_DERIVE_NI_CATEGORY_ENABLED_COUNTRIES, _UK_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
+    _IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES,
 )
 
 
@@ -6607,6 +6610,90 @@ def _france_blocked(exc) -> "FranceCalculationBlockedException":
     return FranceCalculationBlockedException(exc.code, exc.message, trace={"code": exc.code, "message": exc.message})
 
 
+def _ie_payslip_snapshot(result) -> "dict | None":
+    """PayslipItem.ie_calculation_snapshot for an Ireland result (None for
+    every other country) — the applied RPN, each tax head's own figure, the
+    MyFutureFund state, the LPT instruction, and ie_calculation_trace
+    verbatim, JSON-safe.
+
+    Gated on ie_employee_total (not ie_paye) because that is the one key
+    the Ireland engine always sets alongside the others: it is the total of
+    employee deductions, so its presence means an Irish calculation really
+    ran, rather than merely that a field happened to be non-None.
+
+    Deliberately a snapshot, never a re-derivation (IE-045): ie_rpn_hash and
+    the RPN's own values are what make a finalized payslip reproducible after
+    Revenue later reissues or supersedes that RPN.
+    """
+    if getattr(result, "ie_employee_total", None) is None:
+        return None
+    return _jsonable_decimal({
+        # The Revenue instruction actually applied. ie_paye_basis is the
+        # important one: it is the only way to tell a real RPN-derived PAYE
+        # from the Emergency treatment (or the blocked state) after the fact.
+        "rpn": {
+            "rpn_number": result.ie_rpn_number,
+            "snapshot_id": result.ie_rpn_snapshot_id,
+            "raw_hash": result.ie_rpn_hash,
+            "issued_at": result.ie_rpn_issued_at,
+        },
+        "paye": {
+            "basis": result.ie_paye_basis,
+            "amount": result.ie_paye,
+            "unrounded": result.ie_paye_unrounded,
+            "standard_rate_pay": result.ie_standard_rate_pay,
+            "higher_rate_pay": result.ie_higher_rate_pay,
+            "tax_credit_applied": result.ie_tax_credit_applied,
+        },
+        "usc": {
+            "amount": result.ie_usc,
+            "unrounded": result.ie_usc_unrounded,
+        },
+        "prsi": {
+            "subclass": result.ie_prsi_class,
+            "declared_subclass": result.ie_prsi_declaration,
+            "employee": result.ie_employee_prsi,
+            "employer": result.ie_employer_prsi,
+            "ax_credit": result.ie_prsi_ax_credit,
+            "contribution_weeks": result.ie_prsi_contribution_weeks,
+            "weekly_reckonable": result.ie_prsi_weekly_reckonable,
+        },
+        "myfuturefund": {
+            "employee": result.ie_mff_employee,
+            "employer": result.ie_mff_employer,
+            # Informational only — the State top-up is administered by
+            # NAERSA and is never deducted from pay (IE-018).
+            "state_topup": result.ie_mff_state_topup,
+            "status": result.ie_mff_status,
+            "contributory": result.ie_mff_contributory,
+            "ceased_reason": result.ie_mff_ceased_reason,
+        },
+        "lpt": {
+            "amount": result.ie_lpt,
+            "instructed": result.ie_lpt_instructed,
+            "rate_pct": result.ie_lpt_rate_pct,
+        },
+        "pension": {
+            "employee_prsc": result.ie_employee_pension,
+            "employer_prsc": result.ie_employer_pension,
+        },
+        "labour": {
+            # The NMW band and the effective hourly rate the block was
+            # evaluated on — the evidence an inspector asks for (IE-035).
+            "nmw_rate": result.ie_nmw_rate,
+            "nmw_band": result.ie_nmw_band,
+            "effective_hourly": result.ie_effective_hourly,
+        },
+        "employee_total": result.ie_employee_total,
+        "tax_year": result.ie_tax_year,
+        # ie_calculation_trace already carries inputs/bases/rates/band
+        # selection/rounding for every head; ytd_after is the accumulator
+        # state the NEXT period reads back (IE-023/IE-024/IE-025).
+        "calculation": result.ie_calculation_trace,
+        "ytd_after": result.ie_ytd_after,
+    })
+
+
 def _resolve_germany_calc_inputs(db: Session, organization_id: int, employee, payroll_date) -> dict:
     from app.modules.payroll.engine.jurisdictions.germany.pap.core import (
         GermanyCalculationError, resolve_pv_child_category,
@@ -8376,6 +8463,54 @@ _PAYSLIP_ITEM_FIELD_CATALOG = {
     "au_workers_compensation_premium": ("Workers Compensation Premium (Employer)", "currency", True),
 }
 
+# Dotted paths INTO the per-country JSON snapshot columns, keyed by the
+# snapshot column then the path, in the same (label, field_type,
+# aggregatable) shape as _PAYSLIP_ITEM_FIELD_CATALOG. Read via the generic
+# "PAYSLIP_ITEM_JSON" data-source kind (see _resolve_report_field_value),
+# whose `source_column` is "<column>.<path...>".
+#
+# Ireland (ZP-IE-ENG-001) is the first user. These are the per-employee
+# figures Revenue's ROS submissions need and which have no scalar
+# PayslipItem column — the ones the engine computed but that were being
+# discarded before ie_calculation_snapshot existed.
+# ie_mff_state_topup is offered for INFORMATION only and must never be
+# placed in a deduction component: the State contribution is administered by
+# NAERSA, not deducted from pay (IE-018).
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG = {
+    "IE": {
+        "ie_calculation_snapshot.rpn.rpn_number": ("RPN Number (Revenue Instruction Applied)", "text", False),
+        "ie_calculation_snapshot.rpn.snapshot_id": ("RPN Snapshot ID", "text", False),
+        "ie_calculation_snapshot.rpn.raw_hash": ("RPN Raw Hash", "text", False),
+        "ie_calculation_snapshot.paye.basis": ("PAYE Basis (RPN / Emergency)", "text", False),
+        "ie_calculation_snapshot.paye.amount": ("PAYE (Pay As You Earn)", "currency", True),
+        "ie_calculation_snapshot.paye.standard_rate_pay": ("PAYE Standard-Rate Pay", "currency", True),
+        "ie_calculation_snapshot.paye.higher_rate_pay": ("PAYE Higher-Rate Pay", "currency", True),
+        "ie_calculation_snapshot.paye.tax_credit_applied": ("PAYE Tax Credit Applied", "currency", True),
+        "ie_calculation_snapshot.usc.amount": ("Universal Social Charge", "currency", True),
+        "ie_calculation_snapshot.prsi.subclass": ("PRSI Sub-Class", "text", False),
+        "ie_calculation_snapshot.prsi.employee": ("PRSI (Employee)", "currency", True),
+        "ie_calculation_snapshot.prsi.employer": ("PRSI (Employer)", "currency", True),
+        "ie_calculation_snapshot.prsi.ax_credit": ("PRSI AX Tapered Credit", "currency", True),
+        "ie_calculation_snapshot.prsi.contribution_weeks": ("PRSI Contribution Weeks", "text", False),
+        "ie_calculation_snapshot.prsi.weekly_reckonable": ("PRSI Weekly Reckonable Pay", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.employee": ("MyFutureFund (Employee)", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.employer": ("MyFutureFund (Employer)", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.state_topup": ("MyFutureFund State Top-Up (NOT a deduction)", "currency", True),
+        "ie_calculation_snapshot.myfuturefund.status": ("MyFutureFund Status (NAERSA-notified)", "text", False),
+        "ie_calculation_snapshot.myfuturefund.contributory": ("MyFutureFund Contributory", "text", False),
+        "ie_calculation_snapshot.lpt.amount": ("Local Property Tax", "currency", True),
+        "ie_calculation_snapshot.lpt.instructed": ("LPT Instructed on RPN", "text", False),
+        "ie_calculation_snapshot.lpt.rate_pct": ("LPT Instructed Rate %", "text", False),
+        "ie_calculation_snapshot.pension.employee_prsc": ("PRSC Additional Pension (Employee)", "currency", True),
+        "ie_calculation_snapshot.pension.employer_prsc": ("PRSC Additional Pension (Employer)", "currency", True),
+        "ie_calculation_snapshot.employee_total": ("Total Employee Statutory Deductions", "currency", True),
+        "ie_calculation_snapshot.tax_year": ("Irish Tax Year", "text", False),
+        "ie_calculation_snapshot.labour.nmw_band": ("NMW Age Band Applied", "text", False),
+        "ie_calculation_snapshot.labour.nmw_rate": ("NMW Hourly Rate Applied", "currency", True),
+        "ie_calculation_snapshot.labour.effective_hourly": ("Effective Hourly Pay (NMW check)", "currency", True),
+    },
+}
+
 _PAYROLL_RUN_FIELD_CATALOG = {
     "run_code": ("Run Code", "text", False),
     "period_label": ("Period", "text", False),
@@ -8550,6 +8685,22 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
            "gross_pay", "tds", "social_security", "medicare", "state_disability_insurance", "total_deductions",
            "employer_social_security", "employer_medicare", "employer_futa", "employer_sui",
            "employer_state_program_contributions", "net_pay"],
+    # Ireland (ZP-IE-ENG-001) — only the PayslipItem columns
+    # engine/countries/ireland.py's calculate() ACTUALLY populates today:
+    # tds -> PAYE, employer_social_security -> PRSI (employer),
+    # employee_pension/employer_pension -> PRSC Additional Pension.
+    # The engine also returns ie_paye/ie_usc/ie_employee_prsi/ie_mff_*/
+    # ie_lpt/ie_employee_total, but PayslipItem has NO ie_* columns, so
+    # offering them in the field picker would let a Super Admin bind a
+    # template to a column that does not exist and silently render blank.
+    # Only columns that are really there are listed; see the
+    # ie_calculation_snapshot follow-up noted in models.py for the
+    # JSON-snapshot route that exposes the per-head USC/PRSI/MFF/LPT
+    # breakdown Revenue's ROS submissions actually need.
+    "IE": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "hra", "special_allowance", "overtime", "additional_compensation", "gross_pay",
+           "tds", "employee_pension", "total_deductions",
+           "employer_social_security", "employer_pension", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -8614,6 +8765,16 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "tds": "PAYE", "professional_tax": "Health Surcharge",
         "social_security": "NIS (Employee)", "employer_social_security": "NIS (Employer)",
     },
+    # Ireland — the generic columns Ireland reuses, shown under their real
+    # Irish names. The catalog's originals belong to other countries
+    # ("TDS" is India's, "Workplace Pension" is the UK auto-enrolment one),
+    # so without these the picker would misname Irish figures.
+    "IE": {
+        "tds": "PAYE",
+        "employer_social_security": "PRSI (Employer)",
+        "employee_pension": "PRSC Additional Pension (Employee)",
+        "employer_pension": "PRSC Additional Pension (Employer)",
+    },
 }
 
 
@@ -8641,6 +8802,12 @@ def get_available_report_data_fields(country: str) -> List[dict]:
     for key in _PAYROLL_EMPLOYEE_FIELDS_BY_COUNTRY.get(country, []):
         label, field_type, aggregatable = _PAYROLL_EMPLOYEE_FIELD_CATALOG[key]
         items.append({"key": key, "label": label, "dataSourceKind": "PAYROLL_EMPLOYEE", "sourceColumn": key,
+                      "fieldType": field_type, "aggregatable": aggregatable})
+    # Dotted paths into this country's per-country JSON snapshot column(s) —
+    # the figures that are real and computed but have no scalar column (see
+    # _PAYSLIP_ITEM_JSON_FIELD_CATALOG). Ireland first.
+    for key, (label, field_type, aggregatable) in _PAYSLIP_ITEM_JSON_FIELD_CATALOG.get(country, {}).items():
+        items.append({"key": key, "label": label, "dataSourceKind": "PAYSLIP_ITEM_JSON", "sourceColumn": key,
                       "fieldType": field_type, "aggregatable": aggregatable})
     return items
 
@@ -8996,6 +9163,50 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"), ("earnings", "Earnings"),
         ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)"), ("contributions", "Social Insurance"),
         ("employer_contributions", "Employer Contributions"),
+    ],
+    # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) report types.
+    #
+    # Each Irish tax head is a SEPARATE component rather than one folded
+    # "tax" bucket, because Revenue administers and reconciles them
+    # separately: PAYE is instructed per-employee by RPN, USC has its own
+    # payable/paid base, PRSI has a sub-class and a weekly band, LPT is
+    # deducted only on instruction, and MyFutureFund is a separate scheme
+    # with an NAERSA-notified status.
+    #
+    # The employee per-head figures read through the "PAYSLIP_ITEM_JSON"
+    # data source (ie_calculation_snapshot.*) rather than scalar columns,
+    # because they have none. The MyFutureFund State top-up is exposed as
+    # its own component and must never be presented as a deduction —
+    # NAERSA/the State administers it, not the employer (IE-018).
+    "IE_ROS_EMPLOYEE_CERT": [
+        ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("usc", "Universal Social Charge"),
+        ("prsi", "PRSI"), ("pension", "PRSC Additional Pension"),
+        ("deductions", "Total Deductions"), ("ytd", "Year-to-Date"),
+    ],
+    "IE_ROS_PAYROLL": [
+        ("employer_info", "Employer Information"),
+        ("earnings", "Earnings"), ("tax", "PAYE"), ("usc", "Universal Social Charge"),
+        ("prsi", "PRSI"), ("pension", "PRSC Additional Pension"), ("totals", "Period Totals"),
+    ],
+    "IE_PRSI_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("prsi", "PRSI by Sub-Class and Band"), ("totals", "PRSI Totals"),
+    ],
+    "IE_USC_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("usc", "Universal Social Charge"), ("totals", "USC Totals"),
+    ],
+    "IE_MFF_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("myfuturefund", "MyFutureFund Contributions and Status"),
+        ("myfuturefund_state", "MyFutureFund State Top-Up (informational — not a deduction)"),
+        ("totals", "MyFutureFund Totals"),
+    ],
+    "IE_LPT_SCHEDULE": [
+        ("employer_info", "Employer Information"),
+        ("lpt", "Local Property Tax (deducted only where instructed on the RPN)"),
+        ("totals", "LPT Totals"),
     ],
 }
 _DEFAULT_REPORT_COMPONENTS = [
@@ -9954,6 +10165,65 @@ def _resolve_field_value(
             value = float(total)
         else:
             value = getattr(item, field.source_column, None) if item else None
+    elif field.data_source_kind == "PAYSLIP_ITEM_JSON":
+        # A dotted path into one of PayslipItem's per-country JSON snapshot
+        # columns, e.g. "ie_calculation_snapshot.usc.amount". Introduced with
+        # ZP-IE-ENG-001 and deliberately GENERIC: `source_column`'s first
+        # segment is resolved with getattr against the real column, so
+        # germany_calculation_snapshot / fr_calculation_snapshot /
+        # au_calculation_trace can all be read the same way without a new
+        # data-source kind per country.
+        #
+        # This exists because those snapshots hold figures that genuinely
+        # have no scalar column — Ireland's per-head USC/PRSI/MyFutureFund/LPT
+        # breakdown is the first case where a report genuinely needed one.
+        # It is a real read of a real stored value: a missing column, a NULL
+        # snapshot (every non-Irish payslip, and Irish payslips predating
+        # the column), or a path that does not exist yields None rather than
+        # a fabricated 0.
+        def _json_path_value(target):
+            column_name, _, path = field.source_column.partition(".")
+            blob = getattr(target, column_name, None)
+            if blob is None:
+                return None
+            for segment in filter(None, path.split(".")):
+                if not isinstance(blob, dict) or segment not in blob:
+                    return None
+                blob = blob[segment]
+            return blob
+
+        if field.aggregation == "SUM_RUN":
+            # Same contract as the PAYSLIP_ITEM SUM_RUN branch above: a real
+            # sum over real rows, and a non-numeric path (a text field such
+            # as the RPN number or the PRSI sub-class) contributes 0 rather
+            # than raising. Summing text is never what a totals row wants.
+            total = Decimal("0")
+            for row in ((run.payslip_items if run else None) or []):
+                cell = _json_path_value(row)
+                if isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool):
+                    total += Decimal(str(cell))
+            value = float(total)
+        elif field.aggregation == "SUM_YTD" and target_employee_id is not None and period_end is not None:
+            year_start = _report_ytd_period_start(period_end, jurisdiction_country)
+            ytd_query = (
+                db.query(PayslipItem)
+                .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+                .filter(
+                    PayslipItem.organization_id == organization_id,
+                    PayslipItem.employee_id == target_employee_id,
+                    PayrollRun.period_end <= period_end,
+                )
+            )
+            if year_start:
+                ytd_query = ytd_query.filter(PayrollRun.period_end >= year_start)
+            total = Decimal("0")
+            for row in ytd_query.all():
+                cell = _json_path_value(row)
+                if isinstance(cell, (int, float, Decimal)) and not isinstance(cell, bool):
+                    total += Decimal(str(cell))
+            value = float(total)
+        else:
+            value = _json_path_value(item) if item is not None else None
     else:
         value = None
     if isinstance(value, Decimal):
@@ -14240,6 +14510,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _resolve_france_calc_inputs(db, organization_id, emp, period_end or date.today())
             if emp_country == "FR" else None
         )
+        # Ireland (ZP-IE-ENG-001): frozen RPN + NAERSA MyFutureFund status +
+        # independent cumulative bases. Read-only here — IE-032 forbids a
+        # preview from advancing any Ireland YTD figure.
+        ireland_inputs = (
+            _resolve_ie_calc_inputs(db, organization_id, emp, period_end or date.today())
+            if emp_country == "IE" else None
+        )
         germany_kwargs = {}
         if emp_country == "DE":
             resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
@@ -14369,6 +14646,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             work_state=work_state, state_rate_map=state_rate_map, state_slabs=state_slabs,
             **germany_kwargs,
             france_inputs=france_inputs,
+        ireland_inputs=ireland_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -14583,6 +14861,15 @@ def _resolve_holiday_date(entry: dict, year: int) -> date:
         return _nth_weekday_of_month(year, entry["month"], entry["weekday"], entry["n"])
     if rule == "easter_offset":
         return _easter_sunday(year) + timedelta(days=entry["offset_days"])
+    if rule == "first_monday_unless_friday":
+        # St Brigid's Day (Ireland): the first Monday in February, EXCEPT when
+        # 1 February itself falls on a Friday, in which case the holiday is
+        # 1 February. This conditional cannot be expressed as `nth_weekday` or
+        # `fixed`, and it is the reason this rule type exists.
+        first_of_february = date(year, 2, 1)
+        if first_of_february.weekday() == 4:  # Friday
+            return first_of_february
+        return _nth_weekday_of_month(year, 2, 0, 1)
     raise ValueError(f"Unknown holiday date rule: {rule}")
 
 
@@ -14631,6 +14918,30 @@ _DEFAULT_HOLIDAYS_BY_COUNTRY = {
         {"name": "Easter Monday", "rule": "easter_offset", "offset_days": 1},
         {"name": "German Unity Day", "rule": "fixed", "month": 10, "day": 3},
         {"name": "Christmas Day", "rule": "fixed", "month": 12, "day": 25},
+    ],
+    # Ireland's ten statutory public holidays (ZP-IE-ENG-001 §11, WRC S17).
+    # Every date is DERIVED from its statutory rule rather than hardcoded, so a
+    # new year is correct without editing this table.
+    #
+    # Deliberately NO weekend substitute-day handling: Ireland does not roll a
+    # public holiday forward when it lands on a weekend (unlike Great Britain,
+    # which has no substitute rule here either but whose bank-holiday convention
+    # is a common import mistake) and 26 December is a separate listed holiday
+    # in its own right. Where a listed holiday falls on a weekend, the
+    # entitlement question is an EMPLOYMENT/labour-relations matter, not a date
+    # shift — see `_ie_public_holiday_entitlement_notes` in the Phase 4
+    # statutory-leave module, and gate G5. Nothing here silently moves a date.
+    "IE": [
+        {"name": "New Year's Day", "rule": "fixed", "month": 1, "day": 1},
+        {"name": "St Brigid's Day", "rule": "first_monday_unless_friday"},
+        {"name": "St Patrick's Day", "rule": "fixed", "month": 3, "day": 17},
+        {"name": "Easter Monday", "rule": "easter_offset", "offset_days": 1},
+        {"name": "May Day", "rule": "nth_weekday", "month": 5, "weekday": 0, "n": 1},
+        {"name": "June Holiday", "rule": "nth_weekday", "month": 6, "weekday": 0, "n": 1},
+        {"name": "August Holiday", "rule": "nth_weekday", "month": 8, "weekday": 0, "n": 1},
+        {"name": "October Holiday", "rule": "nth_weekday", "month": 10, "weekday": 0, "n": -1},
+        {"name": "Christmas Day", "rule": "fixed", "month": 12, "day": 25},
+        {"name": "St Stephen's Day", "rule": "fixed", "month": 12, "day": 26},
     ],
 }
 
@@ -15514,6 +15825,676 @@ def _upsert_au_whm_ytd_accumulator(db: Session, employee_id: int, pay_date, resu
     row.ytd_taxable_wages = result.ytd_whm_earnings_after
     row.last_updated_payslip_id = payslip_id
     db.flush()
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Ireland (ZP-IE-ENG-001) — service layer
+#
+# Placed inline in service.py, exactly like every other jurisdiction
+# (_load_au_sg_ytd, _load_fr_ytd, _load_ca_ytd above): there is no
+# service_ireland.py, and none should ever be added.
+#
+# Ireland USES the generic PayrollYtdAccumulator and the
+# _YTD_ACCUMULATOR_ENABLED_COUNTRIES switch, the same as the UK and Australia
+# (2026-09-28: this used to be a dedicated payroll_ie_ytd_accumulators table,
+# which was the one genuine piece of duplication in the Ireland schema — the
+# UK and AU both rode the shared table). Ireland's five independent cumulative
+# figures are now five tax_component rows rather than five columns of one row.
+# That is a strictly better fit than the old column-per-figure layout, because
+# the generic table's (taxable_wages, tax_withheld) pair now names a real
+# concept per row instead of being overloaded: USC genuinely has a payable base
+# AND a paid figure, PRSI genuinely has a reckonable total and no employee tax,
+# and MyFutureFund genuinely has an earnings total. The component key carries
+# that meaning, so no reader has to remember which half of the pair is live.
+# ═════════════════════════════════════════════════════════════════════
+
+# IE-032: PREVIEW MUST NEVER WRITE an Ireland accumulator. Every writer below
+# is called only from a real payslip-persisting path, and each one re-checks
+# that it is holding a real payslip id, so a preview can never advance a
+# cumulative figure.
+#
+# The MyFutureFund threshold-crossing date (IE-020) is deliberately NOT a
+# component row, and the old payroll_ie_ytd_accumulators column holding it was
+# dropped rather than relocated, because it was pure redundancy: the crossing
+# payroll is already reconstructable from data this platform persists, on the
+# payslip, immutably, per occurrence. The engine's MyFutureFund block returns
+# threshold / earnings_ytd_before / earnings_ytd_after on EVERY branch, and
+# ie_calculation_trace is snapshotted verbatim onto the payslip, so "the
+# payroll that crossed the threshold" is exactly the payslip where
+# earnings_ytd_before < threshold <= earnings_ytd_after. The old column was
+# additionally write-only — nothing ever read it back, and cessation is derived
+# by the engine from the running total, not from a stored date.
+_IE_YTD_COMPONENTS = (
+    "ie_usc_payable",      # ytd_taxable_wages = USC's own payable base (IE-009/IE-010)
+    "ie_usc_paid",         # ytd_tax_withheld  = USC charged to date
+    "ie_prsi_reckonable",  # ytd_taxable_wages = reckonable pay, PRSI has no employee tax
+    "ie_prsi_weeks",       # ytd_tax_withheld  = contribution weeks to date
+    "ie_mff_earnings",     # ytd_taxable_wages = MyFutureFund earnings before this period
+)
+
+
+def _ie_tax_year(pay_date) -> int:
+    """IE-006: the Irish tax year is selected by PAY DATE and is the calendar
+    year — income earned in 2025 but paid in 2026 is processed under 2026."""
+    return int(pay_date.year)
+
+
+def _ie_ytd_rows_for_update(db: Session, employee_id: int, tax_year: int) -> dict:
+    """component -> locked PayrollYtdAccumulator row, for this employee/year.
+
+    IE-039: Ireland's cumulative PAYE/USC and the annual MyFutureFund threshold
+    are exactly the case where a second concurrent commit must not consume
+    stale year-to-date values, so every component row is read FOR UPDATE. Same
+    forward-looking discipline the shared table's own docstring describes and
+    the UK/AU loaders already apply.
+
+    The rows are NOT created here: a read must never mint a row, only a real
+    commit may."""
+    rows = (
+        db.query(PayrollYtdAccumulator)
+        .filter(
+            PayrollYtdAccumulator.employee_id == employee_id,
+            PayrollYtdAccumulator.tax_year == str(tax_year),
+            PayrollYtdAccumulator.tax_component.in_(_IE_YTD_COMPONENTS),
+        )
+        .with_for_update()
+        .all()
+    )
+    return {r.tax_component: r for r in rows}
+
+
+def _ie_component_value(rows: dict, component: str, column: str) -> Decimal:
+    """Read one cumulative figure, defaulting to zero for a not-yet-written
+    component. A brand-new employee's first payslip of the year legitimately
+    has no rows at all; that is zero, never an error and never a guess."""
+    row = rows.get(component)
+    if row is None:
+        return Decimal("0")
+    value = getattr(row, column)
+    return Decimal("0") if value is None else Decimal(str(value))
+
+
+def _load_ie_ytd(db: Session, employee_id: int, pay_date) -> dict:
+    """Returns kwargs for build_context_from_employee's ireland_ytd param.
+
+    Gated on the shared _YTD_ACCUMULATOR_ENABLED_COUNTRIES switch, like the
+    UK and AU loaders, so Ireland's cumulative state rolls out and can be
+    rolled back with every other jurisdiction's rather than independently.
+
+    A starting value is never guessed or backfilled: no rows means this is the
+    employee's first payslip of the tax year and every figure is legitimately
+    zero."""
+    if "IE" not in _YTD_ACCUMULATOR_ENABLED_COUNTRIES:
+        return {}
+    rows = _ie_ytd_rows_for_update(db, employee_id, _ie_tax_year(pay_date))
+    if not rows:
+        return {}
+    return {
+        "usc_payable_ytd": _ie_component_value(rows, "ie_usc_payable", "ytd_taxable_wages"),
+        "usc_paid_ytd": _ie_component_value(rows, "ie_usc_paid", "ytd_tax_withheld"),
+        "prsi_reckonable_ytd": _ie_component_value(rows, "ie_prsi_reckonable", "ytd_taxable_wages"),
+        "prsi_contribution_weeks_ytd": _ie_component_value(rows, "ie_prsi_weeks", "ytd_tax_withheld"),
+        "mff_earnings_ytd_before": _ie_component_value(rows, "ie_mff_earnings", "ytd_taxable_wages"),
+    }
+
+
+def _upsert_ie_ytd_accumulator(db: Session, employee_id: int, organization_id: int,
+                               pay_date, result, payslip_id: int = None) -> None:
+    """Advance Ireland's independent cumulative bases from a REAL persisted
+    payslip.
+
+    IE-032: preview must not write here, so this returns immediately unless
+    the caller passed a real payslip id. IE-039: every component row is read
+    FOR UPDATE before the figures are merged in, so a concurrent commit cannot
+    consume a stale "before" value.
+
+    Each figure lands in its own component row, created on demand by this
+    writer (and only this writer). The MyFutureFund threshold crossing (IE-020)
+    needs no write here at all: it is derived from the payslip's own snapshot
+    (see the note above), so this writer only carries the running earnings
+    total forward.
+    """
+    if payslip_id is None:
+        return  # preview / non-persisted calculation — never advances a cumulative
+    ytd_after = result.ie_ytd_after
+    if not ytd_after:
+        return  # Week 1 / Emergency basis produce no cumulative state
+    tax_year = _ie_tax_year(pay_date)
+    rows = _ie_ytd_rows_for_update(db, employee_id, tax_year)
+
+    def _row_for(component: str):
+        row = rows.get(component)
+        if row is None:
+            row = PayrollYtdAccumulator(
+                employee_id=employee_id,
+                tax_year=str(tax_year),
+                tax_component=component,
+                ytd_taxable_wages=Decimal("0"),
+                ytd_tax_withheld=Decimal("0"),
+            )
+            db.add(row)
+            rows[component] = row
+        return row
+
+    if ytd_after.get("usc_payable_ytd") is not None:
+        _row_for("ie_usc_payable").ytd_taxable_wages = ytd_after["usc_payable_ytd"]
+    if ytd_after.get("usc_paid_ytd") is not None:
+        _row_for("ie_usc_paid").ytd_tax_withheld = ytd_after["usc_paid_ytd"]
+    if ytd_after.get("prsi_reckonable_ytd") is not None:
+        _row_for("ie_prsi_reckonable").ytd_taxable_wages = ytd_after["prsi_reckonable_ytd"]
+        weeks = result.ie_prsi_contribution_weeks
+        if weeks is not None:
+            weeks_row = _row_for("ie_prsi_weeks")
+            weeks_row.ytd_tax_withheld = (weeks_row.ytd_tax_withheld or Decimal("0")) + weeks
+    if ytd_after.get("mff_earnings_ytd") is not None:
+        _row_for("ie_mff_earnings").ytd_taxable_wages = ytd_after["mff_earnings_ytd"]
+    for component in _IE_YTD_COMPONENTS:
+        row = rows.get(component)
+        if row is not None:
+            row.last_updated_payslip_id = payslip_id
+    db.flush()
+
+
+def _load_ie_rpn(db: Session, employee_id: int, pay_date) -> dict:
+    """The frozen Revenue Payroll Notification for this employee's Irish tax
+    year, as the engine's input dict (IE-005/IE-022).
+
+    IE-022 forbids the core calculator making live Revenue calls, so the
+    snapshot retrieved during preflight IS the calculation input. The most
+    recent non-stale snapshot wins; a stale one is still returned (flagged
+    `is_stale`) rather than silently dropped, because dropping it would make
+    the engine fall through to EMERGENCY basis and produce a plausible but
+    wrong number rather than a block.
+
+    An employee with no snapshot is the legitimate EMERGENCY case (IE-008) —
+    the engine blocks on its own if that is not really the case, because
+    EMERGENCY requires a reason and a week counter."""
+    tax_year = str(_ie_tax_year(pay_date))
+    row = (
+        db.query(IrelandRpnSnapshot)
+        .filter(
+            IrelandRpnSnapshot.employee_id == employee_id,
+            IrelandRpnSnapshot.tax_year == tax_year,
+        )
+        .order_by(IrelandRpnSnapshot.issued_at.desc(), IrelandRpnSnapshot.id.desc())
+        .first()
+    )
+    if row is None:
+        return {}
+    return {
+        "snapshot_id": row.id,
+        "rpn_number": row.rpn_number,
+        "issued_at": row.issued_at,
+        "basis": row.calculation_basis,
+        "ppsn_supplied": row.ppsn_supplied,
+        "standard_rate_band": row.standard_rate_band,
+        "tax_credit": row.tax_credit,
+        "standard_rate_band_period": row.standard_rate_band_period,
+        "tax_credit_period": row.tax_credit_period,
+        "previous_taxable_pay_ytd": row.previous_taxable_pay_ytd,
+        "previous_pay_ytd": row.previous_pay_ytd,
+        "periods_elapsed": row.periods_elapsed,
+        "lpt_instructed": row.lpt_instructed,
+        "lpt_rate_pct": row.lpt_rate_pct,
+        "emergency_tax_credit_weekly": row.emergency_tax_credit_weekly,
+        "raw_hash": row.raw_hash,
+        "is_stale": row.is_stale,
+    }
+
+
+def upsert_ie_rpn_snapshot(
+    db: Session,
+    organization_id: int,
+    employee_id: int,
+    rpn_number: str,
+    issued_at,
+    tax_year: str,
+    calculation_basis: str,
+    ppsn_supplied: bool,
+    standard_rate_band,
+    tax_credit,
+    standard_rate_band_period,
+    tax_credit_period,
+    previous_taxable_pay_ytd,
+    previous_pay_ytd,
+    periods_elapsed: int,
+    lpt_instructed: bool,
+    lpt_rate_pct,
+    emergency_tax_credit_weekly,
+    raw_hash: str,
+    raw_payload: dict = None,
+    statutory_profile_id: int = None,
+) -> "IrelandRpnSnapshot":
+    """Insert or update a frozen Revenue Payroll Notification snapshot (IE-005,
+    IE-022, IE-033, IE-045).
+
+    The snapshot is content-addressed by raw_hash: if the same authority response
+    is ingested again (same raw_hash for the same employee/tax_year), we return
+    the existing row rather than duplicating it. A genuine change (new raw_hash)
+    creates a new immutable row — the historical payroll must always be
+    reproducible from the exact snapshot that was in force (IE-045).
+
+    The caller must supply a deterministic raw_hash over the full authority
+    response (e.g. SHA-256 of the canonical JSON). The raw_payload is stored
+    verbatim for audit/replay (IE-033/IE-047)."""
+    from datetime import datetime
+    from app.modules.payroll.models import IrelandRpnSnapshot
+
+    tax_year = str(tax_year)
+
+    # Check if this exact content already exists for this employee/year
+    existing = (
+        db.query(IrelandRpnSnapshot)
+        .filter(
+            IrelandRpnSnapshot.employee_id == employee_id,
+            IrelandRpnSnapshot.tax_year == tax_year,
+            IrelandRpnSnapshot.raw_hash == raw_hash,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+
+    # Normalize issued_at to datetime if it's a date/string
+    if not isinstance(issued_at, datetime):
+        if isinstance(issued_at, str):
+            issued_at = datetime.fromisoformat(issued_at.replace("Z", "+00:00"))
+        else:
+            # Assume it's a date; promote to datetime at midnight UTC
+            issued_at = datetime.combine(issued_at, datetime.min.time())
+
+    # Helper to coerce numeric strings/Decimals to Numeric-compatible values
+    def _num(v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float, Decimal)):
+            return v
+        try:
+            return Decimal(str(v))
+        except Exception:
+            return None
+
+    row = IrelandRpnSnapshot(
+        organization_id=organization_id,
+        employee_id=employee_id,
+        statutory_profile_id=statutory_profile_id,
+        rpn_number=rpn_number,
+        issued_at=issued_at,
+        tax_year=tax_year,
+        calculation_basis=calculation_basis,
+        ppsn_supplied=bool(ppsn_supplied),
+        standard_rate_band=_num(standard_rate_band),
+        tax_credit=_num(tax_credit),
+        standard_rate_band_period=_num(standard_rate_band_period),
+        tax_credit_period=_num(tax_credit_period),
+        previous_taxable_pay_ytd=_num(previous_taxable_pay_ytd),
+        previous_pay_ytd=_num(previous_pay_ytd),
+        periods_elapsed=int(periods_elapsed) if periods_elapsed is not None else None,
+        lpt_instructed=bool(lpt_instructed),
+        lpt_rate_pct=_num(lpt_rate_pct),
+        emergency_tax_credit_weekly=_num(emergency_tax_credit_weekly),
+        raw_hash=raw_hash,
+        raw_payload=raw_payload,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _load_ie_myfuturefund_status(db: Session, employee_id: int, pay_date) -> dict:
+    """The NAERSA-notified MyFutureFund status in force on pay_date (IE-018).
+
+    Effective-dated: the row whose [effective_from, effective_to] window
+    contains pay_date wins, so a historical payroll replays the status that
+    was notified at the time rather than today's. There is deliberately no
+    admin "enrol this employee" control anywhere — status rows are written
+    only from a NAERSA notification, and the engine blocks rather than
+    defaulting when none is in force."""
+    row = (
+        db.query(IrelandMyFutureFundStatus)
+        .filter(
+            IrelandMyFutureFundStatus.employee_id == employee_id,
+            IrelandMyFutureFundStatus.effective_from <= pay_date,
+            (IrelandMyFutureFundStatus.effective_to.is_(None))
+            | (IrelandMyFutureFundStatus.effective_to >= pay_date),
+        )
+        .order_by(IrelandMyFutureFundStatus.effective_from.desc(), IrelandMyFutureFundStatus.id.desc())
+        .first()
+    )
+    if row is None:
+        return {}
+    return {
+        "status": row.status,
+        "status_reason": row.status_reason,
+        "effective_from": row.effective_from,
+        "employee_contribution_pct": row.employee_contribution_pct,
+        "employer_contribution_pct": row.employer_contribution_pct,
+        "threshold_state": row.threshold_state,
+        "contributions_ceased": row.contributions_ceased,
+        "exemption_reference": row.exemption_reference,
+        "source": row.source,
+    }
+
+
+# ── Ireland Revenue Integration (ZP-IE-ENG-001 WP2) ──────────────────────
+# Real-time payroll submission (on/before pay date), monthly statement
+# retrieval, return reconciliation, and payment tracking — per IE-022/IE-026/IE-027.
+
+def submit_ie_payroll(db: Session, run_id: int) -> dict:
+    """Submit a committed payroll run to Revenue (IE-022: on/before pay date).
+
+    Creates one IrelandRevenueSubmission row per employee in the run,
+    populated from the committed payslip's ie_calculation_snapshot.
+    Returns a summary with counts and any errors.
+
+    Idempotent: if a submission with the same idempotency_key already
+    exists, returns the existing row rather than duplicating (IE-025)."""
+    from app.modules.payroll.models import (
+        PayrollRun, PayslipItem, IrelandRevenueSubmission, IrelandRpnSnapshot
+    )
+    from sqlalchemy import and_
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
+    if not run:
+        raise NotFoundException("PayrollRun", run_id)
+    if run.country != "IE":
+        raise BadRequestException("Revenue submission only valid for Ireland runs")
+
+    items = db.query(PayslipItem).filter(PayslipItem.run_id == run_id).all()
+    if not items:
+        return {"submitted": 0, "skipped": 0, "errors": ["No payslip items in run"]}
+
+    submitted = 0
+    skipped = 0
+    errors = []
+
+    for item in items:
+        emp_id = item.employee_id
+        snap = item.ie_calculation_snapshot
+        if not snap:
+            skipped += 1
+            errors.append(f"Employee {emp_id}: no ie_calculation_snapshot")
+            continue
+
+        # Build payload from the snapshot (what Revenue actually receives)
+        payload = {
+            "paye": snap.get("paye", {}).get("amount"),
+            "usc": snap.get("usc", {}).get("amount"),
+            "prsi_employee": snap.get("prsi", {}).get("employee"),
+            "prsi_employer": snap.get("prsi", {}).get("employer"),
+            "lpt": snap.get("lpt", {}).get("amount"),
+            "myfuturefund_employee": snap.get("myfuturefund", {}).get("employee"),
+            "myfuturefund_employer": snap.get("myfuturefund", {}).get("employer"),
+            "gross": snap.get("gross"),
+            "rpn_number": snap.get("rpn", {}).get("rpn_number"),
+            "rpn_hash": snap.get("rpn", {}).get("raw_hash"),
+            "paye_basis": snap.get("paye", {}).get("basis"),
+            "tax_year": snap.get("tax_year"),
+        }
+
+        import hashlib, json
+        payload_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()
+
+        idempotency_key = f"ie_revsub_{run_id}_{item.employee_id}_{payload_hash[:16]}"
+
+        # Idempotency check (IE-025)
+        existing = db.query(IrelandRevenueSubmission).filter(
+            IrelandRevenueSubmission.idempotency_key == idempotency_key
+        ).first()
+        if existing:
+            skipped += 1
+            continue
+
+        # Find the RPN snapshot used
+        rpn_snap = None
+        if snap.get("rpn", {}).get("snapshot_id"):
+            rpn_snap = db.query(IrelandRpnSnapshot).filter(
+                IrelandRpnSnapshot.id == snap["rpn"]["snapshot_id"]
+            ).first()
+
+        sub = IrelandRevenueSubmission(
+            organization_id=run.organization_id,
+            employee_id=emp_id,
+            run_id=run_id,
+            payslip_id=item.id,
+            rpn_snapshot_id=rpn_snap.id if rpn_snap else None,
+            line_item_id=None,  # filled when Revenue acknowledges
+            previous_line_item_id=None,
+            correction_kind="ORIGINAL",
+            period_start=run.period_start,
+            period_end=run.period_end,
+            pay_date=run.pay_date,
+            reported_gross=payload.get("gross"),
+            reported_paye=payload.get("paye"),
+            reported_usc=payload.get("usc"),
+            reported_prsi_employee=payload.get("prsi_employee"),
+            reported_prsi_employer=payload.get("prsi_employer"),
+            reported_lpt=payload.get("lpt"),
+            reported_myfuturefund_employee=payload.get("myfuturefund_employee"),
+            reported_myfuturefund_employer=payload.get("myfuturefund_employer"),
+            payload=payload,
+            payload_hash=payload_hash,
+            status="PENDING",
+            idempotency_key=idempotency_key,
+        )
+        db.add(sub)
+        submitted += 1
+
+    db.commit()
+    return {"submitted": submitted, "skipped": skipped, "errors": errors}
+
+
+def poll_ie_revenue_ack(db: Session, submission_id: int) -> dict:
+    """Poll Revenue for acknowledgment of a submission (stub for ROS integration).
+
+    In production, this calls the ROS API to check submission status.
+    Updates the submission row with ACKNOWLEDGED/REJECTED/UNKNOWN status.
+    Returns the updated submission status."""
+    from app.modules.payroll.models import IrelandRevenueSubmission
+
+    sub = db.query(IrelandRevenueSubmission).filter(
+        IrelandRevenueSubmission.id == submission_id
+    ).first()
+    if not sub:
+        raise NotFoundException("IrelandRevenueSubmission", submission_id)
+
+    # TODO: Replace with actual ROS API call
+    # For now, mark as ACKNOWLEDGED with a dummy line_item_id
+    if sub.status == "PENDING":
+        sub.status = "ACKNOWLEDGED"
+        sub.line_item_id = f"ROS_{sub.id}_{sub.payload_hash[:8]}"
+        sub.acknowledged_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        db.commit()
+        db.refresh(sub)
+
+    return {
+        "submission_id": sub.id,
+        "status": sub.status,
+        "line_item_id": sub.line_item_id,
+        "acknowledged_at": sub.acknowledged_at,
+    }
+
+
+def retrieve_ie_monthly_statement(db: Session, organization_id: int, period_start, period_end) -> dict:
+    """Retrieve the monthly Revenue statement for an organization (stub).
+
+    In production, this calls the ROS API to fetch the statement.
+    Returns the statement data including Revenue's calculated liability.
+    """
+    # TODO: Replace with actual ROS API call
+    from datetime import date
+    return {
+        "organization_id": organization_id,
+        "statement_period_start": period_start,
+        "statement_period_end": period_end,
+        "revenue_liability": None,  # filled by ROS
+        "statement_items": [],
+        "retrieved_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    }
+
+
+def reconcile_ie_monthly_return(db: Session, organization_id: int, period_start, period_end) -> dict:
+    """Reconcile a monthly return: match submissions to Revenue statement (IE-026/IE-027).
+
+    Creates/updates an IrelandRevenueMonthlyReturn row for the period,
+    comparing calculated_liability (from our submissions) to revenue_liability
+    (from the statement). Marks as ACCEPTED/DEEMED/RECONCILED."""
+    from app.modules.payroll.models import IrelandRevenueSubmission, IrelandRevenueMonthlyReturn
+    from sqlalchemy import and_, func
+    from datetime import date
+
+    # Calculate our total liability from submissions
+    subs = db.query(IrelandRevenueSubmission).filter(
+        IrelandRevenueSubmission.organization_id == organization_id,
+        IrelandRevenueSubmission.period_start >= period_start,
+        IrelandRevenueSubmission.period_end <= period_end,
+        IrelandRevenueSubmission.status.in_(["ACKNOWLEDGED", "SENT"]),
+    ).all()
+
+    calc_liability = sum(
+        (s.reported_paye or 0) + (s.reported_usc or 0) + (s.reported_lpt or 0) +
+        (s.reported_prsi_employee or 0) + (s.reported_myfuturefund_employee or 0)
+        for s in subs
+    )
+
+    # Get Revenue statement (stub)
+    stmt = retrieve_ie_monthly_statement(db, organization_id, period_start, period_end)
+    rev_liability = stmt.get("revenue_liability")
+
+    # Upsert monthly return
+    existing = db.query(IrelandRevenueMonthlyReturn).filter(
+        IrelandRevenueMonthlyReturn.organization_id == organization_id,
+        IrelandRevenueMonthlyReturn.statement_period_start == period_start,
+        IrelandRevenueMonthlyReturn.statement_period_end == period_end,
+    ).order_by(IrelandRevenueMonthlyReturn.version.desc()).first()
+
+    version = (existing.version + 1) if existing else 1
+
+    # Determine status
+    if rev_liability is not None:
+        diff = abs((rev_liability or 0) - (calc_liability or 0))
+        status = "RECONCILED" if diff < Decimal("0.01") else "DRAFT"
+    else:
+        status = "DRAFT"
+
+    ret = IrelandRevenueMonthlyReturn(
+        organization_id=organization_id,
+        statement_period_start=period_start,
+        statement_period_end=period_end,
+        version=version,
+        status=status,
+        calculated_liability=calc_liability,
+        revenue_liability=rev_liability,
+        reconciliation_state={
+            "submission_count": len(subs),
+            "difference": float((rev_liability or 0) - (calc_liability or 0)) if rev_liability is not None else None,
+        },
+        payload_hash=__import__("hashlib").sha256(str(calc_liability).encode()).hexdigest()[:16],
+    )
+    if existing:
+        # Update existing
+        existing.version = version
+        existing.status = status
+        existing.calculated_liability = calc_liability
+        existing.revenue_liability = rev_liability
+        existing.reconciliation_state = ret.reconciliation_state
+        existing.reconciled_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc) if status == "RECONCILED" else None
+        db.commit()
+        db.refresh(existing)
+        return {"monthly_return_id": existing.id, "status": status, "diff": float(diff) if rev_liability is not None else None}
+
+    db.add(ret)
+    db.commit()
+    db.refresh(ret)
+    return {"monthly_return_id": ret.id, "status": status, "diff": None}
+
+
+def record_ie_payment(db: Session, organization_id: int, period_start, period_end, amount, reference, paid_at=None) -> dict:
+    """Record a liability payment to Revenue (IE-026: payment separate from filing).
+
+    Updates the monthly return's reconciled_at and stores payment reference."""
+    from app.modules.payroll.models import IrelandRevenueMonthlyReturn
+
+    ret = db.query(IrelandRevenueMonthlyReturn).filter(
+        IrelandRevenueMonthlyReturn.organization_id == organization_id,
+        IrelandRevenueMonthlyReturn.statement_period_start == period_start,
+        IrelandRevenueMonthlyReturn.statement_period_end == period_end,
+    ).order_by(IrelandRevenueMonthlyReturn.version.desc()).first()
+
+    if not ret:
+        raise NotFoundException(f"Monthly return for period {period_start} to {period_end} not found")
+
+    if ret.status not in ("RECONCILED", "ACCEPTED", "DEEMED"):
+        raise BadRequestException(f"Cannot record payment for return in status {ret.status}")
+
+    # In a full implementation, this would create a separate payment row.
+    # For now, we just mark the return as reconciled with payment info.
+    ret.reconciliation_state = ret.reconciliation_state or {}
+    ret.reconciliation_state["payment"] = {
+        "amount": float(amount),
+        "reference": reference,
+        "paid_at": (paid_at or __import__("datetime").datetime.now(__import__("datetime").timezone.utc)).isoformat(),
+    }
+    ret.reconciled_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    ret.status = "RECONCILED"
+    db.commit()
+    db.refresh(ret)
+    return {"monthly_return_id": ret.id, "payment_recorded": True}
+
+
+def _resolve_ie_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
+                            exclude_run_id: Optional[int] = None) -> dict:
+    """Build build_context_from_employee(ireland_inputs=...) for one Ireland
+    employee on payroll_date: the frozen RPN instruction, the NAERSA
+    MyFutureFund status in force, the independent cumulative bases, and the
+    employee's own statutory facts.
+
+    Mirrors _resolve_france_calc_inputs above in shape and in discipline: it
+    assembles only authority-sourced and employee-sourced facts and never
+    derives a statutory result. Whatever it cannot establish is simply left
+    absent, so the engine raises its own specific block (IE_MFF_STATUS_MISSING,
+    IE_PRSI_CLASS_MISSING, IE_NMW_HOURS_EVIDENCE_MISSING, ...) instead of this
+    layer guessing.
+
+    Ireland is a COUNTRY-LEVEL jurisdiction: there is no province/state
+    dimension, so nothing here is scoped by state.
+    """
+    rpn = _load_ie_rpn(db, employee.id, payroll_date)
+    myfuturefund = _load_ie_myfuturefund_status(db, employee.id, payroll_date)
+    ytd = _load_ie_ytd(db, employee.id, payroll_date)
+
+    # IE-005: PPSN presence on the RPN drives the Emergency basis treatment
+    # (higher rate, no credit), so it is the authority value, not merely
+    # whether the employee record happens to carry a PPSN.
+    ppsn_supplied = rpn.get("ppsn_supplied")
+    if ppsn_supplied is None:
+        ppsn_supplied = bool(getattr(employee, "ie_ppsn", None))
+
+    employee_facts = {
+        "prsi_class": getattr(employee, "ie_prsi_class", None),
+        "prsi_exemption_reference": getattr(employee, "ie_prsi_exemption_reference", None),
+        "usc_status": getattr(employee, "ie_usc_status", None),
+        "ppsn_supplied": bool(ppsn_supplied),
+        "ppsn": getattr(employee, "ie_ppsn", None),
+        "sector_wage_order": getattr(employee, "ie_sector_wage_order", None),
+        "contracted_weekly_hours": getattr(employee, "ie_contracted_weekly_hours", None),
+        "emergency_reason": getattr(employee, "ie_emergency_reason", None),
+        "emergency_week": getattr(employee, "ie_emergency_week", None),
+        "pension_scheme_reference": getattr(employee, "ie_pension_scheme_reference", None),
+    }
+
+    return {
+        "ireland_pay_date": payroll_date,
+        "ireland_rpn": rpn,
+        "ireland_employee": employee_facts,
+        "ireland_myfuturefund": myfuturefund,
+        "ireland_ytd": ytd,
+        "ireland_employee_id": employee.id,
+        "ireland_organization_id": organization_id,
+    }
 
 
 # Cayman Islands mandatory-pension CI$87,000 annual cap (KY-008, 2026-09-21)
@@ -18042,6 +19023,13 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         _resolve_france_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
         if country == "FR" else None
     )
+    # Ireland (ZP-IE-ENG-001): same resolution as the preview path, but this
+    # one DOES persist real payslips below, so the matching
+    # _upsert_ie_ytd_accumulator call is what advances the cumulative bases.
+    ireland_inputs = (
+        _resolve_ie_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "IE" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -18086,6 +19074,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         residence_locality_rate=residence_locality_rate,
         **germany_kwargs,
         france_inputs=france_inputs,
+        ireland_inputs=ireland_inputs,
         pay_date=run.pay_date,
         ni_category_override=ni_category_override,
         **(reciprocity or {}),
@@ -18226,6 +19215,15 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "germany_calculation_snapshot": result.germany_calculation_snapshot,
         # France — frozen result + the YTD state the next period reads back.
         "fr_calculation_snapshot": _fr_payslip_snapshot(result),
+        # Ireland (ZP-IE-ENG-001) — same per-country JSON snapshot contract as
+        # the Germany and France lines above, and for the same reason: the Irish
+        # engine's per-head breakdown (USC, PRSI sub-class/credit/weeks, the
+        # NAERSA-notified MFF status, the LPT instruction, the applied RPN's
+        # number/hash, and ie_calculation_trace itself) has no scalar
+        # PayslipItem column, so without this it was computed and thrown away.
+        # IE-045 (no reconstructing a historical result from current content)
+        # is only satisfiable because the RPN actually applied is frozen here.
+        "ie_calculation_snapshot": _ie_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
         # above, for the before/after cumulative figures this payslip
         # actually consumed per component. None unless YTD accumulation
@@ -18282,6 +19280,13 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # Australia WHM Schedule 15 cumulative-cap tracking — a separate
         # key since it's gated on ITS OWN result field, independent of SG.
         "_au_whm_ytd_result": result if result.ytd_whm_earnings_after is not None else None,
+        # Same splat-then-pop contract as "_ytd_result" above, for Ireland's
+        # INDEPENDENT cumulative bases (ZP-IE-ENG-001 IE-009/IE-010/IE-032/
+        # IE-039: USC, PRSI and MyFutureFund each carry their own figure, so
+        # this is a dedicated key gated on ITS OWN result field, and it writes
+        # to IrelandYtdAccumulator rather than the generic
+        # PayrollYtdAccumulator).
+        "_ie_ytd_result": result if result.ie_ytd_after else None,
         # Same splat-then-pop contract as "_ytd_result" above, for
         # Cayman Islands mandatory-pension CI$87,000 annual-cap tracking
         # (KY-008) — a separate key since it's gated on ITS OWN result
@@ -18415,6 +19420,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     us_ytd_result = values.pop("_us_ytd_result", None)
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
+    ie_ytd_result = values.pop("_ie_ytd_result", None)
     ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
@@ -18470,6 +19476,12 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     if au_whm_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, au_whm_ytd_result, payslip_id=item.id)
+    if ie_ytd_result is not None:
+        db.flush()  # need item.id for last_payslip_id
+        # IE-032/IE-039: advances USC/PRSI/MyFutureFund cumulative state from
+        # a real persisted payslip only, with the row read FOR UPDATE.
+        _upsert_ie_ytd_accumulator(db, employee.id, run.organization_id, run.pay_date,
+                                   ie_ytd_result, payslip_id=item.id)
     if ky_pension_ytd_result is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, ky_pension_ytd_result, payslip_id=item.id)
@@ -19073,6 +20085,11 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     us_ytd_result = values.pop("_us_ytd_result", None)  # never written from this correction path — same reasoning as _ytd_result above
     values.pop("_au_sg_ytd_result", None)  # never written from this correction path — same reasoning as _us_ytd_result above
     values.pop("_au_whm_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
+    # Ireland (ZP-IE-ENG-001): a CORRECTION must never advance Ireland's
+    # cumulative PAYE/USC/PRSI/MyFutureFund state — same reasoning as
+    # _ytd_result/_us_ytd_result above. A correction is a correction of one
+    # payslip's figures, not a new contribution to the year-to-date.
+    values.pop("_ie_ytd_result", None)
     values.pop("_ky_pension_ytd_result", None)  # same reasoning as _au_sg_ytd_result above
     values.pop("_gy_paye_credit_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
     values.pop("_pr_ytd_result", None)  # same reasoning as _ky_pension_ytd_result above
@@ -19201,8 +20218,8 @@ def _apply_employee_filter(query, organization_id):
 
 
 def get_employees(db: Session, organization_id: int,
-                   search: str = None, department: str = None, status: str = None,
-                   limit: int = None, offset: int = None) -> List[PayrollEmployee]:
+                    search: str = None, department: str = None, status: str = None,
+                    limit: int = None, offset: int = None) -> List[PayrollEmployee]:
     query = _apply_employee_filter(db.query(PayrollEmployee), organization_id)
     if department:
         query = query.filter(PayrollEmployee.department == department)
@@ -19223,6 +20240,45 @@ def get_employees(db: Session, organization_id: int,
     if limit:
         query = query.limit(limit)
     return query.all()
+
+
+def get_employee_roster(db: Session, organization_id: int,
+                        status: str = None,
+                        limit: int = None, offset: int = None) -> List[dict]:
+    """Lightweight employee roster for attendance/leave screens.
+    
+    Returns only the columns needed by attendance UI: id, name, employee_code, 
+    department, designation. Uses load_only to avoid loading all columns.
+    """
+    from sqlalchemy.orm import load_only
+    query = _apply_employee_filter(
+        db.query(PayrollEmployee).options(
+            load_only(
+                PayrollEmployee.id,
+                PayrollEmployee.name,
+                PayrollEmployee.employee_code,
+                PayrollEmployee.department,
+                PayrollEmployee.designation,
+            )
+        ), organization_id)
+    if status:
+        query = query.filter(PayrollEmployee.status == status)
+    query = query.order_by(PayrollEmployee.name)
+    if offset:
+        query = query.offset(offset)
+    if limit:
+        query = query.limit(limit)
+    # Convert to dict to avoid detached instance issues
+    return [
+        {
+            "id": emp.id,
+            "name": emp.name,
+            "employee_code": emp.employee_code,
+            "department": emp.department,
+            "designation": emp.designation,
+        }
+        for emp in query.all()
+    ]
 
 
 def get_employee_by_id(db: Session, employee_id: int, organization_id: int) -> PayrollEmployee:
@@ -23265,6 +24321,14 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _resolve_france_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
         if country == "FR" else None
     )
+    # Ireland (ZP-IE-ENG-001): a manually-added IE payslip must consume the
+    # SAME frozen RPN / MyFutureFund / YTD inputs as a generated run, or it
+    # would bypass the statutory wiring and could not be reproducibly
+    # snapshotted.
+    ireland_inputs = (
+        _resolve_ie_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "IE" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved_de = _resolve_germany_calc_inputs(db, organization_id, employee, run.pay_date)
@@ -23382,6 +24446,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         **reciprocity,
         **germany_kwargs,
         france_inputs=france_inputs,
+        ireland_inputs=ireland_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -23574,6 +24639,13 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if calc.ytd_whm_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_au_whm_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
+    if calc.ie_ytd_after:
+        db.flush()  # need item.id for last_payslip_id
+        # Ireland (ZP-IE-ENG-001) manually-added payslip path — this one DOES
+        # persist a real payslip, so it must advance USC/PRSI/MyFutureFund
+        # cumulative state exactly like a generated run, or those bases would
+        # silently regress to zero-only behaviour here.
+        _upsert_ie_ytd_accumulator(db, employee.id, organization_id, run.pay_date, calc, payslip_id=item.id)
     if calc.ytd_ky_mandatory_pensionable_earnings_after is not None:
         db.flush()  # need item.id for last_updated_payslip_id
         _upsert_ky_pension_ytd_accumulator(db, employee.id, run.pay_date, calc, payslip_id=item.id)
@@ -24066,6 +25138,10 @@ def _get_currency_symbol(country: str) -> str:
         "AU": "A$", "DE": "\u20ac", "CA": "C$",
         "BB": "Bds$", "KY": "CI$", "DO": "RD$", "GY": "G$",
         "JM": "J$", "BS": "B$", "TT": "TT$", "PR": "$",
+        # Ireland (ZP-IE-ENG-001) uses the euro. Without this row IE silently
+        # fell through to the "$" default below, which is a silently wrong
+        # currency rather than a visible failure.
+        "IE": "\u20ac", "FR": "\u20ac",
     }.get(country, "$")
 
 
@@ -24088,6 +25164,9 @@ def _get_currency_code(country: str) -> str:
         "AU": "AUD", "DE": "EUR", "CA": "CAD",
         "BB": "BBD", "KY": "KYD", "DO": "DOP", "GY": "GYD",
         "JM": "JMD", "BS": "BSD", "TT": "TTD", "PR": "USD",
+        # Ireland (ZP-IE-ENG-001) uses the euro; without this row IE silently
+        # fell through to the "USD" default below.
+        "IE": "EUR", "FR": "EUR",
     }.get(country, "USD")
 
 
@@ -24384,6 +25463,9 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     income_tax_labels = {
         "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
         "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
+        # Ireland (ZP-IE-ENG-001) routes PAYE through `tds`; without this row
+        # an Irish payslip read the "TDS" default, which is India's term.
+        "IE": "PAYE", "FR": "Prélèvement à la Source",
         # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
         # real terms verified from each country's own engine module
         # docstring (engine/countries/*.py), not guessed. Bahamas/Cayman
@@ -25958,8 +27040,13 @@ def get_attendance_records(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     employee_id: Optional[int] = None,
+    limit: int = 1000,
+    offset: int = 0,
 ) -> List[dict]:
-    """Fetch attendance records with optional date range and employee filter."""
+    """Fetch attendance records with optional date range and employee filter.
+    
+    Paginated: limit/offset default to 1000/0 for backwards compatibility.
+    """
     query = db.query(
         PayrollAttendanceRecord,
         PayrollEmployee.name,
@@ -25979,7 +27066,13 @@ def get_attendance_records(
     if employee_id:
         query = query.filter(PayrollAttendanceRecord.employee_id == employee_id)
 
-    rows = query.order_by(PayrollAttendanceRecord.date.desc()).all()
+    query = query.order_by(PayrollAttendanceRecord.date.desc())
+    if limit > 0:
+        query = query.limit(limit)
+    if offset > 0:
+        query = query.offset(offset)
+
+    rows = query.all()
     return [
         {
             "id": record.id,
@@ -26598,6 +27691,7 @@ _COUNTRY_NAME_TO_JURISDICTION_CODE = {
     "germany": "DE",
     "canada": "CA",
     "france": "FR",
+    "ireland": "IE",
 }
 
 
@@ -27901,6 +28995,9 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
     income_tax_labels = {
         "IN": "TDS", "US": "Federal Withholding", "UK": "PAYE",
         "AU": "PAYG", "DE": "Lohnsteuer", "CA": "Federal Tax",
+        # Ireland (ZP-IE-ENG-001) — mirrors generate_payslip_pdf_bytes's own
+        # label map above.
+        "IE": "PAYE", "FR": "Prélèvement à la Source",
         # Caribbean production jurisdictions (ZP-MJR-2026-002, 2026-09-24) —
         # mirrors generate_payslip_pdf_bytes's own label map. Bahamas/Cayman
         # have no entry: `tds` is always 0 for both (no personal income
@@ -28120,6 +29217,56 @@ def _enrich_leave_request(db: Session, record: PayrollLeaveRequest, organization
         "statutoryAweSnapshot": record.statutory_awe_snapshot,
         "statutoryPayTotalAmount": record.statutory_pay_total_amount,
         "statutoryPayNote": record.statutory_pay_note,
+        # Irish statutory sick pay is assessed into its own IE-037 ledger row
+        # rather than these UK-shaped columns, so it is surfaced as a nested
+        # summary. Absent (null) whenever no assessment exists — which is every
+        # country other than Ireland, and Ireland while the G5 rollout switch is
+        # off. Never defaulted to zeros, so "not assessed" stays distinguishable
+        # from "assessed and nothing was owed".
+        "ireStatutorySickLeave": _ie_sick_leave_summary(db, record),
+    }
+
+
+def _ie_sick_leave_summary(db: Session, record: PayrollLeaveRequest) -> Optional[dict]:
+    """The IE-037 assessment for a leave request, as a read model for the Leave
+    Management screen. Returns None when no assessment row exists.
+
+    Deliberately read-only: it reports what was assessed and why, and does not
+    re-derive any of it. A claim's amount is frozen at approval time, so this
+    must never recompute it from today's rate pack (the same rule
+    IrelandRpnSnapshot and PayslipItem.ie_calculation_snapshot follow).
+    """
+    row = db.query(IrelandStatutorySickLeaveRecord).filter(
+        IrelandStatutorySickLeaveRecord.leave_request_id == record.id,
+    ).order_by(IrelandStatutorySickLeaveRecord.id.desc()).first()
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "calendarYear": row.calendar_year,
+        "absenceStartDate": row.absence_start_date,
+        "absenceEndDate": row.absence_end_date,
+        "daysClaimed": row.days_claimed,
+        "daysCredited": row.days_credited,
+        "daysDisallowed": row.days_disallowed,
+        "daysTakenBefore": row.days_taken_before,
+        "entitlementDays": row.entitlement_days,
+        "entitlementRemainingAfter": row.entitlement_remaining_after,
+        "pctApplied": row.pct_applied,
+        "dailyCap": row.daily_cap,
+        "usualDailyEarnings": row.usual_daily_earnings,
+        "dailyRateBeforeCap": row.daily_rate_before_cap,
+        "dailyRate": row.daily_rate,
+        "capApplied": row.cap_applied,
+        "amount": row.amount,
+        "serviceStartDate": row.service_start_date,
+        "serviceWeeksActual": row.service_weeks_actual,
+        "serviceWeeksRequired": row.service_weeks_required,
+        "serviceQualified": row.service_qualified,
+        "certified": row.certified,
+        "eligible": row.eligible,
+        "reason": row.reason,
+        "status": row.status,
     }
 
 
@@ -28285,6 +29432,228 @@ def _maybe_compute_uk_statutory_leave_pay(db: Session, record: PayrollLeaveReque
     record.statutory_pay_note = f"computed over {weeks} week(s)"
 
 
+def _ie_rate_map_for_statutory_leave(db: Session, organization_id: int, as_of: date) -> dict:
+    """Ireland's component-key -> rate row map for a LEAVE assessment on `as_of`.
+
+    Deliberately NOT `_resolve_effective_rate_inputs()`. That function is the
+    payroll calculation path and it ends in `_assert_jurisdiction_ready()`,
+    which refuses to resolve unless the jurisdiction's tax SLABS are also
+    configured. Statutory sick pay is an entitlement, not a tax computation: it
+    depends only on the four ie_sick_leave_* rows, and demanding a signed
+    income-tax slab table before an employer can have a sick day assessed would
+    be a category error that also blocks the assessment for any employer who has
+    not finished tax configuration.
+
+    It still honours the same content resolution discipline as a real payroll
+    run, so a claim is never decided against different content than the engine
+    would have used: the canonical, date-effective pack wins when the org has
+    opted into canonical tax packs, otherwise the org's own country-level rows
+    are used (seeding the IE catalog on first access, as a payroll run would).
+    """
+    if _org_uses_canonical_tax_pack(db, organization_id):
+        from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+        canonical_rates, _canonical_slabs, pack = resolve_tax_configuration(
+            db, "IE", state=None, tax_regime=None, payroll_date=as_of,
+        )
+        if pack is not None and canonical_rates:
+            return {
+                _normalize_engine_component_key(r.component_key): r
+                for r in canonical_rates
+            }
+    return {
+        _normalize_engine_component_key(r.component_key): r
+        for r in get_contribution_rates(db, organization_id, country="IE", payroll_date=as_of)
+    }
+
+
+def _ie_sick_days_taken_in_calendar_year(db: Session, employee_id: int, calendar_year: int,
+                                         exclude_leave_request_id: Optional[int] = None) -> Decimal:
+    """Days of Irish statutory sick entitlement already CREDITED for this
+    employee in this calendar year (IE-037's calendar-year counter).
+
+    Derived from the ledger rather than kept as a mutable running total, so the
+    figure is reconstructable and cannot drift away from the records behind it.
+    Reversed claims are excluded, because a withdrawn entitlement must return to
+    the employee rather than stay consumed.
+
+    REVERSED rows for the same request are excluded alongside the request's own
+    prior assessment, so re-approving a request re-assesses it against the
+    counter it would have seen the first time rather than against its own
+    previous claim.
+    """
+    query = db.query(
+        sa_func.coalesce(
+            sa_func.sum(IrelandStatutorySickLeaveRecord.days_credited), 0
+        )
+    ).filter(
+        IrelandStatutorySickLeaveRecord.employee_id == employee_id,
+        IrelandStatutorySickLeaveRecord.calendar_year == int(calendar_year),
+        IrelandStatutorySickLeaveRecord.status != "REVERSED",
+    )
+    if exclude_leave_request_id is not None:
+        query = query.filter(IrelandStatutorySickLeaveRecord.leave_request_id != exclude_leave_request_id)
+    total = query.scalar()
+    return Decimal(str(total if total is not None else 0))
+
+
+def _ie_usual_daily_earnings(db: Session, employee_id: int, as_of: date) -> Optional[Decimal]:
+    """Usual daily earnings for a sick claim: gross actually PAID on this
+    employee's most recent paid payslip, divided by the calendar days from that
+    pay date to the absence.
+
+    Uses real paid payslips rather than the current contract salary, because
+    statutory sick pay is defined on what the employee ordinarily earns over the
+    pay period, not on salary annualised through the platform's fixed 30-day
+    payroll model. Only PAID items count — a pending or failed payslip is not
+    evidence of ordinary earnings.
+
+    Returns None when there is no usable paid history, which the caller must
+    treat as "not evidenced" — never as zero, which would silently assess 70%
+    of nothing as a genuine entitlement.
+    """
+    row = (
+        db.query(PayslipItem.gross_pay, PayrollRun.pay_date)
+        .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+        .filter(
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.status == PayslipStatus.PAID.value,
+            PayrollRun.pay_date != None,  # noqa: E711 — SQLAlchemy needs the operator form
+        )
+        .order_by(PayrollRun.pay_date.desc(), PayslipItem.id.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    gross_pay, pay_date = row
+    if not pay_date or as_of <= pay_date:
+        return None
+    covered_days = (as_of - pay_date).days
+    if covered_days <= 0:
+        return None
+    gross = Decimal(str(gross_pay if gross_pay is not None else 0))
+    if gross <= 0:
+        return None
+    return _round2(gross / Decimal(covered_days))
+
+
+def _maybe_assess_ie_statutory_sick_leave(db: Session, record: PayrollLeaveRequest,
+                                          organization_id: int) -> Optional[IrelandStatutorySickLeaveRecord]:
+    """Called once, right after an Irish `sick` leave request is approved.
+
+    Writes ONE IrelandStatutorySickLeaveRecord capturing the full IE-037
+    evidence — absence dates, entitlement used, usual daily earnings, the rate
+    before and after the cap, the service qualification, the certification
+    state, and the reason for the outcome. Mirrors
+    _maybe_compute_uk_statutory_leave_pay above: additive at approval time,
+    frozen there and never recomputed, so a later rate update cannot rewrite a
+    historic claim.
+
+    Returns None (silently, leaving no record) when the switch is off, the
+    leave type is not `sick`, or the employee is not Irish — none of these are
+    errors, they just mean there is no Irish statutory sick pay to assess.
+
+    The computed amount is recorded as EVIDENCE ONLY. It is deliberately not
+    added to gross: see
+    engine/countries/shared.py::_IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES for
+    why the payroll mechanism waits behind G5.
+    """
+    if "IE" not in _IE_STATUTORY_LEAVE_PAY_ENABLED_COUNTRIES:
+        return None
+    if record.leave_type != "sick":
+        return None
+
+    from app.modules.payroll.engine.countries.ireland import (
+        build_rate_pack,
+        calculate_statutory_sick_pay,
+    )
+
+    employee = db.query(PayrollEmployee).filter(
+        PayrollEmployee.id == record.employee_id, PayrollEmployee.organization_id == organization_id,
+    ).first()
+    if not employee:
+        return None
+    country = _resolve_employee_country(db, organization_id, getattr(employee, "country_code", None))
+    if country != "IE":
+        return None
+
+    absence_start = record.start_date
+    calendar_year = int(absence_start.year) if absence_start else None
+    if calendar_year is None:
+        return None
+
+    try:
+        ie_pack = build_rate_pack(
+            _ie_rate_map_for_statutory_leave(db, organization_id, absence_start), organization_id,
+        )
+        taken_before = _ie_sick_days_taken_in_calendar_year(
+            db, employee.id, calendar_year, exclude_leave_request_id=record.id,
+        )
+        assessment = calculate_statutory_sick_pay(
+            pack=ie_pack,
+            usual_daily_earnings=_ie_usual_daily_earnings(db, employee.id, absence_start),
+            days_claimed=record.days,
+            days_taken_in_calendar_year=taken_before,
+            service_start_date=getattr(employee, "date_of_joining", None),
+            absence_start_date=absence_start,
+            absence_end_date=record.end_date,
+            # Certification is a statutory CONDITION and there is no field on
+            # the generic leave request to carry it. Until one exists the claim
+            # is assessed as uncertified, which disallows the entitlement and
+            # says so in the record — it is never assumed certified because the
+            # absence was reported.
+            certified=False,
+        )
+    except Exception:
+        # A payroll run must not fail because signed sick-pay content is not
+        # yet configured for this employer. The absence is still an approved
+        # leave request and the attendance sync has already happened; the claim
+        # simply is not assessed, and that silence is visible because no record
+        # exists. Raising here would block an unrelated employee's payroll.
+        import logging
+        logging.getLogger("zoiko").warning(
+            f"[payroll-leave] Ireland statutory sick pay assessment skipped for leave "
+            f"request {record.id}: statutory content or evidence unavailable",
+            exc_info=True,
+        )
+        return None
+
+    row = IrelandStatutorySickLeaveRecord(
+        organization_id=organization_id,
+        employee_id=employee.id,
+        leave_request_id=record.id,
+        calendar_year=calendar_year,
+        absence_start_date=absence_start,
+        absence_end_date=record.end_date,
+        days_claimed=Decimal(str(record.days or 0)),
+        days_credited=assessment["days_credited"],
+        days_disallowed=assessment["days_disallowed"],
+        days_taken_before=taken_before,
+        entitlement_remaining_after=max(
+            Decimal("0"),
+            assessment["entitlement_remaining_before"] - assessment["days_credited"],
+        ),
+        entitlement_days=assessment["entitlement_days"],
+        pct_applied=assessment["pct_applied"],
+        daily_cap=assessment["daily_cap"],
+        usual_daily_earnings=assessment["usual_daily_earnings"] or None,
+        daily_rate_before_cap=assessment["daily_rate_before_cap"] or None,
+        daily_rate=assessment["daily_rate"] or None,
+        cap_applied=bool(assessment["cap_applied"]),
+        amount=assessment["amount"],
+        service_start_date=getattr(employee, "date_of_joining", None),
+        service_weeks_actual=assessment.get("service_weeks_actual"),
+        service_weeks_required=assessment["service_weeks_required"],
+        service_qualified=bool(assessment["service_weeks_satisfied"]),
+        certified=bool(assessment["certified"]),
+        eligible=bool(assessment["eligible"]),
+        reason=assessment["reason"] or "allowed in full",
+        status="ASSESSED",
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
 def review_payroll_leave_request(db: Session, request_id: int, data, organization_id: int, reviewer_id: int) -> dict:
     record = db.query(PayrollLeaveRequest).filter(
         PayrollLeaveRequest.id == request_id,
@@ -28305,6 +29674,7 @@ def review_payroll_leave_request(db: Session, request_id: int, data, organizatio
     if record.status == "approved" and prev_status != "approved":
         _sync_leave_to_attendance(db, record, organization_id)
         _maybe_compute_uk_statutory_leave_pay(db, record, organization_id)
+        _maybe_assess_ie_statutory_sick_leave(db, record, organization_id)
         alloc = db.query(PayrollLeaveAllocation).filter(
             PayrollLeaveAllocation.organization_id == organization_id,
             PayrollLeaveAllocation.employee_id == record.employee_id,
@@ -28518,6 +29888,24 @@ def require_france_organization(db: Session, organization_id: int):
         raise BadRequestException(
             f"Organization {organization_id} is not a France organization "
             f"(country={getattr(org, 'country', None)!r}); France compliance data is FR-only."
+        )
+    return org
+
+
+def require_ireland_organization(db: Session, organization_id: int):
+    """Every Ireland authority endpoint is organization-scoped; reject an id
+    that is not an existing organization whose country resolves to IE, so a
+    typo or a non-Irish org can never silently accumulate Ireland records."""
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.organizations.models import Organization
+
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    if not org:
+        raise NotFoundException("Organization", organization_id)
+    if get_jurisdiction_code(getattr(org, "country", None)) != "IE":
+        raise BadRequestException(
+            f"Organization {organization_id} is not an Ireland organization "
+            f"(country={getattr(org, 'country', None)!r}); Ireland compliance data is IE-only."
         )
     return org
 

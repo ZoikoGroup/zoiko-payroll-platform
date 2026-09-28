@@ -10,8 +10,9 @@ import AUPolicyPage from "./AUPolicyPage";
 import CAPolicyPage from "./CAPolicyPage";
 import DEPolicyPage from "./DEPolicyPage";
 import FRPolicyPage from "./FRPolicyPage";
+import IEPolicyPage from "./IEPolicyPage";
 
-export { INPolicyPage, USPolicyPage, UKPolicyPage, AUPolicyPage, CAPolicyPage, DEPolicyPage, FRPolicyPage };
+export { INPolicyPage, USPolicyPage, UKPolicyPage, AUPolicyPage, CAPolicyPage, DEPolicyPage, FRPolicyPage, IEPolicyPage };
 
 export const COUNTRY_CODE_TO_POLICY_PAGE = {
   IN: INPolicyPage,
@@ -21,4 +22,5 @@ export const COUNTRY_CODE_TO_POLICY_PAGE = {
   CA: CAPolicyPage,
   DE: DEPolicyPage,
   FR: FRPolicyPage,
+  IE: IEPolicyPage,
 };

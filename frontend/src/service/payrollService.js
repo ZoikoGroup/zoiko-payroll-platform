@@ -1167,7 +1167,7 @@ export const applyExtractedRate = async ({ documentId, kind, row, countryCode = 
 // For real saved records, use getAttendanceRecords() or getAttendanceHistory().
 export const getEmployeeRoster = async (params = {}) => {
   try {
-    const employees = await getEmployees(params);
+    const employees = await api.get("/api/payroll/employees/roster", { params });
     const records = Array.isArray(employees) ? employees : [];
     // Add default attendance + compensation fields
     return records.map((emp) => ({
@@ -1221,6 +1221,18 @@ export const clearAttendanceRecords = async (startDate, endDate) => {
 export const getAttendanceRecords = async (params = {}) => {
   try {
     const res = await api.get("/api/payroll/attendance", { params });
+    return Array.isArray(res) ? res : res?.data || res?.items || [];
+  } catch {
+    return [];
+  }
+};
+
+// Fetch attendance records with pagination support
+export const getAttendanceRecordsPaginated = async (params = {}, limit = 1000, offset = 0) => {
+  try {
+    const res = await api.get("/api/payroll/attendance", { 
+      params: { ...params, limit, offset } 
+    });
     return Array.isArray(res) ? res : res?.data || res?.items || [];
   } catch {
     return [];

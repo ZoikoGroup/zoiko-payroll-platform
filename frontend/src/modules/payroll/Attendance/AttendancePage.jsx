@@ -262,6 +262,9 @@ export default function AttendancePage() {
   // "Total Employees" whenever inactive employees exist or a range simply
   // has no attendance saved for everyone yet.
   const [totalEmployeeCount, setTotalEmployeeCount] = useState(0);
+  // Summary tab pagination
+  const [summaryPage, setSummaryPage] = useState(0);
+  const SUMMARY_PAGE_SIZE = 50;
 
   const loadRecords = useCallback(async () => {
     const requestId = ++recordsRequestIdRef.current;
@@ -402,10 +405,11 @@ export default function AttendancePage() {
     } finally {
       if (requestId === historyRequestIdRef.current) setHistoryLoading(false);
     }
-  }, [filterStartDate, orgId, monthRange]);
+  }, [filterStartDate, orgId, monthRange, resetSummaryPagination]);
 
   useEffect(() => {
     loadHistory(timeRange);
+    resetSummaryPagination();
   }, [timeRange, loadHistory]);
 
   // Clean up old unscoped localStorage keys from prior sessions
@@ -565,6 +569,27 @@ export default function AttendancePage() {
         emp.department?.toLowerCase().includes(q)
     );
   }, [employeeAttendanceSummary, employeeSearch]);
+
+  // Reset pagination when search changes
+  useEffect(() => {
+    resetSummaryPagination();
+  }, [employeeSearch, resetSummaryPagination]);
+
+  // Paginated version for Summary tab table
+  const paginatedSummary = useMemo(() => {
+    const start = summaryPage * SUMMARY_PAGE_SIZE;
+    return filteredSummary.slice(start, start + SUMMARY_PAGE_SIZE);
+  }, [filteredSummary, summaryPage]);
+
+  const hasMoreSummary = filteredSummary.length > (summaryPage + 1) * SUMMARY_PAGE_SIZE;
+
+  function loadMoreSummary() {
+    setSummaryPage((p) => p + 1);
+  }
+
+  function resetSummaryPagination() {
+    setSummaryPage(0);
+  }
 
   function updateRecord(idx, field, value) {
     setRecords((prev) => {
@@ -2553,8 +2578,8 @@ export default function AttendancePage() {
                         <th className="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Total Working Hours</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
-                      {filteredSummary.map((emp, i) => (
+<tbody className="divide-y divide-border">
+                      {paginatedSummary.map((emp, i) => (
                         <tr key={emp.employeeId || i} className="hover:bg-background dark:hover:bg-surface-muted transition-colors">
                           <td className="px-4 py-3 font-medium text-foreground">
                             <div className="flex items-center gap-2.5">
@@ -2563,7 +2588,7 @@ export default function AttendancePage() {
                               </div>
                               {emp.name}
                             </div>
-                        </td>
+                          </td>
                           <td className="px-4 py-3 text-foreground-muted">{emp.department || "-"}</td>
                           <td className="px-4 py-3 text-center font-semibold text-foreground">{emp.totalDays || 0}</td>
                           <td className="px-4 py-3 text-center">
@@ -2603,6 +2628,16 @@ export default function AttendancePage() {
                     </tbody>
                   </table>
                 </div>
+                {hasMoreSummary && (
+                  <div className="text-center mt-4">
+                    <button
+                      onClick={loadMoreSummary}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-primary text-white text-[13px] font-semibold hover:bg-primary-hover transition-colors"
+                    >
+                      <span>Load More ({filteredSummary.length - (summaryPage + 1) * SUMMARY_PAGE_SIZE} remaining)</span>
+                    </button>
+                  </div>
+                }
                 <p className="text-[10px] text-foreground-muted mt-2">All columns reflect saved attendance records for this period. Leave Days link to Payroll Leaves — click to manage there.</p>
               </>
             )}

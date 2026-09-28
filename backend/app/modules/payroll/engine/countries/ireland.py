@@ -166,6 +166,26 @@ class _Pack:
                 "hardcoded fallback for missing signed content.",
             )
 
+    def assert_keys(self, keys) -> None:
+        """Fail closed for a SUBSET of keys.
+
+        Used by statutory-leave entitlement assessment, which is evaluated
+        independently of a payroll run (at leave-approval time). It must not
+        inherit `assert_complete()`'s whole-pack requirement, because an
+        unrelated unconfigured tax head has no bearing on whether a sick day is
+        payable — but the keys this calculation genuinely depends on must still
+        come from signed content rather than a hardcoded fallback.
+        """
+        missing = [k for k in keys if k in self.missing]
+        if missing:
+            raise IrelandCalculationBlockedError(
+                "IE_STATUTORY_CONTENT_NOT_CONFIGURED",
+                "Ireland payroll block: the statutory leave/sick-pay content this assessment "
+                "depends on has no configured value in the active Ireland pack (ZP-IE-ENG-001 "
+                "IE-003): " + ", ".join(sorted(set(missing)))
+                + ". The entitlement cannot be assessed against unsigned content.",
+            )
+
 
 def _resolve_pay_date(ctx: PayrollContext) -> date:
     pay_date = ctx.ireland_pay_date or ctx.pay_date
@@ -569,6 +589,190 @@ def calculate_lpt(rpn, ctx, pack, paye_result) -> dict:
         "lpt": taxable * rate, "instructed": True,
         "rate_pct": rate, "base": base, "exemption": period_exemption,
     }
+
+
+SICK_LEAVE_PACK_KEYS = (
+    "ie_sick_leave_days",
+    "ie_sick_leave_pct",
+    "ie_sick_leave_daily_cap",
+    "ie_sick_leave_service_weeks",
+)
+
+
+def build_rate_pack(rate_map: dict, organization_id=None) -> _Pack:
+    """Public entry point for the signed 2026 Ireland content.
+
+    `calculate()` builds its own pack from the engine context; this is how
+    service.py obtains the same pack for an assessment that happens outside a
+    payroll run — currently Irish statutory sick leave, which is assessed when
+    a leave request is approved, not when a payslip is generated. Exposed here
+    rather than by importing the private `_Pack` so the pack's contract stays
+    owned by the country module.
+    """
+    return _Pack(rate_map, organization_id)
+
+
+def statutory_sick_weeks_service(
+    service_start_date: date | None,
+    absence_start_date: date | None,
+) -> Decimal | None:
+    """Completed weeks of service as at the first day of the absence.
+
+    IE-037 requires the service qualification to be EVIDENCE on the record, so
+    this is derived from two real dates and is never inferred. Returns None when
+    either date is missing, which the caller must treat as "not qualified"
+    rather than as zero weeks.
+    """
+    if not service_start_date or not absence_start_date:
+        return None
+    if absence_start_date <= service_start_date:
+        return ZERO
+    return Decimal((absence_start_date - service_start_date).days) / Decimal("7")
+
+
+def calculate_statutory_sick_pay(
+    *,
+    pack: _Pack,
+    usual_daily_earnings,
+    days_claimed,
+    days_taken_in_calendar_year: Decimal = ZERO,
+    service_start_date: date | None = None,
+    absence_start_date: date | None = None,
+    absence_end_date: date | None = None,
+    certified: bool = True,
+) -> dict:
+    """Irish Statutory Sick Pay for one absence record (ZP-IE-ENG-001 §11, IE-037).
+
+    2026 statutory shape: 5 days' entitlement per CALENDAR year, available only
+    after 13 weeks' service and subject to medical certification, paid at 70% of
+    usual daily earnings and capped at EUR 110 per day.
+
+    Every input figure comes from `pack` (the signed 2026 rate rows) — the
+    function never hardcodes 5 / 70 / 110 / 13, so the whole entitlement is
+    re-drivable when the signed content is versioned.
+
+    This is an ENTITLEMENT assessment, not a tax case, so it fails CLOSED BY
+    DISALLOWANCE rather than by raising `IrelandCalculationBlockedError`: a
+    period that contains an uncertified or unqualified sick day still has to
+    produce a correct payslip for every other employee and every other day.
+    The returned `reason` is the audit evidence IE-037 requires, and the caller
+    freezes it onto the record. It is never a partial number presented as a
+    complete entitlement — `days_credited` and `amount` are always internally
+    consistent, and `days_disallowed` states exactly what was refused and why.
+    """
+    entitlement_days = pack.amount("ie_sick_leave_days")
+    pct = pack.employee_pct("ie_sick_leave_pct")
+    daily_cap = pack.amount("ie_sick_leave_daily_cap")
+    service_weeks_required = pack.amount("ie_sick_leave_service_weeks")
+    pack.assert_keys(SICK_LEAVE_PACK_KEYS)
+
+    claimed = _dec(days_claimed)
+    if claimed < ZERO:
+        claimed = ZERO
+    taken_before = _dec(days_taken_in_calendar_year)
+    if taken_before < ZERO:
+        taken_before = ZERO
+
+    calendar_year = absence_start_date.year if absence_start_date else None
+    result = {
+        "eligible": False,
+        "reason": "",
+        "calendar_year": calendar_year,
+        "absence_start_date": absence_start_date.isoformat() if absence_start_date else None,
+        "absence_end_date": absence_end_date.isoformat() if absence_end_date else None,
+        "entitlement_days": entitlement_days,
+        "pct_applied": pct,
+        "daily_cap": daily_cap,
+        "service_weeks_required": service_weeks_required,
+        "service_weeks_actual": None,
+        "service_weeks_satisfied": False,
+        "certified": bool(certified),
+        "days_claimed": claimed,
+        "days_taken_before": taken_before,
+        "entitlement_remaining_before": max(ZERO, entitlement_days - taken_before),
+        "days_credited": ZERO,
+        "days_disallowed": ZERO,
+        "usual_daily_earnings": ZERO,
+        "daily_rate_before_cap": ZERO,
+        "daily_rate": ZERO,
+        "cap_applied": False,
+        "amount": ZERO,
+        "amount_unrounded": ZERO,
+    }
+
+    if claimed <= ZERO:
+        result["reason"] = "no_sick_days_claimed"
+        return result
+
+    service_weeks = statutory_sick_weeks_service(service_start_date, absence_start_date)
+    result["service_weeks_actual"] = service_weeks
+    if service_weeks is None or service_weeks < service_weeks_required:
+        result["reason"] = (
+            "service_qualification_not_met: statutory sick pay requires "
+            f"{service_weeks_required} weeks of service; "
+            + ("service start date evidence is missing" if service_weeks is None
+               else f"{service_weeks} completed weeks at the first day of absence")
+        )
+        result["days_disallowed"] = claimed
+        return result
+
+    result["service_weeks_satisfied"] = True
+
+    # Derive and FREEZE the usual daily earnings before the certification gate.
+    # IE-037 is audit evidence: a claim refused for lack of certification must
+    # still carry the earnings figure that WOULD have applied, otherwise the
+    # record cannot be re-checked once certification arrives and the frozen
+    # numbers cannot be reconciled against the engine. The arithmetic that turns
+    # earnings into pay still waits until every condition is satisfied.
+    earnings = _dec(usual_daily_earnings)
+    if earnings > ZERO:
+        result["usual_daily_earnings"] = earnings
+
+    if not certified:
+        result["reason"] = (
+            "certification_missing: statutory sick pay requires medical certification; "
+            "an uncertified absence is an unpaid absence"
+        )
+        result["days_disallowed"] = claimed
+        return result
+
+    if earnings <= ZERO:
+        result["reason"] = (
+            "usual_daily_earnings_evidence_missing: 70% of usual daily earnings cannot be "
+            "derived without earnings evidence for the reference period"
+        )
+        result["days_disallowed"] = claimed
+        return result
+
+    remaining = max(ZERO, entitlement_days - taken_before)
+    credited = min(claimed, remaining)
+    if credited <= ZERO:
+        result["reason"] = (
+            f"entitlement_exhausted: the {entitlement_days}-day {calendar_year} statutory "
+            "entitlement has already been used; further sick days are unpaid"
+        )
+        result["days_disallowed"] = claimed
+        return result
+
+    daily_rate_before_cap = earnings * pct
+    daily_rate = daily_rate_before_cap
+    if daily_cap > ZERO and daily_rate > daily_cap:
+        daily_rate = daily_cap
+        result["cap_applied"] = True
+    result["daily_rate_before_cap"] = daily_rate_before_cap
+    result["daily_rate"] = daily_rate
+    result["days_credited"] = credited
+    result["days_disallowed"] = max(ZERO, claimed - credited)
+    if result["days_disallowed"] > ZERO:
+        result["reason"] = (
+            f"partially_allowed: {credited} of {claimed} claimed days fall inside the "
+            f"remaining {remaining}-day {calendar_year} entitlement"
+        )
+    amount_unrounded = daily_rate * credited
+    result["amount_unrounded"] = amount_unrounded
+    result["amount"] = _round2(amount_unrounded)
+    result["eligible"] = True
+    return result
 
 
 def assert_labour_compliance(ctx, pack, pay_date, gross_payable) -> dict:

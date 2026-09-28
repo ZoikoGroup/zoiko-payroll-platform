@@ -1318,6 +1318,192 @@ def run():
         # document) — folding it into the generic ReportTemplate shape
         # would duplicate, not reuse, that existing architecture.
 
+        # ------------------------------------------------------------------
+        # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) templates.
+        # ------------------------------------------------------------------
+        #
+        # All DRAFT, like every other template here: a Super Admin must
+        # review, Approve, Publish and Activate before an organization can
+        # generate against them.
+        #
+        # The per-head Irish figures (USC, PRSI by sub-class, MyFutureFund,
+        # LPT, the applied RPN) are read through the "PAYSLIP_ITEM_JSON"
+        # data source — ie_calculation_snapshot.<path> — because they are
+        # computed per employee but have no scalar PayslipItem column. They
+        # were being discarded entirely before that column existed, so these
+        # templates are the first thing in the product able to show them.
+        #
+        # NOT seeded: a ROS file-format submission itself. Revenue's
+        # published ROS file format / upload specification is external
+        # evidence not present in this repository, and inventing a field
+        # order or layout for it would be exactly the fabrication this
+        # module's own Germany/ELSTER comments above refuse. When that spec
+        # is available it needs its own transmission path (like DE's ELSTER
+        # subsystem note), not a field-mapped ReportTemplate.
+        _seed_template(
+            db, template_key="IE-ROS-EMP-CERT", name="ROS Employee PAYE Certificate",
+            report_type="IE_ROS_EMPLOYEE_CERT", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # The RPN actually applied is the reason this certificate can
+                # be reconciled against Revenue at all (IE-005/IE-045).
+                ("employee_info", "Employee & RPN Reference", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                    ("rpn_number", "RPN Number", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.rpn.rpn_number", None),
+                    ("paye_basis", "PAYE Basis (RPN / Emergency)", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.basis", None),
+                    ("tax_year", "Irish Tax Year", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.tax_year", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                ]),
+                ("tax", "PAYE", [
+                    ("total_paye", "PAYE Deducted", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                    ("standard_rate_pay", "PAYE Standard-Rate Pay", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.standard_rate_pay", None),
+                    ("higher_rate_pay", "PAYE Higher-Rate Pay", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.higher_rate_pay", None),
+                    ("tax_credit", "PAYE Tax Credit Applied", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.tax_credit_applied", None),
+                ]),
+                ("usc", "Universal Social Charge", [
+                    ("total_usc", "USC Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.usc.amount", "SUM_RUN"),
+                ]),
+                ("prsi", "PRSI", [
+                    ("prsi_subclass", "PRSI Sub-Class", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.subclass", None),
+                    ("prsi_employee", "PRSI (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employee", "SUM_RUN"),
+                    ("prsi_employer", "PRSI (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employer", "SUM_RUN"),
+                    ("prsi_ax_credit", "PRSI AX Tapered Credit", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.ax_credit", None),
+                    ("prsi_weeks", "PRSI Contribution Weeks", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.contribution_weeks", None),
+                ]),
+                ("pension", "PRSC Additional Pension", [
+                    ("employee_prsc", "PRSC (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", "SUM_RUN"),
+                    ("employer_prsc", "PRSC (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_RUN"),
+                ]),
+                ("deductions", "Total Deductions", [
+                    ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", "SUM_RUN"),
+                    ("employee_statutory_total", "Total Employee Statutory Deductions", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.employee_total", "SUM_RUN"),
+                ]),
+                ("ytd", "Year-to-Date", [
+                    ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", "SUM_RUN"),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-ROS-PAYROLL", name="ROS Period Payroll Summary",
+            report_type="IE_ROS_PAYROLL", country="IE", reporting_year="2026",
+            document_scope="AGGREGATE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("period_label", "Period", "text", "PAYROLL_RUN", "period_label", None),
+                    ("pay_date", "Pay Date", "date", "PAYROLL_RUN", "pay_date", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                ]),
+                ("tax", "PAYE", [
+                    ("total_paye", "PAYE Deducted", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                ]),
+                ("usc", "Universal Social Charge", [
+                    ("total_usc", "USC Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.usc.amount", "SUM_RUN"),
+                ]),
+                ("prsi", "PRSI", [
+                    ("prsi_employee", "PRSI (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employee", "SUM_RUN"),
+                    ("prsi_employer", "PRSI (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employer", "SUM_RUN"),
+                ]),
+                ("pension", "PRSC Additional Pension", [
+                    ("employee_prsc", "PRSC (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", "SUM_RUN"),
+                    ("employer_prsc", "PRSC (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_RUN"),
+                ]),
+                ("totals", "Period Totals", [
+                    ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", "SUM_RUN"),
+                    ("total_net", "Total Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # PRSI, USC, MyFutureFund and LPT are each reported PER EMPLOYEE —
+        # every one of their distinguishing attributes (PRSI sub-class and
+        # weekly reckonable band, the NAERSA-notified MFF status, whether
+        # LPT was instructed on that employee's RPN) is a property of an
+        # individual, and summing any of them across a run is meaningless.
+        # That is also why their currency fields carry no aggregation here,
+        # matching DE-LSTB's own convention for PER_EMPLOYEE templates. The
+        # period-level roll-up is IE-ROS-PAYROLL above, which is AGGREGATE.
+        _seed_template(
+            db, template_key="IE-PRSI-SCHEDULE", name="PRSI Return Schedule",
+            report_type="IE_PRSI_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("prsi", "PRSI by Sub-Class and Band", [
+                    ("prsi_subclass", "PRSI Sub-Class", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.subclass", None),
+                    ("prsi_weekly_reckonable", "PRSI Weekly Reckonable Pay", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.weekly_reckonable", None),
+                    ("prsi_employee", "PRSI (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employee", None),
+                    ("prsi_ax_credit", "PRSI AX Tapered Credit", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.ax_credit", None),
+                    ("prsi_weeks", "PRSI Contribution Weeks", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.contribution_weeks", None),
+                ]),
+                ("totals", "PRSI Totals", [
+                    ("prsi_employer", "PRSI (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employer", None),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-USC-SCHEDULE", name="USC Return Schedule",
+            report_type="IE_USC_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("usc", "Universal Social Charge", [
+                    ("total_usc", "USC Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.usc.amount", None),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-MFF-SCHEDULE", name="MyFutureFund Contribution Schedule",
+            report_type="IE_MFF_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("myfuturefund", "MyFutureFund Contributions and Status", [
+                    ("mff_status", "NAERSA-notified Status", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.status", None),
+                    ("mff_contributory", "Contributory", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.contributory", None),
+                    ("mff_employee", "MyFutureFund (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.employee", None),
+                    ("mff_employer", "MyFutureFund (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.employer", None),
+                ]),
+                # Informational only. The 0.5% State contribution is
+                # administered by the State/NAERSA and is never deducted from
+                # pay (IE-018) — kept in its own component so it cannot be
+                # mistaken for a payroll deduction or land in a totals block.
+                ("myfuturefund_state", "MyFutureFund State Top-Up (informational — not a deduction)", [
+                    ("mff_state_topup", "State Top-Up", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.state_topup", None),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-LPT-SCHEDULE", name="Local Property Tax Deduction Schedule",
+            report_type="IE_LPT_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # LPT is deducted only where Revenue instructed it on the RPN
+                # (IE-003) — both the amount and the "instructed" flag are
+                # carried so a return can show why a head has no LPT line.
+                ("lpt", "Local Property Tax", [
+                    ("lpt_instructed", "Instructed on RPN", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.lpt.instructed", None),
+                    ("lpt_rate_pct", "Instructed Rate %", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.lpt.rate_pct", None),
+                    ("lpt_amount", "LPT Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.lpt.amount", None),
+                ]),
+            ],
+        )
+
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:
         db.close()

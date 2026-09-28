@@ -181,6 +181,25 @@ def list_employees(
 
 
 @payroll_router.get(
+    "/employees/roster",
+    response_model=List[dict],
+    response_model_by_alias=True,
+    summary="Lightweight employee roster for attendance/leave (id, name, code, department, designation)",
+)
+def list_employee_roster(
+    status: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=5000),
+    offset: Optional[int] = Query(None, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_employee_roster(
+        db, current_user.organization_id,
+        status=status, limit=limit, offset=offset,
+    )
+
+
+@payroll_router.get(
     "/employees/{employee_id}", response_model=EmployeeResponse, response_model_by_alias=True,
     summary="Get a single employee",
 )
@@ -2113,12 +2132,15 @@ def list_attendance(
     startDate: Optional[date] = Query(None),
     endDate: Optional[date] = Query(None),
     employeeId: Optional[int] = Query(None),
+    limit: int = Query(1000, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     return service.get_attendance_records(
         db, current_user.organization_id,
         start_date=startDate, end_date=endDate, employee_id=employeeId,
+        limit=limit, offset=offset,
     )
 
 

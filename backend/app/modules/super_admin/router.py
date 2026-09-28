@@ -84,6 +84,7 @@ from app.modules.payroll.schemas import (
     FranceEstablishmentUpsert, FranceEstablishmentResponse,
     FranceEstablishmentRatePackUpdate, FranceRatePackClose,
     FranceEffectifCorrection, FranceGoLiveRequest,
+    IrelandRpnSnapshotUpsert, IrelandRpnSnapshotResponse,
 )
 
 logger = logging.getLogger("zoiko_payroll.super_admin")
@@ -1504,6 +1505,304 @@ def set_france_live(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.set_france_live(db, organizationId, payload, actor_id=current_user.id)
+
+
+# ── Ireland: RPN (Revenue Payroll Notification) ingestion (ZP-IE-ENG-001) ──────
+# The RPN is the frozen authority instruction for Irish PAYE/USC/PRSI/LPT.
+# Content-addressed by raw_hash so historical payrolls are reproducible from
+# the exact snapshot in force (IE-022/IE-033/IE-045).
+
+
+def _ireland_organization_id(organizationId: int = Query(...), db: Session = Depends(get_db)) -> int:
+    """Validates the Ireland endpoints' organizationId: must exist and be an
+    Ireland (IE) organization - see payroll_service.require_ireland_organization."""
+    from app.modules.payroll import service as payroll_service
+    payroll_service.require_ireland_organization(db, organizationId)
+    return organizationId
+
+
+@router.post(
+    "/compliance/ireland/rpn-snapshots",
+    response_model=IrelandRpnSnapshotResponse,
+    response_model_by_alias=True,
+    summary="Ingest a frozen Revenue Payroll Notification for an Irish employee (Super Admin only)",
+)
+def upsert_ireland_rpn_snapshot(
+    organizationId: int = Depends(_ireland_organization_id),
+    payload: IrelandRpnSnapshotUpsert = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.upsert_ie_rpn_snapshot(
+        db=db,
+        organization_id=organizationId,
+        employee_id=payload.employeeId,
+        rpn_number=payload.rpnNumber,
+        issued_at=payload.issuedAt,
+        tax_year=payload.taxYear,
+        calculation_basis=payload.calculationBasis,
+        ppsn_supplied=payload.ppsnSupplied,
+        standard_rate_band=payload.standardRateBand,
+        tax_credit=payload.taxCredit,
+        standard_rate_band_period=payload.standardRateBandPeriod,
+        tax_credit_period=payload.taxCreditPeriod,
+        previous_taxable_pay_ytd=payload.previousTaxablePayYtd,
+        previous_pay_ytd=payload.previousPayYtd,
+        periods_elapsed=payload.periodsElapsed,
+        lpt_instructed=payload.lptInstructed,
+        lpt_rate_pct=payload.lptRatePct,
+        emergency_tax_credit_weekly=payload.emergencyTaxCreditWeekly,
+        raw_hash=payload.rawHash,
+        raw_payload=payload.rawPayload,
+        statutory_profile_id=payload.statutoryProfileId,
+    )
+
+
+@router.get(
+    "/compliance/ireland/rpn-snapshots",
+    response_model=List[IrelandRpnSnapshotResponse],
+    response_model_by_alias=True,
+    summary="List RPN snapshots for an Irish organization/employee (Super Admin only)",
+)
+def list_ireland_rpn_snapshots(
+    organizationId: int = Depends(_ireland_organization_id),
+    employeeId: Optional[int] = Query(None, alias="employeeId"),
+    taxYear: Optional[str] = Query(None, alias="taxYear"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    query = db.query(payroll_service.IrelandRpnSnapshot).filter(
+        payroll_service.IrelandRpnSnapshot.organization_id == organizationId
+    )
+    if employeeId is not None:
+        query = query.filter(payroll_service.IrelandRpnSnapshot.employee_id == employeeId)
+    if taxYear is not None:
+        query = query.filter(payroll_service.IrelandRpnSnapshot.tax_year == taxYear)
+    return query.order_by(payroll_service.IrelandRpnSnapshot.issued_at.desc()).all()
+
+
+@router.delete(
+    "/compliance/ireland/rpn-snapshots/{snapshot_id}",
+    response_model=SuccessResponse,
+    summary="Delete an RPN snapshot (Super Admin only) — use with extreme caution; only for test data cleanup",
+)
+def delete_ireland_rpn_snapshot(
+    snapshot_id: int,
+    organizationId: int = Depends(_ireland_organization_id),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    row = db.query(payroll_service.IrelandRpnSnapshot).filter(
+        payroll_service.IrelandRpnSnapshot.id == snapshot_id,
+        payroll_service.IrelandRpnSnapshot.organization_id == organizationId,
+    ).first()
+    if not row:
+        from app.core.exceptions import NotFoundException
+        raise NotFoundException(f"RPN snapshot {snapshot_id} not found.")
+    db.delete(row)
+    db.commit()
+    return {"message": "RPN snapshot deleted."}
+
+
+# ── Ireland Revenue Integration (ZP-IE-ENG-001 WP2) ──────────────────────────
+# Real-time payroll submission, monthly return reconciliation, payment tracking.
+
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List
+from datetime import date, datetime
+from decimal import Decimal
+
+
+class IrelandRevenueSubmissionResponse(BaseModel):
+    id: int
+    organizationId: int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    employeeId: int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    runId: int = Field(..., validation_alias="run_id", serialization_alias="runId")
+    payslipId: Optional[int] = Field(None, validation_alias="payslip_id", serialization_alias="payslipId")
+    rpnSnapshotId: Optional[int] = Field(None, validation_alias="rpn_snapshot_id", serialization_alias="rpnSnapshotId")
+    lineItemId: Optional[str] = Field(None, validation_alias="line_item_id", serialization_alias="lineItemId")
+    previousLineItemId: Optional[str] = Field(None, validation_alias="previous_line_item_id", serialization_alias="previousLineItemId")
+    rpnSnapshotId: Optional[int] = Field(None, validation_alias="rpn_snapshot_id", serialization_alias="rpnSnapshotId")
+    correctionKind: str = Field(..., validation_alias="correction_kind", serialization_alias="correctionKind")
+    periodStart: date = Field(..., validation_alias="period_start", serialization_alias="periodStart")
+    periodEnd: date = Field(..., validation_alias="period_end", serialization_alias="periodEnd")
+    payDate: date = Field(..., validation_alias="pay_date", serialization_alias="payDate")
+    reportedGross: Optional[Decimal] = Field(None, validation_alias="reported_gross", serialization_alias="reportedGross")
+    reportedPaye: Optional[Decimal] = Field(None, validation_alias="reported_paye", serialization_alias="reportedPaye")
+    reportedUsc: Optional[Decimal] = Field(None, validation_alias="reported_usc", serialization_alias="reportedUsc")
+    reportedPrsiEmployee: Optional[Decimal] = Field(None, validation_alias="reported_prsi_employee", serialization_alias="reportedPrsiEmployee")
+    reportedPrsiEmployer: Optional[Decimal] = Field(None, validation_alias="reported_prsi_employer", serialization_alias="reportedPrsiEmployer")
+    reportedLpt: Optional[Decimal] = Field(None, validation_alias="reported_lpt", serialization_alias="reportedLpt")
+    reportedMyFutureFundEmployee: Optional[Decimal] = Field(None, validation_alias="reported_myfuturefund_employee", serialization_alias="reportedMyFutureFundEmployee")
+    reportedMyFutureFundEmployer: Optional[Decimal] = Field(None, validation_alias="reported_myfuturefund_employer", serialization_alias="reportedMyFutureFundEmployer")
+    payload: Optional[dict] = None
+    payloadHash: str = Field(..., validation_alias="payload_hash", serialization_alias="payloadHash")
+    status: str
+    sentAt: Optional[datetime] = Field(None, validation_alias="sent_at", serialization_alias="sentAt")
+    acknowledgedAt: Optional[datetime] = Field(None, validation_alias="acknowledged_at", serialization_alias="acknowledgedAt")
+    rejectionReason: Optional[str] = Field(None, validation_alias="rejection_reason", serialization_alias="rejectionReason")
+    reconciliationNote: Optional[str] = Field(None, validation_alias="reconciliation_note", serialization_alias="reconciliationNote")
+    idempotencyKey: str = Field(..., validation_alias="idempotency_key", serialization_alias="idempotencyKey")
+    createdAt: Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt: Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class IrelandRevenueMonthlyReturnResponse(BaseModel):
+    id: int
+    organizationId: int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    statementPeriodStart: date = Field(..., validation_alias="statement_period_start", serialization_alias="statementPeriodStart")
+    statementPeriodEnd: date = Field(..., validation_alias="statement_period_end", serialization_alias="statementPeriodEnd")
+    version: int
+    status: str
+    submittedAt: Optional[datetime] = Field(None, validation_alias="submitted_at", serialization_alias="submittedAt")
+    acceptedAt: Optional[datetime] = Field(None, validation_alias="accepted_at", serialization_alias="acceptedAt")
+    deemedAcceptedAt: Optional[datetime] = Field(None, validation_alias="deemed_accepted_at", serialization_alias="deemedAcceptedAt")
+    rejectionReason: Optional[str] = Field(None, validation_alias="rejection_reason", serialization_alias="rejectionReason")
+    calculatedLiability: Optional[Decimal] = Field(None, validation_alias="calculated_liability", serialization_alias="calculatedLiability")
+    revenueLiability: Optional[Decimal] = Field(None, validation_alias="revenue_liability", serialization_alias="revenueLiability")
+    reconciledAt: Optional[datetime] = Field(None, validation_alias="reconciled_at", serialization_alias="reconciledAt")
+    reconciliationNotes: Optional[str] = Field(None, validation_alias="reconciliation_notes", serialization_alias="reconciliationNotes")
+    reconciliationState: Optional[dict] = Field(None, validation_alias="reconciliation_state", serialization_alias="reconciliationState")
+    payloadHash: Optional[str] = Field(None, validation_alias="payload_hash", serialization_alias="payloadHash")
+    createdAt: Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    updatedAt: Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class IrelandRevenueSubmitRequest(BaseModel):
+    runId: int
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class IrelandRevenueAckRequest(BaseModel):
+    submissionId: int
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class IrelandMonthlyReturnRequest(BaseModel):
+    organizationId: int
+    periodStart: date
+    periodEnd: date
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class IrelandPaymentRecordRequest(BaseModel):
+    organizationId: int
+    periodStart: date
+    periodEnd: date
+    amount: Decimal
+    reference: str
+    paidAt: Optional[datetime] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+@router.post(
+    "/compliance/ireland/revenue-submissions",
+    response_model=dict,
+    summary="Submit a committed Ireland payroll run to Revenue (on/before pay date, IE-022)",
+)
+def submit_ireland_payroll_to_revenue(
+    organizationId: int = Depends(_ireland_organization_id),
+    payload: IrelandRevenueSubmitRequest = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.submit_ie_payroll(db, payload.runId)
+
+
+@router.post(
+    "/compliance/ireland/revenue-submissions/poll-ack",
+    response_model=dict,
+    summary="Poll Revenue for acknowledgment of a submission (stub for ROS integration)",
+)
+def poll_ireland_revenue_ack(
+    organizationId: int = Depends(_ireland_organization_id),
+    payload: IrelandRevenueAckRequest = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.poll_ie_revenue_ack(db, payload.submissionId)
+
+
+@router.get(
+    "/compliance/ireland/revenue-submissions",
+    response_model=List[IrelandRevenueSubmissionResponse],
+    response_model_by_alias=True,
+    summary="List Revenue submissions for an Irish organization (Super Admin only)",
+)
+def list_ireland_revenue_submissions(
+    organizationId: int = Depends(_ireland_organization_id),
+    employeeId: Optional[int] = Query(None, alias="employeeId"),
+    status: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    query = db.query(payroll_service.IrelandRevenueSubmission).filter(
+        payroll_service.IrelandRevenueSubmission.organization_id == organizationId
+    )
+    if employeeId is not None:
+        query = query.filter(payroll_service.IrelandRevenueSubmission.employee_id == employeeId)
+    if status is not None:
+        query = query.filter(payroll_service.IrelandRevenueSubmission.status == status)
+    return query.order_by(payroll_service.IrelandRevenueSubmission.created_at.desc()).all()
+
+
+@router.post(
+    "/compliance/ireland/monthly-returns/reconcile",
+    response_model=dict,
+    summary="Reconcile a monthly Revenue return: match submissions to statement (IE-026/IE-027)",
+)
+def reconcile_ireland_monthly_return(
+    organizationId: int = Depends(_ireland_organization_id),
+    payload: IrelandMonthlyReturnRequest = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.reconcile_ie_monthly_return(db, organizationId, payload.periodStart, payload.periodEnd)
+
+
+@router.get(
+    "/compliance/ireland/monthly-returns",
+    response_model=List[IrelandRevenueMonthlyReturnResponse],
+    response_model_by_alias=True,
+    summary="List monthly Revenue returns for an Irish organization (Super Admin only)",
+)
+def list_ireland_monthly_returns(
+    organizationId: int = Depends(_ireland_organization_id),
+    status: Optional[str] = Query(None),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    query = db.query(payroll_service.IrelandRevenueMonthlyReturn).filter(
+        payroll_service.IrelandRevenueMonthlyReturn.organization_id == organizationId
+    )
+    if status is not None:
+        query = query.filter(payroll_service.IrelandRevenueMonthlyReturn.status == status)
+    return query.order_by(payroll_service.IrelandRevenueMonthlyReturn.created_at.desc()).all()
+
+
+@router.post(
+    "/compliance/ireland/payments",
+    response_model=dict,
+    summary="Record a liability payment to Revenue (IE-026: payment separate from filing)",
+)
+def record_ireland_payment(
+    organizationId: int = Depends(_ireland_organization_id),
+    payload: IrelandPaymentRecordRequest = Body(...),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+    return payroll_service.record_ie_payment(db, organizationId, payload.periodStart, payload.periodEnd, payload.amount, payload.reference, payload.paidAt)
 
 
 @router.delete(

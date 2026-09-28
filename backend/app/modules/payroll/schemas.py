@@ -3885,3 +3885,68 @@ class FranceDsnOutboxItemResponse(BaseModel):
     acknowledgedAt:     Optional[datetime] = Field(None, validation_alias="acknowledged_at", serialization_alias="acknowledgedAt")
     createdAt:          Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# ── Ireland (ZP-IE-ENG-001) ──────────────────────────────────────────────
+# RPN (Revenue Payroll Notification) ingestion & retrieval (IE-005, IE-022,
+# IE-033, IE-045). The snapshot is content-addressed by raw_hash so a
+# historical payroll is always reproducible from the exact authority response.
+
+class IrelandRpnSnapshotUpsert(BaseModel):
+    """Ingest a frozen Revenue Payroll Notification (IE-005/IE-022).
+
+    The raw_hash MUST be a deterministic SHA-256 (or equivalent) over the
+    full authority JSON response. If the same raw_hash is submitted again for
+    the same employee/tax_year, the existing snapshot is returned (no
+    duplicate). A genuine change in the authority response creates a new
+    immutable row — the historical payroll must always be reproducible from
+    the exact snapshot that was in force (IE-045)."""
+    organizationId:           int
+    employeeId:               int
+    rpnNumber:                str
+    issuedAt:                 str   # ISO-8601 datetime
+    taxYear:                  str   # "2026"
+    calculationBasis:         str   # CUMULATIVE | WEEK_1 | EMERGENCY
+    ppsnSupplied:             bool
+    standardRateBand:         Optional[Decimal] = None
+    taxCredit:                Optional[Decimal] = None
+    standardRateBandPeriod:   Optional[Decimal] = None
+    taxCreditPeriod:          Optional[Decimal] = None
+    previousTaxablePayYtd:    Optional[Decimal] = None
+    previousPayYtd:           Optional[Decimal] = None
+    periodsElapsed:           Optional[int] = None
+    lptInstructed:            bool
+    lptRatePct:               Optional[Decimal] = None
+    emergencyTaxCreditWeekly: Optional[Decimal] = None
+    rawHash:                  str   # SHA-256 of the full authority response
+    rawPayload:               Optional[dict] = None
+    statutoryProfileId:       Optional[int] = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class IrelandRpnSnapshotResponse(BaseModel):
+    id:                     int
+    organizationId:         int = Field(..., validation_alias="organization_id", serialization_alias="organizationId")
+    employeeId:             int = Field(..., validation_alias="employee_id", serialization_alias="employeeId")
+    statutoryProfileId:     Optional[int] = Field(None, validation_alias="statutory_profile_id", serialization_alias="statutoryProfileId")
+    rpnNumber:              str
+    issuedAt:               datetime = Field(..., validation_alias="issued_at", serialization_alias="issuedAt")
+    taxYear:                str
+    calculationBasis:       str = Field(..., validation_alias="calculation_basis", serialization_alias="calculationBasis")
+    ppsnSupplied:           bool
+    standardRateBand:       Optional[Decimal] = Field(None, validation_alias="standard_rate_band", serialization_alias="standardRateBand")
+    taxCredit:              Optional[Decimal] = Field(None, validation_alias="tax_credit", serialization_alias="taxCredit")
+    standardRateBandPeriod: Optional[Decimal] = Field(None, validation_alias="standard_rate_band_period", serialization_alias="standardRateBandPeriod")
+    taxCreditPeriod:        Optional[Decimal] = Field(None, validation_alias="tax_credit_period", serialization_alias="taxCreditPeriod")
+    previousTaxablePayYtd:  Optional[Decimal] = Field(None, validation_alias="previous_taxable_pay_ytd", serialization_alias="previousTaxablePayYtd")
+    previousPayYtd:         Optional[Decimal] = Field(None, validation_alias="previous_pay_ytd", serialization_alias="previousPayYtd")
+    periodsElapsed:         Optional[int] = Field(None, validation_alias="periods_elapsed", serialization_alias="periodsElapsed")
+    lptInstructed:          bool
+    lptRatePct:             Optional[Decimal] = Field(None, validation_alias="lpt_rate_pct", serialization_alias="lptRatePct")
+    emergencyTaxCreditWeekly: Optional[Decimal] = Field(None, validation_alias="emergency_tax_credit_weekly", serialization_alias="emergencyTaxCreditWeekly")
+    rawHash:                str = Field(..., validation_alias="raw_hash", serialization_alias="rawHash")
+    rawPayload:             Optional[dict] = Field(None, validation_alias="raw_payload", serialization_alias="rawPayload")
+    isStale:                bool = Field(..., validation_alias="is_stale", serialization_alias="isStale")
+    retrievedAt:            Optional[datetime] = Field(None, validation_alias="retrieved_at", serialization_alias="retrievedAt")
+    createdAt:              Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)

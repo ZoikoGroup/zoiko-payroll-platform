@@ -39,6 +39,14 @@ def _tables_created_by_migrations():
     return created
 
 
+def _tables_dropped_by_migrations():
+    dropped = set()
+    for path in _VERSIONS_DIR.glob("*.py"):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        dropped |= set(re.findall(r"drop_table\(\s*['\"]([A-Za-z0-9_]+)['\"]", text))
+    return dropped
+
+
 def _model_tables():
     from app.database import Base
     import app.modules as modules_pkg
@@ -70,20 +78,55 @@ def test_france_compliance_tables_are_migrated():
 
 
 def test_ireland_payroll_tables_are_migrated():
-    """Same gap-closure as the France assertion above, for ZP-IE-ENG-001:
-    the six new Ireland tables must ship with their create_table migration,
-    or every real environment answers each Ireland request with a
-    missing-table error while the SQLite-backed service tests pass."""
+    """Same gap-closure as the France assertion above, for ZP-IE-ENG-001.
+
+    Three Ireland tables survive the 2026-09-28 refactor (7 -> 3) and each must
+    still ship with its create_table migration, or every real environment
+    answers each Ireland request with a missing-table error while the
+    SQLite-backed service tests pass.
+    """
     created = _tables_created_by_migrations()
     for table in (
-        "payroll_ie_employer_profiles",
         "payroll_ie_rpn_snapshots",
         "payroll_ie_myfuturefund_statuses",
-        "payroll_ie_ytd_accumulators",
-        "payroll_ie_revenue_submissions",
-        "payroll_ie_revenue_monthly_returns",
+        "payroll_ie_statutory_sick_leave_records",
     ):
         assert table in created, table
+
+
+def test_dropped_ireland_tables_are_actually_dropped_by_a_migration():
+    """The four removed tables must be dropped by a real Alembic revision.
+
+    This is the counterpart to the assertion above and it matters more than it
+    looks. models.py no longer declares these tables, and the service tests
+    build their schema with Base.metadata.create_all — so if a refactor
+    removed a model but forgot the migration, every test would still pass
+    while every already-deployed database kept carrying four dead tables
+    forever. Nothing else in the suite can catch that.
+    """
+    dropped = _tables_dropped_by_migrations()
+    for table in (
+        "payroll_ie_employer_profiles",
+        "payroll_ie_revenue_submissions",
+        "payroll_ie_revenue_monthly_returns",
+        "payroll_ie_ytd_accumulators",
+    ):
+        assert table in dropped, (
+            f"{table} has no drop_table migration: the model is gone but a real "
+            f"database would still be carrying the table"
+        )
+
+
+def test_dropped_ireland_tables_are_not_still_declared_as_models():
+    """Belt and braces: a dropped table must not reappear as a model."""
+    live = _model_tables()
+    for table in (
+        "payroll_ie_employer_profiles",
+        "payroll_ie_revenue_submissions",
+        "payroll_ie_revenue_monthly_returns",
+        "payroll_ie_ytd_accumulators",
+    ):
+        assert table not in live, f"{table} is dropped but is still a declared model"
 
 
 def test_ireland_statutory_profile_columns_are_migrated():
