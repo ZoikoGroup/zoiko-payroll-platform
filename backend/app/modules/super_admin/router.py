@@ -33,6 +33,8 @@ from app.modules.super_admin.schemas import (
     FinanceByOrganizationResponse,
     PolicyStatusUpdate,
     ReportsListResponse,
+    SgpPwmSchedulePageResponse,
+    SgpStatutoryAdminSummaryResponse,
     UpdateCurrencyRequest,
     SettingCreate,
     SettingResponse,
@@ -51,6 +53,7 @@ from app.modules.payroll.schemas import (
     StateLocalProgramReadinessResponse, StateLocalProgramReadinessUpsert,
     TaxabilityRuleResponse, TaxabilityRuleUpsert,
     PapAlgorithmAssetResponse,
+    SingaporeCalculationPreviewRequest,
     GermanyPapReleaseResponse, GermanyPapReleaseGateStatusResponse,
     GermanyPapReleaseSourceFinalityUpdate, GermanyPapReleaseLicensingUpdate,
     GermanyPapReleaseGoldenVectorUpdate, GermanyPapReleaseNotesUpdate,
@@ -300,6 +303,72 @@ def list_compliance_jurisdictions(current_user=Depends(get_current_super_admin),
     from app.modules.super_admin import service as sa_service
 
     return sa_service.list_known_jurisdictions(db)
+
+
+@router.post(
+    "/compliance/singapore/calculation-preview",
+    summary="Read-only: preview a Singapore CPF/SDL/SHG/FWL calculation against one Singapore pack's rows — writes nothing",
+)
+def preview_singapore_calculation(
+    data: SingaporeCalculationPreviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Same production engine as a payroll run (calculate_payroll →
+    engine/countries/singapore.py); the frontend never computes statutory
+    figures itself. Creates/changes no run, payslip, employee, YTD
+    accumulator or pack (see service.preview_singapore_calculation)."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.preview_singapore_calculation(db, data)
+
+
+@router.get(
+    "/compliance/singapore/statutory-summary", response_model=SgpStatutoryAdminSummaryResponse,
+    summary="Read-only: point-in-time Singapore statutory configuration summary (CPF/SDL/SHG/FWL/LQS/PWM/IRAS/IR21/"
+            "EZPay/report templates/readiness) — tenant-independent, writes nothing",
+)
+def get_singapore_statutory_summary(
+    as_of: Optional[date] = Query(None, description="Point-in-time date (default: today)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Only canonical (organization_id IS NULL) configuration and global
+    reference data — never an organization's payroll records. Values missing
+    from the persisted pack are NOT_CONFIGURED, never defaulted."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_sg_statutory_summary(db, as_of)
+
+
+@router.get(
+    "/compliance/singapore/pwm-schedules", response_model=SgpPwmSchedulePageResponse,
+    summary="Read-only, paginated: Singapore PWM overtime gross requirement schedule (statutory reference data)",
+)
+def list_singapore_pwm_schedules(
+    sector: Optional[str] = Query(None),
+    occupation_group: Optional[str] = Query(None),
+    job_level: Optional[str] = Query(None),
+    role_label: Optional[str] = Query(None, max_length=120, description="Exact MOM table heading"),
+    effective_on: Optional[date] = Query(None, description="Rows in force on this date"),
+    effective_from: Optional[date] = Query(None, description="Windows starting on or after this date"),
+    effective_to: Optional[date] = Query(None, description="Windows ending on or before this date"),
+    overtime_hours: Optional[int] = Query(None, ge=0, le=72),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, max_length=100),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_sg_pwm_schedules(
+        db, sector=sector, occupation_group=occupation_group, job_level=job_level, role_label=role_label,
+        effective_on=effective_on,
+        effective_from=effective_from, effective_to=effective_to, overtime_hours=overtime_hours, status=status,
+        search=search, skip=skip, limit=limit,
+    )
 
 
 @router.get(
@@ -774,7 +843,8 @@ def set_report_template_status(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.set_report_template_status(db, id, payload.status, actor_id=current_user.id)
+    return payroll_service.set_report_template_status(db, id, payload.status, actor_id=current_user.id,
+                                                      reason=payload.reason)
 
 
 @router.put(

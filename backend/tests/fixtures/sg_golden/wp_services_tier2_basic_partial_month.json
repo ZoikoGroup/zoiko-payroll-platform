@@ -1,0 +1,47 @@
+{
+  "description": "Work Permit issued 17 Oct 2026: MOM daily rate S$19.73 \u00d7 15 days (17\u201331 Oct, issue day levied) = S$295.95.",
+  "source": "MOM 'Services sector: Work Permit requirements' (retrieved 2026-09-24, sha256 191030a4\u2026, last updated 16 Sep 2026): Tier 2 basic-skilled $600 monthly / $19.73 daily; the daily rate applies to Work Permit holders who did not work a full calendar month. MOM 'Foreign worker quota and levy requirements': liability from the day the permit is issued. Employer cost only \u2014 never deducted.",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1990-05-01",
+    "sgp_cpf_residency_status": "FOREIGN",
+    "sgp_work_pass_type": "WORK_PERMIT",
+    "sgp_shg_funds": "NONE",
+    "sgp_wp_sector": "SERVICES",
+    "sgp_wp_skill_level": "R2",
+    "sgp_wp_levy_tier": "TIER_2",
+    "gross": "2000.00",
+    "pay_date": "2026-10-31",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      },
+      "fwl_wp__SERVICES__TIER_2__R2": {
+        "flat_amount": "600"
+      }
+    },
+    "slabs": [],
+    "sgp_work_pass_issue_date": "2026-10-17",
+    "sgp_work_pass_end_date": "2028-10-16"
+  },
+  "expected": {
+    "employer_eht": "295.95",
+    "net_pay": "2000.00"
+  }
+}

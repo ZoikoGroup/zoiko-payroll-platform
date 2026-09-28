@@ -436,6 +436,91 @@ class PayrollContext:
     # accumulators above before their service.py wiring landed.
     ytd_ky_mandatory_pensionable_earnings_before: Decimal = None
 
+    # Singapore CPF cohort facts (ZP-SG-ENG-001 §3/§10) — mirrors
+    # models.PayrollEmployee.sgp_* columns. None for every non-SG employee;
+    # engine/countries/singapore.py BLOCKS on a missing/contradictory fact
+    # rather than assuming one. `sgp_` prefix, not `sg_` — `sg_` already
+    # means Australian Super Guarantee throughout this engine.
+    sgp_cpf_residency_status: str = None           # "SC" | "SPR" | "FOREIGN"
+    sgp_spr_effective_date: date = None
+    sgp_cpf_contribution_arrangement: str = None   # "GG" | "FG" | "FF" (SPR years 1–2)
+    sgp_work_pass_type: str = None                 # "NONE" | "EP" | "S_PASS" | "WORK_PERMIT"
+    # Work pass validity — MOM: levy liability from the day the pass is
+    # issued until it is cancelled or expires. None = not captured.
+    sgp_work_pass_issue_date: date = None
+    sgp_work_pass_end_date: date = None
+    sgp_shg_funds: str = None                      # "CDAC" | "MBMF,SINDA" | "NONE" ...
+    # Singapore CPF annual-ceiling accumulators, as of BEFORE this pay
+    # period (calendar year, per employee = per legal employer). Same
+    # dormancy contract as ytd_ky_mandatory_pensionable_earnings_before:
+    # None means "no accumulator loaded" — singapore.py then BLOCKS any
+    # Additional Wages rather than treat None as $0 already used.
+    ytd_cpf_ow_subject_before: Decimal = None
+    ytd_cpf_aw_subject_before: Decimal = None
+    # Total AW PAID this calendar year before this period (subject to CPF or
+    # not) — the AW-ceiling true-up (CPF Board method, Option A) needs it to
+    # know how much earlier AW is still owed contributions.
+    ytd_cpf_aw_paid_before: Decimal = None
+    # Per-AW-payment ledger for the year, rebuilt by service.py from prior
+    # payslips' persisted sgp_calculation_trace: [{"month": "2026-01",
+    # "awPaid", "awSubjected", "eePct", "totalPct", "formulaType", "rule"}].
+    # None = not loaded (the true-up then BLOCKS if earlier AW is owed).
+    sgp_aw_ledger: list = None
+    # Whether this employee's employer hires foreign workers (EP/S Pass/WP)
+    # — drives the LQS check only. None = not supplied (check not evaluated).
+    sgp_employer_hires_foreign_workers: bool = None
+    # Singapore CPF wage classification per earning component, from the
+    # shared TaxabilityRule primitive (service.get_taxability_classification,
+    # the same mechanism AU/CA/IN use): {"cpf_ordinary_wages": {component:
+    # bool}, "cpf_additional_wages": {component: bool}}. None/empty = the
+    # default mapping in singapore.py (salary/allowances OW, additional
+    # compensation AW) — every SG payroll before a rule is configured.
+    sgp_cpf_wage_classification: dict = None
+    # Singapore only: the payslip's named allowances ([{key, label, amount}],
+    # the same items persisted as PayslipAllowanceItem) so each allowance is
+    # classified on its own ("allowance:<key>") for CPF OW/AW and IRAS
+    # instead of one lump. None = lumped (every other country; manual payslips).
+    sgp_named_allowance_items: list = None
+    # Singapore Work Permit levy classification (payroll_employees columns,
+    # alembic a7c2e9f4b1d6): MOM sector, skill level R1/R2, levy tier.
+    sgp_wp_sector: str = None
+    sgp_wp_skill_level: str = None
+    sgp_wp_levy_tier: str = None
+    # Singapore overtime facts for the trace (hours, Part 4 status,
+    # statutory minimum, paid or not) — computed by service.py from
+    # attendance + policy + labour.py rule rows; the overtime AMOUNT itself
+    # arrives in ctx.overtime like any other earning component.
+    sgp_overtime_facts: dict = None
+    # Singapore Employment Act salary deductions in force for the period
+    # (CourtOrderedDeduction rows, jurisdiction "SINGAPORE"), as plain dicts.
+    sgp_deduction_orders: list = None
+    # Singapore incomplete-month facts (Phase 5.2): the employee's MOM work
+    # pattern ("5_DAY" | "5_5_DAY" | "6_DAY"), rest day, and the ISO dates of
+    # unpaid (no-pay) attendance in the period — service.py builds it from
+    # compliance_fields + attendance. None = no facts supplied.
+    sgp_employment_facts: dict = None
+    # Singapore IRAS Form IR8A item per earning component, from the shared
+    # TaxabilityRule primitive: {"iras_gross_salary": {component: bool}, ...}.
+    # None/empty = the default mapping in singapore.py.
+    sgp_iras_classification: dict = None
+    # Earlier payslips of THIS wage month for this employee (a salary run
+    # plus an off-cycle/backpay run), rebuilt by service.py from their
+    # persisted sgp_calculation_trace. CPF, SDL, SHG and the S Pass levy are
+    # all monthly amounts, so the month is recalculated on its combined
+    # wages and only the difference is booked. None/empty = first payment.
+    sgp_month_to_date: list = None
+    # The payroll run's period (employment period). Read by Singapore only
+    # (SG-011: OW belongs to the employment month when payable by the 14th
+    # of the following month). None for callers without a run period.
+    period_start: date = None
+    period_end: date = None
+    # Generic employment facts, read straight off PayrollEmployee — used by
+    # Singapore only (AW ceiling months remaining, S Pass partial month,
+    # IR21 trigger, LQS full-/part-time). None for callers that don't set them.
+    date_of_joining: date = None
+    date_of_leaving: date = None
+    employment_type: str = None
+
     # Guyana PAYE statutory credit (GY-010) — this employee's remaining
     # unconsumed over-deduction credit balance BEFORE this period.
     # DISCLOSED SCOPE: the spec's own worked scenario (Jan-Feb 2026
@@ -743,6 +828,17 @@ class PayrollResult:
     # field above. See PayrollContext's matching
     # ytd_ky_mandatory_pensionable_earnings_before field.
     ytd_ky_mandatory_pensionable_earnings_after: Decimal = None
+    # Singapore CPF (SG-010) — YTD OW / AW subject to CPF AFTER this period;
+    # None when no accumulator was loaded. See PayrollContext's matching
+    # ytd_cpf_ow_subject_before/ytd_cpf_aw_subject_before.
+    ytd_cpf_ow_subject_after: Decimal = None
+    ytd_cpf_aw_subject_after: Decimal = None
+    ytd_cpf_aw_paid_after: Decimal = None
+    # Singapore calculation trace (inputs, rules, rates, ceilings, AW
+    # estimate/true-up allocations, rounding, SDL/SHG/FWL/LQS/IR21 and row
+    # provenance) — persisted verbatim on PayslipItem.sgp_calculation_trace.
+    # None for every non-SG calculation.
+    sgp_calculation_trace: dict = None
 
     # Guyana PAYE statutory credit (GY-010) — remaining unconsumed credit
     # balance AFTER this period (calculated liability minus whatever

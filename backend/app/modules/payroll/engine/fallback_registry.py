@@ -30,7 +30,7 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, india, uk, us
+from app.modules.payroll.engine.countries import australia, canada, germany, india, singapore, uk, us
 
 _MODULES = {
     "india": india,
@@ -39,6 +39,7 @@ _MODULES = {
     "australia": australia,
     "canada": canada,
     "germany": germany,
+    "singapore": singapore,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -161,6 +162,18 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "DE", "module": "germany", "attr": "_DE_ALV_EMPLOYER_RATE", "label": "Unemployment Insurance (ALV) Rate — Employer", "resolverKey": "alv_employer_rate", "side": "employer"},
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYEE_RATE", "label": "Health Insurance (GKV) General Rate — Employee", "resolverKey": "gkv_general_employee_rate", "side": "employee"},
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYER_RATE", "label": "Health Insurance (GKV) General Rate — Employer", "resolverKey": "gkv_general_employer_rate", "side": "employer"},
+
+    # ── Singapore ────────────────────────────────────────────────────────
+    # Fail-closed: every constant below is None — listed only so the
+    # readiness check (get_required_parameter_keys) knows which keys a
+    # Singapore pack must configure. CPF/SHG band tables (CPF_RATE_BAND/
+    # SHG_FUND_BAND TaxSlab rows) have no scalar key and are validated by
+    # singapore.py itself.
+    {"country": "SG", "module": "singapore", "attr": "_SG_CPF_OW_CEILING_MONTHLY", "label": "CPF Ordinary Wage Ceiling (Monthly)", "resolverKey": "cpf_ow_ceiling_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
+    {"country": "SG", "module": "singapore", "attr": "_SG_CPF_ANNUAL_WAGE_CEILING", "label": "CPF Annual Wage Ceiling", "resolverKey": "cpf_annual_wage_ceiling", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
+    {"country": "SG", "module": "singapore", "attr": "_SG_SDL_RATE", "label": "Skills Development Levy Rate (Employer)", "resolverKey": "sdl", "side": "employer", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
+    {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MIN_MONTHLY", "label": "SDL Minimum (Monthly)", "resolverKey": "sdl_min_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
+    {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MAX_MONTHLY", "label": "SDL Maximum (Monthly)", "resolverKey": "sdl_max_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
 ]
 
 

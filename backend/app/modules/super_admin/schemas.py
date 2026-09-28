@@ -177,3 +177,48 @@ class DashboardChartsResponse(BaseModel):
     payrollByJurisdiction: list[dict]
     complianceOverview: dict
     employeesByCountry: list[dict]
+
+
+# ── Singapore statutory administration (read-only, tenant-independent) ────
+# Same {items, total} list convention as FinanceOverviewResponse /
+# ReportsListResponse; values are the service's own serialization (money as
+# Decimal strings, dates ISO strings), never re-derived here.
+
+class SgpPwmScheduleResponse(BaseModel):
+    id: int
+    jurisdiction: str
+    sector: str
+    occupationGroup: str
+    jobLevel: str
+    roleLabel: str
+    effectiveFrom: str
+    effectiveTo: Optional[str] = None
+    overtimeHours: int
+    requiredGross: str
+    sourceDocumentId: int
+    sourceTitle: Optional[str] = None
+    sourceUrl: Optional[str] = None
+    sourceSha256: str
+    retrievedAt: Optional[str] = None
+    status: str
+
+
+class SgpPwmSchedulePageResponse(BaseModel):
+    items: list[SgpPwmScheduleResponse]
+    total: int
+    skip: int
+    limit: int
+    readOnly: bool
+    classification: str
+
+
+class SgpStatutoryAdminSummaryResponse(BaseModel):
+    jurisdiction: str
+    asOf: str
+    activationReadiness: dict
+    activePack: Optional[dict] = None
+    valuesFromPack: Optional[dict] = None
+    valuesFromActivePack: bool
+    packs: list[dict]
+    sections: list[dict]
+    certification: str

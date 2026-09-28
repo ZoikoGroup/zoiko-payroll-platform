@@ -6,6 +6,7 @@ import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdiction
 import { formatCurrency } from "../../../utils/currency";
 import RunStatusTimeline from "./RunStatusTimeline";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
+import SGRunPreflightPanel from "./SGRunPreflightPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -431,6 +432,8 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   subtitle={`Ask about readiness, exceptions, or status for ${detail?.period || run.period} — answered using only this run's own data.`}
                 />
               </div>
+
+              {items.some((i) => (i.country || i.countryCode) === "SG") && <SGRunPreflightPanel runId={run.id} />}
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">
                 Employee Payroll Details

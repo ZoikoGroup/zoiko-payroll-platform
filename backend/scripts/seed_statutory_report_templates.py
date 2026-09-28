@@ -30,19 +30,22 @@ Usage:
 """
 
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import SessionLocal
 from app.modules.payroll import service
+from app.modules.payroll.engine.jurisdictions.singapore import statutory_summary as sg_catalog
 from app.modules.payroll.models import ReportTemplate
 from app.modules.payroll.schemas import (
     ReportTemplateUpsert, ReportTemplateComponentUpsert, ReportTemplateFieldUpsert, FilingCalendarUpsert,
 )
 
 
-def _seed_template(db, *, template_key, name, report_type, country, reporting_year, document_scope, components, state=None):
+def _seed_template(db, *, template_key, name, report_type, country, reporting_year, document_scope, components, state=None,
+                   description=None, regulatory_authority=None, effective_from=None, source_references=None):
     """`components` = [(component_key, label, [(field_key, label, field_type, data_source_kind, source_column, aggregation), ...])]
 
     Genuinely idempotent (matching this module's own docstring, which
@@ -57,14 +60,19 @@ def _seed_template(db, *, template_key, name, report_type, country, reporting_ye
     already-promoted row is skipped with a clear message instead of
     raising — no template is ever edited in place either way; a
     genuinely new version still upserts normally.
+
+    Review/Approved are skipped too (Phase 5.6): upserting them passes
+    status="Draft" and approvedById=None, which silently demoted a
+    reviewed template and cleared its approver on every re-run. Only a
+    template still in Draft is refreshed from this script.
     """
     existing = (
         db.query(ReportTemplate)
         .filter(ReportTemplate.template_key == template_key, ReportTemplate.version == "1.0")
         .first()
     )
-    if existing is not None and existing.status not in ("Draft", "Review", "Approved"):
-        print(f"  SKIP {template_key} v{existing.version} — already {existing.status} in production (id={existing.id}); not re-seeding.")
+    if existing is not None and existing.status != "Draft":
+        print(f"  SKIP {template_key} v{existing.version} — already {existing.status} (id={existing.id}); not re-seeding.")
         return existing
 
     template = service.upsert_report_template(
@@ -72,6 +80,8 @@ def _seed_template(db, *, template_key, name, report_type, country, reporting_ye
             templateKey=template_key, name=name, reportType=report_type,
             jurisdictionCountry=country, jurisdictionState=state, reportingYear=reporting_year, documentScope=document_scope,
             changeSummary="Seeded via scripts/seed_statutory_report_templates.py",
+            description=description, regulatoryAuthority=regulatory_authority, effectiveFrom=effective_from,
+            sourceReferences=source_references,
         ), actor_id=None,
     )
     for sort_order, (component_key, label, fields) in enumerate(components):
@@ -970,6 +980,207 @@ def run():
                 ]),
             ],
         )
+
+        def _sg_catalog_meta(key, source_key):
+            """Phase 6.4: the three Phase 4/5 Singapore templates predate the
+            description/authority/source kwargs and were seeded with none of
+            them. Same catalogue fields the Phase 5.6 templates use, plus the
+            official source artifact the canonical pack already registers
+            (with its SHA-256) for the generator's rules."""
+            from scripts.seed_singapore_canonical_pack import SOURCES as SG_SOURCES
+
+            entry = sg_catalog.template_catalog_entry(key)
+            publisher, title, url, sha256 = SG_SOURCES[source_key][:4]
+            return dict(description=f"[{entry['classification']}] {entry['description']}",
+                        regulatory_authority=entry["regulatoryAuthority"], effective_from=date(2026, 1, 1),
+                        source_references=f"{publisher} — {title} ({url}; SHA-256 {sha256}). Figures computed by "
+                                          f"{entry['generator']}; no official form layout is certified.")
+
+        print("Seeding Singapore IR8A annual employment-income data extract (EXPORT_READY only — computed by generate_sg_ir8a)...")
+        _seed_template(
+            db, template_key="SG-IR8A", name="IR8A — Employment Income Data Extract (AIS)", report_type="SG_IR8A",
+            country="SG", reporting_year="2026", document_scope="AGGREGATE",
+            **_sg_catalog_meta("SG-IR8A", "iras_ais"),
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # source_column values are real-column placeholders only (schema
+                # requires one) — figures are bespoke-computed by generate_sg_ir8a,
+                # same convention as JM-S02 above.
+                ("totals", "Employer Totals (Income Year, reported for YA = year + 1)", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_gross_salary", "Total Gross Salary (OW)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_bonus_additional_wages", "Total Bonus / Additional Wages", "currency", "PAYSLIP_ITEM", "additional_compensation", None),
+                    ("total_employment_income", "Total Employment Income", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_employee_cpf", "Total Employee CPF", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_shg_donations", "Total SHG Donations", "currency", "PAYSLIP_ITEM", "professional_tax", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Singapore monthly SDL payable (employer aggregate, rounded down — computed by generate_sg_sdl_monthly)...")
+        _seed_template(
+            db, template_key="SG-SDL-MONTHLY", name="Skills Development Levy — Monthly Employer Total", report_type="SG_SDL_MONTHLY",
+            country="SG", reporting_year="2026", document_scope="AGGREGATE",
+            **_sg_catalog_meta("SG-SDL-MONTHLY", "cpf_sdl"),
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # Bespoke-computed by generate_sg_sdl_monthly (CPF Board SDL
+                # page: sum each employee's SDL, then round the total down to
+                # the nearest dollar); source_column is a real-column placeholder.
+                ("totals", "SDL for the calendar month", [
+                    ("total_employee_count", "Employee Count", "number", "PAYSLIP_ITEM", "gross_pay", None),
+                    ("total_sdl_before_rounding", "Total SDL (sum of per-employee SDL)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                    ("total_sdl_payable", "Total SDL Payable (rounded down to the nearest dollar)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Singapore CPF EZPay contribution file (CPF Board FTP specification — computed by generate_sg_cpf_ezpay)...")
+        _seed_template(
+            db, template_key="SG-CPF-EZPAY", name="CPF EZPay Contribution File (FTP specification)", report_type="SG_CPF_EZPAY",
+            country="SG", reporting_year="2026", document_scope="AGGREGATE",
+            **_sg_catalog_meta("SG-CPF-EZPAY", "cpf_ezpay_ftp_spec"),
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                ]),
+                # Bespoke-computed by generate_sg_cpf_ezpay (fixed-length
+                # 150-byte records per the CPF Board specification);
+                # source_column values are real-column placeholders only.
+                ("totals", "CPF EZPay contribution file totals (wage month)", [
+                    ("total_cpf", "Total CPF contributions (payment code 01)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_shg", "Total SHG contributions (payment codes 02–05)", "currency", "PAYSLIP_ITEM", "professional_tax", None),
+                    ("total_sdl", "SDL payable (payment code 11)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                ]),
+            ],
+        )
+
+        # Singapore Phase 5.6 — eight more templates. Name, report type,
+        # classification text and authority come from the Singapore catalog
+        # (engine/jurisdictions/singapore/statutory_summary.SG_REPORT_TEMPLATES).
+        # Every field is a real persisted column read at its true meaning —
+        # never a placeholder. None is an official form: no source_document_id
+        # (that FK is for the government publication a form is based on).
+        print("Seeding Singapore internal / submission-support / workspace templates (Draft; none officially certified)...")
+        employer = ("employer_info", "Employer Information", [
+            ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+            ("employer_uen", "UEN / Tax Registration Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+        ])
+        employee = ("employee_info", "Employee Information", [
+            ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+            ("designation", "Designation", "text", "PAYSLIP_ITEM", "designation", None),
+        ])
+        period = [
+            ("period_label", "Period", "text", "PAYROLL_RUN", "period_label", None),
+            ("pay_date", "Pay Date", "date", "PAYROLL_RUN", "pay_date", None),
+        ]
+        sg_templates = {
+            "SG-PAYROLL-REGISTER": [
+                (employer[0], employer[1], employer[2] + period), employee,
+                ("earnings", "Earnings", [
+                    ("basic_salary", "Basic Salary", "currency", "PAYSLIP_ITEM", "basic_salary", None),
+                    ("overtime", "Overtime Pay", "currency", "PAYSLIP_ITEM", "overtime", None),
+                    ("additional_compensation", "Additional Compensation", "currency", "PAYSLIP_ITEM", "additional_compensation", None),
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("contributions", "CPF / SHG (Employee)", [
+                    ("employee_cpf", "CPF (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("shg", "SHG Contribution", "currency", "PAYSLIP_ITEM", "professional_tax", None),
+                ]),
+                ("deductions", "Deductions and Net Pay", [
+                    ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", None),
+                    ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", None),
+                ]),
+                ("employer_contributions", "CPF / SDL / FWL (Employer)", [
+                    ("employer_cpf", "CPF (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("sdl", "SDL (Employer)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", None),
+                    ("fwl", "Foreign Worker Levy (Employer)", "currency", "PAYSLIP_ITEM", "employer_eht", None),
+                ]),
+            ],
+            "SG-PAYROLL-SUMMARY": [
+                (employer[0], employer[1], employer[2] + period + [
+                    ("employee_count", "Employee Count", "text", "PAYROLL_RUN", "employee_count", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("total_net_pay", "Total Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", "SUM_RUN"),
+                ]),
+                ("contributions", "CPF / SHG (Employee)", [
+                    ("total_employee_cpf", "Total CPF (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", "SUM_RUN"),
+                    ("total_shg", "Total SHG", "currency", "PAYSLIP_ITEM", "professional_tax", "SUM_RUN"),
+                ]),
+                ("employer_contributions", "CPF / SDL / FWL (Employer)", [
+                    ("total_employer_cpf", "Total CPF (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_RUN"),
+                    ("total_sdl", "Total SDL (sum of per-employee SDL, before the employer rounding)", "currency", "PAYSLIP_ITEM", "employer_payroll_tax", "SUM_RUN"),
+                    ("total_fwl", "Total Foreign Worker Levy", "currency", "PAYSLIP_ITEM", "employer_eht", "SUM_RUN"),
+                ]),
+            ],
+            "SG-CPF-CONTRIBUTION": [
+                (employer[0], employer[1], employer[2] + period), employee,
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay (total — not CPF-subject OW/AW)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("contributions", "CPF (Employee)", [
+                    ("employee_cpf", "CPF (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", None),
+                    ("total_employee_cpf", "Total CPF (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", "SUM_RUN"),
+                ]),
+                ("employer_contributions", "CPF (Employer)", [
+                    ("employer_cpf", "CPF (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", None),
+                    ("total_employer_cpf", "Total CPF (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_RUN"),
+                ]),
+            ],
+            "SG-SHG-MONTHLY": [
+                (employer[0], employer[1], employer[2] + period), employee,
+                ("contributions", "SHG (Employee)", [
+                    ("shg", "SHG Contribution", "currency", "PAYSLIP_ITEM", "professional_tax", None),
+                    ("total_shg", "Total SHG", "currency", "PAYSLIP_ITEM", "professional_tax", "SUM_RUN"),
+                ]),
+            ],
+            "SG-FWL-MONTHLY": [
+                (employer[0], employer[1], employer[2] + period), employee,
+                ("employer_contributions", "Foreign Worker Levy (Employer cost)", [
+                    ("fwl", "Foreign Worker Levy (payroll-computed)", "currency", "PAYSLIP_ITEM", "employer_eht", None),
+                    ("total_fwl", "Total Foreign Worker Levy", "currency", "PAYSLIP_ITEM", "employer_eht", "SUM_RUN"),
+                ]),
+            ],
+            "SG-PWM-COMPLIANCE": [
+                employer, employee,
+                ("earnings", "Wages (PWM required gross evaluated by the Compliance Centre, not stored here)", [
+                    ("basic_salary", "Basic Salary", "currency", "PAYSLIP_ITEM", "basic_salary", None),
+                    ("overtime", "Overtime Pay", "currency", "PAYSLIP_ITEM", "overtime", None),
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+            ],
+            "SG-IR21-REGISTER": [
+                employer,
+                ("employee_info", "Employee and Employment Dates", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                    ("date_of_joining", "Start Date", "date", "PAYROLL_EMPLOYEE", "date_of_joining", None),
+                    ("date_of_leaving", "Cessation Date", "date", "PAYROLL_EMPLOYEE", "date_of_leaving", None),
+                ]),
+            ],
+            "SG-LQS-COMPLIANCE": [
+                employer, employee,
+                ("earnings", "Wages (LQS threshold evaluated by the Compliance Centre, not stored here)", [
+                    ("basic_salary", "Basic Salary", "currency", "PAYSLIP_ITEM", "basic_salary", None),
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+            ],
+        }
+        for key, components in sg_templates.items():
+            entry = sg_catalog.template_catalog_entry(key)
+            _seed_template(
+                db, template_key=key, name=entry["name"], report_type=entry["reportType"],
+                country="SG", reporting_year="2026", document_scope="AGGREGATE", components=components,
+                description=f"[{entry['classification']}] {entry['description']}",
+                regulatory_authority=entry["regulatoryAuthority"], effective_from=date(2026, 1, 1),
+                source_references="Internal Zoiko template (Phase 5.6) — no official form layout; figures are the "
+                                  "persisted payslip columns named in each field.",
+            )
 
         print("Seeding The Bahamas NIB statement, per-employee (no personal income tax)...")
         _seed_template(

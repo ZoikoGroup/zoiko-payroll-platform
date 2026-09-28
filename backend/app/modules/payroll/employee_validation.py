@@ -51,6 +51,11 @@ class EmployeeValidationStrategy:
     country_code: str = ""
     FIELD_SPECS: dict = {}
     duplicate_field: Optional[str] = None
+    # compliance_fields keys that are personal national/tax/social-insurance
+    # identifiers — masked in every API response (mask_compliance_fields).
+    # Bank details (routing codes, IBAN, account numbers) are NOT in scope
+    # here: they also feed the `routing` display and bank transfer files.
+    SENSITIVE_FIELDS: tuple = ()
 
     # Maps a compliance_fields key to the PayrollEmployee dedicated column
     # it should ALSO populate, for strategies whose engine calculator
@@ -162,6 +167,7 @@ class INEmployeeValidation(EmployeeValidationStrategy):
     """India's pan/uan/ifsc live on dedicated PayrollEmployee columns, not
     here — this only covers the fields that don't already have a column."""
     country_code = "IN"
+    SENSITIVE_FIELDS = ('esi_number',)
     FIELD_SPECS = {
         "esi_number": {
             "pattern": re.compile(r"^\d{10}(\d{7})?$"),
@@ -186,6 +192,7 @@ class INEmployeeValidation(EmployeeValidationStrategy):
 
 class USEmployeeValidation(EmployeeValidationStrategy):
     country_code = "US"
+    SENSITIVE_FIELDS = ('ssn',)
     FIELD_SPECS = {
         "ssn": {
             "required": True,
@@ -380,6 +387,7 @@ class USEmployeeValidation(EmployeeValidationStrategy):
 
 class UKEmployeeValidation(EmployeeValidationStrategy):
     country_code = "UK"
+    SENSITIVE_FIELDS = ('nino',)
     FIELD_SPECS = {
         "nino": {
             "required": True, "upper": True, "strip_chars": " ",
@@ -466,6 +474,7 @@ class UKEmployeeValidation(EmployeeValidationStrategy):
 
 class AUEmployeeValidation(EmployeeValidationStrategy):
     country_code = "AU"
+    SENSITIVE_FIELDS = ('tfn', 'super_member_number')
     FIELD_SPECS = {
         "tfn": {
             "required": True, "strip_chars": " ",
@@ -532,6 +541,7 @@ class AUEmployeeValidation(EmployeeValidationStrategy):
 
 class CAEmployeeValidation(EmployeeValidationStrategy):
     country_code = "CA"
+    SENSITIVE_FIELDS = ('sin',)
     FIELD_SPECS = {
         "sin": {
             "required": True, "strip_chars": "- ",
@@ -616,6 +626,7 @@ class CAEmployeeValidation(EmployeeValidationStrategy):
 
 class DEEmployeeValidation(EmployeeValidationStrategy):
     country_code = "DE"
+    SENSITIVE_FIELDS = ('steuer_id', 'rv_nummer')   # IBAN is also DE's bank routing value — bank details are out of this scope
     FIELD_SPECS = {
         "steuer_id": {
             "required": True, "strip_chars": " ",
@@ -660,6 +671,7 @@ class DEEmployeeValidation(EmployeeValidationStrategy):
 # exact current form is acquired — same gate the specs themselves impose.
 class BBEmployeeValidation(EmployeeValidationStrategy):
     country_code = "BB"
+    SENSITIVE_FIELDS = ('nis_number', 'tamis_tin')
     FIELD_SPECS = {
         "tamis_tin": {
             "pattern": re.compile(r"^\d{9,13}$"),
@@ -674,6 +686,7 @@ class BBEmployeeValidation(EmployeeValidationStrategy):
 
 class KYEmployeeValidation(EmployeeValidationStrategy):
     country_code = "KY"
+    SENSITIVE_FIELDS = ('nib_member_number',)
     FIELD_SPECS = {
         "nib_member_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
@@ -684,6 +697,7 @@ class KYEmployeeValidation(EmployeeValidationStrategy):
 
 class DOEmployeeValidation(EmployeeValidationStrategy):
     country_code = "DO"
+    SENSITIVE_FIELDS = ('cedula',)
     FIELD_SPECS = {
         # Cédula de identidad — the standard Dominican national ID format
         # (000-0000000-0), the one field in this whole Caribbean set with
@@ -697,6 +711,7 @@ class DOEmployeeValidation(EmployeeValidationStrategy):
 
 class GYEmployeeValidation(EmployeeValidationStrategy):
     country_code = "GY"
+    SENSITIVE_FIELDS = ('gra_tin', 'nis_number')
     FIELD_SPECS = {
         "gra_tin": {
             "pattern": re.compile(r"^\d{7,10}$"),
@@ -711,6 +726,7 @@ class GYEmployeeValidation(EmployeeValidationStrategy):
 
 class JMEmployeeValidation(EmployeeValidationStrategy):
     country_code = "JM"
+    SENSITIVE_FIELDS = ('trn',)
     FIELD_SPECS = {
         "trn": {
             "strip_chars": "-",
@@ -722,6 +738,7 @@ class JMEmployeeValidation(EmployeeValidationStrategy):
 
 class BSEmployeeValidation(EmployeeValidationStrategy):
     country_code = "BS"
+    SENSITIVE_FIELDS = ('nib_number',)
     FIELD_SPECS = {
         "nib_number": {
             "pattern": re.compile(r"^[A-Za-z0-9-]{4,20}$"),
@@ -732,6 +749,7 @@ class BSEmployeeValidation(EmployeeValidationStrategy):
 
 class TTEmployeeValidation(EmployeeValidationStrategy):
     country_code = "TT"
+    SENSITIVE_FIELDS = ('bir_file_number', 'nibtt_number')
     FIELD_SPECS = {
         "bir_file_number": {
             "pattern": re.compile(r"^\d{9,10}$"),
@@ -742,6 +760,141 @@ class TTEmployeeValidation(EmployeeValidationStrategy):
             "error": "NIBTT number looks incorrect.",
         },
     }
+
+
+# ── Singapore (ZP-SG-ENG-001, 2026-09-23) ────────────────────────────────
+# The CPF cohort facts are NOT required here, same reasoning as the
+# Caribbean strategies above (onboarding before every fact is known is a
+# real case) — engine/countries/singapore.py is the authoritative guard and
+# BLOCKS the calculation while any of them is missing or contradictory.
+# NRIC/FIN is a synthetic-safe structural check only (prefix letter, 7
+# digits, suffix letter); no checksum is asserted since the spec doesn't
+# supply one.
+class SGEmployeeValidation(EmployeeValidationStrategy):
+    country_code = "SG"
+    SENSITIVE_FIELDS = ('nric_fin',)
+    FIELD_SPECS = {
+        "nric_fin": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[STFGM]\d{7}[A-Z]$"),
+            "error": "NRIC/FIN must be a letter (S/T/F/G/M), 7 digits and a letter.",
+        },
+        "cpf_residency_status": {"upper": True, "choices": ["SC", "SPR", "FOREIGN"]},
+        "spr_effective_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "SPR effective date must be YYYY-MM-DD.",
+        },
+        "cpf_contribution_arrangement": {"upper": True, "choices": ["GG", "FG", "FF"]},
+        "work_pass_type": {"upper": True, "choices": ["NONE", "EP", "S_PASS", "WORK_PERMIT"]},
+        # Work pass validity (MOM: S Pass levy liability runs from the day
+        # the pass is issued until it is cancelled or expires).
+        "work_pass_issue_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Work pass issue date must be YYYY-MM-DD.",
+        },
+        "work_pass_end_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+            "error": "Work pass end (cancellation/expiry) date must be YYYY-MM-DD.",
+        },
+        # Authority/HR-derived fund codes only (SG-015) — never race/religion.
+        "shg_funds": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^(NONE|(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?(,(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?)*)$"),
+            "error": "SHG funds must be NONE or a comma-separated list of CDAC, ECF, MBMF, SINDA — optionally with the "
+                     "employee's SHG-instructed monthly amount, e.g. MBMF=10.00.",
+        },
+        # SHG opt-out / alternate-amount instruction evidence (SG-014) — the
+        # reference to the signed form, never the form's personal content.
+        "shg_evidence_ref": {
+            "strip_chars": " ", "pattern": re.compile(r"^[A-Za-z0-9 ._/-]{1,60}$"),
+            "error": "SHG evidence reference: up to 60 letters, digits or . _ / -",
+        },
+        # Work Permit levy classification (MOM sector pages) — engine-read,
+        # mapped to the sgp_wp_* columns below.
+        "wp_sector": {"upper": True, "choices": ["SERVICES", "MANUFACTURING", "CONSTRUCTION", "PROCESS", "MARINE_SHIPYARD"]},
+        "wp_skill_level": {"upper": True, "choices": ["R1", "R2"]},
+        "wp_levy_tier": {"upper": True,
+                         "choices": ["TIER_1", "TIER_2", "TIER_3", "NTS", "MYS_NAS_PRC", "OFFSITE", "NO_CERT", "ALL"]},
+        # Employment Act facts (MOM "Employment Act: who it covers"; SG-035) —
+        # Part 4 coverage is COMPUTED from these plus basic salary, never typed.
+        "ea_workman": {"upper": True, "choices": ["YES", "NO"]},
+        "ea_manager_executive": {"upper": True, "choices": ["YES", "NO"]},
+        "ea_contractual_weekly_hours": {
+            "pattern": re.compile(r"^\d{1,2}(\.\d{1,2})?$"), "error": "Contractual weekly hours must be a number, e.g. 44",
+        },
+        "ea_rest_day": {"upper": True, "choices": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]},
+        # MOM incomplete-month salary (Phase 5.2): the work week the MOM
+        # working-day table covers — Mon–Fri, plus a Saturday half day
+        # (5.5) or a Saturday (6); Sunday the rest day.
+        "ea_work_pattern": {"upper": True, "choices": ["5_DAY", "5_5_DAY", "6_DAY"]},
+        # SG-002 release scope: only STANDARD employment is calculated; the
+        # other classes are recorded so the engine can refuse them (BLOCKED).
+        # Not recorded = treated as STANDARD with a preflight warning.
+        "employment_class": {"upper": True, "choices": ["STANDARD", "PLATFORM_WORKER", "SEAFARER", "OVERSEAS_ONLY", "EOR"]},
+        # SG-045: the date a change to a statutory fact (residency, work pass,
+        # Employment Act status, SHG, employment class) takes effect — required
+        # with such a change, audited, never stored on the employee.
+        "statutory_change_effective_date": {
+            "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"), "error": "Statutory change effective date: YYYY-MM-DD",
+        },
+        # Progressive Wage Model classification (MOM PWM sector pages; SG-034).
+        "pwm_sector": {"upper": True, "choices": ["CLEANING", "SECURITY", "LANDSCAPE", "LIFT_ESCALATOR", "RETAIL",
+                                                  "FOOD_SERVICES", "WASTE_MANAGEMENT", "OPW_ADMIN", "OPW_DRIVER",
+                                                  "NONE"]},
+        "pwm_group": {"upper": True, "strip_chars": " ", "pattern": re.compile(r"^[A-Z0-9_]{1,30}$"),
+                      "error": "PWM group: a code such as OFFICE_COMMERCIAL, OUTSOURCED, CATEGORY_A"},
+        "pwm_job_level": {"upper": True, "strip_chars": " ", "pattern": re.compile(r"^[A-Z0-9_]{1,40}$"),
+                          "error": "PWM job level: a code such as GENERAL_CLEANER, SECURITY_OFFICER"},
+    }
+    duplicate_field = "nric_fin"
+    FIELD_COLUMN_MAP = {
+        "cpf_residency_status": "sgp_cpf_residency_status",
+        "spr_effective_date": "sgp_spr_effective_date",
+        "cpf_contribution_arrangement": "sgp_cpf_contribution_arrangement",
+        "work_pass_type": "sgp_work_pass_type",
+        "shg_funds": "sgp_shg_funds",
+        "work_pass_issue_date": "sgp_work_pass_issue_date",
+        "work_pass_end_date": "sgp_work_pass_end_date",
+        "wp_sector": "sgp_wp_sector",
+        "wp_skill_level": "sgp_wp_skill_level",
+        "wp_levy_tier": "sgp_wp_levy_tier",
+    }
+    FIELD_VALUE_MAP = {
+        "spr_effective_date": lambda v: date.fromisoformat(v) if v else None,
+        "work_pass_issue_date": lambda v: date.fromisoformat(v) if v else None,
+        "work_pass_end_date": lambda v: date.fromisoformat(v) if v else None,
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        residency = cleaned.get("cpf_residency_status")
+        work_pass = cleaned.get("work_pass_type")
+        if residency == "SC" and work_pass and work_pass != "NONE":
+            raise BadRequestException("A Singapore Citizen cannot hold a work pass — set work_pass_type to NONE.")
+        if residency == "FOREIGN" and work_pass == "NONE":
+            raise BadRequestException("A foreign employee must have an EP, S Pass or Work Permit.")
+        if residency == "SPR" and not cleaned.get("spr_effective_date"):
+            raise BadRequestException("spr_effective_date is required for an SPR employee.")
+        if "=" in (cleaned.get("shg_funds") or "") and not cleaned.get("shg_evidence_ref"):
+            raise BadRequestException("An SHG instructed (alternate) amount needs the SHG evidence reference "
+                                      "(shg_evidence_ref) — the amount is the employee's instruction to the SHG.")
+        wp_facts = [k for k in ("wp_sector", "wp_skill_level", "wp_levy_tier") if cleaned.get(k)]
+        if wp_facts and work_pass != "WORK_PERMIT":
+            raise BadRequestException("Work Permit levy fields apply to Work Permit holders only.")
+        if cleaned.get("wp_sector") and cleaned.get("wp_levy_tier"):
+            from app.modules.payroll.engine.countries.singapore import WP_TIERS_BY_SECTOR
+
+            if cleaned["wp_levy_tier"] not in WP_TIERS_BY_SECTOR[cleaned["wp_sector"]]:
+                raise BadRequestException(
+                    f"Levy tier {cleaned['wp_levy_tier']} does not exist for the {cleaned['wp_sector']} sector (MOM) — "
+                    f"expected one of {', '.join(WP_TIERS_BY_SECTOR[cleaned['wp_sector']])}.")
+        if cleaned.get("ea_workman") == "YES" and cleaned.get("ea_manager_executive") == "YES":
+            raise BadRequestException("An employee cannot be both a workman and a manager/executive (Employment Act).")
+        issued, ends = cleaned.get("work_pass_issue_date"), cleaned.get("work_pass_end_date")
+        if (issued or ends) and work_pass in (None, "NONE"):
+            raise BadRequestException("Work pass dates need a work pass (EP, S Pass or Work Permit).")
+        if issued and ends and ends < issued:
+            raise BadRequestException("The work pass end date cannot be before its issue date.")
 
 
 _STRATEGIES = {
@@ -758,6 +911,7 @@ _STRATEGIES = {
     "JM": JMEmployeeValidation,
     "BS": BSEmployeeValidation,
     "TT": TTEmployeeValidation,
+    "SG": SGEmployeeValidation,
 }
 
 
@@ -771,3 +925,98 @@ def get_employee_validation_strategy(country_code: str) -> EmployeeValidationStr
             f"Unsupported country code '{country_code}'. Supported: {', '.join(_STRATEGIES)}."
         )
     return strategy
+
+
+# ── Sensitive identifier masking (shared, every jurisdiction) ───────────
+
+def mask_identifier(value) -> Optional[str]:
+    """First character and last 4 kept, the rest masked — the masking the
+    Singapore IR8A extract already used (S1234567D -> S****567D). Values
+    of 5 characters or fewer are masked entirely."""
+    if value is None or value == "":
+        return None
+    value = str(value)
+    return value[0] + "*" * max(len(value) - 5, 0) + value[-4:] if len(value) > 5 else "*" * len(value)
+
+
+def mask_nric_fin(value) -> Optional[str]:
+    """Singapore NRIC / FIN — PDPC "Advisory Guidelines on the PDPA for NRIC
+    and other National Identification Numbers" (31 Aug 2018) §5.2: a partial
+    NRIC is "up to the last 3 numerical digits and checksum" (e.g. "567A"
+    of S1234567A). Everything else, including the S/T/F/G/M prefix, is
+    masked: S1234567D -> *****567D."""
+    if value is None or value == "":
+        return None
+    value = str(value)
+    return "*" * (len(value) - 4) + value[-4:] if len(value) > 4 else "*" * len(value)
+
+
+# Field-specific maskers — only Singapore's nric_fin differs from the
+# shared mask_identifier; every other field (and country) is unchanged.
+_FIELD_MASKERS = {"nric_fin": mask_nric_fin}
+
+
+def _mask_field(key, value):
+    return _FIELD_MASKERS.get(key, mask_identifier)(value)
+
+
+SENSITIVE_COMPLIANCE_FIELDS = frozenset(f for cls in _STRATEGIES.values() for f in cls.SENSITIVE_FIELDS)
+
+
+def mask_compliance_fields(compliance_fields):
+    """Copy of compliance_fields with every sensitive identifier masked —
+    for API responses only; the stored values (used by server-side filing
+    and report generation) are never changed."""
+    if not isinstance(compliance_fields, dict):
+        return compliance_fields
+    return {k: (_mask_field(k, v) if k in SENSITIVE_COMPLIANCE_FIELDS and v not in (None, "") else v)
+            for k, v in compliance_fields.items()}
+
+
+def restore_masked_compliance_fields(incoming, stored):
+    """An edit form round-trips the masked value it was shown; a sensitive
+    field whose incoming value is exactly the mask of the stored value is
+    therefore unchanged, and keeps the stored value (a masked string must
+    never overwrite a real identifier). Any other value is a genuine edit."""
+    if not isinstance(incoming, dict) or not isinstance(stored, dict):
+        return incoming
+    out = dict(incoming)
+    for key in SENSITIVE_COMPLIANCE_FIELDS & set(out):
+        original = stored.get(key)
+        if original not in (None, "") and out[key] == _mask_field(key, original):
+            out[key] = original
+    return out
+
+
+# Top-level PayrollEmployee columns holding a personal account or tax
+# identifier (India's PAN / UAN, every country's bank account number) —
+# masked in API responses exactly like SENSITIVE_COMPLIANCE_FIELDS.
+SENSITIVE_EMPLOYEE_COLUMNS = ("bank_account", "pan", "uan")
+
+
+def restore_masked_employee_columns(values, employee):
+    """Same round-trip rule as restore_masked_compliance_fields, for the
+    top-level columns: an incoming value equal to the mask of the stored
+    value is unchanged and keeps the stored value."""
+    if not isinstance(values, dict) or employee is None:
+        return values
+    out = dict(values)
+    for key in SENSITIVE_EMPLOYEE_COLUMNS:
+        original = getattr(employee, key, None)
+        if key in out and original not in (None, "") and out[key] == mask_identifier(original):
+            out[key] = original
+        elif isinstance(out.get(key), str) and "*" in out[key]:
+            # A masked-looking value that is not this employee's own mask
+            # would otherwise be stored verbatim (these columns have no
+            # format validator) — refuse it rather than corrupt the record.
+            raise BadRequestException(f"{key} looks masked — enter the full value to change it.")
+    return out
+
+
+def mask_routing(routing):
+    """`routing` display rows: bank ROUTING codes stay visible; an entry that
+    is itself an account identifier (IBAN) is masked."""
+    if not isinstance(routing, list):
+        return routing
+    return [({**r, "value": mask_identifier(r.get("value"))} if isinstance(r, dict) and r.get("key") == "iban" and r.get("value")
+             else r) for r in routing]

@@ -64,7 +64,15 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["a5f6e7d8c9b0"]
+    # b8e3d5f2a9c7 (2026-09-25, Phase 5.5 SG-018): sgp_pwm_overtime_schedules,
+    # down_revision a7c2e9f4b1d6.
+    # a7c2e9f4b1d6 (2026-09-24, Phase 5 S1): payroll_employees.sgp_wp_sector /
+    # sgp_wp_skill_level / sgp_wp_levy_tier, down_revision f6a1b4c8d3e5
+    # f6a1b4c8d3e5 (2026-09-24): sgp_ir21_cases, down_revision e5f9a3b7c2d4
+    # (payroll_employees.sgp_work_pass_issue/end_date, on d4e8f2a6b9c1 —
+    # payslip_items.sgp_calculation_trace, on c3d9e1f4a7b2 — which added the
+    # Singapore CPF employee columns on a5f6e7d8c9b0).
+    assert heads == ["b8e3d5f2a9c7"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -76,7 +84,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["a5f6e7d8c9b0"]
+    assert list(script.get_heads()) == ["b8e3d5f2a9c7"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -99,7 +107,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 142
+    assert len(revs) == 148
 
 
 def test_germany_head_chain_wiring_is_intact():
