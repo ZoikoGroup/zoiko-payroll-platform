@@ -3,7 +3,10 @@
 The graph must have one head, no duplicate revision IDs, and retain the
 known Germany migration chain wiring. These tests inspect the files directly
 and also load the real Alembic ScriptDirectory without touching a database.
-The current graph has head ``a1b2c3d4e5f7`` (add composite index on
+The current graph has head ``7c3e1a9d5f20`` (merge of main's
+``998877665544`` orphan IE/FR column drop with venu's chain, re-adding those
+columns if missing) on top of ``998877665544`` (itself on ``f0b1c2d3e4f5``,
+making that a branchpoint) and ``a1b2c3d4e5f7`` (add composite index on
 payroll_attendance_records for attendance queries, Phase 1.1) on top of
 ``9f8e7d6c5b4a`` (recreate Ireland Revenue
 submission + monthly return tables, ZP-IE-ENG-001 WP2) on top of
@@ -14,7 +17,7 @@ tables, same task) on top of ``e5a1c7b9d204`` (add
 payroll_ie_statutory_sick_leave_records, ZP-IE-ENG-001 §11/IE-037) on top of
 ``c7d4e9f1a2b3`` (add ie_calculation_snapshot to payslip_items, also
 ZP-IE-ENG-001) on top of ``4b13831d574b`` (ensure
-communication_events, itself on top of merge ``5ae06cfda828``), and 157
+communication_events, itself on top of merge ``5ae06cfda828``), and 159
 revisions — the
 merge of venu's branch (PR withholding certificates -> France compliance
 tables -> France establishments/editable fields -> Ireland) with main's
@@ -85,7 +88,7 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["a1b2c3d4e5f7"]
+    assert heads == ["7c3e1a9d5f20"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -97,7 +100,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["a1b2c3d4e5f7"]
+    assert list(script.get_heads()) == ["7c3e1a9d5f20"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -107,7 +110,9 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
     here is pre-existing on `main`'s own independently-evolved graph, plus
     the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`,
     and `d4e5f6a7c8b9` where venu's France/Ireland chain and main's
-    communications chain fork (rejoined by merge `5ae06cfda828`)."""
+    communications chain fork (rejoined by merge `5ae06cfda828`), and
+    `f0b1c2d3e4f5` where main's `998877665544` and venu's chain fork
+    (rejoined by merge `7c3e1a9d5f20`)."""
     revs = _parse_revisions()
     children = _children_map(revs)
     branchpoints = sorted(k for k, v in children.items() if len(v) > 1)
@@ -115,14 +120,14 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         "1dc04f15a9b7", "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181",
         "737e7bfa2d77", "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
-        "f1b78410d568", "fbfe6d7eeb2e",
+        "f0b1c2d3e4f5", "f1b78410d568", "fbfe6d7eeb2e",
     ]
 
 
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 157
+    assert len(revs) == 159
 
 
 def test_germany_head_chain_wiring_is_intact():
