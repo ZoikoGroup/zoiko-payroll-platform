@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 __pycache__/
 *.pyc
@@ -18,3 +19,6 @@ docs/extracted/
 frontend/assist_images/
 claude
 claudeignore
+
+# Scratch/diagnostic scripts (read-only analysis, not application code)
+backend/scripts/_audit_*.py
