@@ -205,7 +205,7 @@ def test_legacy_gradient_headers_have_outlook_solid_fallback(template_name):
     assert f"background-color:{solid.group(1)}" in header
     assert "background: linear-gradient" not in header  # gradient only as background-image, over the fallback
     chip = re.search(r'<td[^>]*>\{\{logo_header_block\}\}', raw).group(0)
-    assert 'bgcolor="#0b1f3a"' in chip
+    assert 'bgcolor="#ffffff"' in chip  # white chip so the full-colour navy+blue logo is visible on any header bg
 
 
 def test_every_logo_header_cell_has_a_solid_bgcolor():
