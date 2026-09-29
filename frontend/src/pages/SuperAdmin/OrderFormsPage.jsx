@@ -348,7 +348,7 @@ export default function OrderFormsPage() {
           onClose={() => { if (!busy) setConfirming(false); }}
           maxWidth="max-w-md"
         >
-          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-3 text-xs text-amber-800">
+          <div className="rounded-lg border border-warning/30 bg-warning-light px-3.5 py-3 text-xs text-warning">
             <span className="flex items-center gap-2 font-semibold">
               <AlertTriangle size={14} className="shrink-0" />
               This will make {selectedOrg?.organization_name || "this organization"} commercially active with custom,

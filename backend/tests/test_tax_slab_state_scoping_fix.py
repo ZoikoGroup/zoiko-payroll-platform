@@ -68,6 +68,71 @@ def test_get_tax_slabs_does_not_contaminate_federal_bracket_calculation(db, orga
     assert tax == Decimal("12000.00")  # 60000 * 20%, NOT 30%
 
 
+# ── Full-name vs. code state mismatch (found 2026-09-24) ────────────────
+# CompanyComplianceDetails.jurisdiction_state can hold the FULL region name
+# captured at registration (registrationRegions.js's dropdown lists
+# "Saskatchewan", "California", ...), while canonical state-scoped TaxSlab
+# rows (seeded via Super Admin) are keyed by the 2-letter code (confirmed
+# live: a real CA-SK-2026-V1 pack's brackets are stored with
+# jurisdiction_state="SK"). get_state_scoped_config/get_state_tax_slabs did
+# an exact string match between the two, so a real, Active, populated
+# canonical pack silently resolved to nothing on the org's own Compliance >
+# Tax Configuration page. _normalize_jurisdiction_state fixes this for the
+# two countries where it's real (US/CA); UK/India already use full names as
+# their genuine canonical convention, so those must NOT be touched.
+
+def test_normalize_jurisdiction_state_ca_full_name_to_code():
+    assert service._normalize_jurisdiction_state("CA", "Saskatchewan") == "SK"
+    assert service._normalize_jurisdiction_state("CA", "  saskatchewan  ") == "SK"
+    assert service._normalize_jurisdiction_state("CA", "SK") == "SK"  # already-correct code: no-op
+
+
+def test_normalize_jurisdiction_state_us_full_name_to_code():
+    assert service._normalize_jurisdiction_state("US", "California") == "CA"
+    assert service._normalize_jurisdiction_state("US", "CA") == "CA"
+
+
+def test_normalize_jurisdiction_state_leaves_full_name_countries_untouched():
+    # UK/India's own canonical convention IS the full name — normalizing
+    # these would break an already-correct match, not fix one.
+    assert service._normalize_jurisdiction_state("UK", "Scotland") == "Scotland"
+    assert service._normalize_jurisdiction_state("IN", "Telangana") == "Telangana"
+    assert service._normalize_jurisdiction_state("CA", None) is None
+    assert service._normalize_jurisdiction_state(None, "Saskatchewan") == "Saskatchewan"
+
+
+def test_get_state_tax_slabs_resolves_canonical_pack_from_full_province_name(db, organization):
+    # Exact reproduction of the live bug: a canonical (organization_id=None)
+    # Saskatchewan pack exists, real and Active, but the org's own
+    # jurisdiction_state is the full name from registration.
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="SK",
+        min_amount=Decimal("0"), max_amount=Decimal("54532"), rate_pct=Decimal("10.5"),
+        rate_label="10.50%", tax_formula="marginal", rule_type="MARGINAL_RATE", sort_order=1,
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="SK",
+        min_amount=Decimal("54532"), max_amount=Decimal("155805"), rate_pct=Decimal("12.5"),
+        rate_label="12.50%", tax_formula="marginal", rule_type="MARGINAL_RATE", sort_order=2,
+    ))
+    db.add(TaxSlab(
+        organization_id=None, jurisdiction_country="CA", jurisdiction_state="SK",
+        min_amount=Decimal("155805"), max_amount=None, rate_pct=Decimal("14.5"),
+        rate_label="14.50%", tax_formula="marginal", rule_type="MARGINAL_RATE", sort_order=3,
+    ))
+    db.commit()
+
+    # Before the fix this returned [] — the exact "No provincial /
+    # territorial income tax slabs configured" symptom reported live.
+    rows = service.get_state_tax_slabs(db, "CA", "Saskatchewan")
+    assert len(rows) == 3
+    assert {r.rate_pct for r in rows} == {Decimal("10.5"), Decimal("12.5"), Decimal("14.5")}
+
+    # And the already-correct 2-letter code still works exactly as before.
+    rows_by_code = service.get_state_tax_slabs(db, "CA", "SK")
+    assert len(rows_by_code) == 3
+
+
 def test_get_contribution_rates_excludes_state_scoped_rows(db, organization):
     db.add(ContributionRate(
         organization_id=organization.id, jurisdiction_country="CA", jurisdiction_state=None,

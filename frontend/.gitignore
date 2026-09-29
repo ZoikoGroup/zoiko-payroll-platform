@@ -4,3 +4,4 @@ docs/
 .env
 .env.local
 .env.production
+../Jur_doc/

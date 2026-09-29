@@ -81,7 +81,7 @@ CARIBBEAN_JURISDICTIONS = {
     "BL": ("Saint Barthélemy", CLASSIFICATION_FRENCH, STATUS_COMING_SOON),
 
     # ── United States Territories ────────────────────────────────────────
-    "PR": ("Puerto Rico", CLASSIFICATION_US_TERRITORY, STATUS_COMING_SOON),
+    "PR": ("Puerto Rico", CLASSIFICATION_US_TERRITORY, STATUS_ACTIVE),
     "VI": ("U.S. Virgin Islands", CLASSIFICATION_US_TERRITORY, STATUS_COMING_SOON),
 }
 

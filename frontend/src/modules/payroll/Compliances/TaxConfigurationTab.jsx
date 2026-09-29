@@ -288,6 +288,69 @@ const COUNTRY_TAX_CONFIG = {
       // there is deliberately no fake 0% tax band to show here.
     ],
   },
+  PR: {
+    groups: [
+      {
+        key: "hacienda-withholding", label: "Hacienda Withholding",
+        items: [
+          {
+            key: "withholding", label: "Puerto Rico Income Tax Withholding", source: "slabs",
+            matches: () => true, filter: (rows) => rows.filter((r) => isRuleType(r, "MARGINAL_RATE")),
+          },
+        ],
+      },
+      {
+        key: "social-security-medicare", label: "Social Security / Medicare",
+        items: [
+          {
+            key: "ss", label: "Social Security", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "social security")),
+            noStatePlaceholder: "Social Security isn't configured for this organization yet.",
+          },
+          {
+            key: "medicare", label: "Medicare / Additional Medicare", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "medicare")),
+            noStatePlaceholder: "Medicare isn't configured for this organization yet.",
+          },
+        ],
+      },
+      {
+        key: "futa-unemployment", label: "FUTA-equivalent / DTRH Unemployment",
+        items: [
+          {
+            key: "futa", label: "FUTA-equivalent (Employer)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "futa")),
+            noStatePlaceholder: "FUTA-equivalent isn't configured for this organization yet.",
+          },
+          {
+            key: "unemployment", label: "DTRH Unemployment (Employer, PR-018)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "unemployment")),
+            noStatePlaceholder: "DTRH Unemployment has no employer-specific rate on file yet — PR-018 requires a real DTRH rate notice, never a generic percentage.",
+          },
+        ],
+      },
+      {
+        key: "sinot", label: "SINOT (Temporary Non-Occupational Disability)",
+        items: [
+          {
+            key: "sinot", label: "SINOT", source: "rates", shareShape: "split",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "sinot")),
+            noStatePlaceholder: "SINOT isn't configured for this organization yet.",
+          },
+        ],
+      },
+      {
+        key: "cfse", label: "CFSE Workers' Compensation",
+        items: [
+          {
+            key: "cfse", label: "CFSE (Employer, PR-021)", source: "rates", shareShape: "single",
+            matches: () => true, filter: (rates) => rates.filter((r) => labelIncludes(r, "cfse")),
+            noStatePlaceholder: "CFSE has no employer-specific policy rate on file yet — PR-021 requires a real CFSE policy rate, never a universal percentage.",
+          },
+        ],
+      },
+    ],
+  },
   DO: {
     groups: [
       {

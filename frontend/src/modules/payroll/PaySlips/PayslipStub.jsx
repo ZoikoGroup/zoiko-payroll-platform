@@ -20,7 +20,11 @@ const printStyles = `
 }
 `;
 
-const amountToWords = (n) => {
+// isIndia gates the Indian numbering system (Lakh/Crore) and "Paise" — every
+// other jurisdiction (including the 6 core countries this previously
+// affected too, not just the newer Caribbean/PR ones) uses standard
+// international Thousand/Million/Billion grouping and "Cents" instead.
+const amountToWords = (n, isIndia = true) => {
   if (n == null || isNaN(n)) return "Zero";
   const a = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
   const b = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
@@ -31,12 +35,17 @@ const amountToWords = (n) => {
     if (m < 20) return a[m];
     if (m < 100) return b[Math.floor(m / 10)] + (m % 10 ? " " + a[m % 10] : "");
     if (m < 1000) return a[Math.floor(m / 100)] + " Hundred" + (m % 100 ? " " + convert(m % 100) : "");
-    if (m < 100000) return convert(Math.floor(m / 1000)) + " Thousand" + (m % 1000 ? " " + convert(m % 1000) : "");
-    if (m < 10000000) return convert(Math.floor(m / 100000)) + " Lakh" + (m % 100000 ? " " + convert(m % 100000) : "");
-    return convert(Math.floor(m / 10000000)) + " Crore" + (m % 10000000 ? " " + convert(m % 10000000) : "");
+    if (isIndia) {
+      if (m < 100000) return convert(Math.floor(m / 1000)) + " Thousand" + (m % 1000 ? " " + convert(m % 1000) : "");
+      if (m < 10000000) return convert(Math.floor(m / 100000)) + " Lakh" + (m % 100000 ? " " + convert(m % 100000) : "");
+      return convert(Math.floor(m / 10000000)) + " Crore" + (m % 10000000 ? " " + convert(m % 10000000) : "");
+    }
+    if (m < 1000000) return convert(Math.floor(m / 1000)) + " Thousand" + (m % 1000 ? " " + convert(m % 1000) : "");
+    if (m < 1000000000) return convert(Math.floor(m / 1000000)) + " Million" + (m % 1000000 ? " " + convert(m % 1000000) : "");
+    return convert(Math.floor(m / 1000000000)) + " Billion" + (m % 1000000000 ? " " + convert(m % 1000000000) : "");
   };
   let words = whole === 0 ? "Zero" : convert(whole);
-  if (dec > 0) words += " and " + convert(dec) + " Paise";
+  if (dec > 0) words += " and " + convert(dec) + (isIndia ? " Paise" : " Cents");
   return words;
 };
 
@@ -76,11 +85,11 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     ...(labels.solidaritySurcharge ? [{ label: labels.solidaritySurcharge, amount: payslip.soli || 0 }] : []),
     { label: labels.pf, amount: payslip.pf },
     { label: labels.esi, amount: payslip.esi },
-    { label: "Professional Tax", amount: payslip.professionalTax },
+    { label: labels.professionalTax, amount: payslip.professionalTax },
     { label: labels.socialSecurity, amount: payslip.socialSecurity || 0 },
     { label: labels.medicare, amount: payslip.medicare || 0 },
-    { label: "NI Employee", amount: payslip.niEmployee || 0 },
-    { label: "Workplace Pension", amount: payslip.employeePension || 0 },
+    { label: labels.niEmployee, amount: payslip.niEmployee || 0 },
+    { label: labels.employeePension, amount: payslip.employeePension || 0 },
     { label: "Student Loan Deduction", amount: payslip.studyLoanDeduction || 0 },
     // UK: was reaching the API response (once the schema fix landed) but
     // still had no row here — found 2026-09-09 gap-closure Phase 3.
@@ -105,7 +114,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   const totalEarnings = (Number(payslip.totalEarnings) || 0) || computedEarnings;
   const totalDeductions = (Number(payslip.totalDeductions) || 0) || computedDeductions;
   const netPay = payslip.netPay != null ? Number(payslip.netPay) : totalEarnings - totalDeductions;
-  const netInWords = amountToWords(netPay);
+  const netInWords = amountToWords(netPay, (payslip.country || "IN").toUpperCase() === "IN");
 
   const employeeFields = [
     ["Employee", payslip.employee],

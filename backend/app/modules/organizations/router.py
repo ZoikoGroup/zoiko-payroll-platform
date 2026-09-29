@@ -412,12 +412,22 @@ def list_organizations(
     limit: int = Query(50, ge=1, le=200),
     search: str = Query("", description="Search by name or code"),
     include_inactive: bool = Query(True),
+    country_code: str = Query("", description="Only organizations whose country resolves to this jurisdiction code (e.g. FR)"),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    from sqlalchemy import func
+
+    from app.core.jurisdiction import ALL_COUNTRY_NAME_TO_CODE
     from app.modules.organizations.models import Organization
 
     query = db.query(Organization)
+    if country_code:
+        # Organization.country holds a full name ("France") or, for some
+        # older rows, the code itself — match both, case-insensitively.
+        code = country_code.strip().upper()
+        names = {name for name, c in ALL_COUNTRY_NAME_TO_CODE.items() if c == code} | {code.lower()}
+        query = query.filter(func.lower(func.trim(Organization.country)).in_(names))
     if search:
         like = f"%{search}%"
         query = query.filter(

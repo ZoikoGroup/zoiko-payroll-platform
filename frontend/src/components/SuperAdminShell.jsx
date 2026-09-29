@@ -19,6 +19,7 @@ import { listAlerts } from "../service/commandCenterService";
 import Modal from "./Modal";
 import ThemeToggle from "./ThemeToggle";
 import CommandPalette from "./CommandPalette";
+import PageErrorBoundary from "./PageErrorBoundary";
 import { NAV_GROUPS, isItemActive, getPageLabel } from "./superAdminNav";
 
 const SIDEBAR_COLLAPSE_KEY = "zoiko_pay_super_admin_sidebar_collapsed";
@@ -388,6 +389,7 @@ export default function SuperAdminShell({ children }) {
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
   const wasOpenRef = useRef(false);
+  const { pathname } = useLocation();
 
   useEffect(() => {
     let cancelled = false;
@@ -468,7 +470,9 @@ export default function SuperAdminShell({ children }) {
             visible regardless of `sidebarOpen`. */}
         <div className={`transition-[padding] duration-200 ${sidebarOpen ? "pl-72" : ""} ${collapsed ? "lg:pl-20" : "lg:pl-[272px]"}`}>
           <Header onOpenSidebar={() => setSidebarOpen(true)} onToggleCollapse={toggleCollapse} collapsed={collapsed} />
-          <main className="w-full p-4 sm:p-6 lg:p-8">{children}</main>
+          <main className="w-full p-4 sm:p-6 lg:p-8">
+            <PageErrorBoundary resetKey={pathname}>{children}</PageErrorBoundary>
+          </main>
         </div>
 
         <ToastStack />

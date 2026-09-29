@@ -77,6 +77,8 @@ python-jose==3.3.0
 python-multipart==0.0.9
 PyYAML==6.0.3
 redis==8.1.0
+celery==5.4.0
+flower==2.0.1
 reportlab==5.0.0
 requests==2.34.2
 resend==2.32.2

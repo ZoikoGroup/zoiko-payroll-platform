@@ -7,7 +7,7 @@ const JURISDICTION_TO_CURRENCY = {
   SA: "SAR", SE: "SEK", SG: "SGD", TH: "THB", TZ: "TZS", UG: "UGX",
   ZA: "ZAR",
   // Caribbean production jurisdictions (2026-09-21).
-  BB: "BBD", KY: "KYD", DO: "DOP", GY: "GYD", JM: "JMD", BS: "BSD", TT: "TTD",
+  BB: "BBD", KY: "KYD", DO: "DOP", GY: "GYD", JM: "JMD", BS: "BSD", TT: "TTD", PR: "USD",
   India: "INR", "United States": "USD", "United Kingdom": "GBP",
   "United Arab Emirates": "AED", Australia: "AUD", Bangladesh: "BDT",
   Bahrain: "BHD", Brazil: "BRL", Canada: "CAD", Switzerland: "CHF",
@@ -23,6 +23,7 @@ const JURISDICTION_TO_CURRENCY = {
   Uganda: "UGX", "South Africa": "ZAR",
   Barbados: "BBD", "Cayman Islands": "KYD", "Dominican Republic": "DOP",
   Guyana: "GYD", Jamaica: "JMD", Bahamas: "BSD", "Trinidad and Tobago": "TTD",
+  "Puerto Rico": "USD",
 };
 
 export const CURRENCY_MASTER = {
@@ -195,6 +196,7 @@ export const COUNTRY_OPTIONS = [
   { code: "JM", name: "Jamaica", currency: "JMD" },
   { code: "BS", name: "Bahamas", currency: "BSD" },
   { code: "TT", name: "Trinidad and Tobago", currency: "TTD" },
+  { code: "PR", name: "Puerto Rico", currency: "USD" },
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export function getCurrencyForCountry(countryNameOrCode) {
