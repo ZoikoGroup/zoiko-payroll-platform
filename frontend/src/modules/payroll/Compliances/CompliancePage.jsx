@@ -9,6 +9,7 @@ import TaxConfigurationTab from "./TaxConfigurationTab";
 import ComplianceDocumentUpload from "./ComplianceDocuments";
 import EnterpriseOnboardingBanner from "./EnterpriseOnboarding/EnterpriseOnboardingBanner";
 import EnterpriseJurisdictionsTab from "./EnterpriseOnboarding/EnterpriseJurisdictionsTab";
+import SGComplianceCentreTab from "./SGComplianceCentreTab";
 import {
   fetchComplianceData,
   updateCompanyDetails,
@@ -95,7 +96,12 @@ export default function CompliancePage() {
   // when arriving fresh via the "Configure Compliance" modal button.
   const arrivedForOnboarding = Boolean(location.state?.enterpriseOnboarding);
   const showEnterpriseTab = calcMode === "enterprise" || enterpriseJurisdictions.length > 0 || arrivedForOnboarding;
-  const tabs = showEnterpriseTab ? [...BASE_TABS, "Enterprise Jurisdictions"] : BASE_TABS;
+  // Singapore-only tab (Compliance Centre, with IR21 inside), appended after every positional tab above.
+  const IR21_TAB = "Singapore Compliance Centre";
+  const tabs = [
+    ...(showEnterpriseTab ? [...BASE_TABS, "Enterprise Jurisdictions"] : BASE_TABS),
+    ...(companyDetails.jurisdictionCountry === "SG" ? [IR21_TAB] : []),
+  ];
   const showOnboardingBanner = arrivedForOnboarding || (enterpriseJurisdictions.length > 0 && enterpriseStatus !== "active");
 
   useEffect(() => {
@@ -296,6 +302,8 @@ export default function CompliancePage() {
           <p className="text-[13px] text-foreground-muted max-w-md mx-auto">Compliance documents are not available in Simple Payroll mode.</p>
         </div>
       )}
+
+      {tabs[activeTab] === IR21_TAB && <SGComplianceCentreTab />}
 
       {showEnterpriseTab && activeTab === BASE_TABS.length && (calcMode === "enterprise" || arrivedForOnboarding) && (
         <EnterpriseJurisdictionsTab

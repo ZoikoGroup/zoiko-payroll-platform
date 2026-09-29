@@ -15,6 +15,8 @@ export { default as JMReportTemplatesPage } from "./JMReportTemplatesPage";
 export { default as BSReportTemplatesPage } from "./BSReportTemplatesPage";
 export { default as TTReportTemplatesPage } from "./TTReportTemplatesPage";
 export { default as DEReportTemplatesPage } from "./DEReportTemplatesPage";
+// Singapore (final closure) — the 11 SG templates in the shared lifecycle module.
+export { default as SGReportTemplatesPage } from "./SGReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -40,4 +42,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   BS: "bahamas",
   TT: "trinidad-and-tobago",
   DE: "germany",
+  SG: "singapore",
 };

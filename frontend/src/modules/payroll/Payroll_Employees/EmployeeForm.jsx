@@ -77,7 +77,8 @@ function validate(form) {
   if (!form.designation.trim()) errors.designation = "Designation is required";
   if (!form.dateOfJoining) errors.dateOfJoining = "Date of joining is required";
   if (!form.ctc || Number(form.ctc) <= 0) errors.ctc = "Enter a valid annual CTC";
-  if (form.countryCode === "IN" && form.panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.panNumber.toUpperCase())) {
+  // The API returns PAN masked (e.g. A*****234F); an unchanged mask is resolved server-side.
+  if (form.countryCode === "IN" && form.panNumber && !form.panNumber.includes("*") && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.panNumber.toUpperCase())) {
     errors.panNumber = "PAN format looks incorrect (e.g. ABCDE1234F)";
   }
   // Jurisdiction-specific field patterns (SSN, NINO, IBAN, etc.) are

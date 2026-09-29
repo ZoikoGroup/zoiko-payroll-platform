@@ -1,0 +1,79 @@
+{
+  "description": "Mixed earnings, June 2026: basic 5,000 + HRA 1,000 + overtime 500 + transport 300 (OW) + claims 200 (NON_CPF by rule) + bonus 2,500 (AW). OW 6,800, AW 2,500 (estimated AW ceiling 102,000 − 6,800 × 7 = 54,400, not binding): total CPF 37% × 9,300 = 3,441; employee 20% × 9,300 = 1,860; employer 1,581; SDL capped 11.25.",
+  "source": "CPF Board 'CPF Contribution Rate Tables from 1 January 2026' Table 1 (≤ 55: total 37%, employee 20%; OW ceiling $8,000; round total half-up, employee down); CPF Board AW ceiling = 102,000 − (YTD OW + this month's OW × months remaining); SDL 0.25% ($2–$11.25).",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "NONE",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      }
+    ],
+    "pay_date": "2026-06-30",
+    "ytd_cpf_ow_subject_before": "0",
+    "ytd_cpf_aw_subject_before": "0",
+    "ytd_cpf_aw_paid_before": "0",
+    "sgp_aw_ledger": [],
+    "gross": "9500.00",
+    "basic": "5000",
+    "hra": "1000",
+    "overtime": "500",
+    "additional_compensation": "2500",
+    "sgp_named_allowance_items": [
+      {
+        "key": "transport",
+        "label": "Transport",
+        "amount": "300"
+      },
+      {
+        "key": "claims",
+        "label": "Claims",
+        "amount": "200"
+      }
+    ],
+    "sgp_cpf_wage_classification": {
+      "cpf_ordinary_wages": {
+        "allowance:claims": false
+      },
+      "cpf_additional_wages": {}
+    }
+  },
+  "expected": {
+    "employee_pension": "1860",
+    "employer_pension": "1581",
+    "employer_payroll_tax": "11.25",
+    "net_pay": "7640.00"
+  }
+}

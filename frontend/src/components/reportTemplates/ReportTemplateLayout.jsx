@@ -34,7 +34,10 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 // through that component would mean either faking empty rate/slab tabs
 // or growing more country-agnostic conditionals into a file whose own
 // comments describe its extension points as deliberately minimal.
-export default function ReportTemplateLayout({ country, countryName, initialState = "", onStateChange }) {
+// `embedded` (Singapore final closure): rendered inside another page (the
+// Singapore compliance Report Templates tab) — the page header / Back button
+// are left to the host; behaviour is otherwise identical.
+export default function ReportTemplateLayout({ country, countryName, initialState = "", onStateChange, embedded = false }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
   const [state, setStateRaw] = useState(initialState || "");
@@ -120,15 +123,17 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
 
   return (
     <div>
-      <div className="mb-6">
-        <button onClick={() => navigate(-1)} className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground">
-          <ArrowLeft size={14} /> Back
-        </button>
-        <h1 className="text-2xl font-bold text-foreground">{countryName} Report Templates</h1>
-        <p className="text-sm text-foreground-muted mt-0.5">
-          Author and publish the statutory report blueprints Organizations generate their actual reports from.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="mb-6">
+          <button onClick={() => navigate(-1)} className="mb-2 flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground">
+            <ArrowLeft size={14} /> Back
+          </button>
+          <h1 className="text-2xl font-bold text-foreground">{countryName} Report Templates</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
+            Author and publish the statutory report blueprints Organizations generate their actual reports from.
+          </p>
+        </div>
+      )}
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <input

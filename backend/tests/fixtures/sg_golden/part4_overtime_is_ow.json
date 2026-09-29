@@ -1,0 +1,58 @@
+{
+  "description": "Part 4 workman, basic 4,000 + 6 overtime hours at the MOM minimum ⌈6 × 1.5 × 12 × 4,000 / (52 × 44)⌉ = 188.82 (OW): TW 4,188.82 → total 37% = 1,549.86 → 1,550; employee 20% = 837.76 → 837; employer 713.",
+  "source": "CPF Board 'CPF Contribution Rate Tables from 1 January 2026' Table 1 (≤ 55: total 37%, employee 20%; OW ceiling $8,000; round total half-up, employee down); CPF Board AW ceiling = 102,000 − (YTD OW + this month's OW × months remaining); SDL 0.25% ($2–$11.25).",
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "NONE",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      }
+    ],
+    "pay_date": "2026-06-30",
+    "ytd_cpf_ow_subject_before": "0",
+    "ytd_cpf_aw_subject_before": "0",
+    "ytd_cpf_aw_paid_before": "0",
+    "sgp_aw_ledger": [],
+    "gross": "4188.82",
+    "basic": "4000",
+    "overtime": "188.82"
+  },
+  "expected": {
+    "employee_pension": "837",
+    "employer_pension": "713",
+    "net_pay": "3351.82"
+  }
+}

@@ -21,8 +21,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, List, Dict, Annotated, ClassVar
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, Field, BeforeValidator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, BeforeValidator, field_validator, model_validator
 from app.modules.payroll.models import PayrollStatus, PayslipStatus, ActivityStatus
+from app.modules.payroll.employee_validation import mask_compliance_fields, mask_identifier, mask_routing
 
 
 def coerce_str(v):
@@ -173,6 +174,28 @@ class EmployeeResponse(BaseModel):
     starterDeclaration: Optional[str] = Field(None, validation_alias="starter_declaration", serialization_alias="starterDeclaration")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    # Sensitive identifiers (SSN/NINO/TFN/SIN/Steuer-ID/IBAN/NRIC-FIN/…,
+    # employee_validation.SENSITIVE_COMPLIANCE_FIELDS) are masked in every
+    # response; stored values are untouched and an edit form's round-tripped
+    # mask is restored server-side (restore_masked_compliance_fields).
+    @field_validator("complianceFields")
+    @classmethod
+    def _mask_sensitive_compliance_fields(cls, value):
+        return mask_compliance_fields(value)
+
+    # Personal account / tax identifiers in top-level columns and the IBAN
+    # routing entry — same shared masking (stored values untouched; the
+    # edit form's round-tripped mask is restored server-side).
+    @field_validator("bankAccount", "pan", "uan")
+    @classmethod
+    def _mask_sensitive_columns(cls, value):
+        return mask_identifier(value) if value else value
+
+    @field_validator("routing")
+    @classmethod
+    def _mask_routing_account_identifiers(cls, value):
+        return mask_routing(value)
 
 
 # ── Employee Statutory Profile (effective-dated) ─────────────────────────
@@ -1000,6 +1023,26 @@ class PayslipItemResponse(BaseModel):
     calculationStatus:            Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+    # Same shared masking as EmployeeResponse — the payslip's snapshotted
+    # compliance_fields carry the same identifiers.
+    @field_validator("complianceFields")
+    @classmethod
+    def _mask_sensitive_compliance_fields(cls, value):
+        return mask_compliance_fields(value)
+
+    # Personal account / tax identifiers in top-level columns and the IBAN
+    # routing entry — same shared masking (stored values untouched; the
+    # edit form's round-tripped mask is restored server-side).
+    @field_validator("bankAccount", "pan", "uan")
+    @classmethod
+    def _mask_sensitive_columns(cls, value):
+        return mask_identifier(value) if value else value
+
+    @field_validator("routing")
+    @classmethod
+    def _mask_routing_account_identifiers(cls, value):
+        return mask_routing(value)
 
 
 # ── UK Statutory Pay Calculator (ZP-TAX-UK-2026-27-001 §11/§12 gap-────────
@@ -2073,6 +2116,7 @@ class ReportTemplateUpsert(BaseModel):
 
 class ReportTemplateStatusUpdate(BaseModel):
     status: str
+    reason: Optional[str] = Field(None, max_length=1000)   # recorded in the audit trail (Phase 5.8)
 
 
 # ── Statutory Filing Calendar (jurisdiction-wide; Super Admin-authored) ──
@@ -2343,6 +2387,128 @@ class JMAnnualReportGenerateRequest(BaseModel):
     year: int
 
 
+class SGAnnualReportGenerateRequest(BaseModel):
+    """Singapore IR8A annual data extract — one calendar (income) year."""
+    report_template_id: int
+    year: int
+
+
+class SGIr21CaseCreateRequest(BaseModel):
+    """Open a Singapore IR21 tax-clearance case (withholding starts at awareDate)."""
+    model_config = ConfigDict(populate_by_name=True)
+    employee_id: int = Field(validation_alias="employeeId")
+    trigger_type: str = Field(validation_alias="triggerType")      # CESSATION | OVERSEAS_POSTING | DEPARTURE
+    trigger_date: date = Field(validation_alias="triggerDate")
+    aware_date: date = Field(validation_alias="awareDate")
+
+
+class SGIr21CaseTransitionRequest(BaseModel):
+    """One IR21 lifecycle step — the fields each target status needs."""
+    model_config = ConfigDict(populate_by_name=True)
+    status: str
+    filed_date: Optional[date] = Field(None, validation_alias="filedDate")
+    filing_reference: Optional[str] = Field(None, validation_alias="filingReference", max_length=100)
+    directive_date: Optional[date] = Field(None, validation_alias="directiveDate")
+    directive_reference: Optional[str] = Field(None, validation_alias="directiveReference", max_length=100)
+    directive_tax_amount: Optional[Decimal] = Field(None, validation_alias="directiveTaxAmount")
+    exemption_category: Optional[str] = Field(None, validation_alias="exemptionCategory")
+    reason: Optional[str] = None
+
+
+class SGSalaryDeductionCreate(BaseModel):
+    """A Singapore Employment Act salary deduction (MOM category + evidence)."""
+    model_config = ConfigDict(populate_by_name=True)
+    category: str
+    start_date: date = Field(validation_alias="startDate")
+    end_date: Optional[date] = Field(None, validation_alias="endDate")
+    evidence_ref: str = Field(validation_alias="evidenceRef", max_length=100)
+    evidence_date: date = Field(validation_alias="evidenceDate")
+    amount: Optional[Decimal] = None
+    rate_pct: Optional[Decimal] = Field(None, validation_alias="ratePct")
+    total_to_collect: Optional[Decimal] = Field(None, validation_alias="totalToCollect")
+    priority: Optional[int] = None
+
+
+class SGCorrectionRequest(BaseModel):
+    """Append-only correction of a finalized Singapore payslip (SG-044)."""
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class SGRestoreFreezeRequest(BaseModel):
+    """SG-047 disaster-recovery freeze of external submissions."""
+    model_config = ConfigDict(populate_by_name=True)
+    restore_point: str = Field(validation_alias="restorePoint", min_length=3, max_length=200)
+    # Optional: only SG runs paid on / after this date are put on a bank-export hold.
+    restore_date: Optional[date] = Field(None, validation_alias="restoreDate")
+
+
+class SGBankHoldReleaseRequest(BaseModel):
+    """SG-047: the bank reconciliation that releases a post-restore bank-export hold."""
+    model_config = ConfigDict(populate_by_name=True)
+    reference: str = Field(min_length=3, max_length=100)
+
+
+class SGCessationRequest(BaseModel):
+    """Singapore termination — the last day of employment."""
+    model_config = ConfigDict(populate_by_name=True)
+    date_of_leaving: date = Field(validation_alias="dateOfLeaving")
+
+
+class SGCpfEzpayGenerateRequest(BaseModel):
+    """Prepare the CPF EZPay contribution file for one CPF wage month."""
+    model_config = ConfigDict(populate_by_name=True)
+    report_template_id: int = Field(validation_alias="reportTemplateId")
+    year: int
+    month: int  # 1-12
+    advice_code: str = Field("01", validation_alias="adviceCode", pattern=r"^(0[1-9]|[1-9]\d)$")
+
+
+class SGCpfEzpayTransitionRequest(BaseModel):
+    """One CPF EZPay lifecycle step (APPROVED / SUBMITTED / ACCEPTED / REJECTED / UNKNOWN)."""
+    model_config = ConfigDict(populate_by_name=True)
+    status: str
+    reference: Optional[str] = Field(None, max_length=100)
+    note: Optional[str] = Field(None, max_length=1000)
+    # The authority's own validation / rejection messages, recorded verbatim
+    # with a REJECTED / UNKNOWN outcome (IR8A: IRAS; EZPay: CPF Board).
+    errors: Optional[List[str]] = None
+
+
+class SGIr8aModificationCreateRequest(BaseModel):
+    """Phase 6.8 (G3): revise or amend an IRAS-acknowledged IR8A extract.
+    `method` is REVISION or AMENDMENT (validated, and refusals audited, by
+    service.create_sg_ir8a_modification)."""
+    model_config = ConfigDict(populate_by_name=True)
+    method: str = Field(..., max_length=12)
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class SingaporeCalculationPreviewRequest(BaseModel):
+    """Read-only Super Admin preview of a Singapore calculation against ONE
+    selected pack's canonical rows (any status — so Draft content can be
+    tested before approval). Every statutory value is resolved server-side
+    from that pack; the request carries only employee facts and wages,
+    never a rate. Nothing is persisted."""
+    jurisdictionPackId: int
+    payDate: date
+    gross: Decimal
+    additionalWages: Decimal = Decimal("0")
+    residencyStatus: Optional[str] = None           # SC | SPR | FOREIGN
+    sprEffectiveDate: Optional[date] = None
+    contributionArrangement: Optional[str] = None   # GG | FG | FF
+    workPass: Optional[str] = None                  # NONE | EP | S_PASS | WORK_PERMIT
+    shgFunds: Optional[str] = None                  # NONE | CDAC | "MBMF,SINDA" ...
+    dateOfBirth: Optional[date] = None
+    dateOfJoining: Optional[date] = None
+    dateOfLeaving: Optional[date] = None
+    employmentType: Optional[str] = None            # Full-time | Part-time
+    employerHiresForeignWorkers: Optional[bool] = None
+    ytdOwSubjectBefore: Optional[Decimal] = None
+    ytdAwSubjectBefore: Optional[Decimal] = None
+    ytdAwPaidBefore: Optional[Decimal] = None
+    awLedger: Optional[List[dict]] = None
+
+
 class RtiSubmissionCreate(BaseModel):
     generated_report_id: int
 
@@ -2449,6 +2615,14 @@ class CanonicalTaxSlabResponse(BaseModel):
     employerRatePct: Optional[Decimal] = Field(None, validation_alias="employer_rate_pct", serialization_alias="employerRatePct")
     filingStatus: Optional[str] = Field(None, validation_alias="filing_status", serialization_alias="filingStatus")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+    # Row-level effective dating / per-row evidence (models.py
+    # ContributionRate/TaxSlab.effective_from/effective_to/
+    # source_document_id) — read-only, additive; NULL on every row that
+    # doesn't set them. Exposed 2026-09-23 so Singapore's LQS 1 Jul 2026
+    # boundary renders from data rather than a hardcoded UI date.
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -2468,6 +2642,14 @@ class CanonicalContributionRateResponse(BaseModel):
     flatAmount: Optional[Decimal] = Field(None, validation_alias="flat_amount", serialization_alias="flatAmount")
     textValue: Optional[str] = Field(None, validation_alias="text_value", serialization_alias="textValue")
     sortOrder: int = Field(0, validation_alias="sort_order", serialization_alias="sortOrder")
+    # Row-level effective dating / per-row evidence (models.py
+    # ContributionRate/TaxSlab.effective_from/effective_to/
+    # source_document_id) — read-only, additive; NULL on every row that
+    # doesn't set them. Exposed 2026-09-23 so Singapore's LQS 1 Jul 2026
+    # boundary renders from data rather than a hardcoded UI date.
+    effectiveFrom: Optional[date] = Field(None, validation_alias="effective_from", serialization_alias="effectiveFrom")
+    effectiveTo: Optional[date] = Field(None, validation_alias="effective_to", serialization_alias="effectiveTo")
+    sourceDocumentId: Optional[int] = Field(None, validation_alias="source_document_id", serialization_alias="sourceDocumentId")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

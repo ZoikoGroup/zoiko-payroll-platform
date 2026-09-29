@@ -55,10 +55,12 @@ function PayrollLayout({ children }) {
 
       <div className="flex-1 overflow-auto">{children}</div>
 
-      <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 max-w-sm w-full">
+      {/* Always-mounted live region: toasts are announced; errors assertively. */}
+      <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2 max-w-sm w-full" aria-live="polite" aria-relevant="additions">
         {toasts.map((toast) => (
           <div
             key={toast.id}
+            role={toast.type === "error" ? "alert" : "status"}
             className={`rounded-[18px] border px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)] flex items-center justify-between text-[13px] transition-all duration-200 ${
               toast.type === "success" ? "bg-success-light bg-success-light border-primary/30 dark:border-primary/40 text-primary-hover dark:text-primary"
               : toast.type === "error" ? "bg-error-light border-error/30 dark:border-error/40 text-error"
@@ -66,8 +68,8 @@ function PayrollLayout({ children }) {
             }`}
           >
             <span>{toast.message}</span>
-            <button onClick={() => removeToast(toast.id)} className="ml-3 rounded-[10px] p-1 hover:bg-surface-muted text-foreground-muted transition-all duration-200">
-              <X size={14} />
+            <button type="button" onClick={() => removeToast(toast.id)} aria-label="Dismiss notification" className="ml-3 rounded-[10px] p-1 hover:bg-surface-muted text-foreground-muted transition-all duration-200">
+              <X size={14} aria-hidden="true" />
             </button>
           </div>
         ))}

@@ -285,6 +285,66 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    # Singapore (ZP-SG-ENG-001 §9 Employer Registration panels A–E) — schema
+    # only. Deliberately NOT in REGISTRATION_COUNTRIES above: the spec's
+    # production gates G1–G8 must be evidenced before any Singapore
+    # organization can be onboarded. UEN pattern covers the three published
+    # UEN shapes (business 8 digits + letter, local company 9 digits +
+    # letter, other entity T/S/R-prefixed). CSN per CPF Board "CPF EZPay
+    # (FTP) File Specifications" (effective 16 Jan 2025): UEN/NRIC/FIN (9 or
+    # 10 bytes) + Payment Type (3, e.g. PTE/AMS/VCT) + Sno (2), e.g.
+    # "234567891APTE01" (hyphens tolerated for readability). The remaining
+    # keys are the employer's registration SETTINGS (enumerated, validated
+    # by pattern; "options" lets the form render a choice list) that the
+    # Singapore readiness check (SG-027) reads — none is a statutory rate.
+    "SG": {
+        "label": "UEN / CPF Submission Number (CSN)",
+        "currency": "SGD",
+        "fields": [
+            {
+                "key": "uen",
+                "label": "UEN",
+                "pattern": r"^(\d{8}[A-Z]|\d{9}[A-Z]|[TSR]\d{2}[A-Z]{2}\d{4}[A-Z])$",
+                "example": "201912345K",
+                "primary": True,
+            },
+            {
+                "key": "cpf_submission_number",
+                "label": "CPF Submission Number (CSN)",
+                "pattern": r"^[A-Z0-9]{9,10}-?[A-Z]{3}-?\d{2}$",
+                "example": "201912345KPTE01",
+                "primary": False,
+            },
+            {"key": "cpf_ezpay_method", "label": "CPF EZPay submission method", "pattern": r"^(FILE_UPLOAD|ONLINE_FORM)$",
+             "example": "FILE_UPLOAD", "primary": False, "options": ["FILE_UPLOAD", "ONLINE_FORM"]},
+            {"key": "cpf_payment_method", "label": "CPF payment method", "pattern": r"^(DIRECT_DEBIT|PAYNOW|OTHER)$",
+             "example": "DIRECT_DEBIT", "primary": False, "options": ["DIRECT_DEBIT", "PAYNOW", "OTHER"]},
+            {"key": "ais_status", "label": "IRAS AIS participation", "pattern": r"^(PARTICIPANT|NOT_PARTICIPATING)$",
+             "example": "PARTICIPANT", "primary": False, "options": ["PARTICIPANT", "NOT_PARTICIPATING"]},
+            {"key": "ais_submission_mode", "label": "IRAS AIS submission mode", "pattern": r"^(EXPORT_ONLY|DIRECT_API)$",
+             "example": "EXPORT_ONLY", "primary": False, "options": ["EXPORT_ONLY", "DIRECT_API"]},
+            {"key": "corppass_authorised", "label": "Corppass authorisation for AIS in place", "pattern": r"^(YES|NO)$",
+             "example": "YES", "primary": False, "options": ["YES", "NO"]},
+            {"key": "annual_reporting_owner", "label": "Annual IRAS reporting owner", "pattern": r"^[A-Za-z0-9 .,'@&()/-]{2,100}$",
+             "example": "Finance Manager", "primary": False},
+            {"key": "employs_foreign_workers", "label": "Employs EP / S Pass / Work Permit holders", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "mom_sector", "label": "MOM Work Permit sector",
+             "pattern": r"^(SERVICES|MANUFACTURING|CONSTRUCTION|PROCESS|MARINE_SHIPYARD|NOT_APPLICABLE)$",
+             "example": "SERVICES", "primary": False,
+             "options": ["SERVICES", "MANUFACTURING", "CONSTRUCTION", "PROCESS", "MARINE_SHIPYARD", "NOT_APPLICABLE"]},
+            {"key": "mom_levy_payment", "label": "MOM levy payment method", "pattern": r"^(GIRO|PAYNOW_QR|NOT_APPLICABLE)$",
+             "example": "GIRO", "primary": False, "options": ["GIRO", "PAYNOW_QR", "NOT_APPLICABLE"]},
+            {"key": "pwm_applicable", "label": "Progressive Wage Model applies to some employees", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "sdl_payment_route", "label": "SDL payment route", "pattern": r"^(CPF_EZPAY|OTHER)$",
+             "example": "CPF_EZPAY", "primary": False, "options": ["CPF_EZPAY", "OTHER"]},
+            {"key": "bank_workflow_validated", "label": "Salary bank-payment workflow validated", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "pdpa_controls_approved", "label": "PDPA / NRIC handling controls approved", "pattern": r"^(YES|NO)$",
+             "example": "NO", "primary": False, "options": ["YES", "NO"]},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -308,6 +368,7 @@ COUNTRY_NAME_TO_CODE = {
     "the bahamas": "BS",
     "trinidad and tobago": "TT",
     "trinidad & tobago": "TT",
+    "singapore": "SG",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -323,6 +384,7 @@ CODE_TO_COUNTRY_NAME = {
     "JM": "Jamaica",
     "BS": "Bahamas",
     "TT": "Trinidad and Tobago",
+    "SG": "Singapore",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

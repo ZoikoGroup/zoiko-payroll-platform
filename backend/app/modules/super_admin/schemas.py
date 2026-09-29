@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.modules.auth.models import UserRole
 
@@ -87,8 +87,29 @@ class ApplicableOrganization(BaseModel):
     organizationCode: Optional[str] = None
 
 
+class SgEvidenceReview(BaseModel):
+    """Singapore gate / decision evidence review outcome (never the registrant)."""
+    outcome: str                      # ACCEPTED | REJECTED
+    notes: Optional[str] = None       # required for REJECTED
+    validUntil: Optional[date] = None  # ACCEPTED only; the gate turns EXPIRED after it
+
+
+class SgDecisionCreate(BaseModel):
+    """Owner decision D1 / D2 / D3 — the selected option and the reason."""
+    key: str
+    selectedValue: str
+    reason: str
+
+
+class SourceArtifactSupersede(BaseModel):
+    """Singapore gate / decision evidence: the artifact that replaces this one."""
+    replacementId: int
+
+
 class PolicyStatusUpdate(BaseModel):
     status: str
+    # Optional; kept on the tax pack's status_change audit row.
+    reason: Optional[str] = Field(None, max_length=2000)
 
 
 # ── Finance (Super Admin) ───────────────────────────────────────────────────
@@ -177,3 +198,48 @@ class DashboardChartsResponse(BaseModel):
     payrollByJurisdiction: list[dict]
     complianceOverview: dict
     employeesByCountry: list[dict]
+
+
+# ── Singapore statutory administration (read-only, tenant-independent) ────
+# Same {items, total} list convention as FinanceOverviewResponse /
+# ReportsListResponse; values are the service's own serialization (money as
+# Decimal strings, dates ISO strings), never re-derived here.
+
+class SgpPwmScheduleResponse(BaseModel):
+    id: int
+    jurisdiction: str
+    sector: str
+    occupationGroup: str
+    jobLevel: str
+    roleLabel: str
+    effectiveFrom: str
+    effectiveTo: Optional[str] = None
+    overtimeHours: int
+    requiredGross: str
+    sourceDocumentId: int
+    sourceTitle: Optional[str] = None
+    sourceUrl: Optional[str] = None
+    sourceSha256: str
+    retrievedAt: Optional[str] = None
+    status: str
+
+
+class SgpPwmSchedulePageResponse(BaseModel):
+    items: list[SgpPwmScheduleResponse]
+    total: int
+    skip: int
+    limit: int
+    readOnly: bool
+    classification: str
+
+
+class SgpStatutoryAdminSummaryResponse(BaseModel):
+    jurisdiction: str
+    asOf: str
+    activationReadiness: dict
+    activePack: Optional[dict] = None
+    valuesFromPack: Optional[dict] = None
+    valuesFromActivePack: bool
+    packs: list[dict]
+    sections: list[dict]
+    certification: str

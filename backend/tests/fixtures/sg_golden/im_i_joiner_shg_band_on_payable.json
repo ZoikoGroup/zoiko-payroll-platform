@@ -1,0 +1,289 @@
+{
+  "description": "I. S$3,000 CDAC, joins 16 Jun: 1,500 payable → CDAC band ≤ $2,000 = $0.50 (the contractual 3,000 would be $1).",
+  "source": "Phase 5.2 golden vectors. Expected figures are computed HERE, independently of the engine, from:   MOM incomplete-month salary: monthly gross rate / working days x days worked     (working days: Mon-Fri; 5.5-day = Sat half; Sun rest; PH included) —     cross-checked against MOM's incomplete-month.xls table (June 2026 = 22 /     24 / 26, August 2026 = 21);   CPF Board Table 1 (SC <= 55, 2026): TW <= 50 nil; 50-500 employer 17% of TW;     500-750 total 17% TW + 0.6 (TW - 500), employee 0.6 (TW - 500);     > 750 total 37%, employee 20% of (OW capped at 8,000 + AW); total rounded     to the nearest dollar, employee share drops cents;   SDL 0.25% of total wages, min $2, max $11.25; CDAC bands (CPF Board SHG).",
+  "derivation": {
+    "workPattern": "5_DAY",
+    "workingDaysInMonth": "22",
+    "daysWorked": "11",
+    "salaryPayable": "1500.00",
+    "totalWages": "1500.00"
+  },
+  "context": {
+    "country": "SG",
+    "pay_frequency": "Monthly",
+    "date_of_birth": "1986-03-15",
+    "sgp_cpf_residency_status": "SC",
+    "sgp_work_pass_type": "NONE",
+    "sgp_shg_funds": "CDAC",
+    "rate_map": {
+      "cpf_ow_ceiling_monthly": {
+        "flat_amount": "8000"
+      },
+      "cpf_annual_wage_ceiling": {
+        "flat_amount": "102000"
+      },
+      "cpf_age_band_semantics": {
+        "text_value": "MONTH_AFTER_BIRTHDAY"
+      },
+      "sdl": {
+        "employer_rate_pct": "0.0025"
+      },
+      "sdl_min_monthly": {
+        "flat_amount": "2"
+      },
+      "sdl_max_monthly": {
+        "flat_amount": "11.25"
+      }
+    },
+    "slabs": [
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "60",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "20",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_LE_55-FULL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "16",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "54",
+        "employer_rate_pct": "16",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SC_SPR3",
+        "tax_regime": "AGE_55_60",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "18",
+        "employer_rate_pct": "16",
+        "rate_label": "CPF-2026-SC_SPR3-AGE_55_60-FULL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "4",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "15",
+        "employer_rate_pct": "4",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR1_GG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "5",
+        "employer_rate_pct": "4",
+        "rate_label": "CPF-2026-SPR1_GG-AGE_LE_55-FULL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "NIL",
+        "min_amount": "0",
+        "max_amount": "50",
+        "rate_pct": "0",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-NIL"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "ER_ONLY",
+        "min_amount": "50",
+        "max_amount": "500",
+        "rate_pct": "0",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-ER_ONLY"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "PHASE_IN",
+        "min_amount": "500",
+        "max_amount": "750",
+        "rate_pct": "45",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-PHASE_IN"
+      },
+      {
+        "rule_type": "CPF_RATE_BAND",
+        "filing_status": "SPR2_FG",
+        "tax_regime": "AGE_LE_55",
+        "assessment_basis": "FULL",
+        "min_amount": "750",
+        "max_amount": null,
+        "rate_pct": "15",
+        "employer_rate_pct": "17",
+        "rate_label": "CPF-2026-SPR2_FG-AGE_LE_55-FULL"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "0",
+        "max_amount": "2000",
+        "rate_pct": "0",
+        "flat_amount": "0.50",
+        "rate_label": "SHG-CDAC-0"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "2000",
+        "max_amount": "3500",
+        "rate_pct": "0",
+        "flat_amount": "1",
+        "rate_label": "SHG-CDAC-1"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "3500",
+        "max_amount": "5000",
+        "rate_pct": "0",
+        "flat_amount": "1.50",
+        "rate_label": "SHG-CDAC-2"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "5000",
+        "max_amount": "7500",
+        "rate_pct": "0",
+        "flat_amount": "2",
+        "rate_label": "SHG-CDAC-3"
+      },
+      {
+        "rule_type": "SHG_FUND_BAND",
+        "filing_status": "CDAC",
+        "min_amount": "7500",
+        "max_amount": null,
+        "rate_pct": "0",
+        "flat_amount": "3",
+        "rate_label": "SHG-CDAC-4"
+      }
+    ],
+    "pay_date": "2026-06-30",
+    "period_start": "2026-06-01",
+    "period_end": "2026-06-30",
+    "ytd_cpf_ow_subject_before": "0",
+    "ytd_cpf_aw_subject_before": "0",
+    "ytd_cpf_aw_paid_before": "0",
+    "sgp_aw_ledger": [],
+    "gross": "3000",
+    "basic": "3000",
+    "overtime": "0",
+    "additional_compensation": "0",
+    "calendar_days": 30,
+    "unpaid_leave_days": 0,
+    "sgp_employment_facts": {
+      "workPattern": "5_DAY",
+      "restDay": null,
+      "unpaidDates": []
+    },
+    "date_of_joining": "2026-06-16"
+  },
+  "expected": {
+    "gross": "3000",
+    "attendance_deduction": "1500.00",
+    "employee_pension": "300",
+    "employer_pension": "255",
+    "employer_payroll_tax": "3.75",
+    "professional_tax": "0.50",
+    "net_pay": "1199.50",
+    "ytd_cpf_ow_subject_after": "1500.00",
+    "payable_days": "11",
+    "calendar_days": "22"
+  }
+}

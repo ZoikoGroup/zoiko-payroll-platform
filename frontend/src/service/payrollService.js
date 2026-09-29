@@ -2146,3 +2146,142 @@ export const calculateCaWsdrf = async (payload) => {
     training_expenditure_override: payload.trainingExpenditureOverride || null,
   });
 };
+// ── Singapore IR21 tax clearance (hold / clearance / release) ──────────
+// Tenant-scoped on the server (the caller's own organization only);
+// lifting a hold needs a distinct approver, enforced server-side.
+export const listSgIr21Cases = async (params = {}) => {
+  const res = await api.get("/api/payroll/singapore/ir21-cases", { params });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const createSgIr21Case = async (payload) =>
+  // { employeeId, triggerType, triggerDate, awareDate }
+  api.post("/api/payroll/singapore/ir21-cases", payload);
+
+export const transitionSgIr21Case = async (caseId, payload) =>
+  // { status, filedDate?, filingReference?, directiveDate?, directiveReference?, directiveTaxAmount?, exemptionCategory?, reason? }
+  api.post(`/api/payroll/singapore/ir21-cases/${caseId}/transition`, payload);
+
+// ── Singapore Phase 5 — readiness, preflight, CPF EZPay, Compliance Centre ──
+// Every figure and status is computed by the server; these calls only fetch
+// or submit an operator's decision.
+export const getSgEmployerReadiness = async () => api.get("/api/payroll/singapore/readiness");
+
+export const getSgComplianceCentre = async () => api.get("/api/payroll/singapore/compliance-centre");
+
+export const getSgRunPreflight = async (runId) => api.get(`/api/payroll/singapore/runs/${runId}/preflight`);
+
+export const getSgAisReadiness = async (year) => api.get("/api/payroll/singapore/ais-readiness", { params: { year } });
+
+export const listSgPwmClassifications = async () => {
+  const res = await api.get("/api/payroll/singapore/pwm-classifications");
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const recordSgCessation = async (employeeId, dateOfLeaving) =>
+  api.post(`/api/payroll/singapore/employees/${employeeId}/cessation`, { dateOfLeaving });
+
+export const listSgCpfEzpay = async () => {
+  const res = await api.get("/api/payroll/generated-reports", { params: { reportType: "SG_CPF_EZPAY" } });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+
+export const prepareSgCpfEzpay = async ({ year, month, adviceCode = "01" }) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_CPF_EZPAY" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error("No Active CPF EZPay template for this year.");
+  return api.post("/api/payroll/singapore/reports/cpf-ezpay", { reportTemplateId: templateId, year, month, adviceCode });
+};
+
+// Singapore Phase 5.7 — internal compliance reports (PWM / LQS per CPF wage
+// month, IR21 register per year) generated server-side from the existing
+// evaluators. Resolves the Active template like prepareSgCpfEzpay; these
+// routes take snake_case bodies (GY/JM monthly/annual request schemas).
+const SG_COMPLIANCE_REPORTS = {
+  SG_PWM_COMPLIANCE: "pwm-compliance",
+  SG_LQS_COMPLIANCE: "lqs-compliance",
+  SG_IR21_REGISTER: "ir21-register",
+};
+
+export const generateSgComplianceReport = async (reportType, { year, month }) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active ${reportType} template for ${year}.`);
+  const body = reportType === "SG_IR21_REGISTER"
+    ? { report_template_id: templateId, year }
+    : { report_template_id: templateId, year, month };
+  return api.post(`/api/payroll/singapore/reports/${SG_COMPLIANCE_REPORTS[reportType]}`, body);
+};
+
+export const transitionSgCpfEzpay = async (reportId, payload) =>
+  // { status: APPROVED | SUBMITTED | ACCEPTED | REJECTED | UNKNOWN, reference?, note? }
+  api.post(`/api/payroll/singapore/reports/cpf-ezpay/${reportId}/transition`, payload);
+
+export const downloadSgCpfEzpayFile = async (reportId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}/api/payroll/singapore/reports/cpf-ezpay/${reportId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let detail = "The CPF EZPay file could not be downloaded.";
+    try { detail = (await res.json())?.detail || detail; } catch { /* non-JSON error body */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const match = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `cpf-ezpay-${reportId}.DTL`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  return { filename };
+};
+
+// ── Singapore Phase 5.1 — corrections, salary deductions, DR freeze ─────
+export const correctSgPayslip = async (payslipId, reason) =>
+  api.post(`/api/payroll/singapore/payslips/${payslipId}/corrections`, { reason });
+
+export const listSgPayslipCorrections = async (payslipId) =>
+  api.get(`/api/payroll/singapore/payslips/${payslipId}/corrections`);
+
+export const createSgSalaryDeduction = async (employeeId, payload) =>
+  // { category, startDate, endDate?, evidenceRef, evidenceDate, amount? | ratePct?, totalToCollect?, priority? }
+  api.post(`/api/payroll/singapore/employees/${employeeId}/deductions`, payload);
+
+export const listSgSalaryDeductions = async (employeeId) =>
+  api.get(`/api/payroll/singapore/employees/${employeeId}/deductions`);
+
+export const freezeSgAfterRestore = async (restorePoint, restoreDate) =>
+  api.post("/api/payroll/singapore/disaster-recovery/freeze", { restorePoint, restoreDate: restoreDate || null });
+
+// Singapore SG-047 — release a post-restore bank-export hold after the bank reconciliation.
+export const releaseSgBankExportHold = async (runId, reference) =>
+  api.post(`/api/payroll/singapore/disaster-recovery/bank-hold/${runId}/release`, { reference });
+
+// Singapore SG-023 — IR8A extracts and their controlled manual-submission record (API DIRECT SUBMISSION: NOT READY).
+export const listSgIr8a = async () => {
+  const res = await api.get("/api/payroll/singapore/reports/ir8a");
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const transitionSgIr8a = async (reportId, { status, reference, note }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/transition`, { status, reference, note });
+// Prepare an EXPORT_READY IR8A extract for one income year from the Active SG_IR8A template.
+export const generateSgIr8a = async (year) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_IR8A" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active IR8A template for ${year}.`);
+  return api.post("/api/payroll/singapore/reports/ir8a", { report_template_id: templateId, year });
+};
+// Phase 6.8 (G3) — Revision (full values) / Amendment (differences) of an IRAS-acknowledged extract.
+export const createSgIr8aModification = async (reportId, { method, reason }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/modifications`, { method, reason });

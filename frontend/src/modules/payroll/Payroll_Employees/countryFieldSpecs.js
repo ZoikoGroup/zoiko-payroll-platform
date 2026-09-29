@@ -177,6 +177,42 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "bir_file_number", label: "BIR file number", type: "text", placeholder: "9-10 digits", pattern: /^\d{9,10}$/, error: "BIR file number must be 9 to 10 digits." },
     { key: "nibtt_number", label: "NIBTT number", type: "text", pattern: /^[A-Za-z0-9-]{4,20}$/, error: "NIBTT number looks incorrect." },
   ],
+  // Singapore (ZP-SG-ENG-001 §10) — the CPF cohort facts the engine derives
+  // the contribution table from; there is deliberately no rate field
+  // (SG-029). Mirrors backend SGEmployeeValidation; SHG takes authority/HR
+  // fund codes, never race/religion attributes (SG-015).
+  SG: [
+    { key: "nric_fin", label: "NRIC / FIN", type: "text", placeholder: "S1234567D", pattern: /^[STFGMstfgm]\d{7}[A-Za-z]$/, error: "NRIC/FIN must be a letter (S/T/F/G/M), 7 digits and a letter." },
+    { key: "cpf_residency_status", label: "CPF residency status", type: "select", choices: ["SC", "SPR", "FOREIGN"] },
+    { key: "spr_effective_date", label: "SPR effective date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "SPR effective date must be in YYYY-MM-DD format.", showWhen: (cf) => (cf?.cpf_residency_status || "").toUpperCase() === "SPR" },
+    { key: "cpf_contribution_arrangement", label: "CPF contribution arrangement (SPR years 1-2)", type: "select", choices: ["GG", "FG", "FF"], showWhen: (cf) => (cf?.cpf_residency_status || "").toUpperCase() === "SPR" },
+    { key: "work_pass_type", label: "Work pass", type: "select", choices: ["NONE", "EP", "S_PASS", "WORK_PERMIT"] },
+    // MOM: S Pass levy liability runs from the day the pass is issued until it is cancelled or expires.
+    { key: "work_pass_issue_date", label: "Work pass issue date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Work pass issue date must be in YYYY-MM-DD format.", showWhen: (cf) => !["", "NONE"].includes((cf?.work_pass_type || "").toUpperCase()) },
+    { key: "work_pass_end_date", label: "Work pass cancellation / expiry date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Work pass end date must be in YYYY-MM-DD format.", showWhen: (cf) => !["", "NONE"].includes((cf?.work_pass_type || "").toUpperCase()) },
+    // MOM: the levy stops 1 day before a CANCELLATION; the expiry-day rule is not published (levy then BLOCKS).
+    { key: "work_pass_end_reason", label: "Work pass end reason", type: "select", choices: ["CANCELLED", "EXPIRED"], pattern: /^(CANCELLED|EXPIRED)$/, error: "Choose CANCELLED or EXPIRED.", showWhen: (cf) => Boolean(cf?.work_pass_end_date) },
+    { key: "shg_funds", label: "SHG fund(s)", type: "text", placeholder: "NONE or e.g. MBMF,SINDA", pattern: /^\s*(NONE|(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?(\s*,\s*(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?)*)\s*$/i, error: "SHG funds must be NONE or a comma-separated list of CDAC, ECF, MBMF, SINDA — optionally with the SHG-instructed monthly amount, e.g. MBMF=10.00." },
+    { key: "shg_evidence_ref", label: "SHG opt-out / alternate amount evidence ref.", type: "text", placeholder: "e.g. CDAC-OPTOUT-2026-014" },
+    // MOM Work Permit levy classification (sector / skill / MOM-allocated tier) — the levy is never guessed without them.
+    { key: "wp_sector", label: "MOM Work Permit sector", type: "select", choices: ["SERVICES", "MANUFACTURING", "CONSTRUCTION", "PROCESS", "MARINE_SHIPYARD"], showWhen: (cf) => (cf?.work_pass_type || "").toUpperCase() === "WORK_PERMIT" },
+    { key: "wp_skill_level", label: "Work Permit skill level (R1 higher / R2 basic)", type: "select", choices: ["R1", "R2"], showWhen: (cf) => (cf?.work_pass_type || "").toUpperCase() === "WORK_PERMIT" },
+    { key: "wp_levy_tier", label: "MOM levy tier (from the levy bill)", type: "select", choices: ["TIER_1", "TIER_2", "TIER_3", "NTS", "MYS_NAS_PRC", "OFFSITE", "NO_CERT", "ALL"], showWhen: (cf) => (cf?.work_pass_type || "").toUpperCase() === "WORK_PERMIT" },
+    // Employment Act facts — Part 4 coverage is computed server-side from these and the basic salary.
+    { key: "ea_workman", label: "Workman (mainly manual work)", type: "select", choices: ["YES", "NO"] },
+    { key: "ea_manager_executive", label: "Manager / executive", type: "select", choices: ["YES", "NO"] },
+    { key: "ea_contractual_weekly_hours", label: "Contractual weekly hours", type: "text", placeholder: "44", pattern: /^\d{1,2}(\.\d{1,2})?$/, error: "Contractual weekly hours must be a number, e.g. 44" },
+    { key: "ea_rest_day", label: "Rest day", type: "select", choices: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] },
+    { key: "ea_work_pattern", label: "Work pattern (MOM incomplete-month working days)", type: "select",
+      choices: ["5_DAY", "5_5_DAY", "6_DAY"] },
+    // Progressive Wage Model classification — the floor comes from the Active pack (Compliance Centre / preflight).
+    { key: "pwm_sector", label: "PWM sector / Occupational PW", type: "select", choices: ["NONE", "CLEANING", "SECURITY", "LANDSCAPE", "LIFT_ESCALATOR", "RETAIL", "FOOD_SERVICES", "WASTE_MANAGEMENT", "OPW_ADMIN", "OPW_DRIVER"] },
+    { key: "employment_class", label: "Employment class (SG-002 release scope)", type: "select",
+      choices: ["STANDARD", "PLATFORM_WORKER", "SEAFARER", "OVERSEAS_ONLY", "EOR"] },
+    { key: "statutory_change_effective_date", label: "Effective date of this statutory change (residency / work pass / EA status / SHG / class)", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Effective date must be in YYYY-MM-DD format." },
+    { key: "pwm_group", label: "PWM group", type: "text", placeholder: "e.g. G1, OUTSOURCED, ALL", upper: true, showWhen: (cf) => !["", "NONE"].includes((cf?.pwm_sector || "").toUpperCase()) },
+    { key: "pwm_job_level", label: "PWM job level", type: "text", placeholder: "e.g. GENERAL_INDOOR, OFFICER", upper: true, showWhen: (cf) => !["", "NONE"].includes((cf?.pwm_sector || "").toUpperCase()) },
+  ],
 };
 
 // Every jurisdiction's compliance field, flattened into one list — used to
@@ -218,7 +254,9 @@ export function validateComplianceFields(countryCode, complianceFields) {
       errors.push(`${spec.label} must be one of: ${spec.choices.join(", ")} (got "${raw}").`);
       continue;
     }
-    if (spec.pattern && !spec.pattern.test(raw)) {
+    // Sensitive identifiers come back from the API masked (e.g. S****567D);
+    // a round-tripped mask is resolved server-side against the stored value.
+    if (spec.pattern && !raw.includes("*") && !spec.pattern.test(raw)) {
       errors.push(`${spec.error} (got "${raw}")`);
     }
   }
