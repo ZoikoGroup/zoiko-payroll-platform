@@ -796,6 +796,10 @@ class SGEmployeeValidation(EmployeeValidationStrategy):
             "pattern": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
             "error": "Work pass end (cancellation/expiry) date must be YYYY-MM-DD.",
         },
+        # Why the pass ends on work_pass_end_date: MOM states the levy stops
+        # 1 day before a CANCELLATION; the expiry-day rule is not published.
+        "work_pass_end_reason": {"upper": True, "strip_chars": " ", "pattern": re.compile(r"^(CANCELLED|EXPIRED)$"),
+                                 "error": "Work pass end reason: CANCELLED or EXPIRED"},
         # Authority/HR-derived fund codes only (SG-015) — never race/religion.
         "shg_funds": {
             "upper": True, "strip_chars": " ",

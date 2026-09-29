@@ -270,6 +270,9 @@ def find_active_tax_pack(
     return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
 
 
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG",)
+
+
 def get_jurisdiction_onboarding_block_reason(
     db: Session,
     country: Optional[str],
@@ -326,6 +329,17 @@ def get_jurisdiction_onboarding_block_reason(
 
     registry_row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == code).first()
     if registry_row is not None and registry_row.availability in ("NOT_AVAILABLE", "PLANNED"):
+        return (
+            f"'{country}' is not yet available for onboarding — "
+            "please contact your administrator or select a supported jurisdiction."
+        )
+    # Singapore closure (fail-closed, per-country opt-in): for these countries
+    # the registry row is REQUIRED. Without one, the gate below would open
+    # onboarding as soon as a canonical pack went Active — activating the
+    # statutory pack must never be what makes a jurisdiction commercially
+    # available (the owner's PLANNED -> AVAILABLE step is). Other countries keep
+    # the existing fall-through unchanged.
+    if registry_row is None and code in _REGISTRY_ROW_REQUIRED_COUNTRIES:
         return (
             f"'{country}' is not yet available for onboarding — "
             "please contact your administrator or select a supported jurisdiction."

@@ -132,11 +132,19 @@ def test_transition_graph_is_the_documented_lifecycle():
 # ── Maker-checker ──────────────────────────────────────────────────────────
 
 def test_self_approval_still_blocks_publication(db):
+    """Completion programme: the last editor's self-approval is now refused
+    at the Approve step itself (Singapore opt-in, the pack rule of 6.5 B);
+    the Publish gate still refuses an approver equal to the last editor."""
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
     t = _template(db)
-    service.set_report_template_approver(db, t.id, actor_id=MAKER)                # the last editor approves
+    with pytest.raises(BadRequestException, match="cannot approve it"):
+        service.set_report_template_approver(db, t.id, actor_id=MAKER)            # the last editor approves
+    t = service.get_report_template(db, t.id)
+    assert (t.status, t.approved_by_id) == ("Draft", None)
+    t.approved_by_id, t.status = MAKER, "Approved"                                 # e.g. a legacy row
+    db.commit()
     with pytest.raises(BadRequestException, match="distinct approver"):
         service.set_report_template_status(db, t.id, "Published", actor_id=MAKER)
 

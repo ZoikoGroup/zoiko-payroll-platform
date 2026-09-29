@@ -1,7 +1,7 @@
 """add singapore cpf employee columns
 
 Revision ID: c3d9e1f4a7b2
-Revises: a5f6e7d8c9b0
+Revises: 998877665544
 Create Date: 2026-09-23
 
 Singapore statutory build (ZP-SG-ENG-001), Phase 1 — the CPF cohort facts
@@ -11,6 +11,12 @@ column is touched, and every non-SG employee keeps NULL. Idempotent (skips
 a column that already exists, e.g. on a dev DB synced via create_all),
 same inspector-guarded shape as 0a0402792c76_add_ks_k4_dependents.
 See models.PayrollEmployee's own comment on these columns.
+
+Parent re-pointed (2026-09-29, R2) from a5f6e7d8c9b0 to 998877665544, the
+head of origin/main: main's f0b1c2d3e4f5 DROPS these sgp_* columns, and as a
+parallel branch from a5f6e7d8c9b0 it could run AFTER this revision and
+silently remove them (rehearsed: 0/11 columns left). Parenting on main's
+head makes the chain linear, so the Singapore columns are always added last.
 """
 from typing import Sequence, Union
 
@@ -20,7 +26,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'c3d9e1f4a7b2'
-down_revision: Union[str, Sequence[str], None] = 'a5f6e7d8c9b0'
+down_revision: Union[str, Sequence[str], None] = '998877665544'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

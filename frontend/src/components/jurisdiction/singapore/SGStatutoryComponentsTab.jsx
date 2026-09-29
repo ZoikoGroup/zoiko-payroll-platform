@@ -7,6 +7,7 @@ import { previewSingaporeCalculation } from "../../../service/superAdminService"
 import {
   CPF_AGE_BANDS, CPF_BLOCKED, CPF_COHORTS, CPF_WAGE_BANDS, IR21_STATUSES, IR21_WORKFLOW, NOT_BUILT, NOT_CONFIGURED, SHG_FUNDS,
   IR8A_STATUS, describeBand, findCpfCell, formatDate, formatPct, formatSgdAuto, fractionToPct, rateByKey, shgRows,
+  wageBandRange,
 } from "./sgComponentConfig";
 
 // Singapore "Statutory Components" tab — every figure is read from the
@@ -57,7 +58,7 @@ export default function SGStatutoryComponentsTab({ pack, rates, slabs, onReload,
 
       {band && (
         <SGBandFormModal
-          pack={pack} kind={band.kind} slab={band.slab} initial={band.initial}
+          pack={pack} slabs={slabs} kind={band.kind} slab={band.slab} initial={band.initial}
           onClose={() => setBand(null)}
           onSaved={() => { setBand(null); onReload?.(); }}
         />
@@ -199,7 +200,7 @@ function CpfSection({ pack, rates, slabs, onAddRate, onEditRate, onDeleteRate, o
             <thead className="bg-background text-left text-foreground-muted">
               <tr>
                 <th scope="col" className="px-3 py-2">Age band</th>
-                {CPF_WAGE_BANDS.map((b) => <th key={b.basis} scope="col" className="px-3 py-2">{b.label}<span className="block font-mono text-[10px] text-foreground-disabled">{b.basis}</span></th>)}
+                {CPF_WAGE_BANDS.map((b) => <th key={b.basis} scope="col" className="px-3 py-2">{b.label} <span className="font-normal">({wageBandRange(slabs, b.basis)})</span><span className="block font-mono text-[10px] text-foreground-disabled">{b.basis}</span></th>)}
               </tr>
             </thead>
             <tbody>
@@ -492,6 +493,8 @@ function ShgSection({ pack, slabs, openBand, onDeleteSlab }) {
 function ForeignWorkforceSection(props) {
   const sPass = rateByKey(props.rates, "fwl_s_pass_monthly");
   const lqs = rateByKey(props.rates, "lqs_full_time_monthly");
+  const wpRows = (props.rates || []).filter((r) => (r.componentKey || "").startsWith("fwl_wp__"))
+    .sort((a, b) => a.componentKey.localeCompare(b.componentKey));
   const passes = [
     { key: "EP", label: "Employment Pass", levy: "Nil" },
     { key: "S_PASS", label: "S Pass", levy: sPass ? `${formatSgdAuto(sPass.flatAmount)} / month` : null },
@@ -529,10 +532,12 @@ function ForeignWorkforceSection(props) {
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-[11px] text-foreground-muted">MOM levy bill import / reconciliation: {NOT_BUILT.momLevyImport}. Work Permit sector, skill, quota-tier and waiver-day tables are not configured.</p>
+        <p className="mt-2 text-[11px] text-foreground-muted">MOM levy bill import / reconciliation: {NOT_BUILT.momLevyImport}. Work Permit levy rows in this pack: {wpRows.length}{wpRows.length ? "" : " — not configured"}; values MOM does not publish stay unconfigured (BLOCKED), never defaulted.</p>
       </Card>
       <Card title="Levy configuration">
-        <ParameterTable caption="Foreign worker levy" {...props} keys={[{ key: "fwl_s_pass_monthly", label: "Foreign Worker Levy — S Pass (monthly)" }]} />
+        <ParameterTable caption="Foreign worker levy" {...props}
+          keys={[{ key: "fwl_s_pass_monthly", label: "Foreign Worker Levy — S Pass (monthly)" },
+            ...wpRows.map((r) => ({ key: r.componentKey, label: r.label || r.componentKey }))]} />
       </Card>
     </div>
   );

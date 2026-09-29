@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, ShieldAlert, XCircle } from "lucide-react";
 import { getCompliancePolicies, getFilingCalendarEntries, getTestCertificationRuns } from "../../../service/superAdminService";
 import {
-  HEALTH, IR21_WORKFLOW, NOT_BUILT, PRODUCTION_GATES, evaluateSgHealth, formatDate, formatSgdAuto, fractionToPct, rateByKey, shgRows, SHG_FUNDS,
+  HEALTH, IR21_WORKFLOW, NOT_BUILT, evaluateSgHealth, formatDate, formatSgdAuto, fractionToPct, rateByKey, shgRows, SHG_FUNDS,
 } from "./sgComponentConfig";
+import useSgStatutorySummary from "./useSgStatutorySummary";
 
 // Singapore Overview (JurisdictionLayout overviewTabOverride — the UK's
 // UKOverviewDashboard precedent). Read-only: component summary, Compliance
@@ -20,6 +21,16 @@ export default function SGOverviewDashboard({ pack, rates, slabs }) {
   const [latestRun, setLatestRun] = useState(null);
   const [aisEntry, setAisEntry] = useState(null);
   const [packs, setPacks] = useState([]);
+  // PWM reference data and statutory-operations state come from the backend
+  // summary (the PWM schedule is not a pack row, so `rates` cannot show it).
+  const summary = useSgStatutorySummary(undefined);
+  const sections = summary.data?.sections || [];
+  const pwmValues = sections.find((s) => s.key === "pwm")?.values;
+  const gates = summary.data?.activationReadiness?.productionGates || [];
+  const ops = Object.fromEntries((sections.find((s) => s.key === "operations")?.values?.items || []).map((i) => [i.key, i]));
+  const pwmText = summary.loading ? "PWM loading…" : summary.error ? "PWM unavailable" : pwmValues?.overtimeSchedule
+    ? `PWM ${pwmValues.floorRows ?? 0} floors · ${pwmValues.overtimeSchedule.totalRows} OT-gross rows`
+    : "PWM not configured";
 
   useEffect(() => {
     getTestCertificationRuns({ jurisdiction_country: "SG" })
@@ -61,8 +72,9 @@ export default function SGOverviewDashboard({ pack, rates, slabs }) {
         <Kpi label="SDL (employer cost)" value={val("sdl", (r) => fractionToPct(r.employerRatePct))} sub={`${val("sdl_min_monthly")} – ${val("sdl_max_monthly")}`} />
         <Kpi label="SHG" value={`${SHG_FUNDS.filter((f) => shgRows(slabs, f.key).length).length} of 4 funds`} sub="CDAC · ECF · MBMF · SINDA" />
         <Kpi label="Foreign Worker Levy" value={`S Pass ${val("fwl_s_pass_monthly")}`} sub="Employer cost — never deducted" />
-        <Kpi label="LQS / PWM" value={`FT ${val("lqs_full_time_monthly")}`} sub={`PT ${val("lqs_part_time_hourly", (r) => `${formatSgdAuto(r.flatAmount)}/h`)} · PWM not configured`} />
-        <Kpi label="IRAS AIS" value={NOT_BUILT.aisApi} sub="2026 income → YA2027" />
+        <Kpi label="LQS / PWM" value={`FT ${val("lqs_full_time_monthly")}`} sub={`PT ${val("lqs_part_time_hourly", (r) => `${formatSgdAuto(r.flatAmount)}/h`)} · ${pwmText}`} />
+        <Kpi label="IRAS AIS" value={ops.ais_api ? "API: external integration required" : NOT_BUILT.aisApi}
+          sub={ops.ir8a ? `IR8A export ${ops.ir8a.state === "READY" ? "ready" : ops.ir8a.state.toLowerCase().replace(/_/g, " ")} · 2026 income → YA2027` : "2026 income → YA2027"} />
         <Kpi label="IR21" value="Case workflow" sub="Per organization — IR21 Tax Clearance tab" />
         <Kpi label="Golden vectors" value={latestRun ? `${latestRun.status}` : "No run"} sub={latestRun ? `${latestRun.passedCases}/${latestRun.totalCases} · ${new Date(latestRun.runAt).toLocaleDateString("en-SG")}` : "Run from the Golden Vectors tab"} />
       </div>
@@ -117,12 +129,13 @@ export default function SGOverviewDashboard({ pack, rates, slabs }) {
           <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="sg-gates-heading">
             <h3 id="sg-gates-heading" className="mb-2 flex items-center gap-1.5 text-sm font-bold text-foreground"><ShieldAlert size={14} aria-hidden="true" /> Production gates (ZP-SG-ENG-001 §18)</h3>
             <ul className="grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
-              {PRODUCTION_GATES.map((g) => (
+              {gates.map((g) => (
                 <li key={g.key} className="flex items-start gap-1.5">
                   <XCircle size={12} className="mt-0.5 shrink-0 text-error" aria-hidden="true" />
-                  <span><span className="font-semibold text-foreground">{g.key}</span> <span className="text-foreground-secondary">{g.label}</span> <span className="text-[10px] font-bold text-error">NOT EVIDENCED</span></span>
+                  <span><span className="font-semibold text-foreground">{g.key}</span> <span className="text-foreground-secondary">{g.label}</span> <span className="text-[10px] font-bold text-error">{g.status.replace(/_/g, " ")}</span></span>
                 </li>
               ))}
+              {!gates.length && <li className="text-foreground-muted">{summary.loading ? "Loading…" : "Gate status unavailable"}</li>}
             </ul>
           </section>
         </div>

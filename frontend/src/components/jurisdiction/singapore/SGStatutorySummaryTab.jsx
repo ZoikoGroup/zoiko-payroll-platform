@@ -14,6 +14,22 @@ const STATUS_STYLE = {
   REVIEW: { cls: "text-warning", Icon: AlertTriangle },
   NOT_CONFIGURED: { cls: "text-foreground-muted", Icon: CircleDashed },
   BLOCKED: { cls: "text-error", Icon: XCircle },
+  READY: { cls: "text-success", Icon: CheckCircle2 },
+  TEMPLATE_NOT_ACTIVE: { cls: "text-warning", Icon: AlertTriangle },
+  TEMPLATE_MISSING: { cls: "text-error", Icon: XCircle },
+  NOT_IMPLEMENTED: { cls: "text-foreground-muted", Icon: CircleDashed },
+  EXTERNAL_INTEGRATION_REQUIRED: { cls: "text-warning", Icon: AlertTriangle },
+  EXTERNAL_DATA_REQUIRED: { cls: "text-warning", Icon: AlertTriangle },
+  EVIDENCE_REQUIRED: { cls: "text-warning", Icon: AlertTriangle },
+  SUBMITTED: { cls: "text-warning", Icon: AlertTriangle },
+  UNDER_REVIEW: { cls: "text-warning", Icon: AlertTriangle },
+  REJECTED: { cls: "text-error", Icon: XCircle },
+  EXPIRED: { cls: "text-error", Icon: XCircle },
+  SUPERSEDED: { cls: "text-foreground-muted", Icon: CircleDashed },
+  DECISION_RECORDED: { cls: "text-success", Icon: CheckCircle2 },
+  BUSINESS_DECISION_REQUIRED: { cls: "text-warning", Icon: AlertTriangle },
+  EXTERNAL_REQUIRED: { cls: "text-warning", Icon: AlertTriangle },
+  NOT_APPLICABLE: { cls: "text-foreground-muted", Icon: CircleDashed },
 };
 
 export function SgStatus({ status }) {
@@ -31,7 +47,7 @@ const LABELS = {
   rate: "SDL rate", minimumMonthly: "Minimum (monthly)", maximumMonthly: "Maximum (monthly)",
   fundBands: "SHG fund bands", funds: "SHG funds", fundCount: "Number of funds",
   sPassMonthly: "S Pass levy (monthly)", workPermitLevyRows: "Work Permit levy rows", paymentDueDay: "Levy payment due day",
-  sPassEndDayBasis: "Pass end-day basis", fullTimeMonthly: "Full-time (monthly)", partTimeHourly: "Part-time (hourly)",
+  sPassEndDayBasis: "Pass end-day basis", fullTimeMonthly: "Full-time (monthly)", partTimeHourly: "Part-time (hourly)", quotaComputation: "Foreign-worker quota computation",
   floorRows: "PWM wage-floor rows", overtimeRateRows: "PWM overtime-rate rows", overtimeSchedule: "Overtime gross schedule",
   aisMandatoryEmployeeThreshold: "AIS mandatory threshold (employees)", aisSubmissionMode: "AIS submission mode",
   aisFilingCalendar: "AIS filing calendar", retentionYearsFromYa: "Record retention (years from YA)",
@@ -78,14 +94,19 @@ const GATE_TEXT = {
   latest_golden_run_pass: "Latest SG golden-vector run PASS",
 };
 
-function ActivationReadiness({ readiness }) {
+export function ActivationReadiness({ readiness }) {
   const pack = readiness.statutoryPack;
   const rows = [
     ["Status", pack.status ?? "Not configured"], ["Version", pack.packId ? `${pack.packId} v${pack.version}` : "—"],
     ["Effective from", formatDate(pack.effectiveFrom)], ["Source", pack.source ? `${pack.source.agency} — ${pack.source.title}` : "Not linked"],
     ["Source hash", pack.sourceHash ? `${pack.sourceHash.slice(0, 16)}…` : "—"],
+    ["Effective to", pack.effectiveTo ? formatDate(pack.effectiveTo) : "Open"],
     ["Approval", pack.approval.approvedById ? `User #${pack.approval.approvedById}` : "Not approved"],
+    ["Last edited by", pack.lastEditedById ? `User #${pack.lastEditedById}` : "—"],
     ["Activation", pack.activation], ["External validation", pack.externalValidation],
+    ["Audit entries", pack.audit ? `${pack.audit.entries}${pack.audit.lastEntryAt ? ` · last ${formatDate(pack.audit.lastEntryAt.slice(0, 10))}` : ""}` : "—"],
+    ["Refused actions (audited)", pack.audit ? pack.audit.refused : "—"],
+    ["Hotfix activations", pack.audit ? `${pack.audit.hotfixActivations} (${pack.audit.unreviewedHotfixes} awaiting review)` : "—"],
   ];
   return (
     <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="sg-activation-heading">
@@ -114,10 +135,63 @@ function ActivationReadiness({ readiness }) {
   );
 }
 
+// Statutory operations readiness (IR8A / AIS, IR21, CPF EZPay) — rendered as
+// returned by the backend; lifecycles are the services' own transition maps.
+export function OperationsReadiness({ section }) {
+  return (
+    <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="sg-ops-heading">
+      <div className="mb-2 flex items-center gap-2">
+        <h3 id="sg-ops-heading" className="text-sm font-bold text-foreground">{section.label}</h3>
+        <SgStatus status={section.status} />
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {section.values.items.map((op) => (
+          <article key={op.key} className="rounded-lg border border-border p-3 text-xs" aria-labelledby={`sg-op-${op.key}`}>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h4 id={`sg-op-${op.key}`} className="font-semibold text-foreground">{op.label}</h4>
+              <SgStatus status={op.state} />
+            </div>
+            <p className="text-foreground-muted">
+              Template {op.templateKey}: {op.template ? `v${op.template.version} ${op.template.status}` : "not seeded"}
+              {op.template?.activeVersion && op.template.activeVersion !== op.template.version ? ` · Active v${op.template.activeVersion}` : ""}
+              {" · "}Generator: <span className="font-mono">{op.generator}</span>
+            </p>
+            {op.lifecycle && (
+              <p className="mt-1 text-foreground-secondary">
+                Lifecycle: {Object.entries(op.lifecycle).map(([from, to]) => `${from} → ${to.length ? to.join(" / ") : "final"}`).join("; ")}
+              </p>
+            )}
+            {op.controls.length > 0 && (
+              <ul className="mt-1 list-disc pl-4 text-foreground-secondary">
+                {op.controls.map((c) => <li key={c}>{c}</li>)}
+              </ul>
+            )}
+            <p className="mt-1 text-foreground-muted">Channel: {op.submissionChannel}</p>
+            <p className="mt-0.5 text-warning">External: {op.externalDependency}</p>
+            {op.integrationPrerequisites && (
+              <ul className="mt-1 space-y-0.5">
+                {op.integrationPrerequisites.map((p) => (
+                  <li key={p.key} className="flex flex-wrap items-baseline gap-1.5">
+                    <SgStatus status={p.status} />
+                    <span className="text-foreground-secondary">{p.item}</span>
+                    <span className="text-foreground-muted">({p.owner})</span>
+                  </li>
+                ))}
+                <li className="text-foreground-muted">Credentials configured: {op.credentialsConfigured ? "yes" : "no"}</li>
+              </ul>
+            )}
+          </article>
+        ))}
+      </div>
+      {section.notes.map((n) => <p key={n} className="mt-2 text-[11px] text-foreground-muted">{n}</p>)}
+    </section>
+  );
+}
+
 export default function SGStatutorySummaryTab() {
   const [asOf, setAsOf] = useState(() => new Date().toISOString().slice(0, 10));
   const { loading, error, data } = useSgStatutorySummary(asOf);
-  const statutory = (data?.sections || []).filter((s) => s.key !== "readiness" && s.key !== "reportTemplates");
+  const statutory = (data?.sections || []).filter((s) => !["readiness", "reportTemplates", "operations"].includes(s.key));
   const readiness = (data?.sections || []).find((s) => s.key === "readiness");
   const templates = (data?.sections || []).find((s) => s.key === "reportTemplates");
   const pack = data?.valuesFromPack;
@@ -171,6 +245,16 @@ export default function SGStatutorySummaryTab() {
                     </div>
                   ))}
                 </dl>
+                {s.capabilities && (
+                  <dl className="mt-1 space-y-1 text-xs" aria-label={`${s.label} capabilities`}>
+                    {Object.entries(s.capabilities).map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-3">
+                        <dt className="text-foreground-muted">{LABELS[k] || k}</dt>
+                        <dd><SgStatus status={v} /></dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
                 {s.sources.length > 0 && (
                   <p className="mt-2 text-[11px] text-foreground-muted">
                     Sources: {s.sources.map((src) => `${src.agency} — ${src.title}${src.reviewed ? "" : " (unreviewed)"}`).join("; ")}
@@ -192,7 +276,7 @@ export default function SGStatutorySummaryTab() {
             )}
           </div>
 
-          {data.activationReadiness && <ActivationReadiness readiness={data.activationReadiness} />}
+          <p className="text-[11px] text-foreground-muted">Activation readiness, statutory operations, hotfix policy and production gates: see the Readiness tab.</p>
 
           {readiness && (
             <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby="sg-sum-readiness">

@@ -3,7 +3,7 @@ import Modal from "../../Modal";
 import { useToast } from "../../../context/ToastContext";
 import { upsertCanonicalTaxSlab } from "../../../service/superAdminService";
 import { inputClass, labelClass } from "../constants";
-import { CPF_AGE_BANDS, CPF_COHORTS, CPF_RATE_BAND, CPF_WAGE_BANDS, SHG_FUNDS, SHG_FUND_BAND } from "./sgComponentConfig";
+import { CPF_AGE_BANDS, CPF_COHORTS, CPF_RATE_BAND, CPF_WAGE_BANDS, SHG_FUNDS, SHG_FUND_BAND, wageBandBounds } from "./sgComponentConfig";
 
 // Add/Edit form for Singapore's two band tables — the generic
 // SlabFormModal has no cohort / age-band / formula-type / fund fields, and
@@ -14,17 +14,19 @@ import { CPF_AGE_BANDS, CPF_COHORTS, CPF_RATE_BAND, CPF_WAGE_BANDS, SHG_FUNDS, S
 //
 // `kind`: "CPF" | "SHG". `initial` pre-fills an add (e.g. the matrix cell
 // that was clicked); `slab` is the row being edited.
-export default function SGBandFormModal({ pack, kind, slab, initial = {}, onClose, onSaved }) {
+export default function SGBandFormModal({ pack, slabs = [], kind, slab, initial = {}, onClose, onSaved }) {
   const { addToast } = useToast() || {};
   const isCpf = kind === "CPF";
   const seed = { ...initial, ...(slab || {}) };
-  const band = CPF_WAGE_BANDS.find((b) => b.basis === (seed.assessmentBasis || "FULL")) || CPF_WAGE_BANDS[3];
+  // Prefill thresholds only from the pack's own rows of the same band kind;
+  // otherwise the author enters them from the authority source.
+  const bounds = isCpf ? wageBandBounds(slabs, seed.assessmentBasis || "FULL") : null;
   const [form, setForm] = useState({
     cohort: seed.filingStatus || (isCpf ? "SC_SPR3" : "CDAC"),
     ageBand: seed.taxRegime || "AGE_LE_55",
     basis: seed.assessmentBasis || "FULL",
-    minAmount: seed.minAmount ?? (isCpf ? String(band.min) : "0"),
-    maxAmount: seed.maxAmount ?? (isCpf && band.max !== null ? String(band.max) : ""),
+    minAmount: seed.minAmount ?? (isCpf ? (bounds?.min ?? "") : "0"),
+    maxAmount: seed.maxAmount ?? (isCpf ? (bounds?.max ?? "") : ""),
     ratePct: seed.ratePct ?? "",
     employerRatePct: seed.employerRatePct ?? "",
     flatAmount: seed.flatAmount ?? "",
@@ -47,8 +49,9 @@ export default function SGBandFormModal({ pack, kind, slab, initial = {}, onClos
   }
 
   function setBasis(e) {
-    const next = CPF_WAGE_BANDS.find((b) => b.basis === e.target.value);
-    setForm((f) => ({ ...f, basis: next.basis, minAmount: String(next.min), maxAmount: next.max === null ? "" : String(next.max) }));
+    const basis = e.target.value;
+    const next = wageBandBounds(slabs, basis);
+    setForm((f) => ({ ...f, basis, minAmount: next?.min ?? "", maxAmount: next?.max ?? "" }));
   }
 
   const needsEmployee = isCpf && (form.basis === "FULL" || form.basis === "PHASE_IN");

@@ -249,7 +249,8 @@ def _section(summary, key):
 
 def test_summary_returns_every_section_in_order(db):
     keys = [s["key"] for s in _summary(db)["sections"]]
-    assert keys == ["pack"] + list(STATUTORY_SECTIONS) + ["reportTemplates", "readiness"]      # 5.7: + Statutory Pack
+    # 5.7: + Statutory Pack; completion programme: + Statutory operations (IR8A / AIS, IR21, EZPay readiness)
+    assert keys == ["pack"] + list(STATUTORY_SECTIONS) + ["reportTemplates", "operations", "readiness"]
     for s in _summary(db)["sections"]:
         assert {"configured", "status", "effectiveDate", "values", "sources", "notes"} <= set(s)
 

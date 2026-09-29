@@ -26,12 +26,79 @@ None of them is certified or approved by CPF Board, IRAS, MOM or PDPC
 (`officialCertification` is False for every entry).
 """
 
+from datetime import date
+from typing import Optional
+
 from .labour import PWM_KEY_PREFIX, PWM_OT_RATE_PREFIX
 
 CONFIGURED, PARTIAL, NOT_CONFIGURED = "CONFIGURED", "PARTIAL", "NOT_CONFIGURED"
 # ReportTemplate.status lifecycle (models.py: Draft | Review | Approved | Published | Active | Superseded).
 TEMPLATE_STATUSES = ("Draft", "Review", "Approved", "Published", "Active", "Superseded")
 PASS, REVIEW, BLOCKED = "PASS", "REVIEW", "BLOCKED"
+NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
+EXTERNAL_INTEGRATION_REQUIRED = "EXTERNAL_INTEGRATION_REQUIRED"
+READY, TEMPLATE_NOT_ACTIVE, TEMPLATE_MISSING = "READY", "TEMPLATE_NOT_ACTIVE", "TEMPLATE_MISSING"
+EXTERNAL_DATA_REQUIRED, EVIDENCE_REQUIRED = "EXTERNAL_DATA_REQUIRED", "EVIDENCE_REQUIRED"
+DECISION_RECORDED = "DECISION_RECORDED"
+# Evidence lifecycle (final completion programme), derived — never stored as a
+# settable status: no artifact -> EVIDENCE_REQUIRED; registered, no document
+# -> SUBMITTED; uploaded (server SHA-256), awaiting a distinct reviewer ->
+# UNDER_REVIEW; accepted -> PASS (EXPIRED after its validity date);
+# rejected -> REJECTED.
+SUBMITTED, UNDER_REVIEW, REJECTED, EXPIRED = "SUBMITTED", "UNDER_REVIEW", "REJECTED", "EXPIRED"
+SUPERSEDED = "SUPERSEDED"
+NOT_APPLICABLE = "NOT_APPLICABLE"
+# Readiness-dashboard vocabulary: PASS / BLOCKED / EXTERNAL_REQUIRED / BUSINESS_DECISION_REQUIRED.
+EXTERNAL_REQUIRED = "EXTERNAL_REQUIRED"
+INTERNAL = "Internal engineering evidence (full suite + PostgreSQL rehearsals, docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md) — not re-run at runtime, not regulator certification"
+BUSINESS_DECISION = "BUSINESS_DECISION_REQUIRED"
+LQS_QUOTA_PREFIX = "lqs_quota__"            # sourced MOM quota rows, when they exist (none are seeded)
+
+# ZP-SG-ENG-001 §18 production gates — the single source the Super Admin UI
+# renders. Zoiko records no gate evidence; the status only moves when real
+# external evidence exists (docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md §18).
+SG_PRODUCTION_GATES = (
+    ("G1", "CPF content certification", "Independent reviewer; CPF Board sources", "Signed independent comparison report",
+     "Statutory compliance owner", EVIDENCE_REQUIRED,
+     "An independent reviewer signs that CPF rates, ceilings, age bands, OW/AW treatment and the golden vectors match "
+     "CPF Board publications"),
+    ("G2", "CPF operations (EZPay file, payment, reconciliation)", "CPF Board (EZPay / Corppass)",
+     "CPF acknowledgement and payment reconciliation", "Employer payroll operations", EVIDENCE_REQUIRED,
+     "A CPF acknowledgement of a real submission, reconciled to the payroll register with zero unexplained variance"),
+    ("G3", "IRAS AIS (YA2027 model, route, amendments)", "IRAS", "Signed submission-mode decision; acknowledged "
+     "original and modification", "Product owner", BUSINESS_DECISION,
+     "D1 recorded, then IRAS acknowledges an original and an amended submission (or export upload)"),
+    ("G4", "IR21 tax clearance", "IRAS", "Guidance review; acknowledged filing", "Statutory compliance owner",
+     EVIDENCE_REQUIRED, "Compliance review of the IR21 workspace against IRAS guidance plus one acknowledged IR21"),
+    ("G5", "Foreign workforce (levy billing, LQS / PWM)", "MOM", "Levy-bill reconciliation; published values",
+     "Statutory compliance owner", EVIDENCE_REQUIRED,
+     "A MOM levy bill reconciled to computed FWL; the MOM data items resolved or formally scoped out"),
+    ("G6", "Labour pay (Employment Act)", "MOM / counsel", "Legal review memo", "Legal and compliance owner",
+     EVIDENCE_REQUIRED, "Counsel signs a memo on the Employment Act pay, overtime and deduction rules the product applies"),
+    ("G7", "Security / privacy (PDPA, NRIC/FIN)", "PDPC framework (DPO)", "DPO sign-off; security review; recovery test",
+     "DPO and security owner", EVIDENCE_REQUIRED,
+     "DPO signs; security review has no open high findings; the backup-restore rehearsal is evidenced"),
+    ("G8", "Two-cycle parallel payroll and AIS simulation", "Design-partner employer", "Parallel-run reconciliation report",
+     "Implementation lead", EVIDENCE_REQUIRED,
+     "Two consecutive cycles reconcile against the incumbent payroll, with an AIS simulation"),
+)
+
+_NEXT_ACTION = {
+    EVIDENCE_REQUIRED: "Register a Source Evidence artifact with form number {tag} and upload the signed document",
+    SUBMITTED: "Upload the signed document to the registered artifact (the server records its SHA-256)",
+    UNDER_REVIEW: "A Super Admin other than the one who registered it accepts or rejects the evidence",
+    REJECTED: "Register a corrected artifact with form number {tag}, upload it and supersede the rejected one",
+    EXPIRED: "Register current evidence with form number {tag}, upload it and supersede the expired one",
+    PASS: "None",
+}
+_BLOCKING = {
+    EVIDENCE_REQUIRED: "No evidence recorded",
+    SUBMITTED: "Evidence registered but no document uploaded",
+    UNDER_REVIEW: "Awaiting review by a second Super Admin",
+    REJECTED: "The evidence was rejected by its reviewer",
+    EXPIRED: "The accepted evidence is past its validity date",
+    PASS: None,
+}
 
 EXPORT_READY, SUBMISSION_SUPPORT = "EXPORT_READY", "SUBMISSION_SUPPORT"
 INTERNAL_REPORT, STATUTORY_WORKSPACE = "INTERNAL_REPORT", "STATUTORY_WORKSPACE"
@@ -137,6 +204,284 @@ def _readiness_item(key, label, status, evidence):
     return {"key": key, "label": label, "status": status, "evidence": evidence}
 
 
+def _operation(key, label, template_key, templates, lifecycle, controls, channel, external, generator=None):
+    """One statutory operation's readiness. `state` is READY only when the
+    template has an Active version (a generator refuses anything else); the
+    external submission / acknowledgement is never claimed."""
+    row = templates.get(template_key)
+    active = bool(row and (row["status"] == "Active" or row.get("activeVersionId")))
+    return {"key": key, "label": label, "templateKey": template_key,
+            "template": ({"status": row["status"], "version": row["version"], "activeVersion": row.get("activeVersion")}
+                         if row else None),
+            "state": READY if active else (TEMPLATE_NOT_ACTIVE if row else TEMPLATE_MISSING),
+            "generator": generator or (template_catalog_entry(template_key) or {}).get("generator"),
+            "lifecycle": lifecycle, "controls": controls, "submissionChannel": channel,
+            "externalDependency": external}
+
+
+def _operations_section(ops: dict, templates: dict) -> dict:
+    """Statutory operations readiness (IR8A / AIS, IR21, CPF EZPay). The
+    lifecycles are the service's own transition constants passed in; the
+    controls listed are the ones those services enforce (each covered by a
+    test). Nothing here is an IRAS / CPF Board acceptance."""
+    items = [
+        _operation(
+            "ir8a", "IR8A employment income extract", "SG-IR8A", templates, ops.get("ir8aTransitions"),
+            ["Active template only", "Payslips' pinned statutory pack recorded", "NRIC/FIN masked (last 4)",
+             "IRAS whole-dollar rounding (income down, deductions up)",
+             f"Up to {ops.get('ir8aMaxRecordsPerSubmission')} records per myTax Portal submission",
+             "Filing recorded by a different operator from the preparer (refusals audited)",
+             "One acknowledged original per year; revision / amendment of an acknowledged original"],
+            "The employer keys the extract into IRAS myTax Portal and records IRAS's reference here",
+            "IRAS acknowledgement (manual); IRAS-validated YA2027 field mapping (G3)"),
+        _operation(
+            "ais_api", "IRAS AIS-API 2.0 direct submission", "SG-IR8A", templates, None, [],
+            "Not built", "EXTERNAL INTEGRATION REQUIRED: IRAS APEX onboarding, Corppass authorisation, API "
+            "credentials in a secrets store, sandbox access and the AIS-API 2.0 specification; submission-mode "
+            "decision (export only / API / both) is open", generator="Not built"),
+        _operation(
+            "ir21", "IR21 tax clearance", "SG-IR21-REGISTER", templates, ops.get("ir21Transitions"),
+            [f"Hold on the employee's monies while {', '.join(ops.get('ir21HoldStatuses') or [])}",
+             f"Distinct approver to move to {', '.join(ops.get('ir21ApproverStatuses') or [])} (refusals audited)",
+             "Held payslips excluded from the bank file", "Filed cases excluded from the IR8A extract",
+             "Case view carries no NRIC / bank details; register masks NRIC/FIN", "Tenant-scoped case access"],
+            "The employer files Form IR21 on myTax Portal and records the filing / IRAS directive here",
+            "IRAS clearance directive (manual); IR21 guidance review (G4)"),
+        _operation(
+            "cpf_ezpay", "CPF EZPay contribution file", "SG-CPF-EZPAY", templates, ops.get("ezpayTransitions"),
+            [f"Fixed-length {ops.get('ezpayRecordLength')}-byte records, ASCII only; trailer count / total checked",
+             "Distinct, identified approver before download (refusals audited)",
+             "File never stored — rebuilt on download and verified against its SHA-256; every download audited",
+             "CPF account numbers masked in the stored summary"],
+            "The employer uploads the file through CPF EZPay (Corppass) and records CPF Board's outcome here",
+            "CPF Board acceptance and payment reconciliation (G2); no CPF Board API is used"),
+    ]
+    items[1]["state"] = EXTERNAL_INTEGRATION_REQUIRED          # AIS-API: never READY without onboarding
+    # Final closure: the integration boundary as a checklist — what must exist
+    # before any AIS-API client could be built or enabled. None of it is in the
+    # product; no client, endpoint or credential setting exists, so nothing can
+    # be submitted (an organisation selecting DIRECT_API is BLOCKED in its own
+    # readiness, and the extract is only ever EXPORT_READY).
+    items[1]["integrationPrerequisites"] = [
+        {"key": "d1_decision", "item": "Owner decision D1 selects API_SUBMISSION or BOTH", "owner": "Product owner",
+         "status": BUSINESS_DECISION},
+        {"key": "apex_onboarding", "item": "IRAS APEX API-consumer onboarding for the AIS-API 2.0 service",
+         "owner": "Product owner with IRAS", "status": EXTERNAL_INTEGRATION_REQUIRED},
+        {"key": "specification", "item": "IRAS AIS-API 2.0 specification (payload schema, validation and error codes) "
+                                         "registered as a source artifact", "owner": "Product owner with IRAS",
+         "status": EXTERNAL_DATA_REQUIRED},
+        {"key": "credentials", "item": "APEX client credentials held in a secrets store (never in the database or "
+                                       "the repository)", "owner": "Deploy / security owner",
+         "status": EXTERNAL_INTEGRATION_REQUIRED},
+        {"key": "corppass", "item": "Corppass authorisation by each employer for Zoiko to submit on its behalf",
+         "owner": "Each employer", "status": EXTERNAL_INTEGRATION_REQUIRED},
+        {"key": "sandbox", "item": "IRAS sandbox access and a passing sandbox submission (original + amendment)",
+         "owner": "Implementation lead with IRAS", "status": EXTERNAL_INTEGRATION_REQUIRED},
+    ]
+    items[1]["credentialsConfigured"] = False
+    quota_rows = ops.get("lqsQuotaRows") or 0
+    items.append({
+        "key": "lqs_quota", "label": "LQS foreign-worker quota", "templateKey": None, "template": None,
+        # Fail-safe: no quota figure is ever produced. With no sourced MOM quota
+        # rows the blocker is the data; with rows present, the computation.
+        "state": NOT_IMPLEMENTED if quota_rows else EXTERNAL_DATA_REQUIRED,
+        "generator": "Not built", "lifecycle": None,
+        "controls": ["The per-employee LQS floor is evaluated (engine + SG-LQS-COMPLIANCE)",
+                     "No quota / dependency-ratio figure is produced anywhere"],
+        "submissionChannel": "Not applicable (MOM computes the employer's quota)",
+        "externalDependency": (f"{quota_rows} sourced quota row(s) present; computation not implemented" if quota_rows else
+                               "EXTERNAL DATA REQUIRED: MOM sector dependency-ratio ceilings, local qualifying "
+                               "headcount and part-time weighting rules as sourced reference data "
+                               f"(pack rows '{LQS_QUOTA_PREFIX}*'), plus a decision whether Zoiko computes quota"),
+    })
+    internal = [i for i in items if i["state"] not in (EXTERNAL_INTEGRATION_REQUIRED, EXTERNAL_DATA_REQUIRED,
+                                                          NOT_IMPLEMENTED)]
+    blocked = sum(1 for i in internal if i["state"] != READY)
+    return {"key": "operations", "label": "Statutory operations", "configured": blocked == 0,
+            "status": CONFIGURED if blocked == 0 else PARTIAL, "effectiveDate": None,
+            "values": {"items": items}, "missing": [i["key"] for i in internal if i["state"] != READY],
+            "sources": [], "notes": ["No operation is certified by, or submitted to, IRAS or CPF Board by Zoiko; the "
+                                     "external step is always the employer's."]}
+
+
+def _artifact_status(r: dict, as_of: date) -> str:
+    """One artifact's lifecycle state. PASS only for an artifact whose creator
+    is on record, with an UPLOADED document (server-computed SHA-256 — never
+    a hand-typed hash), accepted by a DIFFERENT user, not rejected, not
+    superseded and inside its validity date."""
+    if r.get("superseded"):
+        return SUPERSEDED
+    if r.get("outcome") == REJECTED:
+        return REJECTED
+    if (r.get("createdById") and r.get("reviewerId") and r["reviewerId"] != r["createdById"]
+            and r.get("hasFile") and r.get("sha256") and r.get("reviewedAt")):
+        valid_until = r.get("validUntil")
+        return EXPIRED if valid_until and date.fromisoformat(valid_until) < as_of else PASS
+    return UNDER_REVIEW if r.get("hasFile") and r.get("sha256") else SUBMITTED
+
+
+# The gate / decision takes its most advanced CURRENT artifact's state.
+_STATE_RANK = (PASS, UNDER_REVIEW, SUBMITTED, EXPIRED, REJECTED)
+
+
+def _evidence_state(rows: list, tag: str, as_of: Optional[date] = None) -> tuple:
+    """(state, recorded evidence) for one gate / decision tag; state None
+    when no current (non-superseded) artifact exists."""
+    as_of = as_of or date.today()
+    tagged = [r for r in rows if (r.get("tag") or "").upper() == tag]
+    recorded = []
+    for r in tagged:
+        status = _artifact_status(r, as_of)
+        recorded.append({k: r.get(k) for k in ("id", "title", "agency", "sha256", "reviewedAt", "superseded",
+                                               "createdById", "reviewerId", "notes", "validUntil", "outcomeBy",
+                                               "outcomeAt", "selectedValue", "decisionReason", "decisionMakerId",
+                                               "decidedAt")}
+                        | {"status": status, "accepted": status == PASS})
+    current = [e["status"] for e in recorded if e["status"] != SUPERSEDED]
+    state = next((s for s in _STATE_RANK if s in current), None)
+    return state, recorded
+
+
+def _lead(recorded: list, state: str):
+    """The current artifact that gives the gate / decision its state (newest first)."""
+    return next((e for e in reversed(recorded) if e["status"] == state), None)
+
+
+def _readiness_dashboard(sections: list, activation: dict, governance: dict, golden) -> list:
+    """The sixteen activation categories (PASS / BLOCKED / EXTERNAL_REQUIRED /
+    BUSINESS_DECISION_REQUIRED). Runtime facts where the server can
+    observe them; the categories only the engineering evidence can prove are
+    labelled as such. PRODUCTION_ACTIVATION passes only when everything does."""
+    by_key = {s["key"]: s for s in sections}
+    templates = by_key["reportTemplates"]["values"]
+    ops = [i for i in by_key["operations"]["values"]["items"]
+           if i["state"] not in (EXTERNAL_INTEGRATION_REQUIRED, EXTERNAL_DATA_REQUIRED, NOT_IMPLEMENTED)]
+    statutory = [by_key[k] for k in ("cpf", "sdl", "shg", "fwl", "lqs", "pwm", "iras", "ir21") if k in by_key]
+    db_state = governance.get("database") or {}
+    registry = (governance.get("serviceAvailability") or {}).get("availability")
+    pack_active = activation["statutoryPack"]["activation"] == "ACTIVE"
+
+    def row(key, label, status, basis, evidence):
+        return {"key": key, "label": label, "status": status, "basis": basis, "evidence": evidence}
+
+    missing_objects = db_state.get("missingSgObjects")
+    rows = [
+        row("engineering", "Engineering", PASS, "internal", INTERNAL),
+        row("configuration", "Configuration",
+            PASS if all(s["configurationStatus"] == CONFIGURED for s in statutory) else BLOCKED, "runtime",
+            ", ".join(f"{s['label']}: {s['configurationStatus']}" for s in statutory)),
+        row("super_admin", "Super Admin", PASS, "runtime", "This readiness view is served from the backend summary"),
+        row("report_templates", "Report templates", PASS if templates["present"] == templates["expected"] else BLOCKED,
+            "runtime", f"{templates['present']} of {templates['expected']} present, {templates['active']} Active"),
+        row("generators", "Generators", PASS if all(i["state"] == READY for i in ops) else BLOCKED, "runtime",
+            "; ".join(f"{i['label']}: {i['state']}" for i in ops) + " — a generator renders only an Active template"),
+        row("security", "Security", PASS, "internal", INTERNAL + "; external review is gate G7"),
+        row("tenant_isolation", "Tenant isolation", PASS, "internal", INTERNAL),
+        row("database", "Database",
+            PASS if missing_objects == [] else BLOCKED, "runtime",
+            "Every Singapore table / column present" if missing_objects == [] else
+            f"Missing Singapore objects: {missing_objects}" if missing_objects else
+            f"Not inspectable ({db_state.get('error')})"),
+        row("migration", "Migration", PASS if db_state.get("atHead") else BLOCKED, "runtime",
+            f"database {db_state.get('databaseHeads')} vs code {db_state.get('codeHeads')}"),
+        row("deployment", "Deployment", EXTERNAL_REQUIRED, "owner",
+            "Deploy-owner review of scripts/deploy_migrate.sh and execution of docs/SINGAPORE_PRODUCTION_ACTIVATION_RUNBOOK.md"),
+        row("testing", "Testing", PASS if golden and golden.get("status") == "PASS" else BLOCKED, "runtime",
+            f"Latest SG golden-vector run: {golden['status']} {golden['passedCases']}/{golden['totalCases']}"
+            if golden else "No SG golden-vector run recorded in this database"),
+        row("external_evidence", "External evidence",
+            PASS if all(g["status"] == PASS for g in activation["productionGates"]) else EXTERNAL_REQUIRED, "runtime",
+            ", ".join(f"{g['key']}: {g['status']}" for g in activation["productionGates"])),
+        row("business_decisions", "Business decisions",
+            PASS if all(d["status"] == DECISION_RECORDED for d in activation["pendingDecisions"])
+            else BUSINESS_DECISION, "runtime",
+            ", ".join(f"{d['key']}: {d['status']}" for d in activation["pendingDecisions"])),
+        row("external_data", "External data",
+            EXTERNAL_REQUIRED if any(d["status"] == EXTERNAL_DATA_REQUIRED for d in activation["externalDependencies"])
+            else PASS,
+            "runtime", ", ".join(d["key"] for d in activation["externalDependencies"]
+                                 if d["status"] == EXTERNAL_DATA_REQUIRED) or "none"),
+        row("external_integrations", "External integrations",
+            EXTERNAL_REQUIRED if any(d["status"] == EXTERNAL_INTEGRATION_REQUIRED
+                                     for d in activation["externalDependencies"]) else PASS,
+            "runtime", "; ".join(d["label"] for d in activation["externalDependencies"]
+                                 if d["status"] == EXTERNAL_INTEGRATION_REQUIRED) or "none"),
+    ]
+    blockers = [r["label"] for r in rows if r["status"] != PASS]
+    if not pack_active:
+        blockers.append("no Active Singapore statutory pack")
+    if registry != "AVAILABLE":
+        blockers.append(f"service registry {registry or 'missing'}")
+    rows.append(row("production_activation", "Production activation", PASS if not blockers else BLOCKED, "runtime",
+                    "All categories pass, pack Active, registry AVAILABLE" if not blockers else
+                    "Blocked by: " + "; ".join(blockers)))
+    return rows
+
+
+def _service_registry_item(availability):
+    """Commercial availability — the owner's PLANNED -> AVAILABLE step, never a
+    consequence of pack activation (tax_resolver fails closed without a row)."""
+    if availability is None:
+        return _readiness_item("service_registry", "Singapore service registry", BLOCKED,
+                               "No registry row — onboarding stays closed (fail-closed); the canonical seed creates it "
+                               "as PLANNED.")
+    state = availability.get("availability")
+    return _readiness_item("service_registry", "Singapore service registry", PASS if state == "AVAILABLE" else BLOCKED,
+                           f"{state} — onboarding " + ("open" if state == "AVAILABLE" else
+                                                        "closed until the owner makes Singapore AVAILABLE after G1–G8"))
+
+
+def _pending_decisions(governance: dict) -> list:
+    """Owner decisions D1–D3 with the value currently in force. Nothing here
+    chooses an option; an item leaves the list only when the owner records the
+    decision (docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md §20)."""
+    ais = governance.get("aisSubmissionModeSetting") or {}
+    hotfix = governance.get("hotfixPolicy") or {}
+    scope = governance.get("controlScope") or {}
+    return [
+        {"key": "D1", "label": "IR8A / AIS submission mode offered by the product",
+         "options": ["EXPORT_ONLY", "API_SUBMISSION", "BOTH"],
+         "inForce": "EXPORT_ONLY (built); per-organisation setting options: " + ", ".join(ais.get("options") or []),
+         "inForceValue": "EXPORT_ONLY",
+         "effectIfDifferent": "API_SUBMISSION / BOTH need the IRAS AIS-API 2.0 integration (external onboarding; not built)",
+         "status": BUSINESS_DECISION},
+        {"key": "D2", "label": "Singapore hotfix policy", "options": hotfix.get("options") or [],
+         "inForce": hotfix.get("current"), "inForceValue": hotfix.get("current"),
+         "effectIfDifferent": "SG_HOTFIX_POLICY is a code constant — a recorded different policy needs a reviewed code change",
+         "status": BUSINESS_DECISION},
+        {"key": "D3", "label": "Scope of the Singapore-only governance controls", "options": ["SG_ONLY", "ALL_COUNTRIES"],
+         "inForce": "SG_ONLY" if scope and all(v == ["SG"] for v in scope.values()) else scope,
+         "inForceValue": "SG_ONLY" if scope and all(v == ["SG"] for v in scope.values()) else None,
+         "effectIfDifferent": "ALL_COUNTRIES widens the opt-in control sets to every jurisdiction — a separate "
+                              "cross-jurisdiction change with its own review",
+         "status": BUSINESS_DECISION},
+    ]
+
+
+def _external_dependencies(rates: dict, activation: dict, sections: list) -> list:
+    """What only an authority / external party can supply — derived from the
+    current configuration (an item disappears once its data or evidence is
+    recorded), never a claim that something is complete."""
+    deps = [{"key": "ais_api", "label": "IRAS AIS-API 2.0 (APEX onboarding, Corppass, credentials, sandbox, specification)",
+             "authority": "IRAS", "status": EXTERNAL_INTEGRATION_REQUIRED}]
+    for key, label in (("fwl_s_pass_end_day_basis", "Whether the pass EXPIRY day is levied (S Pass / Work Permit) — "
+                                                     "cancellation is sourced (MOM: levy stops 1 day before cancellation)"),
+                       ("lqs_part_time_hourly", "Part-time LQS hourly rate")):
+        if rates.get(key) is None:
+            deps.append({"key": key, "label": label, "authority": "MOM", "status": EXTERNAL_DATA_REQUIRED})
+    if not any(k.startswith(LQS_QUOTA_PREFIX) for k in rates):
+        deps.append({"key": "lqs_quota", "label": "Foreign-worker quota tables (dependency ratios, headcount rules)",
+                     "authority": "MOM", "status": EXTERNAL_DATA_REQUIRED})
+    deps.append({"key": "unpublished_values",
+                 "label": "Values MOM has not published: the Work Permit levy before 24 Sep 2026 outside construction "
+                          "(no effective date is stated for the current rates) — pack rows stay BLOCKED, never defaulted",
+                 "authority": "MOM", "status": EXTERNAL_DATA_REQUIRED})
+    if activation["statutoryPack"]["externalValidation"] == "EXTERNAL_VALIDATION_REQUIRED":
+        deps.append({"key": "gates", "label": "Production gates G1–G8 evidence", "authority": "CPF Board / IRAS / MOM / PDPC / reviewers",
+                     "status": EVIDENCE_REQUIRED})
+    return deps
+
+
 def build_statutory_summary(facts: dict) -> dict:
     as_of = facts["as_of"]
     active, review = facts.get("active_pack"), facts.get("review_pack")
@@ -173,17 +518,28 @@ def build_statutory_summary(facts: dict) -> dict:
                              effective_date=effective))
 
     fwl = {"sPassMonthly": val("fwl_s_pass_monthly"), "workPermitLevyRows": count_prefix(WP_LEVY_PREFIX) or None,
-           "paymentDueDay": val("fwl_payment_due_day"), "sPassEndDayBasis": val("fwl_s_pass_end_day_basis")}
+           "paymentDueDay": val("fwl_payment_due_day"), "sPassEndDayBasis": val("fwl_s_pass_end_day_basis"),
+           "sPassCancellationEndDayBasis": val("fwl_s_pass_cancellation_end_day_basis"),
+           "workPermitCancellationEndDayBasis": val("fwl_work_permit_cancellation_end_day_basis")}
     fwl_notes = []
     if fwl["sPassEndDayBasis"] is None:
-        fwl_notes.append("fwl_s_pass_end_day_basis is not seeded (MOM does not state whether the end day is "
-                         "levied) — a pass ending mid-month stays BLOCKED.")
+        fwl_notes.append("The EXPIRY end-day rule is not published by MOM (fwl_s_pass_end_day_basis / "
+                         "fwl_work_permit_end_day_basis not seeded) — a pass EXPIRING mid-month, or ending with no "
+                         "recorded end reason, stays BLOCKED. A CANCELLED pass uses the MOM-sourced cancellation rule.")
     sections.append(_section("fwl", "FWL", fwl, ("sPassMonthly", "workPermitLevyRows"), _sources_for(fwl, sources),
                              notes=fwl_notes, effective_date=effective))
 
     lqs = {"fullTimeMonthly": val("lqs_full_time_monthly"), "partTimeHourly": val("lqs_part_time_hourly")}
-    sections.append(_section("lqs", "LQS", lqs, ("fullTimeMonthly", "partTimeHourly"), _sources_for(lqs, sources),
-                             effective_date=effective))
+    sections.append(_section(
+        "lqs", "LQS", lqs, ("fullTimeMonthly", "partTimeHourly"), _sources_for(lqs, sources),
+        notes=["The LQS floor is evaluated per employee (payroll engine and the SG-LQS-COMPLIANCE report). The MOM "
+               "foreign-worker quota (local qualifying headcount, part-time weighting, sector dependency ratio "
+               "ceilings) is NOT IMPLEMENTED — EXTERNAL DATA REQUIRED: MOM's sector quota tables and headcount rules "
+               "as sourced reference data, and a decision whether Zoiko should compute quota at all."],
+        effective_date=effective))
+    # What the platform does NOT do is a capability, not a configured value —
+    # kept out of `values` (which only ever holds persisted rows).
+    sections[-1]["capabilities"] = {"quotaComputation": NOT_IMPLEMENTED}
 
     pwm_table = facts.get("pwm_schedule") or {}
     pwm = {"floorRows": count_prefix(PWM_KEY_PREFIX) or None, "overtimeRateRows": count_prefix(PWM_OT_RATE_PREFIX) or None,
@@ -192,8 +548,14 @@ def build_statutory_summary(facts: dict) -> dict:
         "pwm", "PWM", pwm, ("floorRows", "overtimeSchedule"),
         [sources[i] for i in pwm_table.get("sourceDocumentIds", []) if i in sources],
         notes=["Overtime gross requirements are statutory reference data in sgp_pwm_overtime_schedules "
-               "(tenant-independent, read-only); they are not pack rows and are not copied into payslips."],
+               "(tenant-independent, read-only); they are not pack rows and are not copied into payslips.",
+               "Retail 3-month averaging (MOM Tripartite Cluster for Retail report, Aug 2025, Annex D) is evaluated "
+               "by SG-PWM-COMPLIANCE for a retail shortfall, from each month's own payslip (recorded job level, gross "
+               "wages, overtime hours). Months it cannot evaluate (part-time, an incomplete month other than the "
+               "first, a payslip calculated before the per-month classification was recorded) leave the shortfall "
+               "flagged — never assumed met."],
         effective_date=effective))
+    sections[-1]["capabilities"] = {"retailThreeMonthAveraging": "IMPLEMENTED"}
 
     ais_calendar = facts.get("ais_calendar")
     iras = {"aisMandatoryEmployeeThreshold": val("ais_mandatory_employee_threshold"),
@@ -202,7 +564,8 @@ def build_statutory_summary(facts: dict) -> dict:
     sections.append(_section(
         "iras", "IRAS (AIS / IR8A)", iras, ("aisMandatoryEmployeeThreshold", "aisSubmissionMode", "aisFilingCalendar"),
         _sources_for(iras, sources),
-        notes=["IR8A is an EXPORT_READY extract; no AIS-API submission is built."], effective_date=effective))
+        notes=["IR8A is an EXPORT_READY extract keyed into myTax Portal by the employer; no AIS-API submission is "
+               "built (EXTERNAL INTEGRATION REQUIRED — see Statutory operations)."], effective_date=effective))
 
     ir21 = {"departureTriggerMonths": val("ir21_departure_trigger_months"),
             "filingLeadMonths": val("ir21_filing_lead_months")}
@@ -258,9 +621,14 @@ def build_statutory_summary(facts: dict) -> dict:
             **{k: (row.get(k) if row else None) for k in (
                 "approvedById", "approvedAt", "lastStatusChangeAt", "auditEntries", "versionCount",
                 "previousVersionId", "sourceDocumentId", "sourceReferences", "regulatoryAuthority", "description",
-                "updatedAt", "allowedNextStatuses")},
+                "updatedAt", "allowedNextStatuses", "effectiveTo", "activeVersion", "activeVersionId")},
+            "regulatoryAuthorityCatalog": entry["regulatoryAuthority"],
+            "source": sources.get(row["sourceDocumentId"]) if row and row.get("sourceDocumentId") else None,
             "editable": (row["status"] in ("Draft", "Review", "Approved")) if row else None,
-            "generatable": (row["status"] == "Active") if row else False,
+            # No template is externally validated by CPF Board / IRAS / MOM.
+            "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+            # A generator renders the Active version, which may not be the listed (latest) one.
+            "generatable": bool(row and (row["status"] == "Active" or row.get("activeVersionId"))),
         })
     unexpected = sorted(k for k in templates if k not in SG_TEMPLATE_KEYS)
     missing_templates = [r["templateKey"] for r in template_rows if not r["present"]]
@@ -281,6 +649,9 @@ def build_statutory_summary(facts: dict) -> dict:
         "notes": ["Classification is Zoiko's own; no template is certified by CPF Board, IRAS, MOM or PDPC."],
     })
 
+    sections.append(_operations_section(
+        {**(facts.get("operations") or {}), "lqsQuotaRows": count_prefix(LQS_QUOTA_PREFIX)}, templates))
+
     unreviewed = [s for s in sources.values() if not s.get("reviewed")]
     golden = facts.get("latest_golden")
     items = [
@@ -291,8 +662,10 @@ def build_statutory_summary(facts: dict) -> dict:
                          f"{review['packId']} v{review['version']} ({review['status']}), not in force"
                          if review else "No Singapore tax pack covers this date")),
         _readiness_item("statutory_sections", "Statutory sections configured",
-                        PASS if all(s["configured"] for s in sections if s["key"] != "reportTemplates") else REVIEW,
-                        ", ".join(f"{s['label']}: {s['status']}" for s in sections if s["key"] != "reportTemplates")),
+                        PASS if all(s["configured"] for s in sections if s["key"] not in ("reportTemplates", "operations"))
+                        else REVIEW,
+                        ", ".join(f"{s['label']}: {s['status']}" for s in sections
+                                  if s["key"] not in ("reportTemplates", "operations"))),
         _readiness_item("source_evidence", "Source evidence reviewed",
                         PASS if sources and not unreviewed else REVIEW,
                         f"{len(sources) - len(unreviewed)} of {len(sources)} linked source artifacts reviewed"),
@@ -306,6 +679,7 @@ def build_statutory_summary(facts: dict) -> dict:
                          if golden else "No run recorded")),
         _readiness_item("production_gates", "ZP-SG-ENG-001 §18 production gates G1–G8", BLOCKED,
                         "No gate evidence is recorded in Zoiko; external evidence is required."),
+        _service_registry_item((facts.get("governance") or {}).get("serviceAvailability")),
     ]
     overall = BLOCKED if any(i["status"] == BLOCKED for i in items) else (
         REVIEW if any(i["status"] == REVIEW for i in items) else PASS)
@@ -351,6 +725,10 @@ def build_statutory_summary(facts: dict) -> dict:
                 {"key": "latest_golden_run_pass", "met": bool(golden and golden.get("status") == "PASS")},
             ],
             "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+            "lastEditedById": values_pack.get("updatedById") if values_pack else None,
+            "hotfixPolicy": (facts.get("governance") or {}).get("hotfixPolicy"),
+            "effectiveTo": values_pack.get("effectiveTo") if values_pack else None,
+            "audit": facts.get("pack_audit"),
         },
         "reportTemplates": {"total": template_values["present"], **template_values["statusCounts"]},
         "pwm": {"rows": pwm_values.get("totalRows"), "schedules": pwm_values.get("schedules"),
@@ -358,6 +736,65 @@ def build_statutory_summary(facts: dict) -> dict:
                 "latestRetrieved": pwm_values.get("latestRetrievedAt"), "lastSeeded": pwm_values.get("lastSeededAt")},
     }
 
+    governance = facts.get("governance") or {}
+    activation["serviceAvailability"] = governance.get("serviceAvailability")
+    activation["aisSubmissionModeSetting"] = governance.get("aisSubmissionModeSetting")
+    activation["pendingDecisions"] = _pending_decisions(governance)
+    activation["externalDependencies"] = _external_dependencies(rates, activation, sections)
+    evidence_rows = governance.get("evidence") or []
+    decision_state = {d["key"]: _evidence_state(evidence_rows, f"SG-DECISION-{d['key']}", as_of)
+                      for d in activation["pendingDecisions"]}
+    for d in activation["pendingDecisions"]:
+        state, recorded = decision_state[d["key"]]
+        tag = f"SG-DECISION-{d['key']}"
+        lead = _lead(recorded, state) if state else None
+        # A decision counts only as an ACCEPTED memo that carries its selected
+        # option (record_sg_decision) — a memo alone records no choice.
+        no_value = state == PASS and not (lead or {}).get("selectedValue")
+        if no_value:
+            state, lead = None, None
+        d["evidenceRecorded"] = recorded
+        d["evidenceTag"] = tag
+        d["reviewStatus"] = state or EVIDENCE_REQUIRED
+        d["recordedValue"] = (lead or {}).get("selectedValue")
+        d["decisionMakerId"] = (lead or {}).get("decisionMakerId") or (lead or {}).get("createdById")
+        d["decidedAt"] = (lead or {}).get("decidedAt")
+        d["reason"] = (lead or {}).get("decisionReason")
+        d["reviewerId"] = (lead or {}).get("reviewerId") or (lead or {}).get("outcomeBy")
+        d["reviewedAt"] = (lead or {}).get("reviewedAt") or (lead or {}).get("outcomeAt")
+        if state == PASS:
+            d["status"] = DECISION_RECORDED
+            in_force = d.get("inForceValue")
+            d["inForceDiffers"] = bool(in_force and d["recordedValue"] != in_force)
+        elif state in (SUBMITTED, UNDER_REVIEW, REJECTED, EXPIRED):
+            d["status"] = state
+        d["blockingReason"] = (None if d["status"] == DECISION_RECORDED else
+                               "The accepted memo records no selected option — record the decision" if no_value else
+                               _BLOCKING.get(state) or "No decision recorded — the value in force is the product default")
+        d["nextAction"] = ("None" if d["status"] == DECISION_RECORDED else
+                           "Record the decision (selected option + reason), upload the signed memo; a second Super Admin "
+                           "accepts it" if state is None else _NEXT_ACTION[state].format(tag=tag))
+    gates = []
+    for k, label, authority, evidence, owner, status, criterion in SG_PRODUCTION_GATES:
+        tag = f"SG-GATE-{k}"
+        state, recorded = _evidence_state(evidence_rows, tag, as_of)
+        if k == "G3" and decision_state["D1"][0] == PASS and status == BUSINESS_DECISION:
+            status = EVIDENCE_REQUIRED                       # D1 recorded; the IRAS evidence is still needed
+        shown = state or status
+        lead = _lead(recorded, state) if state else None
+        gates.append({"key": k, "label": label, "authority": authority, "evidenceRequired": evidence, "owner": owner,
+                      "requiredArtifact": evidence, "validationCriteria": criterion,
+                      "status": shown, "evidenceRecorded": recorded or None, "evidenceTag": tag,
+                      "submittedArtifactId": (lead or {}).get("id"),
+                      "reviewedBy": (lead or {}).get("reviewerId") or (lead or {}).get("outcomeBy"),
+                      "reviewDate": (lead or {}).get("reviewedAt") or (lead or {}).get("outcomeAt"),
+                      "expiryDate": (lead or {}).get("validUntil"), "notes": (lead or {}).get("notes"),
+                      "blockingReason": (_BLOCKING.get(shown) if shown in _BLOCKING else
+                                         "Owner decision D1 not recorded" if shown == BUSINESS_DECISION else None),
+                      "nextAction": (_NEXT_ACTION[shown].format(tag=tag) if shown in _NEXT_ACTION else
+                                     "Record decision D1 (AIS submission mode) first")})
+    activation["productionGates"] = gates
+    activation["readinessDashboard"] = _readiness_dashboard(sections, activation, governance, golden)
     return {
         "jurisdiction": "SG", "asOf": as_of.isoformat(), "activationReadiness": activation,
         "activePack": active, "valuesFromPack": values_pack, "valuesFromActivePack": bool(active),

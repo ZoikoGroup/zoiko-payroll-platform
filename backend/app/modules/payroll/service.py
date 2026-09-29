@@ -579,6 +579,22 @@ def list_jurisdiction_packs(db: Session, country: str, state: str = None) -> Lis
     return query.order_by(JurisdictionPack.version.desc()).all()
 
 
+def find_jurisdiction_pack_upsert_target(db: Session, data: "JurisdictionPackUpsert") -> Optional[JurisdictionPack]:
+    """The existing row an upsert would edit: by primary key when `data.id`
+    is given, else by (packId, version). Shared by upsert_jurisdiction_pack
+    and the org-facing route's tax-pack guard so both resolve the same row."""
+    existing = None
+    if data.id:
+        existing = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.id).first()
+    if not existing:
+        existing = (
+            db.query(JurisdictionPack)
+            .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
+            .first()
+        )
+    return existing
+
+
 def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_id: Optional[int] = None) -> JurisdictionPack:
     """Create or update a pack. When `data.id` is provided (editing an
     existing pack in place), the lookup is by primary key — the only way
@@ -599,14 +615,16 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
     Compliance its version chain (1.0 -> 1.1 -> 2.0) without ever mutating
     or deleting an earlier row.
     """
-    existing = None
-    if data.id:
-        existing = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.id).first()
-    if not existing:
-        existing = (
-            db.query(JurisdictionPack)
-            .filter(JurisdictionPack.pack_id == data.packId, JurisdictionPack.version == data.version)
-            .first()
+    existing = find_jurisdiction_pack_upsert_target(db, data)
+    # Completion programme (all countries — security): an existing pack's type
+    # never changes. A "policy" payload aimed at a tax pack's id previously
+    # rewrote that tax pack's metadata AND its pack_type, and the org-facing
+    # route only checked the payload's packType. No legitimate flow converts
+    # a pack between tax and policy.
+    if existing is not None and existing.pack_type != data.packType:
+        raise BadRequestException(
+            f"Pack {existing.pack_id} v{existing.version} is a {existing.pack_type} pack — its type cannot be "
+            f"changed to {data.packType!r}."
         )
     fields = dict(
         pack_id=data.packId,
@@ -882,6 +900,9 @@ def _invalidate_pack_approval_on_edit(pack: "JurisdictionPack") -> None:
             pack.status = "Draft"
 
 
+_PACK_ROW_CLONE_SKIP = {"id", "jurisdiction_pack_id", "created_at", "updated_at"}
+
+
 def _clone_pack_rates(db: Session, source_pack_id: int, target_pack_id: int) -> None:
     """Copies every canonical ContributionRate/TaxSlab row from
     source_pack_id onto target_pack_id as brand-new rows (fresh ids). Used
@@ -890,39 +911,21 @@ def _clone_pack_rates(db: Session, source_pack_id: int, target_pack_id: int) -> 
     instead of an empty pack — without this, the immutability guard above
     would make "create a new version" prohibitively tedious (retyping
     every rate/slab from scratch) and Super Admins would be pushed back
-    toward editing Active packs in place."""
-    for row in db.query(ContributionRate).filter(
-        ContributionRate.jurisdiction_pack_id == source_pack_id,
-        ContributionRate.organization_id.is_(None),
-    ).all():
-        clone = ContributionRate(
-            organization_id=None, jurisdiction_pack_id=target_pack_id,
-            jurisdiction_country=row.jurisdiction_country, jurisdiction_state=row.jurisdiction_state,
-            jurisdiction_locality=row.jurisdiction_locality, tax_regime=row.tax_regime,
-            filing_status=row.filing_status,
-            component_key=row.component_key, label=row.label,
-            employee_share=row.employee_share, employer_share=row.employer_share, total=row.total,
-            employee_rate_pct=row.employee_rate_pct, employer_rate_pct=row.employer_rate_pct,
-            flat_amount=row.flat_amount, text_value=row.text_value, sort_order=row.sort_order,
-        )
-        db.add(clone)
-    for row in db.query(TaxSlab).filter(
-        TaxSlab.jurisdiction_pack_id == source_pack_id,
-        TaxSlab.organization_id.is_(None),
-    ).all():
-        clone = TaxSlab(
-            organization_id=None, jurisdiction_pack_id=target_pack_id,
-            jurisdiction_country=row.jurisdiction_country, jurisdiction_state=row.jurisdiction_state,
-            jurisdiction_locality=row.jurisdiction_locality, tax_regime=row.tax_regime,
-            filing_status=row.filing_status,
-            min_amount=row.min_amount, max_amount=row.max_amount,
-            rate_pct=row.rate_pct, rate_label=row.rate_label, tax_formula=row.tax_formula,
-            rule_type=row.rule_type, formula_expression=row.formula_expression,
-            flat_amount=row.flat_amount, adjustment_amount=row.adjustment_amount,
-            ni_category=row.ni_category, employer_rate_pct=row.employer_rate_pct,
-            sort_order=row.sort_order,
-        )
-        db.add(clone)
+    toward editing Active packs in place.
+
+    Singapore final closure (found by the real-organization validation): the
+    copy is now of EVERY value column. The previous hand-written field lists
+    dropped effective_from / effective_to, source_document_id and (slabs)
+    assessment_basis — a new version's effective-dated rows became open-ended
+    (e.g. both LQS windows in force at once), lost their source, and every
+    Singapore CPF band lost its FULL / PHASE_IN basis (all payroll under the
+    new version BLOCKED). Only the identity, the pack link and the
+    bookkeeping timestamps differ from the source row."""
+    for model in (ContributionRate, TaxSlab):
+        columns = [c.name for c in model.__table__.columns if c.name not in _PACK_ROW_CLONE_SKIP]
+        for row in db.query(model).filter(model.jurisdiction_pack_id == source_pack_id,
+                                          model.organization_id.is_(None)).all():
+            db.add(model(jurisdiction_pack_id=target_pack_id, **{c: getattr(row, c) for c in columns}))
     db.commit()
 
 def _org_uses_canonical_tax_pack(db: Session, organization_id: int) -> bool:
@@ -2755,6 +2758,187 @@ def create_source_artifact(db: Session, data: SourceArtifactCreate, actor_id: Op
     return row
 
 
+def _is_sg_gate_evidence(row) -> bool:
+    return (row.form_number or "").upper().startswith(("SG-GATE-G", "SG-DECISION-D"))
+
+
+def supersede_sg_gate_evidence(db: Session, artifact_id: int, replacement_id: int,
+                               actor_id: Optional[int] = None) -> SourceArtifact:
+    """Singapore gate / decision evidence (final closure): the only way to
+    change accepted evidence. The old artifact is KEPT (its file and review
+    stay on record) and points at its replacement; the replacement must be a
+    different, not-yet-superseded artifact with the same SG-GATE / SG-DECISION
+    tag, and it counts only once a different Super Admin reviews it — so
+    superseding can only ever withdraw acceptance, never grant it. Audited."""
+    old = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
+    new = db.query(SourceArtifact).filter(SourceArtifact.id == replacement_id).first()
+    if old is None:
+        raise NotFoundException("SourceArtifact", artifact_id)
+    if new is None:
+        raise NotFoundException("SourceArtifact", replacement_id)
+    if not _is_sg_gate_evidence(old):
+        raise BadRequestException("Only Singapore gate / decision evidence (SG-GATE-G<n> / SG-DECISION-D<n>) is "
+                                  "superseded here.")
+    if old.id == new.id:
+        raise BadRequestException("An artifact cannot supersede itself.")
+    if (new.form_number or "").upper() != (old.form_number or "").upper():
+        raise BadRequestException(f"The replacement must carry the same form number ({old.form_number}).")
+    if old.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{old.id} is already superseded by #{old.superseded_by_id}.")
+    if new.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{new.id} is itself superseded and cannot be the replacement.")
+    old.superseded_by_id = new.id
+    db.commit()
+    db.refresh(old)
+    record_tax_audit(
+        db, actor_id=actor_id, action="update", entity_type="source_artifact", entity_id=old.id,
+        old_value={"supersededById": None, "formNumber": old.form_number},
+        new_value={"supersededById": new.id, "formNumber": old.form_number},
+        reason=f"{old.form_number} evidence #{old.id} superseded by #{new.id}",
+    )
+    return old
+
+
+# ── Singapore evidence review outcome + structured decisions (final
+# completion programme). No new table or column: each outcome / decision is
+# an immutable TaxConfigurationAudit row on the SourceArtifact
+# (entity_type "source_artifact"), keyed by "sgEvidenceOutcome" /
+# "sgDecision" in new_value; get_sg_statutory_summary derives the lifecycle
+# EVIDENCE_REQUIRED -> SUBMITTED -> UNDER_REVIEW -> PASS | REJECTED | EXPIRED.
+
+SG_EVIDENCE_OUTCOMES = ("ACCEPTED", "REJECTED")
+
+
+def sg_decision_options() -> dict:
+    """D1–D3 options. D2's are SG_HOTFIX_POLICIES (defined further down this module), read at call time."""
+    return {"D1": ("EXPORT_ONLY", "API_SUBMISSION", "BOTH"), "D2": tuple(SG_HOTFIX_POLICIES),
+            "D3": ("SG_ONLY", "ALL_COUNTRIES")}
+
+
+def _sg_evidence_audits(db: Session, artifact_ids) -> dict:
+    """{artifact id: [audit new_value dicts carrying an SG outcome / decision]}, oldest first."""
+    ids = list(artifact_ids)
+    if not ids:
+        return {}
+    out = {}
+    for a in (db.query(TaxConfigurationAudit)
+              .filter(TaxConfigurationAudit.entity_type == "source_artifact", TaxConfigurationAudit.entity_id.in_(ids))
+              .order_by(TaxConfigurationAudit.id).all()):
+        value = a.new_value if isinstance(a.new_value, dict) else {}
+        if "sgEvidenceOutcome" in value or "sgDecision" in value:
+            out.setdefault(a.entity_id, []).append({**value, "actorId": a.actor_id,
+                                                    "at": a.created_at.isoformat() if a.created_at else None})
+    return out
+
+
+def _sg_evidence_refused(db: Session, row: SourceArtifact, attempted: str, actor_id: Optional[int], message: str):
+    """Final closure: a refused governance action on Singapore gate / decision
+    evidence (maker-checker, a final rejection, a completed review) leaves one
+    "refused" audit row and nothing else — the same rule as the pack /
+    template refusal audit (_audit_refusal)."""
+    artifact_id, form_number = row.id, row.form_number
+    db.rollback()
+    record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="source_artifact", entity_id=artifact_id,
+                     old_value={"formNumber": form_number}, new_value={"attempted": attempted, "result": "REFUSED"},
+                     reason=message)
+    raise BadRequestException(message)
+
+
+def _sg_refuse_if_rejected(db: Session, row: SourceArtifact, attempted: str = "review",
+                           actor_id: Optional[int] = None) -> None:
+    rejected = [v for v in _sg_evidence_audits(db, [row.id]).get(row.id, []) if v.get("sgEvidenceOutcome") == "REJECTED"]
+    if rejected:
+        _sg_evidence_refused(db, row, attempted, actor_id,
+                             f"{row.form_number} evidence #{row.id} was REJECTED — the rejection is retained evidence. "
+                             "Register a new artifact with the same form number, upload the corrected document and "
+                             "supersede this one.")
+
+
+def review_sg_gate_evidence(db: Session, artifact_id: int, outcome: str, notes: Optional[str] = None,
+                            valid_until: Optional[date] = None, actor_id: Optional[int] = None,
+                            today: Optional[date] = None) -> SourceArtifact:
+    """Record the review OUTCOME of Singapore gate / decision evidence —
+    ACCEPTED (optionally valid until a date: the gate turns EXPIRED after
+    it) or REJECTED (notes required). Maker-checker: never the creator;
+    only an uploaded, current (not superseded), not-yet-reviewed artifact.
+    ACCEPTED goes through mark_source_artifact_reviewed (its own checks and
+    audit row). The outcome itself is an immutable audit row — it can never
+    be replaced; a correction is a new artifact + supersession."""
+    outcome = (outcome or "").upper()
+    if outcome not in SG_EVIDENCE_OUTCOMES:
+        raise BadRequestException(f"Outcome must be one of {list(SG_EVIDENCE_OUTCOMES)}.")
+    row = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
+    if row is None:
+        raise NotFoundException("SourceArtifact", artifact_id)
+    if not _is_sg_gate_evidence(row):
+        raise BadRequestException("Only Singapore gate / decision evidence (SG-GATE-G<n> / SG-DECISION-D<n>) is reviewed here.")
+    if row.superseded_by_id is not None:
+        raise BadRequestException(f"Evidence #{row.id} is superseded by #{row.superseded_by_id} — review the replacement.")
+    if actor_id is None or row.created_by_id is None or row.created_by_id == actor_id:
+        _sg_evidence_refused(db, row, f"review:{outcome}", actor_id,
+                             "This evidence needs a reviewer different from whoever registered it (maker-checker).")
+    if not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it.")
+    _sg_refuse_if_rejected(db, row, f"review:{outcome}", actor_id)
+    if row.reviewer_id is not None:
+        _sg_evidence_refused(db, row, f"review:{outcome}", actor_id,
+                             f"{row.form_number} evidence #{row.id} is already reviewed — its review is retained "
+                             "evidence and cannot be replaced; register a replacement and supersede this one.")
+    notes = (notes or "").strip() or None
+    if outcome == "REJECTED":
+        if not notes:
+            raise BadRequestException("A rejection needs notes saying what is wrong with the evidence.")
+        if valid_until is not None:
+            raise BadRequestException("A validity date applies only to ACCEPTED evidence.")
+    if valid_until is not None and valid_until <= (today or date.today()):
+        raise BadRequestException("The validity date must be in the future.")
+    if outcome == "ACCEPTED":
+        row = mark_source_artifact_reviewed(db, row.id, reviewer_id=actor_id)
+    record_tax_audit(
+        db, actor_id=actor_id, action="review", entity_type="source_artifact", entity_id=row.id,
+        old_value={"formNumber": row.form_number},
+        new_value={"sgEvidenceOutcome": outcome, "notes": notes,
+                   "validUntil": valid_until.isoformat() if valid_until else None, "formNumber": row.form_number},
+        reason=f"{row.form_number} evidence #{row.id} {outcome}" + (f": {notes}" if notes else ""),
+    )
+    return row
+
+
+def record_sg_decision(db: Session, key: str, selected_value: str, reason: str,
+                       actor_id: Optional[int] = None) -> SourceArtifact:
+    """Formally record owner decision D1 / D2 / D3: the selected option, the
+    decision maker (actor) and the reason, as a new SG-DECISION-D<n>
+    artifact plus an immutable audit row. It counts (DECISION_RECORDED) only
+    after the signed memo is uploaded and a DIFFERENT Super Admin accepts
+    it. Recording never changes behaviour in force: SG_HOTFIX_POLICY, the
+    SG-only control scope and the AIS route are code / integration changes
+    the readiness view flags when the recorded value differs."""
+    options = sg_decision_options()
+    key = (key or "").upper()
+    if key not in options:
+        raise BadRequestException(f"Unknown Singapore decision {key!r} — expected one of {sorted(options)}.")
+    value = (selected_value or "").upper()
+    if value not in options[key]:
+        raise BadRequestException(f"{key} must be one of {list(options[key])}.")
+    reason = (reason or "").strip()
+    if not reason:
+        raise BadRequestException("A decision needs the owner's reason.")
+    if actor_id is None:
+        raise BadRequestException("A decision needs an identified decision maker.")
+    from app.modules.payroll.schemas import SourceArtifactCreate
+
+    row = create_source_artifact(db, SourceArtifactCreate(
+        agency="Zoiko business owner decision", title=f"{key} decision: {value}", formNumber=f"SG-DECISION-{key}"),
+        actor_id=actor_id)
+    record_tax_audit(
+        db, actor_id=actor_id, action="create", entity_type="source_artifact", entity_id=row.id,
+        old_value=None, new_value={"sgDecision": key, "selectedValue": value, "reason": reason},
+        reason=f"Singapore decision {key} recorded as {value} (pending signed memo + second-admin review): {reason}",
+    )
+    return row
+
+
 def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: int) -> SourceArtifact:
     """A distinct, lightweight action — same "I, this specific person,
     reviewed this" pattern as set_jurisdiction_pack_approver — rather than
@@ -2771,9 +2955,20 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
     if not row:
         raise NotFoundException("SourceArtifact", artifact_id)
     if row.created_by_id is not None and row.created_by_id == reviewer_id:
+        if _is_sg_gate_evidence(row):
+            _sg_evidence_refused(db, row, "review", reviewer_id,
+                                 "This source artifact needs a reviewer different from whoever created it.")
         raise BadRequestException(
             "This source artifact needs a reviewer different from whoever created it."
         )
+    # Singapore gate / decision evidence: the reviewer reviews an uploaded
+    # document (server-computed SHA-256), never a URL or a hand-typed hash.
+    if _is_sg_gate_evidence(row) and not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
+        )
+    if _is_sg_gate_evidence(row):
+        _sg_refuse_if_rejected(db, row, "review", reviewer_id)
     row.reviewer_id = reviewer_id
     row.reviewer_approved_at = datetime.utcnow()
     db.commit()
@@ -2809,6 +3004,17 @@ def upload_source_artifact_file(
     row = db.query(SourceArtifact).filter(SourceArtifact.id == artifact_id).first()
     if not row:
         raise NotFoundException("SourceArtifact", artifact_id)
+    # Singapore gate / decision evidence (production closure): once a second
+    # Super Admin has reviewed it, its document is the accepted evidence —
+    # replacing it (and deleting the reviewed file) would change what was
+    # accepted. Register a new artifact and supersede this one instead.
+    if row.reviewer_approved_at is not None and _is_sg_gate_evidence(row):
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has been reviewed — its file cannot be replaced. Register a new "
+            "artifact with the same form number and supersede this one."
+        )
+    if _is_sg_gate_evidence(row):
+        _sg_refuse_if_rejected(db, row, "upload", actor_id)
     if not data:
         raise BadRequestException("Uploaded file is empty.")
     if len(data) > _SOURCE_ARTIFACT_MAX_BYTES:
@@ -7489,6 +7695,24 @@ _SELF_APPROVAL_REFUSED_COUNTRIES = ("SG",)
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
 _REFUSAL_AUDIT_COUNTRIES = ("SG",)
+# Singapore completion programme (2026-09-29): countries whose TAX packs follow
+# an explicit transition graph. Before this, only the Active-downgrade guard
+# applied, so a Superseded / Retired Singapore pack could be moved back to
+# Draft, edited through upsert and re-activated, and any string was accepted
+# as a status. Same per-country opt-in pattern as the constants above; other
+# countries keep their existing free lifecycle (DE keeps its downgrade guard).
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG",)
+TAX_PACK_TRANSITIONS = {
+    "Draft": ("In Review", "QA", "Approved", "Active"),
+    "In Review": ("Draft", "QA", "Approved", "Active"),
+    "QA": ("Draft", "In Review", "Approved", "Active"),
+    "Approved": ("Draft", "In Review", "QA", "Active"),
+    # Active -> Active is the idempotent re-activation the hotfix path uses.
+    "Active": ("Active", "Deprecated", "Retired", "Superseded"),
+    "Deprecated": ("Retired", "Superseded"),
+    "Retired": (),
+    "Superseded": (),
+}
 
 
 def _audit_refusal(db: Session, model, entity_type: str, entity_id: int, attempted: str, actor_id: Optional[int],
@@ -7515,14 +7739,15 @@ def _audit_refusal(db: Session, model, entity_type: str, entity_id: int, attempt
 
 def set_jurisdiction_pack_status(
     db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None,
-    bypass_approver_check: bool = False,
+    bypass_approver_check: bool = False, reason: Optional[str] = None,
 ) -> JurisdictionPack:
     """Phase 6.5 wrapper: every refusal (BadRequestException) of an opted-in
     country's pack is audited before it propagates — see
-    _set_jurisdiction_pack_status for the gates themselves."""
+    _set_jurisdiction_pack_status for the gates themselves. `reason` (optional,
+    every country) is kept on the tax pack's status_change audit row."""
     try:
         return _set_jurisdiction_pack_status(db, pack_row_id, status, actor_id=actor_id,
-                                             bypass_approver_check=bypass_approver_check)
+                                             bypass_approver_check=bypass_approver_check, reason=reason)
     except BadRequestException as exc:
         _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, status, actor_id, exc.message,
                        path="hotfix" if bypass_approver_check else None)
@@ -7531,7 +7756,7 @@ def set_jurisdiction_pack_status(
 
 def _set_jurisdiction_pack_status(
     db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None,
-    bypass_approver_check: bool = False,
+    bypass_approver_check: bool = False, reason: Optional[str] = None,
 ) -> JurisdictionPack:
     """`bypass_approver_check`: ONLY set by activate_jurisdiction_pack_hotfix
     (never by the ordinary Approve/Publish/Activate path) — see that
@@ -7584,6 +7809,20 @@ def _set_jurisdiction_pack_status(
             f"This {_GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]} tax pack is Active and cannot move directly to {status!r} — "
             "supersede it with a new version instead of downgrading it back to a pre-Active status."
         )
+    # Completion programme graph (after the downgrade guard above, whose
+    # established message still answers Active -> pre-Active).
+    if row.pack_type == "tax" and row.jurisdiction_country in _PACK_TRANSITION_GRAPH_COUNTRIES:
+        if status not in TAX_PACK_TRANSITIONS:
+            raise BadRequestException(
+                f"{status!r} is not a tax pack lifecycle status — use one of {', '.join(TAX_PACK_TRANSITIONS)}."
+            )
+        allowed = TAX_PACK_TRANSITIONS.get(row.status, ())
+        if status not in allowed:
+            raise BadRequestException(
+                f"Pack {row.pack_id} v{row.version} cannot move from {row.status} to {status} — "
+                + (f"allowed: {', '.join(allowed)}." if allowed else
+                   f"{row.status} is final; create a new pack version instead.")
+            )
 
     if status == "Active" and row.pack_type == "tax":
         # No source artifact / no effective date -> cannot publish
@@ -7725,6 +7964,15 @@ def _set_jurisdiction_pack_status(
                 "This pack needs a distinct approver before it can go Active — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
             )
+    # Singapore hotfix policy FOLLOW_UP_REQUIRED: no normal-path activation
+    # while a Singapore hotfix awaits its review (the hotfix path checks it
+    # itself, before recording its own activation row).
+    if (status == "Active" and row.pack_type == "tax" and row.jurisdiction_country == "SG" and not bypass_approver_check
+            and SG_HOTFIX_POLICY == "FOLLOW_UP_REQUIRED" and _sg_unreviewed_hotfixes(db)):
+        raise BadRequestException(
+            "A Singapore hotfix is still awaiting its retrospective review — the Singapore hotfix policy "
+            "(FOLLOW_UP_REQUIRED) blocks further activations until it is reviewed."
+        )
     # Phase 6.0 F2 — approver != activator (Singapore opt-in, same per-country
     # pattern as the DE/SG downgrade guard and the US/SG evidence gate). The
     # gates above compare the approver with the LAST EDITOR; a seeded pack has
@@ -7749,6 +7997,7 @@ def _set_jurisdiction_pack_status(
             db, actor_id=actor_id, action="status_change", entity_type="jurisdiction_pack", entity_id=row.id,
             jurisdiction_pack_id=row.id, tax_version=row.version,
             old_value={"status": old_status}, new_value={"status": status},
+            reason=(reason or "").strip() or None,
         )
     return row
 
@@ -7790,6 +8039,17 @@ def set_jurisdiction_pack_approver(db: Session, pack_row_id: int, actor_id: Opti
             and row.updated_by_id is not None and row.updated_by_id == actor_id):
         message = ("The Super Admin who last edited or submitted this pack cannot approve it — "
                    "a different Super Admin must approve (maker-checker).")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
+        raise BadRequestException(message)
+    # Completion programme (Singapore opt-in, same list as above): only a
+    # pre-release version can be approved. The approval on an Active /
+    # Deprecated / Retired / Superseded pack is its release evidence — it was
+    # previously overwritable, replacing who attested the in-force content.
+    # Same rule report templates already follow (set_report_template_approver).
+    if (row.pack_type == "tax" and row.jurisdiction_country in _SELF_APPROVAL_REFUSED_COUNTRIES
+            and row.status not in _EDITABLE_PACK_STATUSES):
+        message = (f"Pack {row.pack_id} v{row.version} is {row.status} — its approval is release evidence and "
+                   "cannot be replaced; create a new pack version to approve changed content.")
         _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "approve", actor_id, message)
         raise BadRequestException(message)
     old_approver = row.approved_by_id
@@ -8052,6 +8312,18 @@ def activate_jurisdiction_pack_hotfix(
             "Policy packs have no approval gate, so hotfix activation is not applicable — "
             "set the pack's status directly to 'Active' instead."
         )
+    if row.jurisdiction_country == "SG":
+        policy_refusal = None
+        if SG_HOTFIX_POLICY == "PROHIBITED":
+            policy_refusal = ("Singapore hotfix activation is PROHIBITED by the Singapore hotfix policy — activate "
+                              "through the normal maker-checker path.")
+        elif SG_HOTFIX_POLICY == "FOLLOW_UP_REQUIRED" and _sg_unreviewed_hotfixes(db):
+            policy_refusal = ("A Singapore hotfix is still awaiting its retrospective review — the Singapore hotfix "
+                              "policy (FOLLOW_UP_REQUIRED) blocks further activations until it is reviewed.")
+        if policy_refusal:
+            _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, policy_refusal,
+                           path="hotfix")
+            raise BadRequestException(policy_refusal)
 
     # Self-approve, if not already approved by someone else — this is
     # the ONE gate hotfix mode is allowed to bypass. Phase 6.3: the
@@ -8075,7 +8347,8 @@ def activate_jurisdiction_pack_hotfix(
     )
     db.add(activation)
     try:
-        updated = set_jurisdiction_pack_status(db, pack_row_id, "Active", actor_id=actor_id, bypass_approver_check=True)
+        updated = set_jurisdiction_pack_status(db, pack_row_id, "Active", actor_id=actor_id, bypass_approver_check=True,
+                                               reason=f"Hotfix {incident_id.strip()}: {justification.strip()}")
     except Exception:
         db.rollback()
         raise
@@ -8102,6 +8375,27 @@ def list_pack_hotfix_activations(db: Session, reviewed: Optional[bool] = None) -
 # review behaviour (hotfix mode exists for single-Super-Admin sessions).
 _HOTFIX_DISTINCT_REVIEWER_COUNTRIES = ("SG",)
 
+# Singapore hotfix policy — OWNER DECISION D2 (docs/SINGAPORE_FINAL_
+# IMPLEMENTATION_STATUS.md §20). The default reproduces the behaviour in force
+# before the switch existed, so no business decision is made here; choosing
+# another value IS the decision and is a reviewed one-line change.
+#   RESTRICTED          hotfix allowed; every activation gate except the
+#                       approver checks still applies; a DISTINCT Super Admin's
+#                       retrospective review is required and is final.
+#   PROHIBITED          no Singapore hotfix activation at all.
+#   FOLLOW_UP_REQUIRED  RESTRICTED, plus: while any Singapore hotfix awaits its
+#                       review, no further Singapore pack may be activated
+#                       (hotfix or normal path).
+SG_HOTFIX_POLICIES = ("RESTRICTED", "PROHIBITED", "FOLLOW_UP_REQUIRED")
+SG_HOTFIX_POLICY = "RESTRICTED"
+
+
+def _sg_unreviewed_hotfixes(db: Session) -> list:
+    return (db.query(PackHotfixActivation.id)
+            .join(JurisdictionPack, JurisdictionPack.id == PackHotfixActivation.jurisdiction_pack_id)
+            .filter(JurisdictionPack.jurisdiction_country == "SG", PackHotfixActivation.reviewed.is_(False))
+            .order_by(PackHotfixActivation.id).all())
+
 
 def review_pack_hotfix_activation(db: Session, activation_id: int, review_notes: str, actor_id: Optional[int] = None) -> PackHotfixActivation:
     activation = db.query(PackHotfixActivation).filter(PackHotfixActivation.id == activation_id).first()
@@ -8126,6 +8420,18 @@ def review_pack_hotfix_activation(db: Session, activation_id: int, review_notes:
     activation.review_notes = review_notes
     db.commit()
     db.refresh(activation)
+    # Completion programme: the retrospective review — the deferred half of
+    # the hotfix maker-checker — is itself audit evidence on the pack's trail
+    # (it was only a field change on the activation row). Opted-in countries.
+    if pack is not None and pack.jurisdiction_country in _HOTFIX_DISTINCT_REVIEWER_COUNTRIES:
+        record_tax_audit(
+            db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=pack.id,
+            jurisdiction_pack_id=pack.id, tax_version=pack.version,
+            old_value={"hotfixActivationId": activation.id, "reviewed": False},
+            new_value={"hotfixActivationId": activation.id, "reviewed": True, "incidentId": activation.incident_id,
+                       "activatedById": activation.activated_by_id},
+            reason=f"Hotfix review: {review_notes}" if review_notes else "Hotfix review",
+        )
     return activation
 
 
@@ -8991,7 +9297,9 @@ def list_report_templates(
     if search:
         like = f"%{search}%"
         query = query.filter(or_(ReportTemplate.name.ilike(like), ReportTemplate.template_key.ilike(like)))
-    rows = query.order_by(ReportTemplate.template_key, ReportTemplate.created_at.desc()).all()
+    # id breaks a created_at tie (whole seconds on SQLite), so two versions
+    # saved in the same second never swap which one is "latest".
+    rows = query.order_by(ReportTemplate.template_key, ReportTemplate.created_at.desc(), ReportTemplate.id.desc()).all()
 
     latest_by_key = {}
     for row in rows:
@@ -9403,6 +9711,16 @@ def set_report_template_approver(db: Session, template_id: int, actor_id: Option
                    "replaced; create a new version to approve changed content.")
         _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)   # Phase 6.5
         raise BadRequestException(message)
+    # Completion programme (Singapore opt-in, the pack rule of Phase 6.5 B):
+    # the last editor's self-approval is refused HERE — previously it was
+    # recorded (with an audit row calling it an approval) and only refused
+    # later, at Publish.
+    if (row.jurisdiction_country in _SELF_APPROVAL_REFUSED_COUNTRIES and actor_id is not None
+            and row.updated_by_id is not None and row.updated_by_id == actor_id):
+        message = (f"The Super Admin who last edited {row.template_key} v{row.version} cannot approve it — "
+                   "a different Super Admin must approve (maker-checker).")
+        _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)
+        raise BadRequestException(message)
     old_approver = row.approved_by_id
     old_status = row.status
     row.approved_by_id = actor_id
@@ -9427,8 +9745,18 @@ def get_report_template_audit(db: Session, template_id: int) -> List[TaxConfigur
     )
 
 
-def hard_delete_report_template(db: Session, template_id: int) -> dict:
+def hard_delete_report_template(db: Session, template_id: int, actor_id: Optional[int] = None) -> dict:
     row = get_report_template(db, template_id)
+    # Completion programme (Singapore opt-in): a Superseded version is part of
+    # the template's version chain (a successor's previous_version_id points
+    # at it), so it is never deleted; a deletable pre-release version leaves
+    # an audit row behind.
+    audited = row.jurisdiction_country in _REFUSAL_AUDIT_COUNTRIES
+    if audited and row.status == "Superseded":
+        message = (f"{row.template_key} v{row.version} is Superseded — it is retained version history and cannot "
+                   "be deleted.")
+        _audit_refusal(db, ReportTemplate, "report_template", row.id, "delete", actor_id, message)
+        raise BadRequestException(message)
     has_generated_history = (
         db.query(GeneratedReport.id).filter(GeneratedReport.report_template_id == row.id).first() is not None
     )
@@ -9454,8 +9782,15 @@ def hard_delete_report_template(db: Session, template_id: int) -> dict:
         ).delete(synchronize_session=False)
     db.query(ReportTemplateComponent).filter(ReportTemplateComponent.report_template_id == row.id).delete(synchronize_session=False)
     template_key_label, version_label = row.template_key, row.version
+    deleted_id, deleted_status = row.id, row.status
     db.delete(row)
     db.commit()
+    if audited:
+        record_tax_audit(
+            db, actor_id=actor_id, action="delete", entity_type="report_template", entity_id=deleted_id,
+            tax_version=version_label, old_value={"status": deleted_status, "templateKey": template_key_label},
+            new_value=None, reason="Hard delete of a pre-release version",
+        )
     return {"templateKey": template_key_label, "version": version_label}
 
 
@@ -10037,6 +10372,12 @@ def generate_report_from_template(
                 f"{template.template_key} has a dedicated Singapore generator "
                 "(/api/payroll/singapore/reports/...); the generic payslip-column generator cannot render it."
             )
+        # Completion programme: every Singapore generator renders only an
+        # Active template (the dedicated ones already did); a Published but
+        # not yet Active version is not in force.
+        if template.status != "Active":
+            raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
+                                      "a Singapore report is generated only from the Active version.")
     run = (
         db.query(PayrollRun)
         .filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id)
@@ -10136,19 +10477,23 @@ def generate_report_from_template(
         pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == applicable_pack_id).first()
         applicable_pack_version = pack.version if pack else None
     if len(distinct_pack_ids) > 1:
-        rendered_data["metadata"] = {"taxPacksUsed": list(distinct_pack_ids)}
+        rendered_data["metadata"] = {"taxPacksUsed": sorted(distinct_pack_ids)}   # deterministic (a set's order is not)
 
-    existing = (
-        db.query(GeneratedReport)
-        .filter(
-            GeneratedReport.organization_id == organization_id, GeneratedReport.payroll_run_id == payroll_run_id,
-            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+    superseded = []
+    if template.jurisdiction_country == "SG":
+        superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, payroll_run_id=payroll_run_id)
+    else:
+        existing = (
+            db.query(GeneratedReport)
+            .filter(
+                GeneratedReport.organization_id == organization_id, GeneratedReport.payroll_run_id == payroll_run_id,
+                GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
+            )
+            .first()
         )
-        .first()
-    )
-    if existing:
-        existing.status = "Superseded"
-        db.add(existing)
+        if existing:
+            existing.status = "Superseded"
+            db.add(existing)
 
     row = GeneratedReport(
         organization_id=organization_id, report_template_id=template.id, template_version=template.version,
@@ -10160,6 +10505,9 @@ def generate_report_from_template(
         rendered_data=rendered_data, reconciliation=reconciliation,
     )
     db.add(row)
+    if template.jurisdiction_country == "SG":
+        db.flush()
+        _sg_audit_generated_report(db, row, template, superseded)
     db.commit()
     db.refresh(row)
     row.document_scope = template.document_scope
@@ -12181,7 +12529,8 @@ def list_sg_ir8a(db: Session, organization_id: int) -> list:
 
 
 def transition_sg_ir8a(db: Session, organization_id: int, report_id: int, status: str, actor_id: Optional[int] = None,
-                       reference: Optional[str] = None, note: Optional[str] = None) -> dict:
+                       reference: Optional[str] = None, note: Optional[str] = None,
+                       errors: Optional[list] = None) -> dict:
     """EXPORT_READY → SUBMITTED_MANUALLY (the employer filed on myTax Portal;
     a different operator from whoever prepared the extract — maker-checker)
     → ACKNOWLEDGED / REJECTED / UNKNOWN (IRAS's outcome, with its reference).
@@ -12222,8 +12571,9 @@ def transition_sg_ir8a(db: Session, organization_id: int, report_id: int, status
         if acknowledged is not None and modification is None:
             message = (f"IRAS has already acknowledged IR8A extract {acknowledged.id} for income year {row.reporting_year}. "
                        "Changes must be filed with IRAS as a Revision or Amendment (myTax Portal: 'Modify previously "
-                       "submitted data'); Zoiko's revision/amendment workflow is not implemented yet (G3), so this "
-                       "extract cannot be recorded as a new submission.")
+                       "submitted data') — prepare a Revision or Amendment of the acknowledged extract "
+                       f"{acknowledged.id} (Compliance → IR8A); this extract cannot be recorded as a new original "
+                       "submission.")
             db.rollback()
             record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="sg_ir8a", entity_id=report_id,
                              old_value={"status": shown},
@@ -12245,12 +12595,14 @@ def transition_sg_ir8a(db: Session, organization_id: int, report_id: int, status
                                   "never recorded without evidence.")
     if row.status == "UNKNOWN" and not (note or "").strip():
         raise BadRequestException("Reconciling an UNKNOWN IR8A submission needs a note describing how IRAS's outcome was confirmed.")
+    captured = _sg_authority_errors(status, errors)
     reconciliation = copy.deepcopy(row.reconciliation or {})
     reconciliation.setdefault("history", []).append({
         "status": status, "actorId": actor_id, "at": datetime.utcnow().replace(microsecond=0).isoformat(),
-        "reference": (reference or None), "note": (note or None)})
+        "reference": (reference or None), "note": (note or None), **({"errors": captured} if captured else {})})
     if status in ("ACKNOWLEDGED", "REJECTED", "UNKNOWN"):
-        reconciliation["acknowledgement"] = {"outcome": status, "reference": reference or None}
+        reconciliation["acknowledgement"] = {"outcome": status, "reference": reference or None,
+                                             **({"errors": captured} if captured else {})}
     before = shown
     row.reconciliation = reconciliation
     if status == "SUBMITTED_MANUALLY" and modification is not None:
@@ -12411,9 +12763,18 @@ def create_sg_ir8a_modification(db: Session, organization_id: int, base_report_i
     if open_mod is not None:
         refuse(f"IR8A {open_mod.method.lower()} {open_mod.sequence} is {reports[open_mod.report_id].status} — record "
                "IRAS's outcome before preparing another modification.", openModificationId=open_mod.id)
-    template = get_report_template(db, base.report_template_id)
-    if template.status != "Active":
-        refuse(f"Template {template.template_key} v{template.version} is not Active.")
+    # Completion programme: rendered from the Active version of the original's
+    # template key — not the original's own template row, which a template
+    # correction supersedes (that made every later modification impossible).
+    base_template = get_report_template(db, base.report_template_id)
+    template = (db.query(ReportTemplate)
+                .filter(ReportTemplate.template_key == base_template.template_key,
+                        ReportTemplate.jurisdiction_country == base_template.jurisdiction_country,
+                        ReportTemplate.report_type == SG_IR8A_REPORT_TYPE, ReportTemplate.status == "Active")
+                .order_by(ReportTemplate.id.desc()).first())
+    if template is None:
+        refuse(f"No Active version of template {base_template.template_key} — a modification is rendered from the "
+               "Active template.")
     rendered, items = _sg_ir8a_extract(db, organization_id, template, int(base.reporting_year))
     current = _sg_ir8a_position(rendered)
     previous = _sg_ir8a_cumulative_position(db, base)
@@ -12637,7 +12998,11 @@ def _sg_ir8a_extract(db: Session, organization_id: int, template, year: int) -> 
             issues.append("IR21 case not yet filed — confirm whether this employee belongs in the IR8A")
         row["readiness"] = {"status": "READY" if not issues else "REVIEW_REQUIRED", "issues": issues}
         employee_rows.append(row)
-    employee_rows.sort(key=lambda r: (r["employeeName"] or ""))
+    employee_rows.sort(key=lambda r: (r["employeeName"] or "", r["employeeId"]))
+    # IRAS myTax Portal: up to 200 records per submission — each row carries
+    # the (deterministic, 1-based) submission batch it is keyed in.
+    for index, r in enumerate(employee_rows):
+        r["submissionBatch"] = index // _SG_MYTAX_MAX_RECORDS + 1
     box_values = {
         "employer_name": company.name if company else None,
         "year_of_assessment": year + 1,
@@ -12672,6 +13037,8 @@ def _sg_ir8a_extract(db: Session, organization_id: int, template, year: int) -> 
         "myTaxPortalSubmission": {
             "maxRecordsPerSubmission": _SG_MYTAX_MAX_RECORDS,
             "submissions": max(1, -(-len(employee_rows) // _SG_MYTAX_MAX_RECORDS)) if employee_rows else 0,
+            "batches": [{"batch": b, "records": sum(1 for r in employee_rows if r["submissionBatch"] == b)}
+                        for b in sorted({r["submissionBatch"] for r in employee_rows})],
             "rounding": "income fields rounded down, deduction fields rounded up, to the dollar (IRAS FAQ)",
             "source": "IRAS — Submit employment income records (last updated 14 Sep 2026)",
         },
@@ -12706,17 +13073,7 @@ def generate_sg_ir8a(
         raise HTTPException(status_code=409, detail=(
             f"IR8A extract {open_submission.id} for {year} is {open_submission.status} — record IRAS's outcome "
             "(acknowledgement / rejection) before a new extract is prepared (SG-021 / SG-023)."))
-    existing = (
-        db.query(GeneratedReport)
-        .filter(
-            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
-            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
-        )
-        .first()
-    )
-    if existing:
-        existing.status = "Superseded"
-        db.add(existing)
+    superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, scope_key=scope_key)
     row = GeneratedReport(
         organization_id=organization_id, report_template_id=template.id, template_version=template.version,
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
@@ -12728,6 +13085,8 @@ def generate_sg_ir8a(
         rendered_data=rendered_data, reconciliation=None,
     )
     db.add(row)
+    db.flush()
+    _sg_audit_generated_report(db, row, template, superseded)
     db.commit()
     db.refresh(row)
     row.document_scope = template.document_scope
@@ -12833,17 +13192,7 @@ def generate_sg_sdl_monthly(
     pinned_pack, pinned_ids = _sg_pinned_pack(db, items)          # Phase 6.5: the payslips' own pack
     if len(pinned_ids) > 1:
         rendered_data["metadata"] = {"taxPacksUsed": pinned_ids}
-    existing = (
-        db.query(GeneratedReport)
-        .filter(
-            GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
-            GeneratedReport.report_template_id == report_template_id, GeneratedReport.status == "Generated",
-        )
-        .first()
-    )
-    if existing:
-        existing.status = "Superseded"
-        db.add(existing)
+    superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, scope_key=scope_key)
     row = GeneratedReport(
         organization_id=organization_id, report_template_id=template.id, template_version=template.version,
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
@@ -12855,6 +13204,8 @@ def generate_sg_sdl_monthly(
         rendered_data=rendered_data, reconciliation=None,
     )
     db.add(row)
+    db.flush()
+    _sg_audit_generated_report(db, row, template, superseded)
     db.commit()
     db.refresh(row)
     row.document_scope = template.document_scope
@@ -12885,6 +13236,18 @@ def _sg_require_active_template(db: Session, report_template_id: int, report_typ
     return template
 
 
+def _sg_authority_errors(status: str, errors: Optional[list]) -> list:
+    """The authority's own validation / rejection messages (IRAS for IR8A,
+    CPF Board for EZPay), recorded verbatim on a REJECTED or UNKNOWN outcome.
+    Never interpreted; refused on any other step (nothing to capture there)."""
+    cleaned = [str(e).strip() for e in (errors or []) if str(e).strip()]
+    if cleaned and status not in ("REJECTED", "UNKNOWN"):
+        raise BadRequestException("Authority error messages are recorded only with a REJECTED or UNKNOWN outcome.")
+    if len(cleaned) > 200 or any(len(e) > 500 for e in cleaned):
+        raise BadRequestException("At most 200 authority error messages of up to 500 characters each.")
+    return cleaned
+
+
 def _sg_refuse_self_approval(db: Session, entity_type: str, entity_id: int, actor_id: Optional[int],
                              current_status: str, attempted: str, message: str) -> None:
     """Phase 6.5: a preparer's attempt to approve / release its own Singapore
@@ -12895,6 +13258,43 @@ def _sg_refuse_self_approval(db: Session, entity_type: str, entity_id: int, acto
                      old_value={"status": current_status}, new_value={"attempted": attempted, "result": "REFUSED"},
                      reason=message)
     raise BadRequestException(message)
+
+
+def _sg_supersede_live_reports(db: Session, organization_id: int, report_type: str, *, scope_key: Optional[str] = None,
+                               payroll_run_id: Optional[int] = None) -> list:
+    """Completion programme: supersede EVERY live ("Generated") Singapore
+    report of this type for the same org and scope (or run). Keyed on the
+    report type, not the template row — a template correction is a new
+    ReportTemplate row, so keying on report_template_id left the previous
+    version's report live beside the new one. Returns the superseded ids."""
+    q = db.query(GeneratedReport).filter(
+        GeneratedReport.organization_id == organization_id, GeneratedReport.report_type == report_type,
+        GeneratedReport.status == "Generated")
+    q = q.filter(GeneratedReport.scope_key == scope_key) if scope_key is not None else q.filter(
+        GeneratedReport.payroll_run_id == payroll_run_id)
+    superseded = []
+    for existing in q.order_by(GeneratedReport.id).all():
+        existing.status = "Superseded"
+        db.add(existing)
+        superseded.append(existing.id)
+    return superseded
+
+
+def _sg_audit_generated_report(db: Session, row: GeneratedReport, template, superseded_ids: list) -> None:
+    """Completion programme: one "create" audit row per generated Singapore
+    report — template version, pinned pack and the reports it superseded —
+    folded into the caller's own commit (row must be flushed). Report
+    generation was previously unaudited except for CPF EZPay."""
+    record_tax_audit(
+        db, actor_id=row.generated_by_id, action="create", entity_type="generated_report", entity_id=row.id,
+        tax_version=row.template_version,
+        old_value={"supersededReportIds": superseded_ids} if superseded_ids else None,
+        new_value={"reportType": row.report_type, "templateKey": template.template_key,
+                   "templateVersion": row.template_version, "scopeKey": row.scope_key,
+                   "payrollRunId": row.payroll_run_id, "packId": row.applicable_tax_pack_id,
+                   "packVersion": row.applicable_tax_pack_version, "status": row.status},
+        reason=f"Generated {template.template_key} v{template.version}", auto_commit=False,
+    )
 
 
 def _sg_pinned_pack(db: Session, payslips) -> tuple:
@@ -12912,15 +13312,9 @@ def _sg_pinned_pack(db: Session, payslips) -> tuple:
 
 def _sg_persist_report(db: Session, organization_id: int, template, scope_key: str, reporting_year: str,
                        reporting_period: str, rendered_data: dict, actor_id: Optional[int], pack=None) -> GeneratedReport:
-    """Supersede the live report for the same (org, template, scope) and add
-    the new one — history is kept, never overwritten."""
-    existing = (db.query(GeneratedReport)
-                .filter(GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
-                        GeneratedReport.report_template_id == template.id, GeneratedReport.status == "Generated")
-                .first())
-    if existing:
-        existing.status = "Superseded"
-        db.add(existing)
+    """Supersede the live report(s) of the same type for the (org, scope) and
+    add the new one — history is kept, never overwritten; audited."""
+    superseded = _sg_supersede_live_reports(db, organization_id, template.report_type, scope_key=scope_key)
     row = GeneratedReport(
         organization_id=organization_id, report_template_id=template.id, template_version=template.version,
         report_type=template.report_type, payroll_run_id=None, employee_id=None, scope_key=scope_key,
@@ -12930,6 +13324,8 @@ def _sg_persist_report(db: Session, organization_id: int, template, scope_key: s
         status="Generated", generated_by_id=actor_id, rendered_data=rendered_data, reconciliation=None,
     )
     db.add(row)
+    db.flush()
+    _sg_audit_generated_report(db, row, template, superseded)
     db.commit()
     db.refresh(row)
     row.document_scope = template.document_scope
@@ -12970,6 +13366,61 @@ def _sg_payslips_by_employee(db: Session, organization_id: int, year: int, month
     return by_employee
 
 
+def _sg_pack_rates(db: Session, pack_id: int, as_of: date) -> dict:
+    """component_key -> ContributionRate of ONE given pack on `as_of` — the
+    same row filter as tax_resolver.resolve_tax_configuration, without the
+    "currently Active" pack lookup (a released pack's rows are immutable)."""
+    rows = (
+        db.query(ContributionRate)
+        .filter(
+            ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack_id,
+            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
+            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of),
+        )
+        .order_by(ContributionRate.sort_order)
+        .all()
+    )
+    return {r.component_key: r for r in rows}
+
+
+def _sg_report_packs(db: Session, by_employee: dict, month_end: date) -> dict:
+    """Completion programme: the statutory pack(s) a wage-month workspace
+    report (PWM / LQS) is evaluated under — each payslip's PINNED pack
+    (PayslipItem.tax_policy_pack_id), exactly as _sg_pinned_pack does for
+    IR8A / SDL / EZPay / IR21, so a later pack (or the period's pack being
+    Superseded) never changes a regenerated report. Only when no payslip of
+    the month carries a pinned pack (legacy rows) is the pack in force for
+    the wage month resolved instead, and the basis says so."""
+    items = [i for payslips in by_employee.values() for i in payslips]
+    pinned, pinned_ids = _sg_pinned_pack(db, items)
+    if pinned_ids:
+        return {"basis": "PINNED" if pinned is not None else "PINNED_MULTIPLE", "pack": pinned, "packIds": pinned_ids,
+                "rates": {pid: _sg_pack_rates(db, pid, month_end) for pid in pinned_ids}, "fallback": None}
+    pack, rates, _slabs = _sg_active_pack_and_rates(db, month_end)
+    return {"basis": "RESOLVED_FOR_WAGE_MONTH" if pack else "NONE", "pack": pack,
+            "packIds": [pack.id] if pack else [], "rates": {}, "fallback": (pack, rates)}
+
+
+def _sg_employee_pack_rates(packs: dict, payslips: list) -> tuple:
+    """(rates, reason-if-not-evaluable) for one employee's payslips."""
+    ids = {p.tax_policy_pack_id for p in payslips if getattr(p, "tax_policy_pack_id", None)}
+    if len(ids) == 1:
+        return packs["rates"][next(iter(ids))], None
+    if len(ids) > 1:
+        return {}, "The wage month's payslips were calculated under different statutory packs — not evaluated"
+    if packs["fallback"] is not None and packs["fallback"][0] is not None:
+        return packs["fallback"][1], None
+    if packs["packIds"]:
+        return {}, "payslip carries no pinned statutory pack while others in the month do — not evaluated"
+    return {}, "No Active Singapore statutory pack for the wage month — PWM floors are not in force"
+
+
+def _sg_report_pack_metadata(rendered: dict, packs: dict) -> None:
+    rendered["packBasis"] = packs["basis"]
+    if len(packs["packIds"]) > 1:
+        rendered["metadata"] = {"taxPacksUsed": packs["packIds"]}
+
+
 _SG_PWM_FLOOR_RESULT = {"PWM_MET": "MET", "PWM_SHORTFALL": "SHORTFALL"}
 _SG_PWM_OT_RESULT = {"PWM_OVERTIME_GROSS_MET": "MET", "PWM_OVERTIME_GROSS_SHORTFALL": "SHORTFALL",
                      "PWM_OVERTIME_GROSS_NOT_EVALUATED": "NOT_EVALUATED",
@@ -12977,7 +13428,7 @@ _SG_PWM_OT_RESULT = {"PWM_OVERTIME_GROSS_MET": "MET", "PWM_OVERTIME_GROSS_SHORTF
 
 
 def _sg_pwm_report_row(db: Session, employee, payslips: list, rates: dict, month_start: date, month_end: date,
-                       pack_active: bool) -> dict:
+                       pack_reason: Optional[str] = None) -> dict:
     from app.modules.payroll.engine.jurisdictions.singapore import labour
 
     cf = employee.compliance_fields or {}
@@ -12993,8 +13444,8 @@ def _sg_pwm_report_row(db: Session, employee, payslips: list, rates: dict, month
         "overtimeVariance": None, "overtimeResult": None, "schedule": None,
         "averagingWarning": False, "result": "NOT_EVALUATED", "reasons": [], "checks": [],
     }
-    if not pack_active:
-        row["reasons"].append("No Active Singapore statutory pack for the wage month — PWM floors are not in force")
+    if pack_reason:
+        row["reasons"].append(pack_reason)
         return row
     if len(payslips) > 1:
         row["reasons"].append(f"{len(payslips)} payslips in the wage month — the PWM monthly requirement is not "
@@ -13055,16 +13506,33 @@ def generate_sg_pwm_compliance(
 
     template = _sg_require_active_template(db, report_template_id, "SG_PWM_COMPLIANCE")
     month_start, month_end = _sg_month_bounds(year, month)
-    pack, rates, _slabs = _sg_active_pack_and_rates(db, month_end)
     by_employee = _sg_payslips_by_employee(db, organization_id, year, month)
+    packs = _sg_report_packs(db, by_employee, month_end)
+    pack = packs["pack"]
     employees = {e.id: e for e in db.query(PayrollEmployee).filter(
         PayrollEmployee.organization_id == organization_id, PayrollEmployee.id.in_(list(by_employee) or [-1]))}
     rows = []
+    averaging_window = None
     for employee_id, payslips in by_employee.items():
         employee = employees.get(employee_id)
-        if employee is None or (employee.compliance_fields or {}).get("pwm_sector") in (None, "", "NONE"):
+        own = _sg_trace_pwm_fields(payslips[0].sgp_calculation_trace) if len(payslips) == 1 else {}
+        sector = own["pwm_sector"] if own else (employee.compliance_fields or {}).get("pwm_sector") if employee else None
+        if employee is None or sector in (None, "", "NONE"):
             continue                                                  # not PWM-classified — outside the report
-        rows.append(_sg_pwm_report_row(db, employee, payslips, rates, month_start, month_end, pack is not None))
+        rates, pack_reason = _sg_employee_pack_rates(packs, payslips)
+        row = _sg_pwm_report_row(db, employee, payslips, rates, month_start, month_end, pack_reason)
+        if own:
+            row.update(sector=own["pwm_sector"], occupationGroup=own["pwm_group"], jobLevel=own["pwm_job_level"])
+        if sector == "RETAIL" and row["result"] == "SHORTFALL":
+            if averaging_window is None:                              # the two preceding wage months, fetched once
+                averaging_window = [(y, m, _sg_payslips_by_employee(db, organization_id, y, m))
+                                    for y, m in (_sg_month_back(year, month, 2), _sg_month_back(year, month, 1))]
+            window = [(y, m, prior.get(employee_id, [])) for y, m, prior in averaging_window] + [(year, month, payslips)]
+            row["averaging"] = _sg_pwm_retail_averaging(db, employee, window)
+            if row["averaging"]["status"] == "MET":
+                row["result"] = "MET_BY_AVERAGING"
+            row["averagingWarning"] = row["averaging"]["status"] == "NOT_EVALUATED"
+        rows.append(row)
     schedule_ids = {r["schedule"]["scheduleId"] for r in rows if r["schedule"]}
     if schedule_ids:
         windows = {s.id: s for s in db.query(SgpPwmOvertimeSchedule).filter(SgpPwmOvertimeSchedule.id.in_(schedule_ids))}
@@ -13077,7 +13545,8 @@ def generate_sg_pwm_compliance(
                 r["schedule"].update(effectiveTo=_sg_iso(w.effective_to), sourceTitle=src.title if src else None,
                                      sourceUrl=src.source_url if src else None)
     rows.sort(key=lambda r: (r["employeeName"] or "", r["employeeId"]))
-    counts = {k: sum(1 for r in rows if r["result"] == k) for k in ("MET", "SHORTFALL", "NOT_EVALUATED", "NOT_APPLICABLE")}
+    counts = {k: sum(1 for r in rows if r["result"] == k)
+              for k in ("MET", "MET_BY_AVERAGING", "SHORTFALL", "NOT_EVALUATED", "NOT_APPLICABLE")}
     rendered = {
         **_sg_report_header(db, organization_id, template, pack),
         "period": {"wageMonth": month_start.strftime("%Y-%m"), "periodStart": month_start.isoformat(),
@@ -13087,10 +13556,14 @@ def generate_sg_pwm_compliance(
         "knownGaps": [
             "Overtime hours come from the payroll overtime facts recorded on the payslip; MOM rounds them down to "
             "the nearest whole hour before the overtime gross schedule is read.",
-            "Retail permits 3-month averaging (MOM); a retail shortfall is flagged, the average is not computed.",
+            "Retail 3-month averaging (" + _SG_PWM_AVERAGING_SOURCE + ") is evaluated for a retail shortfall from each "
+            "month's own payslip (its recorded job level, gross wages and overtime hours); a month it cannot evaluate — "
+            "part-time, an incomplete month other than the first, a payslip calculated before the per-month "
+            "classification was recorded — leaves the shortfall flagged (averagingWarning), never assumed met.",
             "Not an MOM submission. " + _SG_REPORT_NOT_CERTIFIED,
         ],
     }
+    _sg_report_pack_metadata(rendered, packs)
     return _sg_persist_report(db, organization_id, template, f"PERIOD:{month_start.isoformat()}:{month_end.isoformat()}",
                               str(year), f"{year}-{month:02d}", rendered, actor_id, pack)
 
@@ -13108,8 +13581,9 @@ def generate_sg_lqs_compliance(
     the month is read because the engine evaluates LQS on month-to-date OW."""
     template = _sg_require_active_template(db, report_template_id, "SG_LQS_COMPLIANCE")
     month_start, month_end = _sg_month_bounds(year, month)
-    pack, _rates, _slabs = _sg_active_pack_and_rates(db, month_end)
     by_employee = _sg_payslips_by_employee(db, organization_id, year, month)
+    packs = _sg_report_packs(db, by_employee, month_end)
+    pack = packs["pack"]
     employees = {e.id: e for e in db.query(PayrollEmployee).filter(
         PayrollEmployee.organization_id == organization_id, PayrollEmployee.id.in_(list(by_employee) or [-1]))}
     rows = []
@@ -13156,6 +13630,7 @@ def generate_sg_lqs_compliance(
             "Not an MOM submission. " + _SG_REPORT_NOT_CERTIFIED,
         ],
     }
+    _sg_report_pack_metadata(rendered, packs)
     return _sg_persist_report(db, organization_id, template, f"PERIOD:{month_start.isoformat()}:{month_end.isoformat()}",
                               str(year), f"{year}-{month:02d}", rendered, actor_id, pack)
 
@@ -13431,7 +13906,11 @@ def transition_sg_ir21_case(
     set_germany_accident_insurance_profile_status)."""
     from datetime import timezone as tz
 
-    case = get_sg_ir21_case(db, organization_id, case_id)
+    # Row lock (as transition_sg_ir8a): two concurrent approvals of the same
+    # case must not both pass the status / maker-checker checks.
+    case = _sg_ir21_query(db, organization_id).filter(SgpIr21Case.id == case_id).with_for_update().first()
+    if case is None:
+        raise NotFoundException(f"IR21 case {case_id} not found.")
     old_status = case.status
     if status not in _SG_IR21_TRANSITIONS:
         raise BadRequestException(f"Unknown IR21 status: {status!r}.")
@@ -13656,6 +14135,49 @@ def _sg_decimal_str(value) -> Optional[str]:
     return str(value) if value is not None else None
 
 
+_SG_ALEMBIC_HEADS: list = []                                    # parsed once per process
+
+
+def _alembic_script_heads() -> tuple:
+    if not _SG_ALEMBIC_HEADS:
+        from pathlib import Path
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        backend = Path(__file__).resolve().parents[3]
+        cfg = Config(str(backend / "alembic.ini"))
+        cfg.set_main_option("script_location", str(backend / "alembic"))
+        _SG_ALEMBIC_HEADS.extend(sorted(ScriptDirectory.from_config(cfg).get_heads()))
+    return tuple(_SG_ALEMBIC_HEADS)
+
+
+def _sg_database_state(db: Session) -> dict:
+    """Read-only runtime facts for the readiness dashboard: the database's
+    Alembic revision against the code's head, and whether every Singapore
+    table / column the models declare exists. Never raises."""
+    out = {"codeHeads": [], "databaseHeads": [], "atHead": False, "missingSgObjects": None, "error": None}
+    try:
+        from alembic.runtime.migration import MigrationContext
+        from sqlalchemy import inspect as sa_inspect
+        from app.database import Base
+
+        out["codeHeads"] = list(_alembic_script_heads())
+        out["databaseHeads"] = sorted(MigrationContext.configure(db.connection()).get_current_heads())
+        out["atHead"] = bool(out["codeHeads"]) and out["databaseHeads"] == out["codeHeads"]
+        insp = sa_inspect(db.get_bind())
+        tables = set(insp.get_table_names())
+        missing = [t for t in Base.metadata.tables if t.startswith("sgp_") and t not in tables]
+        for name in ("payroll_employees", "payslip_items"):
+            if name in tables:
+                have = {c["name"] for c in insp.get_columns(name)}
+                missing += [f"{name}.{c.name}" for c in Base.metadata.tables[name].columns
+                            if c.name.startswith("sgp_") and c.name not in have]
+        out["missingSgObjects"] = sorted(missing)
+    except Exception as exc:                                     # noqa: BLE001 — reported, never raised
+        out["error"] = type(exc).__name__
+    return out
+
+
 def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
     from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import build_statutory_summary
     from sqlalchemy import case
@@ -13728,19 +14250,24 @@ def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
                                   .distinct().order_by(Pwm.source_document_id).all()],
         }
 
+    sg_templates = list_report_templates(db, country="SG")
     source_ids = ({r["sourceDocumentId"] for r in rates.values() if r["sourceDocumentId"]}
                   | set(slab_facts["shg_source_ids"]) | {s.source_document_id for s in cpf if s.source_document_id}
                   | set(pwm_schedule.get("sourceDocumentIds", []))
-                  | {p.source_document_id for p in all_packs if p.source_document_id})
+                  | {p.source_document_id for p in all_packs if p.source_document_id}
+                  | {t.source_document_id for t in sg_templates if t.source_document_id})
     sources = {a.id: {"id": a.id, "agency": a.agency, "title": a.title, "url": a.source_url,
                       "sha256": a.checksum_sha256, "retrievedAt": a.retrieved_at.isoformat() if a.retrieved_at else None,
                       "reviewed": a.reviewer_approved_at is not None}
                for a in (db.query(SourceArtifact).filter(SourceArtifact.id.in_(source_ids)).all() if source_ids else [])}
 
-    sg_templates = list_report_templates(db, country="SG")
     version_counts = dict(db.query(ReportTemplate.template_key, sa_func.count(ReportTemplate.id))
                           .filter(ReportTemplate.jurisdiction_country == "SG")
                           .group_by(ReportTemplate.template_key).all())
+    active_versions = {k: {"activeVersion": v, "activeVersionId": i} for k, v, i in (
+        db.query(ReportTemplate.template_key, ReportTemplate.version, ReportTemplate.id)
+        .filter(ReportTemplate.jurisdiction_country == "SG", ReportTemplate.jurisdiction_state.is_(None),
+                ReportTemplate.status == "Active").all())}
     audits: dict = {}
     for entity_id, action, reason, created in (
             db.query(TaxConfigurationAudit.entity_id, TaxConfigurationAudit.action, TaxConfigurationAudit.reason,
@@ -13765,7 +14292,11 @@ def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
                   "sourceDocumentId": t.source_document_id, "sourceReferences": t.source_references,
                   "regulatoryAuthority": t.regulatory_authority, "description": t.description,
                   "updatedAt": t.updated_at.isoformat() if t.updated_at else None,
-                  "allowedNextStatuses": list(REPORT_TEMPLATE_TRANSITIONS.get(t.status, ()))}
+                  "effectiveTo": t.effective_to.isoformat() if t.effective_to else None,
+                  "allowedNextStatuses": list(REPORT_TEMPLATE_TRANSITIONS.get(t.status, ())),
+                  # The version a generator renders today (the listed row is the
+                  # LATEST version, which may be a Draft correction).
+                  **active_versions.get(t.template_key, {"activeVersion": None, "activeVersionId": None})}
                  for t in sg_templates]
     calendar_row = (db.query(StatutoryFilingCalendar)
                     .filter(StatutoryFilingCalendar.jurisdiction_country == "SG",
@@ -13774,7 +14305,94 @@ def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
                     .order_by(StatutoryFilingCalendar.id).first())
     golden = next(iter(list_test_certification_runs(db, limit=1, jurisdiction_country="SG")), None)
 
+    # Pack governance evidence for the pack the values come from: audit trail
+    # size by action (incl. refusals) and hotfix activations / open reviews.
+    values_pack = active or review
+    pack_audit = None
+    if values_pack is not None:
+        by_action = dict(db.query(TaxConfigurationAudit.action, sa_func.count(TaxConfigurationAudit.id))
+                         .filter(TaxConfigurationAudit.entity_type == "jurisdiction_pack",
+                                 TaxConfigurationAudit.entity_id == values_pack.id)
+                         .group_by(TaxConfigurationAudit.action).all())
+        last_change = (db.query(sa_func.max(TaxConfigurationAudit.created_at))
+                       .filter(TaxConfigurationAudit.entity_type == "jurisdiction_pack",
+                               TaxConfigurationAudit.entity_id == values_pack.id).scalar())
+        hotfixes = (db.query(PackHotfixActivation.reviewed, sa_func.count(PackHotfixActivation.id))
+                    .filter(PackHotfixActivation.jurisdiction_pack_id == values_pack.id)
+                    .group_by(PackHotfixActivation.reviewed).all())
+        pack_audit = {"entries": sum(by_action.values()), "byAction": by_action,
+                      "refused": by_action.get("refused", 0),
+                      "lastEntryAt": last_change.isoformat() if last_change else None,
+                      "hotfixActivations": sum(n for _r, n in hotfixes),
+                      "unreviewedHotfixes": sum(n for r, n in hotfixes if not r)}
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory import ezpay as _ezpay
+
+    operations = {
+        "ir8aTransitions": {k: list(v) for k, v in _SG_IR8A_TRANSITIONS.items()},
+        "ir8aMaxRecordsPerSubmission": _SG_MYTAX_MAX_RECORDS,
+        "ir21Transitions": {k: sorted(v) for k, v in _SG_IR21_TRANSITIONS.items()},
+        "ir21ApproverStatuses": sorted(_SG_IR21_APPROVER_STATUSES),
+        "ir21HoldStatuses": list(_SG_IR21_HOLD_STATUSES),
+        "ezpayTransitions": {k: list(v) for k, v in _SG_EZPAY_TRANSITIONS.items()},
+        "ezpayRecordLength": _ezpay.RECORD_LENGTH,
+    }
+
+    # Governance / configuration facts (closure programme). Platform-level
+    # only — this screen carries no organisation data (Phase 5.6 guard), so the
+    # per-organisation AIS choice is shown as its setting definition, from the
+    # canonical jurisdiction schema, not as tenant counts.
+    from app.core.jurisdiction import get_jurisdiction_schema
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    registry = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "SG").first()
+    ais_field = next((f for f in (get_jurisdiction_schema("SG") or {}).get("fields", [])
+                      if f.get("key") == "ais_submission_mode"), None)
+    governance = {
+        "hotfixPolicy": {"current": SG_HOTFIX_POLICY, "options": list(SG_HOTFIX_POLICIES),
+                         "unreviewedHotfixes": len(_sg_unreviewed_hotfixes(db))},
+        # D3: which governance controls are Singapore-only today (the switches themselves).
+        "controlScope": {"refusalAudit": list(_REFUSAL_AUDIT_COUNTRIES),
+                         "selfApprovalRefusedAtApprove": list(_SELF_APPROVAL_REFUSED_COUNTRIES),
+                         "hotfixDistinctReviewer": list(_HOTFIX_DISTINCT_REVIEWER_COUNTRIES),
+                         "packTransitionGraph": list(_PACK_TRANSITION_GRAPH_COUNTRIES),
+                         "approverNotActivator": list(_APPROVER_NOT_ACTIVATOR_COUNTRIES)},
+        "serviceAvailability": ({"availability": registry.availability,
+                                 "filingResponsibility": registry.filing_responsibility,
+                                 "paymentExecutionResponsibility": registry.payment_execution_responsibility,
+                                 "remittanceResponsibility": registry.remittance_responsibility}
+                                if registry else None),
+        "aisSubmissionModeSetting": ({"setting": "Company compliance → " + ais_field["label"],
+                                      "options": list(ais_field.get("options") or []),
+                                      "optionStates": {"EXPORT_ONLY": "READY", "DIRECT_API": "EXTERNAL_INTEGRATION_REQUIRED"}}
+                                     if ais_field else None),
+    }
+
+    # Evidence registry (production closure): gate / decision evidence is an
+    # ordinary SourceArtifact tagged with form_number SG-GATE-G1..G8 or
+    # SG-DECISION-D1..D3 — the existing Source Evidence store (SHA-256, file
+    # upload, reviewer != creator, audited review). No new table.
+    evidence = [{"tag": a.form_number, "id": a.id, "title": a.title, "agency": a.agency, "sha256": a.checksum_sha256,
+                 "createdById": a.created_by_id, "reviewerId": a.reviewer_id,
+                 "reviewedAt": a.reviewer_approved_at.isoformat() if a.reviewer_approved_at else None,
+                 "superseded": a.superseded_by_id is not None, "hasFile": bool(a.file_path)}
+                for a in db.query(SourceArtifact).filter(or_(SourceArtifact.form_number.like("SG-GATE-G%"),
+                                                             SourceArtifact.form_number.like("SG-DECISION-D%")))
+                .order_by(SourceArtifact.id).all()]
+    extra = _sg_evidence_audits(db, [e["id"] for e in evidence])
+    for e in evidence:
+        for value in extra.get(e["id"], []):
+            if "sgEvidenceOutcome" in value:
+                e.update({"outcome": value["sgEvidenceOutcome"], "notes": value.get("notes"),
+                          "validUntil": value.get("validUntil"), "outcomeBy": value["actorId"], "outcomeAt": value["at"]})
+            if "sgDecision" in value:
+                e.update({"selectedValue": value.get("selectedValue"), "decisionReason": value.get("reason"),
+                          "decisionMakerId": value["actorId"], "decidedAt": value["at"]})
+    governance["evidence"] = evidence
+    governance["database"] = _sg_database_state(db)
+
     return build_statutory_summary({
+        "governance": governance,
+        "pack_audit": pack_audit, "operations": operations,
         "as_of": as_of, "active_pack": _sg_pack_dict(active), "review_pack": _sg_pack_dict(review),
         "packs": [_sg_pack_dict(p) for p in all_packs], "rates": rates, "slabs": slab_facts, "sources": sources,
         "pwm_schedule": pwm_schedule, "templates": templates,
@@ -14079,7 +14697,7 @@ def _get_sg_ezpay(db: Session, organization_id: int, report_id: int) -> Generate
 
 def transition_sg_cpf_ezpay(
     db: Session, organization_id: int, report_id: int, status: str, actor_id: Optional[int] = None,
-    reference: Optional[str] = None, note: Optional[str] = None,
+    reference: Optional[str] = None, note: Optional[str] = None, errors: Optional[list] = None,
 ) -> GeneratedReport:
     """PREPARED → APPROVED (a distinct approver, maker-checker) → SUBMITTED
     (the employer uploaded it through CPF EZPay) → ACCEPTED / REJECTED /
@@ -14089,18 +14707,22 @@ def transition_sg_cpf_ezpay(
     allowed = _SG_EZPAY_TRANSITIONS.get(row.status, ())
     if status not in allowed:
         raise BadRequestException(f"CPF EZPay submission is {row.status}; allowed next: {list(allowed) or 'none'}.")
-    if status == "APPROVED" and actor_id is not None and actor_id == row.generated_by_id:
+    if status == "APPROVED" and (actor_id is None or actor_id == row.generated_by_id):
         _sg_refuse_self_approval(db, "sg_cpf_ezpay", row.id, actor_id, row.status, status,
-                                 "CPF EZPay approval needs a distinct approver — the preparer cannot approve (maker-checker).")
+                                 "CPF EZPay approval needs a distinct approver — the preparer cannot approve (maker-checker)."
+                                 if actor_id is not None else
+                                 "CPF EZPay approval needs a distinct approver — an unidentified user cannot approve "
+                                 "(maker-checker).")
     if status in ("ACCEPTED", "REJECTED") and not (reference or "").strip():
         raise BadRequestException(f"{status} needs CPF Board's acknowledgement / reference — never recorded without evidence.")
     if row.status == "UNKNOWN" and not (note or "").strip():
         raise BadRequestException("Reconciling an UNKNOWN submission needs a note describing how the outcome was confirmed.")
     before = row.status
+    captured = _sg_authority_errors(status, errors)
     reconciliation = copy.deepcopy(row.reconciliation or {})
     reconciliation.setdefault("history", []).append({
         "status": status, "actorId": actor_id, "at": datetime.utcnow().replace(microsecond=0).isoformat(),
-        "reference": (reference or None), "note": (note or None),
+        "reference": (reference or None), "note": (note or None), **({"errors": captured} if captured else {}),
     })
     if status in ("ACCEPTED", "REJECTED", "UNKNOWN"):
         reconciliation["acknowledgement"] = {"outcome": status, "reference": reference or None}
@@ -14319,7 +14941,8 @@ def _sg_pwm_inputs(db, employee, trace, rates, month_start, month_end):
     facts = _sg_preflight_employee_facts(employee)
     month_facts, _block = _sg_statutory_facts_for_month(db, employee, month_start, month_end)
     cf = {**(employee.compliance_fields or {}),
-          **{k: v for k, v in month_facts.items() if k in ("ea_workman", "ea_manager_executive", "employment_class")}}
+          **{k: v for k, v in month_facts.items() if k in ("ea_workman", "ea_manager_executive", "employment_class")},
+          **_sg_trace_pwm_fields(trace)}
     wages = _sg_wage_views(trace)
     p4 = labour.part4_coverage(cf.get("ea_workman"), cf.get("ea_manager_executive"), wages["basic"], rates)
     overtime_hours = (trace.get("overtime") or {}).get("hours")
@@ -14333,6 +14956,126 @@ def _sg_pwm_inputs(db, employee, trace, rates, month_start, month_end):
             db, cf.get("pwm_sector"), cf.get("pwm_group"), cf.get("pwm_job_level"), month_end, overtime_hours),
     }
     return facts, cf, wages, p4, pwm_facts
+
+
+def _sg_trace_with_pwm_classification(trace, employee):
+    """Final completion programme: record the PWM job classification and
+    employment type in force when the payslip is calculated, so each month's
+    payslip carries its own role (MOM Retail Annex D §3 averages across role
+    changes, which needs every month's role, not only the current one). A
+    copy — the engine's result is not mutated; non-Singapore traces (None)
+    are returned unchanged."""
+    if not isinstance(trace, dict):
+        return trace
+    cf = getattr(employee, "compliance_fields", None) or {}
+    sector = cf.get("pwm_sector")
+    return {**trace, "pwmClassification": {
+        "sector": sector if sector not in ("", "NONE") else None, "group": cf.get("pwm_group"),
+        "level": cf.get("pwm_job_level"), "employmentType": getattr(employee, "employment_type", None)}}
+
+
+def _sg_trace_pwm_fields(trace) -> dict:
+    """The payslip's own PWM classification as compliance-field keys — {} for
+    a payslip calculated before it was recorded (the current record applies)."""
+    cls = (trace or {}).get("pwmClassification")
+    if not isinstance(cls, dict):
+        return {}
+    return {"pwm_sector": cls.get("sector"), "pwm_group": cls.get("group"), "pwm_job_level": cls.get("level")}
+
+
+_SG_PWM_AVERAGING_SOURCE = ("MOM Tripartite Cluster for Retail Industry report (Aug 2025), Annex D 'Averaging of Gross "
+                            "Wages' §1–4 and footnote 2")
+
+
+def _sg_month_back(year: int, month: int, back: int) -> tuple:
+    n = year * 12 + (month - 1) - back
+    return n // 12, n % 12 + 1
+
+
+def _sg_pwm_retail_averaging(db: Session, employee, window: list) -> dict:
+    """MOM Retail PWM 3-month averaging (Annex D): a retail employee is
+    compliant in a month if (a) that month's gross wage (incl. overtime) meets
+    that month's PWM wage requirement (incl. overtime) OR (b) the average of
+    the past 3 months' gross wages meets the average of the same months'
+    requirements. window = [(year, month, payslips)] oldest -> newest, the
+    last being the evaluated month. The requirement is the MOM Gross Wage
+    Requirement for the month's overtime hours (0 hours = the retail PWM
+    wage) for THAT month's recorded job level (§3: averaging applies across a
+    retail role change). §4 / footnote 2: averaging starts in the 3rd month of
+    employment; an incomplete first month counts with a pro-rated requirement.
+    Everything the source does not cover is NOT_EVALUATED — never assumed."""
+    from decimal import ROUND_HALF_UP
+
+    cent = Decimal("0.01")
+    out = {"status": None, "months": [], "reasons": [], "source": _SG_PWM_AVERAGING_SOURCE}
+
+    def stop(status, reason):
+        out["status"] = status
+        out["reasons"].append(reason)
+        return out
+
+    year, month, _ = window[-1]
+    joined = getattr(employee, "date_of_joining", None)
+    if joined is None:
+        return stop("NOT_EVALUATED", "date of joining not recorded — the 3rd month of employment cannot be determined")
+    index = (year - joined.year) * 12 + (month - joined.month) + 1
+    if index < 3:
+        return stop("NOT_YET_APPLICABLE", f"month {index} of employment — averaging starts in the 3rd month; months 1–2 "
+                                          "must meet the full requirement (Annex D §4)")
+    paid_total = required_total = Decimal("0")
+    for y, m, payslips in window:
+        label = f"{y}-{m:02d}"
+        _start, end = _sg_month_bounds(y, m)
+        if len(payslips) != 1:
+            return stop("NOT_EVALUATED", f"{label}: {len(payslips)} finalized payslips — the month cannot be averaged")
+        p = payslips[0]
+        trace = p.sgp_calculation_trace or {}
+        cls = trace.get("pwmClassification")
+        if not isinstance(cls, dict):
+            return stop("NOT_EVALUATED", f"{label}: payslip #{p.id} was calculated before the per-month PWM classification "
+                                         "was recorded")
+        if cls.get("sector") != "RETAIL":
+            return stop("NOT_APPLICABLE", f"{label}: not a Retail PWM job ({cls.get('sector') or 'none'}) — averaging "
+                                          "applies only across Retail PWM months (Annex D §1, §3)")
+        if (cls.get("employmentType") or "") == "Part-time":
+            return stop("NOT_EVALUATED", f"{label}: part-time — MOM publishes no part-time Gross Wage Requirement table")
+        views = _sg_wage_views(trace)
+        month_facts = trace.get("incompleteMonth") or {}
+        factor = None
+        if views.get("no_pay_leave") or month_facts.get("status") == "INCOMPLETE_MONTH":
+            if ((y, m) != (joined.year, joined.month) or views.get("no_pay_leave")
+                    or Decimal(str(month_facts.get("noPayDays") or 0)) > 0):
+                return stop("NOT_EVALUATED", f"{label}: incomplete month other than the first month of employment — "
+                                             "Annex D states no averaging treatment for it")
+            try:
+                factor = Decimal(str(month_facts["daysWorked"])) / Decimal(str(month_facts["workingDaysInMonth"]))
+            except Exception:  # noqa: BLE001 — missing / zero working days: not evaluable
+                return stop("NOT_EVALUATED", f"{label}: incomplete first month without its working days recorded")
+        hours = (trace.get("overtime") or {}).get("hours")
+        if hours in (None, ""):
+            if views["overtime"] > 0:
+                return stop("NOT_EVALUATED", f"{label}: overtime paid without its hours recorded")
+            hours = 0
+        req = _sg_pwm_overtime_requirement(db, "RETAIL", cls.get("group"), cls.get("level"), end, hours)
+        if req.get("status") != "FOUND":
+            return stop("NOT_EVALUATED", f"{label}: no MOM Gross Wage Requirement in force for {cls.get('level')} at "
+                                         f"{hours} overtime hours")
+        required = Decimal(str(req["required"]))
+        paid_ex_ot = views["gross_ex_ot"]
+        if factor is not None:                       # footnote 2: pro-rated first month (MOM incomplete-month formula)
+            required = (required * factor).quantize(cent, rounding=ROUND_HALF_UP)
+            paid_ex_ot = (paid_ex_ot * factor).quantize(cent, rounding=ROUND_HALF_UP)
+        paid = paid_ex_ot + views["overtime"]
+        paid_total += paid
+        required_total += required
+        out["months"].append({"wageMonth": label, "payslipId": p.id, "jobLevel": cls.get("level"),
+                              "overtimeHours": req["hours"], "grossPaid": str(paid), "requirement": str(required),
+                              "proRatedFirstMonth": factor is not None, "scheduleId": req["scheduleId"]})
+    three = Decimal("3")
+    out["averageGrossPaid"] = str((paid_total / three).quantize(cent, rounding=ROUND_HALF_UP))
+    out["averageRequirement"] = str((required_total / three).quantize(cent, rounding=ROUND_HALF_UP))
+    out["status"] = "MET" if paid_total >= required_total else "SHORTFALL"   # totals: no rounding asymmetry
+    return out
 
 
 def _sg_pwm_overtime_requirement(db: Session, sector, group, level, on_date: date, overtime_hours) -> dict:
@@ -15144,7 +15887,7 @@ def sg_freeze_after_restore(db: Session, organization_id: int, restore_point: st
                        "adviceCode": (row.rendered_data or {}).get("adviceCode"), "previousStatus": before})
     for case in _sg_ir21_query(db, organization_id).filter(SgpIr21Case.status == "DRAFT").with_for_update().all():
         case.status = "RECONCILE_FIRST"
-        record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="sg_ir21_case", entity_id=case.id,
+        record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="sgp_ir21_case", entity_id=case.id,
                          legal_reference="ZP-SG-ENG-001 SG-047", old_value={"status": "DRAFT"},
                          new_value={"status": "RECONCILE_FIRST", "restorePoint": point},
                          reason=f"Disaster recovery — confirm with IRAS whether Form IR21 was filed after restore point {point}",
@@ -16326,12 +17069,32 @@ def get_generated_report(db: Session, organization_id: int, generated_report_id:
 
 def void_generated_report(db: Session, organization_id: int, generated_report_id: int, reason: str, actor_id: Optional[int] = None) -> GeneratedReport:
     row = get_generated_report(db, organization_id, generated_report_id)
+    refusal = None
     if row.report_type == "SG_CPF_EZPAY" and row.status in ("SUBMITTED", "ACCEPTED", "UNKNOWN"):
         # Singapore: a file already handed to CPF Board cannot be voided out
         # of its lifecycle (transition_sg_cpf_ezpay records the outcome).
-        raise BadRequestException(f"A {row.status} CPF EZPay submission cannot be voided — record its CPF Board outcome instead.")
+        refusal = f"A {row.status} CPF EZPay submission cannot be voided — record its CPF Board outcome instead."
+    if row.report_type == SG_IR8A_REPORT_TYPE and row.status in ("SUBMITTED_MANUALLY", "UNKNOWN", "ACKNOWLEDGED"):
+        # Completion programme: an IR8A extract keyed into IRAS (or confirmed
+        # by IRAS) is filing evidence, and an ACKNOWLEDGED original is the
+        # base of every revision / amendment — record IRAS's outcome, or file
+        # a modification, instead of voiding it.
+        refusal = (f"A {row.status} IR8A extract cannot be voided — record IRAS's outcome, or prepare a "
+                   "revision / amendment of an acknowledged original.")
+    if refusal:
+        # Closure programme: a refused void of filing evidence is audited
+        # (one row; nothing else pending — _sg_refuse_self_approval rolls back).
+        _sg_refuse_self_approval(db, "generated_report", row.id, actor_id, row.status, "Void", refusal)
+    before = row.status
     row.status = "Void"
     row.notes = reason
+    if row.jurisdiction_country == "SG":
+        # Completion programme: voiding a Singapore report is audited.
+        record_tax_audit(
+            db, actor_id=actor_id, action="status_change", entity_type="generated_report", entity_id=row.id,
+            tax_version=row.template_version, old_value={"status": before},
+            new_value={"status": "Void", "reportType": row.report_type}, reason=reason, auto_commit=False,
+        )
     db.commit()
     db.refresh(row)
     return row
@@ -20958,7 +21721,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "au_statutory_deductions_total": result.au_statutory_deductions_total,
         "au_workers_compensation_premium": result.au_workers_compensation_premium,
         "au_calculation_trace": result.au_calculation_trace,
-        "sgp_calculation_trace": result.sgp_calculation_trace,
+        "sgp_calculation_trace": _sg_trace_with_pwm_classification(result.sgp_calculation_trace, employee),
         # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
         # same splat-then-pop contract as "_org_levy_result" above. Only
         # ever non-empty when a real order actually contributed a

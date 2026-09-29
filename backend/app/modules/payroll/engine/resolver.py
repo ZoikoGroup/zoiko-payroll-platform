@@ -338,6 +338,7 @@ def build_context_from_employee(
         sgp_work_pass_type=getattr(employee, "sgp_work_pass_type", None),
         sgp_work_pass_issue_date=getattr(employee, "sgp_work_pass_issue_date", None),
         sgp_work_pass_end_date=getattr(employee, "sgp_work_pass_end_date", None),
+        sgp_work_pass_end_reason=(getattr(employee, "compliance_fields", None) or {}).get("work_pass_end_reason"),
         sgp_shg_funds=getattr(employee, "sgp_shg_funds", None),
         sgp_wp_sector=getattr(employee, "sgp_wp_sector", None),
         sgp_wp_skill_level=getattr(employee, "sgp_wp_skill_level", None),

@@ -245,6 +245,7 @@ def build_context(case_context: dict) -> PayrollContext:
         sgp_work_pass_type=case_context.get("sgp_work_pass_type"),
         sgp_work_pass_issue_date=_to_date(case_context.get("sgp_work_pass_issue_date")),
         sgp_work_pass_end_date=_to_date(case_context.get("sgp_work_pass_end_date")),
+        sgp_work_pass_end_reason=case_context.get("sgp_work_pass_end_reason"),
         sgp_shg_funds=case_context.get("sgp_shg_funds"),
         sgp_wp_sector=case_context.get("sgp_wp_sector"),
         sgp_wp_skill_level=case_context.get("sgp_wp_skill_level"),

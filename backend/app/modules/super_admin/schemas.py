@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.modules.auth.models import UserRole
 
@@ -87,8 +87,29 @@ class ApplicableOrganization(BaseModel):
     organizationCode: Optional[str] = None
 
 
+class SgEvidenceReview(BaseModel):
+    """Singapore gate / decision evidence review outcome (never the registrant)."""
+    outcome: str                      # ACCEPTED | REJECTED
+    notes: Optional[str] = None       # required for REJECTED
+    validUntil: Optional[date] = None  # ACCEPTED only; the gate turns EXPIRED after it
+
+
+class SgDecisionCreate(BaseModel):
+    """Owner decision D1 / D2 / D3 — the selected option and the reason."""
+    key: str
+    selectedValue: str
+    reason: str
+
+
+class SourceArtifactSupersede(BaseModel):
+    """Singapore gate / decision evidence: the artifact that replaces this one."""
+    replacementId: int
+
+
 class PolicyStatusUpdate(BaseModel):
     status: str
+    # Optional; kept on the tax pack's status_change audit row.
+    reason: Optional[str] = Field(None, max_length=2000)
 
 
 # ── Finance (Super Admin) ───────────────────────────────────────────────────

@@ -2273,3 +2273,15 @@ export const listSgIr8a = async () => {
 };
 export const transitionSgIr8a = async (reportId, { status, reference, note }) =>
   api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/transition`, { status, reference, note });
+// Prepare an EXPORT_READY IR8A extract for one income year from the Active SG_IR8A template.
+export const generateSgIr8a = async (year) => {
+  const applicable = await api.get("/api/payroll/report-templates/applicable", {
+    params: { reportingYear: String(year), reportType: "SG_IR8A" },
+  });
+  const templateId = applicable?.template?.id ?? applicable?.templateId ?? applicable?.id;
+  if (!templateId) throw new Error(`No Active IR8A template for ${year}.`);
+  return api.post("/api/payroll/singapore/reports/ir8a", { report_template_id: templateId, year });
+};
+// Phase 6.8 (G3) — Revision (full values) / Amendment (differences) of an IRAS-acknowledged extract.
+export const createSgIr8aModification = async (reportId, { method, reason }) =>
+  api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/modifications`, { method, reason });

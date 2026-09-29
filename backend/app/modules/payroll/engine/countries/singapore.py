@@ -112,7 +112,7 @@ from app.modules.payroll.engine.countries.shared import (
 )
 
 _COUNTRY = "SG"
-ENGINE_VERSION = "SG-2026.9"
+ENGINE_VERSION = "SG-2026.10"
 
 # Fail-closed: no Singapore statutory value has a hardcoded fallback. These
 # exist only so fallback_registry.py can list the required keys; each is
@@ -840,10 +840,13 @@ def _s_pass_levy_for_validity(ctx, row, issued, ends, month_start, month_end,
     pass is cancelled or expires"; a full calendar month is the monthly
     rate; otherwise "The daily levy rate … (Monthly levy rate x 12) / 365 =
     rounding up to the nearest cent" per day of liability. The issue day is
-    levied. Whether the cancellation/expiry day itself is levied is NOT
-    stated by the source, so a pass ending within the month needs the
-    `fwl_s_pass_end_day_basis` RulePack row (INCLUSIVE | EXCLUSIVE) — not
-    seeded, so that case BLOCKS until an authoritative value is recorded."""
+    levied. For a CANCELLED pass MOM's cancellation pages state "When levy
+    stops: 1 day before cancellation" — the `*_cancellation_end_day_basis`
+    row (EXCLUSIVE, sourced). For an EXPIRED pass, or when the end reason is
+    not captured, the end-day rule is NOT published, so the pass needs the
+    `fwl_s_pass_end_day_basis` / `fwl_work_permit_end_day_basis` row
+    (INCLUSIVE | EXCLUSIVE) — not seeded, so that case BLOCKS until an
+    authoritative value is recorded."""
     monthly = row.flat_amount
     ref = _row_ref(row)
     base = {"treatment": "EMPLOYER_COST", "ref": ref, "passIssueDate": issued.isoformat() if issued else None,
@@ -853,13 +856,18 @@ def _s_pass_levy_for_validity(ctx, row, issued, ends, month_start, month_end,
     start = max(issued or month_start, month_start)
     end = month_end
     if ends is not None and ends <= month_end:
-        basis_row = ctx.rate_map.get(end_basis_key)
+        reason = (getattr(ctx, "sgp_work_pass_end_reason", None) or "").upper() or None
+        rule_key = end_basis_key.replace("_end_day_basis", "_cancellation_end_day_basis") if reason == "CANCELLED" \
+            else end_basis_key
+        basis_row = ctx.rate_map.get(rule_key)
         end_basis = getattr(basis_row, "text_value", None) if basis_row is not None else None
+        base["endReason"] = reason
         if end_basis not in ("INCLUSIVE", "EXCLUSIVE"):
+            what = ("cancellation" if reason == "CANCELLED" else "expiry" if reason == "EXPIRED"
+                    else "cancellation / expiry (end reason not captured)")
             return _ZERO, {**base, "status": "BLOCKED",
-                           "detail": "BLOCKED — AUTHORITATIVE VALUE REQUIRED: the pass ends within this month and MOM's "
-                                     f"{label} levy page does not state whether the cancellation/expiry day is levied "
-                                     f"({end_basis_key} not configured)"}
+                           "detail": f"BLOCKED — AUTHORITATIVE VALUE REQUIRED: the pass ends within this month by {what} "
+                                     f"and no {label} end-day rule is configured ({rule_key})"}
         end = ends if end_basis == "INCLUSIVE" else ends - timedelta(days=1)
         base["endDayBasis"] = end_basis
         base["endDayBasisRef"] = _row_ref(basis_row)

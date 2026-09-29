@@ -2147,6 +2147,12 @@ def upsert_jurisdiction_pack(
     # never statutory tax values.
     if payload.packType == "tax" and (current_user.role or "").lower() != "super_admin":
         raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
+    # The payload's own packType is not enough: a "policy" payload carrying an
+    # existing TAX pack's id (or packId/version) would otherwise edit that
+    # platform-wide statutory pack from an organization account.
+    target = service.find_jurisdiction_pack_upsert_target(db, payload)
+    if target is not None and target.pack_type == "tax" and (current_user.role or "").lower() != "super_admin":
+        raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
     return service.upsert_jurisdiction_pack(db, payload, actor_id=current_user.id)
 
 
@@ -3005,7 +3011,8 @@ def transition_sg_ir8a(
     current_user=Depends(get_current_user),
 ):
     return service.transition_sg_ir8a(db, current_user.organization_id, report_id, data.status,
-                                      actor_id=current_user.id, reference=data.reference, note=data.note)
+                                      actor_id=current_user.id, reference=data.reference, note=data.note,
+                                      errors=data.errors)
 
 
 # Phase 6.8 (G3): IR8A Revision / Amendment of an IRAS-acknowledged extract —
@@ -3053,7 +3060,7 @@ def transition_sg_cpf_ezpay(
 ):
     return service.transition_sg_cpf_ezpay(
         db, current_user.organization_id, report_id, data.status, actor_id=current_user.id,
-        reference=data.reference, note=data.note,
+        reference=data.reference, note=data.note, errors=data.errors,
     )
 
 

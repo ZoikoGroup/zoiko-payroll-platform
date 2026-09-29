@@ -2469,6 +2469,9 @@ class SGCpfEzpayTransitionRequest(BaseModel):
     status: str
     reference: Optional[str] = Field(None, max_length=100)
     note: Optional[str] = Field(None, max_length=1000)
+    # The authority's own validation / rejection messages, recorded verbatim
+    # with a REJECTED / UNKNOWN outcome (IR8A: IRAS; EZPay: CPF Board).
+    errors: Optional[List[str]] = None
 
 
 class SGIr8aModificationCreateRequest(BaseModel):

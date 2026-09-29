@@ -105,7 +105,8 @@ def test_sg_activation_is_refused_while_the_latest_golden_run_fails_and_allowed_
 
     monkeypatch.setattr(harness, "run_golden_case", real)
     passing = service.run_golden_test_certification(db, "SG", actor_id=A)
-    assert passing.status == "PASS" and passing.passed_cases == passing.total_cases == 36
+    # 37: + wp_services_tier2_cancelled_mid_month (production closure — MOM cancellation end-day rule)
+    assert passing.status == "PASS" and passing.passed_cases == passing.total_cases == 37
     # run_at is server-side now() (whole seconds on SQLite): force the tie, so
     # the newer run (higher id) must win for both the gate and the readiness view.
     passing.run_at = failing.run_at

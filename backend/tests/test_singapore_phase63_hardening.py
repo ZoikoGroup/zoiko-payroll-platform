@@ -120,8 +120,12 @@ def test_self_approval_still_blocks_publication(db):
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
-    t = service.set_report_template_approver(db, _template(db).id, actor_id=MAKER)   # the maker approves itself
-    assert t.status == "Approved"
+    t = _template(db)
+    with pytest.raises(BadRequestException, match="cannot approve it"):             # completion programme:
+        service.set_report_template_approver(db, t.id, actor_id=MAKER)             # refused at Approve now
+    t = service.get_report_template(db, t.id)
+    t.approved_by_id, t.status = MAKER, "Approved"                                  # and still at Publish
+    db.commit()
     with pytest.raises(BadRequestException, match="distinct approver"):
         _status(db, t, "Published", actor=MAKER)
 

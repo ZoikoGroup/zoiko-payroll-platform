@@ -1,4 +1,4 @@
-import { ClipboardList, FileCheck2, FileText, Landmark, ShieldCheck, TableProperties } from "lucide-react";
+import { ClipboardList, FileCheck2, FileText, Gauge, Landmark, ShieldCheck, TableProperties } from "lucide-react";
 import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 import TestCertificationPanel from "../../components/jurisdiction/TestCertificationPanel";
@@ -7,6 +7,7 @@ import SGStatutoryComponentsTab from "../../components/jurisdiction/singapore/SG
 import SGStatutorySummaryTab from "../../components/jurisdiction/singapore/SGStatutorySummaryTab";
 import SGPwmSchedulesTab from "../../components/jurisdiction/singapore/SGPwmSchedulesTab";
 import SGReportTemplatesTab from "../../components/jurisdiction/singapore/SGReportTemplatesTab";
+import SGReadinessTab from "../../components/jurisdiction/singapore/SGReadinessTab";
 
 // Singapore (ZP-SG-ENG-001) — country-level only, plugged into the shared
 // JurisdictionLayout exactly like UK (overviewTabOverride + extraTabs +
@@ -19,7 +20,17 @@ import SGReportTemplatesTab from "../../components/jurisdiction/singapore/SGRepo
 // misleading "0% brackets", and every Singapore row — scalar or band — is
 // presented by the Statutory Components tab instead. Source Evidence and
 // Golden Vectors reuse the platform-wide panels the USA page already uses.
+// Opens on the Active tax pack in force today (else the first Active one), so
+// the Singapore control-center tabs show without an extra click.
+function sgAutoSelectPack(packs) {
+  const today = new Date().toISOString().slice(0, 10);
+  const active = packs.filter((p) => p.packType === "tax" && p.status === "Active");
+  return active.find((p) => (!p.effectiveFrom || p.effectiveFrom <= today) && (!p.effectiveTo || p.effectiveTo >= today))
+    || active[0] || null;
+}
+
 const sgComplianceConfig = {
+  autoSelectPack: sgAutoSelectPack,
   overviewTabOverride: {
     isActive: (pack) => Boolean(pack) && pack.packType === "tax",
     render: (props) => <SGOverviewDashboard {...props} />,
@@ -41,6 +52,13 @@ const sgComplianceConfig = {
       key: "sg-summary", label: "Statutory Summary", icon: ClipboardList, after: "overview",
       isVisible: (pack) => pack.packType === "tax",
       render: () => <SGStatutorySummaryTab />,
+    },
+    // Closure programme: activation readiness, statutory operations, hotfix
+    // policy, AIS modes and production gates in one read-only view.
+    {
+      key: "sg-readiness", label: "Readiness & Operations", icon: Gauge, after: "sg-summary",
+      isVisible: (pack) => pack.packType === "tax",
+      render: () => <SGReadinessTab />,
     },
     {
       key: "sg-pwm", label: "PWM Schedules", icon: TableProperties, after: "sg-evidence",

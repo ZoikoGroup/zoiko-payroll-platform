@@ -35,13 +35,33 @@ export const CPF_AGE_BANDS = [
 ];
 
 // Total-wage bands (ZP-SG-ENG-001 §3) — each is its own statutory row; the
-// full-rate percentage is never extrapolated downward.
+// full-rate percentage is never extrapolated downward. Only the band KIND is
+// known here: the S$ thresholds are the pack's own TaxSlab min/max amounts
+// (wageBandRange), never typed into React.
 export const CPF_WAGE_BANDS = [
-  { basis: "NIL", label: "≤ S$50", min: 0, max: 50 },
-  { basis: "ER_ONLY", label: "> S$50 – 500", min: 50, max: 500 },
-  { basis: "PHASE_IN", label: "> S$500 – 750", min: 500, max: 750 },
-  { basis: "FULL", label: "> S$750", min: 750, max: null },
+  { basis: "NIL", label: "No CPF" },
+  { basis: "ER_ONLY", label: "Employer only" },
+  { basis: "PHASE_IN", label: "Phase-in" },
+  { basis: "FULL", label: "Full rates" },
 ];
+
+// The pack's own threshold range for one wage-band kind: the lowest
+// minAmount and the highest maxAmount of its CPF rows (open when any row
+// has no maximum). { min, max } of strings, or null when the pack has none.
+export function wageBandBounds(slabs, basis) {
+  const rows = (slabs || []).filter((s) => s.ruleType === CPF_RATE_BAND && s.assessmentBasis === basis);
+  if (!rows.length) return null;
+  const mins = rows.map((r) => Number(r.minAmount)).filter((n) => !Number.isNaN(n));
+  const open = rows.some((r) => r.maxAmount === null || r.maxAmount === undefined || r.maxAmount === "");
+  const maxs = rows.map((r) => Number(r.maxAmount)).filter((n) => !Number.isNaN(n));
+  return { min: mins.length ? String(Math.min(...mins)) : "", max: open || !maxs.length ? "" : String(Math.max(...maxs)) };
+}
+
+export function wageBandRange(slabs, basis) {
+  const b = wageBandBounds(slabs, basis);
+  if (!b) return "not configured";
+  return b.max ? `> S$${b.min} – ${b.max}` : `> S$${b.min}`;
+}
 
 export const SHG_FUNDS = [
   { key: "CDAC", label: "CDAC" },
@@ -71,18 +91,9 @@ export const IR8A_STATUS = "EXPORT_READY";
 export const IR21_STATUSES = ["DRAFT", "FILED", "CLEARED", "RELEASED", "EXEMPT", "CANCELLED", "EXCEPTION"];
 export const IR21_WORKFLOW = "TENANT CASE WORKFLOW (hold / clearance / release)";
 
-// ZP-SG-ENG-001 §18 — none can be marked passed from this UI; each needs
-// external evidence this phase does not produce.
-export const PRODUCTION_GATES = [
-  { key: "G1", label: "CPF content certification" },
-  { key: "G2", label: "CPF operations (EZPay file, payment, reconciliation)" },
-  { key: "G3", label: "IRAS AIS (YA2027 model, API/export, amendments)" },
-  { key: "G4", label: "IR21 tax clearance" },
-  { key: "G5", label: "Foreign workforce (levy billing, LQS/PWM)" },
-  { key: "G6", label: "Labour pay (Employment Act)" },
-  { key: "G7", label: "Security / privacy (PDPA, NRIC/FIN masking)" },
-  { key: "G8", label: "Two-cycle parallel payroll + AIS simulation" },
-];
+// ZP-SG-ENG-001 §18 production gates come from the backend summary
+// (activationReadiness.productionGates) — the single source; none can be
+// marked passed from this UI.
 
 export function rateByKey(rates, key) {
   return (rates || []).find((r) => r.componentKey === key) || null;

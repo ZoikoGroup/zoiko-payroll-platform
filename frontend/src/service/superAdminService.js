@@ -279,6 +279,20 @@ export const downloadSourceArtifactFile = async (id, filenameHint) => {
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
 
+// Singapore gate / decision evidence: keep the old artifact, mark it superseded by a same-tag replacement.
+export const supersedeSourceArtifact = (id, replacementId) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/supersede`, { method: "PUT", body: { replacementId } });
+
+// Singapore gate / decision evidence review outcome: ACCEPTED (optional validUntil) or REJECTED (notes required).
+export const reviewSgEvidence = (id, { outcome, notes, validUntil }) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/sg-review`, {
+    method: "PUT", body: { outcome, notes: notes || null, validUntil: validUntil || null },
+  });
+
+// Singapore owner decision D1 / D2 / D3 — selected option + reason (counts after memo upload + second-admin review).
+export const recordSgDecision = ({ key, selectedValue, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/decisions", { method: "POST", body: { key, selectedValue, reason } });
+
 // ── India: state/local statutory readiness registry (§16) ─────────────────
 // One row per (state/UT, optional local authority, program) — informational
 // only, no calculation/onboarding path enforces it yet.

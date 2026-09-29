@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   getEmployees, correctSgPayslip, createSgSalaryDeduction, freezeSgAfterRestore, releaseSgBankExportHold,
-  listSgIr8a, transitionSgIr8a, generateSgComplianceReport,
+  listSgIr8a, transitionSgIr8a, generateSgComplianceReport, generateSgIr8a, createSgIr8aModification,
 } from "../../../service/payrollService";
 
 // Singapore operator actions for the Compliance Centre (Phase 5.1): the
@@ -202,6 +202,34 @@ export function SGRestoreFreezeCard({ onDone }) {
 const IR8A_NEXT = { EXPORT_READY: ["SUBMITTED_MANUALLY"], SUBMITTED_MANUALLY: ["ACKNOWLEDGED", "REJECTED", "UNKNOWN"],
   UNKNOWN: ["ACKNOWLEDGED", "REJECTED"] };
 
+// Phase 6.8 (G3): an IRAS-ACKNOWLEDGED original can be revised (full values)
+// or amended (differences only); the server computes the position and delta.
+function Ir8aModificationForm({ row, onDone }) {
+  const [form, setForm] = useState({ method: "AMENDMENT", reason: "" });
+  const { message, busy, run } = useSubmit();
+  return (
+    <form className="mt-2 flex flex-wrap items-end gap-2" onSubmit={(e) => {
+      e.preventDefault();
+      run(() => createSgIr8aModification(row.id, form), (r) => {
+        onDone?.();
+        return `IR8A ${String(r?.method || form.method).toLowerCase()} prepared${r?.reportId ? ` as extract ${r.reportId}` : ""} — file it on myTax Portal, then record it below.`;
+      });
+    }}>
+      <label className="sr-only" htmlFor={`ir8a-${row.id}-method`}>Modification</label>
+      <select id={`ir8a-${row.id}-method`} className={input} value={form.method}
+              onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}>
+        <option value="AMENDMENT">Amendment (differences only)</option>
+        <option value="REVISION">Revision (full values)</option>
+      </select>
+      <label className="sr-only" htmlFor={`ir8a-${row.id}-reason`}>Reason</label>
+      <input id={`ir8a-${row.id}-reason`} className={input} placeholder="Reason" maxLength={1000} value={form.reason}
+             onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} />
+      <button type="submit" className={btn} disabled={busy}>Prepare modification</button>
+      <Message message={message} />
+    </form>
+  );
+}
+
 function Ir8aRow({ row, onDone }) {
   const next = IR8A_NEXT[row.submissionStatus] || [];
   const [form, setForm] = useState({ status: next[0] || "", reference: "", note: "" });
@@ -209,9 +237,12 @@ function Ir8aRow({ row, onDone }) {
   return (
     <li className="rounded-[12px] border border-border p-3 text-[12px]">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span>IR8A {row.reportingYear} · extract {row.id} · {row.employees} employee(s)</span>
+        <span>IR8A {row.reportingYear} · {row.submissionKind === "ORIGINAL" ? "original" : String(row.submissionKind).toLowerCase()} extract {row.id} · {row.employees} employee(s)</span>
         <span className="font-semibold">{row.submissionStatus}</span>
       </div>
+      {row.submissionStatus === "ACKNOWLEDGED" && row.submissionKind === "ORIGINAL" && (
+        <Ir8aModificationForm row={row} onDone={onDone} />
+      )}
       {next.length > 0 && (
         <form className="mt-2 flex flex-wrap items-end gap-2" onSubmit={(e) => {
           e.preventDefault();
@@ -239,14 +270,34 @@ function Ir8aRow({ row, onDone }) {
 export function SGIr8aSubmissionCard() {
   const [rows, setRows] = useState([]);
   const [version, setVersion] = useState(0);
+  const [year, setYear] = useState(new Date().getFullYear() - 1);
+  const [loadError, setLoadError] = useState(null);
+  const { message, busy, run } = useSubmit();
   useEffect(() => {
     let active = true;
-    listSgIr8a().then((r) => active && setRows(r)).catch(() => active && setRows([]));
+    listSgIr8a()
+      .then((r) => { if (active) { setRows(r); setLoadError(null); } })
+      .catch((e) => { if (active) { setRows([]); setLoadError(e?.message || "IR8A extracts could not be loaded."); } });
     return () => { active = false; };
   }, [version]);
   return (
     <Card id="sg-ir8a-heading" title="IR8A manual submission (SG-023)"
           intro="AIS-API direct submission is NOT READY. Record the employer's manual filing on myTax Portal and IRAS's outcome against each extract — a different operator from the preparer records the submission, and IRAS's reference is required.">
+      <form className="mb-3 flex flex-wrap items-end gap-2" onSubmit={(e) => {
+        e.preventDefault();
+        run(() => generateSgIr8a(year), (r) => {
+          setVersion((v) => v + 1);
+          return `IR8A extract ${r?.id ?? ""} prepared for ${year} (EXPORT_READY) — not submitted to IRAS.`;
+        });
+      }}>
+        <label className={label} htmlFor="sg-ir8a-year">Income year
+          <input id="sg-ir8a-year" type="number" className={`${input} block w-28`} min={2026} value={year}
+                 onChange={(e) => setYear(Number(e.target.value))} />
+        </label>
+        <button type="submit" className={btn} disabled={busy}>Prepare IR8A extract</button>
+      </form>
+      <Message message={message} />
+      {loadError && <p className="text-[12px] text-error" role="alert">{loadError}</p>}
       {rows.length ? <ul className="space-y-2">{rows.map((r) => (
         <Ir8aRow key={`${r.id}-${r.submissionStatus}`} row={r} onDone={() => setVersion((v) => v + 1)} />
       ))}</ul> : <p className="text-[12px] text-foreground-muted">No IR8A extracts yet.</p>}

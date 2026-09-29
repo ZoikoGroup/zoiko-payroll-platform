@@ -190,6 +190,8 @@ export const COUNTRY_FIELD_SPECS = {
     // MOM: S Pass levy liability runs from the day the pass is issued until it is cancelled or expires.
     { key: "work_pass_issue_date", label: "Work pass issue date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Work pass issue date must be in YYYY-MM-DD format.", showWhen: (cf) => !["", "NONE"].includes((cf?.work_pass_type || "").toUpperCase()) },
     { key: "work_pass_end_date", label: "Work pass cancellation / expiry date", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Work pass end date must be in YYYY-MM-DD format.", showWhen: (cf) => !["", "NONE"].includes((cf?.work_pass_type || "").toUpperCase()) },
+    // MOM: the levy stops 1 day before a CANCELLATION; the expiry-day rule is not published (levy then BLOCKS).
+    { key: "work_pass_end_reason", label: "Work pass end reason", type: "select", choices: ["CANCELLED", "EXPIRED"], pattern: /^(CANCELLED|EXPIRED)$/, error: "Choose CANCELLED or EXPIRED.", showWhen: (cf) => Boolean(cf?.work_pass_end_date) },
     { key: "shg_funds", label: "SHG fund(s)", type: "text", placeholder: "NONE or e.g. MBMF,SINDA", pattern: /^\s*(NONE|(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?(\s*,\s*(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?)*)\s*$/i, error: "SHG funds must be NONE or a comma-separated list of CDAC, ECF, MBMF, SINDA — optionally with the SHG-instructed monthly amount, e.g. MBMF=10.00." },
     { key: "shg_evidence_ref", label: "SHG opt-out / alternate amount evidence ref.", type: "text", placeholder: "e.g. CDAC-OPTOUT-2026-014" },
     // MOM Work Permit levy classification (sector / skill / MOM-allocated tier) — the levy is never guessed without them.

@@ -40,7 +40,7 @@ import {
   INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage,
   DEReportTemplatesPage,
   BBReportTemplatesPage, KYReportTemplatesPage, DOReportTemplatesPage, GYReportTemplatesPage, JMReportTemplatesPage,
-  BSReportTemplatesPage, TTReportTemplatesPage,
+  BSReportTemplatesPage, TTReportTemplatesPage, SGReportTemplatesPage,
 } from "./pages/ReportTemplates";
 import FundingPaymentsPage from "./pages/SuperAdmin/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -258,6 +258,8 @@ export default function App() {
         <Route path="/super-admin/report-templates/bahamas" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/bahamas/:jurisdiction" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/trinidad-and-tobago" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/singapore" element={<SuperAdminShell><SGReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/singapore/:jurisdiction" element={<SuperAdminShell><SGReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/trinidad-and-tobago/:jurisdiction" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/germany" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/germany/:jurisdiction" element={<SuperAdminShell><DEReportTemplatesPage /></SuperAdminShell>} />

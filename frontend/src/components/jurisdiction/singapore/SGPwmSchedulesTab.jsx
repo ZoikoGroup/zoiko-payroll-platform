@@ -10,7 +10,7 @@ import useSgStatutorySummary from "./useSgStatutorySummary";
 // the Super Admin FundingPaymentsPage. Sector options come from the backend
 // summary, not a frontend list.
 const PAGE_SIZE = 50;
-const EMPTY = { sector: "", occupation_group: "", job_level: "", effective_on: "", overtime_hours: "", status: "", search: "" };
+const EMPTY = { sector: "", occupation_group: "", job_level: "", role_label: "", effective_on: "", overtime_hours: "", status: "", search: "" };
 
 export default function SGPwmSchedulesTab() {
   const [filters, setFilters] = useState(EMPTY);
@@ -61,6 +61,9 @@ export default function SGPwmSchedulesTab() {
         <label className="text-xs text-foreground-muted">Job level
           <input className={input} value={filters.job_level} onChange={set("job_level")} />
         </label>
+        <label className="text-xs text-foreground-muted">Exact role (MOM heading)
+          <input className={input} value={filters.role_label} onChange={set("role_label")} maxLength={120} />
+        </label>
         <label className="text-xs text-foreground-muted">In force on
           <input type="date" className={input} value={filters.effective_on} onChange={set("effective_on")} />
         </label>
@@ -88,7 +91,10 @@ export default function SGPwmSchedulesTab() {
             </tr>
           </thead>
           <tbody>
-            {result.items.map((r) => (
+            {loading && (
+              <tr><td colSpan={9} className="px-3 py-4 text-center text-foreground-muted">Loading…</td></tr>
+            )}
+            {!loading && result.items.map((r) => (
               <tr key={r.id} className="border-t border-border">
                 <td className="px-3 py-1.5">{r.sector}</td>
                 <td className="px-3 py-1.5">{r.occupationGroup}</td>

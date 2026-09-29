@@ -133,6 +133,13 @@ def build_file(csn, advice_code: str, relevant_month: str, created_at: datetime,
             errors.append(f"{who}: name longer than 66 characters (X(66), spec p5) — never truncated silently")
         if FORBIDDEN_CHARACTERS & set(name):
             errors.append(f"{who}: name contains a character not allowed in the file (spec p6 note 2)")
+        # p1: fixed-length 150-BYTE records. A non-ASCII character (e.g. an
+        # accented letter) is more than one byte, so the record could not be
+        # 150 bytes — refused here rather than failing when the file is encoded.
+        if not name.isascii() or not name.isprintable():
+            errors.append(f"{who}: name contains a non-ASCII or non-printable character — every record must be "
+                          "exactly 150 bytes (spec p1); enter the name as it is registered with CPF Board in "
+                          "plain ASCII")
         status = e.get("employment_status")
         if status not in EMPLOYMENT_STATUSES:
             errors.append(f"{who}: employment status must be E/L/N/O (spec p5)")
@@ -202,6 +209,8 @@ def validate_records(records: list) -> list:
     for n, r in enumerate(records, start=1):
         if len(r) != RECORD_LENGTH:
             problems.append(f"record {n}: length {len(r)} ≠ {RECORD_LENGTH}")
+        elif not r.isascii():
+            problems.append(f"record {n}: contains non-ASCII characters — not a {RECORD_LENGTH}-byte record")
         if r[0] != "F":
             problems.append(f"record {n}: submission mode must be F")
         if FORBIDDEN_CHARACTERS & set(r):

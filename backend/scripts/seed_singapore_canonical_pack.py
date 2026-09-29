@@ -27,11 +27,13 @@ certification run (set_jurisdiction_pack_status). Re-running refuses to
 touch a version that has left Draft.
 
 Deliberately NOT seeded (BLOCKED — AUTHORITATIVE VALUE REQUIRED):
-  - LQS part-time rate before 1 July 2026 (MOM states only the post-July rate).
   - Work Permit levy before 24 Sep 2026 for services / manufacturing /
     process / marine shipyard (MOM states no effective date).
-  - The S Pass / Work Permit end-day basis (MOM does not state whether the
-    cancellation/expiry day is levied).
+  - The S Pass / Work Permit EXPIRY end-day basis (MOM does not state whether
+    the expiry day is levied). The CANCELLATION rule is seeded: MOM's
+    cancellation pages — "When levy stops: 1 day before cancellation".
+(The part-time LQS rate before 1 July 2026 IS seeded — MOM COS 2024
+factsheet, $10.50/h from 1 July 2024 — see the lqs_part_time_hourly rows.)
 
 Idempotent — touches only SG rows under the v1.1 pack (plus the one SG AIS
 filing-calendar row and SG evidence artifacts matched by URL + hash), never
@@ -73,6 +75,7 @@ RETRIEVED_AT = datetime(2026, 9, 23, 10, 23, 44, tzinfo=timezone.utc)
 RETRIEVED_AT_PHASE5 = datetime(2026, 9, 24, 9, 0, 0, tzinfo=timezone.utc)
 # Phase 5.3 / 5.4 sources (keys in LATER_SOURCE_KEYS) were retrieved 2026-09-25.
 RETRIEVED_AT_PHASE53 = datetime(2026, 9, 25, 9, 0, 0, tzinfo=timezone.utc)
+RETRIEVED_AT_CLOSURE = datetime(2026, 9, 29, 6, 0, 0, tzinfo=timezone.utc)
 # MOM publishes no effective date for the current services / manufacturing /
 # process / marine shipyard Work Permit levy tables: they are evidenced only
 # as in force when retrieved, so earlier wage months fail closed (BLOCKED)
@@ -283,11 +286,24 @@ _PHASE5_SOURCES = {
         "https://www.pdpc.gov.sg/-/media/files/pdpc/pdf-files/advisory-guidelines/advisory-guidelines-for-nric-numbers---310818.pdf",
         "b839a916a70243891b2dd4d1df1afdc7f1de0cc6eb2dd8875157821189a8c3b8", date(2018, 8, 31),
     ),
+    # Production closure (retrieved 2026-09-29; SHA-256 of the retrieved HTML;
+    # publication date = the page's "Last Updated").
+    "mom_spass_cancel": (
+        "MOM", "Cancel an S Pass — \"When levy stops: 1 day before cancellation\"",
+        "https://www.mom.gov.sg/passes-and-permits/s-pass/cancel-a-pass",
+        "5c71ac70d3b9d764320cc261d8987e36d2e6009bc95a5f549d0c7c3e3a3e704b", date(2025, 9, 15),
+    ),
+    "mom_wp_cancel": (
+        "MOM", "Cancel a Work Permit — \"Your worker's levy will be charged until 1 day before the pass cancellation\"",
+        _WP + "/cancel-a-work-permit",
+        "2bc8e148258cde0041feec1f08c87c5acb9b2d24fe008f5175189b7700a52d11", date(2026, 8, 5),
+    ),
 }
 LATER_SOURCE_KEYS = frozenset({"mom_opw", "mom_employment_records", "iras_record_keeping",
                                "mom_cos2024_foreign_workforce", "mom_pwm_waste_ot",
                                *(f"mom_{n}" for n in ("pwm_ot_opw_pre_jul26", "pwm_ot_opw_from_jul26", "pwm_ot_fs_pre_jul26", "pwm_ot_fs_from_jul26", "pwm_ot_retail_pre_sep25", "pwm_ot_retail_from_sep25"))})
-PHASE5_SOURCE_KEYS = frozenset(_PHASE5_SOURCES) - LATER_SOURCE_KEYS
+CLOSURE_SOURCE_KEYS = frozenset({"mom_spass_cancel", "mom_wp_cancel"})
+PHASE5_SOURCE_KEYS = frozenset(_PHASE5_SOURCES) - LATER_SOURCE_KEYS - CLOSURE_SOURCE_KEYS
 SOURCES.update(_PHASE5_SOURCES)
 
 # Work Permit monthly levy (MOM sector pages above): (sector, tier, skill,
@@ -612,6 +628,12 @@ RATES = (
     ("sdl_max_monthly", "SDL maximum per employee (monthly)", "cpf_sdl", dict(flat_amount="11.25")),
     ("fwl_s_pass_monthly", "Foreign Worker Levy — S Pass (monthly, employer cost)", "mom_spass_levy",
      dict(flat_amount="650")),
+    # MOM cancellation pages: "When levy stops: 1 day before cancellation" —
+    # the cancellation day is NOT levied. Expiry has no published rule.
+    ("fwl_s_pass_cancellation_end_day_basis", "S Pass levy end day on CANCELLATION (levy stops 1 day before)",
+     "mom_spass_cancel", dict(text_value="EXCLUSIVE")),
+    ("fwl_work_permit_cancellation_end_day_basis", "Work Permit levy end day on CANCELLATION (levy stops 1 day before)",
+     "mom_wp_cancel", dict(text_value="EXCLUSIVE")),
     ("lqs_full_time_monthly", "Local Qualifying Salary — full-time (monthly)", "mom_lqs_factsheet",
      dict(flat_amount="1600", effective_from=EFFECTIVE_FROM, effective_to=date(2026, 6, 30))),
     ("lqs_full_time_monthly", "Local Qualifying Salary — full-time (monthly)", "mom_lqs_factsheet",
@@ -669,7 +691,8 @@ def _upsert_sources(db) -> dict:
             row = SourceArtifact(
                 agency=agency, title=title, source_url=url, checksum_sha256=sha256,
                 publication_date=published,
-                retrieved_at=(RETRIEVED_AT_PHASE53 if key in LATER_SOURCE_KEYS
+                retrieved_at=(RETRIEVED_AT_CLOSURE if key in CLOSURE_SOURCE_KEYS
+                              else RETRIEVED_AT_PHASE53 if key in LATER_SOURCE_KEYS
                               else RETRIEVED_AT_PHASE5 if key in PHASE5_SOURCE_KEYS else RETRIEVED_AT),
             )
             db.add(row)
@@ -737,7 +760,8 @@ def _upsert_pack(db, source_ids, spec=None):
         "(Tables 1–5: Citizens/SPR3+, SPR 1st/2nd year G/G and F/G, F/F = Table 1) incl. every low-wage row; "
         "age-group rule (month after birthday); OW/annual ceilings; SDL; SHG; S Pass levy; LQS (S$1,600 to "
         "30 Jun 2026, S$1,800 from 1 Jul 2026); AIS; IR21. AW ceiling per the CPF Board method (Option A). "
-        "Still BLOCKED: pre-July part-time LQS; Work Permit levy before 24 Sep 2026 outside construction; pass end-day basis."
+        "Still BLOCKED: Work Permit levy before 24 Sep 2026 outside construction; pass EXPIRY end-day basis "
+        "(the CANCELLATION rule is sourced from MOM's cancellation pages)."
     )
     if spec["summary"]:
         pack.change_summary = spec["summary"]
@@ -746,12 +770,58 @@ def _upsert_pack(db, source_ids, spec=None):
     )
     db.flush()
 
-    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None)).delete()
-    db.query(ContributionRate).filter(
-        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None)
-    ).delete()
+    # The existing canonical rows are NOT bulk-deleted any more (final
+    # completion programme): the canonical rows are staged as before and
+    # _reconcile_pack_rows keeps every existing row that already holds the
+    # canonical values, so a re-run changes nothing.
+    prior = {model: [i for (i,) in db.query(model.id).filter(model.jurisdiction_pack_id == pack.id,
+                                                              model.organization_id.is_(None))]
+             for model in (ContributionRate, TaxSlab)}
+    return pack, created, prior
+
+
+_ROW_BOOKKEEPING = {"id", "created_at", "updated_at"}
+
+
+def _reconcile_pack_rows(db, pack, prior) -> dict:
+    """Keep the pack's rows that already hold the canonical values; replace
+    only the ones that differ. `prior` = the row ids present before this run
+    staged the canonical rows. After a flush both sets are re-read from the
+    database (one type / scale per column) and paired by every value column:
+    a matched staged row is dropped again inside this transaction (the
+    existing row is never touched — same id, no UPDATE), an unmatched staged
+    row stays (insert), an unmatched existing row is deleted (it no longer
+    matches the canonical values, e.g. an edit made to the Draft)."""
     db.flush()
-    return pack, created
+    db.expire_all()
+    changes = {}
+    for model in (ContributionRate, TaxSlab):
+        columns = [c.name for c in model.__table__.columns if c.name not in _ROW_BOOKKEEPING]
+        old_ids = set(prior[model])
+        rows = (db.query(model).filter(model.jurisdiction_pack_id == pack.id, model.organization_id.is_(None))
+                .order_by(model.id).all())
+        existing = {}
+        for row in rows:
+            if row.id in old_ids:
+                existing.setdefault(tuple(getattr(row, c) for c in columns), []).append(row)
+        inserted = 0
+        for row in rows:
+            if row.id in old_ids:
+                continue
+            match = existing.get(tuple(getattr(row, c) for c in columns))
+            if match:
+                match.pop(0)                     # identical existing row kept as-is
+                db.delete(row)                   # the staged duplicate never persists
+            else:
+                inserted += 1
+        deleted = 0
+        for leftovers in existing.values():
+            for row in leftovers:
+                db.delete(row)
+                deleted += 1
+        changes[model.__tablename__] = {"inserted": inserted, "deleted": deleted}
+    db.flush()
+    return changes
 
 
 def _add_rate(db, pack, sort_order, component_key, label, source_id, flat_amount=None, employer_rate_pct=None,
@@ -893,12 +963,30 @@ def seed_pwm_overtime_schedules(db, source_ids) -> dict:
     return {"rows": total, "inserted": inserted, "schedules": len(data["schedules"])}
 
 
+def _ensure_service_registry_row(db) -> str:
+    """Singapore's jurisdiction_service_registry row, PLANNED, created only
+    when missing — an existing row (whatever its availability) is never
+    changed; the PLANNED -> AVAILABLE step belongs to the owner. The shared
+    seed_jurisdiction_service_registry overwrites every country's row, so it is
+    not the tool for a production database."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    existing = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "SG").first()
+    if existing is not None:
+        return existing.availability
+    db.add(JurisdictionServiceRegistry(country="SG", availability="PLANNED",
+                                       payment_execution_responsibility="NOT_OFFERED",
+                                       filing_responsibility="NOT_OFFERED", remittance_responsibility="NOT_OFFERED"))
+    db.flush()
+    return "PLANNED"
+
+
 def seed_singapore(db, spec=None) -> JurisdictionPack:
     from app.modules.payroll.service import record_tax_audit
 
     spec = spec or _spec_2026()
     source_ids = _upsert_sources(db)
-    pack, created = _upsert_pack(db, source_ids, spec)
+    pack, created, prior = _upsert_pack(db, source_ids, spec)
     for i, (component_key, label, source_key, kwargs) in enumerate(RATES, start=1):
         _add_rate(db, pack, i, component_key, label, source_ids.get(source_key), **kwargs)
     for j, (sector, tier, skill, monthly, source_key, effective_from) in enumerate(WP_LEVY, start=len(RATES) + 1):
@@ -928,6 +1016,8 @@ def seed_singapore(db, spec=None) -> JurisdictionPack:
                       source_ids["mom_pwm_waste_ot"], flat_amount=amount, effective_from=eff_from, effective_to=eff_to)
     cpf_rows = _add_cpf_rows(db, pack, source_ids[spec["cpf_source"]], spec["cpf_tables"], spec["cpf_year"])
     shg_rows = _add_shg_rows(db, pack, source_ids["cpf_shg"])
+    row_changes = _reconcile_pack_rows(db, pack, prior)
+    _ensure_service_registry_row(db)
     if spec["tax_year"] == TAX_YEAR:
         _upsert_ais_filing_calendar(db, source_ids["iras_ais"])   # YA2027; YA2028 not yet published
         pwm_ot = seed_pwm_overtime_schedules(db, source_ids)
@@ -946,6 +1036,7 @@ def seed_singapore(db, spec=None) -> JurisdictionPack:
             "cpfRateBands": str(cpf_rows), "shgBands": str(shg_rows),
             "pwmOvertimeRows": str(pwm_ot["rows"]), "pwmOvertimeInserted": str(pwm_ot["inserted"]),
             "sourceArtifacts": str(len(source_ids)),
+            "rowChanges": row_changes,
         },
         reason=f"Canonical Singapore pack {spec['pack_id']} v{spec['version']} seeded from {SPEC} + official CPF Board/IRAS/MOM sources "
                "(scripts/seed_singapore_canonical_pack.py) — Draft.",

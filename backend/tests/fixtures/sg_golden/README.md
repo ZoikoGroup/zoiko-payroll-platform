@@ -67,6 +67,10 @@ Correction, replay-after-rate-change, YTD-after-correction and PWM for a
 joiner are service-level scenarios (a persisted run is needed) and live in
 `tests/test_singapore.py` (Phase 5.2 section).
 
+- `wp_services_tier2_cancelled_mid_month.json` — Work Permit CANCELLED 15 Oct
+  2026: MOM "Cancel a Work Permit" (sha256 2bc8e148…) — levy stops 1 day before
+  cancellation → 1–14 Oct × S$19.73 = S$276.22.
+
 ## Not golden vectors (and why)
 
 - F5 (IR21 hold) — the IR21 hold/release workflow is NOT BUILT in this

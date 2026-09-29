@@ -449,6 +449,10 @@ class PayrollContext:
     # issued until it is cancelled or expires. None = not captured.
     sgp_work_pass_issue_date: date = None
     sgp_work_pass_end_date: date = None
+    # Why the pass ends on sgp_work_pass_end_date: "CANCELLED" | "EXPIRED"
+    # (compliance_fields.work_pass_end_reason). None = not captured — a pass
+    # ending within the month then stays BLOCKED (no end-day rule is assumed).
+    sgp_work_pass_end_reason: str = None
     sgp_shg_funds: str = None                      # "CDAC" | "MBMF,SINDA" | "NONE" ...
     # Singapore CPF annual-ceiling accumulators, as of BEFORE this pay
     # period (calendar year, per employee = per legal employer). Same

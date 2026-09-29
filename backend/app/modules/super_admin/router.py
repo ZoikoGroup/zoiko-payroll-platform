@@ -32,6 +32,9 @@ from app.modules.super_admin.schemas import (
     FinanceSummaryResponse,
     FinanceByOrganizationResponse,
     PolicyStatusUpdate,
+    SgDecisionCreate,
+    SgEvidenceReview,
+    SourceArtifactSupersede,
     ReportsListResponse,
     SgpPwmSchedulePageResponse,
     SgpStatutoryAdminSummaryResponse,
@@ -502,7 +505,8 @@ def set_compliance_policy_status(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.set_jurisdiction_pack_status(db, id, payload.status, actor_id=current_user.id)
+    return payroll_service.set_jurisdiction_pack_status(db, id, payload.status, actor_id=current_user.id,
+                                                         reason=payload.reason)
 
 
 @router.put(
@@ -886,7 +890,7 @@ def hard_delete_report_template(
 ):
     from app.modules.payroll import service as payroll_service
 
-    result = payroll_service.hard_delete_report_template(db, id)
+    result = payroll_service.hard_delete_report_template(db, id, actor_id=current_user.id)
     return {"message": f"{result['templateKey']} v{result['version']} permanently deleted."}
 
 
@@ -1602,6 +1606,55 @@ def review_source_artifact(
     from app.modules.payroll import service as payroll_service
 
     row = payroll_service.mark_source_artifact_reviewed(db, id, reviewer_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.put(
+    "/compliance/source-artifacts/{id}/sg-review", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Singapore gate / decision evidence: record the review outcome (ACCEPTED with optional validity, or REJECTED with notes)",
+)
+def review_sg_gate_evidence(
+    id: int,
+    payload: SgEvidenceReview,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.review_sg_gate_evidence(db, id, payload.outcome, payload.notes, payload.validUntil,
+                                                  actor_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.post(
+    "/compliance/singapore/decisions", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Record Singapore owner decision D1 / D2 / D3 (selected option + reason); counts after memo upload + second-admin review",
+)
+def record_sg_decision(
+    payload: SgDecisionCreate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.record_sg_decision(db, payload.key, payload.selectedValue, payload.reason,
+                                             actor_id=current_user.id)
+    return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
+
+
+@router.put(
+    "/compliance/source-artifacts/{id}/supersede", response_model=SourceArtifactResponse, response_model_by_alias=True,
+    summary="Singapore gate / decision evidence: mark this artifact superseded by a same-tag replacement (kept, audited)",
+)
+def supersede_source_artifact(
+    id: int,
+    payload: SourceArtifactSupersede,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    row = payroll_service.supersede_sg_gate_evidence(db, id, payload.replacementId, actor_id=current_user.id)
     return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
 
 
