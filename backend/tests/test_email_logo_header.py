@@ -171,7 +171,7 @@ def test_missing_asset_falls_back_to_hosted_url_not_a_dangling_cid(wire, monkeyp
     email_service.send_approval_email("r@x.test", "password_changed.html", {"subject": "S"})
     (msg,) = wire
     tag = _header_logo(_html_part(msg))
-    assert 'src="https://app.zoikopayroll.test/zoikopayroll-logo-light.png"' in tag
+    assert 'src="https://app.zoikopayroll.test/zoikopayroll-logo.png"' in tag
     assert _inline_logo_parts(msg) == []
 
 
