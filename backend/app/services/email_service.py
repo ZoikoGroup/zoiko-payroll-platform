@@ -469,7 +469,7 @@ def send_approval_email(
     if embed_logo and not _email_logo_bytes():
         # Asset unreadable: never reference a CID part that won't exist —
         # fall back to the hosted web logo (alt text covers it if unreachable).
-        logo_url, embed_logo = f"{frontend_base}/zoikopayroll-logo-light.png", False
+        logo_url, embed_logo = f"{frontend_base}/zoikopayroll-logo.png", False
     full_context["logo_url"] = logo_url
     full_context["logo_dimension_attrs"] = logo_dimension_attrs
     # Header logo link target — set on every send, not only when the logo
