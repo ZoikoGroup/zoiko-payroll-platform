@@ -224,3 +224,54 @@ def health_check():
     from app.database import check_connection
 
     return {"status": "ok", "database": "connected" if check_connection() else "unavailable"}
+
+
+@app.get("/health/celery", tags=["Health"])
+@app.get("/api/health/celery", tags=["Health"])
+def health_celery():
+    from app.config import settings
+    from app.core.celery_app import celery_app
+    from app.core.cache import get_redis_client
+
+    if not settings.REDIS_URL:
+        return {
+            "status": "unconfigured",
+            "message": "Celery disabled; running in synchronous mode",
+            "broker": "unconfigured",
+            "workers": [],
+            "worker_count": 0,
+        }
+
+    # Test broker connectivity
+    broker_status = "offline"
+    try:
+        r = get_redis_client()
+        if r is not None and r.ping():
+            broker_status = "connected"
+    except Exception as exc:
+        logger.warning("Redis ping failed during celery health check: %s", exc)
+        broker_status = "offline"
+
+    # Inspect active workers with 1.0s timeout
+    active_workers = []
+    try:
+        insp = celery_app.control.inspect(timeout=1.0)
+        pings = insp.ping() or {}
+        active_workers = list(pings.keys())
+    except Exception as exc:
+        logger.warning("Celery worker inspect failed: %s", exc)
+
+    worker_count = len(active_workers)
+    if broker_status == "connected" and worker_count > 0:
+        overall_status = "healthy"
+    elif broker_status == "connected":
+        overall_status = "degraded"
+    else:
+        overall_status = "offline"
+
+    return {
+        "status": overall_status,
+        "broker": broker_status,
+        "workers": active_workers,
+        "worker_count": worker_count,
+    }

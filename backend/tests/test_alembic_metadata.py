@@ -3,13 +3,16 @@
 The graph must have one head, no duplicate revision IDs, and retain the
 known Germany migration chain wiring. These tests inspect the files directly
 and also load the real Alembic ScriptDirectory without touching a database.
-The current graph has head ``7c3e1a9d5f20`` (merge of main's
+The current graph has head ``c4d5e6f7a8b9`` (drop the Ireland Revenue
+submission + monthly return tables, undoing ``9f8e7d6c5b4a``) on top of
+``7c3e1a9d5f20`` (merge of main's
 ``998877665544`` orphan IE/FR column drop with venu's chain, re-adding those
 columns if missing) on top of ``998877665544`` (itself on ``f0b1c2d3e4f5``,
 making that a branchpoint) and ``a1b2c3d4e5f7`` (add composite index on
 payroll_attendance_records for attendance queries, Phase 1.1) on top of
 ``9f8e7d6c5b4a`` (recreate Ireland Revenue
-submission + monthly return tables, ZP-IE-ENG-001 WP2) on top of
+submission + monthly return tables, ZP-IE-ENG-001 WP2, since dropped again by
+``c4d5e6f7a8b9``) on top of
 ``2c7d9e0f3a5b`` (merge
 payroll_ie_ytd_accumulators into payroll_ytd_accumulators, ZP-IE-ENG-001,
 7 IE tables -> 3) on top of ``f6b2c4d8e1a3`` (drop the three dead Ireland
@@ -17,15 +20,16 @@ tables, same task) on top of ``e5a1c7b9d204`` (add
 payroll_ie_statutory_sick_leave_records, ZP-IE-ENG-001 §11/IE-037) on top of
 ``c7d4e9f1a2b3`` (add ie_calculation_snapshot to payslip_items, also
 ZP-IE-ENG-001) on top of ``4b13831d574b`` (ensure
-communication_events, itself on top of merge ``5ae06cfda828``), and 159
+communication_events, itself on top of merge ``5ae06cfda828``), and 160
 revisions — the
 merge of venu's branch (PR withholding certificates -> France compliance
 tables -> France establishments/editable fields -> Ireland) with main's
 (communication_events -> drop orphan SGP columns), which forked at
 ``d4e5f6a7c8b9`` (Rugvedh's auth_email_events table).
 
-Note ``a1b2c3d4e5f7``, ``9f8e7d6c5b4a``, ``2c7d9e0f3a5b``, ``f6b2c4d8e1a3``,
-``e5a1c7b9d204`` and ``c7d4e9f1a2b3`` are plain single-parent revisions, so they
+Note ``c4d5e6f7a8b9``, ``a1b2c3d4e5f7``, ``9f8e7d6c5b4a``, ``2c7d9e0f3a5b``,
+``f6b2c4d8e1a3``, ``e5a1c7b9d204`` and ``c7d4e9f1a2b3`` are plain
+single-parent revisions, so they
 add no branchpoint: ``test_alembic_branchpoints_are_only_the_known_existing_ones``
 is unchanged by them and keeps its own hardcoded list.
 """
@@ -88,7 +92,7 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["7c3e1a9d5f20"]
+    assert heads == ["c4d5e6f7a8b9"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -100,7 +104,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["7c3e1a9d5f20"]
+    assert list(script.get_heads()) == ["c4d5e6f7a8b9"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -127,7 +131,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 159
+    assert len(revs) == 160
 
 
 def test_germany_head_chain_wiring_is_intact():

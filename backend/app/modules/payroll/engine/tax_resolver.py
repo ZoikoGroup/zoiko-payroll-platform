@@ -32,16 +32,6 @@ from sqlalchemy.orm import Session
 
 from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
 
-from app.core.cache import (
-    get_canonical_rates,
-    set_canonical_rates,
-    get_canonical_slabs,
-    set_canonical_slabs,
-    get_canonical_pack,
-    set_canonical_pack,
-    invalidate_canonical_cache,
-)
-
 
 # Rule types that represent a genuine income-tax bracket (something
 # _calculate_annual_tax can actually compute a progressive tax from).
@@ -193,25 +183,76 @@ def resolve_tax_configuration(
     entirely by the pack's own window (already checked above) —
     completely additive to every rate/slab that exists today.
 
-    Caching: the JurisdictionPack lookup is cached per (country, state, tax_regime, payroll_date)
-    to avoid repeated DB queries for the same jurisdiction/date combination.
+    Results are served from Redis when configured (see engine/tax_cache).
+    The cache is a pure performance layer: it stores what this function
+    would have returned for the same (country, state, regime, date) and is
+    invalidated on every canonical write. With no REDIS_URL set — the
+    default, and the case in every test — it is a no-op and this function
+    always reads live rows, so cache bugs cannot silently become wrong
+    payroll numbers in an environment that has not opted in.
     """
+    from app.modules.payroll.engine.tax_cache import (
+        current_tax_cache_version, load_cached_tax_config, store_cached_tax_config,
+    )
+
     as_of = payroll_date or date_cls.today()
+    # Captured before the DB read and reused for the store: see
+    # current_tax_cache_version for the stale-write race this closes.
+    version = current_tax_cache_version()
+    cached = load_cached_tax_config(
+        country, state, tax_regime, as_of, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    if cached is not None:
+        return cached
 
-    # Cache key for pack lookup
-    cache_key = f"{country}:{state or ''}:{tax_regime or ''}:{as_of.isoformat()}"
+    rates, slabs, pack = _resolve_uncached(
+        db, country, state=state, tax_regime=tax_regime, as_of=as_of,
+    )
+    store_cached_tax_config(
+        country, state, tax_regime, as_of, rates, slabs, pack, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    return rates, slabs, pack
 
-    # Try to get pack from cache (synchronous cache)
-    cached_pack = get_canonical_pack(country, cache_key)
-    if cached_pack is not None:
-        pack = cached_pack
-    else:
-        pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
-        if pack:
-            set_canonical_pack(country, cache_key, pack, ttl=3600)
 
+def _resolve_uncached(
+    db: Session,
+    country: str,
+    state: Optional[str],
+    tax_regime: Optional[str],
+    as_of: date_cls,
+) -> Tuple[List[ContributionRate], List[TaxSlab], Optional[JurisdictionPack]]:
+    """The authoritative resolution, always reading live rows.
+
+    Split out from resolve_tax_configuration so the cache wrapper above
+    has exactly one place to fall back to, and so the bypass is callable
+    for tests that need to prove cached and uncached resolution agree.
+    """
+    pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
     if not pack:
         return [], [], None
+
+    rates = (
+        db.query(ContributionRate)
+        .filter(
+            ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id == pack.id,
+            or_(ContributionRate.effective_from.is_(None), ContributionRate.effective_from <= as_of),
+            or_(ContributionRate.effective_to.is_(None), ContributionRate.effective_to >= as_of),
+        )
+        .order_by(ContributionRate.sort_order)
+        .all()
+    )
+    slabs = (
+        db.query(TaxSlab)
+        .filter(
+            TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id == pack.id,
+            or_(TaxSlab.effective_from.is_(None), TaxSlab.effective_from <= as_of),
+            or_(TaxSlab.effective_to.is_(None), TaxSlab.effective_to >= as_of),
+        )
+        .order_by(TaxSlab.sort_order, TaxSlab.min_amount)
+        .all()
+    )
     # A single pack can hold MARGINAL_RATE rows for more than one regime
     # (e.g. India's one pack carries both the New and Old regime bracket
     # tables, since the pack itself isn't split per regime the way a

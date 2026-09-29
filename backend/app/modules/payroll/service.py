@@ -28,13 +28,13 @@ import copy
 import json
 import hashlib
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func as sa_func, tuple_, or_
+from sqlalchemy import func as sa_func, tuple_, or_, case as sa_case, and_ as sa_and_
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
@@ -786,6 +786,11 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         old_value=None, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
         reason=data.reason,
     )
+    if fields.get("pack_type") == "tax":
+        # Covers the new version's own effective window and, via
+        # _clone_pack_rates above, the rows it was pre-populated with —
+        # both can make this the pack that resolves for a given date.
+        _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -899,6 +904,30 @@ def _require_editable_policy_pack(pack: "JurisdictionPack") -> None:
             "configuration is no longer editable in place. Create a new version "
             "(\"New Version\") to make changes; to unpublish it, set the status back to Draft."
         )
+
+
+def _invalidate_tax_config_cache_on_canonical_write() -> None:
+    """Drop every cached canonical tax resolution after a write that could
+    change what one would resolve to.
+
+    A single indirection point for the Redis tax cache
+    (engine/tax_cache.py) so the invalidation list is reviewable in one
+    place rather than being an import plus a call repeated at each site.
+    Every caller's reason for needing it is specific and documented
+    there; what they share is that each mutates either a canonical
+    ContributionRate/TaxSlab row or the pack metadata that decides whether
+    those rows are resolvable at all.
+
+    A no-op when Redis is unconfigured, which is the default — so this
+    cannot change behavior for any deployment that has not opted into
+    caching. Deliberately called AFTER the write's own db.commit(): the
+    version bump must never be observable before the data it invalidates
+    is durable, or a concurrent payroll run could repopulate the cache
+    from the pre-write state and then serve it for a full TTL.
+    """
+    from app.modules.payroll.engine.tax_cache import invalidate_tax_config_cache
+
+    invalidate_tax_config_cache()
 
 
 def _invalidate_pack_approval_on_edit(pack: "JurisdictionPack") -> None:
@@ -7465,6 +7494,7 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
         reason=data.reason,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -7545,11 +7575,12 @@ def upsert_canonical_contribution_rate(
     db.commit()
     db.refresh(row)
     record_tax_audit(
-        db, actor_id=actor_id, action=action, entity_type="contribution_rate", entity_id=row.id,
+        db, actor_id=actor_id, action=action,         entity_type="contribution_rate", entity_id=row.id,
         jurisdiction_pack_id=pack.id, tax_version=pack.version,
         old_value=old_value, new_value={k: (str(v) if v is not None else None) for k, v in fields.items()},
         reason=data.reason,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -7589,6 +7620,7 @@ def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Opti
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=pack.version if pack else None,
         old_value=old_value, new_value=None,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
 
 
 # ── US: bulk "New State Import" (Production-Readiness Plan Phase 3) ──────
@@ -7689,6 +7721,7 @@ def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int]
         jurisdiction_pack_id=jurisdiction_pack_id, tax_version=pack.version if pack else None,
         old_value=old_value, new_value=None,
     )
+    _invalidate_tax_config_cache_on_canonical_write()
 
 
 def get_active_tax_configuration_for_display(db: Session, country: str, state: Optional[str] = None) -> dict:
@@ -7964,6 +7997,14 @@ def set_jurisdiction_pack_status(
             jurisdiction_pack_id=row.id, tax_version=row.version,
             old_value={"status": old_status}, new_value={"status": status},
         )
+        # A pack's status alone decides whether it is resolvable at all
+        # (tax_resolver._find_active_tax_pack filters status == "Active"),
+        # so this transition changes what every future payroll for this
+        # jurisdiction resolves to even though no rate or slab row was
+        # touched. Omitting the invalidation here was the one gap that
+        # would let a just-Activated pack keep serving the "no canonical
+        # pack configured" answer until the TTL expired.
+        _invalidate_tax_config_cache_on_canonical_write()
     return row
 
 
@@ -16177,273 +16218,29 @@ def _load_ie_myfuturefund_status(db: Session, employee_id: int, pay_date) -> dic
     }
 
 
-# ── Ireland Revenue Integration (ZP-IE-ENG-001 WP2) ──────────────────────
+# ── Ireland Revenue Integration (ZP-IE-ENG-001 WP2) — NOT IMPLEMENTED ────
 # Real-time payroll submission (on/before pay date), monthly statement
-# retrieval, return reconciliation, and payment tracking — per IE-022/IE-026/IE-027.
-
-def submit_ie_payroll(db: Session, run_id: int) -> dict:
-    """Submit a committed payroll run to Revenue (IE-022: on/before pay date).
-
-    Creates one IrelandRevenueSubmission row per employee in the run,
-    populated from the committed payslip's ie_calculation_snapshot.
-    Returns a summary with counts and any errors.
-
-    Idempotent: if a submission with the same idempotency_key already
-    exists, returns the existing row rather than duplicating (IE-025)."""
-    from app.modules.payroll.models import (
-        PayrollRun, PayslipItem, IrelandRevenueSubmission, IrelandRpnSnapshot
-    )
-    from sqlalchemy import and_
-
-    run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
-    if not run:
-        raise NotFoundException("PayrollRun", run_id)
-    if run.country != "IE":
-        raise BadRequestException("Revenue submission only valid for Ireland runs")
-
-    items = db.query(PayslipItem).filter(PayslipItem.run_id == run_id).all()
-    if not items:
-        return {"submitted": 0, "skipped": 0, "errors": ["No payslip items in run"]}
-
-    submitted = 0
-    skipped = 0
-    errors = []
-
-    for item in items:
-        emp_id = item.employee_id
-        snap = item.ie_calculation_snapshot
-        if not snap:
-            skipped += 1
-            errors.append(f"Employee {emp_id}: no ie_calculation_snapshot")
-            continue
-
-        # Build payload from the snapshot (what Revenue actually receives)
-        payload = {
-            "paye": snap.get("paye", {}).get("amount"),
-            "usc": snap.get("usc", {}).get("amount"),
-            "prsi_employee": snap.get("prsi", {}).get("employee"),
-            "prsi_employer": snap.get("prsi", {}).get("employer"),
-            "lpt": snap.get("lpt", {}).get("amount"),
-            "myfuturefund_employee": snap.get("myfuturefund", {}).get("employee"),
-            "myfuturefund_employer": snap.get("myfuturefund", {}).get("employer"),
-            "gross": snap.get("gross"),
-            "rpn_number": snap.get("rpn", {}).get("rpn_number"),
-            "rpn_hash": snap.get("rpn", {}).get("raw_hash"),
-            "paye_basis": snap.get("paye", {}).get("basis"),
-            "tax_year": snap.get("tax_year"),
-        }
-
-        import hashlib, json
-        payload_hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True, default=str).encode()
-        ).hexdigest()
-
-        idempotency_key = f"ie_revsub_{run_id}_{item.employee_id}_{payload_hash[:16]}"
-
-        # Idempotency check (IE-025)
-        existing = db.query(IrelandRevenueSubmission).filter(
-            IrelandRevenueSubmission.idempotency_key == idempotency_key
-        ).first()
-        if existing:
-            skipped += 1
-            continue
-
-        # Find the RPN snapshot used
-        rpn_snap = None
-        if snap.get("rpn", {}).get("snapshot_id"):
-            rpn_snap = db.query(IrelandRpnSnapshot).filter(
-                IrelandRpnSnapshot.id == snap["rpn"]["snapshot_id"]
-            ).first()
-
-        sub = IrelandRevenueSubmission(
-            organization_id=run.organization_id,
-            employee_id=emp_id,
-            run_id=run_id,
-            payslip_id=item.id,
-            rpn_snapshot_id=rpn_snap.id if rpn_snap else None,
-            line_item_id=None,  # filled when Revenue acknowledges
-            previous_line_item_id=None,
-            correction_kind="ORIGINAL",
-            period_start=run.period_start,
-            period_end=run.period_end,
-            pay_date=run.pay_date,
-            reported_gross=payload.get("gross"),
-            reported_paye=payload.get("paye"),
-            reported_usc=payload.get("usc"),
-            reported_prsi_employee=payload.get("prsi_employee"),
-            reported_prsi_employer=payload.get("prsi_employer"),
-            reported_lpt=payload.get("lpt"),
-            reported_myfuturefund_employee=payload.get("myfuturefund_employee"),
-            reported_myfuturefund_employer=payload.get("myfuturefund_employer"),
-            payload=payload,
-            payload_hash=payload_hash,
-            status="PENDING",
-            idempotency_key=idempotency_key,
-        )
-        db.add(sub)
-        submitted += 1
-
-    db.commit()
-    return {"submitted": submitted, "skipped": skipped, "errors": errors}
-
-
-def poll_ie_revenue_ack(db: Session, submission_id: int) -> dict:
-    """Poll Revenue for acknowledgment of a submission (stub for ROS integration).
-
-    In production, this calls the ROS API to check submission status.
-    Updates the submission row with ACKNOWLEDGED/REJECTED/UNKNOWN status.
-    Returns the updated submission status."""
-    from app.modules.payroll.models import IrelandRevenueSubmission
-
-    sub = db.query(IrelandRevenueSubmission).filter(
-        IrelandRevenueSubmission.id == submission_id
-    ).first()
-    if not sub:
-        raise NotFoundException("IrelandRevenueSubmission", submission_id)
-
-    # TODO: Replace with actual ROS API call
-    # For now, mark as ACKNOWLEDGED with a dummy line_item_id
-    if sub.status == "PENDING":
-        sub.status = "ACKNOWLEDGED"
-        sub.line_item_id = f"ROS_{sub.id}_{sub.payload_hash[:8]}"
-        sub.acknowledged_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-        db.commit()
-        db.refresh(sub)
-
-    return {
-        "submission_id": sub.id,
-        "status": sub.status,
-        "line_item_id": sub.line_item_id,
-        "acknowledged_at": sub.acknowledged_at,
-    }
-
-
-def retrieve_ie_monthly_statement(db: Session, organization_id: int, period_start, period_end) -> dict:
-    """Retrieve the monthly Revenue statement for an organization (stub).
-
-    In production, this calls the ROS API to fetch the statement.
-    Returns the statement data including Revenue's calculated liability.
-    """
-    # TODO: Replace with actual ROS API call
-    from datetime import date
-    return {
-        "organization_id": organization_id,
-        "statement_period_start": period_start,
-        "statement_period_end": period_end,
-        "revenue_liability": None,  # filled by ROS
-        "statement_items": [],
-        "retrieved_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-    }
-
-
-def reconcile_ie_monthly_return(db: Session, organization_id: int, period_start, period_end) -> dict:
-    """Reconcile a monthly return: match submissions to Revenue statement (IE-026/IE-027).
-
-    Creates/updates an IrelandRevenueMonthlyReturn row for the period,
-    comparing calculated_liability (from our submissions) to revenue_liability
-    (from the statement). Marks as ACCEPTED/DEEMED/RECONCILED."""
-    from app.modules.payroll.models import IrelandRevenueSubmission, IrelandRevenueMonthlyReturn
-    from sqlalchemy import and_, func
-    from datetime import date
-
-    # Calculate our total liability from submissions
-    subs = db.query(IrelandRevenueSubmission).filter(
-        IrelandRevenueSubmission.organization_id == organization_id,
-        IrelandRevenueSubmission.period_start >= period_start,
-        IrelandRevenueSubmission.period_end <= period_end,
-        IrelandRevenueSubmission.status.in_(["ACKNOWLEDGED", "SENT"]),
-    ).all()
-
-    calc_liability = sum(
-        (s.reported_paye or 0) + (s.reported_usc or 0) + (s.reported_lpt or 0) +
-        (s.reported_prsi_employee or 0) + (s.reported_myfuturefund_employee or 0)
-        for s in subs
-    )
-
-    # Get Revenue statement (stub)
-    stmt = retrieve_ie_monthly_statement(db, organization_id, period_start, period_end)
-    rev_liability = stmt.get("revenue_liability")
-
-    # Upsert monthly return
-    existing = db.query(IrelandRevenueMonthlyReturn).filter(
-        IrelandRevenueMonthlyReturn.organization_id == organization_id,
-        IrelandRevenueMonthlyReturn.statement_period_start == period_start,
-        IrelandRevenueMonthlyReturn.statement_period_end == period_end,
-    ).order_by(IrelandRevenueMonthlyReturn.version.desc()).first()
-
-    version = (existing.version + 1) if existing else 1
-
-    # Determine status
-    if rev_liability is not None:
-        diff = abs((rev_liability or 0) - (calc_liability or 0))
-        status = "RECONCILED" if diff < Decimal("0.01") else "DRAFT"
-    else:
-        status = "DRAFT"
-
-    ret = IrelandRevenueMonthlyReturn(
-        organization_id=organization_id,
-        statement_period_start=period_start,
-        statement_period_end=period_end,
-        version=version,
-        status=status,
-        calculated_liability=calc_liability,
-        revenue_liability=rev_liability,
-        reconciliation_state={
-            "submission_count": len(subs),
-            "difference": float((rev_liability or 0) - (calc_liability or 0)) if rev_liability is not None else None,
-        },
-        payload_hash=__import__("hashlib").sha256(str(calc_liability).encode()).hexdigest()[:16],
-    )
-    if existing:
-        # Update existing
-        existing.version = version
-        existing.status = status
-        existing.calculated_liability = calc_liability
-        existing.revenue_liability = rev_liability
-        existing.reconciliation_state = ret.reconciliation_state
-        existing.reconciled_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc) if status == "RECONCILED" else None
-        db.commit()
-        db.refresh(existing)
-        return {"monthly_return_id": existing.id, "status": status, "diff": float(diff) if rev_liability is not None else None}
-
-    db.add(ret)
-    db.commit()
-    db.refresh(ret)
-    return {"monthly_return_id": ret.id, "status": status, "diff": None}
-
-
-def record_ie_payment(db: Session, organization_id: int, period_start, period_end, amount, reference, paid_at=None) -> dict:
-    """Record a liability payment to Revenue (IE-026: payment separate from filing).
-
-    Updates the monthly return's reconciled_at and stores payment reference."""
-    from app.modules.payroll.models import IrelandRevenueMonthlyReturn
-
-    ret = db.query(IrelandRevenueMonthlyReturn).filter(
-        IrelandRevenueMonthlyReturn.organization_id == organization_id,
-        IrelandRevenueMonthlyReturn.statement_period_start == period_start,
-        IrelandRevenueMonthlyReturn.statement_period_end == period_end,
-    ).order_by(IrelandRevenueMonthlyReturn.version.desc()).first()
-
-    if not ret:
-        raise NotFoundException(f"Monthly return for period {period_start} to {period_end} not found")
-
-    if ret.status not in ("RECONCILED", "ACCEPTED", "DEEMED"):
-        raise BadRequestException(f"Cannot record payment for return in status {ret.status}")
-
-    # In a full implementation, this would create a separate payment row.
-    # For now, we just mark the return as reconciled with payment info.
-    ret.reconciliation_state = ret.reconciliation_state or {}
-    ret.reconciliation_state["payment"] = {
-        "amount": float(amount),
-        "reference": reference,
-        "paid_at": (paid_at or __import__("datetime").datetime.now(__import__("datetime").timezone.utc)).isoformat(),
-    }
-    ret.reconciled_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-    ret.status = "RECONCILED"
-    db.commit()
-    db.refresh(ret)
-    return {"monthly_return_id": ret.id, "payment_recorded": True}
-
+# retrieval, return reconciliation and payment tracking (IE-022/IE-026/IE-027)
+# are specified but deliberately NOT present in the service layer.
+#
+# They were scaffolded once and then removed on 2026-09-28, because they could
+# not have been correct: they wrote rows to payroll_ie_revenue_submissions /
+# payroll_ie_revenue_monthly_returns, two tables the 2026-09-28 Ireland schema
+# refactor had removed as dead weight (and which
+# tests/test_ireland_statutory_catalog.py::test_ie_has_no_dedicated_ytd_accumulator_table
+# pins must never come back), and they had no ROS transport behind them, so
+# "ACKNOWLEDGED" would have been written without Revenue ever having answered.
+#
+# A working implementation needs, in this order:
+#   1. the official ROS endpoint, its request/response schema and credentials;
+#   2. the real-time submission + monthly statement/return contracts;
+#   3. a persisted correction chain (original/cancel/amend linkage per IE-025);
+#   4. a separate payment record — a return's liability and the act of paying
+#      it are different facts and must not share one row.
+# Until 1 and 2 exist, Ireland payroll produces RPN-driven results only and
+# filing remains a manual, out-of-band step. Nothing here may be stubbed to
+# "succeed", because a false acknowledgement is indistinguishable from a real
+# one at audit time.
 
 def _resolve_ie_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
                             exclude_run_id: Optional[int] = None) -> dict:
@@ -19719,6 +19516,263 @@ def _resolve_employee_calc_inputs(
     return country, rate_map, slabs, resolved_pack, state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, resolution_state
 
 
+def _resolve_payslip_generation_inputs(
+    db: Session,
+    run: PayrollRun,
+    employee,
+    organization_id: int,
+    *,
+    calculation_mode: str,
+    allowance_components: list,
+    org_opted_in: bool,
+    payslip_number: Optional[str] = None,
+    calc_cache: Optional[dict] = None,
+    attendance_by_employee: Optional[dict] = None,
+) -> dict:
+    """Resolve EVERY input _generate_single_payslip needs for ONE employee.
+
+    This is the single source of truth for per-employee payslip inputs,
+    shared by generate_payslips_for_run's batch loop and by the
+    per-employee Celery entry point (generate_payslip_for_employee). Its
+    existence is what makes a chord safe: the alternative — a worker task
+    re-deriving these inputs from its own knowledge of the batch path — is
+    a second implementation that diverges the first time either one is
+    touched, and the divergence shows up as one employee's payslip being
+    computed from different inputs than their colleague's in the same run.
+
+    `calc_cache` is the per-call jurisdiction cache (see
+    _resolve_employee_calc_inputs). It is optional: a single-employee call
+    passes None and resolves fresh, which is CORRECT — the cache exists
+    only to deduplicate repeated resolution of the same jurisdiction
+    within one batch, never to carry state between calls. Passing a cache
+    here that outlives one payroll date would be the bug; no date is part
+    of its key.
+
+    `attendance_by_employee`: optional pre-fetched {employee_id: [rows]}
+    map so a batch caller keeps its single batched attendance query. When
+    absent (the single-employee path) the rows for this employee and this
+    run's period are fetched in one query rather than the two queries the
+    batch path used to issue per employee — same rows, same filters.
+
+    Returns a dict shaped as `_generate_single_payslip(**kwargs)`, plus
+    two non-kwargs entries: `country` (the resolved country, needed by
+    callers for the Germany blocked-handler) and `employee`.
+    """
+    country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
+        db, organization_id, employee, cache=calc_cache,
+        payroll_date=run.pay_date, org_opted_in=org_opted_in,
+    )
+
+    if attendance_by_employee is not None:
+        attendance_records = attendance_by_employee.get(employee.id, [])
+    elif run.period_start and run.period_end and run.period_end >= run.period_start:
+        attendance_records = (
+            db.query(PayrollAttendanceRecord).filter(
+                PayrollAttendanceRecord.organization_id == run.organization_id,
+                PayrollAttendanceRecord.employee_id == employee.id,
+                PayrollAttendanceRecord.date >= run.period_start,
+                PayrollAttendanceRecord.date <= run.period_end,
+            ).all()
+        )
+    else:
+        attendance_records = []
+
+    ytd_inputs = (
+        _load_ca_ytd(db, employee.id, run.pay_date, getattr(employee, "work_state", None))
+        if country == "CA" else
+        _load_uk_director_ytd(db, employee.id, run.pay_date)
+        if country == "UK" else
+        _load_us_ytd(db, employee.id, run.pay_date)
+        if country == "US" else
+        {**_load_au_sg_ytd(db, employee.id, run.pay_date), **_load_au_whm_ytd(db, employee.id, run.pay_date)}
+        if country == "AU" else
+        _load_ky_pension_ytd(db, employee.id, run.pay_date)
+        if country == "KY" else
+        _load_gy_paye_credit_ytd(db, employee.id, run.pay_date)
+        if country == "GY" else
+        _load_pr_ytd(db, employee.id, run.pay_date)
+        if country == "PR" else None
+    )
+    # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be persisted
+    # into the calculation snapshot, not just used to pick a rate/slab pack
+    # and discarded (see _resolve_country_aware_state).
+    poe_snapshot = (
+        {"poe_result": poe_result, "poe_reason": poe_reason} if country == "CA" else None
+    )
+    # Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET — see
+    # _ca_org_levy_read_inputs's own docstring for the gating rationale.
+    # Read fresh per employee (not cached) — the org's running total
+    # changes with every prior same-jurisdiction employee processed in this
+    # same sequential loop, exactly as proven safe for the per-employee
+    # YTD accumulator's own read-then-flush ordering.
+    org_levy_inputs = (
+        _ca_org_levy_read_inputs(db, organization_id, run.pay_date, getattr(employee, "work_state", None))
+        if country == "CA" else
+        _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
+        if country == "UK" else
+        _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(employee, "work_state", None))
+        if country == "AU" else
+        _load_jm_heart_ytd(db, organization_id, run.pay_date)
+        if country == "JM" else {}
+    )
+
+    return {
+        "country": country,
+        "employee": employee,
+        "rate_map": rate_map,
+        "slabs": slabs,
+        "calculation_mode": calculation_mode,
+        "payslip_number": payslip_number,
+        "attendance_records": attendance_records,
+        "allowance_components": allowance_components,
+        "resolved_pack": resolved_pack,
+        "state_rate_map": state_rate_map,
+        "state_slabs": state_slabs,
+        "employer_tax_profiles": employer_tax_profiles,
+        "reciprocity": reciprocity,
+        "locality_rate": locality_rate,
+        "ytd_inputs": ytd_inputs,
+        "poe_snapshot": poe_snapshot,
+        "org_levy_inputs": org_levy_inputs or None,
+    }
+
+
+def generate_payslip_for_employee(
+    db: Session,
+    run: PayrollRun,
+    employee_id: int,
+    organization_id: int,
+    *,
+    payslip_number: Optional[str] = None,
+    skip_if_exists: bool = True,
+) -> dict:
+    """Generate ONE employee's payslip inside an existing run.
+
+    The per-employee entry point Phase 2.2 needs: a chord header task
+    calls this once per employee, and every input comes from
+    _resolve_payslip_generation_inputs — the same function the batch loop
+    uses — so the chord cannot compute a payslip from inputs the batch
+    path would not have used.
+
+    Returns {"status": ..., "employee_id": ..., "payslip_id": ...} with
+    status one of "generated" | "exists" | "blocked". It does NOT commit:
+    the caller owns the transaction, so a chord header can accumulate one
+    session across its group, and the batch path keeps its existing
+    single-transaction boundary. It does NOT touch run aggregates —
+    _recompute_run_aggregates is the caller's responsibility, because
+    recomputing per employee in a loop would be N full re-aggregations.
+
+    `skip_if_exists` defaults True, mirroring the batch path's
+    idempotency: an employee who already has a non-FAILED payslip in this
+    run is left alone. Set False only where the caller has already
+    established the employee has no payslip (the batch path does this
+    after its own existing_ids pass).
+    """
+    from app.core.exceptions import GermanyCalculationBlockedException
+
+    employee = db.query(PayrollEmployee).filter(
+        PayrollEmployee.id == employee_id,
+        PayrollEmployee.organization_id == (organization_id or run.organization_id),
+    ).first()
+    if not employee:
+        raise NotFoundException(f"PayrollEmployee {employee_id} not found.")
+
+    if skip_if_exists:
+        existing = db.query(PayslipItem).filter(
+            PayslipItem.payroll_run_id == run.id,
+            PayslipItem.employee_id == employee_id,
+            PayslipItem.status != PayslipStatus.FAILED,
+        ).first()
+        if existing:
+            return {"status": "exists", "employee_id": employee_id, "payslip_id": existing.id}
+
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    allowance_components = _resolve_allowance_components(db, organization_id)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+
+    resolved = _resolve_payslip_generation_inputs(
+        db, run, employee, organization_id,
+        calculation_mode=calculation_mode,
+        allowance_components=allowance_components,
+        org_opted_in=org_opted_in,
+        payslip_number=payslip_number,
+    )
+    country = resolved["country"]
+    resolved.pop("employee")
+
+    try:
+        item = _generate_single_payslip(db, run, employee, **resolved)
+    except GermanyCalculationBlockedException as exc:
+        employee_name = getattr(employee, "name", None) or f"Employee #{employee.id}"
+        db.add(PayslipItem(
+            payroll_run_id=run.id, employee_id=employee.id, organization_id=run.organization_id,
+            employee_name=employee_name, country_code=country, status=PayslipStatus.FAILED,
+            germany_calculation_snapshot=exc.trace,
+            notes=f"[{exc.error_code}] {exc.message}",
+        ))
+        log_activity(
+            db, organization_id or run.organization_id,
+            f"Payroll for {employee_name} in run '{run.period_label}' is blocked: {exc.message}",
+            ActivityStatus.INFO, actor_id=run.created_by,
+        )
+        # No payslip_number consumed — same contract as the batch loop's
+        # handler: the number stays unused for this employee rather than
+        # being burned on a row that was never really generated.
+        return {"status": "blocked", "employee_id": employee_id, "payslip_id": None}
+
+    return {"status": "generated", "employee_id": employee_id, "payslip_id": item.id}
+
+
+def parallel_payslip_generation_blocker(
+    db: Session, organization_id: int, employees: list,
+) -> Optional[str]:
+    """Return why these employees CANNOT be paysliped in parallel, else None.
+
+    Phase 2.2's safety gate for the Celery chord. The batch path processes
+    employees in a single sequential loop inside one transaction, and that
+    ordering is part of the RESULT for any country whose org-level
+    accumulator is shared across employees — not merely an implementation
+    detail:
+
+      * _ca_org_levy_read_inputs reads the org's running
+        `<component>_ytd_remuneration_before`, canada.py banding
+        (Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET) applies the
+        rate from that running total, then _upsert_ca_org_levy_ytd ADDS
+        this employee's increment. Two workers reading the "before" figure
+        concurrently both see the same value, both band against it, and
+        one increment is lost — a wrong rate AND a wrong total, silently.
+      * The UK Apprenticeship Levy / Employment Levy, Australia's payroll
+        tax and Jamaica's HEART trust do the same read-modify-write on one
+        org-wide row.
+
+    So a run touching any of those countries is processed sequentially by
+    the chord's fallback rather than split across workers — correctness
+    before throughput, because the wrong payslip number is not a
+    retryable failure: it is a persisted, plausible-looking figure.
+
+    Per-employee YTD accumulators (_YTD_ACCUMULATOR_ENABLED_COUNTRIES) are
+    deliberately NOT a blocker: they are keyed by employee_id, so
+    concurrent workers touch disjoint rows.
+
+    `employees` is the already-loaded pending list — no query here, since
+    the caller has just built it.
+    """
+    enabled = set(_ORG_LEVY_ACCUMULATOR_ENABLED_COUNTRIES)
+    if not enabled:
+        return None
+    for emp in employees:
+        country = _resolve_employee_country(
+            db, organization_id, getattr(emp, "country_code", None))
+        if country in enabled:
+            return (
+                f"employee {getattr(emp, 'employee_code', None) or emp.id} is in "
+                f"{country}, whose org-level levy accumulator is shared across "
+                f"employees — this run must be generated sequentially so every "
+                f"employee's levy bands against the true running total"
+            )
+    return None
+
+
 def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int = None, employee_ids: List[int] = None) -> PayrollRun:
     """Generate a payslip for every Active employee in the org (or only the
     specified employee_ids if provided). Idempotent: re-running skips
@@ -19822,50 +19876,27 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
     for emp in employees:
         if emp.id in existing_ids:
             continue
-        country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
-            db, organization_id, emp, cache=calc_cache,
-            payroll_date=run.pay_date, org_opted_in=org_opted_in,
-        )
         payslip_number = f"{base_payslip_code}{seq:05d}" if base_payslip_code else None
-        ytd_inputs = (
-            _load_ca_ytd(db, emp.id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "CA" else
-            _load_uk_director_ytd(db, emp.id, run.pay_date)
-            if country == "UK" else
-            _load_us_ytd(db, emp.id, run.pay_date)
-            if country == "US" else
-            {**_load_au_sg_ytd(db, emp.id, run.pay_date), **_load_au_whm_ytd(db, emp.id, run.pay_date)}
-            if country == "AU" else
-            _load_ky_pension_ytd(db, emp.id, run.pay_date)
-            if country == "KY" else
-            _load_gy_paye_credit_ytd(db, emp.id, run.pay_date)
-            if country == "GY" else
-            _load_pr_ytd(db, emp.id, run.pay_date)
-            if country == "PR" else None
+        # Phase 2.2: the batch loop no longer resolves these inputs inline.
+        # _resolve_payslip_generation_inputs is the single implementation
+        # shared with generate_payslip_for_employee, so a chord worker and
+        # this loop cannot disagree about what inputs an employee's payslip
+        # was computed from. Everything batch-specific stays here: payslip
+        # number sequencing, the batched attendance map, calc_cache reuse,
+        # and PARTIAL activity logging (which is a batch-surface concern).
+        resolved_inputs = _resolve_payslip_generation_inputs(
+            db, run, emp, organization_id,
+            calculation_mode=calculation_mode,
+            allowance_components=allowance_components,
+            org_opted_in=org_opted_in,
+            payslip_number=payslip_number,
+            calc_cache=calc_cache,
+            attendance_by_employee=attendance_by_employee,
         )
-        # ZP-TAX-CA-2026-001 CA-D03/AC-07: the POE reason code must be
-        # persisted into the calculation snapshot, not just used to pick
-        # a rate/slab pack and discarded (see _resolve_country_aware_state).
-        poe_snapshot = (
-            {"poe_result": poe_result, "poe_reason": poe_reason} if country == "CA" else None
-        )
-        # Ontario EHT / BC EHT / Manitoba HE Levy / NL HAPSET — see
-        # _ca_org_levy_read_inputs's own docstring for the gating
-        # rationale. Read fresh per employee (not cached) — the org's
-        # running total changes with every prior same-jurisdiction
-        # employee processed in this same sequential loop, exactly as
-        # proven safe for the per-employee YTD accumulator's own
-        # read-then-flush ordering.
-        org_levy_inputs = (
-            _ca_org_levy_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "CA" else
-            _load_uk_org_levy_ytd(db, organization_id, run.pay_date)
-            if country == "UK" else
-            _au_org_payroll_tax_read_inputs(db, organization_id, run.pay_date, getattr(emp, "work_state", None))
-            if country == "AU" else
-            _load_jm_heart_ytd(db, organization_id, run.pay_date)
-            if country == "JM" else {}
-        )
+        # "country" stays in the dict — _generate_single_payslip takes it.
+        # Only the caller's own reference (employee) is stripped.
+        country = resolved_inputs["country"]
+        resolved_inputs.pop("employee")
         # Phase 8BI (P0): a statutorily-blocked employee (today, only
         # Germany — GermanyCalculationBlockedException, e.g. no PUBLISHED
         # PAP asset / no effective EmployeeStatutoryProfile) must NEVER
@@ -19883,12 +19914,7 @@ def generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: int
         # fabricated monetary figures) and moves on to the next employee.
         try:
             generated_item = _generate_single_payslip(
-                db, run, emp, rate_map, slabs, country, calculation_mode, payslip_number=payslip_number,
-                attendance_records=attendance_by_employee.get(emp.id, []),
-                allowance_components=allowance_components, resolved_pack=resolved_pack,
-                state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
-                reciprocity=reciprocity, locality_rate=locality_rate, ytd_inputs=ytd_inputs, poe_snapshot=poe_snapshot,
-                org_levy_inputs=org_levy_inputs or None,
+                db, run, emp, **resolved_inputs,
             )
             # Phase 8BV: a PARTIAL payslip (Phase 8BU) is a real, persisted
             # outcome an operator needs to know about — the FAILED sentinel
@@ -27033,26 +27059,49 @@ def bulk_save_attendance(db: Session, data: BulkAttendanceRequest, organization_
     }
 
 
-def get_attendance_records(
+def import_attendance_xlsx(
+    db: Session,
+    organization_id: int,
+    file_source: Any,
+    chunk_size: int = 500,
+    skip_duplicates: bool = False,
+) -> dict:
+    """Stream XLSX attendance file and bulk upsert records (Phases 2.3, 2.4, 2.5)."""
+    from app.modules.payroll.attendance_importer import import_attendance_from_stream
+    return import_attendance_from_stream(
+        db, organization_id, file_source, chunk_size=chunk_size, skip_duplicates=skip_duplicates
+    )
+
+
+def _attendance_records_base_query(
     db: Session,
     organization_id: int,
     *,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     employee_id: Optional[int] = None,
-    limit: int = 1000,
-    offset: int = 0,
-) -> List[dict]:
-    """Fetch attendance records with optional date range and employee filter.
-    
-    Paginated: limit/offset default to 1000/0 for backwards compatibility.
+    with_employee_columns: bool = True,
+):
+    """Shared filtered query for attendance reads.
+
+    Employee name/department/designation come from an outer join so an
+    attendance row survives an employee record that has since been removed.
+    Pass with_employee_columns=False for the COUNT path: counting the joined
+    projection would wrap the whole select in a subquery, and the join cannot
+    duplicate attendance rows (employee_id is the join key) so it is not needed
+    to get an accurate total.
     """
-    query = db.query(
-        PayrollAttendanceRecord,
-        PayrollEmployee.name,
-        PayrollEmployee.department,
-        PayrollEmployee.designation,
-    ).outerjoin(
+    columns = (
+        (
+            PayrollAttendanceRecord,
+            PayrollEmployee.name,
+            PayrollEmployee.department,
+            PayrollEmployee.designation,
+        )
+        if with_employee_columns
+        else (PayrollAttendanceRecord,)
+    )
+    query = db.query(*columns).outerjoin(
         PayrollEmployee,
         (PayrollAttendanceRecord.employee_id == PayrollEmployee.id) &
         (PayrollEmployee.organization_id == organization_id)
@@ -27065,36 +27114,462 @@ def get_attendance_records(
         query = query.filter(PayrollAttendanceRecord.date <= end_date)
     if employee_id:
         query = query.filter(PayrollAttendanceRecord.employee_id == employee_id)
+    return query
 
+
+def _attendance_row_to_dict(record, name, department, designation) -> dict:
+    return {
+        "id": record.id,
+        "employee_id": record.employee_id,
+        "name": name,
+        "department": department,
+        "designation": designation,
+        "date": record.date,
+        "check_in": record.check_in,
+        "check_out": record.check_out,
+        "status": record.status,
+        "leave_type": record.leave_type,
+        "is_half_day": record.is_half_day,
+        "leave_request_id": record.leave_request_id,
+        "hours": record.hours,
+        "rewards": record.rewards,
+        "bonus": record.bonus,
+        "other_compensation": record.other_compensation,
+        "notes": record.notes,
+    }
+
+
+def get_attendance_records(
+    db: Session,
+    organization_id: int,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    employee_id: Optional[int] = None,
+    limit: int = 1000,
+    offset: int = 0,
+) -> List[dict]:
+    """Fetch attendance records with optional date range and employee filter.
+
+    Paginated: limit/offset default to 1000/0 for backwards compatibility.
+
+    Returns a bare list, so the caller cannot tell a short page from the end of
+    the data. Callers that need to page should use
+    get_attendance_records_page(), which also reports the total.
+    """
+    query = _attendance_records_base_query(
+        db, organization_id,
+        start_date=start_date, end_date=end_date, employee_id=employee_id,
+    )
     query = query.order_by(PayrollAttendanceRecord.date.desc())
     if limit > 0:
         query = query.limit(limit)
     if offset > 0:
         query = query.offset(offset)
 
-    rows = query.all()
     return [
-        {
-            "id": record.id,
-            "employee_id": record.employee_id,
-            "name": name,
-            "department": department,
-            "designation": designation,
-            "date": record.date,
-            "check_in": record.check_in,
-            "check_out": record.check_out,
-            "status": record.status,
-            "leave_type": record.leave_type,
-            "is_half_day": record.is_half_day,
-            "leave_request_id": record.leave_request_id,
-            "hours": record.hours,
-            "rewards": record.rewards,
-            "bonus": record.bonus,
-            "other_compensation": record.other_compensation,
-            "notes": record.notes,
-        }
-        for record, name, department, designation in rows
+        _attendance_row_to_dict(record, name, department, designation)
+        for record, name, department, designation in query.all()
     ]
+
+
+def get_attendance_records_page(
+    db: Session,
+    organization_id: int,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    employee_id: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """Page through attendance records with an exact total.
+
+    Returns {items, total, limit, offset, hasMore}. `total` is a COUNT over the
+    same predicates, so a client can show "showing 100 of 4,312" and know
+    whether another fetch is worth making, instead of inferring the end of the
+    data from a short page.
+    """
+    total = _attendance_records_base_query(
+        db, organization_id,
+        start_date=start_date, end_date=end_date, employee_id=employee_id,
+        with_employee_columns=False,
+    ).count()
+
+    # Fetch one extra row so hasMore is exact without a second COUNT query:
+    # LIMIT n+1 answers "is there more" directly.
+    rows = (
+        _attendance_records_base_query(
+            db, organization_id,
+            start_date=start_date, end_date=end_date, employee_id=employee_id,
+        )
+        .order_by(PayrollAttendanceRecord.date.desc(), PayrollAttendanceRecord.id.desc())
+        .limit(limit + 1)
+        .offset(offset)
+        .all()
+    )
+    has_more = len(rows) > limit
+    page = rows[:limit]
+
+    # Oldest/newest date in the filtered set, so a client paging through rows
+    # can still report the true span of the range instead of the span of
+    # whichever page it happens to hold.
+    span = (
+        _attendance_records_base_query(
+            db, organization_id,
+            start_date=start_date, end_date=end_date, employee_id=employee_id,
+            with_employee_columns=False,
+        )
+        .with_entities(
+            sa_func.min(PayrollAttendanceRecord.date),
+            sa_func.max(PayrollAttendanceRecord.date),
+        )
+        .one()
+    )
+    first_date, last_date = span if span else (None, None)
+
+    return {
+        "items": [
+            _attendance_row_to_dict(record, name, department, designation)
+            for record, name, department, designation in page
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": has_more,
+        "firstDate": first_date,
+        "lastDate": last_date,
+    }
+
+
+def _parse_attendance_hours(raw) -> float:
+    """Coerce the text `hours` column to a number, treating junk as 0.
+
+    `hours` is String(10) holding things like "8" / "8.5", and it is optional.
+    The previous client-side aggregation did `Number(rec.hours || 0)`, which
+    turns "N/A" into NaN and poisons the whole running total. Anything that
+    is not a finite number is treated as 0 here instead, so one bad row cannot
+    corrupt an employee's hours.
+    """
+    if raw is None:
+        return 0.0
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value == value and value not in (float("inf"), float("-inf")) else 0.0
+
+
+_EMPTY_ATTENDANCE_TOTALS = {
+    "totalDays": 0, "present": 0, "absent": 0, "leave": 0,
+    "unpaidLeaves": 0, "paidLeaves": 0,
+}
+
+
+def get_attendance_summary_by_employee(
+    db: Session,
+    organization_id: int,
+    *,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """Per-employee attendance aggregates over a date range, paged.
+
+    This exists so the Summary tab no longer has to download every attendance
+    row in order to count days. Counts are aggregated by the database; the
+    remaining fields need grouping over *distinct* values rather than rows, so
+    they are grouped in SQL by (employee_id, value) and finished in Python.
+    That keeps the work bounded by the number of distinct check-in times and
+    hour strings per employee instead of by the number of attendance rows,
+    and avoids casting the text `hours` column in SQL -- `CAST('' AS NUMERIC)`
+    raises on Postgres while silently yielding 0 on SQLite, so a cast here
+    would be a portability landmine.
+
+    Semantics deliberately mirror the previous client-side aggregation:
+      * future-dated rows are excluded, so scheduled attendance never counts
+        toward completed stats;
+      * leaveType "paid" counts as paid leave; "unpaid" or missing/legacy
+        (null) counts as unpaid; sick/casual count toward Leave Days only;
+      * "totalDays" counts every recorded day, whatever the status;
+      * avgCheckIn/avgCheckOut are the MOST FREQUENT recorded times, not
+        arithmetic means;
+      * avgBreak is always 0 -- payroll_attendance_records has no
+        break_minutes column, so there is no data source for it. The previous
+        client code read a field that never existed on the record and rendered
+        0; that is preserved rather than invented.
+    """
+    today = date.today()
+
+    base = _attendance_records_base_query(
+        db, organization_id,
+        start_date=start_date, end_date=end_date, with_employee_columns=False,
+    ).filter(PayrollAttendanceRecord.date <= today)
+
+    # Free-text employee search has to happen here, not in the browser, or it
+    # would only ever match the page that happens to be loaded.
+    search = (search or "").strip()
+    if search:
+        like = f"%{search}%"
+        matching_ids = [
+            e.id
+            for e in db.query(PayrollEmployee.id)
+            .filter(
+                PayrollEmployee.organization_id == organization_id,
+                or_(
+                    PayrollEmployee.name.ilike(like),
+                    PayrollEmployee.department.ilike(like),
+                ),
+            )
+            .all()
+        ]
+        if not matching_ids:
+            return {
+                "items": [], "total": 0, "limit": limit, "offset": offset,
+                "hasMore": False, "totals": _EMPTY_ATTENDANCE_TOTALS,
+            }
+        base = base.filter(PayrollAttendanceRecord.employee_id.in_(matching_ids))
+
+    def _grouped(*extra):
+        cols = [PayrollAttendanceRecord.employee_id, *extra]
+        return base.with_entities(*cols).group_by(*cols)
+
+    def _counts_for(emp_ids):
+        """Day/status counts for a specific set of employees."""
+        if not emp_ids:
+            return {}
+        rows = (
+            base
+            .with_entities(
+                PayrollAttendanceRecord.employee_id,
+                sa_func.count().label("days"),
+                sa_func.sum(
+                    sa_case(
+                        (PayrollAttendanceRecord.status == "present", 1), else_=0,
+                    )
+                ).label("present"),
+                sa_func.sum(
+                    sa_case(
+                        (PayrollAttendanceRecord.status == "absent", 1), else_=0,
+                    )
+                ).label("absent"),
+                sa_func.sum(
+                    sa_case(
+                        (PayrollAttendanceRecord.status == "leave", 1), else_=0,
+                    )
+                ).label("leave"),
+                sa_func.sum(
+                    sa_case(
+                        (
+                            sa_and_(
+                                PayrollAttendanceRecord.status == "leave",
+                                # "paid" is deliberately absent: the old client-side
+                                # logic was an if/else-if chain, so a paid day was
+                                # counted as paid and never also as unpaid.
+                                or_(
+                                    PayrollAttendanceRecord.leave_type.is_(None),
+                                    PayrollAttendanceRecord.leave_type == "unpaid",
+                                ),
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("unpaid"),
+                sa_func.sum(
+                    sa_case(
+                        (
+                            sa_and_(
+                                PayrollAttendanceRecord.status == "leave",
+                                PayrollAttendanceRecord.leave_type == "paid",
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("paid"),
+            )
+            .filter(PayrollAttendanceRecord.employee_id.in_(emp_ids))
+            .group_by(PayrollAttendanceRecord.employee_id)
+            .all()
+        )
+        return {
+            r.employee_id: {
+                "totalDays": int(r.days or 0),
+                "present": int(r.present or 0),
+                "absent": int(r.absent or 0),
+                "leave": int(r.leave or 0),
+                "unpaidLeaves": int(r.unpaid or 0),
+                "paidLeaves": int(r.paid or 0),
+            }
+            for r in rows
+        }
+
+    def _counts_for_all():
+        """Same counts, summed across every employee in the filtered set.
+
+        Deliberately computed in SQL rather than by summing the page in Python:
+        the page is a slice, so summing it would under-report as soon as there
+        is a second page.
+        """
+        row = (
+            base
+            .with_entities(
+                sa_func.count().label("days"),
+                sa_func.sum(sa_case(
+                    (PayrollAttendanceRecord.status == "present", 1), else_=0,
+                )).label("present"),
+                sa_func.sum(sa_case(
+                    (PayrollAttendanceRecord.status == "absent", 1), else_=0,
+                )).label("absent"),
+                sa_func.sum(sa_case(
+                    (PayrollAttendanceRecord.status == "leave", 1), else_=0,
+                )).label("leave"),
+                sa_func.sum(sa_case(
+                    (
+                        sa_and_(
+                            PayrollAttendanceRecord.status == "leave",
+                            or_(
+                                PayrollAttendanceRecord.leave_type.is_(None),
+                                PayrollAttendanceRecord.leave_type == "unpaid",
+                            ),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )).label("unpaid"),
+                sa_func.sum(sa_case(
+                    (
+                        sa_and_(
+                            PayrollAttendanceRecord.status == "leave",
+                            PayrollAttendanceRecord.leave_type == "paid",
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )).label("paid"),
+            )
+            .one()
+        )
+        if row is None:
+            return dict(_EMPTY_ATTENDANCE_TOTALS)
+        return {
+            "totalDays": int(row.days or 0),
+            "present": int(row.present or 0),
+            "absent": int(row.absent or 0),
+            "leave": int(row.leave or 0),
+            "unpaidLeaves": int(row.unpaid or 0),
+            "paidLeaves": int(row.paid or 0),
+        }
+
+    # The employee list is the paging unit, so the page has to be chosen in SQL.
+    employee_ids = [
+        row.employee_id
+        for row in (
+            _grouped()
+            .order_by(PayrollAttendanceRecord.employee_id)
+            .limit(limit + 1)
+            .offset(offset)
+            .all()
+        )
+    ]
+    has_more = len(employee_ids) > limit
+    employee_ids = employee_ids[:limit]
+    total_employees = _grouped().count()
+
+    # Org-wide totals for the whole filtered set, not just this page. The
+    # Summary tab's stat cards sum across every employee, so summing only the
+    # loaded page would quietly under-report. This is an aggregate, so it stays
+    # cheap in the database -- the cost being avoided is shipping thousands of
+    # rows to the browser and counting them there.
+    totals = _counts_for_all()
+
+    if not employee_ids:
+        return {
+            "items": [], "total": total_employees, "limit": limit,
+            "offset": offset, "hasMore": False, "totals": totals,
+        }
+
+    people = {
+        e.id: e
+        for e in db.query(PayrollEmployee).filter(
+            PayrollEmployee.organization_id == organization_id,
+            PayrollEmployee.id.in_(employee_ids),
+        ).all()
+    }
+    counts = _counts_for(employee_ids)
+
+    # Hours: sum over DISTINCT hour strings, not over every attendance row.
+    hours_by_emp: dict = {eid: 0.0 for eid in employee_ids}
+    for eid, raw, n in (
+        base
+        .with_entities(
+            PayrollAttendanceRecord.employee_id,
+            PayrollAttendanceRecord.hours,
+            sa_func.count().label("n"),
+        )
+        .filter(PayrollAttendanceRecord.employee_id.in_(employee_ids))
+        .group_by(PayrollAttendanceRecord.employee_id, PayrollAttendanceRecord.hours)
+        .all()
+    ):
+        hours_by_emp[eid] = hours_by_emp.get(eid, 0.0) + _parse_attendance_hours(raw) * int(n or 0)
+
+    def _modal_times(column):
+        """Most frequent non-empty value per employee, ties broken by first
+        appearance in (date, id) order so the result is deterministic."""
+        winners: dict = {}
+        for eid, value, n in (
+            base
+            .with_entities(
+                PayrollAttendanceRecord.employee_id,
+                column,
+                sa_func.count().label("n"),
+            )
+            .filter(PayrollAttendanceRecord.employee_id.in_(employee_ids))
+            .group_by(PayrollAttendanceRecord.employee_id, column)
+            .order_by(PayrollAttendanceRecord.employee_id, sa_func.count().desc())
+            .all()
+        ):
+            if not value:
+                continue
+            key = int(eid)
+            best = winners.get(key)
+            if best is None or int(n or 0) > best[0]:
+                winners[key] = (int(n or 0), value)
+        return {k: v[1] for k, v in winners.items()}
+
+    top_in = _modal_times(PayrollAttendanceRecord.check_in)
+    top_out = _modal_times(PayrollAttendanceRecord.check_out)
+
+    items = []
+    for eid in employee_ids:
+        emp = people.get(eid)
+        agg = counts.get(eid, {
+            "totalDays": 0, "present": 0, "absent": 0, "leave": 0,
+            "unpaidLeaves": 0, "paidLeaves": 0,
+        })
+        items.append({
+            "employeeId": eid,
+            "name": getattr(emp, "name", None) or f"Employee {eid}",
+            "department": getattr(emp, "department", None) or "",
+            "designation": getattr(emp, "designation", None) or "",
+            **agg,
+            "totalHours": round(hours_by_emp.get(eid, 0.0), 2),
+            "avgCheckIn": top_in.get(eid, ""),
+            "avgCheckOut": top_out.get(eid, ""),
+            "avgBreak": 0,
+        })
+
+    return {
+        "items": items,
+        "total": total_employees,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": has_more,
+        "totals": totals,
+    }
 
 
 def clear_attendance_records(

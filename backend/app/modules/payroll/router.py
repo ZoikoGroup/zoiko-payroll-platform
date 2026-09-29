@@ -62,7 +62,7 @@ from app.core import object_storage
 from app.core.dependencies import (
     get_current_user, get_current_payroll_operator, get_current_super_admin, get_organization_id,
 )
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.modules.billing.entitlements import require_writeable_workspace, require_active_subscription, require_scope_limit, require_not_dunning_restricted
 from app.modules.billing.feature_keys import MAX_BWM
 from app.modules.billing.models import DunningStage
@@ -98,6 +98,7 @@ from app.modules.payroll.schemas import (
     GermanyElsterCertificateConfigSet, GermanyElsterTransmissionCreate,
     GermanyElsterCertificateConfigResponse, GermanyElsterTransmissionResponse,
     AttendanceRecordCreate, BulkAttendanceRequest, AttendanceRecordResponse,
+    AttendancePageResponse, EmployeeAttendanceSummaryPageResponse,
     AttendanceSummaryResponse, BulkAttendanceResponse,
     LeaveAllocationCreate, BulkLeaveRequest, LeaveAllocationResponse,
     PayrollLeaveRequestCreate, PayrollLeaveRequestUpdate, PayrollLeaveRequestResponse,
@@ -1070,6 +1071,44 @@ def add_item(
     run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
     country = service._resolve_org_country(db, current_user.organization_id)
     return service._serialize_payslip(item, run, country=country)
+
+
+@payroll_router.post(
+    "/runs/{run_id}/generate-payslips", response_model=PayrollRunResponse, response_model_by_alias=True,
+    summary="Generate or recalculate payslips for a draft payroll run",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def generate_run_payslips(
+    run_id: int,
+    async_dispatch: bool = Query(False, description="Dispatch asynchronously via Celery chord if configured"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Phase 2.1: Generate payslips for a run with optional async chord dispatch."""
+    from fastapi.responses import JSONResponse
+    from app.config import settings
+    from app.modules.payroll.models import PayrollStatus
+
+    run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
+    if run.status != PayrollStatus.DRAFT.value:
+        raise BadRequestException(f"Payslips can only be generated for DRAFT runs (current status: {run.status})")
+
+    if async_dispatch and settings.REDIS_URL:
+        from app.tasks.payroll_tasks import generate_payslips_for_run_task
+        task = generate_payslips_for_run_task.delay(run_id, current_user.organization_id)
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "taskId": task.id,
+                "runId": run_id,
+                "status": "QUEUED",
+                "message": "Payslip generation queued in background via Celery chord.",
+            },
+        )
+
+    # Synchronous execution (default or fallback)
+    service.generate_payslips_for_run(db, run, current_user.organization_id)
+    return service.get_payroll_run_detail(db, run_id, current_user.organization_id)
 
 
 @payroll_router.post(
@@ -2144,6 +2183,27 @@ def list_attendance(
     )
 
 
+@payroll_router.get(
+    "/attendance/page", response_model=AttendancePageResponse,
+    response_model_by_alias=True,
+    summary="Page through attendance records with an exact total",
+)
+def list_attendance_page(
+    startDate: Optional[date] = Query(None),
+    endDate: Optional[date] = Query(None),
+    employeeId: Optional[int] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_attendance_records_page(
+        db, current_user.organization_id,
+        start_date=startDate, end_date=endDate, employee_id=employeeId,
+        limit=limit, offset=offset,
+    )
+
+
 @payroll_router.delete(
     "/attendance", response_model=SuccessResponse,
     summary="Delete all attendance records for the organization",
@@ -2173,6 +2233,30 @@ def attendance_summary(
     current_user=Depends(get_current_user),
 ):
     return service.get_attendance_summary(db, current_user.organization_id)
+
+
+@payroll_router.get(
+    "/attendance/summary/by-employee",
+    response_model=EmployeeAttendanceSummaryPageResponse,
+    response_model_by_alias=True,
+    summary="Paged per-employee attendance aggregates for a date range",
+)
+def attendance_summary_by_employee(
+    startDate: Optional[date] = Query(None),
+    endDate: Optional[date] = Query(None),
+    search: Optional[str] = Query(None, max_length=200),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Replaces the Summary tab's client-side aggregation, which had to fetch
+    every attendance row in the range just to count days per employee."""
+    return service.get_attendance_summary_by_employee(
+        db, current_user.organization_id,
+        start_date=startDate, end_date=endDate,
+        search=search, limit=limit, offset=offset,
+    )
 
 
 # ── Compliance ─────────────────────────────────────────────────────────

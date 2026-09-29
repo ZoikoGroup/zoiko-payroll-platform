@@ -1576,6 +1576,84 @@ class AttendanceRecordResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
+class AttendancePageResponse(BaseModel):
+    """One page of attendance records plus the exact total.
+
+    Kept alongside List[AttendanceRecordResponse] rather than replacing it: a
+    bare list cannot express "is there more", so a client that pages has to
+    infer the end of the data from a short page and re-fetch blindly. hasMore
+    is computed server-side by fetching limit+1 rows, so it is exact even when
+    rows are inserted between page requests.
+    """
+    items:  List[AttendanceRecordResponse] = Field(default_factory=list)
+    total:  int
+    limit:  int
+    offset: int
+    hasMore: bool = Field(False, serialization_alias="hasMore")
+    # Span of the whole filtered set, so a paged client can still report the
+    # true date range rather than the range of whichever page it holds.
+    firstDate: Optional[date] = Field(None, serialization_alias="firstDate")
+    lastDate:  Optional[date] = Field(None, serialization_alias="lastDate")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class EmployeeAttendanceSummaryRow(BaseModel):
+    """One employee's aggregated attendance for a range.
+
+    `avgCheckIn`/`avgCheckOut` are the most frequently recorded times, not
+    arithmetic means. `avgBreak` is always 0: payroll_attendance_records has no
+    break_minutes column, so there is no source for it and the value is not
+    invented.
+    """
+    employeeId:        int
+    name:              str
+    department:        str = ""
+    designation:       str = ""
+    totalDays:         int = 0
+    present:           int = 0
+    absent:            int = 0
+    leave:             int = 0
+    unpaidLeaves:      int = 0
+    paidLeaves:        int = 0
+    totalHours:        float = 0.0
+    avgCheckIn:        str = ""
+    avgCheckOut:       str = ""
+    avgBreak:          float = 0.0
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class AttendanceTotals(BaseModel):
+    """Org-wide sums across every employee in the filtered set.
+
+    Needed because the Summary tab's stat cards total every employee, while
+    the table itself is paged. Summing only the loaded page would under-report
+    whenever there is a second page.
+    """
+    totalDays:    int = 0
+    present:      int = 0
+    absent:       int = 0
+    leave:        int = 0
+    unpaidLeaves: int = 0
+    paidLeaves:   int = 0
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class EmployeeAttendanceSummaryPageResponse(BaseModel):
+    """Paged per-employee aggregates so the Summary tab can page server-side
+    instead of downloading every attendance row to count days in the browser."""
+    items:  List[EmployeeAttendanceSummaryRow] = Field(default_factory=list)
+    total:  int
+    limit:  int
+    offset: int
+    hasMore: bool = Field(False, serialization_alias="hasMore")
+    totals: AttendanceTotals = Field(default_factory=AttendanceTotals)
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
 class SkippedRecordDetail(BaseModel):
     rowName:            Optional[str] = Field(None, serialization_alias="rowName")
     rowId:              Optional[int] = Field(None, serialization_alias="rowId")

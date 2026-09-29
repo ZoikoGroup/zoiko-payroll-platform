@@ -1227,15 +1227,61 @@ export const getAttendanceRecords = async (params = {}) => {
   }
 };
 
-// Fetch attendance records with pagination support
-export const getAttendanceRecordsPaginated = async (params = {}, limit = 1000, offset = 0) => {
+// Paged attendance fetch. Hits /attendance/page, which returns an exact total
+// plus a server-computed hasMore — the plain list endpoint cannot express
+// either, which is why a client paging it has to keep re-fetching blindly.
+export const getAttendanceRecordsPaginated = async (params = {}, limit = 100, offset = 0) => {
   try {
-    const res = await api.get("/api/payroll/attendance", { 
-      params: { ...params, limit, offset } 
+    const res = await api.get("/api/payroll/attendance/page", {
+      params: { ...params, limit, offset },
     });
-    return Array.isArray(res) ? res : res?.data || res?.items || [];
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      // Span of the whole filtered set, not of this page. The History tab
+      // derives its working-days count from these, so dropping them made the
+      // span read zero no matter what range was selected.
+      firstDate: res?.firstDate ?? null,
+      lastDate: res?.lastDate ?? null,
+    };
   } catch {
-    return [];
+    // A failed page must not look like "the end of the data", or the UI will
+    // silently stop loading. Report it as an error and let the caller decide.
+    return { items: [], total: 0, limit, offset, hasMore: false, firstDate: null, lastDate: null, error: true };
+  }
+};
+
+// Per-employee attendance aggregates for a range, paged server-side. The
+// Summary tab used to download every attendance row in range and count days
+// in the browser; this does the counting in the database.
+//
+// `search` is forwarded so the server matches every employee in the
+// organization, not only the ones on the page currently loaded in the browser.
+// `totals` is the org-wide sum across the whole filtered set: the stat cards
+// must not total just the loaded page, which under-reports as soon as there
+// is a second page.
+export const getAttendanceSummaryByEmployee = async (
+  { startDate, endDate, search, limit = 100, offset = 0 } = {}
+) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/summary/by-employee", {
+      params: { startDate, endDate, search, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      totals: res?.totals ?? null,
+    };
+  } catch {
+    return { items: [], total: 0, limit, offset, hasMore: false, totals: null, error: true };
   }
 };
 
