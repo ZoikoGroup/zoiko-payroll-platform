@@ -197,14 +197,14 @@ def test_template_copy_compliance():
     assert ">Reset password</a>" in html          # single primary CTA label
     assert "{{expires_at_local}}" in html         # absolute, caller-formatted
     assert "If this was not you" in html
-    # §07: no tracking pixels — hidden/1x1 images barred; the content logo is
-    # a visible, sized image and allowed.
+    # §07: no tracking pixels — hidden/1x1 images barred. The header logo
+    # is a real, visible <img> (single-source partial), never a pixel.
     assert not re.search(
         r"<img[^>]*(width\s*=\s*[\"']?1[\s\"'>]|height\s*=\s*[\"']?1[\s\"'>]|display:\s*none)",
         html, re.IGNORECASE,
     )
-    assert 'alt="Zoiko Payroll"' in html
-    assert "{{logo_url}}" in html
+    assert "{{logo_header_block}}" in html
+    assert '<span style="color:#ffffff;">Zoiko</span>' not in html
     assert "temporary_password" not in html
 
 

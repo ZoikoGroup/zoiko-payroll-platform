@@ -1,0 +1,12 @@
+<p style="color:#0b1f3a; font-size:12px; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase; margin:0 0 12px 0;">Internal operations notice &mdash; do not forward outside Zoiko Payroll operations</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  The Assist platform kill-switch was
+  <strong style="color:#{{state_color}};">{{state_word}}</strong> by
+  <strong>{{toggled_by}}</strong> at <strong>{{timestamp}}</strong>.
+</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  {{#if enabled}}While the kill-switch is on, every Zoiko Payroll Assist session
+  platform-wide is suspended and Assist requests are refused until an operator
+  switches it back off.{{/if}}{{#if disabled}}The kill-switch is off: Assist is
+  available again and sessions can start normally.{{/if}}
+</p>

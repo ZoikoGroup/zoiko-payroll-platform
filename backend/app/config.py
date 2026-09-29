@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "no-reply@payroll.zoiko.example"
     SMTP_USE_TLS: str = "true"
+    # Optional public https URL of the email logo (a hosted copy of
+    # app/email_assets/zoikopayroll-logo-email.png). Empty (default): the logo
+    # is embedded in every message as an inline CID image, so it renders even
+    # when FRONTEND_URL is not publicly reachable.
+    EMAIL_LOGO_URL: str = ""
 
     # ── Super Admin setup key ─────────────────────────────────────────
     # Required to run scripts/seed_super_admin.py and to create Super

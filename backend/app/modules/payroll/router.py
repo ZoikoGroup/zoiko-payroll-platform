@@ -222,7 +222,7 @@ def bulk_create_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = service.bulk_create_employees(db, data, current_user.organization_id)
+    result = service.bulk_create_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{result['created']} created, {len(result['failed'])} failed.",
         "created": result['created'],
@@ -241,7 +241,7 @@ def bulk_update_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = service.bulk_update_employees(db, data, current_user.organization_id)
+    result = service.bulk_update_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{result['updated']} updated, {len(result['failed'])} failed.",
         "updated": result['updated'],
@@ -260,7 +260,7 @@ def bulk_delete_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    result = service.bulk_delete_employees(db, data, current_user.organization_id)
+    result = service.bulk_delete_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{len(result['deleted'])} deleted, {len(result['failed'])} failed.",
         **result,
@@ -2322,10 +2322,33 @@ def generate_report(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_report_from_template(
-        db, current_user.organization_id, payload.reportTemplateId, payload.payrollRunId,
-        reporting_period=payload.reportingPeriod, actor_id=current_user.id,
-    )
+    try:
+        report = service.generate_report_from_template(
+            db, current_user.organization_id, payload.reportTemplateId, payload.payrollRunId,
+            reporting_period=payload.reportingPeriod, actor_id=current_user.id,
+        )
+    except Exception as exc:
+        # Report-failed notification (best-effort; never masks the real error).
+        try:
+            report_label = "Report"
+            try:
+                _tpl = service.get_report_template(db, payload.reportTemplateId)
+                report_label = _tpl.report_type or "Report"
+            except Exception:
+                pass
+            service._notify_report_generation_failed(
+                db, current_user.organization_id, report_label,
+                payload.reportingPeriod or "", str(exc),
+            )
+        except Exception:
+            pass
+        raise
+    # Report-ready notification (best-effort).
+    try:
+        service._notify_report_generated(db, report, current_user.organization_id)
+    except Exception:
+        pass
+    return report
 
 
 @payroll_router.get(

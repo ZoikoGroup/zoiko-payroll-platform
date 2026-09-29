@@ -1,0 +1,29 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Hello,</p>
+{{#if suspended}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  The organization <strong style="color:#0b1f3a;">{{org_name}}</strong> is now
+  <strong style="color:#b91c1c;">suspended</strong>.
+</p>
+{{/if}}
+{{#if reason}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Stated reason: <em>{{reason}}</em>
+</p>
+{{/if}}
+{{#if suspended}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  While suspended, <strong>no user can sign in</strong> to this organization.
+  Existing payroll data, completed runs and payslips are not changed or deleted.
+  Payroll operations resume only after the organization is reactivated.
+</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  Contact Zoiko Payroll support to resolve this suspension.
+</p>
+{{/if}}
+{{#if restored}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  The organization <strong style="color:#0b1f3a;">{{org_name}}</strong> is
+  <strong style="color:#15803d;">reactivated</strong>. Users can sign in again and
+  payroll operations continue as before.
+</p>
+{{/if}}

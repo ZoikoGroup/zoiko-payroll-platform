@@ -1,0 +1,11 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Hello {{employee_name}},
+</p>
+{{#if approved}}<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your recorded overtime for <strong style="color:#0b1f3a;">{{work_date}}</strong> was approved.
+  Approved hours are eligible for overtime and shift-premium treatment in a payroll run;
+  any premium appears on your payslip once that run is processed.
+</p>{{/if}}{{#if rejected}}<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your recorded overtime for <strong style="color:#0b1f3a;">{{work_date}}</strong> was not approved,
+  so it will not be paid as overtime. If you believe this is wrong, speak to your manager or HR team.
+</p>{{/if}}

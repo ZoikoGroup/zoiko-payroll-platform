@@ -7,11 +7,12 @@ name: Build Zoiko Payroll Frontend
 # deploys, so there's no risk of that no matter what paths it's scoped to.
 on:
   push:
-    branches: [main]
+    branches: [main, rugvedh]
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-build.yml'
   pull_request:
+    branches: [main, rugvedh]
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-build.yml'

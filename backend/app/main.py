@@ -20,7 +20,7 @@ import re
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -106,12 +106,18 @@ async def lifespan(app: FastAPI):
     stop_assisted_access_scheduler()
 
 
+from app.modules.communications.service import bind_request_background_tasks  # noqa: E402
+
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     docs_url="/docs",
     openapi_url="/openapi.json",
     lifespan=lifespan,
+    # Every route gets the request's BackgroundTasks bound for
+    # communications.queue_email, so outbound email is sent after the
+    # response instead of blocking it on SMTP.
+    dependencies=[Depends(bind_request_background_tasks)],
 )
 
 async def _missing_compliance_configuration_handler(request: Request, exc: MissingComplianceConfigurationError):

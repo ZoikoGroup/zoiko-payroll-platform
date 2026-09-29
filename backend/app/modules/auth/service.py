@@ -6,13 +6,17 @@ reset), change password, and org-admin user management.
 """
 
 import hashlib
+import inspect
 import logging
 import os
 import secrets
+import uuid
 from datetime import datetime, timedelta
-from typing import Optional
+from types import SimpleNamespace
+from typing import Callable, Optional
 
 from fastapi import BackgroundTasks
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -32,7 +36,14 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.modules.auth.models import RevokedToken, SecurityActionPurpose, SecurityActionToken, User, UserRole
+from app.modules.auth.models import (
+    AuthEmailEvent,
+    RevokedToken,
+    SecurityActionPurpose,
+    SecurityActionToken,
+    User,
+    UserRole,
+)
 from app.modules.auth.schemas import RegisterRequest, TrialRegisterRequest
 from app.modules.organizations.models import Organization
 
@@ -45,9 +56,32 @@ INVALID_TOKEN_MESSAGE = "This link is no longer valid. Please request a new one.
 # IAM-007 (Password reset requested, Class P1, family IAM).
 RESET_TEMPLATE_ID = "IAM-007"
 RESET_EVENT_TYPE = "identity.password_reset_requested"
+# Same IAM-007 template, admin-initiated copy variant (Super Admin forced reset).
+ADMIN_RESET_EVENT_TYPE = "identity.password_reset_admin_initiated"
 # Governance: template IAM-002 (User invitation, Class P1, family IAM).
 INVITE_TEMPLATE_ID = "IAM-002"
 INVITE_EVENT_TYPE = "identity.invitation_created"
+# Governance: template IAM-008 (Password changed notice, Class P1, family IAM).
+PASSWORD_CHANGED_TEMPLATE_ID = "IAM-008"
+PASSWORD_CHANGED_EVENT_TYPE = "identity.password_changed"
+# Governance: the next four notices are NOT yet catalog-assigned. They
+# previously cited IAM-009..IAM-012, but in the Email Communications System
+# spec those IDs belong to MFA enrolled / MFA method changed / recovery codes
+# regenerated / new sign-in (all unbuilt — MFA does not exist yet). Explicit
+# placeholders until the spec owner allocates real IDs; never reuse the MFA
+# IDs for these.
+# Self-service password replacement notice (Class P1) — catalog ID pending.
+PASSWORD_REPLACED_TEMPLATE_ID = "IAM-TBD-PWD-REPLACED"
+PASSWORD_REPLACED_EVENT_TYPE = "identity.password_reset_self_service"
+# Password reset completed notice (Class P1) — catalog ID pending.
+RESET_COMPLETED_TEMPLATE_ID = "IAM-TBD-RESET-DONE"
+RESET_COMPLETED_EVENT_TYPE = "identity.password_reset_completed"
+# Role change notice (Class P1) — catalog ID pending.
+ROLE_CHANGED_TEMPLATE_ID = "IAM-TBD-ROLE-CHANGED"
+ROLE_CHANGED_EVENT_TYPE = "identity.role_changed"
+# Account deactivation notice (Class P1) — catalog ID pending.
+DEACTIVATED_TEMPLATE_ID = "IAM-TBD-DEACTIVATED"
+DEACTIVATED_EVENT_TYPE = "identity.account_deactivated"
 # Bump when the template copy or TTL changes materially (§04 idempotency key).
 TOKEN_MATERIAL_VERSION = "v2"
 
@@ -147,14 +181,227 @@ def _reference_id(raw_token: str, prefix: str = "ZK", suffix: str = "SEC") -> st
 
 def _idempotency_key(organization_id, event_type: str, email: str, template_id: str) -> str:
     """§04 idempotency key: tenant | event | recipient | template | material
-    version."""
-    return "|".join([
-        str(organization_id or "platform"),
-        event_type,
-        email.lower(),
-        template_id,
-        TOKEN_MATERIAL_VERSION,
-    ])
+    version. Delegates to the platform-wide format in communications so auth
+    and every other module produce identical keys."""
+    from app.modules.communications.service import idempotency_key
+
+    return idempotency_key(organization_id, event_type, email, template_id)
+
+
+# ── Persisted email audit + structural idempotency (Part 1) ────────────────
+
+# Every auth-module email send goes through _dispatch_email_guarded, which
+# enforces the record-of-truth contract:
+#   1. INSERT a row into auth_email_events (outcome="pending") BEFORE any SMTP
+#      call — the UNIQUE constraint on idempotency_key is the double-send guard.
+#   2. If a row for the same idempotency_key already exists (double-click /
+#      retried request), persist a skipped_duplicate row and do NOT send.
+#   3. Send (via communications.queue_email, which also writes the
+#      platform-wide communication_events row and retries transient SMTP
+#      failures), then UPDATE that row's outcome from the real result.
+# The old log-only "email_audit" lines are gone: the tables are the record of
+# truth.
+
+def _token_link_idempotency_key(base_key: str, raw_token: str) -> str:
+    """Token-link flows (reset request / invite-resend) must be able to send
+    again on every legitimate request: each request mints a fresh superseding
+    token and only the latest email carries a live link — a strict unique on
+    the base key would serve stale links. Appending the fresh token's hash
+    prefix gives every attempt its own row while a literal replayed attempt
+    still hits the UNIQUE constraint."""
+    return f"{base_key}|{_token_hash(raw_token)[:12]}"
+
+
+def _claim_audit_row(
+    db: Session,
+    *,
+    event_type: str,
+    template_id: str,
+    recipient_email: str,
+    idempotency_key: str,
+    user_id=None,
+    organization_id=None,
+    actor_user_id=None,
+):
+    """INSERT the pending audit row — the dedup gate. Returns the row, or None
+    when the idempotency_key already exists (duplicate request: do not send)."""
+    existing = db.query(AuthEmailEvent).filter(
+        AuthEmailEvent.idempotency_key == idempotency_key
+    ).first()
+    if existing is not None:
+        return None
+    row = AuthEmailEvent(
+        event_type=event_type,
+        template_id=template_id,
+        recipient_email=recipient_email,
+        user_id=user_id,
+        organization_id=organization_id,
+        actor_user_id=actor_user_id,
+        idempotency_key=idempotency_key,
+        outcome="pending",
+    )
+    db.add(row)
+    try:
+        db.flush()
+        db.commit()
+        return row
+    except IntegrityError:
+        # A concurrent request won the race for this key — treat as duplicate.
+        db.rollback()
+        return None
+
+
+def _record_duplicate(
+    db: Session,
+    *,
+    event_type: str,
+    template_id: str,
+    recipient_email: str,
+    idempotency_key: str,
+    user_id=None,
+    organization_id=None,
+    actor_user_id=None,
+) -> None:
+    """Persist a suppressed attempt as its own skipped_duplicate row. The
+    original send keeps its outcome='sent' row; each duplicate gets a distinct
+    suffix key so it audibly records the attempt without touching the sent row."""
+    dup_key = f"{idempotency_key}#dup:{uuid.uuid4().hex[:8]}"
+    db.add(AuthEmailEvent(
+        event_type=event_type,
+        template_id=template_id,
+        recipient_email=recipient_email,
+        user_id=user_id,
+        organization_id=organization_id,
+        actor_user_id=actor_user_id,
+        idempotency_key=dup_key,
+        outcome="skipped_duplicate",
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+
+
+def _update_audit_outcome(
+    db: Session,
+    row,
+    outcome: str,
+    provider_response: Optional[str] = None,
+) -> None:
+    db.query(AuthEmailEvent).filter(AuthEmailEvent.id == row.id).update(
+        {"outcome": outcome, "provider_response": provider_response},
+        synchronize_session=False,
+    )
+    try:
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.error("[email] Failed to persist audit outcome for id=%s: %s", row.id, exc)
+
+
+def _user_snapshot(user):
+    """Plain-value copy of the User fields the notice senders read. Sends may
+    run in a BackgroundTasks task after the request session is closed, where
+    touching an expired attribute on the live ORM object would raise."""
+    if user is None:
+        return None
+    return SimpleNamespace(
+        id=getattr(user, "id", None),
+        email=getattr(user, "email", None),
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
+        full_name=getattr(user, "full_name", None),
+        organization_id=getattr(user, "organization_id", None),
+        role=getattr(user, "role", None),
+    )
+
+
+def _send_and_mirror(auth_row_id: int, send: Callable, db: Session = None) -> bool:
+    """communications send_fn for auth: performs the send (handing it the
+    dispatcher's session) and mirrors the outcome onto the auth_email_events
+    row claimed at request time. Exceptions propagate so the dispatcher can
+    classify and retry them; a later successful retry overwrites 'failed'."""
+    try:
+        takes_db = len(inspect.signature(send).parameters) >= 1
+    except (TypeError, ValueError):
+        takes_db = False
+    try:
+        sent = send(db) if takes_db else send()
+    except Exception as exc:  # noqa: BLE001
+        _update_audit_outcome(db, SimpleNamespace(id=auth_row_id), "failed", f"{type(exc).__name__}: {exc}")
+        raise
+    _update_audit_outcome(db, SimpleNamespace(id=auth_row_id), "sent" if sent else "failed")
+    return sent
+
+
+def _dispatch_email_guarded(
+    db: Session,
+    *,
+    event_type: str,
+    template_id: str,
+    recipient_email: str,
+    idempotency_key: str,
+    send: Callable[..., bool],
+    user_id=None,
+    organization_id=None,
+    actor_user_id=None,
+) -> bool:
+    """Part 1.2 contract for a single auth email, now layered on the shared
+    communications dispatcher:
+      - the auth_email_events row is still claimed synchronously (the
+        historical dedup gate + record for this module), then
+      - the send itself goes through communications.queue_email, which writes
+        the platform-wide communication_events row, retries transient SMTP
+        failures, and runs after the HTTP response when called in a request.
+    `send` receives the session to use (`lambda db: ...`) — it must not close
+    over live ORM objects (see _user_snapshot).
+
+    Returns True when the send delivered, was queued, or was deliberately
+    skipped as a duplicate; False only on a real inline send failure."""
+    from app.modules.communications import service as communications
+
+    row = _claim_audit_row(
+        db,
+        event_type=event_type,
+        template_id=template_id,
+        recipient_email=recipient_email,
+        idempotency_key=idempotency_key,
+        user_id=user_id,
+        organization_id=organization_id,
+        actor_user_id=actor_user_id,
+    )
+    if row is None:
+        _record_duplicate(
+            db,
+            event_type=event_type,
+            template_id=template_id,
+            recipient_email=recipient_email,
+            idempotency_key=idempotency_key,
+            user_id=user_id,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
+        communications.record_skipped_duplicate(
+            db,
+            module="auth",
+            event_type=event_type,
+            template_id=template_id,
+            recipient_email=recipient_email,
+            idempotency_key=idempotency_key,
+            recipient_user_id=user_id,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+        )
+        return True
+    result = communications.queue_email(
+        "auth", event_type, template_id, recipient_email, idempotency_key,
+        _send_and_mirror, row.id, send,
+        organization_id=organization_id,
+        actor_user_id=actor_user_id,
+        recipient_user_id=user_id,
+        db=db,
+    )
+    return True if result is None else result
 
 
 def _supersede_active_tokens(db: Session, email: str, purpose) -> int:
@@ -190,7 +437,7 @@ def _issue_action_token(
     superseded = _supersede_active_tokens(db, email, purpose)
     if superseded:
         logger.info(
-            "email_audit event=%s recipient=%s purpose=%s superseded_tokens=%d",
+            "identity_audit event=%s recipient=%s purpose=%s superseded_tokens=%d",
             RESET_EVENT_TYPE if purpose == SecurityActionPurpose.RESET else INVITE_EVENT_TYPE,
             email,
             purpose.name,
@@ -287,7 +534,7 @@ def claim_invitation(db: Session, raw_token: str) -> Optional[tuple[User, str]]:
     db.commit()
     db.refresh(user)
     logger.info(
-        "email_audit event=identity.invitation_accepted recipient=%s user_id=%s organization_id=%s",
+        "identity_audit event=identity.invitation_accepted recipient=%s user_id=%s organization_id=%s",
         user.email,
         user.id,
         user.organization_id,
@@ -317,12 +564,28 @@ def complete_action_token(db: Session, raw_token: str, purpose, new_password: st
     db.commit()
     db.refresh(user)
     logger.info(
-        "email_audit event=%s recipient=%s user_id=%s",
+        "identity_audit event=%s recipient=%s user_id=%s",
         "identity.password_reset_completed" if purpose == SecurityActionPurpose.RESET
         else "identity.invitation_accepted",
         user.email,
         user.id,
     )
+    if purpose == SecurityActionPurpose.RESET:
+        # Reset-completed notice (catalog ID pending): confirm the reset to the account owner right after the
+        # identity_audit line above. Notice only — no link.
+        _dispatch_email_guarded(
+            db,
+            event_type=RESET_COMPLETED_EVENT_TYPE,
+            template_id=RESET_COMPLETED_TEMPLATE_ID,
+            recipient_email=user.email,
+            user_id=user.id,
+            organization_id=user.organization_id,
+            actor_user_id=None,
+            idempotency_key=_idempotency_key(
+                user.organization_id, RESET_COMPLETED_EVENT_TYPE, user.email, RESET_COMPLETED_TEMPLATE_ID,
+            ),
+            send=lambda db, _u=_user_snapshot(user): _send_password_reset_completed_email(db, _u),
+        )
     return {"message": "Password set successfully. You can now sign in."}
 
 
@@ -476,30 +739,51 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
         # client ever saw a response, for an email that isn't required for
         # the account to work.
         try:
-            from app.services.email_service import (
-                send_organization_created_email,
-                send_super_admin_org_created_notification_email,
-            )
+            from app.services.email_service import send_organization_created_email
             ref_id = f"ORG-{org.id:04d}-INIT"
-            send_organization_created_email(
-                email=admin.email,
-                recipient_first_name=first_name,
-                organization_name=org.organization_name,
-                reference_id=ref_id,
+
+            # data.plan_code is Stage 1's plan-picker choice, carried
+            # through purely so the welcome email can name the actual plan
+            # — checkout hasn't happened yet at this point (that's
+            # PlanReviewPage, a separate later call), so there's no
+            # BillingSubscription/plan_version to resolve from yet, only
+            # this code string. Resolve it to the real BillingPlan.name
+            # (never show the raw code — "PROFESSIONAL" means nothing to a
+            # customer) rather than hardcoding a second code->name map.
+            plan_display_name = None
+            if data.plan_code:
+                from app.modules.billing.models import BillingPlan
+
+                plan_row = db.query(BillingPlan).filter(BillingPlan.code == data.plan_code.upper()).first()
+                if plan_row is not None:
+                    plan_display_name = plan_row.name
+
+            _dispatch_email_guarded(
+                db,
+                event_type="commercial.organization_created",
+                template_id="COM-001",
+                recipient_email=admin.email,
+                user_id=admin.id,
                 organization_id=org.id,
-                db=db,
-            )
-            logger.info(
-                "email_audit event=commercial.organization_created template_id=COM-001 recipient=%s org_id=%s reference_id=%s",
-                admin.email, org.id, ref_id,
+                actor_user_id=admin.id,
+                idempotency_key=_idempotency_key(
+                    org.id, "commercial.organization_created", admin.email, "COM-001",
+                ),
+                send=lambda: send_organization_created_email(
+                    email=admin.email,
+                    recipient_first_name=first_name,
+                    organization_name=org.organization_name,
+                    reference_id=ref_id,
+                    plan_display_name=plan_display_name,
+                    organization_id=org.id,
+                    db=db,
+                ),
             )
             # Notify Super Admins with full org & primary admin metadata
-            send_super_admin_org_created_notification_email(
-                org=org,
-                admin_user=admin,
-                reference_id=f"ADM-ORG-{org.id:04d}",
-                db=db,
-            )
+            # (ADM-001) — one audited communication_events row per recipient.
+            from app.modules.organizations.notifications import queue_super_admin_org_created_alerts
+
+            queue_super_admin_org_created_alerts(db, org, admin, module="auth", actor_user_id=admin.id)
         except Exception as exc:
             logger.warning("Failed to dispatch org created emails for org %s: %s", org.id, exc)
 
@@ -640,19 +924,27 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
 
             evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
             ref_id = f"TRIAL-{org.id:04d}-INIT"
-            send_trial_organization_created_email(
-                email=admin.email,
-                recipient_first_name=first_name,
-                organization_name=org.organization_name,
-                reference_id=ref_id,
-                evaluation_days=30,
-                evaluation_end_date=evaluation_end,
+            _dispatch_email_guarded(
+                db,
+                event_type="commercial.evaluation_created",
+                template_id="COM-003",
+                recipient_email=admin.email,
+                user_id=admin.id,
                 organization_id=org.id,
-                db=db,
-            )
-            logger.info(
-                "email_audit event=commercial.evaluation_created template_id=COM-003 recipient=%s org_id=%s reference_id=%s",
-                admin.email, org.id, ref_id,
+                actor_user_id=admin.id,
+                idempotency_key=_idempotency_key(
+                    org.id, "commercial.evaluation_created", admin.email, "COM-003",
+                ),
+                send=lambda: send_trial_organization_created_email(
+                    email=admin.email,
+                    recipient_first_name=first_name,
+                    organization_name=org.organization_name,
+                    reference_id=ref_id,
+                    evaluation_days=30,
+                    evaluation_end_date=evaluation_end,
+                    organization_id=org.id,
+                    db=db,
+                ),
             )
         except Exception as exc:
             logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
@@ -696,27 +988,60 @@ def request_password_reset(db: Session, email: str) -> dict:
         )
         link = _action_link(SecurityActionPurpose.RESET, raw_token)
         db.commit()
-        sent = _send_reset_email(
-            db, user, link,
-            expires_at_local=_format_expiry_local(expires_at),
-            reference_id=_reference_id(raw_token),
-        )
-        # §04 audit/evidence: durable record of event, template, recipient and
-        # outcome. Never log the raw token or the link.
-        logger.info(
-            "email_audit event=%s template_id=%s recipient=%s user_id=%s organization_id=%s sent_at=%s outcome=%s",
-            RESET_EVENT_TYPE,
-            RESET_TEMPLATE_ID,
-            user.email,
-            user.id,
-            user.organization_id,
-            datetime.utcnow().isoformat(timespec="seconds") + "Z",
-            "sent" if sent else "failed",
+        _dispatch_email_guarded(
+            db,
+            event_type=RESET_EVENT_TYPE,
+            template_id=RESET_TEMPLATE_ID,
+            recipient_email=user.email,
+            user_id=user.id,
+            organization_id=user.organization_id,
+            actor_user_id=None,
+            # Token-link flow: per-attempt key so every legitimate re-request
+            # still mints+sends the fresh (superseding) link's email.
+            idempotency_key=_token_link_idempotency_key(idempotency_key, raw_token),
+            send=lambda db, _u=_user_snapshot(user): _send_reset_email(
+                db, _u, link,
+                expires_at_local=_format_expiry_local(expires_at),
+                reference_id=_reference_id(raw_token),
+            ),
         )
     else:
         db.rollback()
     # Always return the same message to avoid email enumeration.
     return {"message": "If that email is registered, a password reset link has been sent."}
+
+
+def admin_initiated_password_reset(db: Session, user: User, actor) -> bool:
+    """Super Admin forced reset (super_admin/router.py admin_reset_password):
+    same IAM-007 template and single-use/superseding token as the self-service
+    flow, with the "a platform administrator reset this for you" copy
+    variant, audited through the same guarded path. Its own event type keeps
+    it distinguishable from a user-requested reset in the audit tables.
+    Token-link key family (per-attempt), like request_password_reset."""
+    base_key = _idempotency_key(
+        user.organization_id, ADMIN_RESET_EVENT_TYPE, user.email, RESET_TEMPLATE_ID,
+    )
+    raw_token, expires_at = _issue_action_token(
+        db, user.email, user.organization_id, SecurityActionPurpose.RESET, idempotency_key=base_key,
+    )
+    link = _action_link(SecurityActionPurpose.RESET, raw_token)
+    db.commit()
+    return _dispatch_email_guarded(
+        db,
+        event_type=ADMIN_RESET_EVENT_TYPE,
+        template_id=RESET_TEMPLATE_ID,
+        recipient_email=user.email,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        actor_user_id=actor.id if actor is not None else None,
+        idempotency_key=_token_link_idempotency_key(base_key, raw_token),
+        send=lambda db, _u=_user_snapshot(user): _send_reset_email(
+            db, _u, link,
+            expires_at_local=_format_expiry_local(expires_at),
+            reference_id=_reference_id(raw_token),
+            admin_initiated=True,
+        ),
+    )
 
 
 def change_password(db: Session, user_id: int, current_password: str, new_password: str) -> dict:
@@ -727,6 +1052,23 @@ def change_password(db: Session, user_id: int, current_password: str, new_passwo
         raise BadRequestException("Current password is incorrect.")
     user.hashed_password = hash_password(new_password)
     db.commit()
+    db.refresh(user)
+    # IAM-008: notify the owner after the change is committed. Strict
+    # idempotency key — a double-click / retried request resolves to exactly
+    # one email (the second attempt records skipped_duplicate and doesn't send).
+    _dispatch_email_guarded(
+        db,
+        event_type=PASSWORD_CHANGED_EVENT_TYPE,
+        template_id=PASSWORD_CHANGED_TEMPLATE_ID,
+        recipient_email=user.email,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        actor_user_id=user.id,
+        idempotency_key=_idempotency_key(
+            user.organization_id, PASSWORD_CHANGED_EVENT_TYPE, user.email, PASSWORD_CHANGED_TEMPLATE_ID,
+        ),
+        send=lambda db, _u=_user_snapshot(user): _send_password_changed_email(db, _u),
+    )
     return {"message": "Password changed successfully."}
 
 
@@ -741,7 +1083,23 @@ def generate_random_password(db: Session, user_id: int) -> dict:
     new_password = secrets.token_urlsafe(12)
     user.hashed_password = hash_password(new_password)
     db.commit()
+    db.refresh(user)
     logger.info("User %s generated a new random password for their own account.", user.email)
+    # Password-replaced notice (catalog ID pending): same security-notice
+    # family as IAM-008, strict idempotency.
+    _dispatch_email_guarded(
+        db,
+        event_type=PASSWORD_REPLACED_EVENT_TYPE,
+        template_id=PASSWORD_REPLACED_TEMPLATE_ID,
+        recipient_email=user.email,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        actor_user_id=user.id,
+        idempotency_key=_idempotency_key(
+            user.organization_id, PASSWORD_REPLACED_EVENT_TYPE, user.email, PASSWORD_REPLACED_TEMPLATE_ID,
+        ),
+        send=lambda db, _u=_user_snapshot(user): _send_password_reset_self_service_email(db, _u),
+    )
     return {"password": new_password}
 
 
@@ -797,8 +1155,10 @@ def _dispatch_invite_email(db: Session, user: User, actor) -> bool:
     the resend endpoint so both get identical §04 treatment:
     - prior live INVITE tokens for this email are superseded
     - idempotency key = tenant|identity.invitation_created|recipient|IAM-002|v2
-    - structured audit record with outcome; never logs the token/link"""
-    idempotency_key = _idempotency_key(
+      (per-attempt token-hash suffix — resends are legitimate, each fresh link
+      supersedes the last and only the latest email carries a live link)
+    - persisted audit + outcome via auth_email_events; never logs the token."""
+    base_key = _idempotency_key(
         user.organization_id, INVITE_EVENT_TYPE, user.email, INVITE_TEMPLATE_ID,
     )
     raw_token, expires_at = _issue_action_token(
@@ -806,23 +1166,23 @@ def _dispatch_invite_email(db: Session, user: User, actor) -> bool:
         user.email,
         user.organization_id,
         SecurityActionPurpose.INVITE,
-        idempotency_key=idempotency_key,
+        idempotency_key=base_key,
     )
     link = _action_link(SecurityActionPurpose.INVITE, raw_token)
-    sent = _send_invite_email(
-        db, user, actor, link,
-        expires_at_local=_format_expiry_local(expires_at),
-        reference_id=_reference_id(raw_token, prefix="INV", suffix="ORG"),
-    )
-    logger.info(
-        "email_audit event=%s template_id=%s recipient=%s actor_id=%s organization_id=%s sent_at=%s outcome=%s",
-        INVITE_EVENT_TYPE,
-        INVITE_TEMPLATE_ID,
-        user.email,
-        actor.id if actor is not None else None,
-        user.organization_id,
-        datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "sent" if sent else "failed",
+    sent = _dispatch_email_guarded(
+        db,
+        event_type=INVITE_EVENT_TYPE,
+        template_id=INVITE_TEMPLATE_ID,
+        recipient_email=user.email,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        actor_user_id=actor.id if actor is not None else None,
+        idempotency_key=_token_link_idempotency_key(base_key, raw_token),
+        send=lambda db, _u=_user_snapshot(user), _a=_user_snapshot(actor): _send_invite_email(
+            db, _u, _a, link,
+            expires_at_local=_format_expiry_local(expires_at),
+            reference_id=_reference_id(raw_token, prefix="INV", suffix="ORG"),
+        ),
     )
     return sent
 
@@ -835,6 +1195,7 @@ def _send_reset_email(
     link: str,
     expires_at_local: str = "",
     reference_id: str = "",
+    admin_initiated: bool = False,
 ) -> bool:
     from app.services.email_service import send_org_admin_password_reset_email
 
@@ -848,6 +1209,7 @@ def _send_reset_email(
         expires_at_local=expires_at_local or _format_expiry_local(datetime.utcnow() + timedelta(hours=TOKEN_TTL_HOURS)),
         reference_id=reference_id,
         organization_id=user.organization_id,
+        admin_initiated=admin_initiated,
     )
 
 
@@ -871,6 +1233,130 @@ def _send_invite_email(
         expires_at_local=expires_at_local,
         reference_id=reference_id,
         organization_id=user.organization_id,
+    )
+
+
+# ── Notice senders (IAM-008 + four catalog-ID-pending notices) ───────────────────────────────────────────
+# Each is a thin wrapper around the email_service function of the same name so
+# tests can monkeypatch the service module (same pattern as the reset/invite
+# wrappers) and so the audit guard has a single callable to invoke.
+
+def _send_password_changed_email(db: Session, user: User) -> bool:
+    from app.services.email_service import send_password_changed_email
+
+    return send_password_changed_email(
+        db=db,
+        email=user.email,
+        first_name=user.first_name,
+        changed_at_display=_format_expiry_local(datetime.utcnow()),
+        organization_id=user.organization_id,
+    )
+
+
+def _send_password_reset_self_service_email(db: Session, user: User) -> bool:
+    from app.services.email_service import send_password_reset_self_service_email
+
+    return send_password_reset_self_service_email(
+        db=db,
+        email=user.email,
+        first_name=user.first_name,
+        changed_at_display=_format_expiry_local(datetime.utcnow()),
+        organization_id=user.organization_id,
+    )
+
+
+def _send_password_reset_completed_email(db: Session, user: User) -> bool:
+    from app.services.email_service import send_password_reset_completed_email
+
+    return send_password_reset_completed_email(
+        db=db,
+        email=user.email,
+        first_name=user.first_name,
+        reset_at_display=_format_expiry_local(datetime.utcnow()),
+        organization_id=user.organization_id,
+    )
+
+
+def _send_role_changed_email(
+    db: Session,
+    user: User,
+    old_role,
+    new_role,
+    actor_name: str = "an organization administrator",
+) -> bool:
+    from app.services.email_service import send_role_changed_email
+
+    return send_role_changed_email(
+        db=db,
+        email=user.email,
+        first_name=user.first_name,
+        old_role_label=_role_label(old_role),
+        new_role_label=_role_label(new_role),
+        actor_name=actor_name,
+        changed_at_display=_format_expiry_local(datetime.utcnow()),
+        organization_id=user.organization_id,
+    )
+
+
+def _send_account_deactivated_email(
+    db: Session,
+    user: User,
+    actor_name: str = "an organization administrator",
+) -> bool:
+    from app.services.email_service import send_account_deactivated_email
+
+    return send_account_deactivated_email(
+        db=db,
+        email=user.email,
+        first_name=user.first_name,
+        actor_name=actor_name,
+        deactivated_at_display=_format_expiry_local(datetime.utcnow()),
+        organization_id=user.organization_id,
+    )
+
+
+def _role_label(role) -> str:
+    return ROLE_DISPLAY_LABELS.get(role, role.value.replace("_", " ").title())
+
+
+def notify_role_changed(db: Session, *, user: User, actor, old_role, new_role) -> bool:
+    """Role-changed notice (catalog ID pending): tell the affected user their role changed (old -> new), by
+    whom and when. Fired from router.update_user() after the commit that
+    applied the role change. Strict idempotency — a retried role-change
+    request only notifies once."""
+    actor_name = actor.full_name if actor is not None else "an organization administrator"
+    return _dispatch_email_guarded(
+        db,
+        event_type=ROLE_CHANGED_EVENT_TYPE,
+        template_id=ROLE_CHANGED_TEMPLATE_ID,
+        recipient_email=user.email,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        actor_user_id=actor.id if actor is not None else None,
+        idempotency_key=_idempotency_key(
+            user.organization_id, ROLE_CHANGED_EVENT_TYPE, user.email, ROLE_CHANGED_TEMPLATE_ID,
+        ),
+        send=lambda db, _u=_user_snapshot(user): _send_role_changed_email(db, _u, old_role, new_role, actor_name),
+    )
+
+
+def notify_user_deactivated(db: Session, *, user: User, actor) -> bool:
+    """Account-deactivated notice (catalog ID pending): tell the deactivated user their account access was revoked,
+    by whom (same-org admin) and when. Fired from router.deactivate_user()
+    after the commit. Strict idempotency."""
+    actor_name = actor.full_name or "an organization administrator"
+    return _dispatch_email_guarded(
+        db,
+        event_type=DEACTIVATED_EVENT_TYPE,
+        template_id=DEACTIVATED_TEMPLATE_ID,
+        recipient_email=user.email,
+        user_id=user.id,
+        organization_id=user.organization_id,
+        actor_user_id=actor.id if actor is not None else None,
+        idempotency_key=_idempotency_key(
+            user.organization_id, DEACTIVATED_EVENT_TYPE, user.email, DEACTIVATED_TEMPLATE_ID,
+        ),
+        send=lambda db, _u=_user_snapshot(user): _send_account_deactivated_email(db, _u, actor_name),
     )
 
 

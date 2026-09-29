@@ -2,12 +2,13 @@ name: Deploy Zoiko Payroll Backend
 
 on:
   push:
-    branches: [main]
+    branches: [main, rugvedh]
     paths:
       - 'backend/**'
       - '.github/workflows/**'
       - 'scripts/**'
   pull_request:
+    branches: [main, rugvedh]
     paths:
       - 'backend/**'
       - '.github/workflows/**'
@@ -15,7 +16,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Runs on every PR and every push to main. Nothing previously ran the
+  # Runs on every PR and every push to main/rugvedh. Nothing previously ran the
   # test suite in CI at all -- a broken test could reach main and deploy
   # unchecked. Needs zero configured secrets: tests/conftest.py's `db`
   # fixture is an isolated in-memory SQLite database per test, and
@@ -61,17 +62,20 @@ jobs:
           script: |
             set -euo pipefail
             cd /var/www/zoiko-payroll/backend
-            git pull origin main
+            TARGET_BRANCH="${GITHUB_REF_NAME:-main}"
+            git fetch origin "$TARGET_BRANCH"
+            git checkout "$TARGET_BRANCH" || git checkout -b "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+            git pull origin "$TARGET_BRANCH"
             cd backend
             source venv/bin/activate
             pip install -r requirements.txt
 
             echo "--- Migration diagnostics (read-only) ---"
             git rev-parse HEAD
-            alembic heads
-            alembic branches
+            alembic heads || true
+            alembic branches || true
             alembic history | head -n 40 || true
-            alembic current
+            alembic current || true
             echo "Database alembic_version:"
             python -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' || true
             from sqlalchemy import text

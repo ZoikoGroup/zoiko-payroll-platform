@@ -1,0 +1,17 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Hello {{user_name}},</p>
+{{#if deactivated}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your user account is now <strong style="color:#b91c1c;">deactivated</strong>.
+  You cannot sign in while it is deactivated. Your organization&rsquo;s payroll data
+  and any access you had to it are unchanged by this status change.
+</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  Contact your organization administrator if you believe this is incorrect.
+</p>
+{{/if}}
+{{#if activated}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your user account is <strong style="color:#15803d;">active</strong> again. You
+  can sign in with your existing credentials as before.
+</p>
+{{/if}}

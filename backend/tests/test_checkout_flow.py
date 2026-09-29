@@ -619,10 +619,17 @@ def test_webhook_payment_failed_sets_past_due(client):
 
 
 def test_webhook_invoice_paid_recovers_to_active(client):
-    """invoice.paid after PAST_DUE → sub back to ACTIVE."""
+    """invoice.paid after PAST_DUE → sub back to ACTIVE.
+
+    amount_paid must be a real, positive amount here — a genuine renewal
+    charge, not the $0 invoice Stripe issues when a subscription is created
+    with trial_end (see the invoice.paid handler's real_payment gate, which
+    exists specifically so that harmless $0 trial-creation invoice doesn't
+    prematurely flip an org to PRODUCTION; a real Stripe invoice.paid event
+    for an actual charge always carries a positive amount_paid)."""
     db = SessionLocal()
     try:
-        data = {"subscription": "sub_FAKE001", "id": "in_FAKE_PAID"}
+        data = {"subscription": "sub_FAKE001", "id": "in_FAKE_PAID", "amount_paid": 5000}
         r = _post_webhook(client, "invoice.paid", data, event_id="evt_inv_paid_001")
         assert r.status_code == 200, r.text
 

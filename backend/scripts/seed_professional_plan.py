@@ -32,8 +32,20 @@ PROFESSIONAL_FEATURE_FLAGS = {
     "multi_entity": None,          # on
     "multi_currency": None,        # on
     "api_access": None,            # on
-    "max_entities": 1,             # 1 employing entity
+    # Corrected to match the live PUBLISHED version (plan_version_id=4) and
+    # test_entitlement_enforcement.py's PROFESSIONAL_FLAGS exactly — this
+    # script previously hardcoded max_entities=1 (should be 3, per spec)
+    # and omitted max_jurisdictions/max_schedules/max_billable_worker_months
+    # entirely, which the live version does have. Idempotent guard below
+    # means this was never the source of the live data (already correct);
+    # left as-is it was a landmine for any fresh environment bootstrapped
+    # from this script instead of the already-corrected live database.
+    "max_entities": 3,
+    "max_jurisdictions": 3,
+    "max_schedules": 10,
+    "max_billable_worker_months": 250,
 }
+_SCALE_LIMIT_KEYS = ("max_entities", "max_jurisdictions", "max_schedules", "max_billable_worker_months")
 
 
 def _actor_user_id(db) -> int:
@@ -78,7 +90,7 @@ def main() -> None:
             db,
             plan_id=plan.id,
             feature_set={"features": list(PROFESSIONAL_FEATURE_FLAGS)},
-            scale_limits={"max_entities": PROFESSIONAL_FEATURE_FLAGS["max_entities"]},
+            scale_limits={k: v for k, v in PROFESSIONAL_FEATURE_FLAGS.items() if k in _SCALE_LIMIT_KEYS},
             actor_user_id=actor,
         )
         print(f"Created billing_plan_versions row: id={version.id} version={version.version}")

@@ -1,0 +1,16 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your <strong style="color:#0b1f3a;">{{transmission_type}}</strong> ELSTER filing for
+  the period <strong style="color:#0b1f3a;">{{period_start}} to {{period_end}}</strong>
+  could not be transmitted. The filing status is
+  <strong style="color:#b91c1c;">{{status}}</strong> — it has
+  <strong>not</strong> reached ELSTER.
+</p>
+{{#if blocked_reason}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Reason: {{blocked_reason}}
+</p>
+{{/if}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  Retry the transmission from the Germany ELSTER screen once the block is resolved.
+  Until then, treat this filing as outstanding.
+</p>

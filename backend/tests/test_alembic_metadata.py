@@ -3,7 +3,7 @@
 The graph must have one head, no duplicate revision IDs, and retain the
 known Germany migration chain wiring. These tests inspect the files directly
 and also load the real Alembic ScriptDirectory without touching a database.
-The current graph has head ``a5f6e7d8c9b0`` and 142 revisions.
+The current graph has head ``998877665544`` and 146 revisions.
 """
 
 import re

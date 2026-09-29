@@ -1,30 +1,9 @@
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px;">
-  <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table width="600" cellpadding="20" cellspacing="0" style="background: #ffffff; border-radius: 12px;">
-      <tr><td style="background: linear-gradient(135deg, #059669, #10B981); border-radius: 12px 12px 0 0; text-align: center; padding: 20px 20px 16px 20px;">
-        {{#if logo_url}}<img src="{{logo_url}}" alt="Zoiko Payroll" height="28" style="height:28px; width:auto; display:block; margin:0 auto 8px auto; border:0;">{{/if}}
-        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">{{company_name}}</h1>
-      </td></tr>
-      <tr><td style="padding: 32px 28px;">
-        <h2 style="color: #059669; margin: 0 0 16px 0; font-size: 20px;">Leave Request Approved</h2>
-        <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">Dear {{employee_name}},</p>
-        <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 12px 0;">
-          Great news! Your leave request <strong style="color: #059669;">{{request_code}}</strong> for
-          <strong>{{leave_type}}</strong> from <strong>{{start_date}}</strong> to <strong>{{end_date}}</strong>
-          ({{days}} day{{#if plural}}s{{/if}}) has been <strong style="color: #059669;">approved</strong>.
-        </p>
-        <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 24px 0;">
-          Enjoy your time off!
-        </p>
-        <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 24px 0;" />
-        <p style="color: #9CA3AF; font-size: 12px; margin: 0;">
-          This is an automated message from {{company_name}}. Please do not reply directly to this email.
-        </p>
-      </td></tr>
-    </table>
-  </td></tr></table>
-</body>
-</html>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Dear {{employee_name}},</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">
+  Your leave request <strong style="color:#15803d;">{{request_code}}</strong> for
+  <strong>{{leave_type}}</strong> from <strong>{{start_date}}</strong> to <strong>{{end_date}}</strong>
+  ({{days}} day{{#if plural}}s{{/if}}) has been <strong style="color:#15803d;">approved</strong>.
+</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  Enjoy your time off!
+</p>
