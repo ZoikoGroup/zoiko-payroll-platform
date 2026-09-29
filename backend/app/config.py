@@ -65,8 +65,9 @@ class Settings(BaseSettings):
     # ── CORS ──────────────────────────────────────────────────────────
     PAYROLL_CORS_ORIGINS: str = (
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
-        "http://127.0.0.1:5173,http://127.0.0.1:5174,"
-        "http://192.168.31.148:5173,http://192.168.31.149:5173"
+        "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,"
+        "http://192.168.31.148:5173,http://192.168.31.148:5174,http://192.168.31.148:5175,"
+        "http://192.168.31.149:5173,http://192.168.31.149:5174,http://192.168.31.149:5175"
     )
 
     # ── Public-facing links (e.g. "Send Template" form-fill emails) ────

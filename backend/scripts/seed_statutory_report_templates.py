@@ -815,7 +815,13 @@ def run():
                     ("gross_pay", "Total Pay (Final Period)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
                 ]),
                 ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)", [
-                    ("lohnsteuer", "Lohnsteuer", "currency", "PAYSLIP_ITEM", "tds", None),
+                    # `tds` is persisted as Lohnsteuer + Solidaritätszuschlag combined
+                    # (see engine/countries/germany.py's monthly tds derivation) — there
+                    # is no separate pure-Lohnsteuer PayslipItem column. Labeled to match
+                    # what the value actually is, not "Lohnsteuer" alone, so a reader who
+                    # also sees the separate "Solidaritätszuschlag" field below cannot
+                    # double-count Soli by summing the two.
+                    ("lohnsteuer", "Lohnsteuer + Solidaritätszuschlag", "currency", "PAYSLIP_ITEM", "tds", None),
                     ("soli", "Solidaritätszuschlag", "currency", "PAYSLIP_ITEM", "soli", None),
                     ("church_tax", "Kirchensteuer", "currency", "PAYSLIP_ITEM", "church_tax", None),
                 ]),
@@ -829,7 +835,7 @@ def run():
                 ]),
                 ("ytd", "Year-to-Date", [
                     ("gross_pay_ytd", "Total Pay (Year-to-Date)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
-                    ("lohnsteuer_ytd", "Lohnsteuer (Year-to-Date)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                    ("lohnsteuer_ytd", "Lohnsteuer + Solidaritätszuschlag (Year-to-Date)", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
                     ("soli_ytd", "Solidaritätszuschlag (Year-to-Date)", "currency", "PAYSLIP_ITEM", "soli", "SUM_YTD"),
                     ("church_tax_ytd", "Kirchensteuer (Year-to-Date)", "currency", "PAYSLIP_ITEM", "church_tax", "SUM_YTD"),
                 ]),
@@ -1334,7 +1340,9 @@ def run():
                     ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
                 ]),
                 ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)", [
-                    ("total_lohnsteuer", "Total Lohnsteuer", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                    # Same combined-value labeling fix as DE-LSTB above — `tds` is
+                    # Lohnsteuer + Soli, never Lohnsteuer alone.
+                    ("total_lohnsteuer", "Total Lohnsteuer + Solidaritätszuschlag", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
                     ("total_soli", "Total Solidaritätszuschlag", "currency", "PAYSLIP_ITEM", "soli", "SUM_RUN"),
                     ("total_church_tax", "Total Kirchensteuer", "currency", "PAYSLIP_ITEM", "church_tax", "SUM_RUN"),
                 ]),
