@@ -223,6 +223,19 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
                   <label className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1.5 flex items-center gap-1.5">
                     {f.label} {f.primary && <span className="text-error">*</span>}
                   </label>
+                  {Array.isArray(f.options) ? (
+                    // Enumerated registration setting (only Singapore's schema declares options today).
+                    <select
+                      id={`taxid-${f.key}`}
+                      aria-label={f.label}
+                      value={value}
+                      onChange={(e) => onTaxIdentifierChange?.(f.key, e.target.value)}
+                      className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:border-primary focus:ring-primary/20"
+                    >
+                      <option value="">Not set</option>
+                      {f.options.map((o) => <option key={o} value={o}>{o.replaceAll("_", " ")}</option>)}
+                    </select>
+                  ) : (
                   <input
                     type="text"
                     value={value}
@@ -234,6 +247,7 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
                         : "border-border focus:border-primary focus:ring-primary/20"
                     }`}
                   />
+                  )}
                   {invalid && (
                     <p className="text-[11px] text-error mt-1">
                       Invalid format — e.g. {f.example}.

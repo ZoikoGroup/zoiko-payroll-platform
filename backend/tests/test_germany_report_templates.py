@@ -13,6 +13,7 @@ PayrollEmployee.compliance_fields — the exact same mechanism UK's "nino"
 already used) and "LSTB"/"DE_PAYROLL_SUMMARY" in _REPORT_COMPONENTS_BY_TYPE.
 """
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -101,7 +102,10 @@ def _build_de_lstb_template(db, creator, approver, key="DE-LSTB-TEST"):
         db, template.id, ReportTemplateComponentUpsert(componentKey="ytd", label="Year-to-Date"), actor_id=creator.id,
     )
     for field_key, label, source_column in (
-        ("lohnsteuer_ytd", "Lohnsteuer (YTD)", "tds"),
+        # "tds" is Lohnsteuer + Soli combined (never Lohnsteuer alone) —
+        # label matches the seeded production template, see
+        # scripts/seed_statutory_report_templates.py.
+        ("lohnsteuer_ytd", "Lohnsteuer + Soli (YTD)", "tds"),
         ("soli_ytd", "Soli (YTD)", "soli"),
         ("church_tax_ytd", "Kirchensteuer (YTD)", "church_tax"),
     ):
@@ -127,7 +131,7 @@ def _build_de_payroll_summary_template(db, creator, approver, key="DE-SUMMARY-TE
         db, template.id, ReportTemplateComponentUpsert(componentKey="tax", label="Wage Tax"), actor_id=creator.id,
     )
     for field_key, label, source_column in (
-        ("total_lohnsteuer", "Total Lohnsteuer", "tds"),
+        ("total_lohnsteuer", "Total Lohnsteuer + Soli", "tds"),
         ("total_soli", "Total Soli", "soli"),
         ("total_church_tax", "Total Kirchensteuer", "church_tax"),
     ):
@@ -206,6 +210,96 @@ def test_generate_de_lstb_resolves_employee_and_ytd_fields(db, organization):
     assert values["lohnsteuer_ytd"] == float(item.tds)
     assert values["church_tax_ytd"] == float(item.church_tax)
 
+    # Label must not claim to be Lohnsteuer alone — `tds` is Lohnsteuer +
+    # Soli combined. See test_generate_de_lstb_lohnsteuer_field_label_and_
+    # value_are_consistent for the dedicated regression test.
+    ytd_component = next(
+        c for c in generated.rendered_data["templateSnapshot"]["components"] if c["componentKey"] == "ytd"
+    )
+    lohnsteuer_field = next(f for f in ytd_component["fields"] if f["fieldKey"] == "lohnsteuer_ytd")
+    assert lohnsteuer_field["label"] != "Lohnsteuer (YTD)"
+
+
+def test_generate_de_lstb_lohnsteuer_field_label_and_value_are_consistent(db, organization):
+    """Regression test for the mislabeling this project's own live-UAT PDF
+    inspection caught: a field labeled plain "Lohnsteuer" but sourced from
+    `PayslipItem.tds`, which is persisted as Lohnsteuer + Soli COMBINED
+    (see engine/countries/germany.py's monthly tds derivation — there is
+    no separate pure-Lohnsteuer column). This test fails if either:
+      (a) the label reverts to something that claims to be Lohnsteuer
+          alone (e.g. exactly "Lohnsteuer" or "Lohnsteuer (YTD)"), or
+      (b) the value stops equalling tds (i.e. someone "fixes" the label
+          by silently changing the underlying value instead, which would
+          be changing calculation semantics, not presentation).
+    Uses a payslip where tds != soli (both non-zero and distinct) so a
+    field that silently collapsed to Soli-only, or to zero, or to some
+    other confusion, could not accidentally pass by coincidence."""
+    creator = _make_user(db, "creator_de_label@test.com")
+    approver = _make_user(db, "approver_de_label@test.com")
+    _make_company(db, organization.id, country="DE")
+
+    from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
+
+    employee = PayrollEmployee(
+        organization_id=organization.id, employee_code="DE-LABEL-001", name="Label Test Employee", country_code="DE",
+    )
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+
+    run = PayrollRun(
+        organization_id=organization.id, period_label="Jan 2026",
+        period_start=date(2026, 1, 1), period_end=date(2026, 1, 31), pay_date=date(2026, 1, 31),
+        status="Approved", total_gross=9000, total_deductions=3927.93, total_net=5072.07,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    # Deliberately distinct, non-zero Lohnsteuer-only vs Soli amounts,
+    # matching this project's own real Employee-D-shaped UAT scenario:
+    # Lohnsteuer-only = 2161.84, Soli = 55.45, tds (combined) = 2217.29.
+    lohnsteuer_only = Decimal("2161.84")
+    soli_only = Decimal("55.45")
+    tds_combined = lohnsteuer_only + soli_only  # 2217.29
+    item = PayslipItem(
+        payroll_run_id=run.id, employee_id=employee.id, organization_id=organization.id,
+        employee_name="Label Test Employee", basic_salary=9000, gross_pay=9000,
+        pf=785.85, esi=751.84, tds=tds_combined, soli=soli_only, church_tax=172.95,
+        employer_pf=785.85, employer_esi=729.65,
+        total_deductions=3927.93, net_pay=5072.07,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    template = _build_de_lstb_template(db, creator, approver, key="DE-LSTB-LABEL-TEST")
+    generated = service.generate_uk_employee_report(
+        db, organization.id, template.id, employee.id, date(2026, 1, 31), actor_id=creator.id,
+    )
+
+    # Pull the field's LABEL from the rendered template snapshot, and its
+    # VALUE from the employee's rendered values, independently.
+    ytd_component = next(
+        c for c in generated.rendered_data["templateSnapshot"]["components"] if c["componentKey"] == "ytd"
+    )
+    lohnsteuer_field = next(f for f in ytd_component["fields"] if f["fieldKey"] == "lohnsteuer_ytd")
+    soli_field = next(f for f in ytd_component["fields"] if f["fieldKey"] == "soli_ytd")
+    values = generated.rendered_data["employees"][0]["values"]
+
+    # LABEL: must not claim to be Lohnsteuer alone.
+    assert lohnsteuer_field["label"] != "Lohnsteuer"
+    assert lohnsteuer_field["label"] != "Lohnsteuer (YTD)"
+    assert "Soli" in lohnsteuer_field["label"] or "soli" in lohnsteuer_field["label"].lower()
+    assert soli_field["label"] == "Soli (YTD)"
+
+    # VALUE: the combined field must equal Lohnsteuer + Soli exactly, and
+    # the separate Soli field must equal Soli alone — proving the two
+    # fields are genuinely distinct sources, not the same number twice.
+    assert Decimal(str(values["lohnsteuer_ytd"])) == tds_combined == lohnsteuer_only + soli_only
+    assert Decimal(str(values["soli_ytd"])) == soli_only
+    assert values["lohnsteuer_ytd"] != values["soli_ytd"]
+
 
 def test_generate_de_lstb_certificate_pdf_renders(db, organization):
     """Same PDF-rendering reuse UK P60/Canada T4 already proved — no new
@@ -274,6 +368,14 @@ def test_generate_de_payroll_summary_end_to_end(db, organization):
     assert header["total_soli"] == float(item.soli)
     assert header["total_church_tax"] == float(item.church_tax)
     assert header["total_pf"] == float(item.pf)
+
+    # Label must not claim to be Lohnsteuer alone — same combined-value
+    # fix as DE-LSTB above.
+    tax_component = next(
+        c for c in generated.rendered_data["templateSnapshot"]["components"] if c["componentKey"] == "tax"
+    )
+    lohnsteuer_field = next(f for f in tax_component["fields"] if f["fieldKey"] == "total_lohnsteuer")
+    assert lohnsteuer_field["label"] != "Total Lohnsteuer"
     # The three fallback reconciliation totals (gross/deductions/net) are
     # always computed straight from the run's own PayslipItem rows
     # regardless of which fields the template maps, so they tie out...

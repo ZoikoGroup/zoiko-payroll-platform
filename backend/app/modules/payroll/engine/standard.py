@@ -69,6 +69,7 @@ from app.modules.payroll.engine.countries import trinidad_and_tobago as _trinida
 from app.modules.payroll.engine.countries import puerto_rico as _puerto_rico
 from app.modules.payroll.engine.countries import france as _france
 from app.modules.payroll.engine.countries import ireland as _ireland
+from app.modules.payroll.engine.countries import singapore as _singapore
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -137,6 +138,7 @@ _calc_trinidad_and_tobago = _trinidad_and_tobago.calculate
 _calc_puerto_rico = _puerto_rico.calculate
 _calc_france = _france.calculate
 _calc_ireland = _ireland.calculate
+_calc_singapore = _singapore.calculate
 
 
 _COUNTRY_CALC = {
@@ -169,6 +171,9 @@ _COUNTRY_CALC = {
     # establishment-aware and returns separate net_social/net_imposable.
     "FR": _calc_france,
     "IE": _calc_ireland,
+    # Singapore (ZP-SG-ENG-001) — CPF/SDL/SHG only, never `tds` (not a
+    # monthly-PAYE jurisdiction). Fail-closed: see countries/singapore.py.
+    "SG": _calc_singapore,
 }
 
 
@@ -193,6 +198,14 @@ class StandardStrategy(PayrollStrategy):
         # Country-specific compliance deductions (computed on full gross)
         calc_fn = _COUNTRY_CALC.get(ctx.country.upper(), _calc_generic)
         deductions = calc_fn(ctx)
+        # Singapore only (the key is returned by countries/singapore.py alone):
+        # MOM's incomplete-month salary replaces the generic per-day
+        # attendance deduction, with MOM working days / days worked.
+        if "sgp_incomplete_month_deduction" in deductions:
+            attendance_deduction = deductions["sgp_incomplete_month_deduction"]
+            per_day_salary = deductions.get("sgp_per_day_gross_rate", per_day_salary)
+            payable_days = deductions.get("sgp_days_worked", calendar_days)
+            calendar_days = deductions.get("sgp_working_days", calendar_days)
 
         total_employee_deductions = (
             attendance_deduction
@@ -218,6 +231,8 @@ class StandardStrategy(PayrollStrategy):
             # .get() returns the 0 default, so no other calculation changes.
             + deductions.get("fr_employee_total", Decimal("0"))
             + deductions.get("ie_employee_total", Decimal("0"))
+            # Singapore Employment Act authorised salary deductions (absent → 0 for every other country).
+            + deductions.get("sgp_salary_deductions_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -390,6 +405,10 @@ class StandardStrategy(PayrollStrategy):
             ytd_sg_qualifying_earnings_after=deductions.get("ytd_sg_qualifying_earnings_after"),
             ytd_whm_earnings_after=deductions.get("ytd_whm_earnings_after"),
             ytd_ky_mandatory_pensionable_earnings_after=deductions.get("ytd_ky_mandatory_pensionable_earnings_after"),
+            ytd_cpf_ow_subject_after=deductions.get("ytd_cpf_ow_subject_after"),
+            ytd_cpf_aw_subject_after=deductions.get("ytd_cpf_aw_subject_after"),
+            ytd_cpf_aw_paid_after=deductions.get("ytd_cpf_aw_paid_after"),
+            sgp_calculation_trace=deductions.get("sgp_calculation_trace"),
             ytd_gy_paye_credit_after=deductions.get("ytd_gy_paye_credit_after"),
             ytd_pr_ss_wages_after=deductions.get("ytd_pr_ss_wages_after"),
             ytd_pr_medicare_wages_after=deductions.get("ytd_pr_medicare_wages_after"),

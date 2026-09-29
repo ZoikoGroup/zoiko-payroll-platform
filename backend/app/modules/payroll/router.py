@@ -128,6 +128,17 @@ from app.modules.payroll.schemas import (
     CAPd7aGenerateRequest,
     GYMonthlyReportGenerateRequest,
     JMAnnualReportGenerateRequest,
+    SGAnnualReportGenerateRequest,
+    SGIr21CaseCreateRequest,
+    SGIr21CaseTransitionRequest,
+    SGCpfEzpayGenerateRequest,
+    SGCessationRequest,
+    SGRestoreFreezeRequest,
+    SGBankHoldReleaseRequest,
+    SGCorrectionRequest,
+    SGSalaryDeductionCreate,
+    SGCpfEzpayTransitionRequest,
+    SGIr8aModificationCreateRequest,
     CASpecialPaymentCalculateRequest, CASpecialPaymentCalculateResponse,
     AUSchedule5CalculateRequest, AUSchedule5CalculateResponse,
     AUSchedule4CalculateRequest, AUSchedule4CalculateResponse,
@@ -174,11 +185,13 @@ def list_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_employees(
+    employees = service.get_employees(
         db, current_user.organization_id,
         search=search, department=department, status=status,
         limit=limit, offset=offset,
     )
+    service.audit_sg_shg_read(db, current_user.organization_id, current_user.id, employees)   # Singapore SHG data only
+    return employees
 
 
 @payroll_router.get(
@@ -209,7 +222,9 @@ def get_employee(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_employee_by_id(db, employee_id, current_user.organization_id)
+    employee = service.get_employee_by_id(db, employee_id, current_user.organization_id)
+    service.audit_sg_shg_read(db, current_user.organization_id, current_user.id, employee)    # Singapore SHG data only
+    return employee
 
 
 @payroll_router.post(
@@ -2376,6 +2391,12 @@ def upsert_jurisdiction_pack(
     # never statutory tax values.
     if payload.packType == "tax" and (current_user.role or "").lower() != "super_admin":
         raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
+    # The payload's own packType is not enough: a "policy" payload carrying an
+    # existing TAX pack's id (or packId/version) would otherwise edit that
+    # platform-wide statutory pack from an organization account.
+    target = service.find_jurisdiction_pack_upsert_target(db, payload)
+    if target is not None and target.pack_type == "tax" and (current_user.role or "").lower() != "super_admin":
+        raise ForbiddenException("Tax packs are Super Admin-managed only. Use Super Admin Compliance to create or edit tax configuration.")
     return service.upsert_jurisdiction_pack(db, payload, actor_id=current_user.id)
 
 
@@ -3215,6 +3236,482 @@ def generate_jm_s02(
         db, current_user.organization_id, data.report_template_id, data.year,
         actor_id=current_user.id,
     )
+
+
+# ── Singapore: IR8A annual employment-income data extract (EXPORT_READY only)
+
+@payroll_router.post(
+    "/singapore/reports/ir8a", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate a Singapore IR8A data extract for one income year — EXPORT_READY only, never submitted to IRAS",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_ir8a(
+    data: SGAnnualReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_ir8a(
+        db, current_user.organization_id, data.report_template_id, data.year,
+        actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/singapore/reports/sdl", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore monthly SDL payable — employer total of per-employee SDL, rounded down to the dollar",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_sdl_monthly(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_sdl_monthly(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        actor_id=current_user.id,
+    )
+
+
+# Singapore Phase 5.7 — internal compliance reports from the existing
+# evaluators (PWM check, engine LQS trace, IR21 case lifecycle). Own
+# organization only; payroll operators only; not MOM / IRAS submissions.
+@payroll_router.post(
+    "/singapore/reports/pwm-compliance", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore PWM compliance report for a CPF wage month (internal — not an MOM submission)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_pwm_compliance(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_pwm_compliance(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/singapore/reports/lqs-compliance", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore LQS compliance report for a CPF wage month (internal — not an MOM submission)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_lqs_compliance(
+    data: GYMonthlyReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_lqs_compliance(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month, actor_id=current_user.id,
+    )
+
+
+@payroll_router.post(
+    "/singapore/reports/ir21-register", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Generate the Singapore IR21 tax-clearance register for a year (internal — not an IRAS filing)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_ir21_register(
+    data: JMAnnualReportGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_ir21_register(
+        db, current_user.organization_id, data.report_template_id, data.year, actor_id=current_user.id,
+    )
+
+
+# ── Singapore: CPF EZPay contribution file — prepared here, submitted by the
+# employer through CPF EZPay (Corppass). Own organization only; payroll
+# operators only; the file itself (full CPF account numbers) only after a
+# distinct approver has approved it, and every download is audited.
+
+@payroll_router.post(
+    "/singapore/reports/cpf-ezpay", response_model=GeneratedReportResponse, response_model_by_alias=True,
+    summary="Prepare the Singapore CPF EZPay (FTP) contribution file for a wage month (status PREPARED)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def generate_sg_cpf_ezpay(
+    data: SGCpfEzpayGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.generate_sg_cpf_ezpay(
+        db, current_user.organization_id, data.report_template_id, data.year, data.month,
+        advice_code=data.advice_code, actor_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/singapore/reports/ir8a",
+    summary="List the Singapore IR8A extracts with their controlled manual-submission status (SG-023)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_ir8a(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_ir8a(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/singapore/reports/ir8a/{report_id}/transition",
+    summary="Record the manual IR8A submission / IRAS outcome (SUBMITTED_MANUALLY / ACKNOWLEDGED / REJECTED / UNKNOWN)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transition_sg_ir8a(
+    report_id: int,
+    data: SGCpfEzpayTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_sg_ir8a(db, current_user.organization_id, report_id, data.status,
+                                      actor_id=current_user.id, reference=data.reference, note=data.note,
+                                      errors=data.errors)
+
+
+# Phase 6.8 (G3): IR8A Revision / Amendment of an IRAS-acknowledged extract —
+# own organization only; payroll operators only; filed through the transition
+# route above like any IR8A extract.
+@payroll_router.post(
+    "/singapore/reports/ir8a/{report_id}/modifications",
+    summary="Prepare an IR8A Revision (full values) or Amendment (differences) of an IRAS-acknowledged extract",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_ir8a_modification(
+    report_id: int,
+    data: SGIr8aModificationCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_sg_ir8a_modification(db, current_user.organization_id, report_id, data.method,
+                                               reason=data.reason, actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/reports/ir8a/{report_id}/modifications",
+    summary="List the Revisions / Amendments of an IR8A extract",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_ir8a_modifications(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_ir8a_modifications(db, current_user.organization_id, report_id)
+
+
+@payroll_router.post(
+    "/singapore/reports/cpf-ezpay/{report_id}/transition", response_model=GeneratedReportResponse,
+    response_model_by_alias=True,
+    summary="Advance a CPF EZPay submission (APPROVED / SUBMITTED / ACCEPTED / REJECTED / UNKNOWN)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transition_sg_cpf_ezpay(
+    report_id: int,
+    data: SGCpfEzpayTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.transition_sg_cpf_ezpay(
+        db, current_user.organization_id, report_id, data.status, actor_id=current_user.id,
+        reference=data.reference, note=data.note, errors=data.errors,
+    )
+
+
+@payroll_router.get(
+    "/singapore/reports/cpf-ezpay/{report_id}/file",
+    summary="Download an APPROVED CPF EZPay file (audited — contains full CPF account numbers)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def download_sg_cpf_ezpay_file(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    filename, content = service.get_sg_cpf_ezpay_file(db, current_user.organization_id, report_id, actor_id=current_user.id)
+    return StreamingResponse(
+        io.BytesIO(content.encode("ascii")),
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+# ── Singapore: payroll-run preflight / exceptions (§11 stages 1 and 4) —
+# read-only; BLOCK items refuse approval (enforced in advance_payroll_run_status).
+
+@payroll_router.get(
+    "/singapore/runs/{run_id}/preflight",
+    summary="Singapore preflight + exceptions for a payroll run (read-only dry run of the engine)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_payroll_preflight(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_payroll_preflight(db, current_user.organization_id, run_id)
+
+
+@payroll_router.post(
+    "/singapore/employees/{employee_id}/cessation",
+    summary="Record a Singapore employee's cessation — a non-citizen's monies go on IR21 hold automatically",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def record_sg_cessation(
+    employee_id: int,
+    data: SGCessationRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.record_sg_cessation(db, current_user.organization_id, employee_id, data.date_of_leaving,
+                                       actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/pwm-classifications",
+    summary="Progressive Wage Model sector / group / job-level choices with the floor in force (Active SG pack)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_pwm_classifications(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_pwm_classifications(db)
+
+
+@payroll_router.post(
+    "/singapore/benefit-valuations", response_model=EmployeeBenefitValuationResponse, response_model_by_alias=True,
+    summary="Record a Singapore IR8A Appendix 8A benefit value (the organization's own valuation; Draft)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_benefit_valuation(
+    data: EmployeeBenefitValuationCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_sg_benefit_valuation(db, current_user.organization_id, data.employee_id, data.tax_year,
+                                               data.benefit_type, data.taxable_value, description=data.description)
+
+
+@payroll_router.get(
+    "/singapore/benefit-valuations", response_model=List[EmployeeBenefitValuationResponse], response_model_by_alias=True,
+    summary="List Singapore Appendix 8A benefit valuations",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_benefit_valuations(
+    taxYear: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_benefit_valuations(db, current_user.organization_id, tax_year=taxYear)
+
+
+@payroll_router.get(
+    "/singapore/ais-readiness",
+    summary="Singapore AIS year-end readiness — running data-quality metric (SG-042)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_ais_readiness(
+    year: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_ais_readiness(db, current_user.organization_id, year)
+
+
+@payroll_router.get(
+    "/singapore/compliance-centre",
+    summary="Singapore Compliance Centre — status / effective date / evidence / blocker / owner / action per area, plus clocks",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_compliance_centre(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_sg_compliance_centre(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/singapore/employees/{employee_id}/deductions", response_model=UKCourtOrderResponse, response_model_by_alias=True,
+    summary="Record a Singapore Employment Act salary deduction (MOM category, consent / evidence, caps enforced)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_salary_deduction(
+    employee_id: int,
+    data: SGSalaryDeductionCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.create_sg_salary_deduction(
+        db, current_user.organization_id, employee_id, data.category, data.start_date, evidence_ref=data.evidence_ref,
+        evidence_date=data.evidence_date, end_date=data.end_date, amount=data.amount, rate_pct=data.rate_pct,
+        total_to_collect=data.total_to_collect, priority=data.priority, created_by_id=current_user.id,
+    )
+
+
+@payroll_router.get(
+    "/singapore/employees/{employee_id}/deductions", response_model=list[UKCourtOrderResponse], response_model_by_alias=True,
+    summary="List a Singapore employee's salary deductions",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_salary_deductions(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return [o for o in service.list_court_ordered_deductions(db, current_user.organization_id, employee_id)
+            if o.jurisdiction == service.SG_DEDUCTION_JURISDICTION]
+
+
+@payroll_router.post(
+    "/singapore/payslips/{payslip_id}/corrections",
+    summary="Append-only correction of a finalized Singapore payslip — a linked delta payslip, the original is never changed",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def correct_sg_finalized_payslip(
+    payslip_id: int,
+    data: SGCorrectionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.correct_sg_finalized_payslip(db, current_user.organization_id, payslip_id, data.reason,
+                                                actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/payslips/{payslip_id}/corrections",
+    summary="The correction chain of a Singapore payslip (before / after / delta, reason, actor, time)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_payslip_corrections(
+    payslip_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_payslip_corrections(db, current_user.organization_id, payslip_id)
+
+
+@payroll_router.post(
+    "/singapore/disaster-recovery/freeze",
+    summary="SG-047: after a restore, freeze every CPF EZPay submission with an uncertain external outcome (UNKNOWN)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def sg_freeze_after_restore(
+    data: SGRestoreFreezeRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_freeze_after_restore(db, current_user.organization_id, data.restore_point, actor_id=current_user.id,
+                                           restore_date=data.restore_date)
+
+
+@payroll_router.post(
+    "/singapore/disaster-recovery/bank-hold/{run_id}/release",
+    summary="SG-047: record the bank reconciliation that releases a post-restore bank-export hold (audited)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def release_sg_bank_export_hold(
+    run_id: int,
+    data: SGBankHoldReleaseRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.release_sg_bank_export_hold(db, current_user.organization_id, run_id, data.reference,
+                                               actor_id=current_user.id)
+
+
+@payroll_router.get(
+    "/singapore/retention-report",
+    summary="SG-046: read-only record-retention report against the MOM / IRAS statutory minimums (never deletes)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def sg_retention_report(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.sg_retention_report(db, current_user.organization_id)
+
+
+# ── Singapore: Employer Registration readiness (SG-027) — own organization only.
+
+@payroll_router.get(
+    "/singapore/readiness",
+    summary="Singapore employer launch-readiness card (SG-027) — internal evaluation, not an authority approval",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_employer_readiness(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.get_sg_employer_readiness(db, current_user.organization_id)
+
+
+# ── Singapore: IR21 tax clearance — hold / clearance / release. Tenant-
+# scoped (the caller's own organization only); lifting a hold needs a
+# distinct approver (enforced in service.transition_sg_ir21_case).
+
+@payroll_router.get(
+    "/singapore/ir21-cases",
+    summary="List this organization's Singapore IR21 tax-clearance cases",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_sg_ir21_cases(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_sg_ir21_cases(db, current_user.organization_id, status=status)
+
+
+@payroll_router.post(
+    "/singapore/ir21-cases",
+    summary="Open a Singapore IR21 case — the employee's monies are withheld from the aware date",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def create_sg_ir21_case(
+    data: SGIr21CaseCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    case = service.create_sg_ir21_case(
+        db, current_user.organization_id, data.employee_id, data.trigger_type, data.trigger_date, data.aware_date,
+        actor_id=current_user.id,
+    )
+    return service.serialize_sg_ir21_case(db, case)
+
+
+@payroll_router.get(
+    "/singapore/ir21-cases/{case_id}",
+    summary="Get one Singapore IR21 case (own organization only)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_sg_ir21_case(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.serialize_sg_ir21_case(db, service.get_sg_ir21_case(db, current_user.organization_id, case_id))
+
+
+@payroll_router.post(
+    "/singapore/ir21-cases/{case_id}/transition",
+    summary="Advance a Singapore IR21 case (FILED / CLEARED / RELEASED / EXEMPT / CANCELLED / EXCEPTION)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def transition_sg_ir21_case(
+    case_id: int,
+    data: SGIr21CaseTransitionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    case = service.transition_sg_ir21_case(
+        db, current_user.organization_id, case_id, data.status, actor_id=current_user.id,
+        filed_date=data.filed_date, filing_reference=data.filing_reference,
+        directive_date=data.directive_date, directive_reference=data.directive_reference,
+        directive_tax_amount=data.directive_tax_amount, exemption_category=data.exemption_category,
+        reason=data.reason,
+    )
+    return service.serialize_sg_ir21_case(db, case)
 
 
 # ── Barbados: TAMIS Monthly PAYE return + NIS Earnings Schedule

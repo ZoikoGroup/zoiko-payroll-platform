@@ -487,6 +487,43 @@ class PayrollEmployee(Base):
     # those two categories specifically produced conflicting thresholds).
     au_sapto_category = Column(String(30), nullable=True)  # "SINGLE" | "COUPLE" | "ILLNESS_SEPARATED_COUPLE"
 
+    # Singapore CPF cohort facts (ZP-SG-ENG-001 SG-001/SG-029) — the facts
+    # engine/countries/singapore.py derives the CPF table from; a payroll
+    # user corrects these source facts (with audit), never types a rate.
+    # Captured in compliance_fields and copied here by
+    # SGEmployeeValidation.FIELD_COLUMN_MAP, same as the AU/US/UK columns.
+    # NULL for every non-SG employee; a NULL on an SG employee BLOCKS the
+    # calculation rather than being assumed. `sgp_` prefix because `sg_`
+    # already means Australian Super Guarantee in this codebase.
+    sgp_cpf_residency_status = Column(String(10), nullable=True)          # "SC" | "SPR" | "FOREIGN"
+    sgp_spr_effective_date = Column(Date, nullable=True)
+    sgp_cpf_contribution_arrangement = Column(String(5), nullable=True)   # "GG" | "FG" | "FF" (SPR years 1–2)
+    sgp_work_pass_type = Column(String(20), nullable=True)                # "NONE" | "EP" | "S_PASS" | "WORK_PERMIT"
+    # Authority/HR-derived SHG fund code list (SG-015) — never race or
+    # religion attributes: "CDAC" | "MBMF,SINDA" | "NONE".
+    sgp_shg_funds = Column(String(50), nullable=True)
+    # Work pass validity (MOM: S Pass levy liability starts the day the pass
+    # is issued and ends when it is cancelled or expires) — drives the
+    # partial-month S Pass levy. NULL = not captured: a full month is still
+    # levied, a partial month BLOCKS rather than being guessed from
+    # employment dates.
+    sgp_work_pass_issue_date = Column(Date, nullable=True)
+    sgp_work_pass_end_date = Column(Date, nullable=True)
+    # Work Permit levy classification (MOM sector pages; alembic
+    # a7c2e9f4b1d6): sector "SERVICES" | "MANUFACTURING" | "CONSTRUCTION" |
+    # "PROCESS" | "MARINE_SHIPYARD"; skill "R1" (Higher-skilled) | "R2"
+    # (Basic-skilled); levy tier — the MOM-allocated quota tier "TIER_1" |
+    # "TIER_2" | "TIER_3" (services, manufacturing) or the source category
+    # "NTS" | "MYS_NAS_PRC" | "OFFSITE" (construction/process; OFFSITE
+    # construction only) | "NO_CERT" (construction permit issued without
+    # the required certification). NULL on a Work Permit holder BLOCKS the
+    # levy — never guessed.
+    sgp_wp_sector = Column(String(30), nullable=True)
+    sgp_wp_skill_level = Column(String(10), nullable=True)
+    # String(20): "MYS_NAS_PRC" is 11 characters — String(10) passed on
+    # SQLite (no length enforcement) but failed on PostgreSQL (Phase 6.0 F1).
+    sgp_wp_levy_tier = Column(String(20), nullable=True)
+
     # Government study-loan repayment, deducted via payroll above an
     # income threshold — the SAME mechanism under different names in the
     # UK (Student/Postgraduate Loan, e.g. "UK_PLAN1".."UK_PLAN5",
@@ -1519,6 +1556,17 @@ class PayslipItem(Base):
     # "real figures only, no reconstruction" discipline as every other
     # audit-trail field in this codebase.
     au_calculation_trace = Column(JSON, nullable=True)
+    # Singapore calculation trace (ZP-SG-ENG-001 §17/SG-031 explainability,
+    # approved D-B 2026-09-23) — same country-scoped JSON-column precedent
+    # as au_calculation_trace above, not a platform-wide trace table.
+    # Frozen at generation: inputs, cohort/age band, the CPF rule and rates
+    # used, OW/AW ceilings (ESTIMATED vs FINAL_ACTUAL), every AW allocation
+    # incl. true-up shortfalls at their original months' rates, rounding
+    # checkpoints, SDL/SHG/FWL/LQS/IR21 and each row's provenance. The
+    # per-AW ledgerEntry inside it is what later final-month true-ups read
+    # (service._load_sg_aw_ledger) — no separate ledger table. NULL for
+    # every non-SG payslip and every SG payslip before this column existed.
+    sgp_calculation_trace = Column(JSON, nullable=True)
     # India: EPS diversion + residual — purely-informational breakdown of
     # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
     # employer_pf_residual == employer_pf always, never additional to it.
@@ -6222,3 +6270,138 @@ class IrelandStatutorySickLeaveRecord(Base):
 
     def __repr__(self):
         return f"<IrelandStatutorySickLeaveRecord emp={self.employee_id} {self.absence_start_date} credited={self.days_credited} {self.status}>"
+class SgpIr21Case(Base):
+    """Singapore IR21 tax-clearance case — one per (organization, employee,
+    trigger). IRAS (SourceArtifact iras_ir21): when a non-Singapore-Citizen
+    employee ceases employment, goes on an overseas posting or leaves
+    Singapore for more than three months, the employer must notify IRAS at
+    least one month in advance and "withhold all monies due to the employee
+    from the date you are aware" — a cash-control workflow, not a tax
+    calculation (ZP-SG-ENG-001 SG-024/SG-025).
+
+    Why its own table: StatutoryFiling is one row per (org, jurisdiction,
+    filing type, PERIOD) with no employee or money; an IR21 case is
+    employee-level and carries the hold/release amounts — the same reason
+    Australia's per-employee SuperGuaranteeLiability is its own table.
+
+    Lifecycle (UPPERCASE workflow vocabulary, as SuperGuaranteeLiability /
+    StatutoryFiling): DRAFT (case opened, withholding in force) -> FILED
+    (Form IR21 filed with IRAS, recorded by a human) -> CLEARED (IRAS
+    clearance directive recorded) -> RELEASED (distinct approver releases
+    the held monies less the directed tax). EXEMPT (an IRAS "tax clearance
+    not required" category) and CANCELLED (trigger withdrawn) lift the hold
+    and need a distinct approver. EXCEPTION = a held payslip changed after
+    filing (IRAS: additional income needs an amended IR21) — back to FILED
+    once the amended form is filed. "Held" is not a status: pay is held
+    while the case is DRAFT/FILED/CLEARED/EXCEPTION. Every transition is
+    audited through record_tax_audit (entity_type "sgp_ir21_case")."""
+    __tablename__ = "sgp_ir21_cases"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    # The payslip that carries the release payment (the employee's last
+    # held payslip unless set explicitly); NULL until one exists.
+    final_payslip_id     = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
+
+    trigger_type         = Column(String(20), nullable=False)   # CESSATION | OVERSEAS_POSTING | DEPARTURE
+    trigger_date         = Column(Date, nullable=False)         # cessation / posting start / departure
+    aware_date           = Column(Date, nullable=False)         # withholding starts (IRAS: "from the date you are aware")
+    file_by_date         = Column(Date, nullable=False)         # at least one month before trigger_date
+    filed_date           = Column(Date, nullable=True)
+    filing_reference     = Column(String(100), nullable=True)
+
+    status               = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    held_amount          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    directive_date       = Column(Date, nullable=True)
+    directive_reference  = Column(String(100), nullable=True)
+    directive_tax_amount = Column(Numeric(14, 2), nullable=True)   # tax IRAS directs the employer to pay from held monies
+    released_amount      = Column(Numeric(14, 2), nullable=True)
+    released_at          = Column(DateTime(timezone=True), nullable=True)
+    exception_reason     = Column(Text, nullable=True)          # EXEMPT category / cancellation / exception reason
+
+    prepared_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "employee_id", "trigger_date", name="uq_sgp_ir21_case_trigger"),
+    )
+
+    def __repr__(self):
+        return f"<SgpIr21Case org={self.organization_id} employee={self.employee_id} {self.trigger_type} {self.status}>"
+
+
+class SgpPwmOvertimeSchedule(Base):
+    """Singapore PWM "Total PWM Gross Wage Requirement" for overtime hours
+    (SG-018, Phase 5.5). MOM publishes it as tables — 0 to 72 overtime hours
+    per month, per job level and effective window — for retail, food
+    services and the Occupational PWs, with no formula; each row is one
+    published cell, traced to its MOM PDF (source_document_id + sha256).
+    Tenant-independent statutory data (no organization_id), effective-dated,
+    never updated in place (a new MOM table is a new set of rows; status
+    marks superseded ones). Deliberately NOT a pack ContributionRate: those
+    are copied into every payslip's tax_rule_snapshot, and these
+    compliance-only rows are read by the preflight PWM check alone."""
+    __tablename__ = "sgp_pwm_overtime_schedules"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    jurisdiction_country = Column(String(10), nullable=False, default="SG", server_default="SG")
+    sector               = Column(String(30), nullable=False)      # labour.PWM_SECTORS
+    occupation_group     = Column(String(30), nullable=False)      # PWM group (ALL, A_QUICK, GROUP_A …)
+    job_level            = Column(String(40), nullable=False)
+    role_label           = Column(String(120), nullable=False)     # MOM's own table heading
+    effective_from       = Column(Date, nullable=False)
+    effective_to         = Column(Date, nullable=True)
+    overtime_hours       = Column(Integer, nullable=False)         # 0 (baseline) … 72
+    required_gross       = Column(Numeric(12, 2), nullable=False)
+    source_document_id   = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=False)
+    source_sha256        = Column(String(64), nullable=False)
+    retrieved_at         = Column(DateTime(timezone=True), nullable=False)
+    status               = Column(String(20), nullable=False, default="Active", server_default="Active")
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("jurisdiction_country", "sector", "occupation_group", "job_level", "effective_from",
+                         "overtime_hours", "source_document_id", name="uq_sgp_pwm_ot_schedule_row"),
+        Index("ix_sgp_pwm_ot_lookup", "sector", "occupation_group", "job_level", "effective_from"),
+    )
+
+
+class SgpIr8aModification(Base):
+    """Singapore IR8A Revision / Amendment of an IRAS-ACKNOWLEDGED original
+    extract (G3; docs/SINGAPORE_G3_IR8A_AMENDMENT_AND_AIS_DECISION.md §C).
+    IRAS myTax Portal "Modify previously submitted data" (Quick Guide,
+    15 Sep 2025): a REVISION carries the full and correct values and
+    overwrites the previous records; an AMENDMENT carries only the
+    differences, unaffected fields blank. The modification's own extract is
+    an ordinary SG_IR8A GeneratedReport (`report_id`) that follows the
+    existing manual-submission lifecycle; this row links it to the original
+    (`base_report_id`) and freezes the cumulative acknowledged position it
+    was computed from, the resulting position and — for an amendment — the
+    explicit per-employee delta. Positions are keyed by employee id over the
+    myTaxPortalEntry fields (the values keyed into IRAS). Additive,
+    Singapore-only; the shared payroll_generated_reports table is unchanged."""
+    __tablename__ = "sgp_ir8a_modifications"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    reporting_year    = Column(String(20), nullable=False)
+    base_report_id    = Column(Integer, ForeignKey("payroll_generated_reports.id"), nullable=False, index=True)
+    report_id         = Column(Integer, ForeignKey("payroll_generated_reports.id"), nullable=False)
+    method            = Column(String(12), nullable=False)          # REVISION | AMENDMENT
+    sequence          = Column(Integer, nullable=False)             # 1..n per base
+    reason            = Column(Text, nullable=True)
+    previous_position = Column(JSON, nullable=False)                # cumulative acknowledged position used
+    resulting_position = Column(JSON, nullable=False)               # position once IRAS acknowledges it
+    delta             = Column(JSON, nullable=True)                 # AMENDMENT only: per-employee differences
+    prepared_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    recorded_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)   # who recorded the IRAS filing
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("base_report_id", "sequence", name="uq_sgp_ir8a_modification_sequence"),
+        UniqueConstraint("report_id", name="uq_sgp_ir8a_modification_report"),
+    )

@@ -64,7 +64,13 @@ class MissingComplianceConfigurationError(Exception):
 #   US — same unresolved risk applies (never actually attempted).
 #   UK — also blocked by its tax pack still being Draft (see history above
 #        this rewrite) — _find_active_tax_pack only matches status=="Active".
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE"}
+# SG — enabled from day one, 2026-09-23 (ZP-SG-ENG-001 SG-001/SG-003:
+#      "never a default rate"). Singapore is a brand-new jurisdiction
+#      with zero existing orgs/employees/synced rows, so none of the
+#      IN-style re-sync risk above applies — and singapore.py defines no
+#      hardcoded fallback at all, so there is nothing to fall back to.
+# IE — enabled on venu (ZP-IE-ENG-001); kept alongside SG at the merge.
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
@@ -168,7 +174,10 @@ _VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE"}
 # Ireland build, and it is gone. See
 # tests/test_ireland_statutory_catalog.py::test_ie_uses_the_generic_ytd_accumulator
 # and its sibling, which fail if anyone reintroduces a dedicated Ireland table.
-_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY", "PR", "IE"}
+# SG added 2026-09-23 for the CPF annual wage ceiling (SG-007/SG-010) —
+# same brand-new-jurisdiction reasoning as KY above (zero existing SG
+# payroll history, so no partial-year gap).
+_YTD_ACCUMULATOR_ENABLED_COUNTRIES: set[str] = {"UK", "US", "AU", "CA", "KY", "GY", "PR", "IE", "SG"}
 
 # Per-country rollout switch for the ORG-LEVEL aggregate-remuneration
 # accumulator (ZP-TAX-CA-2026-001 §13/§15's Ontario/BC EHT, Manitoba HE
@@ -1235,6 +1244,9 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
         if getattr(s, "rule_type", None) not in (
             "SURCHARGE", "PT_FLAT", "ON_EHT_BAND", "NI_BAND", "NI_BAND_WEEKLY", "NI_BAND_MONTHLY",
             "CA_RETIRING_ALLOWANCE_BAND", "AU_PAYG_COEFFICIENT", "AU_STSL_COEFFICIENT", "TT_NIS_CLASS",
+            # Singapore CPF/SHG band tables — read directly by
+            # engine/countries/singapore.py, never a marginal-bracket sum.
+            "CPF_RATE_BAND", "SHG_FUND_BAND",
         )
     ]
 

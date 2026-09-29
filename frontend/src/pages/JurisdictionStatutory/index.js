@@ -13,6 +13,7 @@ export { default as BSStatutoryPage } from "./BSStatutoryPage";
 export { default as TTStatutoryPage } from "./TTStatutoryPage";
 export { default as PRStatutoryPage } from "./PRStatutoryPage";
 export { default as IEStatutoryPage } from "./IEStatutoryPage";
+export { default as SGStatutoryPage } from "./SGStatutoryPage";
 
 // Same six countries, same route slugs as Compliance — reused directly
 // rather than re-declared here, so the two feature areas can never drift

@@ -82,14 +82,15 @@ _SECURITY_ADVISORY_HTML = (
 #      https copy of the email logo (lighter messages, remote image);
 #   3. else the logo is EMBEDDED in the message as an inline CID image, so it
 #      renders without depending on any server being publicly reachable.
-# The bundled asset is the white-lettering logo (correct on every template's
-# dark header), cropped and sized at 2x its 36px display height (205x72,
-# ~14KB) — not the 3353px, 115KB web original.
-# alt text is styled white/bold so the header still reads "Zoiko Payroll"
-# when a client blocks images. Explicit width/height attributes matter:
-# Outlook desktop ignores CSS width:auto and sizes from the attributes.
+# The bundled asset is the full-colour ZOiKO PAYROLL logo (navy+blue on
+# transparent), cropped and sized at 2x its 36px display height (202x72,
+# ~16KB). It is always rendered inside a white background container in the
+# email header so the dark-navy/blue colours are visible against all
+# header backgrounds. alt text is white/bold so the header still reads
+# "Zoiko Payroll" when a client blocks images. Explicit width/height
+# attributes matter: Outlook desktop ignores CSS width:auto.
 LOGO_HEIGHT_PX = 36
-LOGO_WIDTH_PX = 102  # 205x72 asset at 36px high
+LOGO_WIDTH_PX = 101  # display width at 36px high; asset is 202x72 (2× retina, full-colour ZOiKO PAYROLL logo)
 LOGO_CID = "zoiko-payroll-logo"
 EMAIL_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "email_assets", "zoikopayroll-logo-email.png")
 LOGO_HEADER_HTML = (
@@ -468,7 +469,7 @@ def send_approval_email(
     if embed_logo and not _email_logo_bytes():
         # Asset unreadable: never reference a CID part that won't exist —
         # fall back to the hosted web logo (alt text covers it if unreachable).
-        logo_url, embed_logo = f"{frontend_base}/zoikopayroll-logo-light.png", False
+        logo_url, embed_logo = f"{frontend_base}/zoikopayroll-logo.png", False
     full_context["logo_url"] = logo_url
     full_context["logo_dimension_attrs"] = logo_dimension_attrs
     # Header logo link target — set on every send, not only when the logo

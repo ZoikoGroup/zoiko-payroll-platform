@@ -92,7 +92,25 @@ def test_alembic_heads_is_single_head():
     revs = _parse_revisions()
     children = _children_map(revs)
     heads = sorted(r for r in revs if r not in children)
-    assert heads == ["c4d5e6f7a8b9"]
+    # R2 (2026-09-29): origin/main's d4e5f6a7c8b9 -> e7f1a2b3c4d5 ->
+    # f0b1c2d3e4f5 -> 998877665544 are carried byte-identically, and the
+    # Singapore chain's first revision c3d9e1f4a7b2 now sits on 998877665544,
+    # so the graph is linear and identical to the merged main + Singapore one.
+    # 445abd6a9083 (2026-09-29, SG G3 IR8A Revision/Amendment): the
+    # sgp_ir8a_modifications table models.SgpIr8aModification declares,
+    # down_revision b8e3d5f2a9c7 (was parked on a release-line merge that
+    # no longer exists; see the migration docstring).
+    # b8e3d5f2a9c7 (2026-09-25, Phase 5.5 SG-018): sgp_pwm_overtime_schedules,
+    # down_revision a7c2e9f4b1d6.
+    # a7c2e9f4b1d6 (2026-09-24, Phase 5 S1): payroll_employees.sgp_wp_sector /
+    # sgp_wp_skill_level / sgp_wp_levy_tier, down_revision f6a1b4c8d3e5
+    # f6a1b4c8d3e5 (2026-09-24): sgp_ir21_cases, down_revision e5f9a3b7c2d4
+    # (payroll_employees.sgp_work_pass_issue/end_date, on d4e8f2a6b9c1 —
+    # payslip_items.sgp_calculation_trace, on c3d9e1f4a7b2 — which added the
+    # Singapore CPF employee columns on a5f6e7d8c9b0).
+    # 66072e2d80a9 (2026-09-29): merge of that Singapore head with venu's
+    # c4d5e6f7a8b9 (Ireland Revenue tables, on 7c3e1a9d5f20 -> 998877665544).
+    assert heads == ["66072e2d80a9"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -104,7 +122,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["c4d5e6f7a8b9"]
+    assert list(script.get_heads()) == ["66072e2d80a9"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -122,7 +140,11 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
     branchpoints = sorted(k for k, v in children.items() if len(v) > 1)
     assert branchpoints == [
         "1dc04f15a9b7", "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181",
-        "737e7bfa2d77", "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        "737e7bfa2d77",
+        # 998877665544: main's Singapore chain (c3d9e1f4a7b2) and venu's
+        # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
+        "998877665544",
+        "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
         "f0b1c2d3e4f5", "f1b78410d568", "fbfe6d7eeb2e",
     ]
@@ -131,7 +153,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 160
+    assert len(revs) == 168
 
 
 def test_germany_head_chain_wiring_is_intact():

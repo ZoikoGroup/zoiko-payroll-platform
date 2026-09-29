@@ -349,10 +349,13 @@ function Header({ onOpenSidebar, onToggleCollapse, collapsed }) {
 function ToastStack() {
   const { toasts, removeToast } = useToast();
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] flex w-full max-w-sm flex-col gap-2">
+    // Always-mounted live region so screen readers announce each toast;
+    // errors are assertive (role="alert"), the rest polite.
+    <div className="fixed bottom-5 right-5 z-[9999] flex w-full max-w-sm flex-col gap-2" aria-live="polite" aria-relevant="additions">
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          role={toast.type === "error" ? "alert" : "status"}
           className={`flex items-center justify-between rounded-xl border px-4 py-3 text-sm shadow-lg transition-all duration-200 ${
             toast.type === "success"
               ? "border-success/30 bg-success-light text-success"
@@ -365,9 +368,10 @@ function ToastStack() {
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
+            aria-label="Dismiss notification"
             className="ml-3 rounded-lg p-1 text-current/70 hover:bg-black/5"
           >
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       ))}

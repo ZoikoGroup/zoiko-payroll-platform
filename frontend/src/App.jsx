@@ -24,7 +24,7 @@ import {
   INCompliancePage, USACompliancePage, UKCompliancePage,
   AUCompliancePage, CACompliancePage, DECompliancePage,
   BBCompliancePage, KYCompliancePage, DOCompliancePage,
-  GYCompliancePage, JMCompliancePage, BSCompliancePage, TTCompliancePage,
+  GYCompliancePage, JMCompliancePage, BSCompliancePage, TTCompliancePage, SGCompliancePage,
   PRCompliancePage, FRCompliancePage, IECompliancePage,
 } from "./pages/JurisdictionCompliance";
 import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
@@ -33,7 +33,7 @@ import {
   INStatutoryPage, USAStatutoryPage, UKStatutoryPage,
   AUStatutoryPage, CAStatutoryPage, DEStatutoryPage,
   BBStatutoryPage, KYStatutoryPage, DOStatutoryPage,
-  GYStatutoryPage, JMStatutoryPage, BSStatutoryPage, TTStatutoryPage,
+  GYStatutoryPage, JMStatutoryPage, BSStatutoryPage, TTStatutoryPage, SGStatutoryPage,
   PRStatutoryPage, IEStatutoryPage,
 } from "./pages/JurisdictionStatutory";
 import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
@@ -42,7 +42,7 @@ import {
   INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage,
   DEReportTemplatesPage,
   BBReportTemplatesPage, KYReportTemplatesPage, DOReportTemplatesPage, GYReportTemplatesPage, JMReportTemplatesPage,
-  BSReportTemplatesPage, TTReportTemplatesPage,
+  BSReportTemplatesPage, TTReportTemplatesPage, SGReportTemplatesPage,
   PRReportTemplatesPage,
   IEReportTemplatesPage,
 } from "./pages/ReportTemplates";
@@ -199,6 +199,7 @@ export default function App() {
         <Route path="/super-admin/compliance/bahamas" element={<SuperAdminShell><BSCompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/trinidad-and-tobago" element={<SuperAdminShell><TTCompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/puerto-rico" element={<SuperAdminShell><PRCompliancePage /></SuperAdminShell>} />
+        <Route path="/super-admin/compliance/singapore" element={<SuperAdminShell><SGCompliancePage /></SuperAdminShell>} />
         {/* Caribbean master (grouped, incl. Coming Soon) — a separate
             browsing view from the pack-driven landing grid above. */}
         <Route path="/super-admin/compliance/caribbean" element={<SuperAdminShell><CaribbeanCompliancePage /></SuperAdminShell>} />
@@ -236,6 +237,7 @@ export default function App() {
         <Route path="/super-admin/statutory-rates/puerto-rico/:jurisdiction" element={<SuperAdminShell><PRStatutoryPage /></SuperAdminShell>} />
       <Route path="/super-admin/statutory-rates/ireland" element={<SuperAdminShell><IEStatutoryPage /></SuperAdminShell>} />
       <Route path="/super-admin/statutory-rates/ireland/:jurisdiction" element={<SuperAdminShell><IEStatutoryPage /></SuperAdminShell>} />
+        <Route path="/super-admin/statutory-rates/singapore" element={<SuperAdminShell><SGStatutoryPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/report-templates"
           element={
@@ -269,6 +271,8 @@ export default function App() {
         <Route path="/super-admin/report-templates/bahamas" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/bahamas/:jurisdiction" element={<SuperAdminShell><BSReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/trinidad-and-tobago" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/singapore" element={<SuperAdminShell><SGReportTemplatesPage /></SuperAdminShell>} />
+        <Route path="/super-admin/report-templates/singapore/:jurisdiction" element={<SuperAdminShell><SGReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/trinidad-and-tobago/:jurisdiction" element={<SuperAdminShell><TTReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/puerto-rico" element={<SuperAdminShell><PRReportTemplatesPage /></SuperAdminShell>} />
         <Route path="/super-admin/report-templates/puerto-rico/:jurisdiction" element={<SuperAdminShell><PRReportTemplatesPage /></SuperAdminShell>} />

@@ -91,6 +91,21 @@ export const getRtiFormsSummary = (params) =>
 // Golden-test certification (Part 10's harness, generalized to Canada
 // gap-closure Phase 8) — trigger a run for a jurisdiction, and read run
 // history. jurisdictionCountry defaults to "UK" for back-compat.
+// Singapore — read-only calculation preview against one SG pack's rows,
+// computed by the backend's production engine (the frontend never does
+// statutory payroll maths itself). Writes nothing server-side.
+export const previewSingaporeCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/singapore/calculation-preview", { method: "POST", body: payload });
+
+// Singapore — read-only statutory configuration summary (point-in-time,
+// from persisted pack rows only) and the paginated PWM overtime gross
+// schedule (global statutory reference data). Both tenant-independent.
+export const getSingaporeStatutorySummary = (params) =>
+  apiFetch("/api/super-admin/compliance/singapore/statutory-summary", { params });
+
+export const getSingaporePwmSchedules = (params) =>
+  apiFetch("/api/super-admin/compliance/singapore/pwm-schedules", { params });
+
 export const runTestCertification = (jurisdictionCountry = "UK") =>
   apiFetch("/api/super-admin/compliance/test-certification/run", {
     method: "POST", body: { jurisdiction_country: jurisdictionCountry },
@@ -263,6 +278,20 @@ export const downloadSourceArtifactFile = async (id, filenameHint) => {
 
 export const reviewSourceArtifact = (id) =>
   apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/review`, { method: "PUT" });
+
+// Singapore gate / decision evidence: keep the old artifact, mark it superseded by a same-tag replacement.
+export const supersedeSourceArtifact = (id, replacementId) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/supersede`, { method: "PUT", body: { replacementId } });
+
+// Singapore gate / decision evidence review outcome: ACCEPTED (optional validUntil) or REJECTED (notes required).
+export const reviewSgEvidence = (id, { outcome, notes, validUntil }) =>
+  apiFetch(`/api/super-admin/compliance/source-artifacts/${id}/sg-review`, {
+    method: "PUT", body: { outcome, notes: notes || null, validUntil: validUntil || null },
+  });
+
+// Singapore owner decision D1 / D2 / D3 — selected option + reason (counts after memo upload + second-admin review).
+export const recordSgDecision = ({ key, selectedValue, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/decisions", { method: "POST", body: { key, selectedValue, reason } });
 
 // ── India: state/local statutory readiness registry (§16) ─────────────────
 // One row per (state/UT, optional local authority, program) — informational
