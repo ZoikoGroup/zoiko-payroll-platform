@@ -46,6 +46,8 @@ from app.modules.super_admin.schemas import (
     SuperAdminUserResponse,
 )
 from app.modules.payroll.schemas import (
+    CollectiveAgreementResponse, CollectiveAgreementStatusUpdate, CollectiveAgreementUpsert,
+    SwedenCalculationPreviewRequest, SwedenReadinessResponse,
     JurisdictionPackResponse, JurisdictionPackUpsert,
     CanonicalTaxSlabResponse, CanonicalTaxSlabUpsert,
     CanonicalContributionRateResponse, CanonicalContributionRateUpsert,
@@ -341,6 +343,83 @@ def preview_singapore_calculation(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.preview_singapore_calculation(db, data)
+
+
+@router.get(
+    "/compliance/sweden/readiness", response_model=SwedenReadinessResponse, response_model_by_alias=True,
+    summary="Read-only: Sweden release-gate / activation-readiness checklist for one SE tax pack (ZP-SE-ENG-001 §16/§37)",
+)
+def get_sweden_readiness(
+    pack_id: Optional[int] = Query(None, alias="packId", description="SE tax pack id (default: the latest)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_se_readiness(db, pack_id)
+
+
+@router.post(
+    "/compliance/sweden/calculation-preview",
+    summary="Read-only: simulate a Sweden calculation against one SE pack's rows — writes nothing",
+)
+def preview_sweden_calculation(
+    data: SwedenCalculationPreviewRequest,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Same production engine as a payroll run (engine/countries/sweden.py);
+    the frontend never computes statutory figures itself (spec §13
+    "simulation before activation")."""
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.preview_sweden_calculation(db, data)
+
+
+@router.get(
+    "/compliance/collective-agreements", response_model=List[CollectiveAgreementResponse], response_model_by_alias=True,
+    summary="List governed collective-agreement definitions/assignments (ZP-SE-ENG-001 §9)",
+)
+def list_collective_agreements(
+    country: str = Query("SE"),
+    organization_id: Optional[int] = Query(None, alias="organizationId"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.list_collective_agreements(db, country, organization_id)
+
+
+@router.post(
+    "/compliance/collective-agreements", response_model=CollectiveAgreementResponse, response_model_by_alias=True,
+    summary="Create or edit a Draft collective-agreement version (no national default type exists)",
+)
+def upsert_collective_agreement(
+    data: CollectiveAgreementUpsert,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.upsert_collective_agreement(db, data, actor_id=current_user.id)
+
+
+@router.post(
+    "/compliance/collective-agreements/{agreement_id}/status", response_model=CollectiveAgreementResponse,
+    response_model_by_alias=True,
+    summary="Move a collective agreement through Draft → In Review → Approved → Active (four-eyes)",
+)
+def set_collective_agreement_status(
+    agreement_id: int,
+    data: CollectiveAgreementStatusUpdate,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.set_collective_agreement_status(db, agreement_id, data.status,
+                                                           actor_id=current_user.id, reason=data.reason)
 
 
 @router.get(

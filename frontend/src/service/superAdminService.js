@@ -106,6 +106,25 @@ export const getSingaporeStatutorySummary = (params) =>
 export const getSingaporePwmSchedules = (params) =>
   apiFetch("/api/super-admin/compliance/singapore/pwm-schedules", { params });
 
+// Sweden (ZP-SE-ENG-001) — release-gate readiness checklist and a read-only
+// calculation preview computed by the backend's production engine (the
+// frontend never does statutory payroll maths itself).
+export const getSwedenReadiness = (packId) =>
+  apiFetch("/api/super-admin/compliance/sweden/readiness", { params: packId ? { packId } : {} });
+
+export const previewSwedenCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/sweden/calculation-preview", { method: "POST", body: payload });
+
+// Governed collective-agreement registry (spec §9) — no national default.
+export const listCollectiveAgreements = (params) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { params });
+
+export const upsertCollectiveAgreement = (payload) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { method: "POST", body: payload });
+
+export const setCollectiveAgreementStatus = (id, status, reason) =>
+  apiFetch(`/api/super-admin/compliance/collective-agreements/${id}/status`, { method: "POST", body: { status, reason } });
+
 export const runTestCertification = (jurisdictionCountry = "UK") =>
   apiFetch("/api/super-admin/compliance/test-certification/run", {
     method: "POST", body: { jurisdiction_country: jurisdictionCountry },

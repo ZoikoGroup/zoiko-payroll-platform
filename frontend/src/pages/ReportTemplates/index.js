@@ -22,6 +22,8 @@ export { default as PRReportTemplatesPage } from "./PRReportTemplatesPage";
 export { default as IEReportTemplatesPage } from "./IEReportTemplatesPage";
 // Singapore (final closure) — the 11 SG templates in the shared lifecycle module.
 export { default as SGReportTemplatesPage } from "./SGReportTemplatesPage";
+// Sweden (ZP-SE-ENG-001) — AGI individual-statement data extract.
+export { default as SEReportTemplatesPage } from "./SEReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -50,4 +52,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   PR: "puerto-rico",
   IE: "ireland",
   SG: "singapore",
+  SE: "sweden",
 };

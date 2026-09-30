@@ -1,0 +1,69 @@
+{
+  "description": "Non-resident with a valid SINK decision, SEK 40,000 in 2026: 22.5% SINK.",
+  "source": "ZP-SE-ENG-001 §3 [S5]: SINK 22.5% for income received in 2026.",
+  "context": {
+    "country": "SE",
+    "pay_frequency": "Monthly",
+    "gross": "40000",
+    "pay_date": "2026-05-25",
+    "date_of_birth": "1985-01-01",
+    "rate_map": {
+      "se_er_age_pension": {
+        "employer_rate_pct": "10.21"
+      },
+      "se_er_survivor_pension": {
+        "employer_rate_pct": "0.60"
+      },
+      "se_er_health_insurance": {
+        "employer_rate_pct": "3.55"
+      },
+      "se_er_parental_insurance": {
+        "employer_rate_pct": "2.60"
+      },
+      "se_er_work_injury": {
+        "employer_rate_pct": "0.20"
+      },
+      "se_er_labour_market": {
+        "employer_rate_pct": "2.64"
+      },
+      "se_er_general_payroll_tax": {
+        "employer_rate_pct": "11.62"
+      },
+      "se_zero_cohort_max_birth_year": {
+        "flat_amount": "1937"
+      },
+      "se_older_cohort_max_birth_year": {
+        "flat_amount": "1958"
+      },
+      "se_youth_reduced": {
+        "employer_rate_pct": "20.81",
+        "effective_from": "2026-04-01",
+        "effective_to": "2027-09-30"
+      },
+      "se_youth_monthly_threshold": {
+        "flat_amount": "25000",
+        "effective_from": "2026-04-01",
+        "effective_to": "2027-09-30"
+      },
+      "se_sink": {
+        "employee_rate_pct": "22.5"
+      },
+      "se_supplementary_rate": {
+        "employee_rate_pct": "30"
+      },
+      "se_slp": {
+        "employer_rate_pct": "24.26"
+      }
+    },
+    "slabs": [],
+    "sweden_statutory_profile": {
+      "se_tax_status": "SINK",
+      "se_sink_status": "VALID",
+      "se_cba_status": "NONE"
+    }
+  },
+  "expected": {
+    "se_preliminary_tax": "9000.00",
+    "net_pay": "31000.00"
+  }
+}

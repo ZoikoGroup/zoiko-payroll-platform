@@ -55,6 +55,15 @@ REGISTRATION_COUNTRIES = [
     # collection keys; engine/countries/france.py wired into _COUNTRY_CALC.
     "France",
     "Ireland",
+    # Sweden (ZP-SE-ENG-001) — effective-dated country package, priority
+    # market #24. Applicability-first resolution (tax status → tax table/
+    # column → social insurance → age cohort → payment date → income type →
+    # CBA/plan → reporting period) in engine/countries/sweden.py; Draft packs
+    # SE-PAYROLL-2026/2027 seeded by scripts/seed_sweden_canonical_packs.py. Production
+    # registration still requires an Active canonical compliance pack, which
+    # in turn requires the §16/§37 readiness gates (evidence, certification,
+    # four-eyes) — adding the name here never activates Sweden by itself.
+    "Sweden",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -381,6 +390,34 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    # Sweden (ZP-SE-ENG-001 §13 "Sweden employer setup" / §11
+    # EmployerRegistration). The organisation number is the primary tax ID
+    # (mirrored into Organization.tax_no like every other country); the tax
+    # account reference is Skatteverket's employer tax-account key used for
+    # AGI settlement (spec §10 "Payment"). Personal identity numbers are
+    # deliberately NOT collected at employer registration (spec §11
+    # EmployerRegistration = org no + tax account; §14 data minimisation):
+    # a worker's personnummer lives only on the employee record, masked.
+    "SE": {
+        "label": "Organisation number / Tax account",
+        "currency": "SEK",
+        "fields": [
+            {
+                "key": "employer_org_number",
+                "label": "Employer organisation number (organisationsnummer)",
+                "pattern": r"^\d{6}-?\d{4}$",
+                "example": "556123-4567",
+                "primary": True,
+            },
+            {
+                "key": "tax_account_reference",
+                "label": "Skatteverket tax account reference",
+                "pattern": r"^[0-9A-Z-]{4,30}$",
+                "example": "5561234567-0001",
+                "primary": False,
+            },
+        ],
+    },
     # Singapore (ZP-SG-ENG-001 §9 Employer Registration panels A–E) — schema
     # only. Deliberately NOT in REGISTRATION_COUNTRIES above: the spec's
     # production gates G1–G8 must be evidenced before any Singapore
@@ -467,6 +504,7 @@ COUNTRY_NAME_TO_CODE = {
     "puerto rico": "PR",
     "france": "FR",
     "ireland": "IE",
+    "sweden": "SE",
     "singapore": "SG",
 }
 
@@ -486,6 +524,7 @@ CODE_TO_COUNTRY_NAME = {
     "PR": "Puerto Rico",
     "FR": "France",
     "IE": "Ireland",
+    "SE": "Sweden",
     "SG": "Singapore",
 }
 

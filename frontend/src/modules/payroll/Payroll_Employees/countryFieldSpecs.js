@@ -29,6 +29,10 @@ export const COUNTRIES = [
   // Ireland (2026-09-25, ZP-IE-ENG-001) — mirrors employee_validation.py's
   // IEEmployeeValidation exactly.
   { code: "IE", name: "Ireland" },
+  // Sweden (2026-09-30, ZP-SE-ENG-001) — mirrors employee_validation.py's
+  // SEEmployeeValidation exactly. Tax status, table/column, SINK and CBA
+  // facts live on the effective-dated statutory profile, not here.
+  { code: "SE", name: "Sweden" },
 ];
 
 export const COUNTRY_FIELD_SPECS = {
@@ -228,6 +232,11 @@ export const COUNTRY_FIELD_SPECS = {
   // the contribution table from; there is deliberately no rate field
   // (SG-029). Mirrors backend SGEmployeeValidation; SHG takes authority/HR
   // fund codes, never race/religion attributes (SG-015).
+  SE: [
+    { key: "swedish_id_number", label: "Personnummer / coordination number", type: "text", placeholder: "YYYYMMDD-XXXX", upper: true, strip: " ", pattern: /^(\d{6}|\d{8})[-+]?\d{4}$/, error: "Swedish identity number must be YYMMDD or YYYYMMDD followed by 4 digits (personnummer or coordination number), optionally separated by - (or + for a person aged 100 or over)." },
+    { key: "employer_reference", label: "Employer Reference", type: "text", upper: true, pattern: /^[A-Za-z0-9-]{3,32}$/, error: "Employer Reference must be 3-32 letters, digits or hyphens." },
+    { key: "residence_municipality_code", label: "Residence municipality code", type: "text", placeholder: "0180", pattern: /^\d{4}$/, error: "Residence municipality must be the 4-digit Skatteverket municipality code (SE-002 — never derived from workplace location)." },
+  ],
   SG: [
     { key: "nric_fin", label: "NRIC / FIN", type: "text", placeholder: "S1234567D", pattern: /^[STFGMstfgm]\d{7}[A-Za-z]$/, error: "NRIC/FIN must be a letter (S/T/F/G/M), 7 digits and a letter." },
     { key: "cpf_residency_status", label: "CPF residency status", type: "select", choices: ["SC", "SPR", "FOREIGN"] },

@@ -69,8 +69,12 @@ class MissingComplianceConfigurationError(Exception):
 #      with zero existing orgs/employees/synced rows, so none of the
 #      IN-style re-sync risk above applies — and singapore.py defines no
 #      hardcoded fallback at all, so there is nothing to fall back to.
-# IE — enabled on venu (ZP-IE-ENG-001); kept alongside SG at the merge.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG"}
+#   IE — enabled on venu (ZP-IE-ENG-001); kept alongside SG at the merge.
+#   SE — enabled with the Sweden build (ZP-SE-ENG-001): a brand-new
+#        jurisdiction with zero existing orgs/employees/synced rows, and
+#        sweden.py defines no hardcoded statutory fallback — same
+#        day-one rationale as SG above.
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact

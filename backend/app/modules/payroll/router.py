@@ -73,6 +73,7 @@ from app.modules.payroll.enterprise.router import enterprise_router
 from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.schemas import (
+    SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
     PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,
     PayslipItemCreate, PayslipItemResponse,
@@ -367,6 +368,60 @@ def create_employee_statutory_profile(
     return service.create_employee_statutory_profile_version(
         db, employee_id, current_user.organization_id, data, current_user.id,
     )
+
+
+# ── Sweden sick-pay episodes and annual-leave ledgers (ZP-SE-ENG-001 §7/§8)
+# Tenant-owned statutory facts — same security tier as the statutory-profile
+# endpoints above. Days/deduction state only; no clinical content is accepted.
+
+@payroll_router.get(
+    "/sweden/sick-episodes", response_model=List[SwedenSickEpisodeResponse], response_model_by_alias=True,
+    summary="List Swedish sick-pay episodes (days 1–14 employer period, qualifying deduction state)",
+)
+def list_sweden_sick_episodes(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_se_sick_episodes(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post(
+    "/sweden/sick-episodes", response_model=SwedenSickEpisodeResponse, response_model_by_alias=True,
+    summary="Record a Swedish sick-pay episode — recurrence, day 1–14 period and qualifying deduction resolved",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_sweden_sick_episode(
+    data: SwedenSickEpisodeUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.upsert_se_sick_episode(db, current_user.organization_id, data, current_user.id)
+
+
+@payroll_router.get(
+    "/sweden/leave-ledgers", response_model=List[SwedenLeaveLedgerResponse], response_model_by_alias=True,
+    summary="List Swedish annual-leave ledgers (entitlement, paid/unpaid/saved days — separate from money)",
+)
+def list_sweden_leave_ledgers(
+    employee_id: Optional[int] = Query(None, alias="employeeId"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_se_leave_ledgers(db, current_user.organization_id, employee_id)
+
+
+@payroll_router.post(
+    "/sweden/leave-ledgers", response_model=SwedenLeaveLedgerResponse, response_model_by_alias=True,
+    summary="Record a Swedish annual-leave ledger row for one entitlement year",
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+)
+def upsert_sweden_leave_ledger(
+    data: SwedenLeaveLedgerUpsert,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.upsert_se_leave_ledger(db, current_user.organization_id, data, current_user.id)
 
 
 # ── Germany overtime/shift-premium work records (Phase 8AC) ─────────────

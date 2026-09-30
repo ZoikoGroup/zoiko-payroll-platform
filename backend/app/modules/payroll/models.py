@@ -875,6 +875,88 @@ class EmployeeStatutoryProfile(Base):
     ie_emergency_reason        = Column(Text, nullable=True)
     ie_emergency_week          = Column(Integer, nullable=True)
 
+    # ── Sweden (SE) statutory attributes (ZP-SE-ENG-001 §2/§11 WorkerTaxProfile
+    # + §20/§21 worker & social-insurance profile) ────────────────────────────
+    # The applicability resolver (engine/countries/sweden.py) reads these in
+    # resolution order: tax status → income role → table/column → decision →
+    # SINK → social insurance/A1 → CBA → plan → reporting period. NULL for
+    # every non-Swedish employee and for a Swedish employee before the facts
+    # have been captured; the engine BLOCKS (never guesses) when a required
+    # fact is missing (spec §5 failure cases, SE-001). Payment date, tax year
+    # and age cohort are NOT stored here — they are per-run keys resolved from
+    # PayrollEmployee.date_of_birth + the run's payment date (SE-005), never
+    # frozen onto a profile row.
+    # A_TAX | SINK | SPECIAL_DECISION | OTHER (spec §5 step 1; ambiguous → block)
+    se_tax_status              = Column(String(30), nullable=True)
+    # MAIN_INCOME | SUPPLEMENTARY_INCOME | ONE_TIME_PAYMENT | POST_EMPLOYMENT
+    # (spec §5 step 2). Supplementary (30%) and one-time paths must never be
+    # blended into the main-income tax-table calculation.
+    se_income_role             = Column(String(30), nullable=True)
+    # Skatteverket tax table number ("29".."42") and applicable column
+    # ("X".."X8"-style). Resolved from the worker's situation + the Active
+    # rule pack; NEVER a global assumption (spec §5 step 3, §8).
+    se_tax_table               = Column(String(10), nullable=True)
+    se_tax_column              = Column(String(10), nullable=True)
+    # Specific Skatteverket decision (spec §5 step 4): takes precedence over
+    # the table lookup WITHIN its own dates. Override is refused without both
+    # the ID and a valid window (spec §2: manual override requires reason,
+    # approver, effective dates and audit event — approver/reason live on the
+    # audit row this profile version creation writes).
+    se_skatteverket_decision_id = Column(String(60), nullable=True)
+    se_decision_effective_from = Column(Date, nullable=True)
+    se_decision_effective_to   = Column(Date, nullable=True)
+    se_decision_override       = Column(Boolean, nullable=True)
+    # What the decision actually INSTRUCTS (spec §5 step 4): a fixed monthly
+    # withholding amount when the decision states one, else a rate % of the
+    # withholding base. An override flag without a value cannot be executed,
+    # so the engine BLOCKS on se_decision_override=true with neither set.
+    se_decision_monthly_withholding = Column(Numeric(14, 2), nullable=True)
+    se_decision_rate_pct            = Column(Numeric(6, 4), nullable=True)
+    # VALID | EXPIRED | PENDING | NOT_APPLICABLE — SINK only ever applies
+    # with valid status/decision evidence (spec §11, §31).
+    se_sink_status             = Column(String(30), nullable=True)
+    se_sink_decision           = Column(String(60), nullable=True)
+    # Residence municipality drives the tax table area; SE-002 forbids
+    # confusing it with workplace location, CBA scope or social-insurance
+    # jurisdiction, so it is its own field, never derived from work_locality.
+    se_residence_municipality  = Column(String(100), nullable=True)
+    se_tax_table_area          = Column(String(100), nullable=True)
+    # SWEDISH | FOREIGN_COVERAGE | A1 | SOCIAL_SECURITY_AGREEMENT (§21).
+    # A validated foreign/A1 situation overrides the domestic default.
+    se_social_insurance_status = Column(String(30), nullable=True)
+    se_foreign_coverage_status = Column(String(30), nullable=True)
+    se_a1_status               = Column(String(30), nullable=True)
+    se_agreement_country       = Column(String(10), nullable=True)
+    se_coverage_start          = Column(Date, nullable=True)
+    se_coverage_end            = Column(Date, nullable=True)
+    # Evidence document reference + validation status (§21). No calculation
+    # may assume Swedish liability while validated foreign coverage/A1 exists.
+    se_evidence_document       = Column(String(200), nullable=True)
+    se_evidence_validation     = Column(String(30), nullable=True)
+    # NONE | EMPLOYER_SPECIFIC | SECTOR | LOCAL_SUPPLEMENT (§22). NONE is an
+    # explicit value — the platform must never silently apply a sector
+    # agreement to an unaffiliated employer (SE-007/spec §9).
+    se_cba_status              = Column(String(30), nullable=True)
+    se_cba_id                  = Column(Integer, ForeignKey("payroll_collective_agreements.id"), nullable=True)
+    se_cba_version             = Column(String(20), nullable=True)
+    se_occupation              = Column(String(100), nullable=True)
+    se_grade                   = Column(String(50), nullable=True)
+    # Employer/CBA plan assignment (§9 occupational pension & insurance) —
+    # only ever through a configured plan; there is no national default.
+    se_pension_plan            = Column(String(100), nullable=True)
+    se_pension_provider        = Column(String(100), nullable=True)
+    se_employee_pension_share  = Column(Numeric(7, 4), nullable=True)  # pct, e.g. 4.5000
+    se_employer_pension_share  = Column(Numeric(7, 4), nullable=True)
+    # Reporting context (§10/§20): MONTHLY | OFF_CYCLE; AGI period key.
+    se_payroll_period          = Column(String(20), nullable=True)
+    se_agi_reporting_period    = Column(String(20), nullable=True)
+    # Reference/declared amounts the resolver validates against (§20). These
+    # are WORKER FACTS, not calculation results — the engine recomputes every
+    # statutory figure from the rule pack and never trusts these as output.
+    se_monthly_gross           = Column(Numeric(14, 2), nullable=True)
+    se_taxable_benefits        = Column(Numeric(14, 2), nullable=True)
+    se_annual_income           = Column(Numeric(14, 2), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1332,6 +1414,18 @@ class PayslipItem(Base):
     # non-Irish payslip and for any Irish payslip generated before this
     # column existed. Never backfilled or inferred after the fact.
     ie_calculation_snapshot       = Column(JSON, nullable=True)
+    # Sweden (ZP-SE-ENG-001 §34/§11 CalculationResult) — same "one JSON
+    # snapshot column per country" choice as germany_/fr_/ie_ above. Frozen
+    # Sweden result: the calculation TRACE verbatim (jurisdiction, rule-pack
+    # id + version, payment date, tax status/role, table/column, employer-
+    # contribution cohort + component breakdown, SINK/SLP/AGI decisions, the
+    # independent statutory bases and evidence status) plus the resolved
+    # worker/employer facts the run actually used. Required so a historical
+    # payslip stays reproducible and auditable even after SE-2026.1 is
+    # superseded (spec §29: historical payroll replays the rule pack
+    # applicable at the ORIGINAL payment date; the snapshot is that replay's
+    # evidence). NULL for every non-Swedish payslip; never backfilled.
+    se_calculation_snapshot       = Column(JSON, nullable=True)
 
     # Earnings.
     basic_salary      = Column(Numeric(12, 2), default=0)
@@ -2472,6 +2566,17 @@ class TaxSlab(Base):
     ni_category           = Column(String(2), nullable=True)
     # Widened alongside rate_pct above, same reasoning/precedent.
     employer_rate_pct     = Column(Numeric(6, 4), nullable=True)
+    # SE_TAX_TABLE / SE_ONE_TIME_PAYMENT only (ZP-SE-ENG-001 §7/§10): which
+    # Skatteverket tax table ("29".."42") and which tax column this band
+    # belongs to, and (§8) that the column is a per-worker RESOLVED fact —
+    # not a global assumption. Same "one nullable discriminator column per
+    # rule_type" convention ni_category/assessment_basis/filing_status
+    # already established; NULL on every pre-existing row, so every other
+    # country's resolution is untouched. On SE_TAX_TABLE rows min_amount/
+    # max_amount are the income band, flat_amount the statutory tax amount
+    # for the band and rate_label/tax_formula the displayed authority text.
+    tax_table_number      = Column(String(10), nullable=True)
+    tax_column            = Column(String(10), nullable=True)
     # Which canonical tax pack version this row was authored under/synced from.
     jurisdiction_pack_id  = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
 
@@ -3167,6 +3272,17 @@ class StatutoryFilingCalendar(Base):
     period_key    = Column(String(20), nullable=False)    # "Q1", "Q2", "ANNUAL", ...
     period_label  = Column(String(100), nullable=False)   # "April-June"
     due_date      = Column(Date, nullable=False)
+    # ── Sweden AGI deadline engine (ZP-SE-ENG-001 §10/§27) ──────────────────
+    # Additive/nullable: NULL on every pre-existing calendar row. Sweden's
+    # employer declaration has a DECLARATION due date and a separate PAYMENT
+    # due date (§10 "Payment"; §15 "large VAT filer declaration/payment
+    # separation"), and large VAT filers get a later declaration date —
+    # `variation` names which filing variation produced these dates (e.g.
+    # "LARGE_VAT_FILER"), `due_date` stays the declaration date, this column
+    # the payment date. Weekend/holiday rolls are NEVER computed at payroll
+    # execution time (§27): the ADJUSTED date is stored here as content.
+    payment_due_date = Column(Date, nullable=True)
+    variation        = Column(String(50), nullable=True)
 
     status = Column(String(20), nullable=False, default="Draft")
     # Draft | Approved | Active | Superseded — same vocabulary as ReportTemplate.
@@ -5683,6 +5799,32 @@ class StatutoryFiling(Base):
     # "Updated" timestamp reflects the row's own updated_at.
     submitted_at    = Column(DateTime(timezone=True), nullable=True)
 
+    # ── AGI reporting linkage (ZP-SE-ENG-001 §10/§26) ──────────────────────
+    # Generic, nullable, additive — NULL on every pre-existing row (AU/IN/DE
+    # filings unaffected). Sweden's AGI uses ALL of them; another country may
+    # later reuse them for its own authority receipt flow. Deliberately NOT
+    # SE-prefixed, mirroring how receipt/reference concepts are jurisdiction-
+    # neutral (same reasoning as the se_* worker-profile columns being
+    # country-prefixed — those are statutory FACTS, these are filing METADATA).
+    #
+    # AGI's own state machine (DRAFT → VALIDATED → APPROVED → EXPORTED →
+    # SUBMITTED → ACCEPTED/REJECTED → CORRECTED, spec §10) is kept SEPARATE
+    # from `status` above (the shared NOT_STARTED/IN_PROGRESS/FILED dashboard
+    # vocabulary) so the Filings & Remittances dashboard keeps its exact
+    # current semantics while the SE AGI tab shows the full authority flow.
+    submission_status      = Column(String(30), nullable=True)
+    # Authority receipt / case reference for an accepted submission (§26).
+    receipt_id             = Column(String(100), nullable=True)
+    # Link to the ORIGINAL employee-period statement being replaced/removed/
+    # corrected (§10 "Never overwrite filed content").
+    correction_reference   = Column(String(100), nullable=True)
+    # AGI XML schema version + Technical Description actually used (§26:
+    # schema/version is governed configuration, never hard-coded in the
+    # calculation layer — see ReportTemplate for the mapping itself).
+    schema_version         = Column(String(30), nullable=True)
+    # Result of the last schema/business validation run (§26 Validation Rules).
+    validation_status      = Column(String(30), nullable=True)
+
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -6405,3 +6547,227 @@ class SgpIr8aModification(Base):
         UniqueConstraint("base_report_id", "sequence", name="uq_sgp_ir8a_modification_sequence"),
         UniqueConstraint("report_id", name="uq_sgp_ir8a_modification_report"),
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sweden (ZP-SE-ENG-001, 2026-09-22) — country extension tables
+#
+# Sweden's statutory rates, tax tables, SINK/SLP parameters, AGI configuration
+# and filing calendar all live in the GENERIC structures every other country
+# uses (JurisdictionPack / ContributionRate / TaxSlab / ReportTemplate /
+# StatutoryFilingCalendar / StatutoryFiling / TaxabilityRule) — seeded as
+# Draft content by scripts/seed_sweden_canonical_packs.py. The three tables
+# below cover only the domains those generic structures genuinely cannot
+# express, exactly like the Germany (Germany*), France (EmployerFranceProfile
+# & co.) and Ireland (IrelandRpnSnapshot & co.) extension tables before them:
+#
+#   - CollectiveAgreement          → governed CBA overlay (spec §9/§22); the
+#     generic pack model has no "agreement assignment" concept, and Sweden
+#     REQUIRES the absence of a CBA to be explicit with no national default.
+#   - SwedenSickEpisode            → recurrence-aware 14-day employer period
+#     with qualifying-deduction state (spec §24); Ireland's
+#     IrelandStatutorySickLeaveRecord is the direct precedent.
+#   - SwedenLeaveLedger            → SE-006's mandated separation of
+#     entitlement / paid-day / saved-day / money ledgers; the generic
+#     PayrollLeaveAllocation is org leave-management, not statutory vacation.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class CollectiveAgreement(Base):
+    """One versioned collective-agreement (CBA) definition/assignment.
+
+    ZP-SE-ENG-001 §9: "model collective agreements as governed rule packages
+    rather than optional notes. The absence of a CBA must be explicit; the
+    platform must never silently apply ITP, SAF-LO, public-sector or other
+    sector rules to an unaffiliated employer." Hence:
+
+      * agreement_type has NO "NATIONAL" member — there is no such thing as
+        a Swedish default agreement, and the seed script creates zero rows;
+      * a worker/employer with no assignment resolves to NONE (explicit),
+        never to some industry pack;
+      * every row is effective-dated + versioned + approval-gated with a
+        source artifact, so an agreement overlay behaves exactly like any
+        other statutory content (spec §13 "Agreement registry: no rule
+        activation without source/effective dates/test pack").
+
+    organization_id NULL = jurisdiction-level agreement DEFINITION (governed
+    content authored by Super Admin); set = that employer's ASSIGNMENT of it.
+    jurisdiction_country keeps the table generic so DE/UK can later model
+    Tarifvertrag/BOOT the same way.
+    """
+    __tablename__ = "payroll_collective_agreements"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+
+    jurisdiction_country = Column(String(10), nullable=False, index=True)  # "SE"
+    agreement_code       = Column(String(50), nullable=False)   # e.g. "SE-SECTOR-TEKNIK-2026"
+    name                 = Column(String(200), nullable=False)
+    # EMPLOYER_SPECIFIC | SECTOR | LOCAL_SUPPLEMENT — deliberately no NATIONAL
+    # member (spec §44: do NOT create a Swedish national default CBA).
+    agreement_type       = Column(String(30), nullable=False)
+    employer_scope       = Column(Text, nullable=True)          # which employers/establishments it covers
+    employee_group       = Column(String(100), nullable=True)
+    occupation           = Column(String(100), nullable=True)
+    grade                = Column(String(50), nullable=True)
+    version              = Column(String(20), nullable=False, default="1.0")
+
+    effective_from       = Column(Date, nullable=True)
+    effective_to         = Column(Date, nullable=True)
+
+    # Draft | In Review | Approved | Active | Superseded — same tax-pack
+    # vocabulary so the shared status/audit machinery applies unchanged.
+    status               = Column(String(20), nullable=False, default="Draft", server_default="Draft")
+    # Which governed modules this agreement actually configures (spec §9):
+    # wage_scales, overtime, unsocial_hours, sickness_supplements,
+    # parental_pay, vacation_enhancement, occupational_pension, insurance,
+    # termination. JSON list — the frontend renders checkboxes/tabs from it;
+    # an agreement with no modules configured activates no payroll effect.
+    modules              = Column(JSON, nullable=True)
+
+    source_document_id   = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    previous_version_id  = Column(Integer, ForeignKey("payroll_collective_agreements.id"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes                = Column(Text, nullable=True)
+
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("agreement_code", "version", name="uq_collective_agreement_code_version"),
+        # At most ONE Active agreement row per (jurisdiction, employer scope,
+        # type, effective date) is a service-layer guard — same pattern
+        # JurisdictionPack's Active-overlap guard uses, because SQLite (the
+        # dev/test fallback) has no EXCLUDE constraint to express it in DDL.
+        Index("ix_collective_agreement_lookup", "jurisdiction_country", "organization_id", "status"),
+    )
+
+    def __repr__(self):
+        return f"<CollectiveAgreement {self.agreement_code} v{self.version} {self.status}>"
+
+
+class SwedenSickEpisode(Base):
+    """One Swedish statutory sick-pay episode (ZP-SE-ENG-001 §24).
+
+    Employer statutory sick pay covers days 1–14 with a qualifying deduction
+    of 20% of the sick pay expected for an average calendar week (never
+    exceeding payable sick pay). If sickness RECURS within the applicable
+    five-day period the periods COMBINE into the same 14-day employer period
+    and no second full qualifying deduction may be made — which is why the
+    recurrence_group_id link and the deduction_already_applied flag are state
+    ON THE ROW, not recomputed: the deduction is a once-per-episode fact.
+    Partial incapacity is captured as work_capacity_pct so sick pay is
+    calculated in proportion. Medical data is deliberately limited to a
+    certificate REFERENCE (spec §14: diagnoses/free-text health narratives
+    must not be stored for ordinary payroll processing).
+    """
+    __tablename__ = "payroll_sweden_sick_episodes"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    episode_start      = Column(Date, nullable=False)
+    episode_end        = Column(Date, nullable=True)            # NULL = ongoing
+    # Episodes sharing a group are ONE statutory 14-day employer period
+    # (recurrence within the five-day window, §24). NULL = standalone.
+    recurrence_group_id = Column(Integer, ForeignKey("payroll_sweden_sick_episodes.id"), nullable=True)
+
+    work_capacity_pct  = Column(Numeric(5, 2), nullable=True)   # 100 = full incapacity
+    # 20% qualifying deduction inputs (§24). Stored, not re-derived, so a
+    # later recurrence can prove a deduction was ALREADY made.
+    expected_weekly_sick_pay = Column(Numeric(14, 2), nullable=True)
+    qualifying_deduction_pct  = Column(Numeric(5, 2), nullable=True)
+    qualifying_deduction_amount = Column(Numeric(14, 2), nullable=True)
+    deduction_already_applied  = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # Which statutory day of the 1–14 employer period this episode covers
+    # (resolved from episode_start + calendar days), for the day-14 boundary
+    # and the day-15 transfer to Försäkringskassan.
+    employer_period_day_from = Column(Integer, nullable=True)
+    employer_period_day_to   = Column(Integer, nullable=True)
+    transfer_to_forsakringskassan = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    medical_certificate_ref = Column(String(100), nullable=True)  # reference ONLY, never clinical content
+    absence_reported     = Column(Boolean, nullable=False, default=False, server_default="false")
+    employer_sick_pay_amount = Column(Numeric(14, 2), nullable=True)
+    cba_supplement_amount    = Column(Numeric(14, 2), nullable=True)  # agreement supplement, separate line
+    cba_agreement_id     = Column(Integer, ForeignKey("payroll_collective_agreements.id"), nullable=True)
+
+    status               = Column(String(20), nullable=False, default="OPEN", server_default="OPEN")
+    source               = Column(String(200), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_se_sick_episode_employee_dates", "employee_id", "episode_start"),
+        Index("ix_se_sick_episode_org", "organization_id"),
+    )
+
+    def __repr__(self):
+        return f"<SwedenSickEpisode org={self.organization_id} emp={self.employee_id} from={self.episode_start} to={self.episode_end}>"
+
+
+class SwedenLeaveLedger(Base):
+    """One Swedish annual-leave ledger row (ZP-SE-ENG-001 §7, SE-006).
+
+    SE-006: "Vacation entitlement, paid-day count, pay method and payout are
+    separate ledgers. Do not calculate final vacation allowance from current
+    balance alone." So this row tracks, per (employee, entitlement year):
+    paid/unpaid/saved days, carryover + expiry, the qualifying-year earnings
+    the percentage method (12%) applies to, and which pay method governs
+    (PERCENTAGE_12 | SAME_PAY | CBA_OVERRIDE). Entitlement (25 days) lives
+    here as days; vacation MONEY is computed from these facts at payroll
+    time and posted as its own payslip line — the two never collapse into
+    one "balance". Final vacation allowance on termination is a separate
+    stored figure computed from preserved qualifying-year history, never
+    from the current day balance (§7 Termination row).
+    """
+    __tablename__ = "payroll_sweden_leave_ledgers"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+
+    entitlement_year    = Column(String(10), nullable=False)    # e.g. "2026" (1 Apr leave year, §7)
+    qualifying_year     = Column(String(10), nullable=True)     # e.g. "2025" (1 Apr – 31 Mar preceding)
+
+    paid_days           = Column(Numeric(6, 2), nullable=False, default=0)
+    unpaid_days         = Column(Numeric(6, 2), nullable=False, default=0)
+    saved_days          = Column(Numeric(6, 2), nullable=False, default=0)  # paid days > 20 (§7 Saving days)
+    carryover_days      = Column(Numeric(6, 2), nullable=False, default=0)
+    carryover_expiry    = Column(Date, nullable=True)           # saved days normally taken within 5 years
+
+    qualifying_earnings = Column(Numeric(14, 2), nullable=True) # 12% percentage-rule basis
+    # PERCENTAGE_12 | SAME_PAY | CBA_OVERRIDE (§7 Percentage/Same-pay/CBA rows)
+    vacation_pay_method = Column(String(20), nullable=False, default="PERCENTAGE_12", server_default="PERCENTAGE_12")
+    # Statutory categories/durations of credited absence that must NOT be
+    # blanket-subtracted from the vacation-pay basis (§7 Credited absence).
+    credited_absence     = Column(JSON, nullable=True)
+
+    # Computed once on termination/final settlement from preserved
+    # qualifying-year history (§7 Termination) — never derived from balance.
+    final_vacation_allowance = Column(Numeric(14, 2), nullable=True)
+
+    cba_agreement_id    = Column(Integer, ForeignKey("payroll_collective_agreements.id"), nullable=True)
+    effective_from      = Column(Date, nullable=True)
+    effective_to        = Column(Date, nullable=True)
+    version             = Column(String(20), nullable=False, default="1.0")
+    status              = Column(String(20), nullable=False, default="Draft", server_default="Draft")
+    source_document_id  = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        # One ledger row per employee per entitlement year — a correction is a
+        # NEW versioned row (previous_version_id-style chains are not needed
+        # because this IS the ledger; history is preserved by never mutating
+        # committed values, spec §11 PayrollCommit immutability).
+        UniqueConstraint("employee_id", "entitlement_year", name="uq_se_leave_ledger_emp_year"),
+        Index("ix_se_leave_ledger_org_year", "organization_id", "entitlement_year"),
+    )
+
+    def __repr__(self):
+        return f"<SwedenLeaveLedger emp={self.employee_id} year={self.entitlement_year} paid={self.paid_days} saved={self.saved_days}>"

@@ -1082,6 +1082,50 @@ class SGEmployeeValidation(EmployeeValidationStrategy):
             raise BadRequestException("The work pass end date cannot be before its issue date.")
 
 
+# ── Sweden (ZP-SE-ENG-001, 2026-09-30) ────────────────────────────────────
+# Only identity/registration-shaped facts live here: every withholding
+# fact (tax status, table/column, decision, SINK, CBA) is an effective-
+# dated EmployeeStatutoryProfile (se_* columns) version, never a bare
+# compliance field — same split as IE/SG above. The engine
+# (engine/countries/sweden.py) is the authoritative guard that BLOCKS a
+# calculation while a required worker fact is missing (spec §5), so
+# onboarding stays possible before every fact is known.
+class SEEmployeeValidation(EmployeeValidationStrategy):
+    """Sweden (ZP-SE-ENG-001 §2/§11).
+
+    personnummer/coordination number is a structural check only (no Luhn
+    checksum asserted — a coordination number adds 60 to the day of birth,
+    and the spec supplies no checksum rule), and it is SENSITIVE: masked
+    in every API response like every other national identifier. The
+    residence municipality code is kept here (not only on the profile) so
+    onboarding can capture it before a statutory profile version exists —
+    SE-002 forbids deriving it from workplace location, so it is entered,
+    never computed."""
+    country_code = "SE"
+    duplicate_field = "swedish_id_number"
+    SENSITIVE_FIELDS = ('swedish_id_number',)
+    FIELD_SPECS = {
+        "swedish_id_number": {
+            "upper": True, "strip_chars": " ",
+            # YYMMDD or YYYYMMDD, optional separator (- ; + marks a person aged
+            # 100 or over), then 4 digits. A coordination number has the same
+            # shape with the day of birth + 60, so it passes the same check.
+            "pattern": re.compile(r"^(\d{6}|\d{8})[-+]?\d{4}$"),
+            "error": "Swedish identity number must be YYMMDD or YYYYMMDD followed by 4 digits (personnummer or "
+                     "coordination number), optionally separated by - (or + for a person aged 100 or over).",
+        },
+        "employer_reference": {
+            "upper": True,
+            "pattern": re.compile(r"^[A-Za-z0-9-]{3,32}$"),
+            "error": "Employer Reference must be 3-32 letters, digits or hyphens.",
+        },
+        "residence_municipality_code": {
+            "pattern": re.compile(r"^\d{4}$"),
+            "error": "Residence municipality must be the 4-digit Skatteverket municipality code (SE-002 — never derived from workplace location).",
+        },
+    }
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1100,6 +1144,7 @@ _STRATEGIES = {
     "FR": FREmployeeValidation,
     "IE": IEEmployeeValidation,
     "SG": SGEmployeeValidation,
+    "SE": SEEmployeeValidation,
 }
 
 

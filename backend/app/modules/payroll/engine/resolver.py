@@ -212,6 +212,7 @@ def build_context_from_employee(
     ni_category_override: str | None = None,
     france_inputs: dict | None = None,
     ireland_inputs: dict | None = None,
+    sweden_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -386,4 +387,7 @@ def build_context_from_employee(
         # service._resolve_ie_calc_inputs (frozen RPN snapshot, MyFutureFund
         # authority status, independent YTD bases, preflight PRSI class).
         **(ireland_inputs or {}),
+        # Sweden (ZP-SE-ENG-001): sweden_statutory_profile + se_* context
+        # fields resolved by service._resolve_se_calc_inputs.
+        **(sweden_inputs or {}),
     )
