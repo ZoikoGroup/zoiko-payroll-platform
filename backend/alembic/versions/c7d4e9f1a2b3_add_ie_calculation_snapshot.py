@@ -46,11 +46,32 @@ branch_labels: str = None
 depends_on: str = None
 
 
+# ── Idempotency guards (2026-09-30) ──────────────────────────────────────
+# Production already holds part of this schema: an earlier, unmerged
+# France/Ireland branch ran these same migrations against it, and the
+# 2026-09-29 deploy failed with DuplicateTable on payroll_fr_establishments.
+# Each operation below is therefore skipped when its object already exists
+# (or, for a drop, is already gone). A pre-existing object with the wrong
+# SHAPE is not papered over: scripts.check_schema_drift runs right after
+# the upgrade and fails the deploy, before the service restarts.
+def _has_table(name):
+    return name in sa.inspect(op.get_bind()).get_table_names()
+
+
+def _has_column(table, column):
+    return _has_table(table) and column in {c["name"] for c in sa.inspect(op.get_bind()).get_columns(table)}
+
+
+def _has_index(table, name):
+    return _has_table(table) and name in {i["name"] for i in sa.inspect(op.get_bind()).get_indexes(table)}
+
+
 def upgrade() -> None:
-    op.add_column(
-        "payslip_items",
-        sa.Column("ie_calculation_snapshot", sa.JSON(), nullable=True),
-    )
+    if not _has_column("payslip_items", "ie_calculation_snapshot"):
+        op.add_column(
+            "payslip_items",
+            sa.Column("ie_calculation_snapshot", sa.JSON(), nullable=True),
+        )
 
 
 def downgrade() -> None:
