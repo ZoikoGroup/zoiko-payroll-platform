@@ -101,6 +101,20 @@ class SgDecisionCreate(BaseModel):
     reason: str
 
 
+class SgServiceRegistryTransition(BaseModel):
+    """Phase 6.10: the owner's Singapore registry step — AVAILABLE (opens
+    onboarding, gated server-side) or PLANNED (closes it). The reason is the
+    change record."""
+    availability: str
+    reason: str
+
+
+class SgServiceRegistryResponse(BaseModel):
+    country: str
+    availability: str
+    updatedAt: Optional[datetime] = None
+
+
 class SourceArtifactSupersede(BaseModel):
     """Singapore gate / decision evidence: the artifact that replaces this one."""
     replacementId: int

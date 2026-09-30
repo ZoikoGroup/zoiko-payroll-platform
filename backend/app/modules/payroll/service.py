@@ -464,6 +464,14 @@ def apply_extracted_rate(db: Session, organization_id: int, kind: str, row: dict
     without both of these is invisible to real payroll runs even though
     it appears "applied" in the UI — this was a real bug (rates vanishing
     from payroll runs after being applied) fixed here."""
+    # Phase 6.10: a canonical-pack-only country's statutory rows are never
+    # org-level, and never written from an extracted document preview.
+    from app.core.jurisdiction import get_jurisdiction_code
+
+    if (get_jurisdiction_code(country_code) or (country_code or "").upper()) in _CANONICAL_PACK_ONLY_COUNTRIES:
+        raise BadRequestException(
+            f"{country_code} statutory rates come only from the Super Admin's Active statutory pack (maker-checker) — "
+            "they cannot be applied from an extracted document to an organisation.")
     if kind == "contributionRate":
         label = row.get("label", "")
         component_key = _component_key_for_label(label)
@@ -1416,6 +1424,11 @@ def check_jurisdiction_readiness(
     }
 
 
+# Countries whose statutory rows come ONLY from the Active canonical pack
+# (never an org's cached copy) — see _resolve_effective_rate_inputs.
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG",)
+
+
 def _resolve_effective_rate_inputs(
     db: Session, organization_id: int, country: str, payroll_date,
     org_opted_in: bool, state: Optional[str] = None, tax_regime: Optional[str] = None,
@@ -1452,7 +1465,27 @@ def _resolve_effective_rate_inputs(
     canonical_rates is the raw list (not the dict) so a caller can build a
     tax snapshot via _pack_to_tax_snapshot without a second query; pack is
     None whenever canonical resolution wasn't used, signalling the caller
-    to fall back to its own existing tax-snapshot logic unchanged."""
+    to fall back to its own existing tax-snapshot logic unchanged.
+
+    Phase 6.10 (per-country opt-in, _CANONICAL_PACK_ONLY_COUNTRIES): a
+    Singapore calculation ALWAYS resolves the Active canonical pack for the
+    date — whether or not the org is opted in — and never falls through to
+    the org's own cached ContributionRate / TaxSlab rows (stale syncs, or
+    rows written by apply_extracted_rate). No Active pack with rows ->
+    MissingComplianceConfigurationError (fail closed). The numbers and the
+    pinned pack therefore always name the same, governed version."""
+    if country in _CANONICAL_PACK_ONLY_COUNTRIES:
+        from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+        from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+        canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
+            db, country, state=state, tax_regime=tax_regime, payroll_date=payroll_date,
+        )
+        if pack is None or not (canonical_rates or canonical_slabs):
+            raise MissingComplianceConfigurationError("active statutory pack", country, organization_id)
+        canonical_rate_map = {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}
+        _assert_jurisdiction_ready(canonical_rate_map, canonical_slabs, country, organization_id)
+        return canonical_rate_map, canonical_slabs, canonical_rates, pack
     if org_opted_in:
         from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
         canonical_rates, canonical_slabs, pack = resolve_tax_configuration(
@@ -2782,7 +2815,9 @@ def create_source_artifact(db: Session, data: SourceArtifactCreate, actor_id: Op
 
 
 def _is_sg_gate_evidence(row) -> bool:
-    return (row.form_number or "").upper().startswith(("SG-GATE-G", "SG-DECISION-D"))
+    # Phase 6.10: the deploy owner's sign-off (SG-OPS-DEPLOYMENT) is reviewed,
+    # superseded and summarised exactly like gate / decision evidence.
+    return (row.form_number or "").upper().startswith(("SG-GATE-G", "SG-DECISION-D", "SG-OPS-DEPLOYMENT"))
 
 
 def supersede_sg_gate_evidence(db: Session, artifact_id: int, replacement_id: int,
@@ -2959,6 +2994,91 @@ def record_sg_decision(db: Session, key: str, selected_value: str, reason: str,
         old_value=None, new_value={"sgDecision": key, "selectedValue": value, "reason": reason},
         reason=f"Singapore decision {key} recorded as {value} (pending signed memo + second-admin review): {reason}",
     )
+    return row
+
+
+def _sg_registry_refused(db: Session, row, attempted: str, actor_id: Optional[int], message: str,
+                         unmet: Optional[list] = None):
+    """A refused Singapore registry transition leaves one "refused" audit row
+    and changes nothing (same rule as _audit_refusal / _sg_evidence_refused)."""
+    row_id, current = (row.id if row is not None else 0), (row.availability if row is not None else None)
+    db.rollback()
+    record_tax_audit(db, actor_id=actor_id, action="refused", entity_type="jurisdiction_service_registry",
+                     entity_id=row_id, old_value={"country": "SG", "availability": current},
+                     new_value={"attempted": attempted, "result": "REFUSED", "unmet": unmet or []}, reason=message)
+    raise BadRequestException(message)
+
+
+def transition_sg_service_registry(db: Session, target: str, reason: str, actor_id: Optional[int] = None,
+                                   as_of: Optional[date] = None):
+    """Phase 6.10 — the owner's Singapore PLANNED <-> AVAILABLE step, the only
+    thing that opens (or closes) Singapore onboarding. Before this there was
+    no path at all except a raw UPDATE of jurisdiction_service_registry.
+
+    AVAILABLE is refused unless every registry-transition requirement of the
+    Singapore readiness summary is met at this moment (re-derived here, never
+    taken from the caller): Active pack, golden-vector PASS, every SG template
+    Active, configuration / database / migration PASS, G1–G8 evidence accepted,
+    D1–D3 recorded and in force, the deploy owner's sign-off accepted, no
+    unreviewed hotfix. PLANNED (closing onboarding — the runbook's rollback)
+    is always allowed from AVAILABLE. Both need a reason; both are audited with
+    the evidence snapshot the decision rested on. Only the SG row, and only
+    these two values: LIMITED_AVAILABILITY / PARTNER_SUPPORTED have no meaning
+    in the onboarding gate (it would treat them as open), so they are refused."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import (
+        SG_REGISTRY_CLOSED, SG_REGISTRY_OPEN)
+
+    target = (target or "").strip().upper()
+    reason = (reason or "").strip()
+    query = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "SG")
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    row = query.first()
+    attempted = f"availability:{target or '?'}"
+    if actor_id is None:
+        raise BadRequestException("A registry change needs an identified Super Admin.")
+    if target not in (SG_REGISTRY_OPEN, SG_REGISTRY_CLOSED):
+        _sg_registry_refused(db, row, attempted, actor_id,
+                             f"Singapore availability can only be {SG_REGISTRY_OPEN} or {SG_REGISTRY_CLOSED} — "
+                             f"{target or 'an empty value'} is not a governed Singapore state.")
+    if not reason:
+        raise BadRequestException("A registry change needs the owner's reason (it is the change record).")
+    if row is None:
+        _sg_registry_refused(db, row, attempted, actor_id,
+                             "There is no Singapore registry row — seed it (python -m scripts.seed_singapore_canonical_pack "
+                             "creates it as PLANNED); it is never created here.")
+    if row.availability == target:
+        _sg_registry_refused(db, row, attempted, actor_id, f"Singapore is already {target}.")
+    if target == SG_REGISTRY_CLOSED:
+        if row.availability != SG_REGISTRY_OPEN:
+            _sg_registry_refused(db, row, attempted, actor_id,
+                                 f"Singapore is {row.availability}; only an AVAILABLE Singapore is closed back to PLANNED here.")
+        snapshot = None
+    else:
+        if row.availability != SG_REGISTRY_CLOSED:
+            _sg_registry_refused(db, row, attempted, actor_id,
+                                 f"Singapore is {row.availability}; only PLANNED moves to AVAILABLE here.")
+        activation = get_sg_statutory_summary(db, as_of)["activationReadiness"]
+        unmet = [r for r in activation["registryTransition"]["requirements"] if not r["met"]]
+        if unmet:
+            _sg_registry_refused(
+                db, row, attempted, actor_id,
+                f"Singapore cannot be made AVAILABLE — {len(unmet)} requirement(s) unmet: "
+                + "; ".join(f"{r['label']} ({r['detail']})" for r in unmet),
+                unmet=[r["key"] for r in unmet])
+        pack = activation["statutoryPack"]
+        snapshot = {"pack": {"packId": pack.get("packId"), "version": pack.get("version")},
+                    "gates": {g["key"]: g.get("submittedArtifactId") for g in activation["productionGates"]},
+                    "decisions": {d["key"]: d.get("recordedValue") for d in activation["pendingDecisions"]},
+                    "deploymentSignoff": activation["deploymentSignoff"].get("submittedArtifactId")}
+    old = row.availability
+    row.availability = target
+    db.commit()
+    db.refresh(row)
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="jurisdiction_service_registry",
+                     entity_id=row.id, old_value={"country": "SG", "availability": old},
+                     new_value={"country": "SG", "availability": target, "evidence": snapshot}, reason=reason)
     return row
 
 
@@ -7952,6 +8072,15 @@ def _set_jurisdiction_pack_status(
                 "This pack's Effective To date is before its Effective From date — "
                 "fix the date range before activating it; it would never resolve for any calculation."
             )
+        # Phase 6.10 (Singapore): G1 accepted, the golden vectors re-run
+        # against THIS pack's own rows, and a wage-month-aligned start. After
+        # the structural guards above (their refusals keep their messages),
+        # before the approver checks, and on the hotfix path too — none of it
+        # is an approver check.
+        if row.jurisdiction_country == "SG":
+            refusal = _sg_activation_evidence_refusal(db, row)
+            if refusal:
+                raise BadRequestException(refusal)
         # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
         # 19.2: "author cannot self-approve a production statutory
         # version"). `row.updated_by_id` here is whoever last edited the
@@ -13412,16 +13541,16 @@ def _sg_report_packs(db: Session, by_employee: dict, month_end: date) -> dict:
     (PayslipItem.tax_policy_pack_id), exactly as _sg_pinned_pack does for
     IR8A / SDL / EZPay / IR21, so a later pack (or the period's pack being
     Superseded) never changes a regenerated report. Only when no payslip of
-    the month carries a pinned pack (legacy rows) is the pack in force for
-    the wage month resolved instead, and the basis says so."""
+    the month carries a pinned pack (legacy rows) nothing is evaluated:
+    Phase 6.10 removed the fallback to the pack in force today — a report
+    never silently substitutes a pack the payroll was not calculated under
+    (basis UNPINNED)."""
     items = [i for payslips in by_employee.values() for i in payslips]
     pinned, pinned_ids = _sg_pinned_pack(db, items)
     if pinned_ids:
         return {"basis": "PINNED" if pinned is not None else "PINNED_MULTIPLE", "pack": pinned, "packIds": pinned_ids,
                 "rates": {pid: _sg_pack_rates(db, pid, month_end) for pid in pinned_ids}, "fallback": None}
-    pack, rates, _slabs = _sg_active_pack_and_rates(db, month_end)
-    return {"basis": "RESOLVED_FOR_WAGE_MONTH" if pack else "NONE", "pack": pack,
-            "packIds": [pack.id] if pack else [], "rates": {}, "fallback": (pack, rates)}
+    return {"basis": "UNPINNED" if items else "NONE", "pack": None, "packIds": [], "rates": {}, "fallback": None}
 
 
 def _sg_employee_pack_rates(packs: dict, payslips: list) -> tuple:
@@ -13435,7 +13564,8 @@ def _sg_employee_pack_rates(packs: dict, payslips: list) -> tuple:
         return packs["fallback"][1], None
     if packs["packIds"]:
         return {}, "payslip carries no pinned statutory pack while others in the month do — not evaluated"
-    return {}, "No Active Singapore statutory pack for the wage month — PWM floors are not in force"
+    return {}, ("The payslip carries no pinned statutory pack — not evaluated (a report never substitutes the "
+                "pack in force today for the one payroll was calculated under)")
 
 
 def _sg_report_pack_metadata(rendered: dict, packs: dict) -> None:
@@ -14174,6 +14304,133 @@ def _alembic_script_heads() -> tuple:
     return tuple(_SG_ALEMBIC_HEADS)
 
 
+def _sg_evidence_rows(db: Session, form_number: Optional[str] = None) -> list:
+    """Singapore gate / decision / deploy sign-off evidence as the readiness
+    summary evaluates it (statutory_summary._evidence_state) — an ordinary
+    SourceArtifact plus its immutable review / decision audit rows. Shared by
+    the summary and the Phase 6.10 activation gate so the two can never
+    disagree on whether a gate has passed."""
+    query = db.query(SourceArtifact)
+    if form_number:
+        query = query.filter(SourceArtifact.form_number == form_number)
+    else:
+        query = query.filter(or_(SourceArtifact.form_number.like("SG-GATE-G%"),
+                                 SourceArtifact.form_number.like("SG-DECISION-D%"),
+                                 SourceArtifact.form_number == "SG-OPS-DEPLOYMENT"))
+    evidence = [{"tag": a.form_number, "id": a.id, "title": a.title, "agency": a.agency, "sha256": a.checksum_sha256,
+                 "createdById": a.created_by_id, "reviewerId": a.reviewer_id,
+                 "reviewedAt": a.reviewer_approved_at.isoformat() if a.reviewer_approved_at else None,
+                 "superseded": a.superseded_by_id is not None, "hasFile": bool(a.file_path)}
+                for a in query.order_by(SourceArtifact.id).all()]
+    extra = _sg_evidence_audits(db, [e["id"] for e in evidence])
+    for e in evidence:
+        for value in extra.get(e["id"], []):
+            if "sgEvidenceOutcome" in value:
+                e.update({"outcome": value["sgEvidenceOutcome"], "notes": value.get("notes"),
+                          "validUntil": value.get("validUntil"), "outcomeBy": value["actorId"], "outcomeAt": value["at"]})
+            if "sgDecision" in value:
+                e.update({"selectedValue": value.get("selectedValue"), "decisionReason": value.get("reason"),
+                          "decisionMakerId": value["actorId"], "decidedAt": value["at"]})
+    return evidence
+
+
+def _sg_gate_state(db: Session, tag: str, as_of: Optional[date] = None) -> Optional[str]:
+    """PASS / UNDER_REVIEW / SUBMITTED / EXPIRED / REJECTED, or None when no
+    current artifact carries `tag` — the readiness summary's own derivation."""
+    from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import _evidence_state
+
+    return _evidence_state(_sg_evidence_rows(db, tag), tag, as_of or date.today())[0]
+
+
+# Phase 6.10: the golden vectors bound to the pack being activated.
+# run_golden_test_certification runs every fixture against the rate_map /
+# slabs embedded IN the fixture — it proves the engine, never the pack's
+# database rows. Before an SG pack goes Active, every fixture whose pay date
+# falls inside the pack's effective window is re-run with the fixture's
+# embedded rates REPLACED by this pack's own rows on that date; a single
+# mismatch (a wrong, missing or extra row) refuses activation.
+def _sg_pack_rows_for_golden(db: Session, pack: JurisdictionPack, on: date) -> tuple:
+    def text(v):
+        return None if v is None else str(v)
+
+    def effective(model):
+        return (model.organization_id.is_(None), model.jurisdiction_pack_id == pack.id,
+                or_(model.effective_from.is_(None), model.effective_from <= on),
+                or_(model.effective_to.is_(None), model.effective_to >= on))
+
+    rate_map = {r.component_key: {"employee_rate_pct": text(r.employee_rate_pct),
+                                  "employer_rate_pct": text(r.employer_rate_pct), "flat_amount": text(r.flat_amount),
+                                  "jurisdiction_state": r.jurisdiction_state, "text_value": r.text_value}
+                for r in db.query(ContributionRate).filter(*effective(ContributionRate)).all()}
+    slabs = [{**{k: text(getattr(t, k)) for k in ("min_amount", "max_amount", "rate_pct", "employer_rate_pct",
+                                                  "flat_amount", "adjustment_amount")},
+              **{k: getattr(t, k) for k in ("rule_type", "ni_category", "filing_status", "jurisdiction_state",
+                                            "assessment_basis", "tax_regime")},
+              "rate_label": t.rate_label or ""}
+             for t in db.query(TaxSlab).filter(*effective(TaxSlab)).all()]
+    return rate_map, slabs
+
+
+def sg_pack_golden_check(db: Session, pack: JurisdictionPack) -> dict:
+    """{casesInWindow, passed, failures:[{case, diffs|error}]} for this pack."""
+    import copy as _copy
+    import json as _json
+    from pathlib import Path as _Path
+
+    from app.modules.payroll.hmrc_golden_harness import GoldenCaseMismatch, run_golden_case
+
+    fixtures_dir = _Path(__file__).resolve().parents[3] / "tests" / "fixtures" / _GOLDEN_FIXTURES_DIR_BY_COUNTRY["SG"]
+    in_window, passed, failures = 0, 0, []
+    rows_on: dict = {}                               # most vectors share a pay date: one read per date
+    for path in sorted(fixtures_dir.glob("*.json")) if fixtures_dir.exists() else []:
+        if path.name.startswith("_"):
+            continue
+        with open(path, encoding="utf-8") as f:
+            case = _json.load(f)
+        pay_date = date.fromisoformat(case["context"]["pay_date"])
+        if not (pack.effective_from and pack.effective_from <= pay_date
+                and (pack.effective_to is None or pay_date <= pack.effective_to)):
+            continue
+        in_window += 1
+        bound = _copy.deepcopy(case)
+        if pay_date not in rows_on:
+            rows_on[pay_date] = _sg_pack_rows_for_golden(db, pack, pay_date)
+        bound["context"]["rate_map"], bound["context"]["slabs"] = _copy.deepcopy(rows_on[pay_date])
+        try:
+            run_golden_case(bound)
+            passed += 1
+        except GoldenCaseMismatch as e:
+            failures.append({"case": path.stem, "diffs": [{"field": d["field"], "expected": str(d["expected"]),
+                                                           "actual": str(d["actual"])} for d in e.diffs]})
+        except Exception as e:                                    # noqa: BLE001 — a crash is a failure, never a pass
+            failures.append({"case": path.stem, "error": f"{type(e).__name__}: {e}"})
+    return {"casesInWindow": in_window, "passed": passed, "failures": failures}
+
+
+def _sg_activation_evidence_refusal(db: Session, pack: JurisdictionPack) -> Optional[str]:
+    """Phase 6.10 Singapore activation gates beyond the country-scoped golden
+    run: G1 (CPF content certification) accepted, the pack reproducing every
+    golden vector in its window, and a wage-month-aligned effective date. Runs
+    on the normal AND the hotfix path — none of them is an approver check."""
+    if pack.effective_from and pack.effective_from.day != 1:
+        return (f"A Singapore pack must take effect on the 1st of a month (CPF resolves a whole wage month) — "
+                f"{pack.pack_id} v{pack.version} starts {pack.effective_from.isoformat()}.")
+    g1 = _sg_gate_state(db, "SG-GATE-G1")
+    if g1 != "PASS":
+        return ("Singapore packs need gate G1 (CPF content certification) evidence ACCEPTED before they can go "
+                f"Active — G1 is {g1 or 'EVIDENCE_REQUIRED'}. Record the signed independent comparison as "
+                "SG-GATE-G1; a different Super Admin reviews it.")
+    check = sg_pack_golden_check(db, pack)
+    if not check["casesInWindow"]:
+        return (f"No Singapore golden vector falls inside {pack.pack_id} v{pack.version}'s effective window — the "
+                "pack's own rows cannot be shown to reproduce any certified case.")
+    if check["failures"]:
+        return (f"{pack.pack_id} v{pack.version}'s own rows do not reproduce {len(check['failures'])} of "
+                f"{check['casesInWindow']} golden vector(s): "
+                + ", ".join(f["case"] for f in check["failures"][:5]) + " — fix the pack before activating it.")
+    return None
+
+
 def _sg_database_state(db: Session) -> dict:
     """Read-only runtime facts for the readiness dashboard: the database's
     Alembic revision against the code's head, and whether every Singapore
@@ -14394,23 +14651,7 @@ def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
     # ordinary SourceArtifact tagged with form_number SG-GATE-G1..G8 or
     # SG-DECISION-D1..D3 — the existing Source Evidence store (SHA-256, file
     # upload, reviewer != creator, audited review). No new table.
-    evidence = [{"tag": a.form_number, "id": a.id, "title": a.title, "agency": a.agency, "sha256": a.checksum_sha256,
-                 "createdById": a.created_by_id, "reviewerId": a.reviewer_id,
-                 "reviewedAt": a.reviewer_approved_at.isoformat() if a.reviewer_approved_at else None,
-                 "superseded": a.superseded_by_id is not None, "hasFile": bool(a.file_path)}
-                for a in db.query(SourceArtifact).filter(or_(SourceArtifact.form_number.like("SG-GATE-G%"),
-                                                             SourceArtifact.form_number.like("SG-DECISION-D%")))
-                .order_by(SourceArtifact.id).all()]
-    extra = _sg_evidence_audits(db, [e["id"] for e in evidence])
-    for e in evidence:
-        for value in extra.get(e["id"], []):
-            if "sgEvidenceOutcome" in value:
-                e.update({"outcome": value["sgEvidenceOutcome"], "notes": value.get("notes"),
-                          "validUntil": value.get("validUntil"), "outcomeBy": value["actorId"], "outcomeAt": value["at"]})
-            if "sgDecision" in value:
-                e.update({"selectedValue": value.get("selectedValue"), "decisionReason": value.get("reason"),
-                          "decisionMakerId": value["actorId"], "decidedAt": value["at"]})
-    governance["evidence"] = evidence
+    governance["evidence"] = _sg_evidence_rows(db)
     governance["database"] = _sg_database_state(db)
 
     return build_statutory_summary({
@@ -14421,6 +14662,8 @@ def get_sg_statutory_summary(db: Session, as_of: Optional[date] = None) -> dict:
         "pwm_schedule": pwm_schedule, "templates": templates,
         "ais_calendar": ({"dueDate": calendar_row.due_date.isoformat(), "periodLabel": calendar_row.period_label,
                           "status": calendar_row.status} if calendar_row else None),
+        # Phase 6.10: the vectors re-run against the pack the values come from.
+        "pack_golden_check": sg_pack_golden_check(db, values_pack) if values_pack is not None else None,
         "latest_golden": ({"status": golden.status, "passedCases": golden.passed_cases,
                            "totalCases": golden.total_cases,
                            "runAt": golden.run_at.isoformat() if golden.run_at else None} if golden else None),
