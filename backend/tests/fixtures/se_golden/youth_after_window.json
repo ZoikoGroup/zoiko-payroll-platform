@@ -1,0 +1,68 @@
+{
+  "description": "Youth-cohort payment on 1 Oct 2027 — after the relief window ends: full 31.42% (Sep 2027 end-date regression).",
+  "source": "ZP-SE-ENG-001 §3 [S1]: 31.42% standard; 10.21% born 1938–1958; 0% born ≤1937; youth 20.81% up to SEK 25,000/month for payments 1 Apr 2026 – 30 Sep 2027.",
+  "context": {
+    "country": "SE",
+    "pay_frequency": "Monthly",
+    "gross": "30000",
+    "pay_date": "2027-10-01",
+    "date_of_birth": "2006-06-01",
+    "rate_map": {
+      "se_er_age_pension": {
+        "employer_rate_pct": "10.21"
+      },
+      "se_er_survivor_pension": {
+        "employer_rate_pct": "0.60"
+      },
+      "se_er_health_insurance": {
+        "employer_rate_pct": "3.55"
+      },
+      "se_er_parental_insurance": {
+        "employer_rate_pct": "2.60"
+      },
+      "se_er_work_injury": {
+        "employer_rate_pct": "0.20"
+      },
+      "se_er_labour_market": {
+        "employer_rate_pct": "2.64"
+      },
+      "se_er_general_payroll_tax": {
+        "employer_rate_pct": "11.62"
+      },
+      "se_zero_cohort_max_birth_year": {
+        "flat_amount": "1937"
+      },
+      "se_older_cohort_max_birth_year": {
+        "flat_amount": "1958"
+      },
+      "se_youth_reduced": {
+        "employer_rate_pct": "20.81",
+        "effective_from": "2026-04-01",
+        "effective_to": "2027-09-30"
+      },
+      "se_youth_monthly_threshold": {
+        "flat_amount": "25000",
+        "effective_from": "2026-04-01",
+        "effective_to": "2027-09-30"
+      },
+      "se_sink": {
+        "employee_rate_pct": "22.5"
+      },
+      "se_supplementary_rate": {
+        "employee_rate_pct": "30"
+      },
+      "se_slp": {
+        "employer_rate_pct": "24.26"
+      }
+    },
+    "slabs": [],
+    "sweden_statutory_profile": {
+      "se_tax_status": "A_TAX",
+      "se_income_role": "SUPPLEMENTARY_INCOME",
+      "se_cba_status": "NONE"
+    }
+  },
+  "expected": {
+    "se_employer_contribution": "9426.00"
+  }
+}

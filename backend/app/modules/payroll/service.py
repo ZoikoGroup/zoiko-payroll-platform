@@ -65,6 +65,7 @@ from app.modules.payroll.models import (
     FranceDsnSubmission, FranceDsnOutboxItem,
     IrelandRpnSnapshot, IrelandMyFutureFundStatus,
     IrelandStatutorySickLeaveRecord,
+    CollectiveAgreement, SwedenSickEpisode, SwedenLeaveLedger,
 )
 from app.modules.payroll.engine.jurisdictions.germany.pap import production_gate as pap_production_gate
 from app.modules.payroll.employee_validation import (
@@ -6865,6 +6866,47 @@ def _fr_payslip_snapshot(result) -> Optional[dict]:
     })
 
 
+def _se_payslip_snapshot(result) -> "dict | None":
+    """PayslipItem.se_calculation_snapshot for a Sweden result (None for
+    every other country) — the withholding strategy + table/column actually
+    applied, the employer-contribution cohort and component breakdown, SLP,
+    plan premiums and se_calculation_trace verbatim, JSON-safe. Gated on
+    se_employee_total, the one key the Sweden engine always sets. A snapshot,
+    never a re-derivation: spec §29 requires historical payroll to replay the
+    rule pack of the ORIGINAL payment date, and this is that evidence."""
+    if getattr(result, "se_employee_total", None) is None:
+        return None
+    return _jsonable_decimal({
+        "withholding": {
+            "amount": result.se_preliminary_tax,
+            "strategy": result.se_tax_strategy,
+            "unrounded": result.se_withholding_unrounded,
+            "table": result.se_tax_table,
+            "column": result.se_tax_column,
+            "tax_status": result.se_tax_status,
+            "income_role": result.se_income_role,
+        },
+        "employer_contribution": {
+            "amount": result.se_employer_contribution,
+            "rate": result.se_employer_contribution_rate,
+            "cohort": result.se_employer_contribution_cohort,
+            "base": result.se_employer_contribution_base,
+            "components": result.se_employer_contribution_components,
+            "youth_applied": result.se_youth_applied,
+            "month_compensation": result.se_month_compensation,
+        },
+        "slp": result.se_slp,
+        "occupational_pension": {
+            "plan": result.se_pension_plan,
+            "employee": result.se_occupational_pension_employee,
+            "employer": result.se_occupational_pension_employer,
+        },
+        "employee_total": result.se_employee_total,
+        "employer_total": result.se_employer_total,
+        "trace": result.se_calculation_trace,
+    })
+
+
 def _france_blocked(exc) -> "FranceCalculationBlockedException":
     return FranceCalculationBlockedException(exc.code, exc.message, trace={"code": exc.code, "message": exc.message})
 
@@ -7561,6 +7603,14 @@ def sync_org_rates_from_canonical(
             # configured for.
             filing_status=cr.filing_status, tax_regime=cr.tax_regime,
         )
+        if country == "SE":
+            # Sweden's temporary youth reduction is defined by the ROW's own
+            # payment-date window (SE-005) and sweden.py re-checks it from
+            # these fields — dropping them here would turn a windowed rate
+            # into an open-ended one on every synced org row. Scoped to SE so
+            # no other country's synced rows change shape.
+            fields.update(effective_from=cr.effective_from, effective_to=cr.effective_to,
+                          text_value=cr.text_value)
         if existing:
             for k, v in fields.items():
                 setattr(existing, k, v)
@@ -7644,6 +7694,16 @@ def sync_org_rates_from_canonical(
                 # future country overloading TaxSlab.filing_status the
                 # same way AU does would have hit this identically.
                 filing_status=ts.filing_status,
+                # Sweden (ZP-SE-ENG-001 §5): which authority table/column a
+                # band belongs to — NULL on every other country's rows, so
+                # copying it is inert elsewhere.
+                tax_table_number=ts.tax_table_number, tax_column=ts.tax_column,
+                # AMOUNT/PERCENT band basis + row dating, Sweden only: the SE
+                # engine refuses a band with no declared basis, so dropping it
+                # would block every synced org; scoped so SG/UK bands (which
+                # also use assessment_basis) keep today's exact sync shape.
+                **(dict(assessment_basis=ts.assessment_basis, effective_from=ts.effective_from,
+                        effective_to=ts.effective_to) if country == "SE" else {}),
                 # Each slab keeps its OWN originating pack id (a state
                 # layer row folded in above came from a different pack
                 # than `pack` itself) rather than being force-tagged with
@@ -7694,6 +7754,12 @@ def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_i
         ni_category=data.niCategory, employer_rate_pct=data.employerRatePct,
         sort_order=data.sortOrder, jurisdiction_pack_id=data.jurisdictionPackId,
     )
+    # Sweden table/column discriminators — only when explicitly sent, so a
+    # form that doesn't know about them never wipes a band's table/column.
+    if "taxTableNumber" in data.model_fields_set:
+        fields["tax_table_number"] = data.taxTableNumber
+    if "taxColumn" in data.model_fields_set:
+        fields["tax_column"] = data.taxColumn
     # Row dating only when explicitly sent (see CanonicalTaxSlabUpsert).
     if "effectiveFrom" in data.model_fields_set:
         fields["effective_from"] = data.effectiveFrom
@@ -8038,24 +8104,57 @@ def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[Jurisdicti
     )
 
 
+def se_activation_blockers(db: Session, pack) -> list:
+    """ZP-SE-ENG-001 §37/§16 — why a Sweden tax pack may NOT go Active yet
+    (empty list = complete). Checks the pack's OWN canonical rows, not an
+    org's cache: every parameter the engine requires (fallback_registry) is
+    configured, and every SE_TAX_TABLE / SE_ONE_TIME_PAYMENT row declares an
+    AMOUNT/PERCENT basis (an unfilled Draft scaffold never activates)."""
+    from app.modules.payroll.engine.countries.sweden import SE_ONE_TIME_PAYMENT_RULE, SE_TAX_TABLE_RULE
+    from app.modules.payroll.engine.fallback_registry import get_required_parameter_keys
+
+    blockers = []
+    rates = {
+        _normalize_engine_component_key(r.component_key): r
+        for r in db.query(ContributionRate).filter(
+            ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))
+    }
+    for req in get_required_parameter_keys("SE"):
+        row = rates.get(req["key"])
+        configured = row is not None and (
+            getattr(row, f"{req['side']}_rate_pct", None) is not None if req["side"] else row.flat_amount is not None)
+        if not configured:
+            blockers.append(f"missing {req['key']} ({req['label']})")
+    slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None)).all()
+    tables = [s for s in slabs if s.rule_type == SE_TAX_TABLE_RULE]
+    if not tables:
+        blockers.append("no SE_TAX_TABLE bands configured")
+    unfilled = [s for s in slabs if s.rule_type in (SE_TAX_TABLE_RULE, SE_ONE_TIME_PAYMENT_RULE)
+                and (s.assessment_basis or "").upper() not in ("AMOUNT", "PERCENT")]
+    if unfilled:
+        blockers.append(f"{len(unfilled)} tax-table/one-time row(s) are unfilled Draft scaffolds "
+                        f"(e.g. {unfilled[0].rate_label})")
+    return blockers
+
+
 # Display names for the per-country opt-in activation gates below.
-_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore"}
+_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG",)
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG",)
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG",)
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG",)
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -8194,7 +8293,9 @@ def _set_jurisdiction_pack_status(
         # SG opted in 2026-09-23 (ZP-SG-ENG-001 SG-003: only APPROVED,
         # evidenced, certified content may activate) — same gate as US,
         # plus the stricter "a real PASS run must exist" check below.
-        if row.jurisdiction_country in ("US", "SG"):
+        # SE opted in 2026-09-30 (ZP-SE-ENG-001 §16: primary-source statutory
+        # pack approved before activation) — the SG gate, verbatim.
+        if row.jurisdiction_country in ("US", "SG", "SE"):
             if not row.source_document_id:
                 raise BadRequestException(
                     "This pack needs a linked Source Evidence artifact before it can go Active — "
@@ -8237,11 +8338,21 @@ def _set_jurisdiction_pack_status(
             # pass — the spec requires golden vectors passing before
             # activation (SG-003/SG-049). US keeps its existing, more
             # lenient behavior above unchanged.
-            if row.jurisdiction_country == "SG" and (latest_run is None or latest_run.status != "PASS"):
+            if row.jurisdiction_country in ("SG", "SE") and (latest_run is None or latest_run.status != "PASS"):
+                name = _GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]
                 raise BadRequestException(
-                    "Singapore packs need a passing golden-vector certification run before they can go Active — "
-                    "run Test Certification for SG first."
+                    f"{name} packs need a passing golden-vector certification run before they can go Active — "
+                    f"run Test Certification for {row.jurisdiction_country} first."
                 )
+            # Sweden §37 completeness gate: every engine-required parameter
+            # present in THIS pack and no inert tax-table scaffold left.
+            if row.jurisdiction_country == "SE":
+                blockers = se_activation_blockers(db, row)
+                if blockers:
+                    raise BadRequestException(
+                        "This Sweden pack is not complete enough to go Active: " + "; ".join(blockers[:5])
+                        + (f" (+{len(blockers) - 5} more)" if len(blockers) > 5 else "")
+                    )
         # Prevent two simultaneously-Active tax versions for the same
         # country+state+regime whose EFFECTIVE DATE RANGES actually overlap
         # (Phase 22 duplicate/overlap guard). Originally compared tax_year
@@ -8674,6 +8785,15 @@ def activate_jurisdiction_pack_hotfix(
             "Policy packs have no approval gate, so hotfix activation is not applicable — "
             "set the pack's status directly to 'Active' instead."
         )
+    if row.jurisdiction_country == "SE":
+        # ZP-SE-ENG-001 §14: four-eyes is REQUIRED for country-content
+        # activation, and hotfix mode exists to self-approve — so Sweden has
+        # no hotfix path at all (the SG "PROHIBITED" policy, fixed).
+        refusal = ("Sweden hotfix activation is not permitted — Swedish statutory content must be activated "
+                   "through the normal four-eyes path (ZP-SE-ENG-001 §14).")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, refusal,
+                       path="hotfix")
+        raise BadRequestException(refusal)
     if row.jurisdiction_country == "SG":
         policy_refusal = None
         if SG_HOTFIX_POLICY == "PROHIBITED":
@@ -8735,7 +8855,7 @@ def list_pack_hotfix_activations(db: Session, reviewed: Optional[bool] = None) -
 # ran the hotfix, and a completed review is final (never replaced). Same
 # per-country opt-in pattern as F2; other countries keep their existing
 # review behaviour (hotfix mode exists for single-Super-Admin sessions).
-_HOTFIX_DISTINCT_REVIEWER_COUNTRIES = ("SG",)
+_HOTFIX_DISTINCT_REVIEWER_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 
 # Singapore hotfix policy — OWNER DECISION D2 (docs/SINGAPORE_FINAL_
 # IMPLEMENTATION_STATUS.md §20). The default reproduces the behaviour in force
@@ -9013,6 +9133,26 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG = {
         "ie_calculation_snapshot.labour.nmw_rate": ("NMW Hourly Rate Applied", "currency", True),
         "ie_calculation_snapshot.labour.effective_hourly": ("Effective Hourly Pay (NMW check)", "currency", True),
     },
+}
+
+# Sweden (ZP-SE-ENG-001 §10) — the per-payee AGI figures, read from the
+# frozen se_calculation_snapshot (no scalar PayslipItem column exists for them).
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"] = {
+    "se_calculation_snapshot.withholding.amount": ("Preliminary Tax Deducted", "currency", True),
+    "se_calculation_snapshot.withholding.strategy": ("Withholding Strategy", "text", False),
+    "se_calculation_snapshot.withholding.table": ("Tax Table", "text", False),
+    "se_calculation_snapshot.withholding.column": ("Tax Column", "text", False),
+    "se_calculation_snapshot.withholding.tax_status": ("Worker Tax Status", "text", False),
+    "se_calculation_snapshot.withholding.income_role": ("Income Role", "text", False),
+    "se_calculation_snapshot.employer_contribution.amount": ("Employer Contributions", "currency", True),
+    "se_calculation_snapshot.employer_contribution.base": ("Employer-Contribution Base", "currency", True),
+    "se_calculation_snapshot.employer_contribution.cohort": ("Employer-Contribution Cohort", "text", False),
+    "se_calculation_snapshot.employer_contribution.rate": ("Employer-Contribution Rate %", "text", False),
+    "se_calculation_snapshot.slp": ("Special Payroll Tax on Pension Costs (SLP)", "currency", True),
+    "se_calculation_snapshot.occupational_pension.employee": ("Occupational Pension (Employee)", "currency", True),
+    "se_calculation_snapshot.occupational_pension.employer": ("Occupational Pension (Employer)", "currency", True),
+    "se_calculation_snapshot.employee_total": ("Total Employee Statutory Deductions", "currency", True),
+    "se_calculation_snapshot.employer_total": ("Total Employer Statutory Cost", "currency", True),
 }
 
 _PAYROLL_RUN_FIELD_CATALOG = {
@@ -9343,6 +9483,13 @@ def get_available_report_data_fields(country: str) -> List[dict]:
 # above, just for components instead of fields. Keyed by report_type;
 # falls back to a generic set for an unrecognized type.
 _REPORT_COMPONENTS_BY_TYPE = {
+    # Sweden AGI individual statement (ZP-SE-ENG-001 §10) — per payee per
+    # payment month. Data extract only; XML generation is a gated phase.
+    "AGI": [
+        ("payee", "Payee"), ("remuneration", "Remuneration"),
+        ("tax", "Deducted tax"), ("employer", "Employer contributions"),
+        ("absence", "Parental / VAB absence"),
+    ],
     "TDS": [
         ("employer_info", "Employer Information"), ("employee_info", "Employee Information"),
         ("earnings", "Earnings"), ("deductions", "Deductions"), ("tax", "Tax"),
@@ -18137,7 +18284,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden"}
 
 
 def run_golden_test_certification(
@@ -18798,6 +18945,12 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _resolve_ie_calc_inputs(db, organization_id, emp, period_end or date.today())
             if emp_country == "IE" else None
         )
+        # Sweden (ZP-SE-ENG-001): worker profile + youth-threshold month
+        # accumulator. Read-only; a preview never advances anything.
+        sweden_inputs = (
+            _resolve_se_calc_inputs(db, organization_id, emp, period_end or date.today())
+            if emp_country == "SE" else None
+        )
         germany_kwargs = {}
         if emp_country == "DE":
             resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
@@ -18930,6 +19083,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             **germany_kwargs,
             france_inputs=france_inputs,
         ireland_inputs=ireland_inputs,
+            sweden_inputs=sweden_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -20568,6 +20722,60 @@ def _resolve_ie_calc_inputs(db: Session, organization_id: int, employee, payroll
         "ireland_ytd": ytd,
         "ireland_employee_id": employee.id,
         "ireland_organization_id": organization_id,
+    }
+
+
+# Payroll runs whose payslips are COMMITTED remuneration for Sweden's youth
+# threshold accumulator: a Draft/Review run is not yet payroll, and counting
+# it would let a regenerated draft consume the SEK threshold twice.
+_SE_COMMITTED_RUN_STATUSES = (
+    PayrollStatus.APPROVED.value, PayrollStatus.AUTHORIZED.value,
+    PayrollStatus.PAID.value, PayrollStatus.CLOSED.value,
+)
+
+
+def _se_month_to_date_prior(db: Session, organization_id: int, employee_id: int, pay_date,
+                            exclude_run_id: Optional[int] = None) -> Decimal:
+    """spec §6 "Threshold allocation": remuneration ALREADY paid by this
+    employer to this person in the same calendar payment month (SE-005:
+    payment date decides the month), from committed runs only. The youth
+    reduction's SEK cap is allocated against this before the current run."""
+    month_start = pay_date.replace(day=1)
+    next_month = (month_start.replace(year=month_start.year + 1, month=1) if month_start.month == 12
+                  else month_start.replace(month=month_start.month + 1))
+    query = (
+        db.query(sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0))
+        .join(PayrollRun, PayrollRun.id == PayslipItem.payroll_run_id)
+        .filter(
+            PayslipItem.organization_id == organization_id,
+            PayslipItem.employee_id == employee_id,
+            PayrollRun.pay_date >= month_start, PayrollRun.pay_date < next_month,
+            PayrollRun.status.in_(_SE_COMMITTED_RUN_STATUSES),
+        )
+    )
+    if exclude_run_id is not None:
+        query = query.filter(PayrollRun.id != exclude_run_id)
+    return Decimal(str(query.scalar() or 0))
+
+
+def _resolve_se_calc_inputs(db: Session, organization_id: int, employee, payroll_date,
+                            exclude_run_id: Optional[int] = None) -> dict:
+    """Build build_context_from_employee(sweden_inputs=...) for one Swedish
+    employee on payroll_date — the worker tax/social-insurance profile in
+    force on that date, the youth-threshold month accumulator and the
+    worker's date of birth (cohort). Same discipline as _resolve_ie_calc_inputs:
+    only facts, never a statutory result; anything it cannot establish is
+    left absent so sweden.py raises its own specific block (spec §5)."""
+    profile = resolve_employee_statutory_profile(db, employee.id, organization_id, as_of=payroll_date)
+    return {
+        "sweden_statutory_profile": profile,
+        "se_organization_id": organization_id,
+        "se_employee_id": employee.id,
+        "se_month_to_date_prior": _se_month_to_date_prior(
+            db, organization_id, employee.id, payroll_date, exclude_run_id=exclude_run_id),
+        # SLP base (SE-007) is the employer pension-cost LEDGER, which has no
+        # Sweden source yet — left unset, which the engine treats as a
+        # legitimate zero, never as gross pay.
     }
 
 
@@ -23698,6 +23906,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         _resolve_ie_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
         if country == "IE" else None
     )
+    sweden_inputs = (
+        _resolve_se_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "SE" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -23743,6 +23955,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         **germany_kwargs,
         france_inputs=france_inputs,
         ireland_inputs=ireland_inputs,
+        sweden_inputs=sweden_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -23900,6 +24113,8 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # IE-045 (no reconstructing a historical result from current content)
         # is only satisfiable because the RPN actually applied is frozen here.
         "ie_calculation_snapshot": _ie_payslip_snapshot(result),
+        # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
+        "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
         # above, for the before/after cumulative figures this payslip
         # actually consumed per component. None unless YTD accumulation
@@ -25670,8 +25885,78 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         if data.de_grundlohn_hourly is not None and data.de_grundlohn_hourly <= 0:
             errors.append("de_grundlohn_hourly must be greater than 0.")
 
+    if country_code == "SE":
+        errors.extend(_se_profile_field_errors(data))
+
     if errors:
         raise BadRequestException("; ".join(errors))
+
+
+# Sweden worker-profile vocabularies (ZP-SE-ENG-001 §2/§5/§9/§11) — the exact
+# values engine/countries/sweden.py resolves; anything else would only ever
+# block at calculation time, so it is refused at write time instead.
+_SE_TAX_STATUSES = {"A_TAX", "SINK", "SPECIAL_DECISION", "OTHER"}
+_SE_INCOME_ROLES = {"MAIN_INCOME", "SUPPLEMENTARY_INCOME", "ONE_TIME_PAYMENT", "POST_EMPLOYMENT"}
+_SE_SINK_STATUSES = {"VALID", "EXPIRED", "PENDING", "NOT_APPLICABLE"}
+_SE_SOCIAL_INSURANCE_STATUSES = {"SWEDISH", "FOREIGN_COVERAGE", "A1", "SOCIAL_SECURITY_AGREEMENT"}
+_SE_CBA_STATUSES = {"NONE", "EMPLOYER_SPECIFIC", "SECTOR", "LOCAL_SUPPLEMENT"}
+_SE_TAX_TABLES = {str(n) for n in range(29, 43)}
+
+
+def _se_profile_field_errors(data) -> list:
+    """Write-time refusals for a Sweden statutory profile — each one a state
+    the engine could never lawfully calculate from (spec §5 failure cases,
+    SE-001 override evidence, §9 explicit CBA status)."""
+    errors = []
+
+    def _enum(field, allowed):
+        value = getattr(data, field, None)
+        if value is not None and value not in allowed:
+            errors.append(f"{field} must be one of {sorted(allowed)}.")
+
+    _enum("se_tax_status", _SE_TAX_STATUSES)
+    _enum("se_income_role", _SE_INCOME_ROLES)
+    _enum("se_sink_status", _SE_SINK_STATUSES)
+    _enum("se_social_insurance_status", _SE_SOCIAL_INSURANCE_STATUSES)
+    _enum("se_cba_status", _SE_CBA_STATUSES)
+    if data.se_tax_table is not None and data.se_tax_table not in _SE_TAX_TABLES:
+        errors.append("se_tax_table must be a Skatteverket table number 29–42.")
+    if data.se_tax_status == "SINK" and data.se_sink_status is None:
+        errors.append("se_sink_status is required when se_tax_status is SINK (spec §3 [S5]).")
+    if data.se_tax_status == "A_TAX" and data.se_income_role == "MAIN_INCOME" and not data.se_decision_override:
+        if not data.se_tax_table or not data.se_tax_column:
+            errors.append("A-tax main income needs se_tax_table and se_tax_column, or a Skatteverket decision (spec §5 step 3).")
+    if data.se_decision_override:
+        # SE-001: a manual override requires evidence + effective dates, and
+        # spec §5 step 4 requires an executable instruction.
+        if not data.se_skatteverket_decision_id:
+            errors.append("se_skatteverket_decision_id is required when se_decision_override is set (SE-001).")
+        if data.se_decision_effective_from is None:
+            errors.append("se_decision_effective_from is required when se_decision_override is set (SE-001).")
+        if data.se_decision_monthly_withholding is None and data.se_decision_rate_pct is None:
+            errors.append("A Skatteverket decision needs se_decision_monthly_withholding or se_decision_rate_pct.")
+        if data.se_decision_monthly_withholding is not None and data.se_decision_rate_pct is not None:
+            errors.append("Set either se_decision_monthly_withholding or se_decision_rate_pct, not both.")
+        if not data.reason:
+            errors.append("reason is required for a Skatteverket decision override (SE-001).")
+    if (data.se_decision_effective_from and data.se_decision_effective_to
+            and data.se_decision_effective_to < data.se_decision_effective_from):
+        errors.append("se_decision_effective_to must not be before se_decision_effective_from.")
+    if data.se_decision_monthly_withholding is not None and data.se_decision_monthly_withholding < 0:
+        errors.append("se_decision_monthly_withholding must not be negative.")
+    if data.se_decision_rate_pct is not None and not (Decimal("0") <= data.se_decision_rate_pct <= Decimal("100")):
+        errors.append("se_decision_rate_pct must be between 0 and 100.")
+    for field in ("se_employee_pension_share", "se_employer_pension_share"):
+        value = getattr(data, field, None)
+        if value is not None and not (Decimal("0") <= value <= Decimal("100")):
+            errors.append(f"{field} must be between 0 and 100.")
+    if data.se_cba_status not in (None, "NONE") and data.se_cba_id is None:
+        errors.append("se_cba_id is required unless se_cba_status is NONE — no agreement is ever applied implicitly (spec §9).")
+    if data.se_cba_status == "NONE" and data.se_cba_id is not None:
+        errors.append("se_cba_id must be empty when se_cba_status is NONE.")
+    if (data.se_coverage_start and data.se_coverage_end and data.se_coverage_end < data.se_coverage_start):
+        errors.append("se_coverage_end must not be before se_coverage_start.")
+    return errors
 
 
 def _validate_statutory_profile_no_overlap(
@@ -25776,6 +26061,46 @@ def create_employee_statutory_profile_version(
         de_elstam_schema_version=data.de_elstam_schema_version,
         de_elstam_import_reference=data.de_elstam_import_reference,
         de_grundlohn_hourly=data.de_grundlohn_hourly,
+        # Sweden (ZP-SE-ENG-001 §2/§20/§21) — applicability-resolver facts,
+        # appended verbatim like the de_* block above; se_cba_id references a
+        # payroll_collective_agreements row validated by
+        # _validate_statutory_profile_fields (SE branch).
+        se_tax_status=data.se_tax_status,
+        se_income_role=data.se_income_role,
+        se_tax_table=data.se_tax_table,
+        se_tax_column=data.se_tax_column,
+        se_skatteverket_decision_id=data.se_skatteverket_decision_id,
+        se_decision_effective_from=data.se_decision_effective_from,
+        se_decision_effective_to=data.se_decision_effective_to,
+        se_decision_override=data.se_decision_override,
+        se_decision_monthly_withholding=data.se_decision_monthly_withholding,
+        se_decision_rate_pct=data.se_decision_rate_pct,
+        se_sink_status=data.se_sink_status,
+        se_sink_decision=data.se_sink_decision,
+        se_residence_municipality=data.se_residence_municipality,
+        se_tax_table_area=data.se_tax_table_area,
+        se_social_insurance_status=data.se_social_insurance_status,
+        se_foreign_coverage_status=data.se_foreign_coverage_status,
+        se_a1_status=data.se_a1_status,
+        se_agreement_country=data.se_agreement_country,
+        se_coverage_start=data.se_coverage_start,
+        se_coverage_end=data.se_coverage_end,
+        se_evidence_document=data.se_evidence_document,
+        se_evidence_validation=data.se_evidence_validation,
+        se_cba_status=data.se_cba_status,
+        se_cba_id=data.se_cba_id,
+        se_cba_version=data.se_cba_version,
+        se_occupation=data.se_occupation,
+        se_grade=data.se_grade,
+        se_pension_plan=data.se_pension_plan,
+        se_pension_provider=data.se_pension_provider,
+        se_employee_pension_share=data.se_employee_pension_share,
+        se_employer_pension_share=data.se_employer_pension_share,
+        se_payroll_period=data.se_payroll_period,
+        se_agi_reporting_period=data.se_agi_reporting_period,
+        se_monthly_gross=data.se_monthly_gross,
+        se_taxable_benefits=data.se_taxable_benefits,
+        se_annual_income=data.se_annual_income,
     )
     db.add(row)
     db.commit()
@@ -29733,6 +30058,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _resolve_ie_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
         if country == "IE" else None
     )
+    sweden_inputs = (
+        _resolve_se_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
+        if country == "SE" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved_de = _resolve_germany_calc_inputs(db, organization_id, employee, run.pay_date)
@@ -29853,6 +30182,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         **germany_kwargs,
         france_inputs=france_inputs,
         ireland_inputs=ireland_inputs,
+        sweden_inputs=sweden_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
@@ -36803,3 +37133,468 @@ def transition_france_dsn_outbox_item(
                      entity_id=item.id, legal_reference="FR-033",
                      old_value={"status": old_status}, new_value={"status": status})
     return item
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sweden (ZP-SE-ENG-001) — readiness, preview, collective-agreement registry,
+# sick-pay episodes and annual-leave ledgers.
+#
+# Statutory figures are computed ONLY by engine/countries/sweden.py; this
+# layer assembles facts, enforces governance (four-eyes, explicit CBA status,
+# no national default agreement) and stores the separate ledgers SE-006 and
+# spec §8 require. Nothing here activates live Swedish payroll.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _latest_se_tax_pack(db: Session, pack_id: Optional[int] = None):
+    query = db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == "SE",
+                                             JurisdictionPack.pack_type == "tax")
+    if pack_id is not None:
+        pack = query.filter(JurisdictionPack.id == pack_id).first()
+        if pack is None:
+            raise NotFoundException("JurisdictionPack", pack_id)
+        return pack
+    # Default: the pack in force today; else the most recent one.
+    today = date.today()
+    in_force = (query.filter(or_(JurisdictionPack.effective_from.is_(None), JurisdictionPack.effective_from <= today),
+                             or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= today))
+                .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first())
+    return in_force or query.order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).first()
+
+
+def get_se_readiness(db: Session, pack_id: Optional[int] = None) -> dict:
+    """spec §16 release gates / §37 checklist for one Sweden tax pack —
+    read-only. `ready` is True only when every REQUIRED item is complete;
+    the items that depend on work outside this platform (specialist
+    sign-off, AGI XML certification, parallel payroll) are listed as
+    required and stay incomplete until evidenced — Sweden never becomes
+    production-ready merely because the country record exists."""
+    pack = _latest_se_tax_pack(db, pack_id)
+    items = []
+
+    def add(key, label, complete, detail=None, required=True):
+        items.append({"key": key, "label": label, "required": required, "complete": bool(complete), "detail": detail})
+
+    if pack is None:
+        add("statutory_pack", "Sweden statutory tax pack exists", False, "No SE tax pack — run the Sweden seed.")
+        return {"packId": None, "packVersion": None, "ready": False, "items": items,
+                "blockers": ["No Sweden tax pack exists."]}
+
+    source = (db.query(SourceArtifact).filter(SourceArtifact.id == pack.source_document_id).first()
+              if pack.source_document_id else None)
+    add("source_evidence", "Primary-source evidence linked to the pack", source is not None,
+        source.title if source else "Link a Source Evidence artifact.")
+    add("specialist_review", "Swedish payroll/tax specialist has reviewed the evidence (§16)",
+        bool(source and source.reviewer_approved_at),
+        "Reviewed" if source and source.reviewer_approved_at else "Awaiting independent review of the source artifact.")
+    content_blockers = se_activation_blockers(db, pack)
+    param_blockers = [b for b in content_blockers if b.startswith("missing ")]
+    table_blockers = [b for b in content_blockers if not b.startswith("missing ")]
+    add("parameters", "Employer-contribution, SINK, SLP and cohort parameters configured", not param_blockers,
+        "; ".join(param_blockers) or "All required parameters configured.")
+    add("tax_tables", "Tax tables 29–42 and one-time-payment tables entered from Skatteverket", not table_blockers,
+        "; ".join(table_blockers) or "All tax-table rows declare an AMOUNT/PERCENT basis.")
+    latest_run = (db.query(TestCertificationRun).filter(TestCertificationRun.jurisdiction_country == "SE")
+                  .order_by(TestCertificationRun.run_at.desc(), TestCertificationRun.id.desc()).first())
+    add("certification", "Golden-vector certification PASS", latest_run is not None and latest_run.status == "PASS",
+        f"Latest run #{latest_run.id}: {latest_run.status}" if latest_run else "No SE certification run yet.")
+    add("approval", "Distinct approver recorded (four-eyes)", pack.approved_by_id is not None,
+        "Approved" if pack.approved_by_id else "Not yet approved by a distinct Super Admin.")
+    calendar_rows = (db.query(StatutoryFilingCalendar)
+                     .filter(StatutoryFilingCalendar.jurisdiction_country == "SE",
+                             StatutoryFilingCalendar.report_type == "AGI",
+                             StatutoryFilingCalendar.reporting_year == (pack.tax_year or "")).count())
+    add("agi_calendar", "AGI declaration/payment calendar for the income year", calendar_rows >= 12,
+        f"{calendar_rows} of 12 monthly periods configured.")
+    agi_template = (db.query(ReportTemplate).filter(ReportTemplate.jurisdiction_country == "SE",
+                                                    ReportTemplate.report_type == "AGI").first())
+    add("agi_template", "AGI individual-statement template", agi_template is not None,
+        f"{agi_template.template_key} ({agi_template.status})" if agi_template else "Not seeded.")
+    add("agi_xml", "AGI XML generated and validated against Technical Description 1.1.18.2 (§10/§16)", False,
+        "Not built — XML generation and Skatteverket test-service validation are a separate, gated phase (SE-008).")
+    add("parallel_payroll", "Two reconciled parallel payroll cycles (§16)", False,
+        "Evidence required from the implementation team.")
+    cba_count = (db.query(CollectiveAgreement)
+                 .filter(CollectiveAgreement.jurisdiction_country == "SE", CollectiveAgreement.status == "Active").count())
+    add("cba_registry", "Collective-agreement registry (optional: no national default exists)", True,
+        f"{cba_count} Active agreement(s); employers without one resolve to an explicit NONE.", required=False)
+
+    blockers = [f"{i['label']}: {i['detail']}" for i in items if i["required"] and not i["complete"]]
+    return {"packId": pack.id, "packVersion": pack.version, "ready": not blockers, "items": items,
+            "blockers": blockers}
+
+
+def preview_sweden_calculation(db: Session, data) -> dict:
+    """Read-only Super Admin simulation (spec §13 "simulation before
+    activation"): the SAME production engine a payroll run uses, against ONE
+    Sweden pack's canonical rows in force on data.payDate, with the worker's
+    facts supplied inline. Writes nothing; a blocked calculation returns the
+    engine's own reason, never a figure."""
+    from types import SimpleNamespace
+
+    from app.modules.payroll.engine.base import PayrollContext
+    from app.modules.payroll.engine.countries.shared import MissingComplianceConfigurationError
+    from app.modules.payroll.engine.resolver import calculate_payroll
+
+    pack = _latest_se_tax_pack(db, data.jurisdictionPackId)
+    rates = _sg_rows_in_force(list_canonical_contribution_rates(db, jurisdiction_pack_id=pack.id), data.payDate)
+    slabs = _sg_rows_in_force(list_canonical_tax_slabs(db, jurisdiction_pack_id=pack.id), data.payDate)
+    profile = SimpleNamespace(
+        se_tax_status=data.taxStatus, se_income_role=data.incomeRole,
+        se_tax_table=data.taxTable, se_tax_column=data.taxColumn, se_sink_status=data.sinkStatus,
+        se_decision_override=data.decisionOverride, se_skatteverket_decision_id=data.decisionId,
+        se_decision_effective_from=data.decisionEffectiveFrom, se_decision_effective_to=data.decisionEffectiveTo,
+        se_decision_monthly_withholding=data.decisionMonthlyWithholding, se_decision_rate_pct=data.decisionRatePct,
+        se_annual_income=data.annualIncome, se_employee_pension_share=data.employeePensionShare,
+        se_employer_pension_share=data.employerPensionShare, se_pension_plan=None,
+        se_cba_status="NONE", se_cba_id=None,
+    )
+    ctx = PayrollContext(
+        gross=data.gross, basic=data.gross, country="SE", pay_frequency=data.payFrequency, pay_date=data.payDate,
+        rate_map={_normalize_engine_component_key(r.component_key): r for r in rates}, slabs=slabs,
+        date_of_birth=data.dateOfBirth, sweden_statutory_profile=profile, se_organization_id=None,
+        se_month_to_date_prior=data.monthToDatePrior, se_cash_pay=data.cashPay,
+        se_pension_cost_base=data.pensionCostBase,
+    )
+    base = {"pack": {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status},
+            "payDate": data.payDate.isoformat(), "readOnly": True}
+    try:
+        result = calculate_payroll(ctx, "standard")
+    except MissingComplianceConfigurationError as exc:
+        return {**base, "blocked": True, "blockedKey": exc.key,
+                "blockedReason": getattr(exc, "reason", None) or str(exc)}
+    return {**base, "blocked": False,
+            "result": {"gross": str(result.gross), "totalDeductions": str(result.total_deductions),
+                       "netPay": str(result.net_pay)},
+            "sweden": _se_payslip_snapshot(result)}
+
+
+# ── Collective-agreement registry (spec §9/§13 "Agreement registry") ─────
+
+_CBA_TYPES = ("EMPLOYER_SPECIFIC", "SECTOR", "LOCAL_SUPPLEMENT")  # deliberately no NATIONAL
+_CBA_MODULES = ("wage_scales", "overtime", "unsocial_hours", "sickness_supplements", "parental_pay",
+                "vacation_enhancement", "occupational_pension", "insurance", "termination")
+_CBA_TRANSITIONS = {
+    "Draft": ("In Review",),
+    "In Review": ("Draft", "Approved"),
+    "Approved": ("Draft", "Active"),
+    "Active": ("Superseded",),
+    "Superseded": (),
+}
+
+
+def list_collective_agreements(db: Session, country: str = "SE",
+                               organization_id: Optional[int] = None) -> List[CollectiveAgreement]:
+    """Agreement definitions (organization_id NULL) plus, when an org is
+    given, that employer's own assignments."""
+    query = db.query(CollectiveAgreement).filter(CollectiveAgreement.jurisdiction_country == _normalize_country(country))
+    if organization_id is not None:
+        query = query.filter(or_(CollectiveAgreement.organization_id == organization_id,
+                                 CollectiveAgreement.organization_id.is_(None)))
+    return query.order_by(CollectiveAgreement.agreement_code, CollectiveAgreement.version).all()
+
+
+def upsert_collective_agreement(db: Session, data, actor_id: Optional[int] = None) -> CollectiveAgreement:
+    """Create or edit a Draft agreement version. Refuses a NATIONAL/unknown
+    type (spec §44: no Swedish national default CBA) and editing any version
+    that has left Draft — a change to released content is a NEW version."""
+    if data.agreementType not in _CBA_TYPES:
+        raise BadRequestException(f"agreementType must be one of {list(_CBA_TYPES)} — there is no national "
+                                  "default collective agreement (ZP-SE-ENG-001 §9).")
+    unknown = [m for m in (data.modules or []) if m not in _CBA_MODULES]
+    if unknown:
+        raise BadRequestException(f"Unknown agreement module(s): {unknown}. Allowed: {list(_CBA_MODULES)}.")
+    if data.effectiveFrom and data.effectiveTo and data.effectiveTo < data.effectiveFrom:
+        raise BadRequestException("effectiveTo must not be before effectiveFrom.")
+    if data.id:
+        row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == data.id).first()
+        if row is None:
+            raise NotFoundException("CollectiveAgreement", data.id)
+        if row.status != "Draft":
+            raise BadRequestException(f"Agreement {row.agreement_code} v{row.version} is {row.status} — create a new "
+                                      "version instead of editing released content.")
+        old = {"status": row.status, "version": row.version}
+    else:
+        clash = (db.query(CollectiveAgreement)
+                 .filter(CollectiveAgreement.agreement_code == data.agreementCode,
+                         CollectiveAgreement.version == data.version).first())
+        if clash is not None:
+            raise BadRequestException(f"Agreement {data.agreementCode} v{data.version} already exists.")
+        row = CollectiveAgreement(created_by_id=actor_id, status="Draft")
+        db.add(row)
+        old = None
+    row.jurisdiction_country = _normalize_country(data.jurisdictionCountry)
+    row.organization_id = data.organizationId
+    row.agreement_code = data.agreementCode
+    row.name = data.name
+    row.agreement_type = data.agreementType
+    row.employer_scope = data.employerScope
+    row.employee_group = data.employeeGroup
+    row.occupation = data.occupation
+    row.grade = data.grade
+    row.version = data.version
+    row.effective_from = data.effectiveFrom
+    row.effective_to = data.effectiveTo
+    row.modules = data.modules or []
+    row.source_document_id = data.sourceDocumentId
+    row.previous_version_id = data.previousVersionId
+    row.notes = data.notes
+    row.updated_by_id = actor_id
+    row.approved_by_id = None          # any edit invalidates a prior approval
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="create" if old is None else "update",
+                     entity_type="collective_agreement", entity_id=row.id, legal_reference="ZP-SE-ENG-001 §9",
+                     old_value=old, new_value={"code": row.agreement_code, "version": row.version,
+                                               "type": row.agreement_type, "modules": row.modules},
+                     reason=data.reason, auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def set_collective_agreement_status(db: Session, agreement_id: int, status: str, actor_id: Optional[int] = None,
+                                    reason: Optional[str] = None) -> CollectiveAgreement:
+    """Governed lifecycle (spec §13: "No rule activation without source /
+    effective dates / test pack"; §14 four-eyes): the approver is never the
+    author/last editor, the activator is never the approver, and an Active
+    version needs a source artifact, an effective-from date and at least one
+    module. Activating a version supersedes the previous Active one."""
+    row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == agreement_id).first()
+    if row is None:
+        raise NotFoundException("CollectiveAgreement", agreement_id)
+    if status not in _CBA_TRANSITIONS.get(row.status, ()):
+        raise BadRequestException(f"Cannot move agreement from {row.status} to {status}.")
+    if status == "Approved":
+        if actor_id is not None and actor_id in (row.updated_by_id, row.created_by_id):
+            raise BadRequestException("The approver must be a different Super Admin than the agreement's author/editor.")
+        row.approved_by_id = actor_id
+    if status == "Active":
+        if not row.source_document_id:
+            raise BadRequestException("An agreement needs a linked source artifact before it can go Active.")
+        if not row.effective_from:
+            raise BadRequestException("An agreement needs an effective-from date before it can go Active.")
+        if not row.modules:
+            raise BadRequestException("An agreement with no configured modules has no payroll effect — configure one first.")
+        if row.approved_by_id is None or (actor_id is not None and row.approved_by_id == actor_id):
+            raise BadRequestException("The Super Admin who approved this agreement cannot also activate it.")
+        for prior in (db.query(CollectiveAgreement)
+                      .filter(CollectiveAgreement.agreement_code == row.agreement_code,
+                              CollectiveAgreement.id != row.id, CollectiveAgreement.status == "Active")):
+            prior.status = "Superseded"
+    if status == "Draft":
+        row.approved_by_id = None
+    before = row.status
+    row.status = status
+    record_tax_audit(db, actor_id=actor_id, action="status_change", entity_type="collective_agreement",
+                     entity_id=row.id, legal_reference="ZP-SE-ENG-001 §9/§14",
+                     old_value={"status": before}, new_value={"status": status}, reason=reason, auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# ── Sick-pay episodes (spec §8) ───────────────────────────────────────────
+
+_SE_SICK_RECURRENCE_DAYS = 5         # spec §8 "Recurrence within 5 days" — rule shape
+_SE_EMPLOYER_SICK_PERIOD_DAYS = 14   # spec §8 "days 1-14" — rule shape
+
+
+def _se_in_force_param(db: Session, key: str, as_of) -> Optional[Decimal]:
+    """A Sweden amount parameter from the ACTIVE canonical pack in force on
+    `as_of` — None when no Active pack configures it (never a default)."""
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    rates, _slabs, pack = resolve_tax_configuration(db, "SE", payroll_date=as_of)
+    if pack is None or pack.status != "Active":
+        return None
+    for row in rates:
+        if _normalize_engine_component_key(row.component_key) == key and row.flat_amount is not None:
+            return Decimal(str(row.flat_amount))
+    return None
+
+
+def list_se_sick_episodes(db: Session, organization_id: int, employee_id: Optional[int] = None) -> List[SwedenSickEpisode]:
+    query = db.query(SwedenSickEpisode).filter(SwedenSickEpisode.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(SwedenSickEpisode.employee_id == employee_id)
+    return query.order_by(SwedenSickEpisode.episode_start.desc(), SwedenSickEpisode.id.desc()).all()
+
+
+def upsert_se_sick_episode(db: Session, organization_id: int, data, actor_id: Optional[int] = None) -> SwedenSickEpisode:
+    """Record one sickness episode and resolve its statutory state (spec §8):
+      * RECURRENCE — an episode starting within 5 days of the previous one's
+        end joins its recurrence group: one combined 14-day employer period,
+        and no second full qualifying deduction if one was already made;
+      * EMPLOYER PERIOD — which of days 1–14 this episode covers; any day
+        beyond 14 flags the Försäkringskassan transfer;
+      * QUALIFYING DEDUCTION — pct × expected average-week sick pay, never
+        exceeding the payable sick pay. The pct comes from the request or the
+        Active pack's se_sick_qualifying_deduction_pct — neither → refused.
+    Only a certificate REFERENCE is stored; never clinical content (§14)."""
+    employee = get_employee_by_id(db, data.employeeId, organization_id)
+    if _normalize_country(getattr(employee, "country_code", None)) != "SE":
+        raise BadRequestException("Swedish sick-pay episodes can only be recorded for a Sweden employee.")
+    if data.episodeEnd is not None and data.episodeEnd < data.episodeStart:
+        raise BadRequestException("episodeEnd must not be before episodeStart.")
+    if data.workCapacityPct is not None and not (Decimal("0") < data.workCapacityPct <= Decimal("100")):
+        raise BadRequestException("workCapacityPct must be greater than 0 and at most 100.")
+
+    row = None
+    if data.id:
+        row = (db.query(SwedenSickEpisode)
+               .filter(SwedenSickEpisode.id == data.id, SwedenSickEpisode.organization_id == organization_id).first())
+        if row is None:
+            raise NotFoundException("SwedenSickEpisode", data.id)
+        if row.status == "CLOSED":
+            raise BadRequestException("A closed sick-pay episode cannot be edited — record a correction episode.")
+    others = [SwedenSickEpisode.id != row.id] if row is not None else []
+
+    previous = (db.query(SwedenSickEpisode)
+                .filter(SwedenSickEpisode.employee_id == employee.id,
+                        SwedenSickEpisode.organization_id == organization_id,
+                        SwedenSickEpisode.episode_start < data.episodeStart,
+                        SwedenSickEpisode.episode_end.isnot(None), *others)
+                .order_by(SwedenSickEpisode.episode_start.desc()).first())
+    group_root = None
+    if previous is not None and (data.episodeStart - previous.episode_end).days <= _SE_SICK_RECURRENCE_DAYS:
+        group_root = previous.recurrence_group_id or previous.id
+    group = []
+    if group_root is not None:
+        group = (db.query(SwedenSickEpisode)
+                 .filter(or_(SwedenSickEpisode.id == group_root, SwedenSickEpisode.recurrence_group_id == group_root),
+                         *others)
+                 .all())
+    days_before = sum(((g.episode_end - g.episode_start).days + 1) for g in group if g.episode_end)
+    own_days = ((data.episodeEnd - data.episodeStart).days + 1) if data.episodeEnd else None
+    day_from = days_before + 1
+    day_to = (days_before + own_days) if own_days is not None else None
+    transfer = bool(day_to is not None and day_to > _SE_EMPLOYER_SICK_PERIOD_DAYS)
+    deduction_already = any(g.deduction_already_applied or (g.qualifying_deduction_amount or 0) > 0 for g in group)
+
+    deduction_pct = data.qualifyingDeductionPct
+    if deduction_pct is None:
+        deduction_pct = _se_in_force_param(db, "se_sick_qualifying_deduction_pct", data.episodeStart)
+    deduction_amount = Decimal("0")
+    if not deduction_already and day_from <= _SE_EMPLOYER_SICK_PERIOD_DAYS:
+        if data.expectedWeeklySickPay is None:
+            raise BadRequestException("expectedWeeklySickPay is required to apply the qualifying deduction (spec §8).")
+        if deduction_pct is None:
+            raise BadRequestException("No qualifying-deduction percentage: supply qualifyingDeductionPct or activate a "
+                                      "Sweden pack configuring se_sick_qualifying_deduction_pct.")
+        deduction_amount = (Decimal(str(deduction_pct)) / Decimal("100") * data.expectedWeeklySickPay).quantize(Decimal("0.01"))
+        if data.employerSickPayAmount is not None and deduction_amount > data.employerSickPayAmount:
+            deduction_amount = Decimal(str(data.employerSickPayAmount))   # never exceeds payable sick pay
+
+    if row is None:
+        row = SwedenSickEpisode(organization_id=organization_id, employee_id=employee.id)
+        db.add(row)
+    row.episode_start = data.episodeStart
+    row.episode_end = data.episodeEnd
+    row.recurrence_group_id = group_root
+    row.work_capacity_pct = data.workCapacityPct
+    row.expected_weekly_sick_pay = data.expectedWeeklySickPay
+    row.qualifying_deduction_pct = deduction_pct
+    row.qualifying_deduction_amount = deduction_amount
+    row.deduction_already_applied = bool(deduction_already or deduction_amount > 0)
+    row.employer_period_day_from = day_from
+    row.employer_period_day_to = min(day_to, _SE_EMPLOYER_SICK_PERIOD_DAYS) if day_to is not None else None
+    row.transfer_to_forsakringskassan = transfer
+    row.medical_certificate_ref = data.medicalCertificateRef
+    row.absence_reported = data.absenceReported
+    row.employer_sick_pay_amount = data.employerSickPayAmount
+    row.cba_supplement_amount = data.cbaSupplementAmount
+    row.cba_agreement_id = data.cbaAgreementId
+    row.status = data.status or "OPEN"
+    row.source = data.source
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="update" if data.id else "create", entity_type="se_sick_episode",
+                     entity_id=row.id, legal_reference="ZP-SE-ENG-001 §8",
+                     new_value={"dayFrom": str(day_from), "dayTo": str(row.employer_period_day_to),
+                                "recurrenceGroup": str(group_root), "deduction": str(deduction_amount),
+                                "transfer": str(transfer)},
+                     auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+# ── Annual-leave ledgers (spec §7, SE-006) ────────────────────────────────
+
+_SE_VACATION_METHODS = ("PERCENTAGE_12", "SAME_PAY", "CBA_OVERRIDE")
+_SE_STATUTORY_LEAVE_DAYS = Decimal("25")          # spec §7 [S10] — statutory baseline
+_SE_SAVEABLE_ABOVE_PAID_DAYS = Decimal("20")      # spec §7 "Paid days exceeding 20 may generally be saved"
+_SE_SAVED_DAYS_YEARS = 5                          # spec §7 "normally taken within five years"
+
+
+def list_se_leave_ledgers(db: Session, organization_id: int, employee_id: Optional[int] = None) -> List[SwedenLeaveLedger]:
+    query = db.query(SwedenLeaveLedger).filter(SwedenLeaveLedger.organization_id == organization_id)
+    if employee_id is not None:
+        query = query.filter(SwedenLeaveLedger.employee_id == employee_id)
+    return query.order_by(SwedenLeaveLedger.entitlement_year.desc(), SwedenLeaveLedger.id.desc()).all()
+
+
+def upsert_se_leave_ledger(db: Session, organization_id: int, data, actor_id: Optional[int] = None) -> SwedenLeaveLedger:
+    """One (employee, entitlement year) leave ledger. Days and money stay
+    separate (SE-006): this row holds days + the qualifying-year earnings;
+    vacation MONEY is never derived from the day balance here. Statutory
+    bounds apply unless a CBA override method is recorded with its agreement."""
+    employee = get_employee_by_id(db, data.employeeId, organization_id)
+    if _normalize_country(getattr(employee, "country_code", None)) != "SE":
+        raise BadRequestException("Swedish leave ledgers can only be recorded for a Sweden employee.")
+    if data.vacationPayMethod not in _SE_VACATION_METHODS:
+        raise BadRequestException(f"vacationPayMethod must be one of {list(_SE_VACATION_METHODS)}.")
+    for label, value in (("paidDays", data.paidDays), ("unpaidDays", data.unpaidDays),
+                         ("savedDays", data.savedDays), ("carryoverDays", data.carryoverDays)):
+        if value is not None and value < 0:
+            raise BadRequestException(f"{label} must not be negative.")
+    if data.vacationPayMethod == "CBA_OVERRIDE":
+        if data.cbaAgreementId is None:
+            raise BadRequestException("CBA_OVERRIDE requires the governing cbaAgreementId (spec §7 CBA override).")
+    else:
+        if data.paidDays + data.unpaidDays > _SE_STATUTORY_LEAVE_DAYS:
+            raise BadRequestException("Paid + unpaid days exceed the 25-day statutory entitlement; record the governing "
+                                      "agreement with vacationPayMethod CBA_OVERRIDE if an agreement grants more.")
+        if data.savedDays > max(Decimal("0"), data.paidDays - _SE_SAVEABLE_ABOVE_PAID_DAYS):
+            raise BadRequestException("Only paid days exceeding 20 may be saved (spec §7 Saving days).")
+    if data.carryoverExpiry is not None and data.entitlementYear.isdigit():
+        if data.carryoverExpiry.year > int(data.entitlementYear) + _SE_SAVED_DAYS_YEARS:
+            raise BadRequestException("Saved days are normally taken within five years — carryoverExpiry is too late.")
+
+    if data.id:
+        row = (db.query(SwedenLeaveLedger)
+               .filter(SwedenLeaveLedger.id == data.id, SwedenLeaveLedger.organization_id == organization_id).first())
+        if row is None:
+            raise NotFoundException("SwedenLeaveLedger", data.id)
+    else:
+        row = (db.query(SwedenLeaveLedger)
+               .filter(SwedenLeaveLedger.employee_id == employee.id,
+                       SwedenLeaveLedger.entitlement_year == data.entitlementYear).first())
+    if row is not None and row.status == "Closed":
+        raise BadRequestException("This ledger is closed (final vacation allowance settled) — it can no longer be edited.")
+    old = None if row is None else {"paidDays": str(row.paid_days), "savedDays": str(row.saved_days)}
+    if row is None:
+        row = SwedenLeaveLedger(organization_id=organization_id, employee_id=employee.id,
+                                entitlement_year=data.entitlementYear)
+        db.add(row)
+    row.qualifying_year = data.qualifyingYear
+    row.paid_days = data.paidDays
+    row.unpaid_days = data.unpaidDays
+    row.saved_days = data.savedDays
+    row.carryover_days = data.carryoverDays
+    row.carryover_expiry = data.carryoverExpiry
+    row.qualifying_earnings = data.qualifyingEarnings
+    row.vacation_pay_method = data.vacationPayMethod
+    row.credited_absence = data.creditedAbsence
+    row.final_vacation_allowance = data.finalVacationAllowance
+    row.cba_agreement_id = data.cbaAgreementId
+    row.effective_from = data.effectiveFrom
+    row.effective_to = data.effectiveTo
+    row.version = data.version
+    row.status = data.status
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="update" if old else "create", entity_type="se_leave_ledger",
+                     entity_id=row.id, legal_reference="ZP-SE-ENG-001 §7/SE-006", old_value=old,
+                     new_value={"paidDays": str(row.paid_days), "savedDays": str(row.saved_days),
+                                "method": row.vacation_pay_method}, auto_commit=False)
+    db.commit()
+    db.refresh(row)
+    return row

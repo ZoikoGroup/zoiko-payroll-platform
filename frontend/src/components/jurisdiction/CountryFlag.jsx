@@ -215,10 +215,20 @@ function Singapore() {
   );
 }
 
+function Sweden() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#006AA7" />
+      <rect x="7" width="3" height="16" fill="#FECC00" />
+      <rect y="6.5" width="24" height="3" fill="#FECC00" />
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
-  PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore,
+  PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

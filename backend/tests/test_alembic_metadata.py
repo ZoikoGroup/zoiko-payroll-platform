@@ -110,7 +110,10 @@ def test_alembic_heads_is_single_head():
     # Singapore CPF employee columns on a5f6e7d8c9b0).
     # 66072e2d80a9 (2026-09-29): merge of that Singapore head with venu's
     # c4d5e6f7a8b9 (Ireland Revenue tables, on 7c3e1a9d5f20 -> 998877665544).
-    assert heads == ["66072e2d80a9"]
+    # e8f1a2b3c4d5 (2026-09-30, ZP-SE-ENG-001): Sweden jurisdiction support
+    # (collective agreements, sick episodes, leave ledgers, se_* profile
+    # columns), down_revision 66072e2d80a9 — idempotency-guarded.
+    assert heads == ["e8f1a2b3c4d5"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -122,7 +125,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["66072e2d80a9"]
+    assert list(script.get_heads()) == ["e8f1a2b3c4d5"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -153,7 +156,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 168
+    assert len(revs) == 169   # + e8f1a2b3c4d5 (Sweden, 2026-09-30)
 
 
 def test_germany_head_chain_wiring_is_intact():

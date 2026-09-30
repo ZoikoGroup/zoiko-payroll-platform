@@ -30,7 +30,7 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, india, singapore, uk, us
+from app.modules.payroll.engine.countries import australia, canada, germany, india, singapore, sweden, uk, us
 from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
@@ -42,6 +42,7 @@ _MODULES = {
     "germany": germany,
     "hardcoded_defaults": hardcoded_defaults,
     "singapore": singapore,
+    "sweden": sweden,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -233,6 +234,31 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_RATE", "label": "Skills Development Levy Rate (Employer)", "resolverKey": "sdl", "side": "employer", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MIN_MONTHLY", "label": "SDL Minimum (Monthly)", "resolverKey": "sdl_min_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MAX_MONTHLY", "label": "SDL Maximum (Monthly)", "resolverKey": "sdl_max_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
+
+    # ── Sweden ────────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-SE-ENG-001 §30 + shared.py's
+    # _VALIDATION_ENABLED_COUNTRIES): every constant below is None —
+    # listed only so the readiness check (get_required_parameter_keys)
+    # knows which keys a Sweden pack must configure. The seven component
+    # rows sum to the standard employer rate; the tax-table/one-time
+    # TaxSlab bands have no scalar key and are validated by sweden.py
+    # itself. se_vacation_percentage / se_sick_qualifying_deduction_pct
+    # are leave/sick-workspace content (not engine-calculate reads), so
+    # they are deliberately NOT registered as required here.
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_AGE_PENSION", "label": "Age Pension Component (Employer)", "resolverKey": "se_er_age_pension", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_HEALTH_INSURANCE", "label": "Health Insurance Component (Employer)", "resolverKey": "se_er_health_insurance", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_PARENTAL_INSURANCE", "label": "Parental Insurance Component (Employer)", "resolverKey": "se_er_parental_insurance", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_LABOUR_MARKET", "label": "Labour Market Component (Employer)", "resolverKey": "se_er_labour_market", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_WORK_INJURY", "label": "Work Injury Component (Employer)", "resolverKey": "se_er_work_injury", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_SURVIVOR_PENSION", "label": "Survivor Pension Component (Employer)", "resolverKey": "se_er_survivor_pension", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_GENERAL_PAYROLL_TAX", "label": "General Payroll Tax Component (Employer)", "resolverKey": "se_er_general_payroll_tax", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_YOUTH_REDUCED", "label": "Temporary Youth Reduced Employer Rate", "resolverKey": "se_youth_reduced", "side": "employer", "required": False, "note": "NO FALLBACK — windowed 1 Apr 2026 – 30 Sep 2027 on the row's own effective dates (ZP-SE-ENG-001 §3/§6)."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_SINK", "label": "SINK Withholding Rate (Employee)", "resolverKey": "se_sink", "side": "employee", "note": "NO FALLBACK — 22.5% for 2026, enacted 20% from 2027; date switch is pack/row governed (ZP-SE-ENG-001 §3 [S5])."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_SUPPLEMENTARY_RATE", "label": "Supplementary Income Withholding Rate", "resolverKey": "se_supplementary_rate", "side": "employee", "note": "NO FALLBACK — the 30% path, never blended with the main-income table (ZP-SE-ENG-001 §3 [S3])."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_SLP", "label": "Special Payroll Tax on Pension Costs (SLP)", "resolverKey": "se_slp", "side": "employer", "note": "NO FALLBACK — 24.26% of the employer pension-cost ledger, never of employee gross (ZP-SE-ENG-001 SE-007)."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_YOUTH_MONTHLY_THRESHOLD", "label": "Youth Relief Monthly Threshold (SEK)", "resolverKey": "se_youth_monthly_threshold", "required": False, "note": "NO FALLBACK — window-conditional with se_youth_reduced; — SEK 25,000 per person per calendar month (ZP-SE-ENG-001 §3)."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_OLDER_COHORT_MAX_BIRTH_YEAR", "label": "Older-Worker Cohort — Maximum Birth Year", "resolverKey": "se_older_cohort_max_birth_year", "note": "NO FALLBACK — income-year content (2026: born 1938–1958 pay only the age-pension component); Super Admin updates it per income year."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ZERO_COHORT_MAX_BIRTH_YEAR", "label": "Zero-Rate Cohort — Maximum Birth Year", "resolverKey": "se_zero_cohort_max_birth_year", "note": "NO FALLBACK — income-year content (2026: born 1937 or earlier pay 0%); Super Admin updates it per income year."},
 ]
 
 
@@ -261,6 +287,13 @@ def get_required_parameter_keys(country: str) -> list[dict]:
             continue
         resolver_key = entry["resolverKey"]
         if resolver_key.startswith("N/A"):
+            continue
+        # Window-conditional content (e.g. Sweden's temporary youth relief,
+        # present only for payment dates inside its statutory window) is
+        # listed for the viewer but is not a readiness requirement: the
+        # date-filtered resolver legitimately omits it outside the window,
+        # and the engine itself blocks on a half-configured window.
+        if entry.get("required") is False:
             continue
         side = entry.get("side")
         for key in (k.strip() for k in resolver_key.split("/")):

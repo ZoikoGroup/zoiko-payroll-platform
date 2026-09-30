@@ -99,6 +99,10 @@ class GoldenRate:
     # Singapore `cpf_age_band_semantics` (ContributionRate.text_value).
     # None for every existing case, unaffected.
     text_value: Optional[str] = None
+    # Row-level dating (Sweden's temporary youth reduction is windowed on the
+    # row's own dates, SE-005). None for every existing case, unaffected.
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
 
 
 @dataclass
@@ -125,6 +129,9 @@ class GoldenSlab:
     # existing case, unaffected.
     tax_regime: Optional[str] = None
     rate_label: str = ""
+    # Sweden SE_TAX_TABLE / SE_ONE_TIME_PAYMENT bands. None elsewhere.
+    tax_table_number: Optional[str] = None
+    tax_column: Optional[str] = None
 
 
 def _to_decimal(value):
@@ -151,6 +158,8 @@ def _build_rate_map(raw: Optional[dict]) -> dict:
             flat_amount=_to_decimal(spec.get("flat_amount")),
             jurisdiction_state=spec.get("jurisdiction_state"),
             text_value=spec.get("text_value"),
+            effective_from=_to_date(spec.get("effective_from")),
+            effective_to=_to_date(spec.get("effective_to")),
         )
     return rate_map
 
@@ -173,6 +182,8 @@ def _build_slabs(raw: Optional[list]) -> list:
             assessment_basis=s.get("assessment_basis"),
             tax_regime=s.get("tax_regime"),
             rate_label=s.get("rate_label", ""),
+            tax_table_number=s.get("tax_table_number"),
+            tax_column=s.get("tax_column"),
         )
         for s in raw
     ]
@@ -264,7 +275,33 @@ def build_context(case_context: dict) -> PayrollContext:
         period_start=_to_date(case_context.get("period_start")),
         period_end=_to_date(case_context.get("period_end")),
         sgp_employment_facts=case_context.get("sgp_employment_facts"),
+        # Sweden (ZP-SE-ENG-001 §15 golden payroll): the worker tax/social-
+        # insurance profile sweden.py resolves, the youth-threshold month
+        # accumulator and the SLP pension-cost base. None elsewhere.
+        **_sweden_context(case_context),
     )
+
+
+def _sweden_context(case_context: dict) -> dict:
+    profile = case_context.get("sweden_statutory_profile")
+    if profile is None and case_context.get("country") != "SE":
+        return {}
+    from types import SimpleNamespace
+
+    facts = dict(profile or {})
+    for key in ("se_decision_effective_from", "se_decision_effective_to"):
+        if facts.get(key):
+            facts[key] = _to_date(facts[key])
+    for key in ("se_decision_monthly_withholding", "se_decision_rate_pct", "se_annual_income",
+                "se_employee_pension_share", "se_employer_pension_share"):
+        if facts.get(key) is not None:
+            facts[key] = _to_decimal(facts[key])
+    return {
+        "sweden_statutory_profile": SimpleNamespace(**facts) if profile is not None else None,
+        "se_month_to_date_prior": _to_decimal(case_context.get("se_month_to_date_prior")),
+        "se_pension_cost_base": _to_decimal(case_context.get("se_pension_cost_base")),
+        "se_cash_pay": _to_decimal(case_context.get("se_cash_pay")),
+    }
 
 
 class GoldenCaseMismatch(AssertionError):

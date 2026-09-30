@@ -27,6 +27,9 @@ const INCOME_TAX_LABELS = {
   // complianceFields snapshot rather than dedicated columns, so they are
   // labelled from the identity/compliance field path below.
   IE: "PAYE",
+  // Sweden's preliminary tax (preliminär skatt) — table/column, 30%
+  // supplementary, one-time or SINK, per the frozen se_calculation_snapshot.
+  SE: "Preliminary Tax",
 };
 
 const PF_LABELS = { DE: "Pension Insurance" };
@@ -155,6 +158,7 @@ const IDENTITY_FIELD = {
   TT: { label: "BIR File No.", get: (p) => p.complianceFields?.bir_file_number },
   PR: { label: "SSN", get: (p) => p.complianceFields?.ssn },
   IE: { label: "PPSN", get: (p) => p.complianceFields?.ppsn },
+  SE: { label: "Personnummer", get: (p) => p.complianceFields?.swedish_id_number },
 };
 
 export function getIdentityField(payslip) {

@@ -16,6 +16,7 @@ export { default as PRCompliancePage } from "./PRCompliancePage";
 export { default as FRCompliancePage } from "./FRCompliancePage";
 export { default as IECompliancePage } from "./IECompliancePage";
 export { default as SGCompliancePage } from "./SGCompliancePage";
+export { default as SECompliancePage } from "./SECompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -38,4 +39,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   FR: "france",
   IE: "ireland",
   SG: "singapore",
+  SE: "sweden",
 };

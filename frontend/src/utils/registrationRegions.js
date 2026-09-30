@@ -28,6 +28,11 @@ export const REGISTRATION_COUNTRIES = [
   // STATES_BY_COUNTRY below therefore stays purely an address/province
   // selector. Europe/Dublin is already in TIMEZONES_BY_COUNTRY below.
   "Ireland",
+  // Sweden (2026-09-30, ZP-SE-ENG-001) — mirrors backend
+  // REGISTRATION_COUNTRIES. Country-level for payroll: the tax table follows
+  // the worker's residence municipality (a worker fact, SE-002), never the
+  // county, so Sweden deliberately has no STATES_BY_COUNTRY entry below.
+  "Sweden",
 ];
 
 const STATES_BY_COUNTRY = {
@@ -244,12 +249,9 @@ const STATES_BY_COUNTRY = {
     "Al-Baha", "Al-Jouf", "Asir", "Eastern Province", "Hail", "Jazan", "Madinah",
     "Makkah", "Najran", "Northern Borders", "Qassim", "Riyadh", "Tabuk",
   ],
-  "Sweden": [
-    "Blekinge", "Dalarna", "Gävleborg", "Gotland", "Halland", "Jämtland",
-    "Jönköping", "Kalmar", "Kronoberg", "Norrbotten", "Örebro", "Östergötland",
-    "Skåne", "Södermanland", "Stockholm", "Uppsala", "Värmland", "Västerbotten",
-    "Västernorrland", "Västmanland", "Västra Götaland",
-  ],
+  // Sweden deliberately has NO entry (ZP-SE-ENG-001 SE-002): counties
+  // (län) are not a payroll dimension — the tax table follows the worker's
+  // residence municipality, captured on the employee, never a region here.
   "Thailand": [
     "Amnat Charoen", "Ang Thong", "Ayutthaya", "Bangkok", "Chachoengsao",
     "Chaiyaphum", "Chanthaburi", "Chiang Mai", "Chiang Rai", "Chonburi",

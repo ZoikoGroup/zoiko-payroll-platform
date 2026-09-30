@@ -797,6 +797,33 @@ class PayrollContext:
     ireland_employee_id: int = None
     ireland_organization_id: int = None
 
+    # Sweden (ZP-SE-ENG-001 §2/§5/§6) — pre-resolved applicability facts.
+    # The service layer resolves these from the worker's effective-dated
+    # EmployeeStatutoryProfile (se_* columns) exactly the way ireland_*/
+    # france_* above are pre-resolved before dispatch; sweden.py BLOCKS
+    # rather than guesses any that are missing.
+    sweden_statutory_profile: object = None  # EmployeeStatutoryProfile | None
+    se_organization_id: int = None
+    se_employee_id: int = None
+    # Remuneration already paid for the same employer/person/calendar month
+    # BEFORE this payment — the youth SEK-threshold allocator's prior
+    # figure (spec §6 "Threshold allocation"); None = this is the month's
+    # first/only payment (previews, single-run calculation).
+    se_month_to_date_prior: Decimal = None
+    # Employer-contribution base override — None = ctx.gross (service
+    # assembles gross already net of contribution-ineligible earnings).
+    se_contribution_base: Decimal = None
+    # Cash actually available to withhold — the §5 cash-limit rule needs
+    # it separately from taxable gross (benefit-only payments have taxable
+    # income but no cash). None = ctx.gross.
+    se_cash_pay: Decimal = None
+    # SINK base override — None = taxable gross (se_sink_base is only set
+    # when service-side contribution exclusions apply to SINK too).
+    se_sink_base: Decimal = None
+    # Employer pension-cost LEDGER for the period (SE-007): the SLP base.
+    # Never employee gross; None = no ledger entries yet → SLP 0.
+    se_pension_cost_base: Decimal = None
+
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
     # affects a figure. None means "caller didn't supply one," in which
@@ -1252,6 +1279,32 @@ class PayrollResult:
     ie_tax_year: int = None
     ie_calculation_trace: dict = None
     ie_ytd_after: dict = None
+
+    # Sweden (ZP-SE-ENG-001) — returned by engine/countries/sweden.py and
+    # propagated by engine/standard.py, same additive pattern as the ie_*
+    # fields above. Every default keeps every other country's result
+    # byte-for-byte unchanged.
+    se_employer_contribution: Decimal = Decimal("0")
+    se_employer_contribution_rate: Decimal = None
+    se_employer_contribution_cohort: str = None      # STANDARD | OLDER | ZERO | YOUTH
+    se_employer_contribution_components: list = field(default_factory=list)
+    se_employer_contribution_base: Decimal = Decimal("0")
+    se_youth_applied: bool = False
+    se_month_compensation: Decimal = None
+    se_preliminary_tax: Decimal = Decimal("0")
+    se_tax_strategy: str = None                      # TAX_TABLE | SUPPLEMENTARY | ONE_TIME | SINK | DECISION_* | CASH_LIMIT
+    se_withholding_unrounded: Decimal = None
+    se_tax_table: str = None
+    se_tax_column: str = None
+    se_income_role: str = None
+    se_tax_status: str = None
+    se_occupational_pension_employee: Decimal = Decimal("0")
+    se_occupational_pension_employer: Decimal = Decimal("0")
+    se_pension_plan: str = None
+    se_slp: Decimal = Decimal("0")
+    se_employer_total: Decimal = Decimal("0")
+    se_employee_total: Decimal = Decimal("0")
+    se_calculation_trace: dict = None
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through
