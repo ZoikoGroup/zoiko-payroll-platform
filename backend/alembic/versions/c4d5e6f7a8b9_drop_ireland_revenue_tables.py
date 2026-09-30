@@ -36,6 +36,7 @@ Both tables were created empty by 9f8e7d6c5b4a and nothing ever wrote to them
 (the code paths that would have raised on import first), so this drops no data.
 """
 from alembic import op
+import sqlalchemy as sa
 
 revision: str = 'c4d5e6f7a8b9'
 down_revision: str = '7c3e1a9d5f20'
@@ -48,9 +49,31 @@ _DROPPED_TABLES = (
 )
 
 
+# ── Idempotency guards (2026-09-30) ──────────────────────────────────────
+# Production already holds part of this schema: an earlier, unmerged
+# France/Ireland branch ran these same migrations against it, and the
+# 2026-09-29 deploy failed with DuplicateTable on payroll_fr_establishments.
+# Each operation below is therefore skipped when its object already exists
+# (or, for a drop, is already gone). A pre-existing object with the wrong
+# SHAPE is not papered over: scripts.check_schema_drift runs right after
+# the upgrade and fails the deploy, before the service restarts.
+def _has_table(name):
+    return name in sa.inspect(op.get_bind()).get_table_names()
+
+
+def _has_column(table, column):
+    return _has_table(table) and column in {c["name"] for c in sa.inspect(op.get_bind()).get_columns(table)}
+
+
+def _has_index(table, name):
+    return _has_table(table) and name in {i["name"] for i in sa.inspect(op.get_bind()).get_indexes(table)}
+
+
 def upgrade() -> None:
-    op.drop_table('payroll_ie_revenue_monthly_returns')
-    op.drop_table('payroll_ie_revenue_submissions')
+    if _has_table('payroll_ie_revenue_monthly_returns'):
+        op.drop_table('payroll_ie_revenue_monthly_returns')
+    if _has_table('payroll_ie_revenue_submissions'):
+        op.drop_table('payroll_ie_revenue_submissions')
 
 
 def downgrade() -> None:
