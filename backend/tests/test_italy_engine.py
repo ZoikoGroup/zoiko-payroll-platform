@@ -119,6 +119,12 @@ def _slabs(extra=()):
 
 _UNSET = object()
 
+_LOCAL_DUE_KEYS = (
+    "it_addreg_saldo_due", "it_addreg_saldo_withheld_prior",
+    "it_addcom_saldo_due", "it_addcom_saldo_withheld_prior",
+    "it_addcom_acconto_due", "it_addcom_acconto_withheld_prior",
+)
+
 
 def _ctx(gross=D("3000"), *, profile=_UNSET, employer=_UNSET, rate_map=None,
          slabs=None, work_days=365, mensilita=13, mensilita_paid_prior=0,
@@ -126,6 +132,10 @@ def _ctx(gross=D("3000"), *, profile=_UNSET, employer=_UNSET, rate_map=None,
          ytd_withheld=None, **kwargs):
     # profile=None means "no profile at all" and is deliberately distinct from
     # the default, so the missing-profile guard can be exercised.
+    # §5: a worker with no local-surtax balance or advance carries explicit
+    # zeros; a test that needs an amount (or its absence) overrides one.
+    for key in _LOCAL_DUE_KEYS:
+        kwargs.setdefault(key, D("0"))
     return PayrollContext(
         country="IT",
         pay_date=date(2026, 3, 10),
@@ -228,17 +238,18 @@ def test_golden_net_pay_adds_the_wedge_benefit():
                 == D(expected["netPay"]))
 
 
-def test_golden_employee_total_contains_no_surtax_and_no_wedge():
-    """The two objects most easily mis-folded: the surtax is traced but never
-    withheld in v1, and the wedge sum is a benefit. Neither may appear in the
-    employee deduction total."""
+def test_golden_employee_total_contains_no_surtax_liability_and_no_wedge():
+    """The two objects most easily mis-folded: this year's surtax LIABILITY is
+    settled at the next conguaglio (only determined instalments are withheld,
+    zero in these cases), and the wedge sum is a benefit. Neither may appear
+    in the employee deduction total."""
     for case in GOLDEN:
         got = _run(case)
         expected = case["expected"]
+        assert got["it_local_tax_withheld_amount"] == D("0")
         assert got["it_employee_total"] == (
             got["it_employee_contributions"] + got["it_irpef"])
         assert D(expected["regionalAnnual"]) > 0 or case["name"] != "jan_2500"
-        assert got["it_local_tax_withheld"] is False
         # The correct invariant: gross - employee_total + wedge = netPay
         assert _round2(D(case["gross"]) - got["it_employee_total"]
                        + got["it_wedge_tax_free_sum"]) == D(expected["netPay"])
@@ -650,11 +661,105 @@ def test_missing_comune_blocks():
     assert excinfo.value.key == "it_tax_domicile_comune"
 
 
-def test_surtax_is_traced_and_explicitly_not_withheld_in_v1():
+def test_current_year_liability_is_traced_but_not_what_is_withheld():
+    """This year's surtax is a LIABILITY for the next conguaglio; what is
+    withheld now is only the determined amounts (none here)."""
     got = calculate(_ctx(gross=D("2500")))
     assert got["it_regional_tax_annual"] > D(0)
-    assert got["it_local_tax_withheld"] is False
-    assert got["it_calculation_trace"]["localTaxWithheld"] is False
+    assert got["it_local_tax_withheld_amount"] == D("0")
+    assert got["it_employee_total"] == got["it_employee_contributions"] + got["it_irpef"]
+    assert got["it_calculation_trace"]["localTaxModel"] == "DETERMINED_AMOUNTS_IN_INSTALMENTS_V2"
+
+
+# ── §5 local-surtax WITHHOLDING (balances and advance) ──────────────────────
+def _withholding_ctx(month, **kwargs):
+    ctx = _ctx(gross=D("2500"), **kwargs)
+    ctx.pay_date = date(2026, month, 10)
+    return ctx
+
+
+@pytest.mark.parametrize("key", [k for k in _LOCAL_DUE_KEYS if k.endswith("_due")])
+def test_an_unrecorded_determined_amount_blocks(key):
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), **{key: None}))
+    assert excinfo.value.key == key
+
+
+def test_three_lines_are_distinct_deductions_in_the_employee_total():
+    got = calculate(_withholding_ctx(
+        3, it_addreg_saldo_due=D("330"), it_addcom_saldo_due=D("110"),
+        it_addcom_acconto_due=D("90")))
+    # March: the Jan-Nov balance windows leave 9 instalments; the Mar-Nov
+    # advance window also leaves 9.
+    assert got["it_addreg_saldo_withheld"] == D("36.67")
+    assert got["it_addcom_saldo_withheld"] == D("12.22")
+    assert got["it_addcom_acconto_withheld"] == D("10.00")
+    assert got["it_local_tax_withheld_amount"] == D("58.89")
+    assert got["it_employee_total"] == (got["it_employee_contributions"] + got["it_irpef"]
+                                        + D("58.89"))
+
+
+def test_balance_spreads_evenly_and_the_last_instalment_takes_the_remainder():
+    """11 instalments Jan-Nov: the running remainder is re-spread each month,
+    so November withholds exactly what is left and the total is exact."""
+    due, withheld = D("100"), D("0")
+    for month in range(1, 12):
+        got = calculate(_withholding_ctx(month, it_addreg_saldo_due=due,
+                                         it_addreg_saldo_withheld_prior=withheld))
+        withheld += got["it_addreg_saldo_withheld"]
+    assert withheld == due
+
+
+def test_advance_is_not_withheld_before_its_window_opens():
+    got = calculate(_withholding_ctx(2, it_addcom_acconto_due=D("90")))
+    assert got["it_addcom_acconto_withheld"] == D("0")
+    line = got["it_calculation_trace"]["localWithholding"]["addcom_acconto"]
+    assert line["basis"] == "window_not_open" and line["window"] == [3, 11]
+
+
+def test_a_remainder_after_the_window_closes_falls_due_at_once():
+    got = calculate(_withholding_ctx(12, it_addreg_saldo_due=D("100"),
+                                     it_addreg_saldo_withheld_prior=D("40")))
+    assert got["it_addreg_saldo_withheld"] == D("60.00")
+    assert got["it_calculation_trace"]["localWithholding"]["addreg_saldo"]["basis"] == "after_window"
+
+
+def test_termination_withholds_everything_outstanding_at_once():
+    got = calculate(_withholding_ctx(
+        4, it_is_termination_period=True, it_addreg_saldo_due=D("330"),
+        it_addreg_saldo_withheld_prior=D("90"), it_addcom_acconto_due=D("90")))
+    assert got["it_addreg_saldo_withheld"] == D("240.00")
+    assert got["it_addcom_acconto_withheld"] == D("90.00")
+    assert got["it_calculation_trace"]["terminationPeriod"] is True
+
+
+def test_a_settled_amount_withholds_nothing():
+    got = calculate(_withholding_ctx(5, it_addreg_saldo_due=D("100"),
+                                     it_addreg_saldo_withheld_prior=D("100")))
+    assert got["it_addreg_saldo_withheld"] == D("0")
+
+
+def test_more_withheld_than_determined_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), it_addcom_saldo_due=D("50"),
+                       it_addcom_saldo_withheld_prior=D("60")))
+    assert excinfo.value.key == "it_addcom_saldo_withheld_prior"
+
+
+def test_a_missing_schedule_row_blocks_rather_than_assuming_a_window():
+    rate_map = _rate_map()
+    del rate_map["it_addcom_acconto_first_month"]
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), rate_map=rate_map))
+    assert excinfo.value.key == "it_addcom_acconto_first_month"
+
+
+def test_advance_is_determined_on_prior_year_income_with_this_years_table():
+    """Milano draft content: 0.8% above a EUR 23,000 exemption; 30% advance."""
+    ctx = _ctx()
+    assert italy.determine_addcom_acconto(ctx, D("30000"), "F205", True) == D("72.00")
+    assert italy.determine_addcom_acconto(ctx, D("22000"), "F205", True) == D("0.00")
+    assert italy.determine_addcom_acconto(ctx, D("30000"), "F205", False) == D("0")
 
 
 def test_surtax_is_zero_when_no_irpef_is_due_for_the_year():
@@ -825,7 +930,7 @@ def test_no_scalar_parameter_falls_back():
 
 def test_registered_keys_match_the_content_and_the_engine():
     """The readiness check, the content file and the calculation must name the
-    same eleven keys, or a pack could be certified against keys nothing reads."""
+    same keys, or a pack could be certified against keys nothing reads."""
     registered = {e["resolverKey"] for e in fallback_registry._ENGINE_CONSTANT_REGISTRY
                   if e["country"] == "IT"}
     assert registered == set(italy.IT_PARAMETER_KEYS)

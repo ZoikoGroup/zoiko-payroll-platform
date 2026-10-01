@@ -59,6 +59,15 @@ IT_PARAMETER_KEYS = {
     "it_mensilita_default": "amount",
     "it_fis_small_employer": "employer_pct",
     "it_fis_large_employer": "employer_pct",
+    # §5 local-surtax withholding schedule: pay MONTHS (1-12) bounding each
+    # instalment window, and the municipal advance percentage.
+    "it_addreg_saldo_first_month": "amount",
+    "it_addreg_saldo_last_month": "amount",
+    "it_addcom_saldo_first_month": "amount",
+    "it_addcom_saldo_last_month": "amount",
+    "it_addcom_acconto_pct": "employee_pct",
+    "it_addcom_acconto_first_month": "amount",
+    "it_addcom_acconto_last_month": "amount",
 }
 
 # (component_key, label, employee_pct, employer_pct, flat_amount, source)
@@ -87,6 +96,24 @@ IT_SCALAR_CONTENT = (
      "§7 / IT-020"),
     ("it_fis_large_employer", "FIS (>5 employees)", "0.2700", "0.5300", None,
      "§7 / IT-020"),
+    # §5 withholding schedule. The specification requires the regional balance,
+    # the municipal balance and the municipal advance as distinct deductions
+    # withheld "using the current legal schedule" but does not state it; these
+    # are the statutory figures, cited, pending the G1 review.
+    ("it_addreg_saldo_first_month", "Regional balance — first instalment month", None, None,
+     "1.00", "§5 — needs source review (D.Lgs. 446/1997 art. 50 c.4: up to 11 instalments)"),
+    ("it_addreg_saldo_last_month", "Regional balance — last instalment month (November)", None, None,
+     "11.00", "§5 — needs source review (D.Lgs. 446/1997 art. 50 c.4)"),
+    ("it_addcom_saldo_first_month", "Municipal balance — first instalment month", None, None,
+     "1.00", "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.5: same schedule as regional)"),
+    ("it_addcom_saldo_last_month", "Municipal balance — last instalment month (November)", None, None,
+     "11.00", "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.5)"),
+    ("it_addcom_acconto_pct", "Municipal advance — % of prior-year municipal amount", "30.0000", None,
+     None, "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.4: 30% advance)"),
+    ("it_addcom_acconto_first_month", "Municipal advance — first instalment month (March)", None, None,
+     "3.00", "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.5: up to 9 instalments from March)"),
+    ("it_addcom_acconto_last_month", "Municipal advance — last instalment month (November)", None, None,
+     "11.00", "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.5)"),
 )
 
 # ── §6/§7 INPS matrix (D1: ContributionRate, no dedicated table) ───────────

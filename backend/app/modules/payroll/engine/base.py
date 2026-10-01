@@ -861,6 +861,17 @@ class PayrollContext:
     # the service populates these from EmployerTaxProfile rows.
     it_employer_csc: str = None
     it_employer_ca: str = None
+    # §5 local-surtax withholding: each DETERMINED amount and how much of it is
+    # already withheld this year. None = not recorded, which BLOCKS; a worker
+    # with nothing owed carries an explicit 0.
+    it_addreg_saldo_due: Decimal = None              # prior-year regional balance
+    it_addreg_saldo_withheld_prior: Decimal = None
+    it_addcom_saldo_due: Decimal = None              # prior-year municipal balance
+    it_addcom_saldo_withheld_prior: Decimal = None
+    it_addcom_acconto_due: Decimal = None            # current-year municipal advance
+    it_addcom_acconto_withheld_prior: Decimal = None
+    # §22: a termination period withholds every outstanding amount at once.
+    it_is_termination_period: bool = False
 
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
@@ -1384,11 +1395,17 @@ class PayrollResult:
     # §4 non-taxable sum — ADDED to net pay, never netted into IRPEF (IT-009).
     it_wedge_tax_free_sum: Decimal = Decimal("0")
     it_wedge_band_pct: Decimal = Decimal("0")
-    # §5 this year's local surtax LIABILITY at the tax domicile. Traced, not
-    # withheld, in v1 (it_local_tax_withheld is always False).
+    # §5 this year's local surtax LIABILITY at the tax domicile, settled at the
+    # following year's conguaglio — traced, never withheld as such.
     it_regional_tax_annual: Decimal = Decimal("0")
     it_municipal_tax_annual: Decimal = Decimal("0")
     it_local_tax_withheld: bool = False
+    # §5 what IS withheld this period: three distinct deductions, each an
+    # instalment of an already-determined amount (part of it_employee_total).
+    it_addreg_saldo_withheld: Decimal = Decimal("0")
+    it_addcom_saldo_withheld: Decimal = Decimal("0")
+    it_addcom_acconto_withheld: Decimal = Decimal("0")
+    it_local_tax_withheld_amount: Decimal = Decimal("0")
     it_tax_domicile_comune: str = None
     it_tax_domicile_region: str = None
     it_fringe_amount: Decimal = Decimal("0")

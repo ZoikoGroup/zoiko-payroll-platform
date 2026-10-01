@@ -21,9 +21,12 @@ Calculation order (each step consumes the one before it):
      never hidden inside IRPEF (IT-009), band chosen on the annual forecast
      and retained in the trace (IT-010).
   7. Regional and municipal surtax (§5) on taxable income at the TAX DOMICILE
-     (IT-013), bracketed (IT-014). v1 computes and traces this year's
-     LIABILITY but withholds nothing: in Italy these are withheld as
-     instalments of a determined amount, and that ledger does not exist yet.
+     (IT-013), bracketed (IT-014). This year's LIABILITY is traced (it is
+     settled at the following year's conguaglio). What is WITHHELD this period
+     is the three distinct §5 deductions, each an instalment of an amount
+     already determined: the prior-year regional balance, the prior-year
+     municipal balance and the current-year municipal advance. All three are
+     withheld in full in a termination period.
   8. TFR (§13) — remuneration / 13.5 less the 0.50% INPS offset, with the
      destination validated against the Fondo Tesoreria headcount rule.
 
@@ -91,6 +94,13 @@ _IT_DETRAZIONE_MIN_FIXED_TERM = None
 _IT_MENSILITA_DEFAULT = None
 _IT_FIS_SMALL_EMPLOYER = None
 _IT_FIS_LARGE_EMPLOYER = None
+_IT_ADDREG_SALDO_FIRST_MONTH = None
+_IT_ADDREG_SALDO_LAST_MONTH = None
+_IT_ADDCOM_SALDO_FIRST_MONTH = None
+_IT_ADDCOM_SALDO_LAST_MONTH = None
+_IT_ADDCOM_ACCONTO_PCT = None
+_IT_ADDCOM_ACCONTO_FIRST_MONTH = None
+_IT_ADDCOM_ACCONTO_LAST_MONTH = None
 
 # The backend catalog of scalar Italy parameters — each key is a
 # ContributionRate.component_key. Parity with italy_content.IT_PARAMETER_KEYS
@@ -109,6 +119,13 @@ IT_PARAMETER_KEYS = {
     "it_mensilita_default": "amount",
     "it_fis_small_employer": "employer_pct",
     "it_fis_large_employer": "employer_pct",
+    "it_addreg_saldo_first_month": "amount",
+    "it_addreg_saldo_last_month": "amount",
+    "it_addcom_saldo_first_month": "amount",
+    "it_addcom_saldo_last_month": "amount",
+    "it_addcom_acconto_pct": "employee_pct",
+    "it_addcom_acconto_first_month": "amount",
+    "it_addcom_acconto_last_month": "amount",
 }
 
 # TaxSlab.rule_type discriminators (mirrors italy_content).
@@ -664,6 +681,101 @@ def resolve_local_tax(ctx: PayrollContext, pack: _Pack, profile, irpef: dict) ->
     }
 
 
+# §5 — the three distinct local-surtax deductions withheld this period. Each
+# is (name, determined amount, already withheld, first-month key, last-month key).
+_LOCAL_WITHHOLDINGS = (
+    ("addreg_saldo", "it_addreg_saldo_due", "it_addreg_saldo_withheld_prior",
+     "it_addreg_saldo_first_month", "it_addreg_saldo_last_month"),
+    ("addcom_saldo", "it_addcom_saldo_due", "it_addcom_saldo_withheld_prior",
+     "it_addcom_saldo_first_month", "it_addcom_saldo_last_month"),
+    ("addcom_acconto", "it_addcom_acconto_due", "it_addcom_acconto_withheld_prior",
+     "it_addcom_acconto_first_month", "it_addcom_acconto_last_month"),
+)
+
+
+def _schedule_month(pack: _Pack, key: str) -> int:
+    value = pack.require_amount(key)
+    if value != value.to_integral_value() or not 1 <= value <= 12:
+        pack.block(key, f"must be a pay month 1-12, got {value}")
+    return int(value)
+
+
+def resolve_local_withholding(ctx: PayrollContext, pack: _Pack) -> dict:
+    """§5 — what is WITHHELD this period, as distinct deductions.
+
+    Each amount was DETERMINED earlier (the regional and municipal balances at
+    the prior year's conguaglio, the municipal advance at the start of this
+    year); the engine only spreads what remains over the instalments left in
+    its window, so the last instalment takes the exact remainder. A
+    termination period withholds everything still outstanding (§22).
+
+    A determined amount the service did not supply BLOCKS: an employee with
+    nothing to withhold carries an explicit 0, so an unrecorded amount is
+    never read as nothing owed.
+    """
+    month = ctx.pay_date.month
+    terminating = _truthy(getattr(ctx, "it_is_termination_period", None))
+    lines = {}
+    total = ZERO
+    for name, due_key, prior_key, first_key, last_key in _LOCAL_WITHHOLDINGS:
+        raw_due = getattr(ctx, due_key, None)
+        if raw_due is None:
+            pack.block(due_key, "the determined amount to withhold is not recorded for this "
+                                "employee (§5); record 0 explicitly when nothing is owed")
+        due = _dec(raw_due)
+        prior = _dec(getattr(ctx, prior_key, None))
+        if due < ZERO or prior < ZERO:
+            pack.block(due_key, f"negative amounts (due {due}, withheld {prior})")
+        if prior > due:
+            pack.block(prior_key, f"{prior} already withheld exceeds the determined {due}")
+        first = _schedule_month(pack, first_key)
+        last = _schedule_month(pack, last_key)
+        if first > last:
+            pack.block(first_key, f"window starts in month {first} after it ends in month {last}")
+        remaining = due - prior
+        if remaining == ZERO:
+            instalment, instalments_left, basis = ZERO, 0, "settled"
+        elif terminating:
+            instalment, instalments_left, basis = _round2(remaining), 1, "termination"
+        elif month < first:
+            instalment, instalments_left, basis = ZERO, last - first + 1, "window_not_open"
+        else:
+            # After the window closes the whole remainder falls due at once.
+            instalments_left = max(1, last - month + 1)
+            instalment = _round2(remaining / Decimal(instalments_left))
+            basis = "instalment" if month <= last else "after_window"
+        lines[name] = {"due": str(due), "withheldPrior": str(prior),
+                       "remainingBefore": str(remaining), "withheldNow": str(instalment),
+                       "instalmentsLeft": instalments_left, "window": [first, last],
+                       "basis": basis}
+        total += instalment
+    return {"lines": lines, "total": _round2(total), "terminating": terminating,
+            "addreg_saldo": _dec(lines["addreg_saldo"]["withheldNow"]),
+            "addcom_saldo": _dec(lines["addcom_saldo"]["withheldNow"]),
+            "addcom_acconto": _dec(lines["addcom_acconto"]["withheldNow"])}
+
+
+def determine_addcom_acconto(ctx: PayrollContext, prior_year_taxable: Decimal, comune: str,
+                             prior_year_irpef_due: bool) -> Decimal:
+    """§5 — the current-year municipal ADVANCE, determined once at the start of
+    the year: the advance percentage of the municipal amount computed on the
+    PRIOR year's taxable income with THIS year's comune table (its brackets and
+    exemption). Nothing is due when no IRPEF was due for the prior year, the
+    same rule resolve_local_tax applies to the liability. Used by the service
+    / conguaglio when it opens the year's advance; never by calculate()."""
+    pack = _Pack(ctx.rate_map, getattr(ctx, "italy_organization_id", None))
+    if not comune:
+        pack.block("it_tax_domicile_comune", "the advance is determined at the tax-domicile comune")
+    if not prior_year_irpef_due:
+        return ZERO
+    pct = pack.require_pct("it_addcom_acconto_pct", side="employee")
+    slabs = list(getattr(ctx, "slabs", None) or [])
+    municipal = _local_liability(slabs, IT_ADDCOM_RULE, IT_ADDCOM_EXEMPT_RULE,
+                                 f"{COMUNE_TABLE_PREFIX}{_upper(comune)}", _dec(prior_year_taxable),
+                                 "it_addcomunale", pack)
+    return _round2(municipal * pct / HUNDRED)
+
+
 def resolve_fringe(ctx: PayrollContext, profile) -> dict:
     """§11 / IT-032 — the €2,000 per-child exemption needs the EMPLOYEE'S OWN
     declaration; it is never inferred. Only the evidence state is recorded
@@ -693,9 +805,11 @@ def calculate(ctx: PayrollContext) -> dict:
     taxable = _round2(_dec(ctx.gross) - contributions["employee"])
     irpef = resolve_irpef(ctx, pack, profile, taxable)
     local = resolve_local_tax(ctx, pack, profile, irpef)
+    local_withheld = resolve_local_withholding(ctx, pack)
     fringe = resolve_fringe(ctx, profile)
 
-    employee_total = _round2(contributions["employee"] + irpef["withholding"])
+    employee_total = _round2(contributions["employee"] + irpef["withholding"]
+                             + local_withheld["total"])
     employer_total = _round2(contributions["employer"] + tfr["net"])
 
     trace = {
@@ -729,8 +843,10 @@ def calculate(ctx: PayrollContext) -> dict:
         "wedgeBandPct": str(irpef["wedge_pct"]),
         "taxDomicileRegion": local["region"],
         "taxDomicileComune": local["comune"],
-        "localTaxWithheld": False,
-        "localTaxModel": "LIABILITY_TRACED_NOT_WITHHELD_V1",
+        "localTaxWithheld": True,
+        "localTaxModel": "DETERMINED_AMOUNTS_IN_INSTALMENTS_V2",
+        "localWithholding": local_withheld["lines"],
+        "terminationPeriod": local_withheld["terminating"],
         "localTaxZeroBecauseNoIrpef": local["zero_because_no_irpef"],
         "tfrDestination": tfr["destination"],
         "tfrRoutingComplete": tfr["routing_complete"],
@@ -771,7 +887,11 @@ def calculate(ctx: PayrollContext) -> dict:
         "it_wedge_band_pct": irpef["wedge_pct"],
         "it_regional_tax_annual": local["regional"],
         "it_municipal_tax_annual": local["municipal"],
-        "it_local_tax_withheld": False,
+        "it_local_tax_withheld": True,
+        "it_addreg_saldo_withheld": local_withheld["addreg_saldo"],
+        "it_addcom_saldo_withheld": local_withheld["addcom_saldo"],
+        "it_addcom_acconto_withheld": local_withheld["addcom_acconto"],
+        "it_local_tax_withheld_amount": local_withheld["total"],
         "it_tax_domicile_comune": local["comune"],
         "it_tax_domicile_region": local["region"],
         "it_fringe_amount": fringe["amount"],

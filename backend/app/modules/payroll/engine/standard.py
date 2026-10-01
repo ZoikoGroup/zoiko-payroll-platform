@@ -250,13 +250,13 @@ class StandardStrategy(PayrollStrategy):
             # occupational-pension employee share) — absent → 0 everywhere
             # else, same additive mechanism as ie_/fr_/sgp_ above.
             + deductions.get("se_employee_total", Decimal("0"))
-            # Italy employee-side statutory total (INPS contributions +
-            # IRPEF). It deliberately excludes the §5 regional/municipal
-            # surtaxes: v1 traces their annual liability without withholding
-            # any of it, so nothing belongs in the deduction. It also excludes
-            # the §4 wedge non-taxable sum, which is a BENEFIT added below,
-            # never a negative deduction (IT-009). Absent -> 0 everywhere else,
-            # same additive mechanism as ie_/fr_/sgp_/se_ above.
+            # Italy employee-side statutory total: INPS contributions + IRPEF
+            # + the §5 local-surtax instalments withheld this period (regional
+            # balance, municipal balance, municipal advance). It excludes the
+            # surtaxes' annual LIABILITY, which is settled at the next
+            # conguaglio, and the §4 wedge non-taxable sum, which is a BENEFIT
+            # added below, never a negative deduction (IT-009). Absent -> 0
+            # everywhere else, same additive mechanism as ie_/fr_/sgp_/se_ above.
             + deductions.get("it_employee_total", Decimal("0"))
         )
 
@@ -479,6 +479,10 @@ class StandardStrategy(PayrollStrategy):
             it_regional_tax_annual=deductions.get("it_regional_tax_annual", Decimal("0")),
             it_municipal_tax_annual=deductions.get("it_municipal_tax_annual", Decimal("0")),
             it_local_tax_withheld=deductions.get("it_local_tax_withheld", False),
+            it_addreg_saldo_withheld=deductions.get("it_addreg_saldo_withheld", Decimal("0")),
+            it_addcom_saldo_withheld=deductions.get("it_addcom_saldo_withheld", Decimal("0")),
+            it_addcom_acconto_withheld=deductions.get("it_addcom_acconto_withheld", Decimal("0")),
+            it_local_tax_withheld_amount=deductions.get("it_local_tax_withheld_amount", Decimal("0")),
             it_tax_domicile_comune=deductions.get("it_tax_domicile_comune"),
             it_tax_domicile_region=deductions.get("it_tax_domicile_region"),
             it_fringe_amount=deductions.get("it_fringe_amount", Decimal("0")),
