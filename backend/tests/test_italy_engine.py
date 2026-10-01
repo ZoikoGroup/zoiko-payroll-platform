@@ -136,6 +136,10 @@ def _ctx(gross=D("3000"), *, profile=_UNSET, employer=_UNSET, rate_map=None,
     # zeros; a test that needs an amount (or its absence) overrides one.
     for key in _LOCAL_DUE_KEYS:
         kwargs.setdefault(key, D("0"))
+    # §6: a full monthly period covers 26 contributory days unless a test
+    # supplies part-time hours or a shorter period.
+    if "it_part_time_hours" not in kwargs:
+        kwargs.setdefault("it_contributory_days", D("26"))
     return PayrollContext(
         country="IT",
         pay_date=date(2026, 3, 10),
@@ -188,6 +192,7 @@ def _run(case, **kwargs):
         ytd_base=D(case["ytdContributoryBasePrior"]),
         ytd_taxable=D(case["ytdTaxablePrior"]),
         ytd_withheld=D(case["ytdIrpefWithheldPrior"]),
+        it_contributory_days=D(str(case.get("contributoryDays", 26))),
         **kwargs,
     )
     return calculate(ctx)
@@ -779,6 +784,60 @@ def test_local_bands_are_progressive_not_one_rate_on_the_whole_amount():
 
 
 # ── 8. TFR (section 13 / section 14) ────────────────────────────────────────
+# ── §2/§6 INPS contributory minimum (IT-004 / IT-018) ──────────────────────
+def test_minimum_raises_the_inps_base_but_not_taxable_pay():
+    got = calculate(_ctx(gross=D("1000")))
+    assert got["it_contributory_base"] == D("1511.38")      # 58.13 x 26
+    assert got["it_contributory_minimum_applied"] is True
+    # IRPEF taxable income is actual pay minus contributions actually deducted.
+    assert got["it_taxable_income"] == D("1000") - got["it_employee_contributions"]
+
+
+def test_pay_above_the_minimum_is_untouched():
+    got = calculate(_ctx(gross=D("2500")))
+    assert got["it_contributory_base"] == D("2500")
+    assert got["it_contributory_minimum_applied"] is False
+
+
+def test_minimum_follows_the_contributory_days_of_a_short_period():
+    got = calculate(_ctx(gross=D("500"), it_contributory_days=D("10")))
+    assert got["it_contributory_base"] == D("581.30")
+
+
+def test_part_time_minimum_is_hourly_on_ccnl_hours_not_an_eight_hour_day():
+    """IT-018: 58.13 x 6 / 40 = 8.72 per hour; 80 hours = 697.60. Dividing by
+    a generic 8-hour day would give 7.27/hour instead."""
+    got = calculate(_ctx(gross=D("600"), it_part_time_hours=D("80"),
+                         it_ccnl_weekly_hours=D("40")))
+    assert got["it_contributory_base"] == D("697.60")
+    minimum = got["it_calculation_trace"]["contributoryMinimum"]
+    assert minimum["basis"] == "part_time" and minimum["hourlyMinimum"] == "8.72"
+
+
+def test_part_time_without_ccnl_hours_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("600"), it_part_time_hours=D("80")))
+    assert excinfo.value.key == "it_ccnl_weekly_hours"
+
+
+def test_missing_contributory_days_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), it_contributory_days=None))
+    assert excinfo.value.key == "it_contributory_days"
+
+
+def test_more_days_than_a_full_month_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), it_contributory_days=D("27")))
+    assert excinfo.value.key == "it_contributory_days"
+
+
+def test_tfr_accrues_on_actual_pay_even_when_the_minimum_applies():
+    got = calculate(_ctx(gross=D("1000")))
+    assert got["it_tfr_gross_accrual"] == D("74.07")       # 1000 / 13.5
+    assert got["it_tfr_inps_offset"] == D("7.56")          # 0.50% of 1511.38
+
+
 def test_tfr_accrues_at_one_thirteen_and_a_half():
     got = calculate(_ctx(gross=D("3000")))
     assert got["it_tfr_gross_accrual"] == _round2(D("3000") / D("13.5"))

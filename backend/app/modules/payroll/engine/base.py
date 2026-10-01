@@ -872,6 +872,12 @@ class PayrollContext:
     it_addcom_acconto_withheld_prior: Decimal = None
     # §22: a termination period withholds every outstanding amount at once.
     it_is_termination_period: bool = False
+    # §6 / IT-018 INPS contributory minimum. Full-time: contributory days the
+    # period covers. Part-time: hours paid + CCNL weekly hours. One of the two
+    # must be supplied or italy.py blocks.
+    it_contributory_days: Decimal = None
+    it_part_time_hours: Decimal = None
+    it_ccnl_weekly_hours: Decimal = None
 
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
@@ -1406,6 +1412,8 @@ class PayrollResult:
     it_addcom_saldo_withheld: Decimal = Decimal("0")
     it_addcom_acconto_withheld: Decimal = Decimal("0")
     it_local_tax_withheld_amount: Decimal = Decimal("0")
+    # §6: True when the contributory minimum raised the INPS base above pay.
+    it_contributory_minimum_applied: bool = False
     it_tax_domicile_comune: str = None
     it_tax_domicile_region: str = None
     it_fringe_amount: Decimal = Decimal("0")

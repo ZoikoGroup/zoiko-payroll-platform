@@ -23,7 +23,8 @@ covered by CIG (so no FIS), and 13 *mensilità* unless the case says otherwise.
 | Wedge additional deduction (§4) | €1,000 (€20k–€32k), €1,000×(40,000−R)/8,000 (€32k–€40k), pro-rated |
 | Extra 1% IVS (§6, IT-016) | cumulative above €56,224 contributory pay |
 | Contribution ceiling (§6, IT-017) | €122,295 cumulative, cohort `POST_1995` only |
-| TFR (§13) | pay / 13.5, less the 0.50% INPS offset |
+| INPS contributory minimum (§2/§6) | contributions on max(pay, €58.13 × 26 contributory days = €1,511.38) |
+| TFR (§13) | actual pay / 13.5, less the 0.50% INPS offset on the contributory base |
 | Lombardia surtax | 1.23 / 1.58 / 1.72 / 1.73% progressive (Draft — verify against MEF) |
 | Milano surtax | 0.8% on the whole income above a €23,000 exemption (Draft — verify against MEF) |
 
@@ -33,6 +34,16 @@ period's taxable × remaining *mensilità*; period IRPEF = annual net tax ×
 municipal amounts are this year's **liability**, which v1 traces but does not
 withhold (instalment ledger not built yet). The tax-free sum is added to net pay
 and is never netted against IRPEF (IT-009).
+
+## Contributory minimum (2026-10-01)
+
+`jan_1000`, `jan_1500`, `jul_hire_1000_partial_year` and
+`oct_hire_1000_detrazione_floor` pay less than the 2026 INPS minimum for a full
+month (€58.13 × 26 = €1,511.38), so their contributions are due on €1,511.38.
+Their expected figures were re-derived by a second standalone calculator (no
+engine code) that also reproduces the other six cases unchanged. IRPEF taxable
+income stays actual pay minus the contributions actually deducted, and TFR
+accrues on actual pay; only the 0.50% offset follows the raised base.
 
 ## What these are not
 

@@ -483,6 +483,7 @@ class StandardStrategy(PayrollStrategy):
             it_addcom_saldo_withheld=deductions.get("it_addcom_saldo_withheld", Decimal("0")),
             it_addcom_acconto_withheld=deductions.get("it_addcom_acconto_withheld", Decimal("0")),
             it_local_tax_withheld_amount=deductions.get("it_local_tax_withheld_amount", Decimal("0")),
+            it_contributory_minimum_applied=deductions.get("it_contributory_minimum_applied", False),
             it_tax_domicile_comune=deductions.get("it_tax_domicile_comune"),
             it_tax_domicile_region=deductions.get("it_tax_domicile_region"),
             it_fringe_amount=deductions.get("it_fringe_amount", Decimal("0")),

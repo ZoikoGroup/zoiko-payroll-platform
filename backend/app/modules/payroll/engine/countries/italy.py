@@ -101,6 +101,9 @@ _IT_ADDCOM_SALDO_LAST_MONTH = None
 _IT_ADDCOM_ACCONTO_PCT = None
 _IT_ADDCOM_ACCONTO_FIRST_MONTH = None
 _IT_ADDCOM_ACCONTO_LAST_MONTH = None
+_IT_INPS_DAILY_MINIMUM = None
+_IT_INPS_FULL_MONTH_DAYS = None
+_IT_INPS_PARTTIME_HOURLY_FACTOR = None
 
 # The backend catalog of scalar Italy parameters — each key is a
 # ContributionRate.component_key. Parity with italy_content.IT_PARAMETER_KEYS
@@ -126,6 +129,10 @@ IT_PARAMETER_KEYS = {
     "it_addcom_acconto_pct": "employee_pct",
     "it_addcom_acconto_first_month": "amount",
     "it_addcom_acconto_last_month": "amount",
+    # §2/§6 INPS contributory minimum — NOT a wage floor (IT-004).
+    "it_inps_daily_minimum": "amount",
+    "it_inps_full_month_days": "amount",
+    "it_inps_parttime_hourly_factor": "amount",
 }
 
 # TaxSlab.rule_type discriminators (mirrors italy_content).
@@ -355,9 +362,49 @@ def _fis_row(ctx: PayrollContext, pack: _Pack):
                                  "(UP_TO_5 / OVER_5) is not captured")
 
 
+def resolve_contributory_minimum(ctx: PayrollContext, pack: _Pack) -> dict:
+    """§2/§6 — the INPS contributory minimum for this period (IT-004, IT-018).
+
+    Full-time: daily minimum × the contributory days the period covers (the
+    service supplies them: a full month, or fewer for a joiner/leaver).
+    Part-time: an HOURLY minimum — daily minimum × factor ÷ the CCNL weekly
+    hours — times the hours paid; never the daily minimum over a generic
+    eight-hour day (IT-018). The minimum only raises the base INPS is paid on;
+    it is not a wage floor and is never presented as one (IT-004)."""
+    daily = pack.require_amount("it_inps_daily_minimum")
+    hours = getattr(ctx, "it_part_time_hours", None)
+    if hours is not None:
+        weekly = getattr(ctx, "it_ccnl_weekly_hours", None)
+        if weekly is None or _dec(weekly) <= ZERO:
+            pack.block("it_ccnl_weekly_hours", "a part-time minimum needs the CCNL weekly "
+                                               "hours (IT-018); none supplied")
+        if _dec(hours) < ZERO:
+            pack.block("it_part_time_hours", f"{hours} is not a valid hour count")
+        factor = pack.require_amount("it_inps_parttime_hourly_factor")
+        hourly = _round2(daily * factor / _dec(weekly))
+        return {"minimum": _round2(hourly * _dec(hours)), "basis": "part_time",
+                "hourlyMinimum": str(hourly), "hours": str(hours),
+                "ccnlWeeklyHours": str(weekly), "dailyMinimum": str(daily)}
+    days = getattr(ctx, "it_contributory_days", None)
+    if days is None:
+        pack.block("it_contributory_days",
+                   "the INPS contributory minimum depends on the contributory days the period "
+                   "covers (spec §6); none supplied, and part-time hours are not recorded either")
+    days = _dec(days)
+    full_month = pack.require_amount("it_inps_full_month_days")
+    if days < ZERO or days > full_month:
+        pack.block("it_contributory_days", f"{days} is outside 0-{full_month} for a monthly period")
+    return {"minimum": _round2(daily * days), "basis": "full_time",
+            "days": str(days), "dailyMinimum": str(daily)}
+
+
 def resolve_contributions(ctx: PayrollContext, pack: _Pack, profile) -> dict:
     gross = _dec(ctx.gross)
-    base = _dec(getattr(ctx, "it_contributory_base", None)) or gross
+    actual_base = _dec(getattr(ctx, "it_contributory_base", None)) or gross
+    minimum = resolve_contributory_minimum(ctx, pack)
+    # §6: contributions are due on the higher of the actual contributory pay
+    # and the minimum; the shortfall is a contribution base, never pay.
+    base = max(actual_base, minimum["minimum"])
     ytd_base = _dec(getattr(ctx, "it_ytd_contributory_base_prior", None))
     scope, rows = _classification_rows(ctx, pack, profile)
     worker_class = _upper(getattr(profile, "it_worker_class", None))
@@ -445,6 +492,9 @@ def resolve_contributions(ctx: PayrollContext, pack: _Pack, profile) -> dict:
                        "crossedThisPeriod": excess_before == ZERO and excess_after > ZERO})
 
     return {
+        "actual_base": actual_base,
+        "minimum": minimum,
+        "minimum_applied": base > actual_base,
         "scope": scope,
         "causale": getattr(ivs_row, "filing_status", None),
         "fis_employee": _round2(fis_employee),
@@ -462,13 +512,17 @@ def resolve_contributions(ctx: PayrollContext, pack: _Pack, profile) -> dict:
 
 
 # ── 8. TFR ─────────────────────────────────────────────────────────────────
-def resolve_tfr(ctx: PayrollContext, pack: _Pack, profile, base: Decimal) -> dict:
+def resolve_tfr(ctx: PayrollContext, pack: _Pack, profile, remuneration: Decimal,
+                contributory_base: Decimal) -> dict:
+    """§13 — TFR accrues on the worker's actual remuneration (Codice civile
+    art. 2120), never on a contributory minimum; the 0.50% INPS offset is a
+    contribution, so it follows the contributory base."""
     divisor = pack.require_amount("it_tfr_divisor")
     if divisor <= ZERO:
         pack.block("it_tfr_divisor", "divisor must be positive")
     offset_pct = pack.require_pct("it_tfr_inps_offset", side="employer")
-    gross_accrual = base / divisor
-    offset = base * offset_pct / HUNDRED
+    gross_accrual = remuneration / divisor
+    offset = contributory_base * offset_pct / HUNDRED
     net = _round2(gross_accrual - offset)
 
     destination = _upper(getattr(profile, "it_tfr_destination", None)) or None
@@ -801,7 +855,8 @@ def calculate(ctx: PayrollContext) -> dict:
         pack.block("italy_statutory_profile", "no Italian statutory profile in force for the pay date")
 
     contributions = resolve_contributions(ctx, pack, profile)
-    tfr = resolve_tfr(ctx, pack, profile, contributions["contributory_base"])
+    tfr = resolve_tfr(ctx, pack, profile, contributions["actual_base"],
+                      contributions["contributory_base"])
     taxable = _round2(_dec(ctx.gross) - contributions["employee"])
     irpef = resolve_irpef(ctx, pack, profile, taxable)
     local = resolve_local_tax(ctx, pack, profile, irpef)
@@ -824,6 +879,9 @@ def calculate(ctx: PayrollContext) -> dict:
         "cnelLevel": getattr(profile, "it_cnel_level", None),
         "cigsApplies": getattr(profile, "it_cigs_applies", None),
         "contributoryBase": str(contributions["contributory_base"]),
+        "actualContributoryPay": str(contributions["actual_base"]),
+        "contributoryMinimum": contributions["minimum"],
+        "contributoryMinimumApplied": contributions["minimum_applied"],
         "pensionBase": str(contributions["pension_base"]),
         "capCohort": contributions["cap_cohort"],
         "capNote": contributions["cap_note"],
@@ -864,6 +922,7 @@ def calculate(ctx: PayrollContext) -> dict:
         "it_employer_contributions": employer_total,
         "it_employee_contributions": contributions["employee"],
         "it_contributory_base": contributions["pension_base"],
+        "it_contributory_minimum_applied": contributions["minimum_applied"],
         "it_contributory_capped": contributions["capped"],
         "it_contributory_cap_cohort": contributions["cap_cohort"],
         "it_contributory_cap_amount": contributions["cap_excluded"],

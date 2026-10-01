@@ -68,6 +68,10 @@ IT_PARAMETER_KEYS = {
     "it_addcom_acconto_pct": "employee_pct",
     "it_addcom_acconto_first_month": "amount",
     "it_addcom_acconto_last_month": "amount",
+    # §2/§6 INPS contributory minimum — NOT a wage floor (IT-004).
+    "it_inps_daily_minimum": "amount",
+    "it_inps_full_month_days": "amount",
+    "it_inps_parttime_hourly_factor": "amount",
 }
 
 # (component_key, label, employee_pct, employer_pct, flat_amount, source)
@@ -114,6 +118,14 @@ IT_SCALAR_CONTENT = (
      "3.00", "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.5: up to 9 instalments from March)"),
     ("it_addcom_acconto_last_month", "Municipal advance — last instalment month (November)", None, None,
      "11.00", "§5 — needs source review (D.Lgs. 360/1998 art. 1 c.5)"),
+    # §2/§6 / IT-004 / IT-018 — the contributory minimum. It raises the base
+    # INPS is paid on; it is never a salary floor shown to anyone (IT-004).
+    ("it_inps_daily_minimum", "INPS contributory daily minimum (2026)", None, None,
+     "58.13", "§2 / §6 / IT-004 (INPS Circular 6/2026)"),
+    ("it_inps_full_month_days", "Contributory days in a full month (monthly-paid)", None, None,
+     "26.00", "§6 — needs source review (INPS monthly-paid convention: 26 days)"),
+    ("it_inps_parttime_hourly_factor", "Part-time hourly minimum = daily minimum × factor ÷ CCNL weekly hours",
+     None, None, "6.00", "IT-018 — needs source review (INPS part-time hourly minimum)"),
 )
 
 # ── §6/§7 INPS matrix (D1: ContributionRate, no dedicated table) ───────────

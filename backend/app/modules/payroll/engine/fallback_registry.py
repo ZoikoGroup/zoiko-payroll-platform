@@ -299,6 +299,9 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "IT", "module": "italy", "attr": "_IT_ADDCOM_ACCONTO_PCT", "label": "Municipal Surtax Advance (% of prior-year amount)", "resolverKey": "it_addcom_acconto_pct", "side": "employee", "note": "NO FALLBACK — 30% under D.Lgs. 360/1998 art. 1, pending G1 review; determined once a year, withheld separately from the balance (§5)."},
     {"country": "IT", "module": "italy", "attr": "_IT_ADDCOM_ACCONTO_FIRST_MONTH", "label": "Municipal Surtax Advance — First Instalment Month", "resolverKey": "it_addcom_acconto_first_month", "note": "NO FALLBACK — March under D.Lgs. 360/1998 art. 1, pending G1 review."},
     {"country": "IT", "module": "italy", "attr": "_IT_ADDCOM_ACCONTO_LAST_MONTH", "label": "Municipal Surtax Advance — Last Instalment Month", "resolverKey": "it_addcom_acconto_last_month", "note": "NO FALLBACK — November under D.Lgs. 360/1998 art. 1, pending G1 review."},
+    {"country": "IT", "module": "italy", "attr": "_IT_INPS_DAILY_MINIMUM", "label": "INPS Contributory Daily Minimum", "resolverKey": "it_inps_daily_minimum", "note": "NO FALLBACK — EUR 58.13 for 2026 (§2/§6). Raises the INPS base only; it is NOT a minimum wage (IT-004)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_INPS_FULL_MONTH_DAYS", "label": "Contributory Days in a Full Month", "resolverKey": "it_inps_full_month_days", "note": "NO FALLBACK — 26 for monthly-paid workers, pending G1 review."},
+    {"country": "IT", "module": "italy", "attr": "_IT_INPS_PARTTIME_HOURLY_FACTOR", "label": "Part-time Hourly Minimum Factor", "resolverKey": "it_inps_parttime_hourly_factor", "note": "NO FALLBACK — hourly minimum = daily minimum x factor / CCNL weekly hours (IT-018), never / 8."},
 ]
 
 
