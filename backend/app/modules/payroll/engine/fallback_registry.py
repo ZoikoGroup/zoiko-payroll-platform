@@ -259,6 +259,39 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "SE", "module": "sweden", "attr": "_SE_YOUTH_MONTHLY_THRESHOLD", "label": "Youth Relief Monthly Threshold (SEK)", "resolverKey": "se_youth_monthly_threshold", "required": False, "note": "NO FALLBACK — window-conditional with se_youth_reduced; — SEK 25,000 per person per calendar month (ZP-SE-ENG-001 §3)."},
     {"country": "SE", "module": "sweden", "attr": "_SE_OLDER_COHORT_MAX_BIRTH_YEAR", "label": "Older-Worker Cohort — Maximum Birth Year", "resolverKey": "se_older_cohort_max_birth_year", "note": "NO FALLBACK — income-year content (2026: born 1938–1958 pay only the age-pension component); Super Admin updates it per income year."},
     {"country": "SE", "module": "sweden", "attr": "_SE_ZERO_COHORT_MAX_BIRTH_YEAR", "label": "Zero-Rate Cohort — Maximum Birth Year", "resolverKey": "se_zero_cohort_max_birth_year", "note": "NO FALLBACK — income-year content (2026: born 1937 or earlier pay 0%); Super Admin updates it per income year."},
+
+    # ── Italy ─────────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-IT-ENG-001 §30 + shared.py's
+    # _VALIDATION_ENABLED_COUNTRIES): every constant below is None — listed
+    # only so the readiness check knows which keys an Italian pack must
+    # configure. Italy's INPS matrix is NOT a flat rate per component: rates
+    # are ContributionRate rows keyed on jurisdiction_state='CSC_<csc>_CA_<ca>'
+    # with tax_regime = worker class, so the matrix itself has no scalar key and
+    # is validated by italy.py at calculation time (IT-002: an unconfigured
+    # combination BLOCKS rather than falling back to a generic rate).
+    #
+    # The keys registered here are therefore only the genuinely scalar,
+    # whole-of-population parameters — the eleven in italy.IT_PARAMETER_KEYS.
+    # Everything else is deliberately absent:
+    #   * the INPS IVS/CIGS rates exist only as classification-scoped rows
+    #     (jurisdiction_state = "CSC_<csc>" / "CSC_<csc>_CA_<ca>", tax_regime =
+    #     worker class). Registering one national key as "required" would
+    #     invite exactly the generic fallback IT-002 forbids.
+    #   * IRPEF brackets, the §4 deduction/wedge bands and the §5 local surtax
+    #     bands are TaxSlab rows keyed by tax_table_number, with no scalar key
+    #     — the same exclusion Sweden makes for its tax-table bands. A locality
+    #     readiness check should verify domicile COVERAGE, not one flat rate.
+    {"country": "IT", "module": "italy", "attr": "_IT_IVS_ADDITIONAL_PCT", "label": "Additional 1% IVS (Employee)", "resolverKey": "it_ivs_additional_pct", "side": "employee", "note": "NO FALLBACK — cumulative above the annual retribution band (ZP-IT-ENG-001 §6 / IT-016); a missing row BLOCKS."},
+    {"country": "IT", "module": "italy", "attr": "_IT_IVS_ADDITIONAL_THRESHOLD", "label": "Additional 1% IVS Annual Threshold", "resolverKey": "it_ivs_additional_threshold", "note": "NO FALLBACK — EUR 56,224 for 2026 (§6); threshold content, never a default."},
+    {"country": "IT", "module": "italy", "attr": "_IT_CONTRIBUTORY_CEILING", "label": "Annual Contributory Maximum (cohort only)", "resolverKey": "it_contributory_ceiling", "note": "NO FALLBACK — EUR 122,295 for 2026; applied ONLY with cap-cohort evidence (IT-017), never because income is high."},
+    {"country": "IT", "module": "italy", "attr": "_IT_TFR_DIVISOR", "label": "TFR Accrual Divisor", "resolverKey": "it_tfr_divisor", "side": "employer", "note": "NO FALLBACK — qualifying annual remuneration / 13.5 (§13 / Codice civile art. 2120)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_TFR_INPS_OFFSET", "label": "TFR 0.50% INPS Offset", "resolverKey": "it_tfr_inps_offset", "side": "employer", "note": "NO FALLBACK — needs source (L. 297/1982 art. 3); kept as content so the statutory review can correct it without a code change."},
+    {"country": "IT", "module": "italy", "attr": "_IT_TESORERIA_HEADCOUNT_THRESHOLD", "label": "Fondo Tesoreria Prior-Year Headcount Threshold", "resolverKey": "it_tesoreria_headcount_threshold", "note": "NO FALLBACK — 60 for 2026-2027, 50 for 2028-2031, 40 from 2032 (§14); determined from the PRIOR-YEAR average (IT-040), never current headcount."},
+    {"country": "IT", "module": "italy", "attr": "_IT_DETRAZIONE_MIN_PERMANENT", "label": "Detrazione Lavoro Floor (Permanent Contract)", "resolverKey": "it_detrazione_min_permanent", "note": "NO FALLBACK — needs source (TUIR art. 13); contract-type dependent, so a single default would misstate one of the two cases."},
+    {"country": "IT", "module": "italy", "attr": "_IT_DETRAZIONE_MIN_FIXED_TERM", "label": "Detrazione Lavoro Floor (Fixed-Term Contract)", "resolverKey": "it_detrazione_min_fixed_term", "note": "NO FALLBACK — needs source (TUIR art. 13)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_MENSILITA_DEFAULT", "label": "Default Mensilita per Year", "resolverKey": "it_mensilita_default", "note": "NO FALLBACK — default 13 until CCNL content lands; a CCNL override is supplied per worker by the service, never a default here."},
+    {"country": "IT", "module": "italy", "attr": "_IT_FIS_SMALL_EMPLOYER", "label": "FIS (employers with up to 5 employees)", "resolverKey": "it_fis_small_employer", "note": "NO FALLBACK — 0.50% total split two-thirds employer / one-third employee where the fund applies (§7 / IT-020); sector funds differ."},
+    {"country": "IT", "module": "italy", "attr": "_IT_FIS_LARGE_EMPLOYER", "label": "FIS (employers with more than 5 employees)", "resolverKey": "it_fis_large_employer", "note": "NO FALLBACK — 0.80% total on the same two-thirds/one-third split (§7 / IT-020)."},
 ]
 
 
