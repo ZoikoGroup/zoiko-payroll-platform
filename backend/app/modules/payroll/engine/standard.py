@@ -501,6 +501,7 @@ class StandardStrategy(PayrollStrategy):
             it_addcom_saldo_determined=deductions.get("it_addcom_saldo_determined", Decimal("0")),
             it_addcom_credit_determined=deductions.get("it_addcom_credit_determined", Decimal("0")),
             it_termination_surtax_withheld=deductions.get("it_termination_surtax_withheld", Decimal("0")),
+            it_ytd_after=deductions.get("it_ytd_after"),
             it_employee_total=deductions.get("it_employee_total", Decimal("0")),
             it_calculation_trace=deductions.get("it_calculation_trace"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),

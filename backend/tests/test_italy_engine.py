@@ -1039,6 +1039,17 @@ def test_more_days_than_a_full_month_blocks():
     assert excinfo.value.key == "it_contributory_days"
 
 
+def test_a_full_month_uses_the_configured_day_count():
+    got = calculate(_ctx(gross=D("1000"), it_contributory_days=None, it_contributory_full_month=True))
+    assert got["it_contributory_base"] == D("1511.38")
+
+
+def test_a_part_time_worker_without_hours_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("800"), it_contributory_days=None, it_is_part_time=True))
+    assert excinfo.value.key == "it_part_time_hours"
+
+
 def test_tfr_accrues_on_actual_pay_even_when_the_minimum_applies():
     got = calculate(_ctx(gross=D("1000")))
     assert got["it_tfr_gross_accrual"] == D("74.07")       # 1000 / 13.5
@@ -1245,6 +1256,17 @@ def test_registered_keys_match_the_content_and_the_engine():
     assert registered == set(italy.IT_PARAMETER_KEYS)
     assert registered == set(italy_content.IT_PARAMETER_KEYS)
     assert {row[0] for row in italy_content.IT_SCALAR_CONTENT} == registered
+
+
+def test_registry_side_matches_each_keys_kind():
+    """The service readiness check reads the registry's "side" to decide which
+    column must be set: an amount key registered as a rate (or the reverse)
+    reports a seeded row as missing and blocks every Italian payroll. This is
+    how it_tfr_divisor and both FIS keys were first registered."""
+    want = {"amount": None, "employee_pct": "employee", "employer_pct": "employer"}
+    for entry in fallback_registry._ENGINE_CONSTANT_REGISTRY:
+        if entry["country"] == "IT":
+            assert entry.get("side") == want[italy.IT_PARAMETER_KEYS[entry["resolverKey"]]], entry["resolverKey"]
 
 
 def test_inps_matrix_has_no_national_rate_key():

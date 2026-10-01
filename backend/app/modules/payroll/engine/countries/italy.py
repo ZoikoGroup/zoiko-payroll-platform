@@ -395,6 +395,9 @@ def resolve_contributory_minimum(ctx: PayrollContext, pack: _Pack) -> dict:
     it is not a wage floor and is never presented as one (IT-004)."""
     daily = pack.require_amount("it_inps_daily_minimum")
     hours = getattr(ctx, "it_part_time_hours", None)
+    if hours is None and _truthy(getattr(ctx, "it_is_part_time", None)):
+        pack.block("it_part_time_hours", "a part-time worker's INPS minimum is hourly (IT-018); "
+                                         "the hours paid this period are not recorded")
     if hours is not None:
         weekly = getattr(ctx, "it_ccnl_weekly_hours", None)
         if weekly is None or _dec(weekly) <= ZERO:
@@ -408,6 +411,10 @@ def resolve_contributory_minimum(ctx: PayrollContext, pack: _Pack) -> dict:
                 "hourlyMinimum": str(hourly), "hours": str(hours),
                 "ccnlWeeklyHours": str(weekly), "dailyMinimum": str(daily)}
     days = getattr(ctx, "it_contributory_days", None)
+    if days is None and _truthy(getattr(ctx, "it_contributory_full_month", None)):
+        # A full monthly period: the configured full-month day count, never a
+        # number the caller assumes.
+        days = pack.require_amount("it_inps_full_month_days")
     if days is None:
         pack.block("it_contributory_days",
                    "the INPS contributory minimum depends on the contributory days the period "
@@ -1134,6 +1141,27 @@ def calculate(ctx: PayrollContext) -> dict:
                              + wedge["recovery_now"])
     employer_total = _round2(contributions["employer"] + tfr["net"])
 
+    # The running totals AFTER this period, in italy_content.IT_YTD_COMPONENTS
+    # terms ([ytd_taxable_wages, ytd_tax_withheld]) for the calendar year of
+    # the pay date. The service persists exactly these — it never recomputes
+    # a statutory figure (same discipline as the other jurisdictions).
+    lines = local_withheld["lines"]
+    ytd_after = {
+        "tax_year": ctx.pay_date.year,
+        "it_irpef": [_dec(getattr(ctx, "it_ytd_taxable_prior", None)) + taxable,
+                     _dec(getattr(ctx, "it_ytd_irpef_withheld_prior", None))
+                     + irpef["withholding"] - irpef["refund"]],
+        "it_inps_base": [_dec(getattr(ctx, "it_ytd_contributory_base_prior", None))
+                         + contributions["contributory_base"], ZERO],
+        "it_fringe": [fringe["fringe_ytd_after"], ZERO],
+        "it_wedge_paid": [_dec(getattr(ctx, "it_ytd_wedge_paid_prior", None)) + wedge["paid_now"], ZERO],
+        "it_mensilita": [Decimal(irpef["mensilita_paid_prior"] + irpef["period_mensilita"]), ZERO],
+    }
+    for name in ("addreg_saldo", "addcom_saldo", "addcom_acconto"):
+        line = lines[name]
+        ytd_after[f"it_{name}"] = [_dec(line["due"]),
+                                   _dec(line["withheldPrior"]) + _dec(line["withheldNow"])]
+
     trace = {
         "jurisdiction": _COUNTRY,
         "payDate": ctx.pay_date.isoformat(),
@@ -1249,5 +1277,6 @@ def calculate(ctx: PayrollContext) -> dict:
         "it_fringe_ytd_after": fringe["fringe_ytd_after"],
         "it_meal_voucher_taxable": fringe["meal_taxable"],
         "it_employee_total": employee_total,
+        "it_ytd_after": ytd_after,
         "it_calculation_trace": trace,
     }

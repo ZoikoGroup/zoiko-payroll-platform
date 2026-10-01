@@ -289,7 +289,14 @@ IT_YTD_COMPONENTS = {
     "it_addcom_acconto": ("current-year municipal advance determined", "withheld to date"),
     "it_addcom_credit":  ("municipal advance credit determined", "refunded to date"),
     "it_wedge_recovery": ("wedge-sum recovery determined (IT-011)", "recovered to date"),
+    "it_wedge_recovery_inst": ("current recovery instalment amount", "unused (0)"),
+    "it_mensilita":      ("mensilita paid to date", "unused (0)"),
 }
+
+# The wedge recovery plan spans calendar years (ten instalments from a
+# December conguaglio), so its two rows use this fixed tax_year key rather
+# than a calendar year.
+IT_WEDGE_RECOVERY_PLAN_YEAR = "IT-RECOVERY"
 
 # INAIL (IT-022) on EmployerTaxProfile: component_code = prefix + voce di
 # tariffa, agency_account_id = the PAT, employer_rate_pct = the tasso

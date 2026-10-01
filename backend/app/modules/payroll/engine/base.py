@@ -876,6 +876,12 @@ class PayrollContext:
     # period covers. Part-time: hours paid + CCNL weekly hours. One of the two
     # must be supplied or italy.py blocks.
     it_contributory_days: Decimal = None
+    # True when the period covers the whole month: the engine then uses the
+    # configured it_inps_full_month_days instead of a caller-supplied count.
+    it_contributory_full_month: bool = False
+    # True for a part-time worker (contractual hours below the CCNL week):
+    # it_part_time_hours is then required.
+    it_is_part_time: bool = False
     it_part_time_hours: Decimal = None
     it_ccnl_weekly_hours: Decimal = None
     # §11 benefits. it_fringe_amount (above) is this period's fringe value;
@@ -1447,6 +1453,9 @@ class PayrollResult:
     it_addcom_saldo_determined: Decimal = Decimal("0")
     it_addcom_credit_determined: Decimal = Decimal("0")
     it_termination_surtax_withheld: Decimal = Decimal("0")
+    # Running totals after this period, keyed by IT_YTD_COMPONENTS (None for
+    # every other country). The service persists them on COMMIT only.
+    it_ytd_after: dict = None
     it_employee_total: Decimal = Decimal("0")
     it_calculation_trace: dict = None
 
