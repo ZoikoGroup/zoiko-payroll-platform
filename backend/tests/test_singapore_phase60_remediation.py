@@ -28,9 +28,11 @@ A, B, C = 101, 202, 303          # two/three distinct Super Admin actors
 
 def _golden_pass(db, actor=A):
     from app.modules.payroll import service
+    from tests._sg_evidence import accept_sg_gate
 
     run = service.run_golden_test_certification(db, "SG", actor_id=actor)
     assert run.status == "PASS"
+    accept_sg_gate(db)                       # Phase 6.10: SG activation also needs G1 accepted
     return run
 
 
@@ -52,6 +54,9 @@ def _seed_both(db):
 
 def _activate(db, pack, approver=B, activator=A):
     from app.modules.payroll import service
+    from tests._sg_evidence import accept_sg_gate
+
+    accept_sg_gate(db)                       # Phase 6.10: SG activation needs G1 accepted
 
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=approver)
     return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=activator)
@@ -265,7 +270,8 @@ def test_f2_other_countries_keep_checker_activation(db):
 def test_f2_opt_in_is_singapore_only():
     from app.modules.payroll.service import _APPROVER_NOT_ACTIVATOR_COUNTRIES
 
-    assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == ("SG",)
+    # Hong Kong (ZP-HK-ENG-001) opted in from day one — still no EXISTING country (owner decision D3).
+    assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == ("SG", "HK")
 
 
 # ══ F3 — 2026 / 2027 pack effective periods ════════════════════════════════

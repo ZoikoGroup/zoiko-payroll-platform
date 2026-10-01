@@ -842,10 +842,13 @@ def test_activation_requires_distinct_approver_then_blocks_downgrade(db):
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
+    from tests._sg_evidence import accept_sg_gate
+
     pack = _seed(db)
     pack.updated_by_id = MAKER.id
     db.commit()
     _cert_run(db, "PASS")
+    accept_sg_gate(db)                       # Phase 6.10: SG activation needs G1 accepted
     with pytest.raises(BadRequestException):
         service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=CHECKER.id)
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER.id)

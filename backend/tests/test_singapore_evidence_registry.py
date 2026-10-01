@@ -163,8 +163,8 @@ def test_the_dashboard_reads_the_real_alembic_head_and_schema(db, monkeypatch):
     from app.modules.payroll import service
 
     state = service._sg_database_state(db)
-    assert state["codeHeads"] == ["445abd6a9083"] and state["missingSgObjects"] == [] and state["error"] is None
-    monkeypatch.setattr(service, "_sg_database_state", lambda _db: {**state, "databaseHeads": ["445abd6a9083"],
+    assert state["codeHeads"] == ["cd62503afe26"] and state["missingSgObjects"] == [] and state["error"] is None
+    monkeypatch.setattr(service, "_sg_database_state", lambda _db: {**state, "databaseHeads": ["cd62503afe26"],
                                                                       "atHead": True})
     rows = {r["key"]: r for r in _ready(db)["readinessDashboard"]}
     assert rows["migration"]["status"] == "PASS"
