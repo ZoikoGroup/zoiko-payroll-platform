@@ -108,6 +108,8 @@ _IT_FRINGE_EXEMPT_LIMIT = None
 _IT_FRINGE_EXEMPT_LIMIT_CHILDREN = None
 _IT_MEAL_ELECTRONIC_EXEMPT = None
 _IT_MEAL_PAPER_EXEMPT = None
+_IT_WEDGE_RECOVERY_THRESHOLD = None
+_IT_WEDGE_RECOVERY_INSTALMENTS = None
 
 # The backend catalog of scalar Italy parameters — each key is a
 # ContributionRate.component_key. Parity with italy_content.IT_PARAMETER_KEYS
@@ -142,6 +144,9 @@ IT_PARAMETER_KEYS = {
     "it_fringe_exempt_limit_children": "amount",
     "it_meal_electronic_exempt": "amount",
     "it_meal_paper_exempt": "amount",
+    # §4 / IT-011 recovery of a wedge sum that turns out not to be due.
+    "it_wedge_recovery_threshold": "amount",
+    "it_wedge_recovery_instalments": "amount",
 }
 
 # TaxSlab.rule_type discriminators (mirrors italy_content).
@@ -628,9 +633,15 @@ def resolve_irpef(ctx: PayrollContext, pack: _Pack, profile, taxable: Decimal,
         pack.block("it_work_days_in_year", f"{days} is not a valid day count")
     day_share = min(days, DAYS_IN_TAX_YEAR) / DAYS_IN_TAX_YEAR
 
-    # IT-005: forecast the year, don't bracket the month.
-    per_mensilita = (taxable - one_off) / Decimal(this_period)
-    forecast = ytd_taxable + per_mensilita * Decimal(total - paid_prior) + one_off
+    # IT-005: forecast the year, don't bracket the month. IT-006: at the
+    # conguaglio (year-end or termination) the ACTUAL annual income replaces
+    # the forecast, and the whole year's tax is settled now.
+    conguaglio = _is_conguaglio(ctx)
+    if conguaglio:
+        forecast = ytd_taxable + taxable
+    else:
+        per_mensilita = (taxable - one_off) / Decimal(this_period)
+        forecast = ytd_taxable + per_mensilita * Decimal(total - paid_prior) + one_off
 
     brackets = _rows(slabs, IT_IRPEF_BRACKET_RULE)
     if not brackets:
@@ -669,9 +680,16 @@ def resolve_irpef(ctx: PayrollContext, pack: _Pack, profile, taxable: Decimal,
     additional = addl_amount * day_share
 
     net_annual = max(ZERO, gross_tax - detrazione - additional)
-    cumulative_due = net_annual * Decimal(paid_prior + this_period) / Decimal(total)
+    if conguaglio:
+        cumulative_due = net_annual
+    else:
+        cumulative_due = net_annual * Decimal(paid_prior + this_period) / Decimal(total)
     raw_withholding = _round2(cumulative_due - ytd_withheld)
     withholding = max(ZERO, raw_withholding)
+    # Only the conguaglio settles the year, so only it may REFUND what was
+    # over-withheld; mid-year an over-withholding is traced and absorbed by
+    # later periods.
+    refund = -raw_withholding if conguaglio and raw_withholding < ZERO else ZERO
 
     # §4 wedge non-taxable sum: the percentage band is chosen on the ANNUAL
     # forecast (IT-010), the sum is that percentage of THIS period's income.
@@ -697,7 +715,9 @@ def resolve_irpef(ctx: PayrollContext, pack: _Pack, profile, taxable: Decimal,
         "net_annual": net_annual,
         "cumulative_due": cumulative_due,
         "withholding": withholding,
-        "over_withheld": -raw_withholding if raw_withholding < ZERO else ZERO,
+        "refund": refund,
+        "conguaglio": conguaglio,
+        "over_withheld": -raw_withholding if raw_withholding < ZERO and not conguaglio else ZERO,
         "day_share": day_share,
         "wedge_pct": wedge_pct,
         "wedge_sum": wedge_sum,
@@ -907,6 +927,106 @@ def resolve_benefits(ctx: PayrollContext, pack: _Pack, profile) -> dict:
             "irpef_taxable": taxable, "inps_taxable": taxable}
 
 
+def _is_conguaglio(ctx: PayrollContext) -> bool:
+    """IT-006: the conguaglio runs at year-end and at termination."""
+    return (_truthy(getattr(ctx, "it_is_conguaglio_period", None))
+            or _truthy(getattr(ctx, "it_is_termination_period", None)))
+
+
+def resolve_wedge_settlement(ctx: PayrollContext, pack: _Pack, irpef: dict) -> dict:
+    """§4 — the structural wedge sum, settled at the conguaglio (IT-009..011).
+
+    Outside the conguaglio the sum is paid each period as computed. At the
+    conguaglio it is re-measured on the ACTUAL annual income: what is still
+    due is paid now; what was paid but is not due is recovered — at once up
+    to the threshold, otherwise in equal instalments from this pay (IT-011),
+    never as one negative net pay. A termination recovers everything at once,
+    because no later pay exists. An instalment plan opened at a previous
+    conguaglio is deducted every period until it is settled."""
+    terminating = _truthy(getattr(ctx, "it_is_termination_period", None))
+    outstanding_raw = getattr(ctx, "it_wedge_recovery_outstanding", None)
+    instalment_raw = getattr(ctx, "it_wedge_recovery_instalment", None)
+    if outstanding_raw is None:
+        pack.block("it_wedge_recovery_outstanding",
+                   "the wedge-sum recovery balance is not recorded for this employee (IT-011); "
+                   "record 0 explicitly when nothing is being recovered")
+    outstanding = _dec(outstanding_raw)
+    instalment = _dec(instalment_raw)
+    if outstanding < ZERO or instalment < ZERO:
+        pack.block("it_wedge_recovery_outstanding", "negative recovery amounts")
+    if outstanding > ZERO and instalment == ZERO and not terminating:
+        pack.block("it_wedge_recovery_instalment",
+                   "a recovery is outstanding but its instalment amount is not recorded")
+
+    # Instalments of an earlier plan.
+    if outstanding == ZERO:
+        plan_now = ZERO
+    elif terminating:
+        plan_now = outstanding
+    else:
+        plan_now = min(outstanding, instalment)
+    outstanding_after = outstanding - plan_now
+    instalment_after = instalment if outstanding_after > ZERO else ZERO
+
+    paid_now = irpef["wedge_sum"]
+    settlement = {"conguaglio": irpef["conguaglio"], "plannedRecoveryNow": str(_round2(plan_now))}
+    new_recovery = ZERO
+    recovery_now = plan_now
+    if irpef["conguaglio"]:
+        paid_prior_raw = getattr(ctx, "it_ytd_wedge_paid_prior", None)
+        if paid_prior_raw is None:
+            pack.block("it_ytd_wedge_paid_prior", "the conguaglio re-measures the wedge sum against "
+                                                  "what was paid this year (IT-009); none recorded")
+        paid_prior = _dec(paid_prior_raw)
+        due_annual = _round2(irpef["forecast"] * irpef["wedge_pct"] / HUNDRED)
+        difference = due_annual - paid_prior
+        settlement.update({"dueAnnual": str(due_annual), "paidPrior": str(paid_prior),
+                           "bandPctOnActualIncome": str(irpef["wedge_pct"])})
+        if difference >= ZERO:
+            paid_now = _round2(difference)
+        else:
+            paid_now = ZERO
+            new_recovery = _round2(-difference)
+            threshold = pack.require_amount("it_wedge_recovery_threshold")
+            count = pack.require_amount("it_wedge_recovery_instalments")
+            if count < 1 or count != count.to_integral_value():
+                pack.block("it_wedge_recovery_instalments", f"must be a whole number >= 1, got {count}")
+            if terminating or new_recovery <= threshold:
+                recovery_now += new_recovery
+                settlement["recoveryMode"] = "termination" if terminating else "single"
+            else:
+                first = _round2(new_recovery / count)
+                recovery_now += first
+                outstanding_after += new_recovery - first
+                instalment_after = first
+                settlement["recoveryMode"] = f"{int(count)}_instalments"
+    return {"paid_now": paid_now, "recovery_now": _round2(recovery_now),
+            "new_recovery": new_recovery, "outstanding_after": _round2(outstanding_after),
+            "instalment_after": _round2(instalment_after), "trace": settlement}
+
+
+def resolve_surtax_determination(ctx: PayrollContext, pack: _Pack, local: dict,
+                                 conguaglio: bool) -> dict:
+    """§5 / §22 — at the conguaglio the year's surtaxes become DETERMINED
+    amounts. At year-end they are withheld next year in instalments (the
+    regional balance in full; the municipal balance is the year's liability
+    less this year's advance). At termination nothing can be withheld next
+    year, so the year's balances are withheld now. An advance larger than
+    the liability leaves a credit, never a negative withholding."""
+    if not conguaglio:
+        return {"regional": ZERO, "municipal": ZERO, "credit": ZERO, "withheld_now": ZERO,
+                "terminating": False}
+    terminating = _truthy(getattr(ctx, "it_is_termination_period", None))
+    acconto = _dec(getattr(ctx, "it_addcom_acconto_due", None))
+    regional = local["regional"]
+    municipal_balance = local["municipal"] - acconto
+    credit = _round2(-municipal_balance) if municipal_balance < ZERO else ZERO
+    municipal = _round2(max(ZERO, municipal_balance))
+    withheld_now = _round2(regional + municipal) if terminating else ZERO
+    return {"regional": regional, "municipal": municipal, "credit": credit,
+            "withheld_now": withheld_now, "terminating": terminating}
+
+
 def calculate(ctx: PayrollContext) -> dict:
     """Italy entry point (standard + enterprise dispatch). Returns the
     deductions/contributions dict standard.py folds into PayrollResult."""
@@ -932,9 +1052,12 @@ def calculate(ctx: PayrollContext) -> dict:
     irpef = resolve_irpef(ctx, pack, profile, taxable, one_off=fringe["irpef_taxable"])
     local = resolve_local_tax(ctx, pack, profile, irpef)
     local_withheld = resolve_local_withholding(ctx, pack)
+    wedge = resolve_wedge_settlement(ctx, pack, irpef)
+    surtax = resolve_surtax_determination(ctx, pack, local, irpef["conguaglio"])
 
-    employee_total = _round2(contributions["employee"] + irpef["withholding"]
-                             + local_withheld["total"])
+    employee_total = _round2(contributions["employee"] + irpef["withholding"] - irpef["refund"]
+                             + local_withheld["total"] + surtax["withheld_now"]
+                             + wedge["recovery_now"])
     employer_total = _round2(contributions["employer"] + tfr["net"])
 
     trace = {
@@ -974,6 +1097,13 @@ def calculate(ctx: PayrollContext) -> dict:
         "localTaxWithheld": True,
         "localTaxModel": "DETERMINED_AMOUNTS_IN_INSTALMENTS_V2",
         "localWithholding": local_withheld["lines"],
+        "conguaglio": irpef["conguaglio"],
+        "irpefRefund": str(irpef["refund"]),
+        "wedgeSettlement": wedge["trace"],
+        "surtaxDetermined": {"regional": str(surtax["regional"]),
+                             "municipal": str(surtax["municipal"]),
+                             "municipalCredit": str(surtax["credit"]),
+                             "withheldNowAtTermination": str(surtax["withheld_now"])},
         "terminationPeriod": local_withheld["terminating"],
         "localTaxZeroBecauseNoIrpef": local["zero_because_no_irpef"],
         "tfrDestination": tfr["destination"],
@@ -1018,7 +1148,17 @@ def calculate(ctx: PayrollContext) -> dict:
         "it_detrazione_lavoro": _round2(irpef["detrazione"]),
         "it_wedge_additional_deduction": _round2(irpef["additional"]),
         "it_fis_employee": contributions["fis_employee"],
-        "it_wedge_tax_free_sum": irpef["wedge_sum"],
+        "it_wedge_tax_free_sum": wedge["paid_now"],
+        "it_wedge_recovery_now": wedge["recovery_now"],
+        "it_wedge_recovery_new": wedge["new_recovery"],
+        "it_wedge_recovery_outstanding_after": wedge["outstanding_after"],
+        "it_wedge_recovery_instalment_after": wedge["instalment_after"],
+        "it_conguaglio": irpef["conguaglio"],
+        "it_irpef_refund": irpef["refund"],
+        "it_addreg_saldo_determined": surtax["regional"],
+        "it_addcom_saldo_determined": surtax["municipal"],
+        "it_addcom_credit_determined": surtax["credit"],
+        "it_termination_surtax_withheld": surtax["withheld_now"],
         "it_wedge_band_pct": irpef["wedge_pct"],
         "it_regional_tax_annual": local["regional"],
         "it_municipal_tax_annual": local["municipal"],

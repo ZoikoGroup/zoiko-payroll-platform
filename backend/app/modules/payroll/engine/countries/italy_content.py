@@ -77,6 +77,9 @@ IT_PARAMETER_KEYS = {
     "it_fringe_exempt_limit_children": "amount",
     "it_meal_electronic_exempt": "amount",
     "it_meal_paper_exempt": "amount",
+    # §4 / IT-011 recovery of a wedge sum that turns out not to be due.
+    "it_wedge_recovery_threshold": "amount",
+    "it_wedge_recovery_instalments": "amount",
 }
 
 # (component_key, label, employee_pct, employer_pct, flat_amount, source)
@@ -142,6 +145,12 @@ IT_SCALAR_CONTENT = (
      "10.00", "§2 / §11"),
     ("it_meal_paper_exempt", "Paper meal voucher — exempt per voucher", None, None,
      "4.00", "§11 'separate statutory limit' — needs source review (TUIR art. 51 c.2 lett. c)"),
+    # §4 / IT-011 — a wedge sum found not due at conguaglio is recovered in
+    # equal instalments when it exceeds the threshold.
+    ("it_wedge_recovery_threshold", "Wedge sum recovery — instalments above this amount", None, None,
+     "60.00", "§4 / IT-011"),
+    ("it_wedge_recovery_instalments", "Wedge sum recovery — number of instalments", None, None,
+     "10.00", "§4 / IT-011"),
 )
 
 # ── §6/§7 INPS matrix (D1: ContributionRate, no dedicated table) ───────────

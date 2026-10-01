@@ -881,6 +881,14 @@ class PayrollContext:
     # §11 benefits. it_fringe_amount (above) is this period's fringe value;
     # the year-to-date value is required whenever there is any.
     it_ytd_fringe_prior: Decimal = None
+    # IT-006 conguaglio: True for the year-end settlement period (termination
+    # always settles too). The wedge sum paid this year is then required.
+    it_is_conguaglio_period: bool = False
+    it_ytd_wedge_paid_prior: Decimal = None
+    # IT-011 wedge-sum recovery plan opened at a previous conguaglio. None =
+    # not recorded, which BLOCKS; nothing being recovered is an explicit 0.
+    it_wedge_recovery_outstanding: Decimal = None
+    it_wedge_recovery_instalment: Decimal = None
     it_meal_electronic_count: Decimal = None
     it_meal_electronic_value: Decimal = None
     it_meal_paper_count: Decimal = None
@@ -1428,6 +1436,17 @@ class PayrollResult:
     it_fringe_taxable: Decimal = Decimal("0")
     it_fringe_ytd_after: Decimal = Decimal("0")
     it_meal_voucher_taxable: Decimal = Decimal("0")
+    # IT-006 / IT-011 conguaglio outputs (for the year ledger).
+    it_conguaglio: bool = False
+    it_irpef_refund: Decimal = Decimal("0")
+    it_wedge_recovery_now: Decimal = Decimal("0")
+    it_wedge_recovery_new: Decimal = Decimal("0")
+    it_wedge_recovery_outstanding_after: Decimal = Decimal("0")
+    it_wedge_recovery_instalment_after: Decimal = Decimal("0")
+    it_addreg_saldo_determined: Decimal = Decimal("0")
+    it_addcom_saldo_determined: Decimal = Decimal("0")
+    it_addcom_credit_determined: Decimal = Decimal("0")
+    it_termination_surtax_withheld: Decimal = Decimal("0")
     it_employee_total: Decimal = Decimal("0")
     it_calculation_trace: dict = None
 

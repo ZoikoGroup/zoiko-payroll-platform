@@ -306,6 +306,8 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "IT", "module": "italy", "attr": "_IT_FRINGE_EXEMPT_LIMIT_CHILDREN", "label": "Fringe Benefits Annual Exemption (child declaration)", "resolverKey": "it_fringe_exempt_limit_children", "note": "NO FALLBACK — EUR 2,000, only with the employee's own declaration (IT-032)."},
     {"country": "IT", "module": "italy", "attr": "_IT_MEAL_ELECTRONIC_EXEMPT", "label": "Electronic Meal Voucher Exemption (per voucher)", "resolverKey": "it_meal_electronic_exempt", "note": "NO FALLBACK — EUR 10 per electronic voucher in 2026 (§11)."},
     {"country": "IT", "module": "italy", "attr": "_IT_MEAL_PAPER_EXEMPT", "label": "Paper Meal Voucher Exemption (per voucher)", "resolverKey": "it_meal_paper_exempt", "note": "NO FALLBACK — separate limit, never the electronic one (§11), pending G1 review."},
+    {"country": "IT", "module": "italy", "attr": "_IT_WEDGE_RECOVERY_THRESHOLD", "label": "Wedge Sum Recovery Instalment Threshold", "resolverKey": "it_wedge_recovery_threshold", "note": "NO FALLBACK — a recovery above EUR 60 is spread over instalments (IT-011)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_WEDGE_RECOVERY_INSTALMENTS", "label": "Wedge Sum Recovery Instalments", "resolverKey": "it_wedge_recovery_instalments", "note": "NO FALLBACK — ten equal instalments from the first affected pay (IT-011)."},
 ]
 
 

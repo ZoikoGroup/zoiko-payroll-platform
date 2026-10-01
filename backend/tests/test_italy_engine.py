@@ -123,6 +123,8 @@ _LOCAL_DUE_KEYS = (
     "it_addreg_saldo_due", "it_addreg_saldo_withheld_prior",
     "it_addcom_saldo_due", "it_addcom_saldo_withheld_prior",
     "it_addcom_acconto_due", "it_addcom_acconto_withheld_prior",
+    # IT-011: no wedge-sum recovery plan open.
+    "it_wedge_recovery_outstanding", "it_wedge_recovery_instalment",
 )
 
 
@@ -731,7 +733,8 @@ def test_a_remainder_after_the_window_closes_falls_due_at_once():
 
 def test_termination_withholds_everything_outstanding_at_once():
     got = calculate(_withholding_ctx(
-        4, it_is_termination_period=True, it_addreg_saldo_due=D("330"),
+        4, it_is_termination_period=True, it_ytd_wedge_paid_prior=D("0"),
+        it_addreg_saldo_due=D("330"),
         it_addreg_saldo_withheld_prior=D("90"), it_addcom_acconto_due=D("90")))
     assert got["it_addreg_saldo_withheld"] == D("240.00")
     assert got["it_addcom_acconto_withheld"] == D("90.00")
@@ -784,6 +787,134 @@ def test_local_bands_are_progressive_not_one_rate_on_the_whole_amount():
 
 
 # ── 8. TFR (section 13 / section 14) ────────────────────────────────────────
+# ── IT-006 conguaglio, IT-011 wedge recovery, §5/§22 surtax determination ──
+# Worked case: December, gross 2,500 (contributions 229.75 + 4.25 = 234.00),
+# 25,000 taxable earned before it -> actual annual 27,266.00; IRPEF 23% =
+# 6,271.18, detrazione 1,910 + 1,190 x (28,000 - 27,266) / 13,000 = 1,977.19,
+# additional deduction 1,000 -> net annual 3,293.99. Figures checked with a
+# separate calculation that shares no engine code.
+def _december(**kwargs):
+    ctx = _ctx(gross=D("2500"), mensilita_paid_prior=12, ytd_taxable=D("25000"),
+               it_is_conguaglio_period=True, **kwargs)
+    ctx.pay_date = date(2026, 12, 15)
+    return ctx
+
+
+def test_conguaglio_settles_the_year_on_actual_income():
+    got = calculate(_december(ytd_withheld=D("3000"), it_ytd_wedge_paid_prior=D("0")))
+    assert got["it_conguaglio"] is True
+    assert got["it_calculation_trace"]["annualForecast"] == "27266.00"   # actual, not projected
+    assert got["it_irpef_annual"] == D("3293.99")
+    assert got["it_irpef"] == D("293.99")                               # 3,293.99 - 3,000
+    assert got["it_irpef_refund"] == D("0")
+
+
+def test_conguaglio_refunds_over_withholding():
+    got = calculate(_december(ytd_withheld=D("3500"), it_ytd_wedge_paid_prior=D("0")))
+    assert got["it_irpef"] == D("0")
+    assert got["it_irpef_refund"] == D("206.01")
+    assert got["it_employee_total"] == (got["it_employee_contributions"] - D("206.01"))
+
+
+def test_mid_year_over_withholding_is_not_refunded():
+    got = calculate(_ctx(gross=D("2500"), mensilita_paid_prior=5, ytd_taxable=D("12000"),
+                         ytd_withheld=D("5000")))
+    assert got["it_conguaglio"] is False
+    assert got["it_irpef_refund"] == D("0")
+
+
+def test_conguaglio_needs_the_wedge_sum_paid_this_year():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_december(ytd_withheld=D("3000")))
+    assert excinfo.value.key == "it_ytd_wedge_paid_prior"
+
+
+def test_wedge_sum_not_due_above_60_is_recovered_in_ten_instalments():
+    """IT-011: 27,266 is above every wedge band, so the 300 paid during the
+    year is not due; above EUR 60 it is recovered as 10 x 30.00, starting now."""
+    got = calculate(_december(ytd_withheld=D("3000"), it_ytd_wedge_paid_prior=D("300")))
+    assert got["it_wedge_tax_free_sum"] == D("0")
+    assert got["it_wedge_recovery_new"] == D("300.00")
+    assert got["it_wedge_recovery_now"] == D("30.00")
+    assert got["it_wedge_recovery_outstanding_after"] == D("270.00")
+    assert got["it_wedge_recovery_instalment_after"] == D("30.00")
+    assert got["it_calculation_trace"]["wedgeSettlement"]["recoveryMode"] == "10_instalments"
+
+
+def test_wedge_recovery_up_to_60_is_taken_at_once():
+    got = calculate(_december(ytd_withheld=D("3000"), it_ytd_wedge_paid_prior=D("50")))
+    assert got["it_wedge_recovery_now"] == D("50.00")
+    assert got["it_wedge_recovery_outstanding_after"] == D("0")
+
+
+def test_conguaglio_pays_a_wedge_sum_still_due():
+    """Gross 1,500 (contributions on the 1,511.38 minimum: 141.47) -> actual
+    annual 11,358.53 in the 5.3% band -> 602.00 due; 500 paid -> 102.00 now."""
+    ctx = _ctx(gross=D("1500"), mensilita_paid_prior=12, ytd_taxable=D("10000"),
+               it_is_conguaglio_period=True, it_ytd_wedge_paid_prior=D("500"))
+    ctx.pay_date = date(2026, 12, 15)
+    got = calculate(ctx)
+    assert got["it_wedge_tax_free_sum"] == D("102.00")
+    assert got["it_wedge_recovery_new"] == D("0")
+
+
+def test_an_open_recovery_plan_is_deducted_each_period():
+    got = calculate(_ctx(gross=D("2500"), it_wedge_recovery_outstanding=D("270"),
+                         it_wedge_recovery_instalment=D("30")))
+    assert got["it_wedge_recovery_now"] == D("30.00")
+    assert got["it_wedge_recovery_outstanding_after"] == D("240.00")
+    assert got["it_employee_total"] == (got["it_employee_contributions"] + got["it_irpef"] + D("30.00"))
+
+
+def test_the_last_plan_instalment_takes_only_what_is_left():
+    got = calculate(_ctx(gross=D("2500"), it_wedge_recovery_outstanding=D("12"),
+                         it_wedge_recovery_instalment=D("30")))
+    assert got["it_wedge_recovery_now"] == D("12.00")
+    assert got["it_wedge_recovery_instalment_after"] == D("0")
+
+
+def test_an_open_plan_without_its_instalment_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), it_wedge_recovery_outstanding=D("270")))
+    assert excinfo.value.key == "it_wedge_recovery_instalment"
+
+
+def test_termination_recovers_an_open_plan_in_full():
+    ctx = _ctx(gross=D("2500"), it_is_termination_period=True, it_ytd_wedge_paid_prior=D("0"),
+               it_wedge_recovery_outstanding=D("270"), it_wedge_recovery_instalment=D("30"))
+    got = calculate(ctx)
+    assert got["it_wedge_recovery_now"] == D("270.00")
+    assert got["it_wedge_recovery_outstanding_after"] == D("0")
+
+
+def test_year_end_determines_next_years_surtax_balances():
+    """Lombardia 184.50 + 193.80 = 378.30; Milano 0.8% x 27,266 = 218.13 less
+    the 60 advance = 158.13. Withheld next year, not now."""
+    got = calculate(_december(ytd_withheld=D("3000"), it_ytd_wedge_paid_prior=D("0"),
+                              it_addcom_acconto_due=D("60"), it_addcom_acconto_withheld_prior=D("60")))
+    assert got["it_addreg_saldo_determined"] == D("378.30")
+    assert got["it_addcom_saldo_determined"] == D("158.13")
+    assert got["it_termination_surtax_withheld"] == D("0")
+
+
+def test_an_advance_above_the_liability_leaves_a_credit_not_a_negative_balance():
+    got = calculate(_december(ytd_withheld=D("3000"), it_ytd_wedge_paid_prior=D("0"),
+                              it_addcom_acconto_due=D("300"), it_addcom_acconto_withheld_prior=D("300")))
+    assert got["it_addcom_saldo_determined"] == D("0")
+    assert got["it_addcom_credit_determined"] == D("81.87")
+
+
+def test_termination_withholds_the_years_surtax_balances_now():
+    """§22: no later pay exists, so 378.30 + 158.13 = 536.43 is withheld now."""
+    ctx = _december(ytd_withheld=D("3000"), it_ytd_wedge_paid_prior=D("0"),
+                    it_addcom_acconto_due=D("60"), it_addcom_acconto_withheld_prior=D("60"))
+    ctx.it_is_termination_period = True
+    got = calculate(ctx)
+    assert got["it_termination_surtax_withheld"] == D("536.43")
+    assert got["it_employee_total"] == _round2(
+        got["it_employee_contributions"] + got["it_irpef"] + D("536.43"))
+
+
 # ── §11 fringe benefits and meal vouchers (IT-031..IT-033) ────────────────
 def test_fringe_within_the_annual_limit_is_not_taxable():
     got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("400"), it_ytd_fringe_prior=D("300")))
