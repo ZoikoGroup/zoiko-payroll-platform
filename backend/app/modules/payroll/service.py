@@ -6892,7 +6892,7 @@ def _se_payslip_snapshot(result) -> "dict | None":
             "tax_status": result.se_tax_status,
             "income_role": result.se_income_role,
         },
-        "employer_contribution": {
+        "employer": {
             "amount": result.se_employer_contribution,
             "rate": result.se_employer_contribution_rate,
             "cohort": result.se_employer_contribution_cohort,
@@ -6902,7 +6902,7 @@ def _se_payslip_snapshot(result) -> "dict | None":
             "month_compensation": result.se_month_compensation,
         },
         "slp": result.se_slp,
-        "occupational_pension": {
+        "pension": {
             "plan": result.se_pension_plan,
             "employee": result.se_occupational_pension_employee,
             "employer": result.se_occupational_pension_employer,
@@ -9150,13 +9150,13 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"] = {
     "se_calculation_snapshot.withholding.column": ("Tax Column", "text", False),
     "se_calculation_snapshot.withholding.tax_status": ("Worker Tax Status", "text", False),
     "se_calculation_snapshot.withholding.income_role": ("Income Role", "text", False),
-    "se_calculation_snapshot.employer_contribution.amount": ("Employer Contributions", "currency", True),
-    "se_calculation_snapshot.employer_contribution.base": ("Employer-Contribution Base", "currency", True),
-    "se_calculation_snapshot.employer_contribution.cohort": ("Employer-Contribution Cohort", "text", False),
-    "se_calculation_snapshot.employer_contribution.rate": ("Employer-Contribution Rate %", "text", False),
+    "se_calculation_snapshot.employer.amount": ("Employer Contributions", "currency", True),
+    "se_calculation_snapshot.employer.base": ("Employer-Contribution Base", "currency", True),
+    "se_calculation_snapshot.employer.cohort": ("Employer-Contribution Cohort", "text", False),
+    "se_calculation_snapshot.employer.rate": ("Employer-Contribution Rate %", "text", False),
     "se_calculation_snapshot.slp": ("Special Payroll Tax on Pension Costs (SLP)", "currency", True),
-    "se_calculation_snapshot.occupational_pension.employee": ("Occupational Pension (Employee)", "currency", True),
-    "se_calculation_snapshot.occupational_pension.employer": ("Occupational Pension (Employer)", "currency", True),
+    "se_calculation_snapshot.pension.employee": ("Occupational Pension (Employee)", "currency", True),
+    "se_calculation_snapshot.pension.employer": ("Occupational Pension (Employer)", "currency", True),
     "se_calculation_snapshot.employee_total": ("Total Employee Statutory Deductions", "currency", True),
     "se_calculation_snapshot.employer_total": ("Total Employer Statutory Cost", "currency", True),
 }

@@ -1126,6 +1126,72 @@ class SEEmployeeValidation(EmployeeValidationStrategy):
     }
 
 
+# Italy (ZP-IT-ENG-001 §18) — codice fiscale check character (DM 23/12/1976):
+# odd positions (1st, 3rd, ...) use this table, even positions the plain
+# value (digits 0-9, letters A=0..Z=25); the sum modulo 26 gives the letter.
+_IT_CF_ODD = dict(zip(
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    (1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 1, 0, 5, 7, 9, 13, 15, 17, 19, 21,
+     2, 4, 18, 20, 11, 3, 6, 8, 12, 14, 16, 10, 22, 25, 24, 23)))
+
+
+def italian_codice_fiscale_is_valid(value: str) -> bool:
+    """Shape AND check character. The shape allows omocodia (digits replaced
+    by L-V letters), which the check character covers the same way."""
+    if not value or not re.match(r"^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-EHLMPRST][0-9LMNPQRSTUV]{2}"
+                                 r"[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$", value):
+        return False
+    total = sum(_IT_CF_ODD[c] if i % 2 == 0 else (int(c) if c.isdigit() else ord(c) - 65)
+                for i, c in enumerate(value[:15]))
+    return chr(total % 26 + 65) == value[15]
+
+
+class ITEmployeeValidation(EmployeeValidationStrategy):
+    """Italy (ZP-IT-ENG-001 §18).
+
+    The codice fiscale is validated in shape AND check character, because
+    IT-052 makes a wrong one blocking for tax and UniEmens reporting and
+    forbids synthesising one — a typo must be caught at entry, not at the
+    annual CU. It is SENSITIVE (masked in API responses). The tax domicile is
+    entered as codes (ISTAT region, cadastral comune) and kept separate from
+    the worksite (IT-013). No field here sets a rate: classifications are
+    resolved against configured content, and an unconfigured one blocks the
+    calculation (IT-002)."""
+    country_code = "IT"
+    duplicate_field = "codice_fiscale"
+    SENSITIVE_FIELDS = ('codice_fiscale',)
+    FIELD_SPECS = {
+        "codice_fiscale": {
+            "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z0-9]{16}$"),
+            "error": "Codice fiscale must be 16 letters and digits.",
+        },
+        "worker_class": {"upper": True, "pattern": re.compile(r"^[A-Z_]{3,30}$"),
+                         "error": "INPS worker class: a code such as OPERAIO, IMPIEGATO, QUADRO"},
+        "contract_type": {"upper": True, "choices": ["INDETERMINATO", "DETERMINATO", "APPRENDISTATO"]},
+        "tfr_destination": {"upper": True, "choices": ["AZIENDA", "FONDO_PENSIONE", "FONDO_TESORERIA"]},
+        "tax_domicile_region": {"pattern": re.compile(r"^(0[1-9]|1[0-9]|20)$"),
+                                "error": "Tax domicile region: the 2-digit ISTAT region code (01-20)."},
+        "tax_domicile_comune": {"upper": True, "pattern": re.compile(r"^[A-Z]\d{3}$"),
+                                "error": "Tax domicile comune: the 4-character cadastral code, e.g. F205."},
+        "contractual_weekly_hours": {"pattern": re.compile(r"^\d{1,2}(\.\d{1,2})?$"),
+                                     "error": "Contractual weekly hours must be a number, e.g. 40 or 24.5."},
+        "cnel_code": {"upper": True, "pattern": re.compile(r"^[A-Z0-9]{1,20}$"),
+                      "error": "CNEL contract code: up to 20 letters and digits."},
+        "cnel_level": {"upper": True, "pattern": re.compile(r"^[A-Z0-9 ._-]{1,20}$"),
+                       "error": "CCNL level: up to 20 characters."},
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        cf = cleaned.get("codice_fiscale")
+        if cf and not italian_codice_fiscale_is_valid(cf):
+            raise BadRequestException("Codice fiscale check character does not match — check the code "
+                                      "against the employee's tessera sanitaria (IT-052).")
+        if cleaned.get("tfr_destination") == "FONDO_PENSIONE" and not cleaned.get("pension_fund"):
+            raise BadRequestException("A pension-fund TFR destination needs the fund named (pension_fund).")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1145,6 +1211,7 @@ _STRATEGIES = {
     "IE": IEEmployeeValidation,
     "SG": SGEmployeeValidation,
     "SE": SEEmployeeValidation,
+    "IT": ITEmployeeValidation,
 }
 
 

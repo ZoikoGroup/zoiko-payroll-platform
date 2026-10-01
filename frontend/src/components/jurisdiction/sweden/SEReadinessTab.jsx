@@ -135,10 +135,10 @@ function Preview({ pack }) {
       {se && (
         <dl className="grid grid-cols-1 gap-x-6 gap-y-1 rounded-xl border border-border p-3 text-xs sm:grid-cols-2">
           <dt className="text-foreground-muted">Withholding ({se.withholding.strategy})</dt><dd className="font-medium text-foreground">SEK {se.withholding.amount}</dd>
-          <dt className="text-foreground-muted">Employer contributions ({se.employer_contribution.cohort})</dt><dd className="font-medium text-foreground">SEK {se.employer_contribution.amount}</dd>
+          <dt className="text-foreground-muted">Employer contributions ({se.employer.cohort})</dt><dd className="font-medium text-foreground">SEK {se.employer.amount}</dd>
           <dt className="text-foreground-muted">SLP</dt><dd className="font-medium text-foreground">SEK {se.slp}</dd>
           <dt className="text-foreground-muted">Net pay</dt><dd className="font-medium text-foreground">SEK {out.result.netPay}</dd>
-          {(se.employer_contribution.components || []).map((c) => (
+          {(se.employer.components || []).map((c) => (
             <div key={c.key} className="contents">
               <dt className="pl-3 text-foreground-muted">{c.key} @ {c.ratePct}%{c.base ? ` on ${c.base}` : ""}</dt>
               <dd className="text-foreground-secondary">SEK {c.amount}</dd>

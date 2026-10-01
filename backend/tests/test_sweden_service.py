@@ -148,7 +148,7 @@ def test_preview_blocks_on_scaffold_and_computes_youth_relief(db, seeded):
         jurisdictionPackId=pack.id, payDate=date(2026, 5, 25), gross=D("40000"), dateOfBirth=date(2005, 1, 1),
         incomeRole="SUPPLEMENTARY_INCOME"))
     assert not ok["blocked"]
-    assert ok["sweden"]["employer_contribution"]["amount"] == "9915.50"   # 25,000 @ 20.81% + 15,000 @ 31.42%
+    assert ok["sweden"]["employer"]["amount"] == "9915.50"   # 25,000 @ 20.81% + 15,000 @ 31.42%
     assert ok["sweden"]["withholding"]["amount"] == "12000.00"
 
 
@@ -157,7 +157,7 @@ def test_preview_before_youth_window_is_not_blocked(db, seeded):
     out = service.preview_sweden_calculation(db, SwedenCalculationPreviewRequest(
         jurisdictionPackId=_pack(db).id, payDate=date(2026, 2, 25), gross=D("40000"), dateOfBirth=date(2005, 1, 1),
         incomeRole="SUPPLEMENTARY_INCOME"))
-    assert not out["blocked"] and out["sweden"]["employer_contribution"]["cohort"] == "STANDARD"
+    assert not out["blocked"] and out["sweden"]["employer"]["cohort"] == "STANDARD"
 
 
 # ── Canonical → org sync keeps Sweden's discriminators ──────────────────
