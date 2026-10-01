@@ -878,6 +878,13 @@ class PayrollContext:
     it_contributory_days: Decimal = None
     it_part_time_hours: Decimal = None
     it_ccnl_weekly_hours: Decimal = None
+    # §11 benefits. it_fringe_amount (above) is this period's fringe value;
+    # the year-to-date value is required whenever there is any.
+    it_ytd_fringe_prior: Decimal = None
+    it_meal_electronic_count: Decimal = None
+    it_meal_electronic_value: Decimal = None
+    it_meal_paper_count: Decimal = None
+    it_meal_paper_value: Decimal = None
 
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
@@ -1418,6 +1425,9 @@ class PayrollResult:
     it_tax_domicile_region: str = None
     it_fringe_amount: Decimal = Decimal("0")
     it_fringe_child_declared: bool = False
+    it_fringe_taxable: Decimal = Decimal("0")
+    it_fringe_ytd_after: Decimal = Decimal("0")
+    it_meal_voucher_taxable: Decimal = Decimal("0")
     it_employee_total: Decimal = Decimal("0")
     it_calculation_trace: dict = None
 

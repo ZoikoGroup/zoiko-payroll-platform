@@ -104,6 +104,10 @@ _IT_ADDCOM_ACCONTO_LAST_MONTH = None
 _IT_INPS_DAILY_MINIMUM = None
 _IT_INPS_FULL_MONTH_DAYS = None
 _IT_INPS_PARTTIME_HOURLY_FACTOR = None
+_IT_FRINGE_EXEMPT_LIMIT = None
+_IT_FRINGE_EXEMPT_LIMIT_CHILDREN = None
+_IT_MEAL_ELECTRONIC_EXEMPT = None
+_IT_MEAL_PAPER_EXEMPT = None
 
 # The backend catalog of scalar Italy parameters — each key is a
 # ContributionRate.component_key. Parity with italy_content.IT_PARAMETER_KEYS
@@ -133,6 +137,11 @@ IT_PARAMETER_KEYS = {
     "it_inps_daily_minimum": "amount",
     "it_inps_full_month_days": "amount",
     "it_inps_parttime_hourly_factor": "amount",
+    # §11 annual fringe exemption and per-voucher meal exemptions.
+    "it_fringe_exempt_limit": "amount",
+    "it_fringe_exempt_limit_children": "amount",
+    "it_meal_electronic_exempt": "amount",
+    "it_meal_paper_exempt": "amount",
 }
 
 # TaxSlab.rule_type discriminators (mirrors italy_content).
@@ -398,13 +407,15 @@ def resolve_contributory_minimum(ctx: PayrollContext, pack: _Pack) -> dict:
             "days": str(days), "dailyMinimum": str(daily)}
 
 
-def resolve_contributions(ctx: PayrollContext, pack: _Pack, profile) -> dict:
+def resolve_contributions(ctx: PayrollContext, pack: _Pack, profile,
+                          benefits_inps: Decimal = ZERO) -> dict:
     gross = _dec(ctx.gross)
     actual_base = _dec(getattr(ctx, "it_contributory_base", None)) or gross
     minimum = resolve_contributory_minimum(ctx, pack)
     # §6: contributions are due on the higher of the actual contributory pay
-    # and the minimum; the shortfall is a contribution base, never pay.
-    base = max(actual_base, minimum["minimum"])
+    # (cash plus the §11 benefits that are contributory this period) and the
+    # minimum; the shortfall is a contribution base, never pay.
+    base = max(actual_base + benefits_inps, minimum["minimum"])
     ytd_base = _dec(getattr(ctx, "it_ytd_contributory_base_prior", None))
     scope, rows = _classification_rows(ctx, pack, profile)
     worker_class = _upper(getattr(profile, "it_worker_class", None))
@@ -587,7 +598,12 @@ def _mensilita(ctx: PayrollContext, pack: _Pack) -> int:
     return int(value)
 
 
-def resolve_irpef(ctx: PayrollContext, pack: _Pack, profile, taxable: Decimal) -> dict:
+def resolve_irpef(ctx: PayrollContext, pack: _Pack, profile, taxable: Decimal,
+                  one_off: Decimal = ZERO) -> dict:
+    """`taxable` is this period's whole taxable income; `one_off` is the part
+    of it that does not recur (§11 benefits that became taxable this period),
+    added to the annual forecast once instead of being multiplied by the
+    mensilità still to come (IT-005)."""
     slabs = list(getattr(ctx, "slabs", None) or [])
     total = _mensilita(ctx, pack)
     paid_prior = int(getattr(ctx, "it_mensilita_paid_prior", None) or 0)
@@ -613,8 +629,8 @@ def resolve_irpef(ctx: PayrollContext, pack: _Pack, profile, taxable: Decimal) -
     day_share = min(days, DAYS_IN_TAX_YEAR) / DAYS_IN_TAX_YEAR
 
     # IT-005: forecast the year, don't bracket the month.
-    per_mensilita = taxable / Decimal(this_period)
-    forecast = ytd_taxable + per_mensilita * Decimal(total - paid_prior)
+    per_mensilita = (taxable - one_off) / Decimal(this_period)
+    forecast = ytd_taxable + per_mensilita * Decimal(total - paid_prior) + one_off
 
     brackets = _rows(slabs, IT_IRPEF_BRACKET_RULE)
     if not brackets:
@@ -830,14 +846,65 @@ def determine_addcom_acconto(ctx: PayrollContext, prior_year_taxable: Decimal, c
     return _round2(municipal * pct / HUNDRED)
 
 
-def resolve_fringe(ctx: PayrollContext, profile) -> dict:
-    """§11 / IT-032 — the €2,000 per-child exemption needs the EMPLOYEE'S OWN
-    declaration; it is never inferred. Only the evidence state is recorded
-    here; the annual fringe accumulator is a later ledger."""
+def resolve_benefits(ctx: PayrollContext, pack: _Pack, profile) -> dict:
+    """§11 — fringe benefits and meal vouchers (IT-031..IT-033).
+
+    Fringe: one aggregate ANNUAL exemption — the higher limit only with the
+    employee's own child declaration (IT-032), never inferred. Within the
+    limit nothing is taxable; the period that crosses it makes the WHOLE
+    year's amount taxable, including what was exempt in earlier periods, and
+    every later period is taxable in full (IT-031: the law taxes the whole
+    amount, not just the excess). Meal vouchers: only each voucher's value
+    above its type's limit is taxable, and paper never inherits the
+    electronic limit. Each amount carries its IRPEF and its INPS treatment
+    separately (IT-033); under current law the two coincide."""
     declared = _truthy(getattr(profile, "it_fringe_child_declared", None))
     amount = _dec(getattr(ctx, "it_fringe_amount", None))
+    if amount < ZERO:
+        pack.block("it_fringe_amount", f"{amount} is not a valid fringe value")
+    prior_raw = getattr(ctx, "it_ytd_fringe_prior", None)
+    fringe_taxable = ZERO
+    limit = None
+    crossed_now = False
+    prior = _dec(prior_raw)
+    if amount > ZERO or prior > ZERO:
+        if prior_raw is None:
+            pack.block("it_ytd_fringe_prior", "the fringe exemption is an ANNUAL accumulator "
+                                              "(IT-031); the year-to-date amount is not recorded")
+        limit = pack.require_amount("it_fringe_exempt_limit_children" if declared
+                                    else "it_fringe_exempt_limit")
+        if prior > limit:
+            fringe_taxable = amount                      # already crossed: taxed in full
+        elif prior + amount > limit:
+            fringe_taxable = prior + amount              # crossing now: the whole year's amount
+            crossed_now = True
+
+    meal_taxable = ZERO
+    meals = {}
+    for kind, count_key, value_key, limit_key in (
+            ("electronic", "it_meal_electronic_count", "it_meal_electronic_value",
+             "it_meal_electronic_exempt"),
+            ("paper", "it_meal_paper_count", "it_meal_paper_value", "it_meal_paper_exempt")):
+        count = _dec(getattr(ctx, count_key, None))
+        if count == ZERO:
+            continue
+        value = getattr(ctx, value_key, None)
+        if count < ZERO or value is None or _dec(value) < ZERO:
+            pack.block(value_key, f"{kind} meal vouchers need a non-negative count and face value")
+        exempt = pack.require_amount(limit_key)
+        excess = max(ZERO, _dec(value) - exempt) * count
+        meals[kind] = {"count": str(count), "faceValue": str(value), "exemptPerVoucher": str(exempt),
+                       "taxable": str(_round2(excess))}
+        meal_taxable += excess
+
+    taxable = _round2(fringe_taxable + meal_taxable)
     return {"amount": amount, "child_declared": declared,
-            "evidence_ok": declared or amount == ZERO}
+            "evidence_ok": declared or amount == ZERO,
+            "fringe_limit": limit, "fringe_ytd_after": _round2(prior + amount),
+            "fringe_taxable": _round2(fringe_taxable), "fringe_crossed_now": crossed_now,
+            "meal_taxable": _round2(meal_taxable), "meals": meals,
+            # IT-033: kept apart even though current law treats them alike.
+            "irpef_taxable": taxable, "inps_taxable": taxable}
 
 
 def calculate(ctx: PayrollContext) -> dict:
@@ -854,14 +921,17 @@ def calculate(ctx: PayrollContext) -> dict:
     if profile is None:
         pack.block("italy_statutory_profile", "no Italian statutory profile in force for the pay date")
 
-    contributions = resolve_contributions(ctx, pack, profile)
+    fringe = resolve_benefits(ctx, pack, profile)
+    contributions = resolve_contributions(ctx, pack, profile, fringe["inps_taxable"])
+    # TFR accrues on cash remuneration; benefits in kind are not part of it here.
     tfr = resolve_tfr(ctx, pack, profile, contributions["actual_base"],
                       contributions["contributory_base"])
-    taxable = _round2(_dec(ctx.gross) - contributions["employee"])
-    irpef = resolve_irpef(ctx, pack, profile, taxable)
+    # Taxable benefits are income that is NOT paid in cash: they raise taxable
+    # income but never net pay.
+    taxable = _round2(_dec(ctx.gross) - contributions["employee"] + fringe["irpef_taxable"])
+    irpef = resolve_irpef(ctx, pack, profile, taxable, one_off=fringe["irpef_taxable"])
     local = resolve_local_tax(ctx, pack, profile, irpef)
     local_withheld = resolve_local_withholding(ctx, pack)
-    fringe = resolve_fringe(ctx, profile)
 
     employee_total = _round2(contributions["employee"] + irpef["withholding"]
                              + local_withheld["total"])
@@ -911,6 +981,12 @@ def calculate(ctx: PayrollContext) -> dict:
         "tfrTesoreriaBelowThreshold": tfr["tesoreria_below_threshold"],
         "tfrUnrounded": str(tfr["unrounded"]),
         "fringeEvidenceOk": fringe["evidence_ok"],
+        "fringeLimit": None if fringe["fringe_limit"] is None else str(fringe["fringe_limit"]),
+        "fringeYtdAfter": str(fringe["fringe_ytd_after"]),
+        "fringeCrossedThisPeriod": fringe["fringe_crossed_now"],
+        "mealVouchers": fringe["meals"],
+        "benefitsIrpefTaxable": str(fringe["irpef_taxable"]),
+        "benefitsInpsTaxable": str(fringe["inps_taxable"]),
         "rateKeys": sorted(ctx.rate_map.keys()),
     }
 
@@ -955,6 +1031,9 @@ def calculate(ctx: PayrollContext) -> dict:
         "it_tax_domicile_region": local["region"],
         "it_fringe_amount": fringe["amount"],
         "it_fringe_child_declared": fringe["child_declared"],
+        "it_fringe_taxable": fringe["fringe_taxable"],
+        "it_fringe_ytd_after": fringe["fringe_ytd_after"],
+        "it_meal_voucher_taxable": fringe["meal_taxable"],
         "it_employee_total": employee_total,
         "it_calculation_trace": trace,
     }

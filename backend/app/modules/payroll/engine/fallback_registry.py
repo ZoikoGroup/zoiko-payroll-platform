@@ -302,6 +302,10 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "IT", "module": "italy", "attr": "_IT_INPS_DAILY_MINIMUM", "label": "INPS Contributory Daily Minimum", "resolverKey": "it_inps_daily_minimum", "note": "NO FALLBACK — EUR 58.13 for 2026 (§2/§6). Raises the INPS base only; it is NOT a minimum wage (IT-004)."},
     {"country": "IT", "module": "italy", "attr": "_IT_INPS_FULL_MONTH_DAYS", "label": "Contributory Days in a Full Month", "resolverKey": "it_inps_full_month_days", "note": "NO FALLBACK — 26 for monthly-paid workers, pending G1 review."},
     {"country": "IT", "module": "italy", "attr": "_IT_INPS_PARTTIME_HOURLY_FACTOR", "label": "Part-time Hourly Minimum Factor", "resolverKey": "it_inps_parttime_hourly_factor", "note": "NO FALLBACK — hourly minimum = daily minimum x factor / CCNL weekly hours (IT-018), never / 8."},
+    {"country": "IT", "module": "italy", "attr": "_IT_FRINGE_EXEMPT_LIMIT", "label": "Fringe Benefits Annual Exemption", "resolverKey": "it_fringe_exempt_limit", "note": "NO FALLBACK — EUR 1,000 (2025-2027); crossing it makes the WHOLE amount taxable (IT-031)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_FRINGE_EXEMPT_LIMIT_CHILDREN", "label": "Fringe Benefits Annual Exemption (child declaration)", "resolverKey": "it_fringe_exempt_limit_children", "note": "NO FALLBACK — EUR 2,000, only with the employee's own declaration (IT-032)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_MEAL_ELECTRONIC_EXEMPT", "label": "Electronic Meal Voucher Exemption (per voucher)", "resolverKey": "it_meal_electronic_exempt", "note": "NO FALLBACK — EUR 10 per electronic voucher in 2026 (§11)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_MEAL_PAPER_EXEMPT", "label": "Paper Meal Voucher Exemption (per voucher)", "resolverKey": "it_meal_paper_exempt", "note": "NO FALLBACK — separate limit, never the electronic one (§11), pending G1 review."},
 ]
 
 

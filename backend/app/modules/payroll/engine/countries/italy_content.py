@@ -72,6 +72,11 @@ IT_PARAMETER_KEYS = {
     "it_inps_daily_minimum": "amount",
     "it_inps_full_month_days": "amount",
     "it_inps_parttime_hourly_factor": "amount",
+    # §11 annual fringe exemption and per-voucher meal exemptions.
+    "it_fringe_exempt_limit": "amount",
+    "it_fringe_exempt_limit_children": "amount",
+    "it_meal_electronic_exempt": "amount",
+    "it_meal_paper_exempt": "amount",
 }
 
 # (component_key, label, employee_pct, employer_pct, flat_amount, source)
@@ -126,6 +131,17 @@ IT_SCALAR_CONTENT = (
      "26.00", "§6 — needs source review (INPS monthly-paid convention: 26 days)"),
     ("it_inps_parttime_hourly_factor", "Part-time hourly minimum = daily minimum × factor ÷ CCNL weekly hours",
      None, None, "6.00", "IT-018 — needs source review (INPS part-time hourly minimum)"),
+    # §11 / IT-031 — aggregate annual fringe exemption under the temporary
+    # 2025-2027 rule; crossing it makes the WHOLE amount taxable.
+    ("it_fringe_exempt_limit", "Fringe benefits — annual exemption", None, None,
+     "1000.00", "§2 / §11 / IT-031 (L. 207/2024, 2025-2027)"),
+    ("it_fringe_exempt_limit_children", "Fringe benefits — annual exemption with child declaration",
+     None, None, "2000.00", "§2 / §11 / IT-032 — requires the employee's own declaration"),
+    # §11 — per-voucher exemption; only the excess over it is taxable.
+    ("it_meal_electronic_exempt", "Electronic meal voucher — exempt per voucher (2026)", None, None,
+     "10.00", "§2 / §11"),
+    ("it_meal_paper_exempt", "Paper meal voucher — exempt per voucher", None, None,
+     "4.00", "§11 'separate statutory limit' — needs source review (TUIR art. 51 c.2 lett. c)"),
 )
 
 # ── §6/§7 INPS matrix (D1: ContributionRate, no dedicated table) ───────────

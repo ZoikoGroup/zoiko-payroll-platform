@@ -784,6 +784,82 @@ def test_local_bands_are_progressive_not_one_rate_on_the_whole_amount():
 
 
 # ── 8. TFR (section 13 / section 14) ────────────────────────────────────────
+# ── §11 fringe benefits and meal vouchers (IT-031..IT-033) ────────────────
+def test_fringe_within_the_annual_limit_is_not_taxable():
+    got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("400"), it_ytd_fringe_prior=D("300")))
+    assert got["it_fringe_taxable"] == D("0")
+    assert got["it_fringe_ytd_after"] == D("700")
+
+
+def test_crossing_the_limit_taxes_the_whole_years_amount_not_the_excess():
+    """IT-031: 800 already exempt + 300 now crosses EUR 1,000, so all 1,100 is
+    taxable in this period — not just the 100 above the limit."""
+    got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("300"), it_ytd_fringe_prior=D("800")))
+    assert got["it_fringe_taxable"] == D("1100")
+    assert got["it_calculation_trace"]["fringeCrossedThisPeriod"] is True
+
+
+def test_after_the_crossing_each_benefit_is_taxed_in_full():
+    got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("200"), it_ytd_fringe_prior=D("1100")))
+    assert got["it_fringe_taxable"] == D("200")
+
+
+def test_child_declaration_raises_the_limit():
+    """IT-032: the higher limit needs the employee's own declaration."""
+    got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("300"), it_ytd_fringe_prior=D("800"),
+                         profile=_ready_profile(it_fringe_child_declared=True)))
+    assert got["it_fringe_taxable"] == D("0")
+    assert got["it_calculation_trace"]["fringeLimit"] == "2000.00"
+
+
+def test_a_fringe_value_without_its_year_to_date_blocks():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), it_fringe_amount=D("300")))
+    assert excinfo.value.key == "it_ytd_fringe_prior"
+
+
+def test_meal_vouchers_tax_only_the_excess_and_paper_has_its_own_limit():
+    got = calculate(_ctx(gross=D("2500"),
+                         it_meal_electronic_count=D("20"), it_meal_electronic_value=D("12"),
+                         it_meal_paper_count=D("10"), it_meal_paper_value=D("6")))
+    # electronic (12 - 10) x 20 = 40; paper (6 - 4) x 10 = 20 — paper never
+    # inherits the EUR 10 electronic limit.
+    assert got["it_meal_voucher_taxable"] == D("60.00")
+    meals = got["it_calculation_trace"]["mealVouchers"]
+    assert meals["electronic"]["taxable"] == "40.00" and meals["paper"]["taxable"] == "20.00"
+
+
+def test_vouchers_within_the_limit_are_not_taxable():
+    got = calculate(_ctx(gross=D("2500"), it_meal_electronic_count=D("20"),
+                         it_meal_electronic_value=D("8")))
+    assert got["it_meal_voucher_taxable"] == D("0")
+
+
+def test_meal_vouchers_without_a_face_value_block():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        calculate(_ctx(gross=D("2500"), it_meal_paper_count=D("5")))
+    assert excinfo.value.key == "it_meal_paper_value"
+
+
+def test_taxable_benefits_raise_income_and_the_inps_base_but_are_never_paid():
+    plain = calculate(_ctx(gross=D("2500")))
+    got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("300"), it_ytd_fringe_prior=D("800")))
+    assert got["it_contributory_base"] == D("3600")                    # 2500 cash + 1100 fringe
+    assert got["it_taxable_income"] == D("2500") - got["it_employee_contributions"] + D("1100")
+    # Net cash falls: more tax and contributions, and the benefit itself is
+    # never added to pay.
+    net = lambda r: D("2500") - r["it_employee_total"] + r["it_wedge_tax_free_sum"]
+    assert net(got) < net(plain)
+
+
+def test_a_one_off_taxable_benefit_is_not_projected_over_the_year():
+    """IT-005: the 1,100 enters the annual forecast once, not x 13."""
+    got = calculate(_ctx(gross=D("2500"), it_fringe_amount=D("300"), it_ytd_fringe_prior=D("800")))
+    one_off, taxable = got["it_fringe_taxable"], got["it_taxable_income"]
+    forecast = D(got["it_calculation_trace"]["annualForecast"])
+    assert forecast == _round2((taxable - one_off) * 13 + one_off)
+
+
 # ── §2/§6 INPS contributory minimum (IT-004 / IT-018) ──────────────────────
 def test_minimum_raises_the_inps_base_but_not_taxable_pay():
     got = calculate(_ctx(gross=D("1000")))
