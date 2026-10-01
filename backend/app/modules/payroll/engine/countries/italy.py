@@ -110,6 +110,9 @@ _IT_MEAL_ELECTRONIC_EXEMPT = None
 _IT_MEAL_PAPER_EXEMPT = None
 _IT_WEDGE_RECOVERY_THRESHOLD = None
 _IT_WEDGE_RECOVERY_INSTALMENTS = None
+_IT_TFR_REVALUATION_FIXED_PCT = None
+_IT_TFR_REVALUATION_ISTAT_SHARE = None
+_IT_TFR_REVALUATION_TAX_PCT = None
 
 # The backend catalog of scalar Italy parameters — each key is a
 # ContributionRate.component_key. Parity with italy_content.IT_PARAMETER_KEYS
@@ -147,6 +150,11 @@ IT_PARAMETER_KEYS = {
     # §4 / IT-011 recovery of a wedge sum that turns out not to be due.
     "it_wedge_recovery_threshold": "amount",
     "it_wedge_recovery_instalments": "amount",
+    # §13 TFR revaluation: fixed part, share of the ISTAT FOI increase, and
+    # the substitute tax on the revaluation.
+    "it_tfr_revaluation_fixed_pct": "employer_pct",
+    "it_tfr_revaluation_istat_share": "employer_pct",
+    "it_tfr_revaluation_tax_pct": "employee_pct",
 }
 
 # TaxSlab.rule_type discriminators (mirrors italy_content).
@@ -925,6 +933,72 @@ def resolve_benefits(ctx: PayrollContext, pack: _Pack, profile) -> dict:
             "meal_taxable": _round2(meal_taxable), "meals": meals,
             # IT-033: kept apart even though current law treats them alike.
             "irpef_taxable": taxable, "inps_taxable": taxable}
+
+
+def determine_tfr_revaluation(ctx: PayrollContext, accrued_prior: Decimal,
+                              istat_increase_pct: Decimal, months: int) -> dict:
+    """§13 — revaluation of the TFR accrued up to the previous 31 December
+    (never the current year's quota): the fixed percentage pro-rated to the
+    months elapsed, plus a share of the ISTAT FOI index increase over the same
+    span, which is authority data the service supplies. The revaluation bears
+    its own substitute tax and is a ledger entry, never a monthly earning
+    (IT-037). Called at 31 December and at termination."""
+    pack = _Pack(ctx.rate_map, getattr(ctx, "italy_organization_id", None))
+    if accrued_prior is None or _dec(accrued_prior) < ZERO:
+        pack.block("it_tfr_accrued_prior", "the TFR accrued to the previous 31 December is required")
+    if istat_increase_pct is None:
+        pack.block("it_istat_foi_increase", "the ISTAT FOI increase is authority data and must be "
+                                            "supplied; it is never assumed")
+    if not isinstance(months, int) or not 0 <= months <= 12:
+        pack.block("it_tfr_revaluation_months", f"{months} is not a month count 0-12")
+    fixed = pack.require_pct("it_tfr_revaluation_fixed_pct", side="employer")
+    share = pack.require_pct("it_tfr_revaluation_istat_share", side="employer")
+    tax_pct = pack.require_pct("it_tfr_revaluation_tax_pct", side="employee")
+    # A fall in the index does not reduce the fixed part below zero growth.
+    istat = max(ZERO, _dec(istat_increase_pct))
+    coefficient = fixed * Decimal(months) / Decimal(12) + istat * share / HUNDRED
+    revaluation = _round2(_dec(accrued_prior) * coefficient / HUNDRED)
+    tax = _round2(revaluation * tax_pct / HUNDRED)
+    return {"coefficientPct": str(coefficient), "revaluation": revaluation,
+            "substituteTax": tax, "netRevaluation": _round2(revaluation - tax),
+            "months": months, "istatIncreasePct": str(istat_increase_pct)}
+
+
+def determine_tfr_separate_tax(ctx: PayrollContext, tfr_taxable: Decimal,
+                               months_of_service: int, service_start) -> dict:
+    """IT-039 — TFR is taxed separately (TUIR art. 17/19), never at the
+    employee's current marginal IRPEF rate: the reference income is the TFR
+    x 12 / years of service, the IRPEF of the year on that reference income
+    gives an AVERAGE rate, and that average rate is applied to the TFR.
+    Service before 2001 carries statutory reductions this function does not
+    implement, so it blocks rather than approximating them. `tfr_taxable`
+    excludes revaluations already taxed by the substitute tax."""
+    pack = _Pack(ctx.rate_map, getattr(ctx, "italy_organization_id", None))
+    if service_start is None:
+        pack.block("it_service_start", "the start of the service the TFR covers is required")
+    if service_start.year < 2001:
+        pack.block("it_service_start", "TFR for service before 2001 carries statutory reductions "
+                                       "(TUIR art. 19 c.2-bis) that are not certified yet")
+    if not isinstance(months_of_service, int) or months_of_service < 1:
+        pack.block("it_months_of_service", f"{months_of_service} is not a valid month count")
+    amount = _dec(tfr_taxable)
+    if amount < ZERO:
+        pack.block("it_tfr_taxable", f"{amount} is not a valid TFR amount")
+    brackets = _rows(list(getattr(ctx, "slabs", None) or []), IT_IRPEF_BRACKET_RULE)
+    if not brackets:
+        pack.block("it_irpef_brackets", "separate taxation needs the year's IRPEF brackets")
+    # TFR accrues about one month's pay per year of service, so TFR / years
+    # is a monthly figure; x 12 makes it the annual reference income.
+    years = Decimal(months_of_service) / Decimal(12)
+    reference = amount * Decimal(12) / years
+    if reference == ZERO:
+        return {"referenceIncome": "0", "averageRatePct": "0", "tax": ZERO, "net": ZERO}
+    tax_on_reference = _progressive(brackets, reference, "it_irpef_brackets", pack)
+    average_rate = tax_on_reference / reference
+    tax = _round2(amount * average_rate)
+    return {"referenceIncome": str(_round2(reference)),
+            "averageRatePct": str(_round2(average_rate * HUNDRED)),
+            "tax": tax, "net": _round2(amount - tax)}
 
 
 def _is_conguaglio(ctx: PayrollContext) -> bool:

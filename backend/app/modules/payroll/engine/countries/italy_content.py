@@ -80,6 +80,11 @@ IT_PARAMETER_KEYS = {
     # §4 / IT-011 recovery of a wedge sum that turns out not to be due.
     "it_wedge_recovery_threshold": "amount",
     "it_wedge_recovery_instalments": "amount",
+    # §13 TFR revaluation: fixed part, share of the ISTAT FOI increase, and
+    # the substitute tax on the revaluation.
+    "it_tfr_revaluation_fixed_pct": "employer_pct",
+    "it_tfr_revaluation_istat_share": "employer_pct",
+    "it_tfr_revaluation_tax_pct": "employee_pct",
 }
 
 # (component_key, label, employee_pct, employer_pct, flat_amount, source)
@@ -151,6 +156,13 @@ IT_SCALAR_CONTENT = (
      "60.00", "§4 / IT-011"),
     ("it_wedge_recovery_instalments", "Wedge sum recovery — number of instalments", None, None,
      "10.00", "§4 / IT-011"),
+    # §13 — revaluation of accrued TFR: 1.5% + 75% of the ISTAT FOI increase.
+    ("it_tfr_revaluation_fixed_pct", "TFR revaluation — fixed part (per year)", None, "1.5000", None,
+     "§13 / Codice civile art. 2120"),
+    ("it_tfr_revaluation_istat_share", "TFR revaluation — share of the ISTAT FOI increase", None,
+     "75.0000", None, "§13 / Codice civile art. 2120"),
+    ("it_tfr_revaluation_tax_pct", "TFR revaluation — substitute tax", "17.0000", None, None,
+     "§13 — needs source review (D.Lgs. 47/2000 art. 11 c.3)"),
 )
 
 # ── §6/§7 INPS matrix (D1: ContributionRate, no dedicated table) ───────────

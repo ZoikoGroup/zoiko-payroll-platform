@@ -1045,6 +1045,49 @@ def test_tfr_accrues_on_actual_pay_even_when_the_minimum_applies():
     assert got["it_tfr_inps_offset"] == D("7.56")          # 0.50% of 1511.38
 
 
+# ── §13 TFR revaluation and IT-039 separate taxation ───────────────────────
+def test_tfr_revaluation_full_year():
+    """10,000 accrued, ISTAT +2.0%: 1.5% + 75% x 2.0% = 3.0% -> 300; 17% tax 51."""
+    got = italy.determine_tfr_revaluation(_ctx(), D("10000"), D("2.0"), 12)
+    assert got["revaluation"] == D("300.00")
+    assert got["substituteTax"] == D("51.00")
+    assert got["netRevaluation"] == D("249.00")
+
+
+def test_tfr_revaluation_part_year_prorates_only_the_fixed_part():
+    """6 months, ISTAT +1.0%: 0.75% + 0.75% = 1.5% -> 150."""
+    got = italy.determine_tfr_revaluation(_ctx(), D("10000"), D("1.0"), 6)
+    assert got["revaluation"] == D("150.00")
+
+
+def test_tfr_revaluation_needs_the_istat_figure():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        italy.determine_tfr_revaluation(_ctx(), D("10000"), None, 12)
+    assert excinfo.value.key == "it_istat_foi_increase"
+
+
+def test_tfr_separate_tax_uses_the_average_rate_on_the_reference_income():
+    """IT-039: 20,000 over 10 years -> reference 24,000, all in the 23% band
+    -> average 23% -> 4,600."""
+    got = italy.determine_tfr_separate_tax(_ctx(), D("20000"), 120, date(2016, 1, 1))
+    assert got["referenceIncome"] == "24000.00"
+    assert got["tax"] == D("4600.00")
+
+
+def test_tfr_separate_tax_is_not_the_marginal_rate():
+    """90,000 over 5 years -> reference 216,000; IRPEF 6,440 + 7,260 + 71,380 =
+    85,080 -> average 39.39% -> 35,450.00, well below the 43% marginal rate."""
+    got = italy.determine_tfr_separate_tax(_ctx(), D("90000"), 60, date(2021, 1, 1))
+    assert got["tax"] == D("35450.00")
+    assert got["averageRatePct"] == "39.39"
+
+
+def test_tfr_for_pre_2001_service_blocks_rather_than_approximating():
+    with pytest.raises(ItalyCalculationBlockedError) as excinfo:
+        italy.determine_tfr_separate_tax(_ctx(), D("50000"), 360, date(1996, 3, 1))
+    assert excinfo.value.key == "it_service_start"
+
+
 def test_tfr_accrues_at_one_thirteen_and_a_half():
     got = calculate(_ctx(gross=D("3000")))
     assert got["it_tfr_gross_accrual"] == _round2(D("3000") / D("13.5"))

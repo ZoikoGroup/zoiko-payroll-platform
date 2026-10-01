@@ -308,6 +308,9 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "IT", "module": "italy", "attr": "_IT_MEAL_PAPER_EXEMPT", "label": "Paper Meal Voucher Exemption (per voucher)", "resolverKey": "it_meal_paper_exempt", "note": "NO FALLBACK — separate limit, never the electronic one (§11), pending G1 review."},
     {"country": "IT", "module": "italy", "attr": "_IT_WEDGE_RECOVERY_THRESHOLD", "label": "Wedge Sum Recovery Instalment Threshold", "resolverKey": "it_wedge_recovery_threshold", "note": "NO FALLBACK — a recovery above EUR 60 is spread over instalments (IT-011)."},
     {"country": "IT", "module": "italy", "attr": "_IT_WEDGE_RECOVERY_INSTALMENTS", "label": "Wedge Sum Recovery Instalments", "resolverKey": "it_wedge_recovery_instalments", "note": "NO FALLBACK — ten equal instalments from the first affected pay (IT-011)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_FIXED_PCT", "label": "TFR Revaluation — Fixed Part", "resolverKey": "it_tfr_revaluation_fixed_pct", "side": "employer", "note": "NO FALLBACK — 1.5% a year, pro-rated by month (§13 / c.c. art. 2120)."},
+    {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_ISTAT_SHARE", "label": "TFR Revaluation — Share of ISTAT FOI Increase", "resolverKey": "it_tfr_revaluation_istat_share", "side": "employer", "note": "NO FALLBACK — 75% of the ISTAT FOI increase (§13); the index itself is authority data supplied per run."},
+    {"country": "IT", "module": "italy", "attr": "_IT_TFR_REVALUATION_TAX_PCT", "label": "TFR Revaluation — Substitute Tax", "resolverKey": "it_tfr_revaluation_tax_pct", "side": "employee", "note": "NO FALLBACK — 17%, pending G1 review."},
 ]
 
 
