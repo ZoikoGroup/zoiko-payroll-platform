@@ -273,3 +273,25 @@ IT_LAUNCH_COMMUNI = (
     ("D612", "Firenze", "09"),
     ("L736", "Venezia", "05"),
 )
+
+# ── P2 ledgers on the generic model (917a54ed2347) ─────────────────────────
+# PayrollYtdAccumulator rows, one tax_component per Italian running total.
+# Each names what its (ytd_taxable_wages, ytd_tax_withheld) pair holds, so no
+# reader has to guess which half is live (Ireland's ie_* convention).
+# tax_year = the calendar year the amounts are WITHHELD or accrued in.
+IT_YTD_COMPONENTS = {
+    "it_irpef":          ("taxable income to date", "IRPEF withheld to date"),
+    "it_inps_base":      ("INPS contributory base to date", "unused (0)"),
+    "it_fringe":         ("fringe-benefit value to date (IT-031)", "unused (0)"),
+    "it_wedge_paid":     ("wedge non-taxable sum paid to date (IT-009)", "unused (0)"),
+    "it_addreg_saldo":   ("prior-year regional balance determined", "withheld to date"),
+    "it_addcom_saldo":   ("prior-year municipal balance determined", "withheld to date"),
+    "it_addcom_acconto": ("current-year municipal advance determined", "withheld to date"),
+    "it_addcom_credit":  ("municipal advance credit determined", "refunded to date"),
+    "it_wedge_recovery": ("wedge-sum recovery determined (IT-011)", "recovered to date"),
+}
+
+# INAIL (IT-022) on EmployerTaxProfile: component_code = prefix + voce di
+# tariffa, agency_account_id = the PAT, employer_rate_pct = the tasso
+# applicabile converted from per mille (12 per mille -> 1.2000).
+IT_INAIL_COMPONENT_PREFIX = "IT_INAIL_"

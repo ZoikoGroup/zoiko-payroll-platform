@@ -1002,6 +1002,10 @@ class EmployeeStatutoryProfile(Base):
     # §22 termination. IT-064: the reason is a legal input determining notice,
     # employer charge and reporting, so operators cannot pick a preferred
     # tax/severance treatment.
+    # IT-018 (917a54ed2347): the worker's contractual weekly hours. Below the
+    # CCNL level's full-time week (ItalyCcnlLevelTerms.weekly_hours) the INPS
+    # minimum is the part-time hourly one; never inferred from employment_type.
+    it_contractual_weekly_hours = Column(Numeric(5, 2), nullable=True)
     it_termination_reason      = Column(String(50), nullable=True)
 
     __table_args__ = (
@@ -6322,6 +6326,163 @@ class ItalyFilingOutboxItem(Base):
     def __repr__(self):
         return (f"<ItalyFilingOutboxItem org={self.organization_id} "
                 f"{self.action} {self.status}>")
+
+
+# ── Italy P2 ledgers (917a54ed2347) ─────────────────────────────────────────
+# Four more tables, each for a fact no generic table can express. Everything
+# else in the spec's P2 list maps onto the generic model:
+#   INAIL PAT / voce / tasso (IT-022)   -> EmployerTaxProfile:
+#                                          component_code = "IT_INAIL_<voce>",
+#                                          agency_account_id = PAT,
+#                                          employer_rate_pct = tasso (per mille / 10)
+#   INAIL autoliquidazione (IT-023)     -> StatutoryFiling (filing_type INAIL_AUTOLIQ)
+#   CCNL identity/version/approval      -> CollectiveAgreement (jurisdiction_country "IT",
+#                                          agreement_code = CNEL code)
+#   surtax balances/advance, wedge recovery plan, fringe / wedge / IRPEF /
+#   INPS year-to-date                   -> PayrollYtdAccumulator, one tax_component
+#                                          each (italy_content.IT_YTD_COMPONENTS),
+#                                          reversible through the ytdPostings lifecycle
+#   UniEmens / CU / 770 status, receipt, correction, schema version
+#                                       -> StatutoryFiling + ItalyFilingOutboxItem
+
+
+class ItalyCcnlLevelTerms(Base):
+    """§9 — the money a CCNL attaches to one level, effective-dated by renewal.
+
+    CollectiveAgreement carries the agreement itself (CNEL code, version,
+    national / territorial / company scope, approval, source artifact) but no
+    amounts. The minimum pay, the contractual fixed elements, the number of
+    monthly payments and the normal week are per level and change at every
+    renewal (IT-026), so each renewal is a NEW row rather than an edit: a
+    retroactive renewal is then a linked delta against the old row, never a
+    rewrite of a committed run. Draft until approved, like every other piece
+    of statutory content (IT-003)."""
+    __tablename__ = "payroll_it_ccnl_level_terms"
+    __table_args__ = (
+        UniqueConstraint("collective_agreement_id", "level_code", "effective_from",
+                         name="uq_it_ccnl_level_terms_level_from"),
+    )
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    collective_agreement_id = Column(Integer, ForeignKey("payroll_collective_agreements.id"),
+                                     nullable=False, index=True)
+    level_code              = Column(String(20), nullable=False)   # fits it_cnel_level
+    worker_category         = Column(String(30), nullable=True)    # fits it_worker_class
+    minimum_monthly         = Column(Numeric(12, 2), nullable=False)   # minimo tabellare
+    contingenza_monthly     = Column(Numeric(12, 2), nullable=True)
+    edr_monthly             = Column(Numeric(12, 2), nullable=True)    # elemento distinto
+    other_fixed_elements    = Column(JSON, nullable=True)              # {name: monthly amount}
+    mensilita               = Column(Integer, nullable=False)          # 13 or 14
+    weekly_hours            = Column(Numeric(5, 2), nullable=False)    # CCNL full-time week
+    effective_from          = Column(Date, nullable=False)
+    effective_to            = Column(Date, nullable=True)
+    renewal_reference       = Column(String(100), nullable=True)
+    source_document_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    status                  = Column(String(20), nullable=False, default="Draft", server_default="Draft")
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return (f"<ItalyCcnlLevelTerms agreement={self.collective_agreement_id} "
+                f"level={self.level_code} from={self.effective_from} {self.status}>")
+
+
+class ItalyTfrLedgerEntry(Base):
+    """§13 / IT-037 / IT-038 — the TFR liability ledger. Append-only.
+
+    TFR is a liability, not an earning: each accrual, INPS offset,
+    revaluation (and its substitute tax), transfer to a pension fund or the
+    Fondo Tesoreria, advance and settlement is its own entry, carrying the
+    destination in force when it was made. A destination change therefore
+    redirects future entries without touching past ones (IT-038), and a
+    correction is a new entry that reverses an old one, never an edit.
+    idempotency_key UNIQUE stops one payslip posting the same accrual twice."""
+    __tablename__ = "payroll_it_tfr_ledger_entries"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    # ACCRUAL | INPS_OFFSET | REVALUATION | REVALUATION_TAX | TRANSFER_PENSION_FUND |
+    # TRANSFER_TESORERIA | ADVANCE | SETTLEMENT | SETTLEMENT_TAX
+    entry_type        = Column(String(30), nullable=False)
+    tax_year          = Column(Integer, nullable=False)
+    entry_date        = Column(Date, nullable=False)
+    amount            = Column(Numeric(14, 2), nullable=False)
+    destination       = Column(String(30), nullable=True)   # AZIENDA | FONDO_PENSIONE | FONDO_TESORERIA
+    pension_fund      = Column(String(30), nullable=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id"), nullable=True, index=True)
+    payroll_run_id    = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
+    reverses_entry_id = Column(Integer, ForeignKey("payroll_it_tfr_ledger_entries.id"), nullable=True)
+    evidence          = Column(JSON, nullable=True)        # e.g. ISTAT index and coefficient
+    idempotency_key   = Column(String(64), nullable=False, unique=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return (f"<ItalyTfrLedgerEntry emp={self.employee_id} {self.entry_type} "
+                f"{self.amount} {self.tax_year}>")
+
+
+class ItalyF24Line(Base):
+    """§16 / IT-046 — one F24 line: section, tax code, authority, period and
+    amount, built from committed payroll with its source lines. Never one
+    opaque "payroll taxes" figure. The payment it belongs to, and its
+    prepared / submitted / accepted / settled / rejected / UNKNOWN state
+    (IT-047, IT-048), is a StatutoryFiling row — separate from the UniEmens
+    and tax filings."""
+    __tablename__ = "payroll_it_f24_lines"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    statutory_filing_id = Column(Integer, ForeignKey("statutory_filings.id"), nullable=True, index=True)
+    payroll_run_id      = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True, index=True)
+    # ERARIO | INPS | REGIONI | ENTI_LOCALI | INAIL
+    section             = Column(String(20), nullable=False)
+    tax_code            = Column(String(10), nullable=False)   # codice tributo / causale
+    region_code         = Column(String(10), nullable=True)
+    comune_code         = Column(String(10), nullable=True)
+    reference_period    = Column(String(10), nullable=False)   # "2026-03" or "2026"
+    debit_amount        = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    credit_amount       = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    source_lines        = Column(JSON, nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return (f"<ItalyF24Line org={self.organization_id} {self.section} {self.tax_code} "
+                f"{self.reference_period} {self.debit_amount}>")
+
+
+class ItalyLulEntry(Base):
+    """§20 / IT-058 — one Libro Unico del Lavoro registration.
+
+    The LUL is a statutory record, not a PDF: entries are sequentially
+    numbered per employer (UNIQUE), carry a hash of what was registered so any
+    later alteration is detectable, are corrected only by a further entry that
+    points at the one it corrects, and are retained five years from
+    registration (retention_until)."""
+    __tablename__ = "payroll_it_lul_entries"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "sequence_number", name="uq_it_lul_org_sequence"),
+    )
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    reference_month   = Column(String(7), nullable=False)    # "2026-03"
+    sequence_number   = Column(Integer, nullable=False)
+    entry_type        = Column(String(20), nullable=False)   # ORIGINAL | CORRECTION
+    corrects_entry_id = Column(Integer, ForeignKey("payroll_it_lul_entries.id"), nullable=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
+    payroll_run_id    = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
+    content_hash      = Column(String(64), nullable=False)   # sha256 of the registered content
+    registered_at     = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    retention_until   = Column(Date, nullable=False)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return (f"<ItalyLulEntry org={self.organization_id} #{self.sequence_number} "
+                f"emp={self.employee_id} {self.reference_month} {self.entry_type}>")
 
 
 # ══ Ireland (IE) — ZP-IE-ENG-001 ═══════════════════════════════════════

@@ -35,6 +35,9 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_PATH = BACKEND_ROOT / "alembic" / "versions" / MIGRATION_FILENAME
 
 PROFILE_TABLE = "payroll_employee_statutory_profiles"
+# it_* profile columns added by LATER Italy revisions (917a54ed2347 and on);
+# this module checks only what 7a1b2c3d4e5f itself declares.
+LATER_REVISION_COLUMNS = {"it_contractual_weekly_hours"}
 PAYSLIP_TABLE = "payslip_items"
 EMPLOYER_TABLE = "payroll_it_employer_profiles"
 OUTBOX_TABLE = "payroll_it_filing_outbox_items"
@@ -193,7 +196,7 @@ def test_employee_profile_additions_match_the_model(migrated):
     from_model = _model_columns(EmployeeStatutoryProfile)
 
     it_in_migration = {n for n in from_migration if n.startswith("it_")}
-    it_in_model = {n for n in from_model if n.startswith("it_")}
+    it_in_model = {n for n in from_model if n.startswith("it_")} - LATER_REVISION_COLUMNS
 
     assert it_in_model == it_in_migration
     assert len(it_in_model) == 15, (
@@ -307,9 +310,10 @@ def test_revision_is_a_single_head_on_top_of_sweden():
 
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == MIGRATION_REVISION
     revision = script.get_revision(MIGRATION_REVISION)
     assert revision.down_revision == MIGRATION_PARENT
+    # Later Italy revisions chain on top of this one; the graph keeps one head.
+    assert len(script.get_heads()) == 1
 
 
 # ── 6. downgrade restores the pre-migration shape ─────────────────────────────
@@ -333,7 +337,8 @@ def test_upgrade_is_idempotent():
     assert OUTBOX_TABLE in snapshot["tables"]
     assert sorted(n for n in snapshot["columns"][PROFILE_TABLE]
                   if n.startswith("it_")) == sorted(
-        n for n in _model_columns(EmployeeStatutoryProfile) if n.startswith("it_"))
+        n for n in _model_columns(EmployeeStatutoryProfile)
+        if n.startswith("it_") and n not in LATER_REVISION_COLUMNS)
     # Running it a third time must not accumulate duplicates either.
     third = _run_migration(["upgrade", "upgrade", "upgrade"])
     assert sorted(third["columns"][PROFILE_TABLE]) == sorted(
