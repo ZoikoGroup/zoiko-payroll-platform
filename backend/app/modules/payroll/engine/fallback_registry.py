@@ -30,7 +30,8 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, india, singapore, uk, us
+from app.modules.payroll.engine.countries import australia, canada, germany, india, singapore, sweden, uk, us
+from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
     "india": india,
@@ -39,7 +40,9 @@ _MODULES = {
     "australia": australia,
     "canada": canada,
     "germany": germany,
+    "hardcoded_defaults": hardcoded_defaults,
     "singapore": singapore,
+    "sweden": sweden,
 }
 
 _ENGINE_CONSTANT_REGISTRY = [
@@ -163,6 +166,63 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYEE_RATE", "label": "Health Insurance (GKV) General Rate — Employee", "resolverKey": "gkv_general_employee_rate", "side": "employee"},
     {"country": "DE", "module": "germany", "attr": "_DE_GKV_GENERAL_EMPLOYER_RATE", "label": "Health Insurance (GKV) General Rate — Employer", "resolverKey": "gkv_general_employer_rate", "side": "employer"},
 
+    # ── France ──────────────────────────────────────────────────────────
+    # France statutory values are pack data (ZP-FR-ENG-001 FR-003):
+    # engine/countries/france.py resolves every key below from the active
+    # France JurisdictionPack's ContributionRate rows (seeded Draft by
+    # scripts/seed_france_canonical_packs.py from
+    # engine/countries/france_content.py) and BLOCKS when a key has no row —
+    # these constants are the published 2026 fallbacks shown for reference.
+    # skip_discrepancy_check: France has no legacy per-country seed dict in
+    # service.py, so the viewer's seed-vs-engine callout does not apply.
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PASS_ANNUAL", "label": "PASS — annual Social Security ceiling (2026)", "resolverKey": "fr_pass_annual", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PASS_MONTHLY", "label": "PMSS — monthly Social Security ceiling (2026)", "resolverKey": "fr_pmss", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_HOURLY_JAN_MAY", "label": "SMIC hourly — Jan–May 2026 (dated pack row)", "resolverKey": "fr_smic_hourly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_HOURLY_JUN", "label": "SMIC hourly — from 1 Jun 2026 (dated pack row)", "resolverKey": "fr_smic_hourly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_MONTHLY_JAN_MAY", "label": "SMIC monthly 35h — Jan–May 2026 (dated pack row)", "resolverKey": "fr_smic_monthly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_MONTHLY_JUN", "label": "SMIC monthly 35h — from 1 Jun 2026 (dated pack row)", "resolverKey": "fr_smic_monthly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_ANNUAL_FROZEN", "label": "RGDU SMIC reference — annual (frozen 1 Jan 2026)", "resolverKey": "fr_smic_rgdu_annual", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_HOURLY_FROZEN", "label": "RGDU SMIC reference — hourly (frozen 1 Jan 2026)", "resolverKey": "fr_smic_rgdu_hourly", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SMIC_2026_FULLTIME_HOURS", "label": "Full-time monthly hours (35h × 52 / 12)", "resolverKey": "fr_fulltime_monthly_hours", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_CAPPED_EE", "label": "Old-age capped (PSS) — employee", "resolverKey": "fr_vieillesse_capped_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_UNCAPPED_EE", "label": "Old-age uncapped (total) — employee", "resolverKey": "fr_vieillesse_uncapped_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_CAPPED_ER", "label": "Old-age capped (PSS) — employer", "resolverKey": "fr_vieillesse_capped_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_VIEILLESSE_UNCAPPED_ER", "label": "Old-age uncapped (total) — employer", "resolverKey": "fr_vieillesse_uncapped_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CHOMAGE_ER", "label": "Unemployment — employer (within 4 PASS)", "resolverKey": "fr_chomage_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGS_ER", "label": "AGS — employer (within 4 PASS)", "resolverKey": "fr_ags_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SANTE_ER_STANDARD", "label": "Health — employer, standard rate [PENDING G1]", "resolverKey": "fr_sante_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_SANTE_ER_REDUCED", "label": "Health — employer, reduced rate [PENDING G1]", "resolverKey": "fr_sante_er_reduced", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_FAMILLE_ER", "label": "Family allowances — employer [PENDING G1]", "resolverKey": "fr_famille_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSA_ER_DEFAULT", "label": "CSA — employer [PENDING G1]", "resolverKey": "fr_csa_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_FNAL_ER_0P10", "label": "FNAL — employer, under 50 employees (capped base)", "resolverKey": "fr_fnal_er_0p10", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_FNAL_ER_0P50", "label": "FNAL — employer, 50+ employees (total pay)", "resolverKey": "fr_fnal_er_0p50", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CFP_ER_0P55", "label": "CFP — employer, under 11 employees", "resolverKey": "fr_cfp_er_0p55", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CFP_ER_1P00", "label": "CFP — employer, 11+ employees", "resolverKey": "fr_cfp_er_1p00", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APPRENTISSAGE_ER", "label": "Apprenticeship tax — main share", "resolverKey": "fr_apprentissage_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APPRENTISSAGE_BALANCE_ER", "label": "Apprenticeship tax — balance", "resolverKey": "fr_apprentissage_balance_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T1_EE", "label": "Agirc-Arrco T1 — employee", "resolverKey": "fr_agirc_t1_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T1_ER", "label": "Agirc-Arrco T1 — employer", "resolverKey": "fr_agirc_t1_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T2_EE", "label": "Agirc-Arrco T2 — employee", "resolverKey": "fr_agirc_t2_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_AGIRC_T2_ER", "label": "Agirc-Arrco T2 — employer", "resolverKey": "fr_agirc_t2_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T1_EE", "label": "CEG T1 — employee", "resolverKey": "fr_ceg_t1_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T1_ER", "label": "CEG T1 — employer", "resolverKey": "fr_ceg_t1_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T2_EE", "label": "CEG T2 — employee", "resolverKey": "fr_ceg_t2_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CEG_T2_ER", "label": "CEG T2 — employer", "resolverKey": "fr_ceg_t2_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CET_EE", "label": "CET — employee (on T1+T2 when pay exceeds T1)", "resolverKey": "fr_cet_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CET_ER", "label": "CET — employer (on T1+T2 when pay exceeds T1)", "resolverKey": "fr_cet_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APEC_EE", "label": "Apec — employee (cadres, up to 4 PSS)", "resolverKey": "fr_apec_ee", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_APEC_ER", "label": "Apec — employer (cadres, up to 4 PSS)", "resolverKey": "fr_apec_er", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSG_EE_DEDUCTIBLE", "label": "CSG — deductible part", "resolverKey": "fr_csg_deductible", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSG_EE_NONDEDUCTIBLE", "label": "CSG — non-deductible part", "resolverKey": "fr_csg_nondeductible", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CRDS_EE", "label": "CRDS (non-deductible)", "resolverKey": "fr_crds", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_CSG_BASE_FACTOR_98_25", "label": "CSG/CRDS base factor (98.25%, within cumulative 4 PSS)", "resolverKey": "fr_csg_base_factor", "side": "employee", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_TMIN", "label": "RGDU — Tmin (stored as % in the pack: 2.00 = 0.0200)", "resolverKey": "fr_rgdu_tmin", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_TDELTA_FNAL_0P10", "label": "RGDU — Tdelta, under 50 employees (pack %: 37.81)", "resolverKey": "fr_rgdu_tdelta_lt50", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_TDELTA_FNAL_0P50", "label": "RGDU — Tdelta, 50+ employees (pack %: 38.21)", "resolverKey": "fr_rgdu_tdelta_ge50", "side": "employer", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_POWER", "label": "RGDU — exponent", "resolverKey": "fr_rgdu_power", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_RGDU_ELIGIBILITY_MULTIPLE", "label": "RGDU — eligibility envelope (× SMIC)", "resolverKey": "fr_rgdu_smic_multiple", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PAS_SHORT_CONTRACT_ABATEMENT", "label": "PAS — short-contract base abatement (€ amount)", "resolverKey": "fr_pas_short_contract_abatement", "skip_discrepancy_check": True},
+    {"country": "FR", "module": "hardcoded_defaults", "attr": "_FR_PAS_APPRENTICE_THRESHOLD", "label": "PAS — apprentice exemption threshold (€ / year)", "resolverKey": "fr_pas_apprentice_threshold", "skip_discrepancy_check": True},
     # ── Singapore ────────────────────────────────────────────────────────
     # Fail-closed: every constant below is None — listed only so the
     # readiness check (get_required_parameter_keys) knows which keys a
@@ -174,6 +234,31 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_RATE", "label": "Skills Development Levy Rate (Employer)", "resolverKey": "sdl", "side": "employer", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MIN_MONTHLY", "label": "SDL Minimum (Monthly)", "resolverKey": "sdl_min_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MAX_MONTHLY", "label": "SDL Maximum (Monthly)", "resolverKey": "sdl_max_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
+
+    # ── Sweden ────────────────────────────────────────────────────────────
+    # Fail-closed from day one (ZP-SE-ENG-001 §30 + shared.py's
+    # _VALIDATION_ENABLED_COUNTRIES): every constant below is None —
+    # listed only so the readiness check (get_required_parameter_keys)
+    # knows which keys a Sweden pack must configure. The seven component
+    # rows sum to the standard employer rate; the tax-table/one-time
+    # TaxSlab bands have no scalar key and are validated by sweden.py
+    # itself. se_vacation_percentage / se_sick_qualifying_deduction_pct
+    # are leave/sick-workspace content (not engine-calculate reads), so
+    # they are deliberately NOT registered as required here.
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_AGE_PENSION", "label": "Age Pension Component (Employer)", "resolverKey": "se_er_age_pension", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_HEALTH_INSURANCE", "label": "Health Insurance Component (Employer)", "resolverKey": "se_er_health_insurance", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_PARENTAL_INSURANCE", "label": "Parental Insurance Component (Employer)", "resolverKey": "se_er_parental_insurance", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_LABOUR_MARKET", "label": "Labour Market Component (Employer)", "resolverKey": "se_er_labour_market", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_WORK_INJURY", "label": "Work Injury Component (Employer)", "resolverKey": "se_er_work_injury", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_SURVIVOR_PENSION", "label": "Survivor Pension Component (Employer)", "resolverKey": "se_er_survivor_pension", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ER_GENERAL_PAYROLL_TAX", "label": "General Payroll Tax Component (Employer)", "resolverKey": "se_er_general_payroll_tax", "side": "employer", "note": "NO FALLBACK — Sweden is fail-closed (ZP-SE-ENG-001 §6); a missing row BLOCKS the calculation."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_YOUTH_REDUCED", "label": "Temporary Youth Reduced Employer Rate", "resolverKey": "se_youth_reduced", "side": "employer", "required": False, "note": "NO FALLBACK — windowed 1 Apr 2026 – 30 Sep 2027 on the row's own effective dates (ZP-SE-ENG-001 §3/§6)."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_SINK", "label": "SINK Withholding Rate (Employee)", "resolverKey": "se_sink", "side": "employee", "note": "NO FALLBACK — 22.5% for 2026, enacted 20% from 2027; date switch is pack/row governed (ZP-SE-ENG-001 §3 [S5])."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_SUPPLEMENTARY_RATE", "label": "Supplementary Income Withholding Rate", "resolverKey": "se_supplementary_rate", "side": "employee", "note": "NO FALLBACK — the 30% path, never blended with the main-income table (ZP-SE-ENG-001 §3 [S3])."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_SLP", "label": "Special Payroll Tax on Pension Costs (SLP)", "resolverKey": "se_slp", "side": "employer", "note": "NO FALLBACK — 24.26% of the employer pension-cost ledger, never of employee gross (ZP-SE-ENG-001 SE-007)."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_YOUTH_MONTHLY_THRESHOLD", "label": "Youth Relief Monthly Threshold (SEK)", "resolverKey": "se_youth_monthly_threshold", "required": False, "note": "NO FALLBACK — window-conditional with se_youth_reduced; — SEK 25,000 per person per calendar month (ZP-SE-ENG-001 §3)."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_OLDER_COHORT_MAX_BIRTH_YEAR", "label": "Older-Worker Cohort — Maximum Birth Year", "resolverKey": "se_older_cohort_max_birth_year", "note": "NO FALLBACK — income-year content (2026: born 1938–1958 pay only the age-pension component); Super Admin updates it per income year."},
+    {"country": "SE", "module": "sweden", "attr": "_SE_ZERO_COHORT_MAX_BIRTH_YEAR", "label": "Zero-Rate Cohort — Maximum Birth Year", "resolverKey": "se_zero_cohort_max_birth_year", "note": "NO FALLBACK — income-year content (2026: born 1937 or earlier pay 0%); Super Admin updates it per income year."},
 ]
 
 
@@ -202,6 +287,13 @@ def get_required_parameter_keys(country: str) -> list[dict]:
             continue
         resolver_key = entry["resolverKey"]
         if resolver_key.startswith("N/A"):
+            continue
+        # Window-conditional content (e.g. Sweden's temporary youth relief,
+        # present only for payment dates inside its statutory window) is
+        # listed for the viewer but is not a readiness requirement: the
+        # date-filtered resolver legitimately omits it outside the window,
+        # and the engine itself blocks on a half-configured window.
+        if entry.get("required") is False:
             continue
         side = entry.get("side")
         for key in (k.strip() for k in resolver_key.split("/")):

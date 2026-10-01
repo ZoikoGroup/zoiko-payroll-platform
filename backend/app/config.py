@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     # when FRONTEND_URL is not publicly reachable.
     EMAIL_LOGO_URL: str = ""
 
+    # ── Redis Cache ──────────────────────────────────────────────────────
+    REDIS_URL: str = ""
+    REDIS_TTL_SECONDS: int = 3600
+
     # ── Super Admin setup key ─────────────────────────────────────────
     # Required to run scripts/seed_super_admin.py and to create Super
     # Admin accounts. Never create a Super Admin through public /auth/register.

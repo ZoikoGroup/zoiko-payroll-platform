@@ -12,7 +12,11 @@ export { default as GYCompliancePage } from "./GYCompliancePage";
 export { default as JMCompliancePage } from "./JMCompliancePage";
 export { default as BSCompliancePage } from "./BSCompliancePage";
 export { default as TTCompliancePage } from "./TTCompliancePage";
+export { default as PRCompliancePage } from "./PRCompliancePage";
+export { default as FRCompliancePage } from "./FRCompliancePage";
+export { default as IECompliancePage } from "./IECompliancePage";
 export { default as SGCompliancePage } from "./SGCompliancePage";
+export { default as SECompliancePage } from "./SECompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -31,5 +35,9 @@ export const COUNTRY_CODE_TO_ROUTE = {
   JM: "jamaica",
   BS: "bahamas",
   TT: "trinidad-and-tobago",
+  PR: "puerto-rico",
+  FR: "france",
+  IE: "ireland",
   SG: "singapore",
+  SE: "sweden",
 };

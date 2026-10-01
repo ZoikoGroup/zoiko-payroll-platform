@@ -106,6 +106,25 @@ export const getSingaporeStatutorySummary = (params) =>
 export const getSingaporePwmSchedules = (params) =>
   apiFetch("/api/super-admin/compliance/singapore/pwm-schedules", { params });
 
+// Sweden (ZP-SE-ENG-001) — release-gate readiness checklist and a read-only
+// calculation preview computed by the backend's production engine (the
+// frontend never does statutory payroll maths itself).
+export const getSwedenReadiness = (packId) =>
+  apiFetch("/api/super-admin/compliance/sweden/readiness", { params: packId ? { packId } : {} });
+
+export const previewSwedenCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/sweden/calculation-preview", { method: "POST", body: payload });
+
+// Governed collective-agreement registry (spec §9) — no national default.
+export const listCollectiveAgreements = (params) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { params });
+
+export const upsertCollectiveAgreement = (payload) =>
+  apiFetch("/api/super-admin/compliance/collective-agreements", { method: "POST", body: payload });
+
+export const setCollectiveAgreementStatus = (id, status, reason) =>
+  apiFetch(`/api/super-admin/compliance/collective-agreements/${id}/status`, { method: "POST", body: { status, reason } });
+
 export const runTestCertification = (jurisdictionCountry = "UK") =>
   apiFetch("/api/super-admin/compliance/test-certification/run", {
     method: "POST", body: { jurisdiction_country: jurisdictionCountry },
@@ -650,3 +669,82 @@ export const upsertFilingCalendarEntry = (payload) =>
 
 export const setFilingCalendarEntryStatus = (id, status) =>
   apiFetch(`/api/super-admin/report-templates/filing-calendar/${id}/status`, { method: "PUT", body: { status } });
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Super-Admin-owned authority data for the France Compliance workspace:
+// SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate
+// packs, DGFiP PAS rates, governed effectif, plus the read-only DSN/outbox
+// transport diagnostics and the launch-gate H readiness dry-run.
+//
+// Everything below is organization-scoped (organizationId travels as a
+// query param, the body stays the authority payload) — the org itself only
+// opens DSN filings via /payroll/france/* (see payrollService).
+export const getFranceReadiness = (params) =>
+  apiFetch("/api/super-admin/compliance/france/readiness", { params });
+
+export const getFranceEmployerProfile = async (params) => {
+  // 404 is a legitimate empty state — the org has no France profile
+  // configured yet ("SIREN identity missing" / "Not configured" in the
+  // overview) — never a hard failure that should blank the whole dashboard.
+  try {
+    return await apiFetch("/api/super-admin/compliance/france/employer-profile", { params });
+  } catch (err) {
+    if (err && err.status === 404) return null;
+    throw err;
+  }
+};
+
+export const upsertFranceEmployerProfile = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/employer-profile", { method: "PUT", body: payload, params });
+
+export const recordFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif", { method: "POST", body: payload, params });
+
+export const upsertFranceEstablishmentRatePack = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { method: "PUT", body: payload, params });
+
+export const listFranceEstablishmentRatePacks = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishment-rate-packs", { params });
+
+export const ingestFrancePASRate = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { method: "POST", body: payload, params });
+
+export const listFrancePASRates = (params) =>
+  apiFetch("/api/super-admin/compliance/france/pas-rates", { params });
+
+export const listFranceDsnSubmissions = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-submissions", { params });
+
+export const listFranceDsnOutboxItems = (params) =>
+  apiFetch("/api/super-admin/compliance/france/dsn-outbox", { params });
+
+// France organizations only (the org's country resolves to FR) — the France
+// endpoints reject any other organization.
+export const listFranceOrganizations = () =>
+  apiFetch("/api/organizations", { params: { limit: 200, country_code: "FR" } }).then((data) => data.organizations || []);
+
+export const correctFranceEffectif = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/effectif/corrections", { method: "POST", body: payload, params });
+
+export const listFranceEstablishments = (params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { params });
+
+export const createFranceEstablishment = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/establishments", { method: "POST", body: payload, params });
+
+export const updateFranceEstablishment = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishments/${id}`, { method: "PUT", body: payload, params });
+
+export const updateFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}`, { method: "PATCH", body: payload, params });
+
+export const closeFranceEstablishmentRatePack = (id, payload, params) =>
+  apiFetch(`/api/super-admin/compliance/france/establishment-rate-packs/${id}/close`, { method: "POST", body: payload, params });
+
+// Fill a France tax pack's missing statutory rows from the 2026 catalog
+// (insert-only; editable packs only).
+export const loadFranceStatutoryDefaults = (packId) =>
+  apiFetch(`/api/super-admin/compliance/france/packs/${packId}/load-statutory-defaults`, { method: "POST" });
+
+export const setFranceLive = (payload, params) =>
+  apiFetch("/api/super-admin/compliance/france/go-live", { method: "POST", body: payload, params });

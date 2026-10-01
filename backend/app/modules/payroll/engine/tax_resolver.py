@@ -182,8 +182,53 @@ def resolve_tax_configuration(
     both fields NULL is unaffected by this filter and is governed
     entirely by the pack's own window (already checked above) —
     completely additive to every rate/slab that exists today.
+
+    Results are served from Redis when configured (see engine/tax_cache).
+    The cache is a pure performance layer: it stores what this function
+    would have returned for the same (country, state, regime, date) and is
+    invalidated on every canonical write. With no REDIS_URL set — the
+    default, and the case in every test — it is a no-op and this function
+    always reads live rows, so cache bugs cannot silently become wrong
+    payroll numbers in an environment that has not opted in.
     """
+    from app.modules.payroll.engine.tax_cache import (
+        current_tax_cache_version, load_cached_tax_config, store_cached_tax_config,
+    )
+
     as_of = payroll_date or date_cls.today()
+    # Captured before the DB read and reused for the store: see
+    # current_tax_cache_version for the stale-write race this closes.
+    version = current_tax_cache_version()
+    cached = load_cached_tax_config(
+        country, state, tax_regime, as_of, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    if cached is not None:
+        return cached
+
+    rates, slabs, pack = _resolve_uncached(
+        db, country, state=state, tax_regime=tax_regime, as_of=as_of,
+    )
+    store_cached_tax_config(
+        country, state, tax_regime, as_of, rates, slabs, pack, ContributionRate, TaxSlab, JurisdictionPack,
+        version=version,
+    )
+    return rates, slabs, pack
+
+
+def _resolve_uncached(
+    db: Session,
+    country: str,
+    state: Optional[str],
+    tax_regime: Optional[str],
+    as_of: date_cls,
+) -> Tuple[List[ContributionRate], List[TaxSlab], Optional[JurisdictionPack]]:
+    """The authoritative resolution, always reading live rows.
+
+    Split out from resolve_tax_configuration so the cache wrapper above
+    has exactly one place to fall back to, and so the bypass is callable
+    for tests that need to prove cached and uncached resolution agree.
+    """
     pack = _find_active_tax_pack(db, country, state, tax_regime, as_of)
     if not pack:
         return [], [], None
