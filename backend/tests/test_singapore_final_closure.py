@@ -45,11 +45,29 @@ def _gated_pack(db):
     from app.modules.payroll import service
     from scripts.seed_singapore_canonical_pack import seed_singapore
 
+    from tests._sg_evidence import accept_sg_gate
+
     pack = seed_singapore(db)
     pack.effective_to = date(2029, 12, 31)
     db.commit()
     assert service.run_golden_test_certification(db, "SG", actor_id=A).status == "PASS"
+    accept_sg_gate(db)                       # Phase 6.10: SG activation needs G1 accepted
     return pack
+
+
+def _stub_pack_golden_binding(monkeypatch):
+    """The hotfix-POLICY tests' packs are policy fixtures, not statutory
+    content: _later_pack is row-less (2030) and _gated_pack is widened to 2029.
+    The Phase 6.10 pack-bound golden check (covered by
+    test_singapore_phase610_fail_closed.py) is stubbed for these two tests
+    only; G1 and every other gate still run."""
+    from app.modules.payroll import service
+
+    # _gated_pack's own window is widened to 2029 (so it can precede the 2030
+    # pack), which the binding would rightly refuse: 2026 rows cannot
+    # reproduce the 2027 CPF vectors.
+    monkeypatch.setattr(service, "sg_pack_golden_check",
+                        lambda db, pack: {"casesInWindow": 1, "passed": 1, "failures": []})
 
 
 def _later_pack(db, source_id):
@@ -96,6 +114,7 @@ def test_follow_up_policy_blocks_further_activations_until_the_hotfix_is_reviewe
     from app.modules.payroll import service
 
     pack = _gated_pack(db)
+    _stub_pack_golden_binding(monkeypatch)
     monkeypatch.setattr(service, "SG_HOTFIX_POLICY", "FOLLOW_UP_REQUIRED")
     service.activate_jurisdiction_pack_hotfix(db, pack.id, "INC-2", "emergency", actor_id=A)
     later = _later_pack(db, pack.source_document_id)
@@ -110,10 +129,11 @@ def test_follow_up_policy_blocks_further_activations_until_the_hotfix_is_reviewe
     assert service.set_jurisdiction_pack_status(db, later.id, "Active", actor_id=C).status == "Active"
 
 
-def test_restricted_policy_does_not_require_the_review_before_the_next_activation(db):
+def test_restricted_policy_does_not_require_the_review_before_the_next_activation(db, monkeypatch):
     from app.modules.payroll import service
 
     pack = _gated_pack(db)
+    _stub_pack_golden_binding(monkeypatch)
     service.activate_jurisdiction_pack_hotfix(db, pack.id, "INC-4", "emergency", actor_id=A)
     later = _later_pack(db, pack.source_document_id)
     assert service.set_jurisdiction_pack_status(db, later.id, "Active", actor_id=C).status == "Active"

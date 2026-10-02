@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { recordSgDecision, reviewSgEvidence, supersedeSourceArtifact } from "../../../service/superAdminService";
+import { recordSgDecision, reviewSgEvidence, supersedeSourceArtifact, transitionSgServiceRegistry } from "../../../service/superAdminService";
 import { ActivationReadiness, OperationsReadiness, SgStatus } from "./SGStatutorySummaryTab";
 import useSgStatutorySummary from "./useSgStatutorySummary";
 
@@ -102,6 +102,26 @@ function DecisionForm({ decision, onRecord }) {
   );
 }
 
+// The owner's registry step (Phase 6.10). The backend re-derives every
+// requirement at the moment of the change and refuses (audited) if any is
+// unmet; this only collects the reason and offers the one allowed direction.
+function RegistryTransitionForm({ transition, onTransition }) {
+  const [reason, setReason] = useState("");
+  const target = transition.plannedAllowed ? "PLANNED" : "AVAILABLE";
+  const allowed = transition.plannedAllowed || transition.availableAllowed;
+  return (
+    <span className="mt-2 flex flex-wrap items-center gap-1.5">
+      <label className="sr-only" htmlFor="sg-registry-reason">Change record reason</label>
+      <input id="sg-registry-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Change record / reason"
+        className="min-w-[14rem] flex-1 rounded border border-border bg-surface px-1.5 py-0.5 text-[11px]" />
+      <button type="button" disabled={!allowed || !reason.trim()} onClick={() => onTransition({ availability: target, reason })}
+        className="text-[11px] font-semibold text-primary hover:underline disabled:opacity-50">
+        {target === "PLANNED" ? "Close onboarding (PLANNED)" : "Make Singapore AVAILABLE"}
+      </button>
+    </span>
+  );
+}
+
 function Section({ id, title, status, children }) {
   return (
     <section className="rounded-xl border border-border bg-surface p-4" aria-labelledby={id}>
@@ -139,6 +159,7 @@ export default function SGReadinessTab() {
   const supersede = (id, replacementId) => act(() => supersedeSourceArtifact(id, replacementId), "The evidence could not be superseded.");
   const review = (id, outcome) => act(() => reviewSgEvidence(id, outcome), "The review could not be recorded.");
   const recordDecision = (payload) => act(() => recordSgDecision(payload), "The decision could not be recorded.");
+  const transitionRegistry = (payload) => act(() => transitionSgServiceRegistry(payload), "The registry change was refused.");
   const sections = data?.sections || [];
   const readiness = data?.activationReadiness;
   const operations = sections.find((s) => s.key === "operations");
@@ -146,6 +167,8 @@ export default function SGReadinessTab() {
   const availability = readiness?.serviceAvailability;
   const hotfix = readiness?.statutoryPack?.hotfixPolicy;
   const ais = readiness?.aisSubmissionModeSetting;
+  const registry = readiness?.registryTransition;
+  const deploySignoff = readiness?.deploymentSignoff;
 
   if (loading) return <p className="text-sm text-foreground-muted">Loading…</p>;
   if (error) return <p className="text-sm text-error" role="alert">{error}</p>;
@@ -176,6 +199,27 @@ export default function SGReadinessTab() {
           </table>
         </div>
       </Section>
+
+      {registry && (
+        <Section id="sg-rd-registry" title="Registry transition (opens Singapore onboarding)" status={registry.availableAllowed || registry.current === "AVAILABLE" ? "PASS" : "BLOCKED"}>
+          <p className="mb-2 text-xs text-foreground-muted">Currently <span className="font-semibold text-foreground">{registry.current || "no row"}</span> · {registry.unmet} requirement(s) unmet · {registry.note}</p>
+          <ul className="space-y-1 text-xs">
+            {registry.requirements.map((r) => (
+              <li key={r.key} className="flex flex-wrap items-baseline gap-2">
+                <SgStatus status={r.met ? "PASS" : "BLOCKED"} />
+                <span className="text-foreground">{r.label}</span>
+                <span className="text-foreground-muted">{r.detail}</span>
+              </li>
+            ))}
+          </ul>
+          {deploySignoff && (
+            <div className="mt-2 text-[11px] text-foreground-muted">
+              Deploy-owner sign-off ({deploySignoff.requiredArtifact}): <EvidenceList items={deploySignoff.evidenceRecorded} tag={deploySignoff.evidenceTag} onSupersede={supersede} onReview={review} />
+            </div>
+          )}
+          {(registry.availableAllowed || registry.plannedAllowed) && <RegistryTransitionForm transition={registry} onTransition={transitionRegistry} />}
+        </Section>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Section id="sg-rd-service" title="Service availability" status={availability ? undefined : "NOT_CONFIGURED"}>

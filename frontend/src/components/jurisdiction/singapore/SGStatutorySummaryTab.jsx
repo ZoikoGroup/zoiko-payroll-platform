@@ -92,6 +92,9 @@ const GATE_TEXT = {
   source_evidence_linked: "Source evidence linked to the pack",
   effective_from_set: "Effective-from date set",
   latest_golden_run_pass: "Latest SG golden-vector run PASS",
+  g1_evidence_accepted: "G1 CPF content certification accepted (distinct reviewer)",
+  pack_reproduces_golden_vectors: "This pack's own rows reproduce every golden vector in its window",
+  effective_from_first_of_month: "Takes effect on the 1st of a month (whole CPF wage month)",
 };
 
 export function ActivationReadiness({ readiness }) {
@@ -121,6 +124,12 @@ export function ActivationReadiness({ readiness }) {
           {pack.activationGates.map((g) => (
             <li key={g.key} className="flex items-start gap-1.5"><SgStatus status={g.met ? "PASS" : "BLOCKED"} /><span className="text-foreground-secondary">{GATE_TEXT[g.key] || g.key}</span></li>
           ))}
+          {pack.packGoldenCheck && (
+            <li className="text-[11px] text-foreground-muted">
+              Pack-bound golden vectors: {pack.packGoldenCheck.passed} of {pack.packGoldenCheck.casesInWindow} reproduced
+              {pack.packGoldenCheck.failures.length ? ` — failing: ${pack.packGoldenCheck.failures.map((f) => f.case).join(", ")}` : ""}
+            </li>
+          )}
         </ul>
         <dl className="space-y-1">
           {Object.entries(readiness.reportTemplates).map(([k, v]) => (

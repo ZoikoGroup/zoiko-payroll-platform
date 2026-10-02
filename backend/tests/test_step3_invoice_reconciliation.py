@@ -111,8 +111,11 @@ _sub_a = BillingSubscription(
 _db.add(_sub_a)
 _db.flush()
 
-_billing_month = date.today().replace(day=1)
+# The invoice's billing month is derived from issued_at (invoice_explanation.
+# _billing_month_for_invoice), so the BWM records must use that same month --
+# date.today() put them a month ahead on the 1st of every month.
 _issued_at = datetime.utcnow() - timedelta(days=1)
+_billing_month = _issued_at.date().replace(day=1)
 
 _invoice_a = BillingInvoice(
     organization_id=_org_a.id, subscription_id=_sub_a.id, stripe_invoice_id="in_TESTA001",

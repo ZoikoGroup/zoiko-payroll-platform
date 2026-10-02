@@ -220,6 +220,19 @@ def _month_end(d: date) -> date:
     return d.replace(day=calendar.monthrange(d.year, d.month)[1])
 
 
+def _leap_day_boundary(date_of_birth: date, month_start: date):
+    """(boundary age, year) when a 29 February birth date reaches a CPF
+    boundary age in a non-leap year and `month_start` is February or March of
+    that year — the only months the observed birthday can change."""
+    if (date_of_birth.month, date_of_birth.day) != (2, 29) or month_start.month not in (2, 3):
+        return None
+    for boundary in _CPF_AGE_BOUNDARIES:
+        year = date_of_birth.year + boundary
+        if year == month_start.year and not calendar.isleap(year):
+            return boundary, year
+    return None
+
+
 def _band_for_age(age: int) -> str:
     for key, lower, upper in _CPF_AGE_BANDS:
         if (lower is None or age > lower) and (upper is None or age <= upper):
@@ -233,7 +246,28 @@ def resolve_cpf_age_band(date_of_birth: date, month_start: date, month_end: date
     boundary the configured `cpf_age_band_semantics` rule applies; the
     only supported value is CPF Board's MONTH_AFTER_BIRTHDAY ("new
     contribution rates apply from the first day of the month after the
-    employee's 55th, 60th, 65th or 70th birthday"). Without it: BLOCKED."""
+    employee's 55th, 60th, 65th or 70th birthday"). Without it: BLOCKED.
+
+    Phase 6.10: a 29 February birth date reaching a boundary age in a
+    NON-leap year has no birthday that year. Whether CPF observes it on
+    28 February or 1 March is not stated by any source the pack holds, and
+    it decides which month the new rates start. Only a sourced
+    `cpf_leap_day_birthday_basis` row (FEBRUARY | MARCH) decides February
+    and March of that year; without one both months are BLOCKED (before,
+    _age_on silently chose 1 March)."""
+    leap = _leap_day_boundary(date_of_birth, month_start)
+    if leap is not None:
+        boundary, year = leap
+        row = rate_map.get("cpf_leap_day_birthday_basis")
+        basis = (getattr(row, "text_value", None) or "").upper() if row is not None else ""
+        if basis not in ("FEBRUARY", "MARCH"):
+            raise SingaporeCalculationBlockedError(
+                "cpf_leap_day_birthday_basis",
+                f"the employee's {boundary}th birthday falls on 29 February in {year}, a non-leap year, and no "
+                "sourced rule says whether CPF observes it on 28 February or 1 March",
+            )
+        observed = date(year, 2, 28) if basis == "FEBRUARY" else date(year, 3, 1)
+        return _band_for_age(boundary + 1 if observed < month_start else boundary - 1)
     ages = {_age_on(date_of_birth, month_start), _age_on(date_of_birth, month_end)}
     if not any(a in _CPF_AGE_BOUNDARIES for a in ages):
         return _band_for_age(max(ages))

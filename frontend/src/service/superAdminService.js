@@ -312,6 +312,10 @@ export const reviewSgEvidence = (id, { outcome, notes, validUntil }) =>
 export const recordSgDecision = ({ key, selectedValue, reason }) =>
   apiFetch("/api/super-admin/compliance/singapore/decisions", { method: "POST", body: { key, selectedValue, reason } });
 
+// Singapore registry step (Phase 6.10): AVAILABLE (gated server-side) or PLANNED; reason required, audited.
+export const transitionSgServiceRegistry = ({ availability, reason }) =>
+  apiFetch("/api/super-admin/compliance/singapore/service-registry", { method: "POST", body: { availability, reason } });
+
 // ── India: state/local statutory readiness registry (§16) ─────────────────
 // One row per (state/UT, optional local authority, program) — informational
 // only, no calculation/onboarding path enforces it yet.
