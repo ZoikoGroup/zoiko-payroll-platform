@@ -113,7 +113,15 @@ def test_alembic_heads_is_single_head():
     # e8f1a2b3c4d5 (2026-09-30, ZP-SE-ENG-001): Sweden jurisdiction support
     # (collective agreements, sick episodes, leave ledgers, se_* profile
     # columns), down_revision 66072e2d80a9 — idempotency-guarded.
-    assert heads == ["e8f1a2b3c4d5"]
+    # 7a1b2c3d4e5f (ZP-IT-ENG-001): Italy jurisdiction support — Italy
+    # employer profile + filing outbox tables, fifteen it_* profile columns,
+    # payslip_items.it_calculation_snapshot; down_revision e8f1a2b3c4d5 —
+    # idempotency-guarded, and it adds NO new branchpoint (single child of
+    # e8f1a2b3c4d5, so the branchpoint list below is unchanged).
+    # 917a54ed2347 (ZP-IT-ENG-001 P2): Italy ledgers — CCNL level terms, TFR
+    # ledger, F24 lines, LUL entries + it_contractual_weekly_hours; single child
+    # of 7a1b2c3d4e5f, so no new branchpoint.
+    assert heads == ["917a54ed2347"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -125,7 +133,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["e8f1a2b3c4d5"]
+    assert list(script.get_heads()) == ["917a54ed2347"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -156,7 +164,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 169   # + e8f1a2b3c4d5 (Sweden, 2026-09-30)
+    assert len(revs) == 171   # + 917a54ed2347 (Italy P2 ledgers)
 
 
 def test_germany_head_chain_wiring_is_intact():

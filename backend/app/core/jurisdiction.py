@@ -418,6 +418,25 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    # Italy (ZP-IT-ENG-001 §17 A–C) — schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: Italy stays PLANNED until gates G1–G8 are signed.
+    # Codice fiscale of a company is 11 digits (usually equal to the partita
+    # IVA); the INPS matricola is 10 digits; the INAIL PAT is 8 digits plus
+    # an optional 2-digit check. Formats only — never synthesised (IT-052).
+    "IT": {
+        "label": "Codice fiscale / Partita IVA / Matricola INPS / PAT INAIL",
+        "currency": "EUR",
+        "fields": [
+            {"key": "codice_fiscale", "label": "Codice fiscale (employer)",
+             "pattern": r"^(\d{11}|[A-Z0-9]{16})$", "example": "01234567890", "primary": True},
+            {"key": "partita_iva", "label": "Partita IVA",
+             "pattern": r"^\d{11}$", "example": "01234567890", "primary": False},
+            {"key": "matricola_inps", "label": "Matricola INPS",
+             "pattern": r"^\d{10}$", "example": "1234567890", "primary": False},
+            {"key": "pat_inail", "label": "PAT INAIL",
+             "pattern": r"^\d{8}(\d{2})?$", "example": "12345678", "primary": False},
+        ],
+    },
     # Singapore (ZP-SG-ENG-001 §9 Employer Registration panels A–E) — schema
     # only. Deliberately NOT in REGISTRATION_COUNTRIES above: the spec's
     # production gates G1–G8 must be evidenced before any Singapore
@@ -506,6 +525,8 @@ COUNTRY_NAME_TO_CODE = {
     "ireland": "IE",
     "sweden": "SE",
     "singapore": "SG",
+    "italy": "IT",
+    "italia": "IT",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -526,6 +547,7 @@ CODE_TO_COUNTRY_NAME = {
     "IE": "Ireland",
     "SE": "Sweden",
     "SG": "Singapore",
+    "IT": "Italy",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this
