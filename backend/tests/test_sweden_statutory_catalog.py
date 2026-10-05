@@ -74,3 +74,20 @@ def test_no_national_collective_agreement_type_exists():
 
     assert "NATIONAL" not in service._CBA_TYPES
     assert "NATIONAL" not in FRONTEND_CONFIG.read_text(encoding="utf-8").split("SE_CBA_TYPES")[1].split("]")[0]
+
+
+def test_report_field_paths_fit_the_postgres_column():
+    """payroll_report_template_component_fields.source_column / field_key are
+    VARCHAR(50). SQLite (the test DB) does not enforce lengths, so a longer
+    path only fails on PostgreSQL — found 2026-10-01 seeding the shared DB."""
+    from app.modules.payroll import service
+    from app.modules.payroll.models import ReportTemplateComponentField as ReportTemplateField
+    from scripts import seed_sweden_canonical_packs as seed
+
+    limit = ReportTemplateField.__table__.c.source_column.type.length
+    assert all(len(p) <= limit for p in service._PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"]), \
+        [p for p in service._PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"] if len(p) > limit]
+    import inspect
+    src = inspect.getsource(seed._seed_agi_template)
+    import re
+    assert all(len(p) <= limit for p in re.findall(r'"(se_calculation_snapshot\.[a-z_.]+)"', src))

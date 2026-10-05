@@ -74,6 +74,8 @@ from app.modules.payroll.employee_validation import (
     mask_nric_fin,
 )
 from app.modules.payroll import bank_routing
+# Italy (ZP-IT-ENG-001) service layer — input resolver, YTD posting, snapshot.
+from app.modules.payroll import italy_service as _italy_service
 from app.modules.payroll.schemas import (
     PayrollRunCreate, PayrollRunUpdate, PayslipItemCreate, CompanyDetailsUpdate,
     EmployeeCreate, EmployeeUpdate, BulkEmployeeItem, BulkEmployeeRequest,
@@ -1552,6 +1554,10 @@ def _resolve_effective_rate_inputs(
             # existed can still carry a wrong-cased key on disk; this
             # guarantees the live calculation path never misses it even so.
             canonical_rate_map = {_normalize_engine_component_key(r.component_key): r for r in canonical_rates}
+            if country == "IT":
+                # The §7 INPS matrix has many rows per family; keying by
+                # family alone would keep one class's rates for everyone.
+                canonical_rate_map = _italy_service.italy_rate_map(canonical_rates)
             _assert_jurisdiction_ready(canonical_rate_map, canonical_slabs, country, organization_id)
             return canonical_rate_map, canonical_slabs, canonical_rates, pack
     # India's Old and New regime bracket tables are two complete,
@@ -7006,7 +7012,7 @@ def _se_payslip_snapshot(result) -> "dict | None":
             "tax_status": result.se_tax_status,
             "income_role": result.se_income_role,
         },
-        "employer_contribution": {
+        "employer": {
             "amount": result.se_employer_contribution,
             "rate": result.se_employer_contribution_rate,
             "cohort": result.se_employer_contribution_cohort,
@@ -7016,7 +7022,7 @@ def _se_payslip_snapshot(result) -> "dict | None":
             "month_compensation": result.se_month_compensation,
         },
         "slp": result.se_slp,
-        "occupational_pension": {
+        "pension": {
             "plan": result.se_pension_plan,
             "employee": result.se_occupational_pension_employee,
             "employer": result.se_occupational_pension_employer,
@@ -9273,13 +9279,13 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["SE"] = {
     "se_calculation_snapshot.withholding.column": ("Tax Column", "text", False),
     "se_calculation_snapshot.withholding.tax_status": ("Worker Tax Status", "text", False),
     "se_calculation_snapshot.withholding.income_role": ("Income Role", "text", False),
-    "se_calculation_snapshot.employer_contribution.amount": ("Employer Contributions", "currency", True),
-    "se_calculation_snapshot.employer_contribution.base": ("Employer-Contribution Base", "currency", True),
-    "se_calculation_snapshot.employer_contribution.cohort": ("Employer-Contribution Cohort", "text", False),
-    "se_calculation_snapshot.employer_contribution.rate": ("Employer-Contribution Rate %", "text", False),
+    "se_calculation_snapshot.employer.amount": ("Employer Contributions", "currency", True),
+    "se_calculation_snapshot.employer.base": ("Employer-Contribution Base", "currency", True),
+    "se_calculation_snapshot.employer.cohort": ("Employer-Contribution Cohort", "text", False),
+    "se_calculation_snapshot.employer.rate": ("Employer-Contribution Rate %", "text", False),
     "se_calculation_snapshot.slp": ("Special Payroll Tax on Pension Costs (SLP)", "currency", True),
-    "se_calculation_snapshot.occupational_pension.employee": ("Occupational Pension (Employee)", "currency", True),
-    "se_calculation_snapshot.occupational_pension.employer": ("Occupational Pension (Employer)", "currency", True),
+    "se_calculation_snapshot.pension.employee": ("Occupational Pension (Employee)", "currency", True),
+    "se_calculation_snapshot.pension.employer": ("Occupational Pension (Employer)", "currency", True),
     "se_calculation_snapshot.employee_total": ("Total Employee Statutory Deductions", "currency", True),
     "se_calculation_snapshot.employer_total": ("Total Employer Statutory Cost", "currency", True),
 }
@@ -19194,6 +19200,14 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             _resolve_se_calc_inputs(db, organization_id, emp, period_end or date.today())
             if emp_country == "SE" else None
         )
+        # Italy (ZP-IT-ENG-001): facts only, read-only; a preview never
+        # advances an Italian accumulator (IT-055).
+        italy_inputs = (
+            _italy_service.resolve_it_calc_inputs(
+                db, organization_id, emp, period_end or date.today(),
+                period_start=period_start, period_end=period_end)
+            if emp_country == "IT" else None
+        )
         germany_kwargs = {}
         if emp_country == "DE":
             resolved_de = _resolve_germany_calc_inputs(db, organization_id, emp, period_end or date.today())
@@ -19327,6 +19341,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             france_inputs=france_inputs,
         ireland_inputs=ireland_inputs,
             sweden_inputs=sweden_inputs,
+            italy_inputs=italy_inputs,
             pay_date=period_end or date.today(),
             ni_category_override=ni_category_override,
             **ytd_inputs,
@@ -24153,6 +24168,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         _resolve_se_calc_inputs(db, run.organization_id, employee, run.pay_date, exclude_run_id=run.id)
         if country == "SE" else None
     )
+    italy_inputs = (
+        _italy_service.resolve_it_calc_inputs(
+            db, run.organization_id, employee, run.pay_date,
+            period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
+        if country == "IT" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved = _resolve_germany_calc_inputs(db, run.organization_id, employee, run.pay_date)
@@ -24199,6 +24220,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         france_inputs=france_inputs,
         ireland_inputs=ireland_inputs,
         sweden_inputs=sweden_inputs,
+        italy_inputs=italy_inputs,
         pay_date=run.pay_date,
         period_start=run.period_start, period_end=run.period_end,
         ni_category_override=ni_category_override,
@@ -24356,6 +24378,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # IE-045 (no reconstructing a historical result from current content)
         # is only satisfiable because the RPN actually applied is frozen here.
         "ie_calculation_snapshot": _ie_payslip_snapshot(result),
+        "it_calculation_snapshot": _italy_service.it_payslip_snapshot(result),
         # Sweden (ZP-SE-ENG-001 §29/§34) — same per-country snapshot contract.
         "se_calculation_snapshot": _se_payslip_snapshot(result),
         # Canada YTD — same immutability contract as tax_rule_snapshot
@@ -24428,6 +24451,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # to IrelandYtdAccumulator rather than the generic
         # PayrollYtdAccumulator).
         "_ie_ytd_result": result if result.ie_ytd_after else None,
+        # Italy (ZP-IT-ENG-001): the engine's post-period running totals,
+        # persisted by italy_service.post_it_payslip_ytd.
+        "_it_ytd_result": result if result.it_ytd_after else None,
         # Same splat-then-pop contract as "_ytd_result" above, for
         # Cayman Islands mandatory-pension CI$87,000 annual-cap tracking
         # (KY-008) — a separate key since it's gated on ITS OWN result
@@ -24732,6 +24758,8 @@ def _post_payslip_ytd(db: Session, run: PayrollRun, employee, item: PayslipItem,
                                    r["ie_ytd_result"], payslip_id=item.id)
     if r.get("pr_ytd_result") is not None:
         _upsert_pr_ytd_accumulator(db, employee.id, run.pay_date, r["pr_ytd_result"], payslip_id=item.id)
+    if r.get("it_ytd_result") is not None:
+        _italy_service.post_it_payslip_ytd(db, employee.id, r["it_ytd_result"], payslip_id=item.id)
     if r.get("option2_ytd_result") is not None:
         _upsert_ca_option2_ytd_accumulator(db, employee.id, run.pay_date, work_state, r["option2_ytd_result"], payslip_id=item.id)
     if r.get("uk_director_ytd_result") is not None:
@@ -24841,6 +24869,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
     au_sg_ytd_result = values.pop("_au_sg_ytd_result", None)
     au_whm_ytd_result = values.pop("_au_whm_ytd_result", None)
     ie_ytd_result = values.pop("_ie_ytd_result", None)
+    it_ytd_result = values.pop("_it_ytd_result", None)
     ky_pension_ytd_result = values.pop("_ky_pension_ytd_result", None)
     gy_paye_credit_ytd_result = values.pop("_gy_paye_credit_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
@@ -24878,7 +24907,7 @@ def _generate_single_payslip(db: Session, run: PayrollRun, employee, rate_map, s
         ytd_result=ytd_result, us_ytd_result=us_ytd_result, au_sg_ytd_result=au_sg_ytd_result,
         au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
         gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
-        ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result,
+        ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
         option2_ytd_result=option2_ytd_result, uk_director_ytd_result=uk_director_ytd_result,
         org_levy_result=org_levy_result, uk_org_levy_increment=uk_org_levy_increment,
         jm_heart_increment=jm_heart_increment,
@@ -25805,6 +25834,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # (_refresh_ytd_after_correction reverses this payslip's absolute postings
     # first), so a correction REPLACES their year-to-date rather than advancing it.
     ie_ytd_result = values.pop("_ie_ytd_result", None)
+    it_ytd_result = values.pop("_it_ytd_result", None)
     pr_ytd_result = values.pop("_pr_ytd_result", None)
     # Same never-write-from-a-correction-path reasoning for AU statutory
     # deductions — recalculation must not double-collect against an order
@@ -25860,7 +25890,7 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
                 ytd_result=ytd_result, us_ytd_result=us_ytd_result, au_sg_ytd_result=au_sg_ytd_result,
                 au_whm_ytd_result=au_whm_ytd_result, ky_pension_ytd_result=ky_pension_ytd_result,
                 gy_paye_credit_ytd_result=gy_paye_credit_ytd_result, sg_cpf_ytd_result=sg_cpf_ytd_result,
-                ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result,
+                ie_ytd_result=ie_ytd_result, pr_ytd_result=pr_ytd_result, it_ytd_result=it_ytd_result,
                 uk_director_ytd_result=uk_director_ytd_result,
             ), old_ytd_postings)
         except YtdPostingConflict as exc:
@@ -30305,6 +30335,12 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         _resolve_se_calc_inputs(db, organization_id, employee, run.pay_date, exclude_run_id=run.id)
         if country == "SE" else None
     )
+    italy_inputs = (
+        _italy_service.resolve_it_calc_inputs(
+            db, organization_id, employee, run.pay_date,
+            period_start=run.period_start, period_end=run.period_end, exclude_run_id=run.id)
+        if country == "IT" else None
+    )
     germany_kwargs = {}
     if country == "DE":
         resolved_de = _resolve_germany_calc_inputs(db, organization_id, employee, run.pay_date)
@@ -30426,6 +30462,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         france_inputs=france_inputs,
         ireland_inputs=ireland_inputs,
         sweden_inputs=sweden_inputs,
+        italy_inputs=italy_inputs,
         **ytd_inputs,
         **org_levy_inputs,
         **option2_inputs,
