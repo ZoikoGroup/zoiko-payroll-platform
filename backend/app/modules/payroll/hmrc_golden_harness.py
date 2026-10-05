@@ -264,6 +264,11 @@ def build_context(case_context: dict) -> PayrollContext:
         period_start=_to_date(case_context.get("period_start")),
         period_end=_to_date(case_context.get("period_end")),
         sgp_employment_facts=case_context.get("sgp_employment_facts"),
+        # Hong Kong (ZP-HK-ENG-001 §16 fixtures): worker facts, verified hours
+        # and the period-overlapping SMW segments countries/hong_kong.py reads.
+        hkg_worker_facts=case_context.get("hkg_worker_facts"),
+        hkg_hours=case_context.get("hkg_hours"),
+        hkg_rule_segments=case_context.get("hkg_rule_segments"),
     )
 
 

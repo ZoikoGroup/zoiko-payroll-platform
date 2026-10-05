@@ -2285,3 +2285,90 @@ export const generateSgIr8a = async (year) => {
 // Phase 6.8 (G3) — Revision (full values) / Amendment (differences) of an IRAS-acknowledged extract.
 export const createSgIr8aModification = async (reportId, { method, reason }) =>
   api.post(`/api/payroll/singapore/reports/ir8a/${reportId}/modifications`, { method, reason });
+
+// ── Hong Kong (ZP-HK-ENG-001) — tenant workflows ───────────────────────
+// Every rule (MPF, IR56G hold, IRD, eMPF, entitlements, SP/LSP, four-eyes)
+// is enforced server-side; these calls only fetch or submit operator input.
+const HK = "/api/payroll/hong-kong";
+export const recordHkWorkHours = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/work-hours`, payload);
+export const getHkContinuousContract = (employeeId, asOf) =>
+  api.get(`${HK}/employees/${employeeId}/continuous-contract`, { params: { as_of: asOf } });
+export const listHkTaxClearanceCases = async () => {
+  const res = await api.get(`${HK}/tax-clearance`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const identifyHkDeparture = (payload) => api.post(`${HK}/tax-clearance`, payload);
+export const recordHkIr56gFiled = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/filed`, payload);
+export const requestHkHoldRelease = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/release-request`, payload);
+export const approveHkHoldRelease = (holdId) => api.post(`${HK}/tax-clearance/${holdId}/release-approve`, {});
+export const changeHkDeparture = (holdId, payload) => api.post(`${HK}/tax-clearance/${holdId}/change`, payload);
+export const closeHkHold = (holdId) => api.post(`${HK}/tax-clearance/${holdId}/close`, {});
+export const listHkIrdCases = async (yearOfAssessment) => {
+  const res = await api.get(`${HK}/ird/cases`, { params: yearOfAssessment ? { year_of_assessment: yearOfAssessment } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const createHkIrdEventCases = (employeeId) => api.post(`${HK}/ird/employees/${employeeId}/event-cases`, {});
+export const generateHkAnnualReturn = (yearOfAssessment) => api.post(`${HK}/ird/annual-return`, { yearOfAssessment });
+export const transitionHkIrdCase = (caseId, payload) => api.post(`${HK}/ird/cases/${caseId}/transition`, payload);
+export const amendHkIrdCase = (caseId, reason) => api.post(`${HK}/ird/cases/${caseId}/amend`, { reason });
+export const getHkIrdCaseHistory = async (caseId) => {
+  const res = await api.get(`${HK}/ird/cases/${caseId}/history`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const calculateHkAverageWage = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/average-wage`, payload);
+export const calculateHkEntitlement = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/entitlements`, payload);
+export const calculateHkTermination = (employeeId, payload) => api.post(`${HK}/employees/${employeeId}/termination`, payload);
+export const approveHkTermination = (resultId) => api.post(`${HK}/termination/${resultId}/approve`, {});
+export const listHkEmpfSubmissions = async () => {
+  const res = await api.get(`${HK}/empf/submissions`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const prepareHkEmpfSubmission = (contributionPeriod) => api.post(`${HK}/empf/submissions`, { contributionPeriod });
+export const transitionHkEmpfSubmission = (id, payload) => api.post(`${HK}/empf/submissions/${id}/transition`, payload);
+export const estimateHkSalariesTax = (payload) => api.post(`${HK}/salaries-tax/estimate`, payload);
+export const getHkRunPreflight = (runId) => api.get(`${HK}/runs/${runId}/preflight`);
+export const getHkEmployerReadiness = () => api.get(`${HK}/readiness`);
+export const recordHkEmployeeCopy = (caseId, evidenceRef) => api.post(`${HK}/ird/cases/${caseId}/employee-copy`, { evidenceRef });
+// HK statutory reports (GeneratedReport from an Active template). Bodies are
+// snake_case exactly as the server's request schemas declare them.
+export const generateHkBir56a = (reportTemplateId, yearOfAssessment) =>
+  api.post(`${HK}/reports/bir56a`, { report_template_id: reportTemplateId, year_of_assessment: yearOfAssessment });
+export const generateHkIr56b = (reportTemplateId, employeeId, yearOfAssessment) =>
+  api.post(`${HK}/reports/ir56b`, { report_template_id: reportTemplateId, employee_id: employeeId, year_of_assessment: yearOfAssessment });
+export const generateHkIr56Notification = (reportTemplateId, caseId) =>
+  api.post(`${HK}/reports/ir56-notification`, { report_template_id: reportTemplateId, case_id: caseId });
+export const generateHkEmpfRemittance = (reportTemplateId, submissionId) =>
+  api.post(`${HK}/reports/empf-remittance`, { report_template_id: reportTemplateId, submission_id: submissionId });
+export const generateHkMpfContributionRecord = (reportTemplateId, employeeId, contributionPeriod) =>
+  api.post(`${HK}/reports/mpf-contribution-record`, { report_template_id: reportTemplateId, employee_id: employeeId, contribution_period: contributionPeriod });
+export const generateHkTerminationStatement = (reportTemplateId, terminationResultId) =>
+  api.post(`${HK}/reports/termination-statement`, { report_template_id: reportTemplateId, termination_result_id: terminationResultId });
+// D-14 linked corrections of committed HK payroll (maker requests, a different checker approves).
+export const requestHkCorrection = (payslipId, reason) => api.post(`${HK}/payslips/${payslipId}/corrections`, { reason });
+export const listHkCorrections = async (employeeId) => {
+  const res = await api.get(`${HK}/corrections`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listHkTerminationResults = async (employeeId) => {
+  const res = await api.get(`${HK}/termination-results`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const listHkAverageWageSnapshots = async (employeeId) => {
+  const res = await api.get(`${HK}/employees/${employeeId}/average-wage-snapshots`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const requestHkAverageWageOverride = (snapshotId, payload) => api.post(`${HK}/average-wage/${snapshotId}/override-request`, payload);
+export const approveHkAverageWageOverride = (snapshotId) => api.post(`${HK}/average-wage/${snapshotId}/override-approve`, {});
+export const approveHkCorrection = (correctionId) => api.post(`${HK}/corrections/${correctionId}/approve`, {});
+export const rejectHkCorrection = (correctionId, reason) => api.post(`${HK}/corrections/${correctionId}/reject`, { reason });
+// D-19 legal holds and the HK statutory-data access log.
+export const listHkLegalHolds = async () => {
+  const res = await api.get(`${HK}/legal-holds`);
+  return Array.isArray(res) ? res : res?.data || [];
+};
+export const placeHkLegalHold = (payload) => api.post(`${HK}/legal-holds`, payload);
+export const releaseHkLegalHold = (holdId, reason) => api.post(`${HK}/legal-holds/${holdId}/release`, { reason });
+export const listHkAccessEvents = async (employeeId) => {
+  const res = await api.get(`${HK}/access-events`, { params: employeeId ? { employee_id: employeeId } : {} });
+  return Array.isArray(res) ? res : res?.data || [];
+};

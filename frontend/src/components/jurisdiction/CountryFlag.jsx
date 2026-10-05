@@ -179,10 +179,22 @@ function Singapore() {
   );
 }
 
+// Hong Kong SAR — red field, simplified five-petal white bauhinia.
+function HongKong() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#DE2910" />
+      {[0, 72, 144, 216, 288].map((a) => (
+        <ellipse key={a} cx="12" cy="5.6" rx="1.5" ry="2.6" fill="#fff" transform={`rotate(${a} 12 8)`} />
+      ))}
+    </svg>
+  );
+}
+
 const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
-  SG: Singapore,
+  SG: Singapore, HK: HongKong,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

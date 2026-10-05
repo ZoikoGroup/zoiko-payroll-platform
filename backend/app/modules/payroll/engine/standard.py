@@ -67,6 +67,7 @@ from app.modules.payroll.engine.countries import jamaica as _jamaica
 from app.modules.payroll.engine.countries import bahamas as _bahamas
 from app.modules.payroll.engine.countries import trinidad_and_tobago as _trinidad_and_tobago
 from app.modules.payroll.engine.countries import singapore as _singapore
+from app.modules.payroll.engine.countries import hong_kong as _hong_kong
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -133,6 +134,7 @@ _calc_jamaica = _jamaica.calculate
 _calc_bahamas = _bahamas.calculate
 _calc_trinidad_and_tobago = _trinidad_and_tobago.calculate
 _calc_singapore = _singapore.calculate
+_calc_hong_kong = _hong_kong.calculate
 
 
 _COUNTRY_CALC = {
@@ -158,6 +160,10 @@ _COUNTRY_CALC = {
     # Singapore (ZP-SG-ENG-001) — CPF/SDL/SHG only, never `tds` (not a
     # monthly-PAYE jurisdiction). Fail-closed: see countries/singapore.py.
     "SG": _calc_singapore,
+    # Hong Kong (ZP-HK-ENG-001) — MPF + SMW assessment + IRD reportable
+    # income, never `tds` (employee-assessed Salaries Tax, not monthly PAYE).
+    # Fail-closed: see countries/hong_kong.py.
+    "HK": _calc_hong_kong,
 }
 
 
@@ -331,6 +337,8 @@ class StandardStrategy(PayrollStrategy):
             ytd_cpf_aw_subject_after=deductions.get("ytd_cpf_aw_subject_after"),
             ytd_cpf_aw_paid_after=deductions.get("ytd_cpf_aw_paid_after"),
             sgp_calculation_trace=deductions.get("sgp_calculation_trace"),
+            hkg_calculation_trace=deductions.get("hkg_calculation_trace"),
+            hkg_statutory_profile_id=deductions.get("_hk_statutory_profile_id"),
             ytd_gy_paye_credit_after=deductions.get("ytd_gy_paye_credit_after"),
             au_whm_cap_exceeded=deductions.get("au_whm_cap_exceeded", False),
             sg_qualifying_earnings_period=deductions.get("sg_qualifying_earnings_period"),

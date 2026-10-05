@@ -13,6 +13,7 @@ export { default as JMCompliancePage } from "./JMCompliancePage";
 export { default as BSCompliancePage } from "./BSCompliancePage";
 export { default as TTCompliancePage } from "./TTCompliancePage";
 export { default as SGCompliancePage } from "./SGCompliancePage";
+export { default as HKCompliancePage } from "./HKCompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -32,4 +33,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   BS: "bahamas",
   TT: "trinidad-and-tobago",
   SG: "singapore",
+  HK: "hong-kong",
 };

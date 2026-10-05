@@ -345,6 +345,43 @@ JURISDICTION_TAX_SCHEMAS = {
              "example": "NO", "primary": False, "options": ["YES", "NO"]},
         ],
     },
+    # Hong Kong (ZP-HK-ENG-001 §13 HKEmployerRegistration) — schema only.
+    # Deliberately NOT in REGISTRATION_COUNTRIES: live Hong Kong payroll stays
+    # disabled until release gates G1–G7 are evidenced and the signed pack is
+    # activated (and the registry row leaves PLANNED). BR number: the 8-digit
+    # Business Registration number. IRD employer's file number: the
+    # "6xx-xxxxxxxx" reference printed on BIR56A (format kept lenient — the
+    # exact issuing format is a G1 confirmation item). The remaining keys
+    # are employer SETTINGS read by the Hong Kong readiness check — none is
+    # a statutory rate.
+    "HK": {
+        "label": "BR Number / IRD Employer's File Number",
+        "currency": "HKD",
+        "fields": [
+            {"key": "br_number", "label": "Business Registration Number", "pattern": r"^\d{8}$",
+             "example": "12345678", "primary": True},
+            {"key": "ird_employer_file_number", "label": "IRD Employer's File Number",
+             "pattern": r"^\d[A-Z0-9]{2}-?\d{6,8}$", "example": "6A1-12345678", "primary": False},
+            {"key": "empf_employer_account", "label": "eMPF employer account number",
+             "pattern": r"^[A-Za-z0-9-]{4,30}$", "example": "ER-12345678", "primary": False},
+            {"key": "mpf_scheme_name", "label": "MPF scheme (trustee) the employer participates in",
+             "pattern": r"^[A-Za-z0-9 .,'&()/-]{2,100}$", "example": "Example MPF Master Trust", "primary": False},
+            {"key": "empf_submission_channel", "label": "eMPF submission channel",
+             "pattern": r"^(EMPF_PLATFORM_MANUAL|NOT_CONFIGURED)$", "example": "EMPF_PLATFORM_MANUAL",
+             "primary": False, "options": ["EMPF_PLATFORM_MANUAL", "NOT_CONFIGURED"]},
+            {"key": "ird_filing_channel", "label": "IRD employer's return filing channel",
+             "pattern": r"^(IRD_ETAX_MANUAL|PAPER|NOT_CONFIGURED)$", "example": "IRD_ETAX_MANUAL",
+             "primary": False, "options": ["IRD_ETAX_MANUAL", "PAPER", "NOT_CONFIGURED"]},
+            {"key": "ec_insurance_policy_number", "label": "Employees' Compensation insurance policy number",
+             "pattern": r"^[A-Za-z0-9/-]{3,40}$", "example": "EC-2026-000123", "primary": False},
+            {"key": "ec_insurance_expiry", "label": "Employees' Compensation insurance expiry (YYYY-MM-DD)",
+             "pattern": r"^\d{4}-\d{2}-\d{2}$", "example": "2027-06-30", "primary": False},
+            {"key": "pics_published", "label": "Employment Personal Information Collection Statement issued",
+             "pattern": r"^(YES|NO)$", "example": "NO", "primary": False, "options": ["YES", "NO"]},
+            {"key": "bank_workflow_validated", "label": "Salary bank-payment workflow validated",
+             "pattern": r"^(YES|NO)$", "example": "NO", "primary": False, "options": ["YES", "NO"]},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -369,6 +406,9 @@ COUNTRY_NAME_TO_CODE = {
     "trinidad and tobago": "TT",
     "trinidad & tobago": "TT",
     "singapore": "SG",
+    "hong kong": "HK",
+    "hong kong sar": "HK",
+    "hong kong, china": "HK",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -385,6 +425,7 @@ CODE_TO_COUNTRY_NAME = {
     "BS": "Bahamas",
     "TT": "Trinidad and Tobago",
     "SG": "Singapore",
+    "HK": "Hong Kong",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

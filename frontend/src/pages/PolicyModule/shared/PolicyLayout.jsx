@@ -52,6 +52,10 @@ function _bumpVersion(v) {
 // already uses — no new endpoint needed.
 export default function PolicyLayout({
   country, countryName,
+  // Optional per-jurisdiction wording; the defaults keep every existing page
+  // unchanged. A territory without states (Hong Kong) hides the State field;
+  // `allowanceLabel` names the hra_pct component in local terms.
+  hasStates = true, allowanceLabel = "HRA",
   categoryFields = DEFAULT_CATEGORY_FIELDS,
   overtimeFields = DEFAULT_OVERTIME_FIELDS,
   payTypeChoices = DEFAULT_PAY_TYPE_CHOICES,
@@ -259,7 +263,7 @@ export default function PolicyLayout({
               <FieldLabel required locked>Country</FieldLabel>
               <input value={form.jurisdictionCountry} disabled className={inputClass} />
             </div>
-            <div>
+            {hasStates && <div>
               <FieldLabel locked={stateLocked}>State / Province</FieldLabel>
               <input
                 value={form.jurisdictionState || ""}
@@ -268,7 +272,7 @@ export default function PolicyLayout({
                 className={inputClass}
                 placeholder="Telangana (optional)"
               />
-            </div>
+            </div>}
             <div>
               <FieldLabel>Status</FieldLabel>
               <select value={form.status} onChange={set("status")} className={inputClass}>
@@ -310,7 +314,7 @@ export default function PolicyLayout({
 
         <Section
           title="Salary Structure & Components"
-          description="How monthly gross splits into Basic, HRA, and any named components for organizations without their own explicit amounts set. Special Allowance always absorbs whatever's left of gross — it's never configured directly."
+          description={`How monthly gross splits into Basic, ${allowanceLabel}, and any named components for organizations without their own explicit amounts set. Special Allowance always absorbs whatever's left of gross — it's never configured directly.`}
         >
           <div className="space-y-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -322,7 +326,7 @@ export default function PolicyLayout({
                 onChangeAllow={(allowOverride) => setLockNode(setForm, ["basic_pct"], { allowOverride })}
               />
               <LockableField
-                label="HRA % of Gross"
+                label={`${allowanceLabel} % of Gross`}
                 node={getLockNode(form.policyDefaults, ["hra_pct"])}
                 type="number"
                 onChangeValue={(value) => setLockNode(setForm, ["hra_pct"], { value })}

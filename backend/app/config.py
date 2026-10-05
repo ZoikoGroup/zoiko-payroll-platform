@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     # ── JWT / Auth (own secret — never reuse the main platform's) ──────
     PAYROLL_SECRET_KEY: str = "change-me-payroll-platform-secret"
+    # Hong Kong identity-token key (D-19): HMAC key for the pseudonymous HKID /
+    # passport token. Unset → derived from PAYROLL_SECRET_KEY under a fixed
+    # domain label. Set a dedicated value in production.
+    HK_IDENTITY_TOKEN_KEY: str = ""
     ALGORITHM: str = "HS256"
     # Distinct issuer/token-namespace so tokens from this platform can
     # never be confused with (or accepted by) the main platform.

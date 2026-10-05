@@ -80,7 +80,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     { label: labels.socialSecurity, amount: payslip.socialSecurity || 0 },
     { label: labels.medicare, amount: payslip.medicare || 0 },
     { label: "NI Employee", amount: payslip.niEmployee || 0 },
-    { label: "Workplace Pension", amount: payslip.employeePension || 0 },
+    { label: labels.employeePension, amount: payslip.employeePension || 0 },
     { label: "Student Loan Deduction", amount: payslip.studyLoanDeduction || 0 },
     // UK: was reaching the API response (once the schema fix landed) but
     // still had no row here — found 2026-09-09 gap-closure Phase 3.
@@ -312,6 +312,23 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                   <span>{fmt(netPay)}</span>
                 </div>
               </div>
+            </div>
+            )}
+
+            {/* HONG KONG: no Salaries Tax withholding; an IR56G hold is a
+                legal hold on payment, shown apart from deductions. */}
+            {!isBlocked && labels.noPayrollIncomeTax && (
+            <div className="mb-5 space-y-2 rounded-[8px] border border-border bg-surface p-4 text-[12px] text-foreground-secondary">
+              <p>
+                No Salaries Tax is withheld from this pay. Hong Kong Salaries Tax is assessed by the Inland Revenue
+                Department on the employee; the employer reports remuneration to the IRD.
+              </p>
+              {payslip.hkTaxClearanceHold && (
+                <p role="status" className="font-semibold text-warning">
+                  IR56G tax-clearance hold ({payslip.hkTaxClearanceHold.status}): {fmt(payslip.hkTaxClearanceHold.amount)} of
+                  this net pay is held pending the IRD letter of release. It is not a deduction and remains owed to you.
+                </p>
+              )}
             </div>
             )}
 

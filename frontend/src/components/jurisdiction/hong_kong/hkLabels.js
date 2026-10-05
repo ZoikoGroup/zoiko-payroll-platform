@@ -1,0 +1,102 @@
+// Human-readable labels for Hong Kong statutory states, outcomes and actions,
+// so no raw internal key (DEPARTURE_IDENTIFIED, SUPPLEMENTARY_BATCH_REQUIRED,
+// …) is shown on an HK screen. An unknown value falls back to a sentence-cased
+// rendering — never the raw underscore key.
+const LABELS = {
+  // IR56G tax clearance
+  DEPARTURE_IDENTIFIED: "Departure identified",
+  IR56G_DUE: "IR56G due",
+  IR56G_FILED_HOLD_ACTIVE: "IR56G filed — hold active",
+  LETTER_OF_RELEASE_RECEIVED: "Letter of release received",
+  DEPARTURE_CANCELLED_OR_CHANGED: "Departure cancelled or changed",
+  CASE_CLOSED: "Case closed",
+  INACTIVE: "Inactive",
+  LETTER_OF_RELEASE: "Letter of release",
+  STATUTORY_PERIOD_ELAPSED: "One month from filing elapsed",
+  // IRD / eMPF lifecycles
+  DUE: "Due",
+  PREPARED: "Prepared",
+  VALIDATED: "Validated",
+  FILED: "Filed",
+  DRAFT: "Draft", READY_FOR_EXTERNAL_SUBMISSION: "Ready for external submission (IRD-approved software)",
+  SUBMITTED_EXTERNALLY: "Submitted externally", AMENDMENT_REQUIRED: "Amendment required",
+  ONLINE_MODE: "Online mode (eTAX upload)", MIXED_MODE: "Mixed mode (data file + signed control list)",
+  INTERNAL_PREPARATION_ONLY: "Internal preparation only (employer filed via own channel)",
+  ACCEPTED: "Accepted",
+  ACKNOWLEDGED: "Acknowledged",
+  AMENDED: "Amended (superseded)",
+  SUPPRESSED: "Suppressed (duplicate)",
+  CANCELLED: "Cancelled",
+  SUBMITTED: "Submitted",
+  PARTIAL: "Partially accepted",
+  REJECTED: "Rejected",
+  PAID: "Paid",
+  RECONCILED: "Reconciled",
+  SUPPLEMENTARY: "Supplementary batch",
+  // corrections / approvals / holds
+  REQUESTED: "Awaiting approval",
+  APPROVED: "Approved",
+  CALCULATED: "Calculated",
+  SUPERSEDED: "Superseded",
+  ACTIVE: "Active",
+  RELEASED: "Released",
+  ORGANISATION: "Whole organisation",
+  EMPLOYEE: "One employee",
+  // Employment Ordinance / MPF
+  CONTINUOUS: "Continuous contract",
+  NOT_CONTINUOUS: "Not a continuous contract",
+  UNDETERMINED: "Undetermined (hours not recorded)",
+  COVERED: "Covered",
+  EXEMPT: "Exempt",
+  PENDING_60_DAY: "Pending (60-day rule)",
+  NOT_COVERED_LEFT_BEFORE_60_DAYS: "Not covered (left before 60 days)",
+  SP: "Severance payment",
+  LSP: "Long service payment",
+  NONE: "No statutory payment",
+  // termination reasons
+  REDUNDANCY: "Redundancy",
+  FIXED_TERM_EXPIRY_REDUNDANCY: "Fixed term expired (redundancy)",
+  LAY_OFF: "Lay-off",
+  DISMISSAL: "Dismissal (not summary)",
+  FIXED_TERM_EXPIRY: "Fixed term expired",
+  DEATH: "Death",
+  RESIGNATION_ILL_HEALTH: "Resignation (ill health)",
+  RESIGNATION_AGE_65: "Resignation (aged 65 or above)",
+  SUMMARY_DISMISSAL: "Summary dismissal",
+  RESIGNATION: "Resignation",
+  // access log
+  VIEW_REPORT: "Viewed report",
+  DOWNLOAD_CERTIFICATE: "Downloaded certificate",
+  DOWNLOAD_CERTIFICATES_ZIP: "Downloaded certificates (ZIP)",
+  VIEW_STATUTORY_PROFILE: "Viewed statutory profile",
+  EVIDENCE_REQUIRED: "Evidence required",
+  DOWNLOAD_PAYSLIP: "Downloaded payslip",
+  DOWNLOAD_PAYSLIPS_ZIP: "Downloaded payslips (ZIP)",
+  DOWNLOAD_BANK_FILE: "Downloaded bank transfer file",
+  SUCCESS: "Success",
+  // correction consequences
+  AMENDMENT_CREATED: "Amendment case opened",
+  REGENERATE_BEFORE_FILING: "Regenerate before filing",
+  COVER_ALREADY_FILED: "Cover return already filed — submit the amended IR56B under the IRD procedure",
+  SUPPRESSED_NO_CHANGE: "Suppressed — no change",
+  SUPERSEDED_UNSUBMITTED: "Unsubmitted batch superseded",
+  SUPPLEMENTARY_BATCH_REQUIRED: "Supplementary eMPF batch required",
+  PREPARE_PERIOD: "Prepare the contribution period",
+  DELTA_HELD_UNDER_IR56G: "Held under the IR56G hold",
+  PAYMENT_BLOCKED_UNTIL_IR56G_FILED: "Payment blocked until the IR56G is filed",
+  PAY_DELTA: "Paid in the correction run",
+  NOT_PAID_RECOVERY_IS_SEPARATE: "Not paid — recovery is a separate step",
+  NO_PAYMENT: "No payment",
+  RECALCULATE_AVERAGE_WAGE: "Recalculate the average wage",
+  REVIEW_TERMINATION_WAGES: "Review the termination calculation",
+  REGENERATE_REPORT: "Regenerate the report",
+  DELIVER_AMENDED_COPY: "Deliver the amended employee copy",
+};
+
+export function hkLabel(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const key = String(value);
+  if (LABELS[key]) return LABELS[key];
+  const text = key.replace(/_/g, " ").toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}

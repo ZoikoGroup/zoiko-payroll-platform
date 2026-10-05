@@ -252,6 +252,33 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     # Grundlohn source (never derived — see models.py's own field docstring).
     de_grundlohn_hourly:               Optional[Decimal] = Field(None, validation_alias="deGrundlohnHourly")
 
+    # Hong Kong (ZP-HK-ENG-001 §3) — worker FACTS only; validated by
+    # service._validate_statutory_profile_fields. Fields not sent carry
+    # forward from the previous HK version (each version is a full snapshot).
+    hkg_employment_relationship: Optional[str] = Field(None, validation_alias="hkgEmploymentRelationship")
+    hkg_identity_document_type: Optional[str] = Field(None, validation_alias="hkgIdentityDocumentType")
+    hkg_residency_status: Optional[str] = Field(None, validation_alias="hkgResidencyStatus")
+    hkg_visa_type: Optional[str] = Field(None, validation_alias="hkgVisaType")
+    hkg_entered_for_employment: Optional[bool] = Field(None, validation_alias="hkgEnteredForEmployment")
+    hkg_permission_to_stay_until: Optional[date] = Field(None, validation_alias="hkgPermissionToStayUntil")
+    hkg_overseas_scheme_member: Optional[bool] = Field(None, validation_alias="hkgOverseasSchemeMember")
+    hkg_mpf_exemption_code: Optional[str] = Field(None, validation_alias="hkgMpfExemptionCode")
+    hkg_mpf_exemption_reason: Optional[str] = Field(None, validation_alias="hkgMpfExemptionReason")
+    hkg_mpf_exemption_evidence_ref: Optional[str] = Field(None, validation_alias="hkgMpfExemptionEvidenceRef")
+    hkg_mpf_scheme_ref: Optional[str] = Field(None, validation_alias="hkgMpfSchemeRef")
+    hkg_employment_continuity_start: Optional[date] = Field(None, validation_alias="hkgEmploymentContinuityStart")
+    hkg_pay_basis: Optional[str] = Field(None, validation_alias="hkgPayBasis")
+    hkg_contractual_weekly_hours: Optional[Decimal] = Field(None, validation_alias="hkgContractualWeeklyHours")
+    hkg_likely_chargeable: Optional[bool] = Field(None, validation_alias="hkgLikelyChargeable")
+    hkg_arrival_date: Optional[date] = Field(None, validation_alias="hkgArrivalDate")
+    hkg_expected_departure_date: Optional[date] = Field(None, validation_alias="hkgExpectedDepartureDate")
+    hkg_frequent_travel_exempt: Optional[bool] = Field(None, validation_alias="hkgFrequentTravelExempt")
+    hkg_termination_date: Optional[date] = Field(None, validation_alias="hkgTerminationDate")
+    hkg_termination_reason: Optional[str] = Field(None, validation_alias="hkgTerminationReason")
+    hkg_pre_transition_monthly_wage: Optional[Decimal] = Field(None, validation_alias="hkgPreTransitionMonthlyWage")
+    hkg_pre_transition_wage_basis: Optional[str] = Field(None, validation_alias="hkgPreTransitionWageBasis")
+    hkg_pre_transition_evidence_ref: Optional[str] = Field(None, validation_alias="hkgPreTransitionEvidenceRef")
+
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
@@ -298,6 +325,31 @@ class EmployeeStatutoryProfileResponse(BaseModel):
 
     # Phase 8AB — see EmployeeStatutoryProfileCreate's field docstring.
     deGrundlohnHourly:              Optional[Decimal] = Field(None, validation_alias="de_grundlohn_hourly", serialization_alias="deGrundlohnHourly")
+
+    # Hong Kong (ZP-HK-ENG-001 §3). The identity token is never returned.
+    hkgEmploymentRelationship: Optional[str] = Field(None, validation_alias="hkg_employment_relationship", serialization_alias="hkgEmploymentRelationship")
+    hkgIdentityDocumentType: Optional[str] = Field(None, validation_alias="hkg_identity_document_type", serialization_alias="hkgIdentityDocumentType")
+    hkgResidencyStatus: Optional[str] = Field(None, validation_alias="hkg_residency_status", serialization_alias="hkgResidencyStatus")
+    hkgVisaType: Optional[str] = Field(None, validation_alias="hkg_visa_type", serialization_alias="hkgVisaType")
+    hkgEnteredForEmployment: Optional[bool] = Field(None, validation_alias="hkg_entered_for_employment", serialization_alias="hkgEnteredForEmployment")
+    hkgPermissionToStayUntil: Optional[date] = Field(None, validation_alias="hkg_permission_to_stay_until", serialization_alias="hkgPermissionToStayUntil")
+    hkgOverseasSchemeMember: Optional[bool] = Field(None, validation_alias="hkg_overseas_scheme_member", serialization_alias="hkgOverseasSchemeMember")
+    hkgMpfExemptionCode: Optional[str] = Field(None, validation_alias="hkg_mpf_exemption_code", serialization_alias="hkgMpfExemptionCode")
+    hkgMpfExemptionReason: Optional[str] = Field(None, validation_alias="hkg_mpf_exemption_reason", serialization_alias="hkgMpfExemptionReason")
+    hkgMpfExemptionEvidenceRef: Optional[str] = Field(None, validation_alias="hkg_mpf_exemption_evidence_ref", serialization_alias="hkgMpfExemptionEvidenceRef")
+    hkgMpfSchemeRef: Optional[str] = Field(None, validation_alias="hkg_mpf_scheme_ref", serialization_alias="hkgMpfSchemeRef")
+    hkgEmploymentContinuityStart: Optional[date] = Field(None, validation_alias="hkg_employment_continuity_start", serialization_alias="hkgEmploymentContinuityStart")
+    hkgPayBasis: Optional[str] = Field(None, validation_alias="hkg_pay_basis", serialization_alias="hkgPayBasis")
+    hkgContractualWeeklyHours: Optional[Decimal] = Field(None, validation_alias="hkg_contractual_weekly_hours", serialization_alias="hkgContractualWeeklyHours")
+    hkgLikelyChargeable: Optional[bool] = Field(None, validation_alias="hkg_likely_chargeable", serialization_alias="hkgLikelyChargeable")
+    hkgArrivalDate: Optional[date] = Field(None, validation_alias="hkg_arrival_date", serialization_alias="hkgArrivalDate")
+    hkgExpectedDepartureDate: Optional[date] = Field(None, validation_alias="hkg_expected_departure_date", serialization_alias="hkgExpectedDepartureDate")
+    hkgFrequentTravelExempt: Optional[bool] = Field(None, validation_alias="hkg_frequent_travel_exempt", serialization_alias="hkgFrequentTravelExempt")
+    hkgTerminationDate: Optional[date] = Field(None, validation_alias="hkg_termination_date", serialization_alias="hkgTerminationDate")
+    hkgTerminationReason: Optional[str] = Field(None, validation_alias="hkg_termination_reason", serialization_alias="hkgTerminationReason")
+    hkgPreTransitionMonthlyWage: Optional[Decimal] = Field(None, validation_alias="hkg_pre_transition_monthly_wage", serialization_alias="hkgPreTransitionMonthlyWage")
+    hkgPreTransitionWageBasis: Optional[str] = Field(None, validation_alias="hkg_pre_transition_wage_basis", serialization_alias="hkgPreTransitionWageBasis")
+    hkgPreTransitionEvidenceRef: Optional[str] = Field(None, validation_alias="hkg_pre_transition_evidence_ref", serialization_alias="hkgPreTransitionEvidenceRef")
 
     # Phase 8AK — computed, never stored (see Gate 4's own "do not store
     # derived values as authoritative inputs" instruction). Reuses
@@ -982,6 +1034,10 @@ class PayslipItemResponse(BaseModel):
     # every non-AU payslip and for any AU payslip generated before this
     # field existed.
     auCalculationTrace: Optional[dict] = None
+    # Hong Kong (ZP-HK-ENG-001): the frozen calculation trace (MPF / SMW / IRD
+    # reportable) and the payslip's IR56G legal-hold line, if any.
+    hkgCalculationTrace: Optional[dict] = None
+    hkTaxClearanceHold: Optional[dict] = None
     # UK: Automatic Enrolment assessment (ZP-TAX-UK-2026-27-001 §13
     # gap-closure Part 3, 2026-09-09) — a classification, not a monetary
     # amount; informational only, never affects employeePension/
@@ -2325,6 +2381,44 @@ class USForm941GenerateRequest(BaseModel):
 class USForm940GenerateRequest(BaseModel):
     report_template_id: int
     year: int
+
+
+# ── Hong Kong: IRD returns / notifications, eMPF remittance, MPF record
+# (ZP-HK-ENG-001 §7, §5, HK-011, HK-010) ─────────────────────────────────
+# A Hong Kong year of assessment is "YYYY/YY" and ends 31 March — never a
+# calendar year and never a dash, unlike India's "2026-27". A contribution
+# period is a plain calendar month, because MPF is contributed monthly.
+
+class HongKongBir56aGenerateRequest(BaseModel):
+    report_template_id: int
+    year_of_assessment: str  # e.g. "2025/26"
+
+
+class HongKongIr56bGenerateRequest(BaseModel):
+    report_template_id: int
+    employee_id: int
+    year_of_assessment: str  # e.g. "2025/26"
+
+
+class HongKongIr56NotificationGenerateRequest(BaseModel):
+    report_template_id: int
+    case_id: int  # the IR56E / IR56F / IR56G reporting case, which is the source of truth
+
+
+class HongKongEmpfRemittanceGenerateRequest(BaseModel):
+    report_template_id: int
+    submission_id: int
+
+
+class HongKongMpfContributionRecordGenerateRequest(BaseModel):
+    report_template_id: int
+    employee_id: int
+    contribution_period: str  # e.g. "2026-05" — a calendar month
+
+
+class HongKongTerminationStatementGenerateRequest(BaseModel):
+    report_template_id: int
+    termination_result_id: int
 
 
 # ── US: New Hire Reporting (Production-Readiness Plan Phase 5) ──────────
@@ -3679,3 +3773,165 @@ class ComplianceDocumentResponse(BaseModel):
     error:         Optional[str] = Field(None, validation_alias="error_message", serialization_alias="error")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+# ── Hong Kong (ZP-HK-ENG-001) request bodies ────────────────────────────
+# Responses are the plain dicts built by hk_service.serialize_* (same
+# convention as the Singapore IR21 endpoints).
+
+class _HKBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class HKWorkHoursEntry(_HKBody):
+    date: date
+    hours: Decimal
+    source: Optional[str] = "VERIFIED_TIMESHEET"
+    evidenceRef: Optional[str] = None
+
+
+class HKWorkHoursRequest(_HKBody):
+    entries: List[HKWorkHoursEntry]
+    reason: Optional[str] = None
+
+
+class HKDepartureRequest(_HKBody):
+    employeeId: int
+    expectedDepartureDate: date
+    identifiedOn: Optional[date] = None
+    returnDate: Optional[date] = None
+
+
+class HKIr56gFiledRequest(_HKBody):
+    filedOn: date
+    filingReference: str
+
+
+class HKReleaseRequest(_HKBody):
+    basis: str
+    reference: Optional[str] = None
+    evidenceRef: str
+
+
+class HKDepartureChangeRequest(_HKBody):
+    reason: str
+    evidenceRef: str
+    newDepartureDate: Optional[date] = None
+
+
+class HKAnnualReturnRequest(_HKBody):
+    yearOfAssessment: str = Field(pattern=r"^\d{4}/\d{2}$")
+
+
+class HKIrdTransitionRequest(_HKBody):
+    target: str
+    filingReference: Optional[str] = None
+    receiptReference: Optional[str] = None
+    # FILED only: how the employer submitted (recorded from its evidence).
+    submissionMode: Optional[str] = None
+    authorizedSigner: Optional[str] = None
+    transactionReference: Optional[str] = None
+    controlListReference: Optional[str] = None
+    submittedOn: Optional[date] = None
+
+
+class HKIrdAmendRequest(_HKBody):
+    reason: str
+    amendmentType: str = "REPLACEMENT"
+
+
+class HKReasonRequest(_HKBody):
+    reason: str
+
+
+class HKCorrectionRequest(_HKBody):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class HKLegalHoldRequest(_HKBody):
+    employeeId: Optional[int] = None
+    reason: str = Field(min_length=1, max_length=2000)
+    reference: Optional[str] = Field(default=None, max_length=200)
+
+
+class HKEmployeeCopyRequest(_HKBody):
+    evidenceRef: str = Field(min_length=1, max_length=200)
+
+
+class HKAverageWageRequest(_HKBody):
+    benefitType: str
+    referenceDate: date
+    disregarded: List[dict] = []
+    overtimeConstant: bool = False
+
+
+class HKAverageWageOverrideRequest(_HKBody):
+    averageDailyWage: Decimal
+    reason: str
+    evidenceRef: str
+
+
+class HKEntitlementRequest(_HKBody):
+    benefit: str
+    averageWageSnapshotId: int
+    date: Optional[date] = None
+    days: Optional[Decimal] = None
+    sicknessDays: Optional[int] = None
+    consecutiveDays: Optional[int] = None
+    medicallyCertified: bool = False
+    pregnancyRelated: bool = False
+    availablePaidSicknessDays: Optional[Decimal] = None
+    noticeGiven: bool = False
+    documentProvided: bool = False
+
+
+class HKTerminationRequest(_HKBody):
+    terminationDate: date
+    reason: str
+    postTransitionWage: Decimal
+    postTransitionWageBasis: Optional[str] = "LAST_FULL_MONTH"
+    preTransitionWage: Optional[Decimal] = None
+    preTransitionWageBasis: Optional[str] = None
+    payBasis: Optional[str] = None
+    offsets: List[dict] = []
+    renewalOfferRefused: bool = False
+    finalWages: Optional[Decimal] = None
+    annualLeavePay: Optional[Decimal] = None
+    holidayPay: Optional[Decimal] = None
+
+
+class HKEmpfPrepareRequest(_HKBody):
+    contributionPeriod: str = Field(pattern=r"^\d{4}-\d{2}$")
+
+
+class HKEmpfTransitionRequest(_HKBody):
+    target: str
+    submissionReference: Optional[str] = None
+    rowOutcomes: Optional[List[dict]] = None
+    settlementReference: Optional[str] = None
+
+
+class HKSalariesTaxEstimateRequest(_HKBody):
+    yearOfAssessment: str = Field(pattern=r"^\d{4}/\d{2}$")
+    income: Decimal
+    deductions: Decimal = Decimal("0")
+    allowances: dict = {}
+    # Itemised claims, each capped by the engine to the statutory ceiling for the
+    # year of assessment: mandatory_contributions, self_education, home_loan_
+    # interest, elderly_residential_care, domestic_rents, voluntary_mpf,
+    # assisted_reproductive, qvhi_premium, approved_donation.
+    deductionClaims: dict = {}
+    # Additional HLI / domestic-rent ceiling elections (IRD, from YA 2024/25):
+    # home_loan_interest_additional_ceiling, domestic_rents_additional_ceiling.
+    elections: List[str] = []
+
+
+class HKCalculationPreviewRequest(_HKBody):
+    payDate: date
+    periodStart: Optional[date] = None
+    periodEnd: Optional[date] = None
+    payFrequency: str = "Monthly"
+    gross: Decimal
+    dateOfBirth: date
+    dateOfJoining: date
+    workerFacts: dict = {}
+    hours: dict = {}

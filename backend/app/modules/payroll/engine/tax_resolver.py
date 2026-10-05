@@ -270,7 +270,7 @@ def find_active_tax_pack(
     return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
 
 
-_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG",)
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK")
 
 
 def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str]) -> Optional[str]:

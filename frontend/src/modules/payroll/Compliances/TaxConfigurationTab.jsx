@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { fetchContributionRates, fetchTaxSlabs, fetchStateTaxSlabs, fetchOrgLocalityRates } from "../../../service/payrollService";
 import { SlabsTable, PTSlabsTable, withholdingTerm } from "./TaxSlabTable";
 import { RatesTable } from "./ContributionRatesTable";
+import HKTaxConfigurationPanel from "./HKTaxConfigurationPanel";
 
 // Organization Compliance > Tax Configuration — UI/UX ONLY.
 // -----------------------------------------------------------------------
@@ -515,7 +516,15 @@ function getVisibleItems(group, jurisdictionState) {
   return matching.length > 0 ? matching : group.items;
 }
 
-export default function TaxConfigurationTab({ documents = [], country, jurisdictionState }) {
+// Hong Kong has no per-organisation slab/rate rows (the calculator resolves
+// the platform pack in force), so it gets its own read-only view. Every other
+// country renders the unchanged generic tab below.
+export default function TaxConfigurationTab(props) {
+  if (props.country === "HK") return <HKTaxConfigurationPanel />;
+  return <GenericTaxConfigurationTab {...props} />;
+}
+
+function GenericTaxConfigurationTab({ documents = [], country, jurisdictionState }) {
   const [slabRows, setSlabRows] = useState([]);
   const [stateSlabRows, setStateSlabRows] = useState([]);
   const [rateRows, setRateRows] = useState([]);

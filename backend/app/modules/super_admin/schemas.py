@@ -4,7 +4,7 @@ modules/super_admin/schemas.py
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -106,6 +106,86 @@ class SgServiceRegistryTransition(BaseModel):
     onboarding, gated server-side) or PLANNED (closes it). The reason is the
     change record."""
     availability: str
+    reason: str
+
+
+class HkServiceRegistryTransition(BaseModel):
+    """Final completion program: the owner's Hong Kong registry step —
+    AVAILABLE (opens onboarding; refused unless every readiness requirement is
+    met, re-derived server-side) or PLANNED (suspends / closes it)."""
+    model_config = ConfigDict(extra="forbid")
+    availability: str
+    reason: str
+
+
+class HkConfigRowUpdate(BaseModel):
+    """Governed edit of one HK statutory row: a reason and a source document are required."""
+    model_config = ConfigDict(extra="forbid")
+    reason: str
+    sourceDocumentId: int
+    employeeRatePct: Optional[str] = None
+    employerRatePct: Optional[str] = None
+    flatAmount: Optional[str] = None
+    textValue: Optional[str] = None
+    minAmount: Optional[str] = None
+    maxAmount: Optional[str] = None
+    ratePct: Optional[str] = None
+    taxFormula: Optional[str] = None
+    effectiveFrom: Optional[str] = None
+    effectiveTo: Optional[str] = None
+    # Records the HK specialist's (G1) confirmation of a value seeded "[G1]";
+    # accepted only with a stored, hashed, independently reviewed source.
+    specialistVerified: Optional[bool] = None
+
+
+class HkNewVersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: str
+    reason: str
+
+
+class HkSoftwareApprovalTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: str
+    reason: str
+    formsCovered: Optional[List[str]] = None
+    specificationVersion: Optional[str] = None
+    applicationReference: Optional[str] = None
+    applicationSubmittedOn: Optional[date] = None
+    testDataSubmittedOn: Optional[date] = None
+    approvalReference: Optional[str] = None
+    approvalReceivedOn: Optional[date] = None
+    approvalDocumentId: Optional[int] = None
+    expiresOn: Optional[date] = None
+    notes: Optional[str] = None
+
+
+class HkEmpfConfigurationCreate(BaseModel):
+    """Statuses and non-secret descriptors only — extra fields (a password,
+    key, certificate body…) are refused outright."""
+    model_config = ConfigDict(extra="forbid")
+    submissionMethod: str
+    environment: str
+    reason: str
+    fileFormat: Optional[str] = None
+    formatVersion: Optional[str] = None
+    endpointReference: Optional[str] = None
+    credentialStatus: str = "NOT_CONFIGURED"
+    certificateStatus: str = "NOT_CONFIGURED"
+    certificationEvidenceId: Optional[int] = None
+
+
+class HkRetentionProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recordCategory: str
+    retentionYears: int
+    endOfRetention: str
+    legalBasis: str
+    reason: str
+
+
+class HkReasonBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     reason: str
 
 

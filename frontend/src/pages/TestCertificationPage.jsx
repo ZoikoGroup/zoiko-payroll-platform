@@ -14,6 +14,7 @@ const JURISDICTIONS = [
   { value: "CA", label: "Canada (CRA/Revenu Quebec)", fixturesPath: "backend/tests/fixtures/cra_golden/README.md" },
   { value: "IN", label: "India (CBDT/EPFO/ESIC)", fixturesPath: "backend/tests/fixtures/in_golden/README.md" },
   { value: "US", label: "United States (IRS/SSA/State DOR)", fixturesPath: "backend/tests/fixtures/us_golden/README.md" },
+  { value: "HK", label: "Hong Kong (MPFA / IRD / Labour Department)", fixturesPath: "backend/tests/fixtures/hk_golden/README.md" },
 ];
 
 export default function TestCertificationPage() {

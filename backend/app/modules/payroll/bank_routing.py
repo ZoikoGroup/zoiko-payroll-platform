@@ -7,6 +7,7 @@ Each jurisdiction's salary payment uses one canonical routing code:
 
     IN -> IFSC               UK -> Sort Code      US -> ABA routing number
     CA -> Transit + Institution Number   DE -> IBAN + BIC   AU -> BSB
+    HK -> HKICL bank (clearing) code + branch code (3 digits each)
 
 This module is the single source of truth for:
 
@@ -35,7 +36,7 @@ from typing import List, Optional
 # ── Jurisdiction registry ────────────────────────────────────────────────
 
 # Countries with a canonical salary-payment routing code in scope.
-ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU")
+ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "HK")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -53,6 +54,13 @@ ROUTING_FIELDS = {
         {"key": "bic", "label": "BIC"},
     ],
     "AU": [{"key": "bsb_code", "label": "BSB code"}],
+    # Hong Kong: HKICL "Clearing Code and Branch Code" list — a 3-digit bank
+    # (clearing) code and a 3-digit branch code; the account number format is
+    # bank-specific and is not validated beyond presence.
+    "HK": [
+        {"key": "bank_code", "label": "Bank code"},
+        {"key": "branch_code", "label": "Branch code"},
+    ],
 }
 
 # Canonical name used as the BTF routing column header per country. India
@@ -65,6 +73,7 @@ BTF_ROUTING_LABEL = {
     "CA": "Transit No.",
     "DE": "IBAN",
     "AU": "BSB",
+    "HK": "Bank-Branch Code",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -154,6 +163,10 @@ def btf_routing_value(obj, country: Optional[str] = None) -> str:
         if transit and institution:
             return f"{transit}-{institution}"
         return transit or institution
+    if effective == "HK":
+        bank = _field_value(obj, "bank_code")
+        branch = _field_value(obj, "branch_code")
+        return f"{bank}-{branch}" if bank and branch else (bank or branch)
     if effective == "DE":
         iban = _field_value(obj, "iban")
         bic = _field_value(obj, "bic")

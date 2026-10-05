@@ -69,7 +69,10 @@ class MissingComplianceConfigurationError(Exception):
 #      with zero existing orgs/employees/synced rows, so none of the
 #      IN-style re-sync risk above applies — and singapore.py defines no
 #      hardcoded fallback at all, so there is nothing to fall back to.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"SG"}
+# HK — enabled from day one, 2026-09-30 (ZP-HK-ENG-001: "never invent a
+#      statutory value"). Same reasoning as SG: a brand-new jurisdiction
+#      with no orgs and no hardcoded fallback in countries/hong_kong.py.
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"SG", "HK"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact

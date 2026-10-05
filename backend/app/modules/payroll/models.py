@@ -835,6 +835,47 @@ class EmployeeStatutoryProfile(Base):
     # establishes the source of truth for a later phase to consume.
     de_grundlohn_hourly               = Column(Numeric(10, 2), nullable=True)
 
+    # ── Hong Kong (HK) statutory FACTS (ZP-HK-ENG-001 §3 worker resolver,
+    # §13 HKWorkerProfile) ───────────────────────────────────────────────
+    # Facts only — never a calculated MPF / tax / net-pay figure. NULL for
+    # every non-HK row. `hkg_` (ISO-3) prefix, same convention as `sgp_`.
+    # Every HK version is a complete snapshot: create_employee_statutory_
+    # profile_version carries forward any HK field the new version does not
+    # set, so history stays replayable row by row (HK-005).
+    hkg_employment_relationship       = Column(String(30), nullable=True)   # EMPLOYEE | CASUAL_INDUSTRY | DOMESTIC | CONTRACTOR_REVIEW
+    hkg_identity_document_type        = Column(String(10), nullable=True)   # HKID | PASSPORT
+    # SHA-256 token of the normalised identifier (HK-022: never the raw
+    # HKID/passport number here — that stays in the masked compliance fields).
+    hkg_identity_token                = Column(String(80), nullable=True)   # keyed, versioned token (D-19)
+    hkg_residency_status              = Column(String(20), nullable=True)   # RESIDENT | NON_RESIDENT
+    hkg_visa_type                     = Column(String(40), nullable=True)
+    hkg_entered_for_employment        = Column(Boolean, nullable=True)      # s.11 Immigration Ordinance entry for employment
+    hkg_permission_to_stay_until      = Column(Date, nullable=True)
+    hkg_overseas_scheme_member        = Column(Boolean, nullable=True)      # member of a retirement scheme of a place outside HK
+    # MPF exemption FACT (never inferred from full-time/part-time, §5):
+    # NONE | EXEMPT_AGE | EXEMPT_DOMESTIC | EXEMPT_STATUTORY_SCHEME |
+    # EXEMPT_ORSO | EXEMPT_INBOUND | INDUSTRY_SCHEME_SPECIAL
+    hkg_mpf_exemption_code            = Column(String(30), nullable=True)
+    hkg_mpf_exemption_reason          = Column(Text, nullable=True)
+    hkg_mpf_exemption_evidence_ref    = Column(String(200), nullable=True)
+    hkg_mpf_scheme_ref                = Column(String(60), nullable=True)   # eMPF scheme / employer-account mapping
+    # Start of continuous employment with this employer when it differs from
+    # date_of_joining (e.g. transfer of business); NULL = date_of_joining.
+    hkg_employment_continuity_start   = Column(Date, nullable=True)
+    hkg_pay_basis                     = Column(String(20), nullable=True)   # MONTHLY | DAILY | HOURLY | PIECE
+    hkg_contractual_weekly_hours      = Column(Numeric(6, 2), nullable=True)
+    hkg_likely_chargeable             = Column(Boolean, nullable=True)      # likely chargeable to Salaries Tax (IR56E trigger)
+    hkg_arrival_date                  = Column(Date, nullable=True)
+    hkg_expected_departure_date       = Column(Date, nullable=True)         # leaving HK for > 1 month (IR56G trigger)
+    hkg_frequent_travel_exempt        = Column(Boolean, nullable=True)      # required to leave HK at frequent intervals (no IR56G)
+    hkg_termination_date              = Column(Date, nullable=True)
+    hkg_termination_reason            = Column(String(40), nullable=True)
+    # HK-017 frozen pre-1-May-2025 wage evidence for the SP/LSP transition
+    # split. Once recorded it can never change in a later version.
+    hkg_pre_transition_monthly_wage   = Column(Numeric(12, 2), nullable=True)
+    hkg_pre_transition_wage_basis     = Column(String(30), nullable=True)   # LAST_FULL_MONTH | TWELVE_MONTH_AVERAGE
+    hkg_pre_transition_evidence_ref   = Column(String(200), nullable=True)
+
     __table_args__ = (
         Index("ix_statutory_profile_employee_period", "employee_id", "effective_from"),
         Index("ix_statutory_profile_org", "organization_id"),
@@ -1498,6 +1539,12 @@ class PayslipItem(Base):
     # (service._load_sg_aw_ledger) — no separate ledger table. NULL for
     # every non-SG payslip and every SG payslip before this column existed.
     sgp_calculation_trace = Column(JSON, nullable=True)
+    # Hong Kong calculation trace (ZP-HK-ENG-001 §13 HKPayrollSnapshot /
+    # HKMPFResult) — same country-scoped JSON-column precedent as the SG and
+    # AU traces: MPF coverage decision, relevant income, threshold branch,
+    # contribution holiday, SMW segments, classification and every rule's
+    # provenance. Never a Salaries Tax withholding. NULL for non-HK payslips.
+    hkg_calculation_trace = Column(JSON, nullable=True)
     # India: EPS diversion + residual — purely-informational breakdown of
     # employer_pf above (ZP-TAX-IN-2026-27-001 §9.1/§9.3); employer_eps +
     # employer_pf_residual == employer_pf always, never additional to it.
@@ -5713,3 +5760,411 @@ class SgpIr8aModification(Base):
         UniqueConstraint("base_report_id", "sequence", name="uq_sgp_ir8a_modification_sequence"),
         UniqueConstraint("report_id", name="uq_sgp_ir8a_modification_report"),
     )
+
+
+# ── Hong Kong (ZP-HK-ENG-001) — HK-specific registries ──────────────────
+# Only objects no shared table can represent (docs/HONG_KONG_CURRENT_STATE_
+# ARCHITECTURE_MAP.md §7). Rule packs, rates, evidence, worker facts and the
+# payroll snapshot all reuse the shared tables. Every row is tenant-scoped by
+# organization_id (HK-021) and every transition is audited through
+# service.record_tax_audit.
+
+
+class HkgWorkHours(Base):
+    """Verified hours worked on one day (HK-016) — the evidence both the
+    continuous-contract resolver (weekly / rolling 4-week hours, HK-005) and
+    the minimum-wage test (hours before/after an SMW effective date) replay
+    from. Append-only: a correction supersedes the row (superseded_by_id),
+    never edits it, so any past qualification can be re-derived."""
+    __tablename__ = "hkg_work_hours"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    work_date        = Column(Date, nullable=False)
+    hours            = Column(Numeric(6, 2), nullable=False)
+    source           = Column(String(30), nullable=False)       # TIME_ATTENDANCE | VERIFIED_TIMESHEET | MANUAL_VERIFIED
+    evidence_ref     = Column(String(200), nullable=True)
+    superseded_by_id = Column(Integer, ForeignKey("hkg_work_hours.id"), nullable=True)
+    supersede_reason = Column(Text, nullable=True)
+    recorded_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_hkg_work_hours_employee_date", "employee_id", "work_date"),)
+
+
+class HkgIrdReportingCase(Base):
+    """One IRD employer-reporting obligation (ZP-HK-ENG-001 §7, HKIRDReportingCase):
+    BIR56A (annual employer's return cover, employee_id NULL), IR56B (annual,
+    per employee), IR56E (commencement), IR56F (cessation), IR56G (departure).
+
+    Lifecycle DUE -> PREPARED -> VALIDATED -> FILED -> ACCEPTED/ACKNOWLEDGED, with
+    AMENDED (superseded by a linked amendment case) and SUPPRESSED (duplicate
+    of income another filed form already covers). FILED / ACCEPTED rows are
+    immutable: an amendment is a NEW case (amends_case_id) and the accepted
+    payload/receipt are never overwritten."""
+    __tablename__ = "hkg_ird_reporting_cases"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id"), nullable=True, index=True)
+    form_type             = Column(String(10), nullable=False)          # BIR56A | IR56B | IR56E | IR56F | IR56G
+    year_of_assessment    = Column(String(9), nullable=False)           # "2025/26" — the year ending 31 March
+    event_date            = Column(Date, nullable=True)                 # commencement / cessation / expected departure
+    due_date              = Column(Date, nullable=True)
+    income_period_start   = Column(Date, nullable=True)
+    income_period_end     = Column(Date, nullable=True)
+    status                = Column(String(20), nullable=False, default="DUE", server_default="DUE")
+    schema_version        = Column(String(40), nullable=True)
+    schema_hash           = Column(String(64), nullable=True)
+    payload               = Column(JSON, nullable=True)
+    payload_hash          = Column(String(64), nullable=True)
+    source_payroll_hash   = Column(String(64), nullable=True)
+    reported_income       = Column(JSON, nullable=True)
+    validation_errors     = Column(JSON, nullable=True)
+    filing_reference      = Column(String(100), nullable=True)
+    receipt_reference     = Column(String(100), nullable=True)
+    filed_at              = Column(DateTime(timezone=True), nullable=True)
+    accepted_at           = Column(DateTime(timezone=True), nullable=True)
+    amends_case_id        = Column(Integer, ForeignKey("hkg_ird_reporting_cases.id"), nullable=True)
+    generated_report_id   = Column(Integer, ForeignKey("payroll_generated_reports.id"), nullable=True, index=True)
+    suppression_reason    = Column(Text, nullable=True)
+    employee_copy_delivered_at = Column(DateTime(timezone=True), nullable=True)
+    # IRD submission record (production-readiness pass). amendment_type:
+    # ORIGINAL | ADDITIONAL | REPLACEMENT | SUPPLEMENTARY. submission_mode:
+    # ONLINE_MODE (eTAX upload of the data file) | MIXED_MODE (data file + signed
+    # control list) | INTERNAL_PREPARATION_ONLY (Zoiko prepared; the employer
+    # filed through its own channel). Recorded from the operator's evidence —
+    # nothing here transmits to the IRD.
+    amendment_type        = Column(String(15), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    submission_mode       = Column(String(30), nullable=True)
+    authorized_signer     = Column(String(200), nullable=True)
+    transaction_reference = Column(String(100), nullable=True)
+    control_list_reference = Column(String(100), nullable=True)
+    submitted_on          = Column(Date, nullable=True)
+    uploaded_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    prepared_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at            = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (Index("ix_hkg_ird_case_lookup", "organization_id", "employee_id", "form_type", "year_of_assessment"),)
+
+
+class HkgTaxClearanceHold(Base):
+    """IR56G departure tax-clearance hold (ZP-HK-ENG-001 §8, HK-013) — a LEGAL
+    HOLD state, never a deduction or negative earning. The held money stays
+    owed to the employee on its payslips; hkg_tax_clearance_hold_lines is the
+    per-payslip held ledger. States: INACTIVE -> DEPARTURE_IDENTIFIED ->
+    IR56G_DUE -> IR56G_FILED_HOLD_ACTIVE -> LETTER_OF_RELEASE_RECEIVED ->
+    CASE_CLOSED, with DEPARTURE_CANCELLED_OR_CHANGED (evidence required, never
+    silently clears an active hold). Release requires evidence and an
+    approver distinct from the requester."""
+    __tablename__ = "hkg_tax_clearance_holds"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    organization_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    ird_case_id             = Column(Integer, ForeignKey("hkg_ird_reporting_cases.id"), nullable=True)
+    state                   = Column(String(40), nullable=False, default="DEPARTURE_IDENTIFIED", server_default="DEPARTURE_IDENTIFIED")
+    expected_departure_date = Column(Date, nullable=False)
+    identified_on           = Column(Date, nullable=False)
+    filing_deadline         = Column(Date, nullable=False)          # not later than 1 month before departure
+    filed_date              = Column(Date, nullable=True)
+    statutory_hold_expiry   = Column(Date, nullable=True)           # filed_date + 1 month (IRO: whichever is earlier)
+    release_basis           = Column(String(40), nullable=True)     # LETTER_OF_RELEASE | STATUTORY_PERIOD_ELAPSED
+    release_reference       = Column(String(100), nullable=True)
+    release_evidence_ref    = Column(String(200), nullable=True)
+    release_requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    released_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    released_at             = Column(DateTime(timezone=True), nullable=True)
+    released_amount         = Column(Numeric(14, 2), nullable=True)
+    change_reason           = Column(Text, nullable=True)
+    change_evidence_ref     = Column(String(200), nullable=True)
+    prepared_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at              = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class HkgTaxClearanceHoldLine(Base):
+    """One payslip's money held under an IR56G hold — the traceable held
+    ledger (HK-013). Amount = the payslip's net pay (MPF still goes to the
+    scheme; it is the employee's cash that is withheld). Never deleted."""
+    __tablename__ = "hkg_tax_clearance_hold_lines"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    hold_id         = Column(Integer, ForeignKey("hkg_tax_clearance_holds.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    payslip_item_id = Column(Integer, ForeignKey("payslip_items.id"), nullable=False)
+    amount          = Column(Numeric(14, 2), nullable=False)
+    status          = Column(String(20), nullable=False, default="HELD", server_default="HELD")   # HELD | RELEASED
+    released_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("hold_id", "payslip_item_id", name="uq_hkg_hold_line_payslip"),)
+
+
+class HkgAverageWageSnapshot(Base):
+    """Employment Ordinance 12-month average wage (ZP-HK-ENG-001 §9,
+    HKAverageWageSnapshot) — computed ONLY from committed payslips, with every
+    included row, excluded period/amount and reason frozen (HK-014). A manual
+    override is a controlled, evidenced, second-person-approved field on the
+    snapshot; the calculated figures are never replaced."""
+    __tablename__ = "hkg_average_wage_snapshots"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    organization_id          = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    benefit_type             = Column(String(30), nullable=False)   # SICKNESS | MATERNITY | PATERNITY | STATUTORY_HOLIDAY | ANNUAL_LEAVE
+    reference_date           = Column(Date, nullable=False)
+    lookback_start           = Column(Date, nullable=False)
+    lookback_end             = Column(Date, nullable=False)
+    included_rows            = Column(JSON, nullable=False)
+    excluded_periods         = Column(JSON, nullable=False)
+    excluded_amounts         = Column(JSON, nullable=False)
+    total_wages              = Column(Numeric(14, 2), nullable=False)
+    total_days               = Column(Integer, nullable=False)
+    average_daily_wage       = Column(Numeric(14, 4), nullable=False)
+    average_monthly_wage     = Column(Numeric(14, 2), nullable=True)
+    four_fifths_daily        = Column(Numeric(14, 2), nullable=True)
+    result                   = Column(JSON, nullable=False)
+    source_revision_hash     = Column(String(64), nullable=False)
+    evidence_hash            = Column(String(64), nullable=False)
+    status                   = Column(String(20), nullable=False, default="CALCULATED", server_default="CALCULATED")
+    override_average_daily_wage = Column(Numeric(14, 4), nullable=True)
+    override_reason          = Column(Text, nullable=True)
+    override_evidence_ref    = Column(String(200), nullable=True)
+    override_requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    override_approved_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HkgTerminationResult(Base):
+    """Statutory termination calculation (ZP-HK-ENG-001 §11,
+    HKTerminationResult, HK-018): SP/LSP eligibility and base, pre/post
+    1-May-2025 transition split, each permitted offset, caps, and the net
+    statutory payment, with the evidence chain frozen in `result`."""
+    __tablename__ = "hkg_termination_results"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    termination_date      = Column(Date, nullable=False)
+    termination_reason    = Column(String(40), nullable=False)
+    payment_type          = Column(String(10), nullable=False)       # SP | LSP | NONE
+    gross_entitlement     = Column(Numeric(14, 2), nullable=False)
+    total_offsets         = Column(Numeric(14, 2), nullable=False)
+    net_statutory_payment = Column(Numeric(14, 2), nullable=False)
+    result                = Column(JSON, nullable=False)
+    evidence_hash         = Column(String(64), nullable=False)
+    status                = Column(String(20), nullable=False, default="CALCULATED", server_default="CALCULATED")  # CALCULATED | APPROVED | SUPERSEDED
+    created_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at           = Column(DateTime(timezone=True), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HkgEmpfSubmission(Base):
+    """One eMPF remittance-statement submission for a contribution period
+    (ZP-HK-ENG-001 §5/§12). Lifecycle PREPARED -> VALIDATED -> SUBMITTED ->
+    ACCEPTED / PARTIAL / REJECTED -> PAID -> RECONCILED, AMENDED when a linked
+    correction supersedes it. Zoiko holds NO certified eMPF interface: the
+    SUBMITTED / outcome states are recorded from the operator's evidence of a
+    submission made through eMPF itself — nothing here transmits to eMPF.
+    A rejected row never rewrites the committed payroll it came from."""
+    __tablename__ = "hkg_empf_submissions"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    contribution_period    = Column(String(7), nullable=False)       # "2026-05"
+    status                 = Column(String(20), nullable=False, default="PREPARED", server_default="PREPARED")
+    rows                   = Column(JSON, nullable=False)
+    totals                 = Column(JSON, nullable=False)
+    payload_hash           = Column(String(64), nullable=False)
+    validation_errors      = Column(JSON, nullable=True)
+    submission_reference   = Column(String(100), nullable=True)
+    row_outcomes           = Column(JSON, nullable=True)
+    settlement_reference   = Column(String(100), nullable=True)
+    contribution_day       = Column(Date, nullable=True)
+    amends_submission_id   = Column(Integer, ForeignKey("hkg_empf_submissions.id"), nullable=True)
+    # A SUPPLEMENTARY batch for a period whose earlier batch was already
+    # submitted: it carries only payslips (e.g. an approved correction delta)
+    # that no submitted batch for the period has included (D-14).
+    supplements_submission_id = Column(Integer, ForeignKey("hkg_empf_submissions.id"), nullable=True)
+    generated_report_id    = Column(Integer, ForeignKey("payroll_generated_reports.id"), nullable=True, index=True)
+    prepared_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    submitted_by_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at             = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class HkgPayslipCorrection(Base):
+    """A linked, append-only correction of a COMMITTED Hong Kong payslip
+    (ZP-HK-ENG-001 §12 CORRECTED_BY_LINKED_ADJUSTMENT; gap-closure D-14).
+
+    The original payslip, its run and its frozen trace are never modified. The
+    correction is a DELTA payslip in its own correction run, booked to the
+    ORIGINAL wage period (so MPF, eMPF, IR56B and the average wage attribute it
+    to the period it belongs to), recalculated on the original payslip's own
+    frozen statutory snapshot. Maker-checker: the requester can never approve.
+    REQUESTED -> APPROVED (the correction run is committed) | REJECTED."""
+    __tablename__ = "hkg_payslip_corrections"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id"), nullable=False, index=True)
+    original_payslip_id  = Column(Integer, ForeignKey("payslip_items.id"), nullable=False, index=True)
+    original_run_id      = Column(Integer, ForeignKey("payroll_runs.id"), nullable=False)
+    correction_run_id    = Column(Integer, ForeignKey("payroll_runs.id"), nullable=True)
+    delta_payslip_id     = Column(Integer, ForeignKey("payslip_items.id"), nullable=True)
+    sequence             = Column(Integer, nullable=False)
+    status               = Column(String(20), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    reason               = Column(Text, nullable=False)
+    original_trace_hash  = Column(String(64), nullable=False)
+    before               = Column(JSON, nullable=False)
+    after                = Column(JSON, nullable=False)
+    delta                = Column(JSON, nullable=False)
+    warnings             = Column(JSON, nullable=True)
+    consequences         = Column(JSON, nullable=True)
+    requested_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    requested_at         = Column(DateTime(timezone=True), nullable=False)
+    approved_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    rejected_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rejected_reason      = Column(Text, nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("original_payslip_id", "sequence", name="uq_hkg_correction_sequence"),)
+
+
+class HkgAccessEvent(Base):
+    """Access log for Hong Kong statutory data (gap-closure D-19): report /
+    certificate downloads and views of HK statutory profile data. Tenant-scoped
+    (organization_id) so a tenant's own access history can be listed without
+    reading anyone else's. Records the actor, resource, purpose, result and the
+    request's client address / user agent. Append-only — no update or delete
+    path exists."""
+    __tablename__ = "hkg_access_events"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    actor_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action          = Column(String(40), nullable=False)     # DOWNLOAD_REPORT | DOWNLOAD_CERTIFICATE | DOWNLOAD_CERTIFICATES_ZIP | VIEW_STATUTORY_PROFILE
+    resource_type   = Column(String(40), nullable=False)
+    resource_id     = Column(Integer, nullable=True)
+    employee_id     = Column(Integer, nullable=True, index=True)
+    report_type     = Column(String(40), nullable=True)
+    purpose         = Column(String(200), nullable=True)
+    result          = Column(String(20), nullable=False, default="SUCCESS", server_default="SUCCESS")
+    client_address  = Column(String(64), nullable=True)
+    user_agent      = Column(String(300), nullable=True)
+    assisted_access_session_id = Column(Integer, nullable=True)
+    occurred_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class HkgLegalHold(Base):
+    """A legal hold on Hong Kong payroll records (gap-closure D-19): while
+    ACTIVE, no HK record in its scope may be deleted (enforced on every delete
+    path that can reach HK data). It sets NO retention period — that is an
+    owner / privacy-counsel decision. Placing is audited; releasing needs a
+    different user from the one who placed it (four-eyes)."""
+    __tablename__ = "hkg_legal_holds"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id"), nullable=True, index=True)   # NULL = whole organisation
+    status          = Column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")   # ACTIVE | RELEASED
+    reason          = Column(Text, nullable=False)
+    reference       = Column(String(200), nullable=True)
+    placed_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    placed_at       = Column(DateTime(timezone=True), nullable=False)
+    released_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    released_at     = Column(DateTime(timezone=True), nullable=True)
+    release_reason  = Column(Text, nullable=True)
+
+
+class HkgIrdSoftwareApproval(Base):
+    """The platform's IRD software-approval register (Super Admin): whether the
+    IRD has approved Zoiko's data-file output for the employer's-return forms.
+    NOT_APPLIED -> APPLICATION_PREPARED -> APPLICATION_SUBMITTED ->
+    TEST_DATA_SUBMITTED -> APPROVAL_RECEIVED -> APPROVAL_EXPIRED /
+    APPROVAL_REVOKED -> REQUIRES_REAPPLICATION. APPROVAL_RECEIVED needs the
+    IRD's approval document (a reviewed source artifact) and a reviewer other
+    than the recorder; no internal validation result can set it. Without an
+    unexpired approval covering the form, a Zoiko data file can never be
+    recorded as submitted in ONLINE / MIXED mode."""
+    __tablename__ = "hkg_ird_software_approvals"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    status                   = Column(String(30), nullable=False, default="NOT_APPLIED", server_default="NOT_APPLIED")
+    forms_covered            = Column(JSON, nullable=False)
+    specification_version    = Column(String(40), nullable=True)
+    application_reference    = Column(String(100), nullable=True)
+    application_submitted_on = Column(Date, nullable=True)
+    test_data_submitted_on   = Column(Date, nullable=True)
+    approval_reference       = Column(String(100), nullable=True)
+    approval_received_on     = Column(Date, nullable=True)
+    expires_on               = Column(Date, nullable=True)
+    approval_document_id     = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    document_sha256          = Column(String(64), nullable=True)
+    reviewer_id              = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes                    = Column(Text, nullable=True)
+    created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class HkgEmpfConfiguration(Base):
+    """Versioned eMPF integration configuration (Super Admin). Holds STATUSES
+    and non-secret descriptors only — never a credential, key or certificate
+    (those live in the deployment's secret store; this row only records whether
+    they are configured there). DRAFT -> ACTIVE (approver other than the
+    maker) -> SUPERSEDED; an ACTIVE row is never edited — a change is a new
+    DRAFT. ``certification_status`` is CERTIFIED only with reviewed eMPF
+    certification evidence (G2)."""
+    __tablename__ = "hkg_empf_configurations"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    version                 = Column(Integer, nullable=False)
+    status                  = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    submission_method       = Column(String(40), nullable=False)
+    file_format             = Column(String(40), nullable=True)
+    format_version          = Column(String(40), nullable=True)
+    environment             = Column(String(20), nullable=False)
+    endpoint_reference      = Column(String(300), nullable=True)
+    credential_status       = Column(String(30), nullable=False, default="NOT_CONFIGURED", server_default="NOT_CONFIGURED")
+    certificate_status      = Column(String(30), nullable=False, default="NOT_CONFIGURED", server_default="NOT_CONFIGURED")
+    certification_status    = Column(String(30), nullable=False, default="NOT_CERTIFIED", server_default="NOT_CERTIFIED")
+    certification_evidence_id = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
+    reason                  = Column(Text, nullable=False)
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    activated_at            = Column(DateTime(timezone=True), nullable=True)
+    created_at              = Column(DateTime(timezone=True), server_default=func.now())
+
+    # one row per version number, even under concurrent draft creation
+    __table_args__ = (UniqueConstraint("version", name="uq_hkg_empf_configuration_version"),)
+
+
+class HkgRetentionPolicy(Base):
+    """Retention policy per Hong Kong record category (technical framework;
+    D-2 / D-3). A category stays BLOCKED_UNDECIDED — and nothing in it may be
+    purged — until the owner decision D-2 is recorded and a period is entered
+    with that decision as its basis. DRAFT -> APPROVED (approver other than the
+    maker) -> SUPERSEDED. The platform never picks a period."""
+    __tablename__ = "hkg_retention_policies"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    record_category    = Column(String(60), nullable=False, index=True)
+    status             = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    retention_years    = Column(Integer, nullable=True)
+    end_of_retention   = Column(String(20), nullable=True)               # DELETE | ANONYMISE (D-3)
+    legal_basis        = Column(Text, nullable=True)
+    decision_reference = Column(String(60), nullable=True)
+    reason             = Column(Text, nullable=False)
+    created_by_id      = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at        = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now())

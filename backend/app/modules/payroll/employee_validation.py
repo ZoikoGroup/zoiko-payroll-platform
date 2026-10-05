@@ -901,6 +901,62 @@ class SGEmployeeValidation(EmployeeValidationStrategy):
             raise BadRequestException("The work pass end date cannot be before its issue date.")
 
 
+def hkid_check_digit_valid(value: str) -> bool:
+    """Hong Kong Identity Card check digit — the published mod-11 scheme:
+    one or two prefix letters (A=10 … Z=35; a single-letter prefix is
+    padded with a space = 36), six digits, check digit 0-9 or A (=10).
+    Weights 9..2 over the 8 positions; the check digit makes the weighted
+    sum divisible by 11. "A123456(3)" / "A1234563" are both accepted."""
+    raw = re.sub(r"[()\s]", "", str(value or "").upper())
+    m = re.fullmatch(r"([A-Z]{1,2})([0-9]{6})([0-9A])", raw)
+    if not m:
+        return False
+    letters, digits, check = m.groups()
+    chars = ([" "] if len(letters) == 1 else []) + list(letters) + list(digits)
+    values = [36 if c == " " else (ord(c) - 55 if c.isalpha() else int(c)) for c in chars]
+    total = sum(v * w for v, w in zip(values, range(9, 1, -1)))
+    expected = (11 - total % 11) % 11
+    return (10 if check == "A" else int(check)) == expected
+
+
+class HKEmployeeValidation(EmployeeValidationStrategy):
+    """Hong Kong (ZP-HK-ENG-001 §3, §15). Identity is collected only for the
+    statutory purposes (IRD IR56 forms, eMPF enrolment — HK-022 data
+    minimisation) and masked in every API response (SENSITIVE_FIELDS).
+    Statutory FACTS (MPF exemption, residency, departure …) are NOT here:
+    they live on the effective-dated EmployeeStatutoryProfile hkg_* columns."""
+    country_code = "HK"
+    SENSITIVE_FIELDS = ("hkid", "passport_number")
+    duplicate_field = "hkid"
+    FIELD_SPECS = {
+        "hkid": {
+            "pattern": re.compile(r"^[A-Z]{1,2}[0-9]{6}\(?[0-9A]\)?$"),
+            "upper": True, "strip_chars": " ",
+            "error": "HKID must look like A123456(3) — one or two letters, six digits and a check digit.",
+        },
+        "passport_number": {
+            "pattern": re.compile(r"^[A-Z0-9]{5,20}$"), "upper": True, "strip_chars": " ",
+            "error": "Passport number must be 5–20 letters/digits.",
+        },
+        "passport_country": {"pattern": re.compile(r"^[A-Z]{2,3}$"), "upper": True,
+                             "error": "Passport issuing country must be a 2- or 3-letter code."},
+        "mpf_member_account": {"pattern": re.compile(r"^[A-Za-z0-9-]{4,30}$"),
+                               "error": "eMPF / MPF member account number looks incorrect."},
+        # Salary bank routing (bank_routing.ROUTING_FIELDS["HK"]): HKICL clearing
+        # and branch codes are 3 digits each.
+        "bank_code": {"pattern": re.compile(r"^\d{3}$"), "error": "HK bank (clearing) code must be 3 digits."},
+        "branch_code": {"pattern": re.compile(r"^\d{3}$"), "error": "HK branch code must be 3 digits."},
+    }
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        hkid = cleaned.get("hkid")
+        if hkid and not hkid_check_digit_valid(hkid):
+            raise BadRequestException(f"HKID {hkid!r} fails the check-digit test.")
+        if cleaned.get("passport_number") and not cleaned.get("passport_country"):
+            raise BadRequestException("passport_country is required with passport_number.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -916,6 +972,7 @@ _STRATEGIES = {
     "BS": BSEmployeeValidation,
     "TT": TTEmployeeValidation,
     "SG": SGEmployeeValidation,
+    "HK": HKEmployeeValidation,
 }
 
 
