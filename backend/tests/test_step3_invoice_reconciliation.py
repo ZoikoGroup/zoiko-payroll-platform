@@ -47,7 +47,7 @@ _saved_app_modules = {
 for _mod in list(_saved_app_modules):
     del sys.modules[_mod]
 
-from datetime import date, datetime, timedelta  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -111,8 +111,12 @@ _sub_a = BillingSubscription(
 _db.add(_sub_a)
 _db.flush()
 
-_billing_month = date.today().replace(day=1)
 _issued_at = datetime.utcnow() - timedelta(days=1)
+# The month invoice_explanation._billing_month_for_invoice derives from
+# issued_at — NOT date.today()'s month, which differs on the 1st of every
+# month (issued_at is then the last day of the previous month) and made
+# these tests fail only on that day.
+_billing_month = _issued_at.date().replace(day=1)
 
 _invoice_a = BillingInvoice(
     organization_id=_org_a.id, subscription_id=_sub_a.id, stripe_invoice_id="in_TESTA001",
