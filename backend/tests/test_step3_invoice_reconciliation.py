@@ -47,7 +47,7 @@ _saved_app_modules = {
 for _mod in list(_saved_app_modules):
     del sys.modules[_mod]
 
-from datetime import datetime, timedelta  # noqa: E402
+from datetime import date, datetime, timedelta  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -111,11 +111,10 @@ _sub_a = BillingSubscription(
 _db.add(_sub_a)
 _db.flush()
 
+# The invoice's billing month is derived from issued_at (invoice_explanation.
+# _billing_month_for_invoice), so the BWM records must use that same month --
+# date.today() put them a month ahead on the 1st of every month.
 _issued_at = datetime.utcnow() - timedelta(days=1)
-# The month invoice_explanation._billing_month_for_invoice derives from
-# issued_at — NOT date.today()'s month, which differs on the 1st of every
-# month (issued_at is then the last day of the previous month) and made
-# these tests fail only on that day.
 _billing_month = _issued_at.date().replace(day=1)
 
 _invoice_a = BillingInvoice(

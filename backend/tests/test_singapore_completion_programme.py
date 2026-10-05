@@ -50,9 +50,11 @@ def _audits(db, entity_type, entity_id, action=None):
 
 def _sg_pack(db):
     from scripts.seed_singapore_canonical_pack import seed_singapore
+    from tests._sg_evidence import accept_sg_gate
 
     pack = seed_singapore(db)
     db.commit()
+    accept_sg_gate(db)                       # Phase 6.10: SG activation needs G1 accepted
     return pack
 
 

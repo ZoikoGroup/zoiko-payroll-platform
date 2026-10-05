@@ -83,8 +83,11 @@ def test_sg_activation_is_refused_while_the_latest_golden_run_fails_and_allowed_
     from app.modules.payroll import service
     from scripts.seed_singapore_canonical_pack import seed_singapore
 
+    from tests._sg_evidence import accept_sg_gate
+
     pack = seed_singapore(db)
     db.commit()
+    accept_sg_gate(db)                       # Phase 6.10: SG activation needs G1 accepted
     real = harness.run_golden_case
     seen = {"n": 0}
 

@@ -30,6 +30,9 @@ def _sg_pack(db):
     pack = seed_singapore(db)
     db.commit()
     assert service.run_golden_test_certification(db, "SG", actor_id=A).status == "PASS"
+    from tests._sg_evidence import accept_sg_gate
+
+    accept_sg_gate(db)                       # Phase 6.10: SG activation needs G1 accepted
     return pack
 
 

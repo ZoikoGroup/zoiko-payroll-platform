@@ -142,6 +142,12 @@ def update_my_organization(
     if fields.get("currency"):
         require_entitlement(MULTI_CURRENCY)(current_user=current_user, db=db)
 
+    if "country" in fields:
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
+
+        block_reason = get_jurisdiction_change_block_reason(db, org.country, fields["country"])
+        if block_reason:
+            raise BadRequestException(block_reason)
     for field, value in fields.items():
         setattr(org, field, value)
     db.commit()
@@ -487,6 +493,12 @@ def update_organization(
         "registration_number": "Registration number",
     }
     _old_values = {k: (str(getattr(org, k)) if getattr(org, k) is not None else None) for k in updates}
+    if "country" in updates:
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
+
+        block_reason = get_jurisdiction_change_block_reason(db, org.country, updates["country"])
+        if block_reason:
+            raise BadRequestException(block_reason)
 
     for field, value in updates.items():
         setattr(org, field, value)

@@ -265,7 +265,10 @@ def test_activation_readiness_reports_the_real_gates_without_activating(db, monk
     assert sp["sourceHash"] == source.checksum_sha256 and sp["source"]["id"] == source.id
     gates = {g["key"]: g["met"] for g in sp["activationGates"]}
     assert gates == {"distinct_approver": False, "source_evidence_linked": True, "effective_from_set": True,
-                     "latest_golden_run_pass": False}
+                     "latest_golden_run_pass": False,
+                     # Phase 6.10: G1 not accepted; the seeded rows DO reproduce every golden vector in the window.
+                     "g1_evidence_accepted": False, "pack_reproduces_golden_vectors": True,
+                     "effective_from_first_of_month": True}
     assert ready["reportTemplates"]["total"] == 11 and ready["reportTemplates"]["Draft"] == 11
     assert ready["reportTemplates"]["Active"] == 0
     pwm_sources = {s for (s,) in db.query(SgpPwmOvertimeSchedule.source_document_id).distinct()}
