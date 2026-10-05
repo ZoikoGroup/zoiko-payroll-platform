@@ -72,6 +72,13 @@ export default function NewReportTemplateModal({ country, countryName, state, on
             <option value="TDS" />
             <option value="P60" />
             <option value="941" />
+            <option value="HK_BIR56A" />
+            <option value="HK_IR56B" />
+            <option value="HK_IR56E" />
+            <option value="HK_IR56F" />
+            <option value="HK_IR56G" />
+            <option value="HK_EMPF_REMITTANCE" />
+            <option value="HK_MPF_CONTRIBUTION_RECORD" />
           </datalist>
         </div>
         <div>

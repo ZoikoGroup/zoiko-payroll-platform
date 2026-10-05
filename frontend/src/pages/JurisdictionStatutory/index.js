@@ -14,6 +14,7 @@ export { default as TTStatutoryPage } from "./TTStatutoryPage";
 export { default as PRStatutoryPage } from "./PRStatutoryPage";
 export { default as IEStatutoryPage } from "./IEStatutoryPage";
 export { default as SGStatutoryPage } from "./SGStatutoryPage";
+export { default as HKStatutoryPage } from "./HKStatutoryPage";
 export { default as SEStatutoryPage } from "./SEStatutoryPage";
 
 // Same six countries, same route slugs as Compliance — reused directly

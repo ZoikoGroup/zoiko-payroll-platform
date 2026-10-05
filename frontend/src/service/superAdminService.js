@@ -670,6 +670,41 @@ export const upsertFilingCalendarEntry = (payload) =>
 export const setFilingCalendarEntryStatus = (id, status) =>
   apiFetch(`/api/super-admin/report-templates/filing-calendar/${id}/status`, { method: "PUT", body: { status } });
 
+// ── Hong Kong (ZP-HK-ENG-001) — Super Admin, tenant-independent ────────
+export const getHongKongStatutorySummary = () => apiFetch("/api/super-admin/compliance/hong-kong/statutory-summary");
+export const previewHongKongCalculation = (payload) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/calculation-preview", { method: "POST", body: payload });
+// Hong Kong statutory configuration administration (governed; Super Admin only)
+const HK_CFG = "/api/super-admin/compliance/hong-kong/configuration";
+export const getHkConfigVersions = () => apiFetch(`${HK_CFG}/versions`);
+export const getHkConfigPack = (packRowId) => apiFetch(`${HK_CFG}/packs/${packRowId}`);
+export const getHkConfigResolution = (on) => apiFetch(`${HK_CFG}/resolution`, { params: { on } });
+export const compareHkConfig = (fromId, toId) => apiFetch(`${HK_CFG}/compare`, { params: { from: fromId, to: toId } });
+export const updateHkConfigRow = (kind, rowId, payload) =>
+  apiFetch(`${HK_CFG}/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const createHkConfigVersion = (packRowId, version, reason) =>
+  apiFetch(`${HK_CFG}/packs/${packRowId}/new-version`, { method: "POST", body: { version, reason } });
+// Hong Kong platform control records (Super Admin only)
+const HK_SA = "/api/super-admin/compliance/hong-kong";
+export const getHkSoftwareApproval = () => apiFetch(`${HK_SA}/ird-software-approval`);
+export const transitionHkSoftwareApproval = (payload) =>
+  apiFetch(`${HK_SA}/ird-software-approval/transition`, { method: "POST", body: payload });
+export const getHkEmpfConfiguration = () => apiFetch(`${HK_SA}/empf-configuration`);
+export const createHkEmpfConfiguration = (payload) => apiFetch(`${HK_SA}/empf-configuration`, { method: "POST", body: payload });
+export const activateHkEmpfConfiguration = (id, reason) =>
+  apiFetch(`${HK_SA}/empf-configuration/${id}/activate`, { method: "POST", body: { reason } });
+export const getHkRetentionPolicies = () => apiFetch(`${HK_SA}/retention-policies`);
+export const proposeHkRetentionPolicy = (payload) => apiFetch(`${HK_SA}/retention-policies`, { method: "POST", body: payload });
+export const approveHkRetentionPolicy = (id) => apiFetch(`${HK_SA}/retention-policies/${id}/approve`, { method: "POST" });
+export const getHkReadinessCenter = () => apiFetch(`${HK_SA}/readiness-center`);
+export const getHkMonitoring = () => apiFetch(`${HK_SA}/monitoring`);
+export const transitionHongKongServiceRegistry = (availability, reason) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/service-registry", { method: "POST", body: { availability, reason } });
+export const compareHongKongReportTemplates = (fromId, toId) =>
+  apiFetch("/api/super-admin/compliance/hong-kong/report-templates/compare", { params: { from: fromId, to: toId } });
+export const getHongKongPackGoldenCheck = (packRowId) =>
+  apiFetch(`/api/super-admin/compliance/hong-kong/packs/${packRowId}/golden-check`);
+
 // ————— France (ZP-FR-ENG-001, 2026-09-24) ————
 // Super-Admin-owned authority data for the France Compliance workspace:
 // SIREN employer identity (panels C/D), URSSAF AT/MP establishment rate

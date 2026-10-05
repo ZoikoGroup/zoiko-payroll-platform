@@ -8,6 +8,8 @@ import IndiaStatutoryFormsModal from "./IndiaStatutoryFormsModal";
 import CAStatutoryFormsModal from "./CAStatutoryFormsModal";
 import USStatutoryFormsModal from "./USStatutoryFormsModal";
 import GermanyStatutoryProfilePanel from "./GermanyStatutoryProfilePanel";
+import HKStatutoryProfilePanel from "./HKStatutoryProfilePanel";
+import HKStatutoryFormsModal from "./HKStatutoryFormsModal";
 import GermanyOvertimePanel from "./GermanyOvertimePanel";
 import { deleteEmployee, getCustomFields } from "../../../service/payrollService";
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
@@ -90,6 +92,8 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
   const [showCaStatutoryForms, setShowCaStatutoryForms] = useState(false);
   const [showUsStatutoryForms, setShowUsStatutoryForms] = useState(false);
   const [showGermanyStatutory, setShowGermanyStatutory] = useState(false);
+  const [showHkStatutory, setShowHkStatutory] = useState(false);
+  const [showHkForms, setShowHkForms] = useState(false);
   const [showGermanyOvertime, setShowGermanyOvertime] = useState(false);
 
   useEffect(() => {
@@ -186,7 +190,9 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                 <dl className="divide-y divide-border">
                   <DetailRow label="Bank name" value={employee.bankName} />
                   <DetailRow label="Bank account" value={employee.bankAccountNumber} />
-                  <DetailRow label="PAN" value={employee.panNumber} />
+                  {/* PAN is India's tax ID — a Hong Kong employee shows their HK
+                      identifiers and HKICL routing in the block below instead. */}
+                  {employee.countryCode !== "HK" && <DetailRow label="PAN" value={employee.panNumber} />}
                 </dl>
                 {employee.countryCode === "UK" && (
                   <div className="mt-3 space-y-2">
@@ -254,6 +260,19 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                 )}
               </div>
 
+              {employee.countryCode === "HK" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">Hong Kong identity, MPF &amp; bank routing</h4>
+                  {/* HKID / passport arrive masked from the API (employee_validation SENSITIVE_FIELDS). */}
+                  <dl className="divide-y divide-border">
+                    {COUNTRY_FIELD_SPECS.HK.map((spec) => (
+                      <DetailRow key={spec.key} label={spec.label}
+                        value={formatComplianceValue(spec, employee.complianceFields?.[spec.key])} />
+                    ))}
+                  </dl>
+                </div>
+              )}
+
               {employee.countryCode === "US" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">US Tax Details</h4>
@@ -268,6 +287,34 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
                       />
                     ))}
                   </dl>
+                </div>
+              )}
+
+              {employee.countryCode === "HK" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Hong Kong statutory profile
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowHkStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    MPF coverage and exemption, residency, IRD reporting and departure facts, termination and the frozen
+                    pre-1-May-2025 wage — effective-dated; required before Hong Kong payroll can be calculated.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowHkForms(true)}
+                    className="mt-3 flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                  >
+                    <Landmark size={13} /> Work hours, average wage, MPF record &amp; IR56
+                  </button>
                 </div>
               )}
 
@@ -396,6 +443,12 @@ export default function EmployeeDetailPanel({ employee, onClose, onUpdated, onDe
       )}
       {showGermanyStatutory && (
         <GermanyStatutoryProfilePanel employee={employee} onClose={() => setShowGermanyStatutory(false)} />
+      )}
+      {showHkStatutory && (
+        <HKStatutoryProfilePanel employee={employee} onClose={() => setShowHkStatutory(false)} />
+      )}
+      {showHkForms && (
+        <HKStatutoryFormsModal employee={employee} onClose={() => setShowHkForms(false)} />
       )}
       {showGermanyOvertime && (
         <GermanyOvertimePanel employee={employee} onClose={() => setShowGermanyOvertime(false)} />

@@ -7,6 +7,8 @@ import { formatCurrency } from "../../../utils/currency";
 import RunStatusTimeline from "./RunStatusTimeline";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
+import HKRunPreflightPanel from "./HKRunPreflightPanel";
+import HKCorrectionRequestPanel from "./HKCorrectionRequestPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -114,7 +116,7 @@ function EarningsDeductionsBlock({ item, fmtCurrency }) {
     [labels.socialSecurity, item.socialSecurity],
     [labels.medicare, item.medicare],
     ["National Insurance", item.niEmployee],
-    ["Workplace Pension", item.employeePension],
+    [labels.employeePension || "Workplace Pension", item.employeePension],
     ["Student Loan Deduction", item.studyLoanDeduction],
     // UK: was reaching the API response (once the schema fix landed) but
     // still had no row here — found 2026-09-09 gap-closure Phase 3.
@@ -434,6 +436,8 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               </div>
 
               {items.some((i) => (i.country || i.countryCode) === "SG") && <SGRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "HK") && <HKRunPreflightPanel runId={run.id} />}
+              <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">
                 Employee Payroll Details

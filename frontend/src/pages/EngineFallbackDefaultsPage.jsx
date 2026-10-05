@@ -20,6 +20,7 @@ const COUNTRIES = [
   { code: "AU", name: "Australia" },
   { code: "CA", name: "Canada" },
   { code: "DE", name: "Germany" },
+  { code: "HK", name: "Hong Kong" },
   { code: "FR", name: "France" },
   // Ireland (ZP-IE-ENG-001). 41 engine parameter keys across 47 rows — the
   // six PRSI rate keys each carry a pre/post 2026-10-01 window, so Ireland is

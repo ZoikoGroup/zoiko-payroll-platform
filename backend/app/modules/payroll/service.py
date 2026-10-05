@@ -127,6 +127,8 @@ _COUNTRY_NAME_TO_CODE = {
     # Without this, "Singapore" would fall through to the 2-letter
     # truncation below and resolve to "SI".
     "singapore": "SG", "sg": "SG",
+    # Without this, "Hong Kong" would truncate to "HO".
+    "hong kong": "HK", "hong kong sar": "HK", "hk": "HK", "hkg": "HK",
 }
 
 
@@ -1482,7 +1484,7 @@ def check_jurisdiction_readiness(
 
 # Countries whose statutory rows come ONLY from the Active canonical pack
 # (never an org's cached copy) — see _resolve_effective_rate_inputs.
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG",)
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK")
 
 
 def _resolve_effective_rate_inputs(
@@ -3220,6 +3222,10 @@ def mark_source_artifact_reviewed(db: Session, artifact_id: int, reviewer_id: in
         )
     # Singapore gate / decision evidence: the reviewer reviews an uploaded
     # document (server-computed SHA-256), never a URL or a hand-typed hash.
+    if (row.form_number or "").upper().startswith("HK-GATE-G") and not row.file_path:
+        raise BadRequestException(
+            f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
+        )
     if _is_sg_gate_evidence(row) and not row.file_path:
         raise BadRequestException(
             f"{row.form_number} evidence #{row.id} has no uploaded document — upload the signed file first, then review it."
@@ -7857,12 +7863,25 @@ def list_canonical_tax_slabs(
     return query.order_by(TaxSlab.sort_order, TaxSlab.min_amount).all()
 
 
+def _refuse_hk_generic_statutory_edit(pack) -> None:
+    """Hong Kong only (statutory configuration administration): HK statutory
+    rows are edited through the governed HK editor (source document + reason
+    required, hk_configuration.update_row) — never through the generic
+    canonical-row editor, which carries no source. Other countries unchanged."""
+    if pack is not None and pack.jurisdiction_country == "HK":
+        raise BadRequestException(
+            "Hong Kong statutory rows are edited in Compliance → Hong Kong → Statutory Configuration "
+            "(a source document and a change reason are required)."
+        )
+
+
 def upsert_canonical_tax_slab(db: Session, data: CanonicalTaxSlabUpsert, actor_id: Optional[int] = None) -> TaxSlab:
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == data.jurisdictionPackId).first()
     if not pack:
         raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
     if pack.pack_type != "tax":
         raise BadRequestException("Canonical tax slabs can only be attached to a pack_type='tax' JurisdictionPack.")
+    _refuse_hk_generic_statutory_edit(pack)
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -7939,6 +7958,7 @@ def upsert_canonical_contribution_rate(
         raise NotFoundException("JurisdictionPack", data.jurisdictionPackId)
     if pack.pack_type != "tax":
         raise BadRequestException("Canonical contribution rates can only be attached to a pack_type='tax' JurisdictionPack.")
+    _refuse_hk_generic_statutory_edit(pack)
     _require_editable_pack(pack)
     _invalidate_pack_approval_on_edit(pack)
 
@@ -8033,6 +8053,7 @@ def delete_canonical_contribution_rate(db: Session, rate_id: int, actor_id: Opti
     # immutability contract upsert_canonical_contribution_rate already
     # enforces for edits, applied here for deletes too.
     if pack:
+        _refuse_hk_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -8134,6 +8155,7 @@ def delete_canonical_tax_slab(db: Session, slab_id: int, actor_id: Optional[int]
     # Same real gap/fix as delete_canonical_contribution_rate above — no
     # status check previously existed here at all.
     if pack:
+        _refuse_hk_generic_statutory_edit(pack)
         _require_editable_pack(pack)
         _invalidate_pack_approval_on_edit(pack)
     db.delete(row)
@@ -8264,23 +8286,23 @@ def se_activation_blockers(db: Session, pack) -> list:
 
 
 # Display names for the per-country opt-in activation gates below.
-_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden"}
+_GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK")  # SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -8381,7 +8403,7 @@ def _set_jurisdiction_pack_status(
     # place") — a brand-new jurisdiction with no existing Active->Draft
     # correction workflow to disturb.
     if (
-        row.pack_type == "tax" and row.jurisdiction_country in ("DE", "SG")
+        row.pack_type == "tax" and row.jurisdiction_country in ("DE", "SG", "HK")
         and row.status == "Active" and status not in ("Active", "Deprecated", "Retired", "Superseded")
     ):
         raise BadRequestException(
@@ -8419,9 +8441,11 @@ def _set_jurisdiction_pack_status(
         # SG opted in 2026-09-23 (ZP-SG-ENG-001 SG-003: only APPROVED,
         # evidenced, certified content may activate) — same gate as US,
         # plus the stricter "a real PASS run must exist" check below.
+        # HK opted in 2026-09-30 (ZP-HK-ENG-001 §16: live Hong Kong payroll
+        # stays disabled until the release gates are evidenced).
         # SE opted in 2026-09-30 (ZP-SE-ENG-001 §16: primary-source statutory
         # pack approved before activation) — the SG gate, verbatim.
-        if row.jurisdiction_country in ("US", "SG", "SE"):
+        if row.jurisdiction_country in ("US", "SG", "SE", "HK"):
             if not row.source_document_id:
                 raise BadRequestException(
                     "This pack needs a linked Source Evidence artifact before it can go Active — "
@@ -8464,7 +8488,7 @@ def _set_jurisdiction_pack_status(
             # pass — the spec requires golden vectors passing before
             # activation (SG-003/SG-049). US keeps its existing, more
             # lenient behavior above unchanged.
-            if row.jurisdiction_country in ("SG", "SE") and (latest_run is None or latest_run.status != "PASS"):
+            if row.jurisdiction_country in ("SG", "SE", "HK") and (latest_run is None or latest_run.status != "PASS"):
                 name = _GATED_PACK_COUNTRY_NAMES[row.jurisdiction_country]
                 raise BadRequestException(
                     f"{name} packs need a passing golden-vector certification run before they can go Active — "
@@ -8492,6 +8516,14 @@ def _set_jurisdiction_pack_status(
         far_past = date(1, 1, 1)
         target_from = row.effective_from or far_past
         target_to = row.effective_to or far_future
+        if row.jurisdiction_country == "HK":
+            # Serialize concurrent Hong Kong activations: lock the jurisdiction's
+            # tax packs (row locks on PostgreSQL, in id order) so a second
+            # activation waits, then sees the first one's Active row below and is
+            # refused — never two overlapping Active versions.
+            db.query(JurisdictionPack).filter(
+                JurisdictionPack.jurisdiction_country == "HK", JurisdictionPack.pack_type == "tax",
+            ).order_by(JurisdictionPack.id).with_for_update().all()
         conflict = (
             db.query(JurisdictionPack)
             .filter(
@@ -8527,6 +8559,15 @@ def _set_jurisdiction_pack_status(
         # is an approver check.
         if row.jurisdiction_country == "SG":
             refusal = _sg_activation_evidence_refusal(db, row)
+            if refusal:
+                raise BadRequestException(refusal)
+        # Hong Kong (ZP-HK-ENG-001 §16): G1 statutory-content evidence
+        # accepted by a second Super Admin, and the golden vectors re-run
+        # against THIS pack's own rows — on the hotfix path too.
+        if row.jurisdiction_country == "HK":
+            from app.modules.payroll.hk_service import hk_activation_evidence_refusal
+
+            refusal = hk_activation_evidence_refusal(db, row)
             if refusal:
                 raise BadRequestException(refusal)
         # Minimum viable maker-checker gate (ZP-TAX-UK-2026-27-001 section
@@ -8920,6 +8961,13 @@ def activate_jurisdiction_pack_hotfix(
             "Policy packs have no approval gate, so hotfix activation is not applicable — "
             "set the pack's status directly to 'Active' instead."
         )
+    if row.jurisdiction_country == "HK":
+        # No Hong Kong hotfix: a first activation must be the full
+        # maker-checker path (ZP-HK-ENG-001 §16 G7 launch authority).
+        refusal = ("Hong Kong hotfix activation is not permitted — activate through the normal maker-checker path "
+                   "after the release gates are evidenced.")
+        _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", pack_row_id, "Active", actor_id, refusal, path="hotfix")
+        raise BadRequestException(refusal)
     if row.jurisdiction_country == "SE":
         # ZP-SE-ENG-001 §14: four-eyes is REQUIRED for country-content
         # activation, and hotfix mode exists to self-approve — so Sweden has
@@ -9316,6 +9364,14 @@ _EMPLOYER_PROFILE_FIELD_CATALOG = {
     # UK RTI (ZP-TAX-UK-2026-27-001 §18 gap-closure Part 9, 2026-09-09).
     "paye_reference": ("PAYE Reference", "text", False),
     "accounts_office_reference": ("Accounts Office Reference", "text", False),
+    # Hong Kong's two employer statutory identifiers (ZP-HK-ENG-001 §7,
+    # HK-022): the IRD employer file number every IR56 form quotes, and the
+    # eMPF employer account every remittance quotes. Neither is the same as
+    # tax_no/employer_id above, and both live in the
+    # CompanyComplianceDetails.tax_identifiers JSON (special-cased in
+    # _resolve_field_value) rather than as dedicated columns.
+    "ird_employer_file_number": ("IRD Employer File Number", "text", False),
+    "empf_employer_account": ("eMPF Employer Account", "text", False),
 }
 
 # Real, already-computed columns on the linked PayrollEmployee a report
@@ -9359,11 +9415,22 @@ _PAYROLL_EMPLOYEE_FIELD_CATALOG = {
     # location).
     "steuer_id": ("Tax ID (Steuer-ID)", "text", False),
     "iban": ("IBAN", "text", False),
+    # Hong Kong's own identity fields (ZP-HK-ENG-001 §7, HK-022) — same
+    # compliance_fields-backed special case as "nino"/"steuer_id" above, and
+    # for the same reason: HKID and passport are SENSITIVE fields stored
+    # masked-at-the-edge in PayrollEmployee.compliance_fields, never as
+    # dedicated columns, and never copied into a payroll trace.
+    "hkid": ("HKID", "text", False),
+    "passport_number": ("Passport Number", "text", False),
 }
 _PAYROLL_EMPLOYEE_FIELDS_BY_COUNTRY = {
     "UK": list(_PAYROLL_EMPLOYEE_FIELD_CATALOG.keys()),
     "CA": ["name", "date_of_birth", "date_of_joining"],
     "DE": ["name", "date_of_birth", "date_of_joining", "steuer_id", "iban"],
+    # Hong Kong's IR56 identity block needs both employment dates (IR56B
+    # reports the period inside the year of assessment) and the identity
+    # document (an IR56B cannot be prepared without one).
+    "HK": ["name", "date_of_birth", "date_of_joining", "date_of_leaving", "hkid", "passport_number"],
 }
 
 _REPORT_FIELD_ALLOWED_COLUMNS = {
@@ -9497,6 +9564,10 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "SG": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "employee_pension", "professional_tax", "total_deductions",
            "employer_pension", "employer_payroll_tax", "employer_eht", "net_pay"],
+    # Hong Kong — no `tds` (Salaries Tax is employee-assessed; ZP-HK-ENG-001
+    # architecture lock). MPF reuses the employee/employer pension slots.
+    "HK": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "gross_pay", "employee_pension", "total_deductions", "employer_pension", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -9575,6 +9646,10 @@ _PAYSLIP_FIELD_LABEL_OVERRIDES = {
         "employee_pension": "CPF (Employee)", "employer_pension": "CPF (Employer)",
         "professional_tax": "SHG Contribution", "employer_payroll_tax": "SDL (Employer)",
         "employer_eht": "Foreign Worker Levy (Employer)",
+    },
+    "HK": {
+        "employee_pension": "MPF Mandatory Contribution (Employee)",
+        "employer_pension": "MPF Mandatory Contribution (Employer)",
     },
 }
 
@@ -10023,6 +10098,91 @@ _REPORT_COMPONENTS_BY_TYPE = {
         ("employer_info", "Employer Information"), ("earnings", "Earnings"),
         ("tax", "Wage Tax (Lohnsteuer / Soli / Kirchensteuer)"), ("contributions", "Social Insurance"),
         ("employer_contributions", "Employer Contributions"),
+    ],
+    # ── Hong Kong (ZP-HK-ENG-001 §7, HK-011 / HK-010) ──────────────────────
+    # Hong Kong has no payroll income tax (Salaries Tax is employee-assessed
+    # and reported to IRD after the year of assessment, never withheld), so
+    # there is deliberately NO "tax" component on any HK report type — the
+    # same reasoning that gives Cayman ("KY_PENSION") and The Bahamas
+    # ("BS_NIB_STATEMENT") a contributions-only shape. MPF goes in the shared
+    # employee/employer pension slots. Every HK layout is Zoiko's own internal
+    # field map: the IRD XML and eMPF prescribed formats are not archived
+    # (release gate G2), so no official layout is invented or claimed.
+    # HK_BIR56A — the annual employer's return cover (AGGREGATE, per year of
+    # assessment ending 31 March).
+    "HK_BIR56A": [
+        ("employer_info", "Employer Information"),
+        ("employee_summary", "Employee Summary"),
+        ("totals", "Totals"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_IR56B — the per-employee annual employee return (PER_EMPLOYEE; also
+    # the employee-copy document, so it must be PER_EMPLOYEE for the shared
+    # certificate PDF to accept it).
+    "HK_IR56B": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("employment", "Employment Period"),
+        ("remuneration", "Remuneration Details"),
+        ("contributions", "MPF (Employee)"),
+        ("employer_contributions", "MPF (Employer)"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_IR56E / IR56F / IR56G — the three employee notifications. They share
+    # one component shape (identity, event, income-to-event, MPF) because the
+    # IRD notification layout is one form with different event blocks; the
+    # event itself is a per-employee field, not a separate component.
+    "HK_IR56E": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("event", "Commencement Details"),
+        ("remuneration", "Remuneration Details"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    "HK_IR56F": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("event", "Cessation Details"),
+        ("remuneration", "Remuneration Details"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    "HK_IR56G": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("event", "Departure Details"),
+        ("remuneration", "Remuneration Details"),
+        ("tax_clearance_hold", "Tax Clearance Hold (amount withheld)"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_EMPF_REMITTANCE — the employer's contribution-period remittance
+    # statement (AGGREGATE; computed by generate_hong_kong_empf_remittance
+    # from the real committed payslips, the W-2/941 bespoke pattern).
+    "HK_EMPF_REMITTANCE": [
+        ("employer_info", "Employer Information"),
+        ("contributions", "MPF Contributions"),
+        ("members", "Contributing Members"),
+        ("totals", "Period Totals"),
+        ("filing_metadata", "Filing Metadata"),
+    ],
+    # HK_MPF_CONTRIBUTION_RECORD — the employee's own MPF contribution /
+    # pay record (HK-010: "provide employee MPF contribution / pay records").
+    # A pure employee document, not a filing — hence no filing_metadata.
+    "HK_MPF_CONTRIBUTION_RECORD": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("contributions", "MPF Contributions"),
+        ("ytd", "Year-to-Date"),
+        ("coverage", "MPF Coverage"),
+    ],
+    # HK_TERMINATION_STATEMENT — the employee's termination statement (spec
+    # document service: "leave / termination statements"), from an APPROVED
+    # four-eyes termination calculation. An employee document, not a filing.
+    "HK_TERMINATION_STATEMENT": [
+        ("employer_info", "Employer Information"),
+        ("employee_info", "Employee Information"),
+        ("termination", "Termination"),
+        ("entitlement", "Severance / Long Service Payment"),
+        ("final_payment", "Final Payment"),
     ],
     # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) report types.
     #
@@ -10495,7 +10655,22 @@ def _set_report_template_status(
                 "This template needs a distinct approver before it can be Published/Activated — "
                 "use \"Approve\" (a different Super Admin than whoever last edited it)."
             )
+    if status == "Active" and row.jurisdiction_country == "HK":
+        # Hong Kong only (final completion program): reviewed source evidence
+        # and an activator other than the approver. Other countries unchanged.
+        from app.modules.payroll import hk_governance
+
+        refusal = hk_governance.template_activation_refusal(db, row, actor_id)
+        if refusal:
+            raise BadRequestException(refusal)
     if status == "Active":
+        if row.jurisdiction_country == "HK":
+            # Same serialization as HK pack activation: one Active template per
+            # report type and year, even under concurrent activations.
+            db.query(ReportTemplate).filter(
+                ReportTemplate.jurisdiction_country == "HK", ReportTemplate.report_type == row.report_type,
+                ReportTemplate.reporting_year == row.reporting_year,
+            ).order_by(ReportTemplate.id).with_for_update().all()
         conflict = (
             db.query(ReportTemplate)
             .filter(
@@ -11060,14 +11235,18 @@ def _report_ytd_period_start(period_end, jurisdiction_country: Optional[str]) ->
     Form 130's own "tds_ytd" field would otherwise silently sum Jan-Dec
     instead of the real fiscal year. Every other jurisdiction still keeps
     the calendar-year approximation, a disclosed simplification for them
-    (not fixed this pass)."""
+    (not fixed this pass).
+
+    Hong Kong (ZP-HK-ENG-001 §7, HK-011) is fixed for the same reason: the
+    year of assessment runs 1 April - 31 March, so an IR56B or an MPF
+    contribution record must sum the assessment year and never Jan-Dec."""
     if not period_end:
         return None
     normalized = _normalize_country(jurisdiction_country or "")
     if normalized == "UK":
         start_year = period_end.year if (period_end.month, period_end.day) >= (4, 6) else period_end.year - 1
         return date(start_year, 4, 6)
-    if normalized == "IN":
+    if normalized in ("IN", "HK"):
         start_year = period_end.year if period_end.month >= 4 else period_end.year - 1
         return date(start_year, 4, 1)
     return date(period_end.year, 1, 1)
@@ -11094,7 +11273,18 @@ def _resolve_field_value(
     if field.data_source_kind == "PAYROLL_RUN":
         value = getattr(run, field.source_column, None) if run else None
     elif field.data_source_kind == "EMPLOYER_PROFILE":
-        value = getattr(company, field.source_column, None) if company else None
+        if company is None:
+            value = None
+        elif field.source_column in ("ird_employer_file_number", "empf_employer_account"):
+            # compliance_fields-style special case, same as the HK employee
+            # identity keys above: these two live in
+            # CompanyComplianceDetails.tax_identifiers (the jurisdiction-
+            # agnostic {"<key>": "<value>"} JSON synced from
+            # Organization.tax_identifiers at registration — see that
+            # column's own docstring), NOT as dedicated columns.
+            value = (company.tax_identifiers or {}).get(field.source_column)
+        else:
+            value = getattr(company, field.source_column, None)
     elif field.data_source_kind == "PAYROLL_EMPLOYEE":
         if employee is None:
             value = None
@@ -11102,6 +11292,13 @@ def _resolve_field_value(
             value = (employee.compliance_fields or {}).get("nino")
         elif field.source_column in ("steuer_id", "iban"):
             value = (employee.compliance_fields or {}).get(field.source_column)
+        elif field.source_column in ("hkid", "passport_number"):
+            # Hong Kong identity is MASKED in ordinary output (HK-022 / PCPD HR
+            # Code — the same rule the HK payslip identity rows apply), so a
+            # report can never become a way around that. The unmasked value
+            # stays in the employee record and reaches IRD through the filing
+            # channel, not through a downloadable report.
+            value = mask_identifier((employee.compliance_fields or {}).get(field.source_column))
         else:
             value = getattr(employee, field.source_column, None)
     elif field.data_source_kind == "PAYSLIP_ITEM":
@@ -11266,6 +11463,23 @@ def generate_report_from_template(
         if template.status != "Active":
             raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
                                       "a Singapore report is generated only from the Active version.")
+    if template.jurisdiction_country == "HK" and template.report_type in _HK_DEDICATED_GENERATOR_REPORT_TYPES:
+        # Same restraint as the Singapore block above, and for the same reason:
+        # every HK report's subject is a STATUTORY RESULT, not a payslip column —
+        # a year-of-assessment reconciliation, an IR56 reporting case, a
+        # prepared eMPF submission, or a month's committed HK payslips. A generic
+        # payslip-column render would be a plain wage list under a compliance
+        # title, so the dedicated Hong Kong generators are the only way in.
+        raise BadRequestException(
+            f"{template.template_key} has a dedicated Hong Kong generator "
+            "(/api/payroll/hong-kong/reports/...); the generic payslip-column generator cannot render it."
+        )
+    if template.jurisdiction_country == "HK" and template.status != "Active":
+        # The same "Active version is the one in force" rule Singapore applies:
+        # a seeded HK template stays inert until a distinct Super Admin approves,
+        # publishes and activates it.
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is {template.status} — "
+                                  "a Hong Kong report is generated only from the Active version.")
     run = (
         db.query(PayrollRun)
         .filter(PayrollRun.id == payroll_run_id, PayrollRun.organization_id == organization_id)
@@ -18321,7 +18535,1175 @@ def generate_ky_pension_submission(
     return row
 
 
+# ── Hong Kong: IRD annual return / notifications, eMPF remittance, MPF
+#    contribution record (ZP-HK-ENG-001 §7, §5, HK-011, HK-010) ────────────
+#
+# Hong Kong reports use the SAME shared architecture as every other
+# jurisdiction: a Super-Admin-authored ReportTemplate (versioned, effective
+# dated, maker-checker approved, activated through the normal lifecycle), a
+# GeneratedReport row with a frozen templateSnapshot, the shared scope_key
+# "one live report per scope" uniqueness, the shared certificate PDF for
+# employee copies and the shared report history / audit. There is no HK-only
+# report infrastructure. Only the VALUES are country-specific: each generator
+# delegates every statutory decision to the pure modules in
+# engine/jurisdictions/hong_kong/ and to hk_service, exactly as W-2 delegates
+# its box values and Form 138 its quarter arithmetic.
+#
+# Layout honesty: the IRD BIR56A/IR56B/E/F/G XML schemas and the eMPF
+# prescribed remittance format are NOT archived in this build (release gate
+# G2), so these templates carry Zoiko's own internal field map and every
+# report discloses that in `knownGaps`. No IRD or eMPF layout is invented and
+# nothing is transmitted to IRD or eMPF. The HK statutory case/submission
+# tables stay the FILING TRACKER and link to their report through
+# generated_report_id — the same split the UK uses between GeneratedReport and
+# RtiSubmission.
+
+_HK_REPORT_FINALIZED_STATUSES = (
+    PayrollStatus.APPROVED, PayrollStatus.AUTHORIZED, PayrollStatus.PAID, PayrollStatus.CLOSED,
+)
+# Every HK report type has a bespoke generator, so the shared
+# generate_report_from_template refuses all of them (see the check inside it).
+# Kept as one tuple so the refusal and the seeded catalog cannot drift apart.
+_HK_DEDICATED_GENERATOR_REPORT_TYPES = (
+    "HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G",
+    "HK_EMPF_REMITTANCE", "HK_MPF_CONTRIBUTION_RECORD", "HK_TERMINATION_STATEMENT",
+)
+_HK_LAYOUT_DISCLOSURE = (
+    "This is Zoiko's own internal field map for the Hong Kong form, not the IRD / eMPF prescribed "
+    "layout. The official IRD BIR56A / IR56B / IR56E / IR56F / IR56G XML schemas and the eMPF "
+    "remittance specification are not archived in this build, so no official layout is claimed and "
+    "nothing is transmitted to IRD or eMPF (release gate G2). External e-filing stays disabled "
+    "until a Super Admin activates an IRD-layout template that has been checked against the archived "
+    "schema."
+)
+
+
+def _hk_active_template(db: Session, report_template_id: int, expected_types) -> "ReportTemplate":
+    """A Hong Kong report template, of one of `expected_types`, that has been
+    Activated. Same two gates every other country's bespoke generator applies
+    (generate_us_w2/generate_uk_eps/generate_india_form_138): the report type
+    must match, and a template that is not Active can never be generated
+    against — that is what keeps a seeded HK template inert until a distinct
+    Super Admin approves, publishes and activates it."""
+    template = get_report_template(db, report_template_id)
+    types = (expected_types,) if isinstance(expected_types, str) else tuple(expected_types)
+    if template.jurisdiction_country != "HK":
+        # Same third gate generate_sg_pwm_compliance applies: a report type is
+        # only ever generated against a template that belongs to its own
+        # jurisdiction, so a stray UK/US row carrying an HK report_type can
+        # never be substituted for the seeded HK template (or vice versa).
+        raise BadRequestException(
+            f"Template {template.template_key} is a {template.jurisdiction_country!r} template — Hong Kong reports "
+            f"can only be generated against an 'HK' template."
+        )
+    if template.report_type not in types:
+        raise BadRequestException(
+            f"This template is a {template.report_type!r} template, not one of {', '.join(types)}."
+        )
+    if template.status != "Active":
+        raise BadRequestException(f"Template {template.template_key} v{template.version} is not Active.")
+    return template
+
+
+def _hk_require_template_year(template: "ReportTemplate", year: str) -> None:
+    """Exact-year rule for every HK report: the template's reporting year must
+    BE the report's year (IRD: the year of assessment "2025/26"; MPF /
+    termination: the calendar year "2026"). An Active template of another
+    year is never used — the Super Admin publishes that year's version."""
+    if str(template.reporting_year) != str(year):
+        raise BadRequestException(
+            f"Template {template.template_key} v{template.version} is the {template.reporting_year} version; this report "
+            f"is for {year}. Publish and activate the {year} version — an earlier year's template is never used."
+        )
+
+
+def _hk_walk_report_components(db: Session, template: "ReportTemplate", values: dict) -> tuple:
+    """Walks the template's real components/fields and resolves each field's
+    value from `values` (a field_key -> real computed value map the caller
+    already built), leaving an unrecognized field_key None rather than
+    fabricating a value — the same contract as
+    _walk_us_aggregate_report_components. Returns
+    (component_snapshots, resolved_values)."""
+    components = (
+        db.query(ReportTemplateComponent)
+        .filter(ReportTemplateComponent.report_template_id == template.id)
+        .order_by(ReportTemplateComponent.sort_order)
+        .all()
+    )
+    component_snapshots = []
+    resolved: dict = {}
+    for component in components:
+        fields = (
+            db.query(ReportTemplateComponentField)
+            .filter(ReportTemplateComponentField.component_id == component.id)
+            .order_by(ReportTemplateComponentField.sort_order)
+            .all()
+        )
+        field_snapshots = []
+        for field in fields:
+            field_snapshots.append({
+                "fieldKey": field.field_key, "label": field.label, "type": field.field_type,
+                "dataSourceKind": field.data_source_kind, "sourceColumn": field.source_column,
+                "aggregation": field.aggregation,
+            })
+            resolved[field.field_key] = values.get(field.field_key)
+        component_snapshots.append({"componentKey": component.component_key, "label": component.label, "fields": field_snapshots})
+    return component_snapshots, resolved
+
+
+def _hk_report_configuration_lineage(db: Session, organization_id: int, employee_id: Optional[int],
+                                     reporting_year: str, reporting_period: Optional[str]) -> list:
+    """The statutory configuration version(s) the report's payslips were
+    calculated on — each committed HK payslip's PINNED pack, never today's
+    resolution (a superseded version stays the truth for its own payroll).
+    Scope = the report's own period: a year of assessment ("2025/26"), a
+    contribution month ("2026-05"), up to a termination date, or a calendar
+    year. Ordered by first pay date; empty when no payslip is in scope."""
+    import re as _re
+    from app.modules.payroll import hk_service
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import year_of_assessment_bounds
+
+    try:
+        if "/" in (reporting_year or ""):
+            start, end = year_of_assessment_bounds(reporting_year)
+        elif reporting_period and _re.fullmatch(r"\d{4}-\d{2}", reporting_period):
+            y, m = int(reporting_period[:4]), int(reporting_period[5:])
+            start = date(y, m, 1)
+            end = date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)
+        elif reporting_period and _re.fullmatch(r"\d{4}-\d{2}-\d{2}", reporting_period):
+            end = date.fromisoformat(reporting_period)
+            start = date(end.year, 1, 1)
+        else:
+            start, end = date(int(reporting_year), 1, 1), date(int(reporting_year), 12, 31)
+    except (TypeError, ValueError):
+        return []
+    seen = {}
+    for item, run in sorted(hk_service._committed_hk_payslips(db, organization_id, start, end, employee_id=employee_id),
+                            key=lambda p: (p[1].pay_date, p[0].id)):
+        pid = item.tax_policy_pack_id
+        if pid and pid not in seen:
+            pack = db.get(JurisdictionPack, pid)
+            seen[pid] = {"packRowId": pid, "packId": pack.pack_id if pack else None,
+                         "version": pack.version if pack else None, "firstPayDate": run.pay_date.isoformat()}
+    return list(seen.values())
+
+
+def _hk_write_report(db: Session, organization_id: int, template: "ReportTemplate", scope_key: str,
+                     rendered_data: dict, reporting_year: str, reporting_period: Optional[str],
+                     actor_id: Optional[int], employee_id: Optional[int] = None,
+                     reconciliation: Optional[dict] = None) -> GeneratedReport:
+    """The shared "one live report per scope" write: any prior Generated row for
+    this (organization, scope_key, template) is flipped to Superseded rather
+    than overwritten or deleted, and the new row is inserted with the frozen
+    templateSnapshot already inside `rendered_data` (HK-011: a report is
+    immutable evidence; regenerating is a new version, never an edit)."""
+    existing = (
+        db.query(GeneratedReport)
+        .filter(GeneratedReport.organization_id == organization_id, GeneratedReport.scope_key == scope_key,
+                GeneratedReport.report_template_id == template.id, GeneratedReport.status == "Generated")
+        .first()
+    )
+    if existing is not None:
+        existing.status = "Superseded"
+        db.add(existing)
+    lineage = _hk_report_configuration_lineage(db, organization_id, employee_id, reporting_year, reporting_period)
+    if lineage:
+        rendered_data = {**rendered_data, "configurationLineage": lineage}
+    row = GeneratedReport(
+        organization_id=organization_id, report_template_id=template.id, template_version=template.version,
+        report_type=template.report_type, payroll_run_id=None, employee_id=employee_id, scope_key=scope_key,
+        jurisdiction_country=template.jurisdiction_country, jurisdiction_state=template.jurisdiction_state,
+        reporting_year=reporting_year, reporting_period=reporting_period,
+        applicable_tax_pack_id=lineage[-1]["packRowId"] if lineage else None,
+        applicable_tax_pack_version=lineage[-1]["version"] if lineage else None,
+        status="Generated", generated_by_id=actor_id,
+        rendered_data=rendered_data, reconciliation=reconciliation,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    row.document_scope = template.document_scope
+    return row
+
+
+def _hk_employer_values(db: Session, organization_id: int) -> tuple:
+    """The employer identity every HK report carries. HK employer registration
+    facts (BR number, IRD employer file number, eMPF employer account) live on
+    the shared CompanyComplianceDetails.tax_identifiers via
+    JURISDICTION_TAX_SCHEMAS['HK'] — read here, never duplicated."""
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    identifiers = (company.tax_identifiers or {}) if company else {}
+    return company, {
+        "employer_name": company.name if company else None,
+        "employer_address": company.address if company else None,
+        "employer_br_number": identifiers.get("br_number"),     # JURISDICTION_TAX_SCHEMAS["HK"] key
+        "employer_ird_file_number": identifiers.get("ird_employer_file_number"),
+        "employer_empf_account": identifiers.get("empf_employer_account"),
+    }
+
+
+def generate_hong_kong_bir56a(
+    db: Session, organization_id: int, report_template_id: int, ya: str, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """Hong Kong's annual employer's return (BIR56A) for a year of assessment
+    ending 31 March.
+
+    The reconciliation itself is NOT recomputed here: hk_service already builds
+    the BIR56A cover case plus one IR56B case per reportable employee from
+    COMMITTED payroll only, with IR56F / IR56G duplicate suppression and an
+    exact reconciliation of reported remuneration to committed payroll
+    (HK-011). This function runs that same statutory pass and then REPRESENTS
+    its outcome as a shared GeneratedReport, so the return gains the template
+    versioning, report history, audit trail, reconciliation block and Super
+    Admin cross-org visibility every other jurisdiction's return already had.
+    The cases stay the filing tracker and each one links to the report through
+    generated_report_id."""
+    from app.modules.payroll import hk_service
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import year_of_assessment_bounds
+
+    template = _hk_active_template(db, report_template_id, "HK_BIR56A")
+    _hk_require_template_year(template, ya)
+    _validate_hong_kong_ya(ya)
+    outcome = hk_service.generate_annual_return(db, organization_id, ya, actor_id)
+    company, employer_values = _hk_employer_values(db, organization_id)
+
+    employees = []
+    for line in outcome.get("employees", []):
+        employees.append({
+            "employeeId": line.get("employeeId"),
+            "caseId": line.get("caseId"),
+            "status": line.get("status"),
+            "message": line.get("message"),
+            "validationErrors": line.get("validationErrors") or [],
+        })
+    box_values = {
+        **employer_values,
+        "employer_ya": ya,
+        "employee_count": len([e for e in employees if e["status"] != "SUPPRESSED"]),
+        "total_remuneration": outcome.get("reportedTotal"),
+        "committed_payroll_gross": outcome.get("committedPayrollGross"),
+        "bir56a_case_id": outcome.get("bir56aCaseId"),
+        "schema_status": outcome.get("schemaStatus"),
+    }
+    component_snapshots, values = _hk_walk_report_components(db, template, box_values)
+    ya_start, ya_end = year_of_assessment_bounds(ya)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version,
+                             "components": component_snapshots},
+        "employer": values,
+        "yearOfAssessment": ya,
+        "period": {"reportingYear": ya, "periodKey": "ANNUAL",
+                   "periodStart": ya_start.isoformat(), "periodEnd": ya_end.isoformat()},
+        "employees": employees,
+        "totals": {"reportedTotal": outcome.get("reportedTotal"),
+                   "committedPayrollGross": outcome.get("committedPayrollGross")},
+        "knownGaps": [
+            _HK_LAYOUT_DISCLOSURE,
+            "Per-employee IR56B details are reported on the per-employee HK_IR56B report, not on this "
+            "aggregate cover; this report carries the employee count and the reconciled total only.",
+        ],
+    }
+    reconciliation = {
+        "status": "Reconciled" if outcome.get("reportedTotal") == outcome.get("committedPayrollGross") else "Variance",
+        "reportedTotal": outcome.get("reportedTotal"),
+        "committedPayrollGross": outcome.get("committedPayrollGross"),
+        "tolerance": None,
+    }
+    report = _hk_write_report(db, organization_id, template, f"PERIOD:{ya}:BIR56A", rendered_data, ya, "ANNUAL",
+                              actor_id, reconciliation=reconciliation)
+    # The case is the filing tracker; it points at the report that represents it.
+    # Only the BIR56A COVER case is linked here — deliberately not every case for
+    # the year. The per-employee IR56B cases and the IR56E/F/G notification cases
+    # are represented by their OWN reports (generate_hong_kong_ir56b /
+    # generate_hong_kong_ir56_notification), and each of those functions links its
+    # own case. Linking them here would overwrite that mapping with the aggregate
+    # cover report and leave an employee's certificate pointing at a document that
+    # has no per-employee fields.
+    from app.modules.payroll.models import HkgIrdReportingCase
+
+    cover = (db.query(HkgIrdReportingCase)
+             .filter(HkgIrdReportingCase.organization_id == organization_id,
+                     HkgIrdReportingCase.id == outcome.get("bir56aCaseId"))
+             .first())
+    if cover is None:
+        raise BadRequestException(
+            f"The statutory pass for {ya} did not produce a BIR56A cover case to link — the report is not filed."
+        )
+    if cover.generated_report_id != report.id:
+        cover.generated_report_id = report.id
+        db.commit()
+    return report
+
+
+def _validate_hong_kong_ya(ya: str) -> None:
+    """A Hong Kong year of assessment is "YYYY/YY" and ends 31 March (never a
+    calendar year, never a dash) — validated at the API boundary so a
+    mistyped period can never silently produce an empty return."""
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import year_of_assessment_bounds
+
+    if not ya or "/" not in ya or len(ya) != 7:
+        raise BadRequestException(
+            f"Invalid Hong Kong year of assessment {ya!r} — expected 'YYYY/YY' (e.g. '2025/26')."
+        )
+    try:
+        year_of_assessment_bounds(ya)
+    except (ValueError, TypeError):
+        raise BadRequestException(f"Invalid Hong Kong year of assessment {ya!r} — expected 'YYYY/YY'.")
+
+
+def generate_hong_kong_ir56b(
+    db: Session, organization_id: int, report_template_id: int, employee_id: int, ya: str,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """The per-employee annual return (IR56B) for a year of assessment — Hong
+    Kong's employee-copy document.
+
+    Reads the employee's PREPARED/SUPPRESSED IR56B case for the year (built
+    from committed payroll by hk_service.generate_annual_return) and renders
+    its real reported-income fields, employment period and MPF totals. Because
+    the template is PER_EMPLOYEE, the SHARED
+    generate_report_certificate_pdf_bytes produces the employee's copy
+    unchanged — the same route India's Form 130 and the UK's P60 use."""
+    template = _hk_active_template(db, report_template_id, "HK_IR56B")
+    _hk_require_template_year(template, ya)
+    _validate_hong_kong_ya(ya)
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import year_of_assessment_bounds
+    from app.modules.payroll.models import HkgIrdReportingCase
+
+    employee = _get_employee_or_404(db, organization_id, employee_id)
+    case = (db.query(HkgIrdReportingCase)
+            .filter(HkgIrdReportingCase.organization_id == organization_id, HkgIrdReportingCase.employee_id == employee_id,
+                    HkgIrdReportingCase.form_type == "IR56B", HkgIrdReportingCase.year_of_assessment == ya)
+            .order_by(HkgIrdReportingCase.id.desc()).first())
+    if case is None:
+        raise BadRequestException(
+            f"No IR56B has been prepared for employee #{employee_id} for {ya} — run the year's annual return first."
+        )
+    if case.status == "SUPPRESSED":
+        raise BadRequestException(
+            f"The IR56B for employee #{employee_id} ({ya}) is SUPPRESSED: {case.suppression_reason}"
+        )
+    _company, employer_values = _hk_employer_values(db, organization_id)
+    start, end = year_of_assessment_bounds(ya)
+    reported = dict(case.reported_income or {})
+
+    # MPF totals for the assessment year come from the employee's own committed
+    # HK payslips (the shared employee/employer pension slots), not from a
+    # second MPF store.
+    mpf_employee, mpf_employer, relevant_income = _hk_year_totals(db, organization_id, employee_id, start, end)
+    compliance = employee.compliance_fields or {}
+    box_values = {
+        **employer_values,
+        "employee_name": employee.name,
+        "employee_hkid": mask_identifier(compliance.get("hkid") or compliance.get("passport_number")),
+        "employee_passport_number": mask_identifier(compliance.get("passport_number")),
+        "employment_start": _iso_date(case.income_period_start or employee.date_of_joining or start),
+        "employment_end": _iso_date(case.income_period_end or employee.date_of_leaving or end),
+        "year_of_assessment": ya,
+        "total_remuneration": float(sum(_hk_dec(v) for v in reported.values())),
+        "mpf_employee_total": float(mpf_employee),
+        "mpf_employer_total": float(mpf_employer),
+        "mpf_relevant_income_total": float(relevant_income),
+        "case_id": case.id,
+        "case_status": case.status,
+        "due_date": _iso_date(case.due_date),
+        "schema_status": hk_service_schema_status(),
+    }
+    for field, amount in reported.items():
+        box_values[f"ird_{str(field).lower()}"] = float(_hk_dec(amount))
+    component_snapshots, values = _hk_walk_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version,
+                             "components": component_snapshots},
+        "employer": employer_values,
+        "employees": [{"employeeId": employee.id, "employeeName": employee.name, "values": values}],
+        "yearOfAssessment": ya,
+        "reportedIncome": reported,
+        "caseId": case.id,
+        "caseStatus": case.status,
+        "knownGaps": [
+            _HK_LAYOUT_DISCLOSURE,
+            "Reportable field labels are the pack's own IRD field keys; the certified field numbering and "
+            "the [G1] specialist sign-off over the HK_EARNING_CLASS mapping are still outstanding.",
+            "Identity is MASKED on this report (HK-022 / PCPD HR Code, the same rule the HK payslips apply): "
+            "the unmasked HKID is never written into a GeneratedReport, so the official IRD copy still has to "
+            "be produced from the employee record through the filing channel.",
+        ],
+    }
+    report = _hk_write_report(db, organization_id, template, f"EMPLOYEE:{employee.id}:{ya}", rendered_data, ya, "ANNUAL",
+                              actor_id, employee_id=employee.id)
+    if case.generated_report_id != report.id:
+        case.generated_report_id = report.id
+        db.commit()
+    return report
+
+
+def hk_service_schema_status() -> str:
+    from app.modules.payroll.engine.jurisdictions.hong_kong import ird as hk_ird
+
+    return hk_ird.SCHEMA_STATUS
+
+
+def _hk_preflight_employee_facts(employee) -> dict:
+    compliance = employee.compliance_fields or {}
+    return {
+        "id": employee.id, "code": employee.employee_code, "name": employee.name,
+        "identity": {"hkid": compliance.get("hkid"), "passport_number": compliance.get("passport_number")},
+        "dob": employee.date_of_birth, "joining": employee.date_of_joining,
+        "termination": employee.date_of_leaving,
+    }
+
+
+def _hk_mpf_enrolled(db: Session, employee, as_of) -> bool:
+    """MPF enrolment evidence: a recorded MPF member account (compliance
+    field) or an MPF scheme reference on the statutory profile in force."""
+    from app.modules.payroll import hk_service
+
+    if (employee.compliance_fields or {}).get("mpf_member_account"):
+        return True
+    facts = hk_service.worker_facts(db, employee, as_of) or {}
+    return bool(facts.get("mpfSchemeRef"))
+
+
+def _hk_run_employees(db: Session, run: PayrollRun) -> list:
+    """The HK employees a run covers — the same selection generate_payslips_for_run
+    makes, filtered to Hong Kong."""
+    rows = db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == run.organization_id,
+        PayrollEmployee.status == EmployeeStatus.ACTIVE,
+        or_(PayrollEmployee.date_of_joining == None, PayrollEmployee.date_of_joining <= run.period_start),  # noqa: E711
+    ).all()
+    return [e for e in rows if _resolve_employee_country(db, run.organization_id, getattr(e, "country_code", None)) == "HK"]
+
+
+def _hk_dry_run_trace(db: Session, run: PayrollRun, employee, cache: dict, calculation_mode,
+                      allowance_components, org_opted_in):
+    """(trace, None) or (None, HongKongCalculationBlockedError) — read-only."""
+    from app.modules.payroll.engine.countries.hong_kong import HongKongCalculationBlockedError
+
+    try:
+        country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, _pr, _po = _resolve_employee_calc_inputs(
+            db, run.organization_id, employee, cache=cache, payroll_date=run.pay_date, org_opted_in=org_opted_in, run=run,
+        )
+        values = _compute_payslip_values(
+            db, run, employee, rate_map, slabs, country, calculation_mode,
+            allowance_components=allowance_components, resolved_pack=resolved_pack,
+            state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+            reciprocity=reciprocity, locality_rate=locality_rate,
+        )
+        return values.get("hkg_calculation_trace") or {}, None
+    except HongKongCalculationBlockedError as exc:
+        return None, exc
+
+
+def _hk_frozen_recompute(db: Session, run: PayrollRun, employee, item: PayslipItem, organization_id: int) -> dict:
+    """The corrected values of a COMMITTED Hong Kong payslip, recalculated on
+    its own frozen statutory context: the original tax_rule_snapshot is
+    replayed and the original pack stays pinned (period segments are read from
+    ITS rows), from the employee's current facts. Read-only; nothing is
+    persisted (D-14 linked corrections, hk_corrections.request_correction)."""
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, _pr, _po = _resolve_employee_calc_inputs(
+        db, organization_id, employee, payroll_date=run.pay_date, org_opted_in=org_opted_in, run=run,
+    )
+    if item.tax_rule_snapshot:
+        replay_rates, replay_slabs = _reconstruct_rate_map_and_slabs_from_snapshot(item.tax_rule_snapshot)
+        if replay_rates or replay_slabs:
+            rate_map = {_normalize_engine_component_key(r.component_key): r for r in replay_rates}
+            slabs = replay_slabs
+    pinned = db.get(JurisdictionPack, item.tax_policy_pack_id) if item.tax_policy_pack_id else None
+    if pinned is not None and resolved_pack is not None:
+        resolved_pack = (resolved_pack[0], resolved_pack[1], pinned)
+    return _compute_payslip_values(
+        db, run, employee, rate_map, slabs, country, calculation_mode,
+        allowance_components=_resolve_allowance_components(db, organization_id), resolved_pack=resolved_pack,
+        state_rate_map=state_rate_map, state_slabs=state_slabs, employer_tax_profiles=employer_tax_profiles,
+        reciprocity=reciprocity, locality_rate=locality_rate,
+    )
+
+
+def _hk_preflight_state(db: Session, organization_id: int, employee_id: int) -> dict:
+    """(hold, ird_cases) for one employee — the payment control and any open
+    employer return, read from the same rows the payment path reads."""
+    from app.modules.payroll.models import HkgIrdReportingCase, HkgTaxClearanceHold
+
+    hold = (db.query(HkgTaxClearanceHold)
+            .filter(HkgTaxClearanceHold.organization_id == organization_id,
+                    HkgTaxClearanceHold.employee_id == employee_id,
+                    HkgTaxClearanceHold.state.notin_(("INACTIVE", "CASE_CLOSED")))
+            .order_by(HkgTaxClearanceHold.id.desc()).first())
+    cases = (db.query(HkgIrdReportingCase)
+             .filter(HkgIrdReportingCase.organization_id == organization_id,
+                     HkgIrdReportingCase.employee_id == employee_id)
+             .order_by(HkgIrdReportingCase.id.desc()).all())
+    hold_view = None if hold is None else {
+        "id": hold.id, "state": hold.state,
+        "filing_deadline": hold.filing_deadline.isoformat() if hold.filing_deadline else None,
+    }
+    case_views = [{"id": c.id, "form_type": c.form_type, "status": c.status,
+                   "dueDate": c.due_date.isoformat() if c.due_date else None} for c in cases]
+    return hold_view, case_views
+
+
+def hk_payroll_preflight(db: Session, organization_id: int, run_id: int, today: Optional[date] = None) -> dict:
+    """Hong Kong payroll-run preflight (ZP-HK-ENG-001 §14 / HK-014) — the statutory
+    exceptions that must be resolved or blocked before a HK run is approved:
+    Employment Ordinance wage-payment timing and continuous contract, the
+    Statutory Minimum Wage position, MPF coverage / contribution position, and
+    IRD reporting readiness (an IR56G hold is a payment control, not a deduction).
+
+    Read-only: a persisted trace is read when the run is calculated, otherwise the
+    engine is dry-run. No rate is evaluated here — engine/jurisdictions/hong_kong/
+    preflight.py only turns the engine's own answers into operator checks.
+    """
+    from app.modules.payroll import hk_service
+    from app.modules.payroll.engine.countries.hong_kong import HongKongCalculationBlockedError
+    from app.modules.payroll.engine.jurisdictions.hong_kong import preflight as pf
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    run = get_payroll_run_by_id(db, run_id, organization_id)
+    from app.modules.payroll import hk_corrections
+
+    if hk_corrections.is_correction_run(run):
+        return hk_corrections.correction_preflight(db, run)
+    today = today or date.today()
+    period_end = run.period_end or run.pay_date
+    checks = []
+    rates, slabs, pack = resolve_tax_configuration(db, "HK", payroll_date=run.pay_date)
+    if pack is None:
+        checks.append(pf.check("HK_PACK_NOT_ACTIVE", pf.BLOCK, f"no Active Hong Kong statutory pack is in force on "
+                               f"{run.pay_date} — no Hong Kong payslip may be calculated", source="tax_resolver",
+                               action="Activate the Hong Kong rule pack"))
+        return {"runId": run.id, **pf.summarize(checks)}
+    rate_map = {r.component_key: r for r in rates}
+    checks.extend(pf.pack_checks(rate_map))
+    employees = _hk_run_employees(db, run)
+    persisted = {i.employee_id: i for i in db.query(PayslipItem).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "HK", PayslipItem.status != PayslipStatus.FAILED)}
+    cache: dict = {}
+    calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
+    allowance_components = _resolve_allowance_components(db, organization_id)
+    org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
+    for employee in employees:
+        facts = _hk_preflight_employee_facts(employee)
+        checks.extend(pf.identity_checks(facts))
+        if employee.id in persisted:
+            trace = persisted[employee.id].hkg_calculation_trace or {}
+        else:
+            trace, exc = _hk_dry_run_trace(db, run, employee, cache, calculation_mode, allowance_components, org_opted_in)
+            if exc is not None:
+                checks.append(pf.engine_block_check(facts, exc))
+                continue
+        try:
+            cc = hk_service.continuous_contract(db, organization_id, employee.id, period_end)
+        except (BadRequestException, HongKongCalculationBlockedError):
+            # No in-force statutory profile / an incomplete pack: continuity is
+            # reported as not assessed rather than assumed continuous.
+            cc = None
+        hold, cases = _hk_preflight_state(db, organization_id, employee.id)
+        checks.extend(pf.trace_checks(
+            facts, trace, cc=cc, hold=hold, ird_cases=cases, rate_map=rate_map,
+            pay_date=run.pay_date, period_end=period_end, termination=employee.date_of_leaving, today=today,
+            enrolled=_hk_mpf_enrolled(db, employee, period_end)))
+    out = pf.summarize(checks)
+    out.update({"runId": run.id, "payDate": run.pay_date.isoformat() if run.pay_date else None,
+                "wagePeriodEnd": period_end.isoformat(), "payDateDue": run.pay_date.isoformat(),
+                "pack": f"{pack.pack_id} v{pack.version}" if pack else None,
+                "employeeCount": len(employees), "calculated": len(persisted)})
+    return out
+
+
+def _iso_date(value) -> Optional[str]:
+    return value.isoformat() if hasattr(value, "isoformat") else (str(value) if value else None)
+
+
+def hk_employer_readiness(db: Session, organization_id: int, today: Optional[date] = None) -> dict:
+    """Hong Kong payroll readiness dashboard (ZP-HK-ENG-001 §14) — the
+    organisation-level view: employer registrations, the rule pack in force,
+    unresolved worker facts, open IR56G holds, IRD reporting due / overdue and
+    the eMPF position.
+
+    Read-only. Built from the SAME check builders as hk_payroll_preflight
+    (engine/jurisdictions/hong_kong/preflight.py) and the same statutory-profile
+    resolution the calculator uses, so this screen can never show READY for
+    something the payroll run or its approval gate would BLOCK."""
+    from app.modules.payroll import hk_service
+    from app.modules.payroll.engine.jurisdictions.hong_kong import preflight as pf
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+    from app.modules.billing.models import JurisdictionServiceRegistry
+    from app.modules.payroll.models import HkgEmpfSubmission, HkgIrdReportingCase, HkgTaxClearanceHold
+
+    today = today or date.today()
+    checks = []
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    ids = (company.tax_identifiers or {}) if company else {}
+    for key, label, severity in (
+        ("br_number", "Business Registration number", pf.BLOCK),
+        ("ird_employer_file_number", "IRD employer's file number (BIR56A / IR56)", pf.BLOCK),
+        ("empf_employer_account", "eMPF employer account number", pf.WARN),
+        ("ec_insurance_policy_number", "Employees' Compensation insurance policy (compulsory)", pf.WARN),
+    ):
+        if not ids.get(key):
+            checks.append(pf.check(f"HK_REGISTRATION_MISSING:{key}", severity, f"{label} is not recorded",
+                                   source="Company Details → Hong Kong employer registration",
+                                   action=f"Record the {label} under Compliance → Company Details"))
+    expiry = ids.get("ec_insurance_expiry")
+    if expiry:
+        try:
+            if date.fromisoformat(str(expiry)) < today:
+                checks.append(pf.check("HK_EC_INSURANCE_EXPIRED", pf.BLOCK,
+                                       f"the Employees' Compensation insurance policy expired on {expiry}",
+                                       source="Employees' Compensation Ordinance (compulsory insurance)",
+                                       action="Record the renewed policy"))
+        except ValueError:
+            checks.append(pf.check("HK_EC_INSURANCE_EXPIRY_INVALID", pf.WARN, f"insurance expiry {expiry!r} is not a date"))
+
+    registry = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "HK").first()
+    availability = registry.availability if registry else "MISSING"
+    if availability != "AVAILABLE":
+        checks.append(pf.check("HK_SERVICE_NOT_AVAILABLE", pf.INFO,
+                               f"Hong Kong is {availability} on the platform service registry — production onboarding "
+                               "is gated until the release gates are evidenced", source="jurisdiction_service_registry"))
+
+    rates, slabs, pack = resolve_tax_configuration(db, "HK", payroll_date=today)
+    if pack is None:
+        checks.append(pf.check("HK_PACK_NOT_ACTIVE", pf.BLOCK, f"no Active Hong Kong statutory pack is in force on {today}",
+                               source="tax_resolver", action="Activate the Hong Kong rule pack (Super Admin)"))
+    else:
+        checks.extend(pf.pack_checks({r.component_key: r for r in rates}))
+
+    employees = [e for e in db.query(PayrollEmployee).filter(
+        PayrollEmployee.organization_id == organization_id, PayrollEmployee.status == EmployeeStatus.ACTIVE).all()
+        if _resolve_employee_country(db, organization_id, getattr(e, "country_code", None)) == "HK"]
+    without_profile = 0
+    from app.modules.payroll.engine.jurisdictions.hong_kong import mpf as hk_mpf
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
+
+    rate_lookup = {r.component_key: r for r in rates} if pack is not None else {}
+    for employee in employees:
+        facts = _hk_preflight_employee_facts(employee)
+        checks.extend(pf.identity_checks(facts))
+        worker = hk_service.worker_facts(db, employee, today)
+        if worker is not None and pack is not None:
+            # MPF enrolment state (spec §5 eligibility card / exception queue).
+            try:
+                coverage = hk_mpf.resolve_coverage(worker, today, today, hk_mpf.mpf_parameters(rate_lookup))
+                checks.extend(pf.enrolment_checks(facts, coverage, _hk_mpf_enrolled(db, employee, today), today))
+            except HongKongCalculationBlockedError:
+                pass                     # the profile / pack gap is already reported by its own check
+        if worker is None:
+            without_profile += 1
+            checks.append(pf.check("HK_PROFILE_MISSING", pf.BLOCK,
+                                   "no Hong Kong statutory profile version is in force — the calculator blocks this "
+                                   "employee", facts, source="EmployeeStatutoryProfile",
+                                   action="Record a Hong Kong statutory profile version (Employees → Hong Kong statutory profile)"))
+
+    holds = db.query(HkgTaxClearanceHold).filter(HkgTaxClearanceHold.organization_id == organization_id,
+                                                 HkgTaxClearanceHold.state != "CASE_CLOSED").all()
+    for hold in holds:
+        if hold.state in ("DEPARTURE_IDENTIFIED", "IR56G_DUE"):
+            severity = pf.BLOCK if hold.filing_deadline < today else pf.WARN
+            checks.append(pf.check("HK_IR56G_DUE", severity,
+                                   f"IR56G for case #{hold.id} is due by {hold.filing_deadline} (departure "
+                                   f"{hold.expected_departure_date})", {"id": hold.employee_id},
+                                   source="IRD PAM 46(e)", action="File the IR56G and record the filing reference"))
+        else:
+            checks.append(pf.check("HK_IR56G_HOLD_ACTIVE", pf.INFO,
+                                   f"IR56G case #{hold.id} is {hold.state}: payments are withheld (legal hold, not a deduction)",
+                                   {"id": hold.employee_id}, source="IRD PAM 46(e)"))
+
+    open_cases = db.query(HkgIrdReportingCase).filter(
+        HkgIrdReportingCase.organization_id == organization_id,
+        HkgIrdReportingCase.status.in_(("DUE", "PREPARED", "VALIDATED"))).all()
+    for case in open_cases:
+        if case.form_type == "IR56G" or case.due_date is None:
+            continue
+        if case.due_date < today:
+            checks.append(pf.check("HK_IRD_OVERDUE", pf.WARN, f"{case.form_type} case #{case.id} was due {case.due_date}",
+                                   {"id": case.employee_id}, source="IRD employer obligations",
+                                   action="Prepare, validate and file it through the IRD's own channel"))
+        elif (case.due_date - today).days <= 30:
+            checks.append(pf.check("HK_IRD_DUE_SOON", pf.INFO, f"{case.form_type} case #{case.id} is due {case.due_date}",
+                                   {"id": case.employee_id}, source="IRD employer obligations"))
+
+    from app.modules.payroll.models import HkgLegalHold, HkgPayslipCorrection
+
+    open_corrections = (db.query(HkgPayslipCorrection)
+                        .filter(HkgPayslipCorrection.organization_id == organization_id,
+                                HkgPayslipCorrection.status == "REQUESTED").all())
+    for corr in open_corrections:
+        checks.append(pf.check("HK_CORRECTION_AWAITING_APPROVAL", pf.INFO,
+                               f"payroll correction #{corr.id} of payslip {corr.original_payslip_id} awaits approval by a "
+                               "different operator", {"id": corr.employee_id},
+                               source="ZP-HK-ENG-001 §12 linked adjustment",
+                               action="Approve or reject it (Compliance → Hong Kong Compliance Centre → Corrections)"))
+    active_holds = (db.query(HkgLegalHold)
+                    .filter(HkgLegalHold.organization_id == organization_id, HkgLegalHold.status == "ACTIVE").count())
+    if active_holds:
+        checks.append(pf.check("HK_LEGAL_HOLD_ACTIVE", pf.INFO,
+                               f"{active_holds} legal hold(s) in force — HK records in scope cannot be deleted",
+                               source="D-19 legal hold"))
+    latest_empf = (db.query(HkgEmpfSubmission).filter(HkgEmpfSubmission.organization_id == organization_id)
+                   .order_by(HkgEmpfSubmission.contribution_period.desc(), HkgEmpfSubmission.id.desc()).first())
+    summary = pf.summarize(checks)
+    return {
+        **summary,
+        "asOf": today.isoformat(),
+        "pack": None if pack is None else {"packId": pack.pack_id, "version": pack.version, "status": pack.status,
+                                           "yearOfAssessment": pack.tax_year,
+                                           "effectiveFrom": _iso_date(pack.effective_from),
+                                           "effectiveTo": _iso_date(pack.effective_to)},
+        "serviceRegistry": availability,
+        "registration": {k: bool(ids.get(k)) for k in ("br_number", "ird_employer_file_number",
+                                                       "empf_employer_account", "ec_insurance_policy_number")},
+        "workforce": {"hongKongEmployees": len(employees), "withoutStatutoryProfile": without_profile},
+        "taxClearance": {"openCases": len(holds)},
+        "corrections": {"awaitingApproval": len(open_corrections)},
+        "legalHolds": {"active": active_holds},
+        "ird": {"openCases": len(open_cases)},
+        "empf": None if latest_empf is None else {"contributionPeriod": latest_empf.contribution_period,
+                                                  "status": latest_empf.status},
+        "salariesTax": "Employee-assessed by the IRD — no payroll withholding",
+        # The pack in force, exactly as the calculator resolves it (tenant
+        # Tax Configuration view — HK has no per-organisation slab rows).
+        "parameters": [] if pack is None else [
+            {"componentKey": r.component_key, "label": r.label,
+             "ratePct": None if r.employee_rate_pct is None else str(r.employee_rate_pct),
+             "employerRatePct": None if r.employer_rate_pct is None else str(r.employer_rate_pct),
+             "flatAmount": None if r.flat_amount is None else str(r.flat_amount),
+             "textValue": r.text_value, "sourceDocumentId": r.source_document_id}
+            for r in sorted(rates, key=lambda r: r.component_key)],
+        "salariesTaxBands": [] if pack is None else [
+            {"ruleType": t.rule_type, "minAmount": str(t.min_amount),
+             "maxAmount": None if t.max_amount is None else str(t.max_amount), "ratePct": str(t.rate_pct)}
+            for t in sorted(slabs, key=lambda t: (t.rule_type or "", t.min_amount))
+            if (t.rule_type or "").startswith("HK_SALARIES_TAX")],
+    }
+
+
+def _hk_run_has_payslips(db: Session, run: PayrollRun) -> bool:
+    return db.query(PayslipItem.id).filter(
+        PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "HK").first() is not None
+
+
+def _hk_before_run_transition(db: Session, run: PayrollRun, next_status, actor_id) -> None:
+    """HK-gated hook of advance_payroll_run_status (a run without HK payslips is
+    untouched). A BLOCK check is a statutory exception that must be resolved
+    before the money is committed — the operator cannot approve past it."""
+    if not _hk_run_has_payslips(db, run):
+        return
+    from app.modules.payroll import hk_corrections
+
+    if hk_corrections.is_correction_run(run):
+        # D-14: a linked correction is approved by a different operator, and
+        # its statutory consequences are applied in this same transaction.
+        hk_corrections.before_run_transition(db, run, next_status, actor_id)
+        return
+    if next_status == PayrollStatus.APPROVED:
+        from app.modules.payroll.engine.jurisdictions.hong_kong import preflight as pf
+
+        result = hk_payroll_preflight(db, run.organization_id, run.id)
+        blocks = [c for c in result["checks"] if c["severity"] == pf.BLOCK]
+        if blocks:
+            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+                "Hong Kong preflight blocks approval: "
+                + "; ".join(f"{c['code']} ({c.get('employeeCode') or 'run'})" for c in blocks[:10])))
+
+
+def _hk_dec(value):
+    from decimal import Decimal
+
+    if value is None or value == "":
+        return Decimal("0")
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+def _hk_year_totals(db: Session, organization_id: int, employee_id: int, start: date, end: date) -> tuple:
+    """(employee MPF, employer MPF, relevant income) over the committed HK
+    payslips paid inside [start, end]. Reads the same persisted payslip columns
+    the certificate PDF and bank file read — never a second contribution store."""
+    rows = (
+        db.query(PayslipItem)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(PayslipItem.organization_id == organization_id, PayslipItem.employee_id == employee_id,
+                PayslipItem.country_code == "HK", PayrollRun.pay_date >= start, PayrollRun.pay_date <= end,
+                PayrollRun.status.in_(_HK_REPORT_FINALIZED_STATUSES))
+        .all()
+    )
+    employee_total = employer_total = relevant = Decimal("0")
+    for item in rows:
+        employee_total += _hk_dec(item.employee_pension)
+        employer_total += _hk_dec(item.employer_pension)
+        relevant += _hk_dec(((item.hkg_calculation_trace or {}).get("mpf") or {})
+                            .get("currentPeriod", {}).get("relevantIncome"))
+    return employee_total, employer_total, relevant
+
+
+def generate_hong_kong_ir56_notification(
+    db: Session, organization_id: int, report_template_id: int, case_id: int, actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """An IR56 employee notification (IR56E commencement, IR56F cessation, or
+    IR56G departure) for one employee.
+
+    The HkgIrdReportingCase is the source of truth — it already holds the
+    resolved filing deadline, the income period and the payload produced from
+    committed payroll — so this renders the case rather than re-deriving it,
+    and links the case to its report. IR56G additionally reports the amount
+    currently held under the tax-clearance hold (a legal hold, not a
+    deduction: net pay is unchanged)."""
+    from app.modules.payroll.engine.jurisdictions.hong_kong import tax_clearance as hk_tc
+    from app.modules.payroll.models import HkgIrdReportingCase, HkgTaxClearanceHold
+
+    template = _hk_active_template(db, report_template_id, ("HK_IR56E", "HK_IR56F", "HK_IR56G"))
+    case = (db.query(HkgIrdReportingCase)
+            .filter(HkgIrdReportingCase.organization_id == organization_id, HkgIrdReportingCase.id == case_id)
+            .first())
+    if case is None:
+        raise NotFoundException("Hong Kong IRD reporting case", case_id)
+    _hk_require_template_year(template, case.year_of_assessment)
+    form_to_type = {"IR56E": "HK_IR56E", "IR56F": "HK_IR56F", "IR56G": "HK_IR56G"}
+    expected = form_to_type.get(case.form_type)
+    if expected is None:
+        raise BadRequestException(
+            f"Case #{case_id} is a {case.form_type!r} case, not an employee notification (IR56E / IR56F / IR56G)."
+        )
+    if template.report_type != expected:
+        raise BadRequestException(
+            f"A {case.form_type} case must be reported on a {expected} template, not {template.report_type!r}."
+        )
+    employee = _get_employee_or_404(db, organization_id, case.employee_id)
+    _company, employer_values = _hk_employer_values(db, organization_id)
+    compliance = employee.compliance_fields or {}
+    hold, hold_amount = None, None
+    if case.form_type == "IR56G":
+        hold = (db.query(HkgTaxClearanceHold)
+                .filter(HkgTaxClearanceHold.organization_id == organization_id,
+                        HkgTaxClearanceHold.employee_id == case.employee_id,
+                        HkgTaxClearanceHold.state.in_(hk_tc.HOLDING_STATES))
+                .order_by(HkgTaxClearanceHold.id.desc()).first())
+        if hold is not None:
+            from app.modules.payroll import hk_service
+
+            hold_amount = float(hk_service.held_total(db, hold))
+
+    box_values = {
+        **employer_values,
+        "employee_name": employee.name,
+        "employee_hkid": mask_identifier(compliance.get("hkid") or compliance.get("passport_number")),
+        "employee_passport_number": mask_identifier(compliance.get("passport_number")),
+        "form_type": case.form_type,
+        "event_date": _iso_date(case.event_date),
+        "due_date": _iso_date(case.due_date),
+        "income_period_start": _iso_date(case.income_period_start),
+        "income_period_end": _iso_date(case.income_period_end),
+        "reported_total": float(sum(_hk_dec(v) for v in (case.reported_income or {}).values())) or None,
+        "hold_state": hold.state if hold is not None else None,
+        "hold_filing_deadline": _iso_date(hold.filing_deadline) if hold is not None else None,
+        "hold_statutory_expiry": _iso_date(hold.statutory_hold_expiry) if hold is not None else None,
+        "amount_withheld": hold_amount,
+        "case_id": case.id,
+        "case_status": case.status,
+    }
+    component_snapshots, values = _hk_walk_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version,
+                             "components": component_snapshots},
+        "employer": employer_values,
+        "employees": [{"employeeId": employee.id, "employeeName": employee.name, "values": values}],
+        "formType": case.form_type,
+        "caseId": case.id,
+        "caseStatus": case.status,
+        "eventDate": _iso_date(case.event_date),
+        "dueDate": _iso_date(case.due_date),
+        "knownGaps": [
+            _HK_LAYOUT_DISCLOSURE,
+            "The IR56G 'Additional' form flow (an employee who departs and later returns) is not modelled; "
+            "only the initial departure notification is produced.",
+            "Identity is MASKED on this report (HK-022 / PCPD HR Code): the unmasked HKID is never written "
+            "into a GeneratedReport, so the official IRD copy still has to be produced from the employee "
+            "record through the filing channel.",
+        ],
+    }
+    report = _hk_write_report(db, organization_id, template, f"CASE:{case.form_type}:{case.id}", rendered_data,
+                              case.year_of_assessment, case.form_type, actor_id, employee_id=case.employee_id)
+    # The case is the filing tracker; it points at the report that represents it
+    # (the shared history row, so the case is always resolvable back to the exact
+    # rendered document and template version it was issued on).
+    if case.generated_report_id != report.id:
+        case.generated_report_id = report.id
+        db.commit()
+    return report
+
+
+def generate_hong_kong_empf_remittance(
+    db: Session, organization_id: int, report_template_id: int, submission_id: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """The employer's eMPF remittance statement for one contribution period,
+    rendered from a PREPARED eMPF submission (hk_service builds those rows from
+    committed payslips only, with per-member validation errors).
+
+    Zoiko transmits nothing: the statement is the operator's input to their own
+    eMPF submission, and the submission's own lifecycle (SUBMITTED /
+    ACCEPTED / REJECTED, four-eyes) stays the record of what actually happened
+    on the eMPF platform (release gate G2)."""
+    from app.modules.payroll import hk_service
+    from app.modules.payroll.models import HkgEmpfSubmission
+
+    template = _hk_active_template(db, report_template_id, "HK_EMPF_REMITTANCE")
+    submission = (db.query(HkgEmpfSubmission)
+                  .filter(HkgEmpfSubmission.organization_id == organization_id, HkgEmpfSubmission.id == submission_id)
+                  .first())
+    if submission is None:
+        raise NotFoundException("Hong Kong eMPF submission", submission_id)
+    _hk_require_template_year(template, str(submission.contribution_period)[:4])
+    _company, employer_values = _hk_employer_values(db, organization_id)
+    totals = submission.totals or {}
+    members = [
+        {"payslipId": r.get("payslipId"), "employeeId": r.get("employeeId"), "name": r.get("name"),
+         "hkid": r.get("hkid"), "relevantIncome": r.get("relevantIncome"),
+         "employerMandatory": r.get("employerMandatory"), "employeeMandatory": r.get("employeeMandatory"),
+         "catchUpPeriods": r.get("catchUpPeriods"), "errors": r.get("errors") or []}
+        for r in (submission.rows or [])
+    ]
+    box_values = {
+        **employer_values,
+        "contribution_period": submission.contribution_period,
+        "contribution_day": _iso_date(submission.contribution_day),
+        "submission_status": submission.status,
+        "member_count": totals.get("employees"),
+        "total_relevant_income": totals.get("relevantIncome"),
+        "total_employer_mandatory": totals.get("employerMandatory"),
+        "total_employee_mandatory": totals.get("employeeMandatory"),
+        "validation_error_count": len(submission.validation_errors or []),
+        "submission_id": submission.id,
+    }
+    component_snapshots, values = _hk_walk_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version,
+                             "components": component_snapshots},
+        "employer": values,
+        "period": {"contributionPeriod": submission.contribution_period,
+                   "contributionDay": _iso_date(submission.contribution_day)},
+        "employees": members,
+        "totals": totals,
+        "validationErrors": submission.validation_errors or [],
+        "knownGaps": [
+            _HK_LAYOUT_DISCLOSURE,
+            "MPF voluntary contributions are NOT in the first release: only mandatory employer and "
+            "employee contributions are reported, and no voluntary-contribution subsystem exists. The "
+            "remittance statement keeps one line per contributing member, so voluntary amounts can be "
+            "added to that line later without changing the report's shape.",
+            "Identity is masked here; the unmasked value is never placed in a GeneratedReport.",
+        ],
+    }
+    report = _hk_write_report(db, organization_id, template,
+                              f"SUBMISSION:{submission.contribution_period}:{submission.id}", rendered_data,
+                              submission.contribution_period[:4], submission.contribution_period, actor_id)
+    if submission.generated_report_id != report.id:
+        submission.generated_report_id = report.id
+        db.commit()
+    return report
+
+
+def generate_hong_kong_mpf_contribution_record(
+    db: Session, organization_id: int, report_template_id: int, employee_id: int, period: str,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """The employee's own MPF contribution / pay record (HK-010: "provide
+    employee MPF contribution / pay records"). Not a filing — an employee
+    document — so it is generated straight from the employee's committed HK
+    payslips for the contribution period, in the same employee_pension /
+    employer_pension / relevant-income columns every other jurisdiction's
+    employee statement reads.
+
+    `period` is a calendar month ("2026-05"); `period=None` is not accepted
+    because MPF is contributed monthly and an unbounded record would silently
+    mix contribution periods."""
+    from app.modules.payroll.engine.jurisdictions.hong_kong.common import add_months
+
+    template = _hk_active_template(db, report_template_id, "HK_MPF_CONTRIBUTION_RECORD")
+    if not period or len(str(period)) != 7 or str(period)[4] != "-":
+        raise BadRequestException(
+            f"Invalid contribution period {period!r} — expected a calendar month, e.g. '2026-05'."
+        )
+    employee = _get_employee_or_404(db, organization_id, employee_id)        # tenant refusal first
+    _hk_require_template_year(template, str(period)[:4])
+    year, month = (int(p) for p in str(period).split("-"))
+    start = date(year, month, 1)
+    end = add_months(start, 1) - timedelta(days=1)
+
+    items = (
+        db.query(PayslipItem, PayrollRun)
+        .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+        .filter(PayslipItem.organization_id == organization_id, PayslipItem.employee_id == employee_id,
+                PayslipItem.country_code == "HK", PayrollRun.pay_date >= start, PayrollRun.pay_date <= end,
+                PayrollRun.status.in_(_HK_REPORT_FINALIZED_STATUSES))
+        .order_by(PayrollRun.pay_date)
+        .all()
+    )
+    if not items:
+        raise BadRequestException(
+            f"Employee #{employee_id} has no committed Hong Kong payroll in {period} — there is no MPF record to report."
+        )
+    _company, employer_values = _hk_employer_values(db, organization_id)
+    lines, employee_total, employer_total, relevant_total = [], Decimal("0"), Decimal("0"), Decimal("0")
+    for item, item_run in items:
+        trace = item.hkg_calculation_trace or {}
+        relevant = _hk_dec((trace.get("mpf") or {}).get("currentPeriod", {}).get("relevantIncome"))
+        coverage = (trace.get("mpf") or {}).get("coverage") or {}
+        line = {
+            "payslipItemId": item.id,
+            "payDate": item_run.pay_date.isoformat() if item_run.pay_date else None,
+            "periodEnd": (trace.get("period") or {}).get("end"),
+            "relevantIncome": float(relevant),
+            "employerMandatory": float(_hk_dec(item.employer_pension)),
+            "employeeMandatory": float(_hk_dec(item.employee_pension)),
+            "coverageStatus": coverage.get("status"),
+            "catchUpPeriods": len((trace.get("mpf") or {}).get("catchUp") or []),
+        }
+        lines.append(line)
+        relevant_total += relevant
+        employer_total += _hk_dec(item.employer_pension)
+        employee_total += _hk_dec(item.employee_pension)
+
+    # The statutory pack + version the figures came from is read back off the
+    # payslip's own tax_rule_snapshot pin, so a historical record can always be
+    # re-derived against the pack that actually produced it.
+    pack_ref = None
+    for item, _item_run in items:
+        snap = item.tax_rule_snapshot if isinstance(item.tax_rule_snapshot, dict) else None
+        if snap and (snap.get("packId") or snap.get("pack_id")):
+            pack_ref = {"packId": snap.get("packId") or snap.get("pack_id"),
+                        "version": snap.get("version") or snap.get("packVersion")}
+            break
+    if pack_ref is None:
+        # No pin on any payslip: fall back to the pack FK the same items carry,
+        # rather than reporting the statutory pack as unknown when it is
+        # recoverable (a payslip that pinned a pack always sets both).
+        pinned = {i.tax_policy_pack_id for i, _r in items if i.tax_policy_pack_id}
+        if len(pinned) == 1:
+            pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pinned.pop()).first()
+            if pack is not None:
+                pack_ref = {"packId": pack.id, "version": pack.version}
+    compliance = employee.compliance_fields or {}
+    box_values = {
+        **employer_values,
+        "employee_name": employee.name,
+        "employee_hkid": mask_identifier(compliance.get("hkid") or compliance.get("passport_number")),
+        "employee_passport_number": mask_identifier(compliance.get("passport_number")),
+        "contribution_period": period,
+        "payslip_count": len(items),
+        "total_relevant_income": float(relevant_total),
+        "total_employer_mandatory": float(employer_total),
+        "total_employee_mandatory": float(employee_total),
+        "pack_id": (pack_ref or {}).get("packId"),
+        "pack_version": (pack_ref or {}).get("version"),
+    }
+    component_snapshots, values = _hk_walk_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version,
+                             "components": component_snapshots},
+        "employer": employer_values,
+        "employees": [{"employeeId": employee.id, "employeeName": employee.name, "values": values}],
+        "contributionPeriod": period,
+        "period": {"periodStart": start.isoformat(), "periodEnd": end.isoformat()},
+        "lines": lines,
+        "totals": {"relevantIncome": float(relevant_total), "employerMandatory": float(employer_total),
+                   "employeeMandatory": float(employee_total)},
+        "statutoryPack": pack_ref,
+        "knownGaps": [
+            "MPF voluntary contributions are NOT in the first release; this record reports mandatory "
+            "employer and employee contributions only.",
+            "The per-line 'coverage status' and any catch-up contribution count come from the payroll "
+            "calculation trace itself, so a replay against the same pack reproduces this record exactly.",
+        ],
+    }
+    return _hk_write_report(db, organization_id, template, f"EMPLOYEE:{employee.id}:{period}", rendered_data,
+                            str(year), period, actor_id, employee_id=employee.id)
+
+
+def generate_hong_kong_termination_statement(
+    db: Session, organization_id: int, report_template_id: int, termination_result_id: int,
+    actor_id: Optional[int] = None,
+) -> GeneratedReport:
+    """The employee's Hong Kong termination statement (ZP-HK-ENG-001 document
+    service: "leave / termination statements"). It RENDERS an APPROVED
+    (four-eyes) HkgTerminationResult — never recalculates it — so the figures
+    the employee receives are exactly the approved evidence (evidence hash
+    included). An employee document, not a filing: nothing is transmitted."""
+    from app.modules.payroll.models import HkgTerminationResult
+
+    template = _hk_active_template(db, report_template_id, "HK_TERMINATION_STATEMENT")
+    row = (db.query(HkgTerminationResult)
+           .filter(HkgTerminationResult.id == termination_result_id,
+                   HkgTerminationResult.organization_id == organization_id).first())
+    if row is None:
+        raise NotFoundException(f"Hong Kong termination result {termination_result_id} not found.")
+    _hk_require_template_year(template, str(row.termination_date.year))
+    if row.status != "APPROVED":
+        raise BadRequestException(
+            f"Termination result #{row.id} is {row.status} — only an APPROVED (four-eyes) calculation is issued "
+            "to the employee as a statement.")
+    employee = _get_employee_or_404(db, organization_id, row.employee_id)
+    _company, employer_values = _hk_employer_values(db, organization_id)
+    r = row.result or {}
+    portions = r.get("portions") or {}
+
+    def portion(name):
+        p = portions.get(name) or {}
+        value = p.get("amountAfterCap", p.get("amount"))
+        return float(_hk_dec(value)) if value is not None else None
+
+    compliance = employee.compliance_fields or {}
+    box_values = {
+        **employer_values,
+        "employee_name": employee.name,
+        "employee_hkid": mask_identifier(compliance.get("hkid") or compliance.get("passport_number")),
+        "termination_date": row.termination_date.isoformat(),
+        "termination_reason": row.termination_reason,
+        "payment_type": row.payment_type,
+        "pre_transition_portion": portion("preTransition"),
+        "post_transition_portion": portion("postTransition"),
+        "gross_entitlement": float(_hk_dec(row.gross_entitlement)),
+        "total_offsets": float(_hk_dec(row.total_offsets)),
+        "net_statutory_payment": float(_hk_dec(row.net_statutory_payment)),
+        "final_wages": float(_hk_dec(r.get("finalWages"))),
+        "annual_leave_pay": float(_hk_dec(r.get("annualLeavePay"))),
+        "holiday_pay": float(_hk_dec(r.get("holidayPay"))),
+        "total_final_payment": float(_hk_dec(r.get("totalFinalPayment"))),
+        "payment_hold": r.get("paymentHold") or "",
+        "evidence_hash": row.evidence_hash,
+        "pack_id": r.get("packId"),
+    }
+    component_snapshots, values = _hk_walk_report_components(db, template, box_values)
+    rendered_data = {
+        "templateSnapshot": {"templateKey": template.template_key, "version": template.version,
+                             "components": component_snapshots},
+        "employer": employer_values,
+        "employees": [{"employeeId": employee.id, "employeeName": employee.name, "values": values}],
+        "termination": {"resultId": row.id, "terminationDate": row.termination_date.isoformat(),
+                        "reason": row.termination_reason, "paymentType": row.payment_type,
+                        "approvedById": row.approved_by_id, "evidenceHash": row.evidence_hash},
+        "offsets": r.get("offsets") or [],
+        "knownGaps": [
+            "An employee statement rendered from the approved termination calculation; it is not an IRD / "
+            "Labour Department filing and nothing is transmitted.",
+            "The SP / LSP day-count convention (days / 365 for an incomplete year) is a Hong Kong specialist "
+            "certification item (G1).",
+            "Leave and holiday pay shown are the amounts entered on the approved calculation; terminations "
+            "before 1 May 2025 are out of scope.",
+        ],
+    }
+    return _hk_write_report(db, organization_id, template, f"TERMINATION:{row.id}", rendered_data,
+                            str(row.termination_date.year), row.termination_date.isoformat(), actor_id,
+                            employee_id=employee.id)
+
+
 # ── RTI XML rendering (§18 gap-closure Part 9, 2026-09-09) ──────────────
+
+
 # Serializes a FPS/EPS/P45 GeneratedReport's rendered_data into HMRC's
 # real RTI top-level element structure — a correctly-SHAPED submission
 # file, a genuine deliverable on its own even before any transmission
@@ -18491,7 +19873,18 @@ _CA_FORM_REPORT_TYPES = ("T4", "RL1", "ROE", "PD7A")
 # shipped (same session) — their own GeneratedReport rows need the same
 # cross-org visibility STP gets.
 _AU_FORM_REPORT_TYPES = ("STP", "SUPERSTREAM", "AU_PAYROLL_TAX_RETURN")
-_RTI_FORMS_SUMMARY_REPORT_TYPES = _UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES + _AU_FORM_REPORT_TYPES
+# Hong Kong (ZP-HK-ENG-001 §7, HK-011 / HK-010) widened 2026-09-30 the same
+# way: the IRD annual return (BIR56A cover), the per-employee IR56B, the three
+# employee notifications (E/F/G), the eMPF remittance statement and the
+# employee's MPF contribution record are all GeneratedReport rows now, so
+# Super Admin needs the same cross-org visibility India's and Australia's
+# forms already had. RtiSubmission tracking stays empty for these — it is a
+# UK-specific HMRC concept, and an HK row renders "Not tracked" exactly like
+# every other non-UK report type that predates RTI tracking.
+_HK_FORM_REPORT_TYPES = ("HK_BIR56A", "HK_IR56B", "HK_IR56E", "HK_IR56F", "HK_IR56G",
+                         "HK_EMPF_REMITTANCE", "HK_MPF_CONTRIBUTION_RECORD")
+_RTI_FORMS_SUMMARY_REPORT_TYPES = (_UK_RTI_REPORT_TYPES + _INDIA_FORM_REPORT_TYPES + _CA_FORM_REPORT_TYPES
+                                   + _AU_FORM_REPORT_TYPES + _HK_FORM_REPORT_TYPES)
 
 
 def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) -> list[dict]:
@@ -18533,7 +19926,7 @@ def get_rti_forms_summary(db: Session, organization_id: Optional[int] = None) ->
 # silently leak into) — "UK" keeps its original, unchanged
 # tests/fixtures/hmrc_golden/ path for backward compatibility with every
 # existing fixture/README reference; "CA" is new.
-_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden"}
+_GOLDEN_FIXTURES_DIR_BY_COUNTRY = {"UK": "hmrc_golden", "CA": "cra_golden", "IN": "in_golden", "US": "us_golden", "AU": "au_golden", "SG": "sg_golden", "SE": "se_golden", "HK": "hk_golden"}
 
 
 def run_golden_test_certification(
@@ -19664,6 +21057,23 @@ _SG_GAZETTED_PUBLIC_HOLIDAYS = {
 }
 
 
+def _hk_pack_holidays(db: Session, year: int) -> List[dict]:
+    """The year's statutory holidays straight from the in-force HK rule pack's
+    own calendar rows (one source-linked slab row per day). No pack / no rows
+    for that year seeds nothing — a Labour Department date is never guessed."""
+    from app.modules.payroll.engine.countries.hong_kong import HongKongCalculationBlockedError
+    from app.modules.payroll.engine.jurisdictions.hong_kong import entitlements as hk_entitlements
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    try:
+        _rates, slabs, pack = resolve_tax_configuration(db, "HK", payroll_date=date(year, 12, 31))
+        if pack is None:
+            return []
+        return hk_entitlements.statutory_holidays(slabs, year)
+    except (BadRequestException, HongKongCalculationBlockedError):   # no calendar for that year
+        return []
+
+
 def _seed_holidays_for_country(db: Session, organization_id: int, country: str, year: int) -> List[PayrollHoliday]:
     if country == "SG":
         # Gazetted dates (see _SG_GAZETTED_PUBLIC_HOLIDAYS): a year MOM has
@@ -19671,6 +21081,16 @@ def _seed_holidays_for_country(db: Session, organization_id: int, country: str, 
         rows = [PayrollHoliday(organization_id=organization_id, country="SG", category="National",
                                date=date(year, m, d), name=name)
                 for (m, d), name in _SG_GAZETTED_PUBLIC_HOLIDAYS.get(year, ())]
+        for row in rows:
+            db.add(row)
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
+    if country == "HK":
+        rows = [PayrollHoliday(organization_id=organization_id, country="HK", category="Statutory",
+                               date=date.fromisoformat(h["date"]), name=h["name"])
+                for h in _hk_pack_holidays(db, year)]
         for row in rows:
             db.add(row)
         db.commit()
@@ -21464,8 +22884,12 @@ def _sg_mid_period_joiners(db: Session, organization_id: int, period_start, peri
     )
     if employee_ids:
         query = query.filter(PayrollEmployee.id.in_(employee_ids))
+    # Hong Kong joins the same selection (ZP-HK-ENG-001 §5): MPF employer
+    # contributions run from the FIRST day of employment, so a mid-period
+    # joiner's first wage period must exist (the days before joining are
+    # unpaid — see _compute_payslip_values).
     return [e for e in query.order_by(PayrollEmployee.id).all()
-            if _resolve_employee_country(db, organization_id, getattr(e, "country_code", None)) == "SG"]
+            if _resolve_employee_country(db, organization_id, getattr(e, "country_code", None)) in ("SG", "HK")]
 
 
 def _sg_overtime(db: Session, run: PayrollRun, employee, monthly_basic: Decimal, rate_map: dict, attendance_records=None,
@@ -24195,6 +25619,40 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
                 db, run.organization_id, employee.id, run.period_start, run.period_end, records=attendance_records,
             ),
         )
+    hk_inputs = {}
+    hk_pre_joining_days = 0
+    hk_post_leaving_days = 0
+    hk_termination_date = None
+    if country == "HK" and run.period_start and is_active:
+        period_last_day = run.period_end or run.pay_date
+        joining = employee.date_of_joining
+        leaving = employee.date_of_leaving
+        if joining and run.period_start < joining <= period_last_day:
+            # Days of the wage period before employment began are not payable —
+            # applied through the platform's own per-day unpaid-day model, not a
+            # new Hong Kong proration rule (none is statutory).
+            hk_pre_joining_days = (joining - run.period_start).days
+            unpaid_leave_days += hk_pre_joining_days
+        if leaving and run.period_start <= leaving < period_last_day:
+            # Final period (ZP-HK-ENG-001): the day after termination is the
+            # end of the wage period, so days beyond it are not payable either.
+            # Same unpaid-day model as the joiner side — symmetric, not a new
+            # statutory rule.
+            hk_post_leaving_days = (period_last_day - leaving).days
+            unpaid_leave_days += hk_post_leaving_days
+            hk_termination_date = leaving
+    if country == "HK":
+        # Hong Kong (ZP-HK-ENG-001): effective-dated profile facts, verified
+        # hours, prior-period MPF state and the pinned pack's period-split
+        # rule rows — all read here so the calculator itself stays pure.
+        from app.modules.payroll import hk_service
+
+        hk_inputs = hk_service.calc_inputs(db, run, employee, resolved_pack)
+        if hk_pre_joining_days:
+            hk_inputs["hkg_worker_facts"]["preJoiningUnpaidDays"] = hk_pre_joining_days
+        if hk_post_leaving_days:
+            hk_inputs["hkg_worker_facts"]["postLeavingUnpaidDays"] = hk_post_leaving_days
+            hk_inputs["hkg_worker_facts"]["finalPeriodTerminationDate"] = hk_termination_date.isoformat()
     ctx = build_context_from_employee(
         employee, gross=gross, basic=basic, hra=hra,
         special_allowance=special, overtime=overtime,
@@ -24230,6 +25688,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         **(pr_certificate_inputs or {}),
         **_sg_named_allowance_inputs(country, allowance_items),
         **sg_overtime_inputs,
+        **hk_inputs,
     )
     # SG-045: the value in force for this wage month, not today's.
     for key, column in _SG_STATUTORY_FACTS:
@@ -24349,6 +25808,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         "au_workers_compensation_premium": result.au_workers_compensation_premium,
         "au_calculation_trace": result.au_calculation_trace,
         "sgp_calculation_trace": _sg_trace_with_pwm_classification(result.sgp_calculation_trace, employee),
+        "hkg_calculation_trace": result.hkg_calculation_trace,
         # "_au_statutory_deductions_detail" is NOT a PayslipItem column —
         # same splat-then-pop contract as "_org_levy_result" above. Only
         # ever non-empty when a real order actually contributed a
@@ -24365,7 +25825,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # even if the underlying registries later change (spec's
         # reproducibility requirement). None for every non-German payslip
         # and for any German payslip generated before this column existed.
-        "employee_statutory_profile_id": result.germany_statutory_profile_id,
+        "employee_statutory_profile_id": result.germany_statutory_profile_id or result.hkg_statutory_profile_id,
         "germany_calculation_snapshot": result.germany_calculation_snapshot,
         # France — frozen result + the YTD state the next period reads back.
         "fr_calculation_snapshot": _fr_payslip_snapshot(result),
@@ -25457,6 +26917,9 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
     if _sg_is_correction_run(run):
         raise BadRequestException("A Singapore correction run holds correction deltas only — it is never generated from "
                                   "employee data (SG-044).")
+    if (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise BadRequestException("A Hong Kong correction run holds one correction delta only — it is never generated "
+                                  "from employee data (D-14).")
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     # Org-level, not per-employee — resolved once for the whole run, same as
     # rate_map/slabs are cached per-jurisdiction below.
@@ -25647,6 +27110,9 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     run = run_query.first()
     if not run:
         raise NotFoundException(f"Payroll run {run_id} not found.")
+    if (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise BadRequestException("A Hong Kong correction delta is not recalculated — reject it and request a new "
+                                  "correction of the original payslip (D-14).")
     if _sg_is_correction_run(run):
         raise BadRequestException("A Singapore correction delta is not recalculated — create a further correction of the "
                                   "original payslip instead (SG-044).")
@@ -26158,11 +27624,83 @@ def _validate_statutory_profile_fields(country_code: str, data: EmployeeStatutor
         if data.de_grundlohn_hourly is not None and data.de_grundlohn_hourly <= 0:
             errors.append("de_grundlohn_hourly must be greater than 0.")
 
+    if country_code == "HK":
+        errors.extend(_hk_statutory_profile_errors(data))
     if country_code == "SE":
         errors.extend(_se_profile_field_errors(data))
 
     if errors:
         raise BadRequestException("; ".join(errors))
+
+
+# Hong Kong statutory-profile value sets (ZP-HK-ENG-001 §3, §5).
+_HK_PROFILE_CHOICES = {
+    "hkg_employment_relationship": ("EMPLOYEE", "CASUAL_INDUSTRY", "DOMESTIC", "CONTRACTOR_REVIEW"),
+    "hkg_identity_document_type": ("HKID", "PASSPORT"),
+    "hkg_residency_status": ("RESIDENT", "NON_RESIDENT"),
+    "hkg_mpf_exemption_code": ("NONE", "EXEMPT_AGE", "EXEMPT_DOMESTIC", "EXEMPT_STATUTORY_SCHEME", "EXEMPT_ORSO",
+                               "EXEMPT_INBOUND", "INDUSTRY_SCHEME_SPECIAL"),
+    "hkg_pay_basis": ("MONTHLY", "DAILY", "HOURLY", "PIECE"),
+    "hkg_termination_reason": ("REDUNDANCY", "FIXED_TERM_EXPIRY_REDUNDANCY", "LAY_OFF", "DISMISSAL", "FIXED_TERM_EXPIRY",
+                               "DEATH", "RESIGNATION_ILL_HEALTH", "RESIGNATION_AGE_65", "SUMMARY_DISMISSAL", "RESIGNATION"),
+    "hkg_pre_transition_wage_basis": ("LAST_FULL_MONTH", "TWELVE_MONTH_AVERAGE"),
+}
+
+
+def _hk_statutory_profile_errors(data) -> list:
+    errors = []
+    for field, allowed in _HK_PROFILE_CHOICES.items():
+        value = getattr(data, field, None)
+        if value is not None and value not in allowed:
+            errors.append(f"{field} must be one of {', '.join(allowed)}.")
+    code = data.hkg_mpf_exemption_code
+    if code in ("EXEMPT_STATUTORY_SCHEME", "EXEMPT_ORSO", "EXEMPT_INBOUND") and not data.hkg_mpf_exemption_evidence_ref:
+        errors.append(f"{code} needs hkg_mpf_exemption_evidence_ref (the exemption is never inferred).")
+    hours = data.hkg_contractual_weekly_hours
+    if hours is not None and not (0 <= hours <= 168):
+        errors.append("hkg_contractual_weekly_hours must be between 0 and 168.")
+    if data.hkg_pre_transition_monthly_wage is not None and data.hkg_pre_transition_monthly_wage <= 0:
+        errors.append("hkg_pre_transition_monthly_wage must be greater than 0.")
+    if data.hkg_pre_transition_monthly_wage is not None and not data.hkg_pre_transition_evidence_ref:
+        errors.append("the frozen pre-1-May-2025 wage needs hkg_pre_transition_evidence_ref (HK-017).")
+    return errors
+
+
+_HK_FROZEN_PROFILE_FIELDS = ("hkg_pre_transition_monthly_wage", "hkg_pre_transition_wage_basis",
+                             "hkg_pre_transition_evidence_ref")
+
+
+def _hk_profile_values(db: Session, employee, data, previous) -> dict:
+    """HK columns for a new version: every HK field not sent in THIS request
+    carries forward from the previous HK version (a full snapshot per
+    version); the frozen pre-transition wage can never change once recorded
+    (HK-017); the identity token is derived server-side from the employee's
+    own identifier, never accepted from the client (HK-022)."""
+    import hashlib
+
+    from app.modules.payroll.hk_service import HK_PROFILE_COLUMNS
+
+    sent = data.model_fields_set
+    values = {}
+    for col in HK_PROFILE_COLUMNS:
+        if col == "hkg_identity_token":
+            continue
+        if col in sent:
+            values[col] = getattr(data, col)
+        elif previous is not None and previous.country_code == "HK":
+            values[col] = getattr(previous, col)
+    if previous is not None and previous.country_code == "HK":
+        for col in _HK_FROZEN_PROFILE_FIELDS:
+            before = getattr(previous, col)
+            if before is not None and values.get(col) != before:
+                raise BadRequestException(
+                    f"{col} is frozen pre-transition wage evidence (HK-017) and cannot change in a later version.")
+    cf = employee.compliance_fields or {}
+    ident = cf.get("hkid") if values.get("hkg_identity_document_type") != "PASSPORT" else cf.get("passport_number")
+    from app.modules.payroll.hk_service import identity_token
+
+    values["hkg_identity_token"] = identity_token(ident)          # keyed, versioned (D-19)
+    return values
 
 
 # Sweden worker-profile vocabularies (ZP-SE-ENG-001 §2/§5/§9/§11) — the exact
@@ -26375,6 +27913,13 @@ def create_employee_statutory_profile_version(
         se_taxable_benefits=data.se_taxable_benefits,
         se_annual_income=data.se_annual_income,
     )
+    if country_code == "HK":
+        latest = previous_open or (
+            db.query(EmployeeStatutoryProfile).filter(EmployeeStatutoryProfile.employee_id == employee_id,
+                                                      EmployeeStatutoryProfile.effective_from < data.effective_from)
+            .order_by(EmployeeStatutoryProfile.effective_from.desc()).first())
+        for col, value in _hk_profile_values(db, employee, data, latest).items():
+            setattr(row, col, value)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -29370,6 +30915,11 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
 
 def delete_employee(db: Session, employee_id: int, organization_id: int):
     employee = get_employee_by_id(db, employee_id, organization_id)
+    if _normalize_country(employee.country_code or "") == "HK":
+        # D-19: an HK legal hold (or any retained HK statutory record) blocks deletion.
+        from app.modules.payroll import hk_privacy
+
+        hk_privacy.assert_employee_deletable(db, organization_id, employee.id)
     has_payslips = db.query(PayslipItem.id).filter(PayslipItem.employee_id == employee_id).first()
     if has_payslips:
         raise HTTPException(
@@ -30134,6 +31684,9 @@ def advance_payroll_run_status(
     # Singapore (SG-gated): preflight blocks approval; a later step re-verifies
     # the approval fingerprint (SG-032). Runs without SG payslips skip this.
     _sg_before_run_transition(db, run, next_status, approver_id)
+    # Hong Kong (HK-gated): the preflight's BLOCK checks are statutory
+    # exceptions, so they refuse approval. Runs without HK payslips skip this.
+    _hk_before_run_transition(db, run, next_status, approver_id)
     run.status = next_status
     if next_status == PayrollStatus.APPROVED:
         run.approved_by = approver_id
@@ -30173,6 +31726,9 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only Draft runs can be deleted.")
+    if (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))
     _deleted_run_period = run.period_label
     _deleted_run_code = run.run_code
     db.delete(run)
@@ -30190,6 +31746,9 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
     run = db.query(PayrollRun).filter(PayrollRun.id == item.payroll_run_id).first()
     if run and run.status != PayrollStatus.DRAFT:
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail="Only payslips in Draft runs can be deleted.")
+    if run and (run.notes or "").startswith("[HK-CORRECTION]"):
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "This is a Hong Kong correction delta — reject the correction instead (its record is kept for audit)."))
     # Phase 8AS: fail-closed — refuse to delete a payslip that has Germany
     # overtime premium components still ATTACHED. Deleting would silently
     # erase money the operator explicitly attached (the credited allowance
@@ -30844,8 +32403,19 @@ def _build_bank_export_rows(db: Session, run: PayrollRun, items: List[PayslipIte
                 "before any file is produced; a restored database is never permission to pay again."))
         _sg_verify_run_approval(db, run)              # SG-032: bank data / payslips unchanged since approval
 
+    # Hong Kong IR56G: payslips under an active tax-clearance hold (or final
+    # pay whose IR56G filing is unresolved) are left out of the payment file;
+    # their net pay stays owed and is traced on the hold's ledger lines.
+    hk_holds = {}
+    if organization_id and any((i.country_code or "").upper() == "HK" for i in items):
+        from app.modules.payroll import hk_service
+
+        hk_holds = hk_service.payment_treatment(db, organization_id, run, items)
+        db.commit()
     rows = []
     for item in items:
+        if item.id in hk_holds:
+            continue
         treatment, released = ir21.get(item.id, (None, None))
         if treatment in ("HELD", "COVERED") or (treatment == "RELEASE" and not released):
             continue
@@ -30949,6 +32519,23 @@ def _resolve_org_country(db: Session, organization_id: int = None, *, required: 
             )
         return None
     return _normalize_country(raw)
+
+
+def _hk_payslip_hold_view(item: PayslipItem) -> Optional[dict]:
+    """Hong Kong IR56G: the payslip's held-ledger line, if any — shown on the
+    payslip as a LEGAL HOLD, separate from deductions (net pay unchanged)."""
+    if (getattr(item, "country_code", None) or "").upper() != "HK":
+        return None
+    from sqlalchemy.orm import object_session
+    from app.modules.payroll.models import HkgTaxClearanceHoldLine
+
+    session = object_session(item)
+    line = session.query(HkgTaxClearanceHoldLine).filter(
+        HkgTaxClearanceHoldLine.payslip_item_id == item.id).first() if session is not None else None
+    if line is None:
+        return None
+    return {"status": line.status, "amount": str(line.amount), "holdId": line.hold_id,
+            "basis": "IR56G departure tax-clearance hold — money remains owed to the employee"}
 
 
 def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) -> dict:
@@ -31071,6 +32658,8 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "auWorkersCompensationPremium": item.au_workers_compensation_premium or z,
         "auCalculationTrace": item.au_calculation_trace,
         "sgpCalculationTrace": item.sgp_calculation_trace,
+        "hkgCalculationTrace": item.hkg_calculation_trace,
+        "hkTaxClearanceHold": _hk_payslip_hold_view(item),
         # UK: Automatic Enrolment assessment (gap-closure Part 3) —
         # informational classification, not a monetary field.
         "autoEnrolmentStatus": item.auto_enrolment_status,
@@ -31357,6 +32946,13 @@ def _payslip_identity_rows(country: str, data: dict) -> list:
         # digits + checksum); MOM's itemised-payslip items need no NRIC at all.
         "SG": [("NRIC / FIN", mask_nric_fin(cf.get("nric_fin"))), ("CPF Status", cf.get("cpf_residency_status")),
                ("Work Pass", cf.get("work_pass_type"))],
+        # Hong Kong: masked HKID only (HK-022 / PCPD HR Code — identity
+        # masked in ordinary output).
+        # Three slots like every country (the layout unpacks three rows): the
+        # third is the HKICL bank-branch code in the bank-file format.
+        "HK": [("HKID", mask_identifier(cf.get("hkid") or cf.get("passport_number"))),
+               ("MPF Account", mask_identifier(cf.get("mpf_member_account"))),
+               ("Bank-Branch Code", "-".join(v for v in (cf.get("bank_code"), cf.get("branch_code")) if v) or None)],
     }
     return rows_by_country.get(country, [("Tax ID", None), ("Reference", None), ("Routing", None)])
 
@@ -31491,7 +33087,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # ── Build earnings & deduction items (pre-computed for layout) ──
     earnings_items = [
         ("Basic Salary", data["basicPay"]),
-        ("House Rent Allowance (HRA)", data["hra"]),
+        ("Housing Allowance" if country == "HK" else "House Rent Allowance (HRA)", data["hra"]),
     ]
     # Named allowance components (Transport/Medical/Other/...), if this org
     # has any configured — shown as their own line items, same as Overtime/
@@ -31514,7 +33110,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     attendance_ded = float(data.get("attendanceDeduction", 0) or 0)
     if attendance_ded > 0:
         unpaid_days = data.get("unpaidLeaveDays")
-        lbl = "LOP Deduction"
+        lbl = "No-pay Leave Deduction" if country == "HK" else "LOP Deduction"
         if unpaid_days:
             lbl += f" ({float(unpaid_days):g} day{'s' if float(unpaid_days) != 1 else ''})"
         deduction_items.append((lbl, attendance_ded))
@@ -31618,6 +33214,9 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         "KY": {"socialSecurity": "NIB Pension"},
         # Singapore reuses employee_pension for employee CPF.
         "SG": {"employeePension": "CPF (Employee)"},
+        # Hong Kong: MPF employee mandatory contribution — never an income
+        # tax line (no `tds` is ever set for HK).
+        "HK": {"employeePension": "MPF Mandatory Contribution (Employee)"},
     }.get(country, {})
     for lbl, key in [
         (other_labels.get("socialSecurity", "Social Security"), "socialSecurity"),
@@ -31953,7 +33552,7 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     c.drawString(col_mid + 3 * mm, y - pd_row_h + 3.2 * mm, "Salary Credit Date")
 
     c.setFont(F, 10.5)
-    c.drawString(margin_l + 3 * mm, y - 2 * pd_row_h + 3.2 * mm, "Bank Transfer (NEFT)")
+    c.drawString(margin_l + 3 * mm, y - 2 * pd_row_h + 3.2 * mm, "Bank Transfer" if country == "HK" else "Bank Transfer (NEFT)")
     c.drawString(col_mid + 3 * mm, y - 2 * pd_row_h + 3.2 * mm, fmt_date(data["payDate"]))
     y -= 2 * pd_row_h + gap_after_payment
 

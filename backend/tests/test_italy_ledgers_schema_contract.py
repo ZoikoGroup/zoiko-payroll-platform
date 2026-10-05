@@ -124,7 +124,11 @@ def test_revision_chains_onto_the_italy_engine_migration():
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_ROOT / "alembic.ini")))
     assert script.get_revision(REVISION).down_revision == PARENT
-    assert REVISION in script.get_heads()
+    # Later jurisdictions chain on top (Hong Kong's cd62503afe26 follows it), so the
+    # contract is: the graph has ONE head and this revision is on its chain.
+    heads = script.get_heads()
+    assert len(heads) == 1
+    assert REVISION in {r.revision for r in script.walk_revisions("base", heads[0])}
 
 
 def test_ytd_component_names_fit_the_generic_accumulator():

@@ -22,6 +22,10 @@ export const COUNTRIES = [
   { code: "JM", name: "Jamaica" },
   { code: "BS", name: "Bahamas" },
   { code: "TT", name: "Trinidad and Tobago" },
+  // Hong Kong (ZP-HK-ENG-001) — identity fields only; statutory FACTS (MPF
+  // exemption, residency, departure …) live on the effective-dated
+  // statutory profile (Employee → Hong Kong statutory profile panel).
+  { code: "HK", name: "Hong Kong" },
   { code: "PR", name: "Puerto Rico" },
   // France (2026-09-24, ZP-FR-ENG-001) — mirrors employee_validation.py's
   // FREmployeeValidation exactly.
@@ -268,6 +272,17 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "statutory_change_effective_date", label: "Effective date of this statutory change (residency / work pass / EA status / SHG / class)", type: "date", pattern: /^\d{4}-\d{2}-\d{2}$/, error: "Effective date must be in YYYY-MM-DD format." },
     { key: "pwm_group", label: "PWM group", type: "text", placeholder: "e.g. G1, OUTSOURCED, ALL", upper: true, showWhen: (cf) => !["", "NONE"].includes((cf?.pwm_sector || "").toUpperCase()) },
     { key: "pwm_job_level", label: "PWM job level", type: "text", placeholder: "e.g. GENERAL_INDOOR, OFFICER", upper: true, showWhen: (cf) => !["", "NONE"].includes((cf?.pwm_sector || "").toUpperCase()) },
+  ],
+  // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
+  // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
+  HK: [
+    { key: "hkid", label: "HKID", type: "text", placeholder: "A123456(3)", upper: true, strip: " ", pattern: /^[A-Z]{1,2}[0-9]{6}\(?[0-9A]\)?$/i, error: "HKID must look like A123456(3) — one or two letters, six digits and a check digit." },
+    { key: "passport_number", label: "Passport number (if no HKID)", type: "text", upper: true, strip: " ", pattern: /^[A-Z0-9]{5,20}$/i, error: "Passport number must be 5–20 letters/digits." },
+    { key: "passport_country", label: "Passport issuing country", type: "text", upper: true, pattern: /^[A-Z]{2,3}$/i, error: "Passport issuing country must be a 2- or 3-letter code.", showWhen: (cf) => Boolean(cf?.passport_number) },
+    { key: "mpf_member_account", label: "eMPF / MPF member account", type: "text", pattern: /^[A-Za-z0-9-]{4,30}$/, error: "eMPF / MPF member account number looks incorrect." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.HK): HKICL clearing + branch codes.
+    { key: "bank_code", label: "Bank (clearing) code", type: "text", placeholder: "004", pattern: /^\d{3}$/, error: "Hong Kong bank code must be 3 digits." },
+    { key: "branch_code", label: "Branch code", type: "text", placeholder: "123", pattern: /^\d{3}$/, error: "Hong Kong branch code must be 3 digits." },
   ],
 };
 

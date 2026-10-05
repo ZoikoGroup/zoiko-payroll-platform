@@ -513,6 +513,20 @@ class PayrollContext:
     # all monthly amounts, so the month is recalculated on its combined
     # wages and only the difference is booked. None/empty = first payment.
     sgp_month_to_date: list = None
+    # Hong Kong (ZP-HK-ENG-001) — built by service._hk_calc_inputs; None for
+    # every non-HK calculation. The calculator (countries/hong_kong.py) is
+    # pure (HK-020): it never queries, never reads a live clock.
+    #   hkg_worker_facts   — the effective-dated statutory-profile version in
+    #                        force (facts only) + employment dates + its id.
+    #   hkg_hours          — verified daily hours for the wage period
+    #                        {"days": {iso_date: "8.00"}, "complete": bool}.
+    #   hkg_rule_segments  — every row of the PINNED pack overlapping the wage
+    #                        period for period-split rules (SMW hourly rate,
+    #                        hours-record cap): {key: [{from, to, value, ref}]}
+    #                        — a period crossing 1 May 2026 sees both rates.
+    hkg_worker_facts: dict = None
+    hkg_hours: dict = None
+    hkg_rule_segments: dict = None
     # The payroll run's period (employment period). Read by Singapore only
     # (SG-011: OW belongs to the employment month when payable by the 14th
     # of the following month). None for callers without a run period.
@@ -1022,6 +1036,12 @@ class PayrollResult:
     # provenance) — persisted verbatim on PayslipItem.sgp_calculation_trace.
     # None for every non-SG calculation.
     sgp_calculation_trace: dict = None
+    # Hong Kong calculation trace (MPF coverage/threshold branch, SMW
+    # segments, classification, provenance) — persisted verbatim on
+    # PayslipItem.hkg_calculation_trace; and the statutory-profile version
+    # the calculation used (pinned on PayslipItem.employee_statutory_profile_id).
+    hkg_calculation_trace: dict = None
+    hkg_statutory_profile_id: int = None
 
     # Guyana PAYE statutory credit (GY-010) — remaining unconsumed credit
     # balance AFTER this period (calculated liability minus whatever

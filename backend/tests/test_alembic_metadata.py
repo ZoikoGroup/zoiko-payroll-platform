@@ -96,6 +96,10 @@ def test_alembic_heads_is_single_head():
     # f0b1c2d3e4f5 -> 998877665544 are carried byte-identically, and the
     # Singapore chain's first revision c3d9e1f4a7b2 now sits on 998877665544,
     # so the graph is linear and identical to the merged main + Singapore one.
+    # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001): hkg_* statutory
+    # profile columns, payslip_items.hkg_calculation_trace and the seven hkg_
+    # registries, down_revision 917a54ed2347 (re-parented from 445abd6a9083 at the
+    # main integrations — linear, no new branchpoint).
     # 445abd6a9083 (2026-09-29, SG G3 IR8A Revision/Amendment): the
     # sgp_ir8a_modifications table models.SgpIr8aModification declares,
     # down_revision b8e3d5f2a9c7 (was parked on a release-line merge that
@@ -121,7 +125,9 @@ def test_alembic_heads_is_single_head():
     # 917a54ed2347 (ZP-IT-ENG-001 P2): Italy ledgers — CCNL level terms, TFR
     # ledger, F24 lines, LUL entries + it_contractual_weekly_hours; single child
     # of 7a1b2c3d4e5f, so no new branchpoint.
-    assert heads == ["917a54ed2347"]
+    # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001), re-parented onto
+    # 917a54ed2347 (Italy ledgers) when nikhil integrated main — linear, single head.
+    assert heads == ["cd62503afe26"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -133,7 +139,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["917a54ed2347"]
+    assert list(script.get_heads()) == ["cd62503afe26"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -164,7 +170,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 171   # + 917a54ed2347 (Italy P2 ledgers)
+    assert len(revs) == 172   # + 917a54ed2347 (Italy P2 ledgers) + cd62503afe26 (Hong Kong)
 
 
 def test_germany_head_chain_wiring_is_intact():

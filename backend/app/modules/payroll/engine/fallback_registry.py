@@ -30,7 +30,7 @@ skips them rather than flagging a false positive.
 
 from decimal import Decimal
 
-from app.modules.payroll.engine.countries import australia, canada, germany, india, singapore, sweden, uk, us
+from app.modules.payroll.engine.countries import australia, canada, germany, hong_kong, india, singapore, sweden, uk, us
 from app.modules.payroll import hardcoded_defaults
 
 _MODULES = {
@@ -42,6 +42,7 @@ _MODULES = {
     "germany": germany,
     "hardcoded_defaults": hardcoded_defaults,
     "singapore": singapore,
+    "hong_kong": hong_kong,
     "sweden": sweden,
 }
 
@@ -235,6 +236,17 @@ _ENGINE_CONSTANT_REGISTRY = [
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MIN_MONTHLY", "label": "SDL Minimum (Monthly)", "resolverKey": "sdl_min_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
     {"country": "SG", "module": "singapore", "attr": "_SG_SDL_MAX_MONTHLY", "label": "SDL Maximum (Monthly)", "resolverKey": "sdl_max_monthly", "note": "NO FALLBACK — Singapore is fail-closed (ZP-SG-ENG-001 SG-001); a missing row BLOCKS the calculation."},
 
+    # ── Hong Kong ────────────────────────────────────────────────────────
+    # Fail-closed (ZP-HK-ENG-001): every constant is None; listed so the
+    # readiness check knows which scalar keys an HK pack must carry. SMW,
+    # continuous-contract, EO and SP/LSP rows are validated by the HK
+    # modules themselves (a missing row BLOCKS there).
+    {"country": "HK", "module": "hong_kong", "attr": "_HK_MPF_EMPLOYEE_RATE", "label": "MPF Employee Mandatory Rate", "resolverKey": "mpf_employee_rate", "side": "employee", "note": "NO FALLBACK — Hong Kong is fail-closed (ZP-HK-ENG-001); a missing row BLOCKS the calculation."},
+    {"country": "HK", "module": "hong_kong", "attr": "_HK_MPF_EMPLOYER_RATE", "label": "MPF Employer Mandatory Rate", "resolverKey": "mpf_employer_rate", "side": "employer", "note": "NO FALLBACK — Hong Kong is fail-closed (ZP-HK-ENG-001); a missing row BLOCKS the calculation."},
+    {"country": "HK", "module": "hong_kong", "attr": "_HK_MPF_MIN_RI_MONTHLY", "label": "MPF Minimum Relevant Income (Monthly)", "resolverKey": "mpf_min_relevant_income_monthly", "note": "NO FALLBACK — Hong Kong is fail-closed (ZP-HK-ENG-001); a missing row BLOCKS the calculation."},
+    {"country": "HK", "module": "hong_kong", "attr": "_HK_MPF_MAX_RI_MONTHLY", "label": "MPF Maximum Relevant Income (Monthly)", "resolverKey": "mpf_max_relevant_income_monthly", "note": "NO FALLBACK — Hong Kong is fail-closed (ZP-HK-ENG-001); a missing row BLOCKS the calculation."},
+    {"country": "HK", "module": "hong_kong", "attr": "_HK_MPF_MIN_RI_DAILY", "label": "MPF Minimum Relevant Income (Daily)", "resolverKey": "mpf_min_relevant_income_daily", "note": "NO FALLBACK — Hong Kong is fail-closed (ZP-HK-ENG-001); a missing row BLOCKS the calculation."},
+    {"country": "HK", "module": "hong_kong", "attr": "_HK_MPF_MAX_RI_DAILY", "label": "MPF Maximum Relevant Income (Daily)", "resolverKey": "mpf_max_relevant_income_daily", "note": "NO FALLBACK — Hong Kong is fail-closed (ZP-HK-ENG-001); a missing row BLOCKS the calculation."},
     # ── Sweden ────────────────────────────────────────────────────────────
     # Fail-closed from day one (ZP-SE-ENG-001 §30 + shared.py's
     # _VALIDATION_ENABLED_COUNTRIES): every constant below is None —
