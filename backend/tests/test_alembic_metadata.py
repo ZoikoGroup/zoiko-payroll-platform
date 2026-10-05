@@ -98,8 +98,8 @@ def test_alembic_heads_is_single_head():
     # so the graph is linear and identical to the merged main + Singapore one.
     # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001): hkg_* statutory
     # profile columns, payslip_items.hkg_calculation_trace and the seven hkg_
-    # registries, down_revision e8f1a2b3c4d5 (re-parented from 445abd6a9083 at the
-    # main integration — linear, no new branchpoint).
+    # registries, down_revision 917a54ed2347 (re-parented from 445abd6a9083 at the
+    # main integrations — linear, no new branchpoint).
     # 445abd6a9083 (2026-09-29, SG G3 IR8A Revision/Amendment): the
     # sgp_ir8a_modifications table models.SgpIr8aModification declares,
     # down_revision b8e3d5f2a9c7 (was parked on a release-line merge that
@@ -117,8 +117,16 @@ def test_alembic_heads_is_single_head():
     # e8f1a2b3c4d5 (2026-09-30, ZP-SE-ENG-001): Sweden jurisdiction support
     # (collective agreements, sick episodes, leave ledgers, se_* profile
     # columns), down_revision 66072e2d80a9 — idempotency-guarded.
+    # 7a1b2c3d4e5f (ZP-IT-ENG-001): Italy jurisdiction support — Italy
+    # employer profile + filing outbox tables, fifteen it_* profile columns,
+    # payslip_items.it_calculation_snapshot; down_revision e8f1a2b3c4d5 —
+    # idempotency-guarded, and it adds NO new branchpoint (single child of
+    # e8f1a2b3c4d5, so the branchpoint list below is unchanged).
+    # 917a54ed2347 (ZP-IT-ENG-001 P2): Italy ledgers — CCNL level terms, TFR
+    # ledger, F24 lines, LUL entries + it_contractual_weekly_hours; single child
+    # of 7a1b2c3d4e5f, so no new branchpoint.
     # cd62503afe26 (2026-09-30, Hong Kong ZP-HK-ENG-001), re-parented onto
-    # e8f1a2b3c4d5 when nikhil integrated main — linear, single head.
+    # 917a54ed2347 (Italy ledgers) when nikhil integrated main — linear, single head.
     assert heads == ["cd62503afe26"]
 
 
@@ -162,7 +170,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 170   # + e8f1a2b3c4d5 (Sweden, 2026-09-30) + cd62503afe26 (Hong Kong)
+    assert len(revs) == 172   # + 917a54ed2347 (Italy P2 ledgers) + cd62503afe26 (Hong Kong)
 
 
 def test_germany_head_chain_wiring_is_intact():

@@ -429,7 +429,7 @@ def _seed_agi_template(db, source_id):
         ("remuneration", "Remuneration", (
             ("gross_pay", "Cash remuneration (gross)", "currency", "PAYSLIP_ITEM", "gross_pay", None),
             ("employer_contribution_base", "Employer-contribution base", "currency", "PAYSLIP_ITEM_JSON",
-             "se_calculation_snapshot.employer_contribution.base", None),
+             "se_calculation_snapshot.employer.base", None),
         )),
         ("tax", "Deducted tax", (
             ("preliminary_tax", "Preliminary tax deducted", "currency", "PAYSLIP_ITEM_JSON",
@@ -439,9 +439,9 @@ def _seed_agi_template(db, source_id):
         )),
         ("employer", "Employer contributions", (
             ("employer_contribution", "Employer contributions", "currency", "PAYSLIP_ITEM_JSON",
-             "se_calculation_snapshot.employer_contribution.amount", None),
+             "se_calculation_snapshot.employer.amount", None),
             ("employer_cohort", "Contribution cohort", "text", "PAYSLIP_ITEM_JSON",
-             "se_calculation_snapshot.employer_contribution.cohort", None),
+             "se_calculation_snapshot.employer.cohort", None),
         )),
     )
     for sort_order, (component_key, label, fields) in enumerate(components):

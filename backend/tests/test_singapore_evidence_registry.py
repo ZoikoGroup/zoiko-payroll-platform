@@ -16,6 +16,7 @@ app.* imports are lazy (tests/_db_safety.py).
 """
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -163,8 +164,22 @@ def test_the_dashboard_reads_the_real_alembic_head_and_schema(db, monkeypatch):
     from app.modules.payroll import service
 
     state = service._sg_database_state(db)
-    assert state["codeHeads"] == ["cd62503afe26"] and state["missingSgObjects"] == [] and state["error"] is None
-    monkeypatch.setattr(service, "_sg_database_state", lambda _db: {**state, "databaseHeads": ["cd62503afe26"],
+    # The head moves with each jurisdiction that lands: e8f1a2b3c4d5 (Sweden)
+    # then 7a1b2c3d4e5f (Italy, ZP-IT-ENG-001). This asserts the dashboard
+    # reports the REAL single head, so it must track the current head rather
+    # than pin one revision.
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    backend_root = Path(__file__).resolve().parents[1]
+    _cfg = Config(str(backend_root / "alembic.ini"))
+    _cfg.set_main_option("script_location", str(backend_root / "alembic"))
+    expected_heads = list(ScriptDirectory.from_config(_cfg).get_heads())
+
+    assert state["codeHeads"] == expected_heads
+    assert len(expected_heads) == 1
+    assert state["missingSgObjects"] == [] and state["error"] is None
+    monkeypatch.setattr(service, "_sg_database_state", lambda _db: {**state, "databaseHeads": ["e8f1a2b3c4d5"],
                                                                       "atHead": True})
     rows = {r["key"]: r for r in _ready(db)["readinessDashboard"]}
     assert rows["migration"]["status"] == "PASS"

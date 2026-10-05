@@ -838,6 +838,82 @@ class PayrollContext:
     # Never employee gross; None = no ledger entries yet → SLP 0.
     se_pension_cost_base: Decimal = None
 
+    # ── Italy (ZP-IT-ENG-001) — pre-resolved applicability facts ────────────
+    # Resolved by the service layer from the worker's effective-dated
+    # EmployeeStatutoryProfile (it_* columns) and the org's
+    # EmployerItalyProfile, exactly the way sweden_*/ireland_*/france_* above
+    # are pre-resolved before dispatch. italy.py BLOCKS rather than guesses
+    # any that are missing.
+    italy_statutory_profile: object = None   # EmployeeStatutoryProfile | None
+    italy_employer_profile: object = None     # EmployerItalyProfile | None
+    italy_organization_id: int = None
+    it_employee_id: int = None
+    # Italian "imponibile sociale" override — the wage base social
+    # contributions apply to, which is NOT ctx.gross. None = ctx.gross, which
+    # the service only uses when it has already assembled gross net of
+    # contribution-ineligible earnings.
+    it_contributory_base: Decimal = None
+    # Fringe-benefit amount in the period, for the §11 evidence check. None = 0.
+    it_fringe_amount: Decimal = None
+    # Year-to-date facts from COMMITTED payroll in the same calendar tax year
+    # (preview never writes them, IT-055). None = no prior payroll this year,
+    # a legitimate zero.
+    it_ytd_contributory_base_prior: Decimal = None   # IT-016 1% / IT-017 ceiling
+    it_ytd_taxable_prior: Decimal = None             # IT-005 annual forecast
+    it_ytd_irpef_withheld_prior: Decimal = None      # IT-005 cumulative withholding
+    it_mensilita_paid_prior: int = None
+    # Mensilità in THIS payment (2 when the tredicesima is paid with December).
+    # None = 1.
+    it_period_mensilita: int = None
+    # Total mensilità for the worker's year (CCNL; pro-rated by the service for
+    # a mid-year hire). None = the it_mensilita_default content row.
+    it_mensilita: int = None
+    # Days of employment in the tax year, for pro-rating the §4 deductions.
+    # Required — italy.py blocks when it is absent.
+    it_work_days_in_year: int = None
+    # Fallbacks used only when the employer profile has no CSC/CA captured —
+    # the service populates these from EmployerTaxProfile rows.
+    it_employer_csc: str = None
+    it_employer_ca: str = None
+    # §5 local-surtax withholding: each DETERMINED amount and how much of it is
+    # already withheld this year. None = not recorded, which BLOCKS; a worker
+    # with nothing owed carries an explicit 0.
+    it_addreg_saldo_due: Decimal = None              # prior-year regional balance
+    it_addreg_saldo_withheld_prior: Decimal = None
+    it_addcom_saldo_due: Decimal = None              # prior-year municipal balance
+    it_addcom_saldo_withheld_prior: Decimal = None
+    it_addcom_acconto_due: Decimal = None            # current-year municipal advance
+    it_addcom_acconto_withheld_prior: Decimal = None
+    # §22: a termination period withholds every outstanding amount at once.
+    it_is_termination_period: bool = False
+    # §6 / IT-018 INPS contributory minimum. Full-time: contributory days the
+    # period covers. Part-time: hours paid + CCNL weekly hours. One of the two
+    # must be supplied or italy.py blocks.
+    it_contributory_days: Decimal = None
+    # True when the period covers the whole month: the engine then uses the
+    # configured it_inps_full_month_days instead of a caller-supplied count.
+    it_contributory_full_month: bool = False
+    # True for a part-time worker (contractual hours below the CCNL week):
+    # it_part_time_hours is then required.
+    it_is_part_time: bool = False
+    it_part_time_hours: Decimal = None
+    it_ccnl_weekly_hours: Decimal = None
+    # §11 benefits. it_fringe_amount (above) is this period's fringe value;
+    # the year-to-date value is required whenever there is any.
+    it_ytd_fringe_prior: Decimal = None
+    # IT-006 conguaglio: True for the year-end settlement period (termination
+    # always settles too). The wedge sum paid this year is then required.
+    it_is_conguaglio_period: bool = False
+    it_ytd_wedge_paid_prior: Decimal = None
+    # IT-011 wedge-sum recovery plan opened at a previous conguaglio. None =
+    # not recorded, which BLOCKS; nothing being recovered is an explicit 0.
+    it_wedge_recovery_outstanding: Decimal = None
+    it_wedge_recovery_instalment: Decimal = None
+    it_meal_electronic_count: Decimal = None
+    it_meal_electronic_value: Decimal = None
+    it_meal_paper_count: Decimal = None
+    it_meal_paper_value: Decimal = None
+
     # Correlation ID for this calculation, for log/debugging correlation
     # only — never read by any country calculator, never persisted, never
     # affects a figure. None means "caller didn't supply one," in which
@@ -1325,6 +1401,83 @@ class PayrollResult:
     se_employer_total: Decimal = Decimal("0")
     se_employee_total: Decimal = Decimal("0")
     se_calculation_trace: dict = None
+
+    # ── Italy (ZP-IT-ENG-001) ───────────────────────────────────────────────
+    # Employer side, split per IT-057: social security is what the employer
+    # REMITS to INPS; employer_contributions adds the TFR accrual, a reserve
+    # the employer funds but does not remit with the month's contributions.
+    it_employer_social_security: Decimal = Decimal("0")
+    it_employer_contributions: Decimal = Decimal("0")
+    # Employee side: INPS IVS + CIGS + other matrix families + FIS + the
+    # additional 1% IVS.
+    it_employee_contributions: Decimal = Decimal("0")
+    # The base IVS was charged on (after the cohort ceiling, IT-017).
+    it_contributory_base: Decimal = Decimal("0")
+    it_contributory_capped: bool = False
+    it_contributory_cap_cohort: str = None
+    it_contributory_cap_amount: Decimal = Decimal("0")   # base excluded by the ceiling
+    it_contributory_cap_note: str = None
+    # The INPS classification scope actually matched, e.g. "CSC_70501".
+    it_inps_scope: str = None
+    it_inps_components: list = field(default_factory=list)
+    it_ivs_additional: Decimal = Decimal("0")            # IT-016
+    # TFR accrual (net of the 0.50% INPS offset) and its routed destination.
+    it_tfr_amount: Decimal = Decimal("0")
+    it_tfr_gross_accrual: Decimal = Decimal("0")
+    it_tfr_inps_offset: Decimal = Decimal("0")
+    it_tfr_destination: str = None                   # AZIENDA | FONDO_PENSIONE | FONDO_TESORERIA
+    it_tfr_routing_complete: bool = False
+    # IRPEF: period withholding plus the annual figures it was derived from.
+    it_taxable_income: Decimal = Decimal("0")
+    it_irpef: Decimal = Decimal("0")
+    it_irpef_annual: Decimal = Decimal("0")          # net, after deductions
+    it_irpef_gross_annual: Decimal = Decimal("0")
+    it_detrazione_lavoro: Decimal = Decimal("0")
+    it_wedge_additional_deduction: Decimal = Decimal("0")
+    # FIS employee share (IT-020) — 1/3 of the fund's 0.50%/0.80% total, so
+    # it lands inside it_employee_contributions and is broken out here for
+    # the payslip. Already inside it_employee_contributions; never added
+    # again.
+    it_fis_employee: Decimal = Decimal("0")
+    # §4 non-taxable sum — ADDED to net pay, never netted into IRPEF (IT-009).
+    it_wedge_tax_free_sum: Decimal = Decimal("0")
+    it_wedge_band_pct: Decimal = Decimal("0")
+    # §5 this year's local surtax LIABILITY at the tax domicile, settled at the
+    # following year's conguaglio — traced, never withheld as such.
+    it_regional_tax_annual: Decimal = Decimal("0")
+    it_municipal_tax_annual: Decimal = Decimal("0")
+    it_local_tax_withheld: bool = False
+    # §5 what IS withheld this period: three distinct deductions, each an
+    # instalment of an already-determined amount (part of it_employee_total).
+    it_addreg_saldo_withheld: Decimal = Decimal("0")
+    it_addcom_saldo_withheld: Decimal = Decimal("0")
+    it_addcom_acconto_withheld: Decimal = Decimal("0")
+    it_local_tax_withheld_amount: Decimal = Decimal("0")
+    # §6: True when the contributory minimum raised the INPS base above pay.
+    it_contributory_minimum_applied: bool = False
+    it_tax_domicile_comune: str = None
+    it_tax_domicile_region: str = None
+    it_fringe_amount: Decimal = Decimal("0")
+    it_fringe_child_declared: bool = False
+    it_fringe_taxable: Decimal = Decimal("0")
+    it_fringe_ytd_after: Decimal = Decimal("0")
+    it_meal_voucher_taxable: Decimal = Decimal("0")
+    # IT-006 / IT-011 conguaglio outputs (for the year ledger).
+    it_conguaglio: bool = False
+    it_irpef_refund: Decimal = Decimal("0")
+    it_wedge_recovery_now: Decimal = Decimal("0")
+    it_wedge_recovery_new: Decimal = Decimal("0")
+    it_wedge_recovery_outstanding_after: Decimal = Decimal("0")
+    it_wedge_recovery_instalment_after: Decimal = Decimal("0")
+    it_addreg_saldo_determined: Decimal = Decimal("0")
+    it_addcom_saldo_determined: Decimal = Decimal("0")
+    it_addcom_credit_determined: Decimal = Decimal("0")
+    it_termination_surtax_withheld: Decimal = Decimal("0")
+    # Running totals after this period, keyed by IT_YTD_COMPONENTS (None for
+    # every other country). The service persists them on COMMIT only.
+    it_ytd_after: dict = None
+    it_employee_total: Decimal = Decimal("0")
+    it_calculation_trace: dict = None
 
     # Echoes PayrollContext.trace_id back on the result — see that field's
     # own docstring. None only if the caller never went through

@@ -1,7 +1,7 @@
 """hong kong statutory foundation
 
 Revision ID: cd62503afe26
-Revises: e8f1a2b3c4d5
+Revises: 917a54ed2347
 Create Date: 2026-09-30
 
 Hong Kong statutory build (ZP-HK-ENG-001 v1.0). Additive only — no existing
@@ -18,8 +18,9 @@ row or column is touched:
     (D-14), hkg_access_events and hkg_legal_holds (D-19) — the only HK objects no
     shared table can represent (docs/HONG_KONG_CURRENT_STATE_ARCHITECTURE_MAP.md §7).
 
-Parent: e8f1a2b3c4d5 (Sweden) — re-parented from 445abd6a9083 when nikhil integrated main
-(France / Ireland / Sweden chain via 66072e2d80a9); still the single head. Idempotent (inspector-guarded: skips a
+Parent: 917a54ed2347 (Italy ledgers) — re-parented from 445abd6a9083 (then e8f1a2b3c4d5,
+Sweden) as nikhil integrated main's France / Ireland / Sweden / Italy chain; still
+the single head. The migration is idempotent and was never applied before. Idempotent (inspector-guarded: skips a
 column/table that already exists, e.g. a dev DB synced via create_all), same
 shape as c3d9e1f4a7b2 / 445abd6a9083. No data is seeded here: the Hong Kong
 rule packs are seeded Draft by scripts/seed_hong_kong_canonical_pack.py only.
@@ -32,7 +33,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'cd62503afe26'
-down_revision: Union[str, Sequence[str], None] = 'e8f1a2b3c4d5'
+down_revision: Union[str, Sequence[str], None] = '917a54ed2347'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

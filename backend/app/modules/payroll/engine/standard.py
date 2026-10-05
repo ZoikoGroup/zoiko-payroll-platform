@@ -72,6 +72,7 @@ from app.modules.payroll.engine.countries import ireland as _ireland
 from app.modules.payroll.engine.countries import singapore as _singapore
 from app.modules.payroll.engine.countries import hong_kong as _hong_kong
 from app.modules.payroll.engine.countries import sweden as _sweden
+from app.modules.payroll.engine.countries import italy as _italy
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -143,6 +144,7 @@ _calc_ireland = _ireland.calculate
 _calc_singapore = _singapore.calculate
 _calc_hong_kong = _hong_kong.calculate
 _calc_sweden = _sweden.calculate
+_calc_italy = _italy.calculate
 
 
 _COUNTRY_CALC = {
@@ -186,6 +188,11 @@ _COUNTRY_CALC = {
     # national %), component-summed employer contributions with cohorts,
     # SLP from its own pension-cost ledger. Fail-closed: countries/sweden.py.
     "SE": _calc_sweden,
+    # Italy (ZP-IT-ENG-001) - INPS classification-matrix contributions (never a
+    # national average), progressive IRPEF with the solidarity wedge, regional/
+    # municipal additions on the TAX DOMICILE. Fail-closed:
+    # countries/italy.py.
+    "IT": _calc_italy,
 }
 
 
@@ -249,9 +256,24 @@ class StandardStrategy(PayrollStrategy):
             # occupational-pension employee share) — absent → 0 everywhere
             # else, same additive mechanism as ie_/fr_/sgp_ above.
             + deductions.get("se_employee_total", Decimal("0"))
+            # Italy employee-side statutory total: INPS contributions + IRPEF
+            # + the §5 local-surtax instalments withheld this period (regional
+            # balance, municipal balance, municipal advance). It excludes the
+            # surtaxes' annual LIABILITY, which is settled at the next
+            # conguaglio, and the §4 wedge non-taxable sum, which is a BENEFIT
+            # added below, never a negative deduction (IT-009). Absent -> 0
+            # everywhere else, same additive mechanism as ie_/fr_/sgp_/se_ above.
+            + deductions.get("it_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
+        # §4 / IT-009: the structural tax-wedge non-taxable sum is money the
+        # employee keeps — a separate statutory object with its own YTD state,
+        # never netted inside IRPEF. It is added to net pay here, and is 0 for
+        # every country whose calculation does not return the key.
+        it_wedge_tax_free_sum = deductions.get("it_wedge_tax_free_sum", Decimal("0"))
+        if it_wedge_tax_free_sum:
+            net_pay = max(_round2(net_pay + it_wedge_tax_free_sum), Decimal("0"))
         # Phase 8BU: a PARTIAL Germany result (wage_tax/soli/church_tax
         # genuinely unavailable, RV/ALV/GKV/PV genuinely computed) must
         # NEVER present a net_pay computed as if the missing tax were
@@ -431,6 +453,63 @@ class StandardStrategy(PayrollStrategy):
             se_employer_total=deductions.get("se_employer_total", Decimal("0")),
             se_employee_total=deductions.get("se_employee_total", Decimal("0")),
             se_calculation_trace=deductions.get("se_calculation_trace"),
+            # Italy (ZP-IT-ENG-001) — everything countries/italy.py returns.
+            # .get with the PayrollResult default keeps every other country's
+            # result unchanged.
+            it_employer_social_security=deductions.get("it_employer_social_security", Decimal("0")),
+            it_employer_contributions=deductions.get("it_employer_contributions", Decimal("0")),
+            it_employee_contributions=deductions.get("it_employee_contributions", Decimal("0")),
+            it_contributory_base=deductions.get("it_contributory_base", Decimal("0")),
+            it_contributory_capped=deductions.get("it_contributory_capped", False),
+            it_contributory_cap_cohort=deductions.get("it_contributory_cap_cohort"),
+            it_contributory_cap_amount=deductions.get("it_contributory_cap_amount", Decimal("0")),
+            it_contributory_cap_note=deductions.get("it_contributory_cap_note"),
+            it_inps_scope=deductions.get("it_inps_scope"),
+            it_inps_components=deductions.get("it_inps_components", []),
+            it_ivs_additional=deductions.get("it_ivs_additional", Decimal("0")),
+            it_fis_employee=deductions.get("it_fis_employee", Decimal("0")),
+            it_tfr_amount=deductions.get("it_tfr_amount", Decimal("0")),
+            it_tfr_gross_accrual=deductions.get("it_tfr_gross_accrual", Decimal("0")),
+            it_tfr_inps_offset=deductions.get("it_tfr_inps_offset", Decimal("0")),
+            it_tfr_destination=deductions.get("it_tfr_destination"),
+            it_tfr_routing_complete=deductions.get("it_tfr_routing_complete", False),
+            it_taxable_income=deductions.get("it_taxable_income", Decimal("0")),
+            it_irpef=deductions.get("it_irpef", Decimal("0")),
+            it_irpef_annual=deductions.get("it_irpef_annual", Decimal("0")),
+            it_irpef_gross_annual=deductions.get("it_irpef_gross_annual", Decimal("0")),
+            it_detrazione_lavoro=deductions.get("it_detrazione_lavoro", Decimal("0")),
+            it_wedge_additional_deduction=deductions.get(
+                "it_wedge_additional_deduction", Decimal("0")),
+            it_wedge_tax_free_sum=deductions.get("it_wedge_tax_free_sum", Decimal("0")),
+            it_wedge_band_pct=deductions.get("it_wedge_band_pct", Decimal("0")),
+            it_regional_tax_annual=deductions.get("it_regional_tax_annual", Decimal("0")),
+            it_municipal_tax_annual=deductions.get("it_municipal_tax_annual", Decimal("0")),
+            it_local_tax_withheld=deductions.get("it_local_tax_withheld", False),
+            it_addreg_saldo_withheld=deductions.get("it_addreg_saldo_withheld", Decimal("0")),
+            it_addcom_saldo_withheld=deductions.get("it_addcom_saldo_withheld", Decimal("0")),
+            it_addcom_acconto_withheld=deductions.get("it_addcom_acconto_withheld", Decimal("0")),
+            it_local_tax_withheld_amount=deductions.get("it_local_tax_withheld_amount", Decimal("0")),
+            it_contributory_minimum_applied=deductions.get("it_contributory_minimum_applied", False),
+            it_tax_domicile_comune=deductions.get("it_tax_domicile_comune"),
+            it_tax_domicile_region=deductions.get("it_tax_domicile_region"),
+            it_fringe_amount=deductions.get("it_fringe_amount", Decimal("0")),
+            it_fringe_child_declared=deductions.get("it_fringe_child_declared", False),
+            it_fringe_taxable=deductions.get("it_fringe_taxable", Decimal("0")),
+            it_fringe_ytd_after=deductions.get("it_fringe_ytd_after", Decimal("0")),
+            it_meal_voucher_taxable=deductions.get("it_meal_voucher_taxable", Decimal("0")),
+            it_conguaglio=deductions.get("it_conguaglio", False),
+            it_irpef_refund=deductions.get("it_irpef_refund", Decimal("0")),
+            it_wedge_recovery_now=deductions.get("it_wedge_recovery_now", Decimal("0")),
+            it_wedge_recovery_new=deductions.get("it_wedge_recovery_new", Decimal("0")),
+            it_wedge_recovery_outstanding_after=deductions.get("it_wedge_recovery_outstanding_after", Decimal("0")),
+            it_wedge_recovery_instalment_after=deductions.get("it_wedge_recovery_instalment_after", Decimal("0")),
+            it_addreg_saldo_determined=deductions.get("it_addreg_saldo_determined", Decimal("0")),
+            it_addcom_saldo_determined=deductions.get("it_addcom_saldo_determined", Decimal("0")),
+            it_addcom_credit_determined=deductions.get("it_addcom_credit_determined", Decimal("0")),
+            it_termination_surtax_withheld=deductions.get("it_termination_surtax_withheld", Decimal("0")),
+            it_ytd_after=deductions.get("it_ytd_after"),
+            it_employee_total=deductions.get("it_employee_total", Decimal("0")),
+            it_calculation_trace=deductions.get("it_calculation_trace"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

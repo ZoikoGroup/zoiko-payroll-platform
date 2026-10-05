@@ -77,7 +77,17 @@ class MissingComplianceConfigurationError(Exception):
 #        jurisdiction with zero existing orgs/employees/synced rows, and
 #        sweden.py defines no hardcoded statutory fallback — same
 #        day-one rationale as SG above.
-_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "HK"}
+# Countries whose statutory parameters have NO engine fallback: a missing
+# configured row raises MissingComplianceConfigurationError instead of silently
+# warning and substituting a hardcoded default (see the resolver below).
+# Each was added on the SAME day its jurisdiction landed, with zero
+# pre-existing organizations in that country — Sweden's entry notes this is
+# "exactly Singapore's situation", i.e. the gate is safe to enable from day one
+# and doing so later would only leave a window where a default was honoured.
+# Italy is the same case (ZP-IT-ENG-001 §30): no Italian packs, rates, registry
+# row or payroll runs exist, so flipping IT on at landing makes readiness — not
+# a default — the thing that keeps payroll honest.
+_VALIDATION_ENABLED_COUNTRIES: set[str] = {"IE", "SG", "SE", "IT", "HK"}
 
 # Per-country rollout switch for real YTD-accumulator-based caps (Canada
 # CPP/CPP2/EI's YMPE/YAMPE/MIE, per ZP-TAX-CA-2026-001 §10/§11 — "exact
