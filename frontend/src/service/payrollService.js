@@ -41,6 +41,10 @@ export const COMPLIANCE_COUNTRIES = [
   { code: "JM", name: "Jamaica" },
   { code: "BS", name: "Bahamas" },
   { code: "TT", name: "Trinidad and Tobago" },
+  // France (2026-09-24, ZP-FR-ENG-001) — Europe expansion.
+  { code: "FR", name: "France" },
+  // Ireland (2026-09-25, ZP-IE-ENG-001) — Europe expansion.
+  { code: "IE", name: "Ireland" },
 ];
 
 export const DEFAULT_COUNTRY = "IN";
@@ -1163,7 +1167,7 @@ export const applyExtractedRate = async ({ documentId, kind, row, countryCode = 
 // For real saved records, use getAttendanceRecords() or getAttendanceHistory().
 export const getEmployeeRoster = async (params = {}) => {
   try {
-    const employees = await getEmployees(params);
+    const employees = await api.get("/api/payroll/employees/roster", { params });
     const records = Array.isArray(employees) ? employees : [];
     // Add default attendance + compensation fields
     return records.map((emp) => ({
@@ -1220,6 +1224,64 @@ export const getAttendanceRecords = async (params = {}) => {
     return Array.isArray(res) ? res : res?.data || res?.items || [];
   } catch {
     return [];
+  }
+};
+
+// Paged attendance fetch. Hits /attendance/page, which returns an exact total
+// plus a server-computed hasMore — the plain list endpoint cannot express
+// either, which is why a client paging it has to keep re-fetching blindly.
+export const getAttendanceRecordsPaginated = async (params = {}, limit = 100, offset = 0) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/page", {
+      params: { ...params, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      // Span of the whole filtered set, not of this page. The History tab
+      // derives its working-days count from these, so dropping them made the
+      // span read zero no matter what range was selected.
+      firstDate: res?.firstDate ?? null,
+      lastDate: res?.lastDate ?? null,
+    };
+  } catch {
+    // A failed page must not look like "the end of the data", or the UI will
+    // silently stop loading. Report it as an error and let the caller decide.
+    return { items: [], total: 0, limit, offset, hasMore: false, firstDate: null, lastDate: null, error: true };
+  }
+};
+
+// Per-employee attendance aggregates for a range, paged server-side. The
+// Summary tab used to download every attendance row in range and count days
+// in the browser; this does the counting in the database.
+//
+// `search` is forwarded so the server matches every employee in the
+// organization, not only the ones on the page currently loaded in the browser.
+// `totals` is the org-wide sum across the whole filtered set: the stat cards
+// must not total just the loaded page, which under-reports as soon as there
+// is a second page.
+export const getAttendanceSummaryByEmployee = async (
+  { startDate, endDate, search, limit = 100, offset = 0 } = {}
+) => {
+  try {
+    const res = await api.get("/api/payroll/attendance/summary/by-employee", {
+      params: { startDate, endDate, search, limit, offset },
+    });
+    const items = Array.isArray(res) ? res : res?.data || res?.items || [];
+    return {
+      items: Array.isArray(items) ? items : [],
+      total: Number(res?.total ?? items?.length ?? 0) || 0,
+      limit: Number(res?.limit ?? limit) || limit,
+      offset: Number(res?.offset ?? offset) || 0,
+      hasMore: Boolean(res?.hasMore),
+      totals: res?.totals ?? null,
+    };
+  } catch {
+    return { items: [], total: 0, limit, offset, hasMore: false, totals: null, error: true };
   }
 };
 
@@ -1442,6 +1504,7 @@ export const ENTERPRISE_JURISDICTIONS = [
   { code: "AU", name: "Australia", flag: "🇦🇺", currency: "AUD", financialYear: "Jul 1 – Jun 30" },
   { code: "DE", name: "Germany", flag: "🇩🇪", currency: "EUR", financialYear: "Jan 1 – Dec 31" },
   { code: "CA", name: "Canada", flag: "🇨🇦", currency: "CAD", financialYear: "Jan 1 – Dec 31" },
+{ code: "FR", name: "France", flag: "FR", currency: "EUR", financialYear: "Jan 1 - Dec 31" },
 ];
 
 export const ENTERPRISE_STATUS_LABELS = {
@@ -2145,6 +2208,65 @@ export const calculateCaWsdrf = async (payload) => {
     period_end: payload.periodEnd,
     training_expenditure_override: payload.trainingExpenditureOverride || null,
   });
+};
+
+// ————— France (ZP-FR-ENG-001, 2026-09-24) ————
+// Org-facing surface: the employer opens its France DSN, follows the four
+// lifecycle signals (FR-032) and drives its own idempotent outbox
+// (FR-033). Authority data — PAS rates, establishment AT/MP rate packs,
+// governed effectif, employer profile — is Super Admin-owned and lives in
+// superAdminService (compliance/france/*), exactly as the backend splits
+// them.
+export const createFranceDsnSubmission = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-submissions", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const listFranceDsnSubmissionsForOrg = async (params = {}) => {
+  try {
+    return await api.get("/api/payroll/france/dsn-submissions", { params });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnSubmission = async (submissionId, payload) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-submissions/${submissionId}/status`, payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const createFranceDsnOutboxItem = async (payload) => {
+  try {
+    return await api.post("/api/payroll/france/dsn-outbox", payload);
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const transitionFranceDsnOutboxItem = async (itemId, status, lastError) => {
+  try {
+    return await api.put(`/api/payroll/france/dsn-outbox/${itemId}/status`, undefined, {
+      params: { status, last_error: lastError || null },
+    });
+  } catch (err) {
+    throw err;
+  }
+};
+
+export const getFranceReadinessForOrg = async (forPeriod) => {
+  try {
+    return await api.get("/api/payroll/france/readiness", {
+      params: { for_period: forPeriod || undefined },
+    });
+  } catch (err) {
+    throw err;
+  }
 };
 // ── Singapore IR21 tax clearance (hold / clearance / release) ──────────
 // Tenant-scoped on the server (the caller's own organization only);

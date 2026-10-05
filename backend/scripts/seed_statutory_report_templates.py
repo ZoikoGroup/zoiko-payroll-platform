@@ -1324,6 +1324,175 @@ def run():
             ],
         )
 
+        print("Seeding Puerto Rico Withholding + Social Security/Medicare + SINOT statement, per-employee...")
+        # Same "generic PER_EMPLOYEE statement, no bespoke generator"
+        # baseline every other Caribbean country got first — the real
+        # named Hacienda/SSA forms (499 R-1B, 499R-2/W-2PR, Form
+        # 940/941-equivalent) are deferred to a follow-up phase, same
+        # sequencing KY's own real-forms commit followed its own base
+        # country build by.
+        _seed_template(
+            db, template_key="PR-WITHHOLDING-STATEMENT", name="Withholding + Social Security/Medicare + SINOT Statement",
+            report_type="PR_WITHHOLDING_STATEMENT",
+            country="PR", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_hacienda_ein", "Hacienda EIN", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", None),
+                ]),
+                ("tax", "Hacienda Withholding", [
+                    ("tds", "Puerto Rico Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", None),
+                ]),
+                ("contributions", "Social Security / Medicare / SINOT (Employee)", [
+                    ("social_security", "Social Security (Employee)", "currency", "PAYSLIP_ITEM", "social_security", None),
+                    ("medicare", "Medicare (incl. Additional Medicare, Employee)", "currency", "PAYSLIP_ITEM", "medicare", None),
+                    ("state_disability_insurance", "SINOT (Employee)", "currency", "PAYSLIP_ITEM", "state_disability_insurance", None),
+                ]),
+                ("employer_contributions", "Social Security / Medicare / FUTA-equivalent / Unemployment / SINOT (Employer)", [
+                    ("employer_social_security", "Social Security (Employer)", "currency", "PAYSLIP_ITEM", "employer_social_security", None),
+                    ("employer_medicare", "Medicare (Employer)", "currency", "PAYSLIP_ITEM", "employer_medicare", None),
+                    ("employer_futa", "FUTA-equivalent (Employer)", "currency", "PAYSLIP_ITEM", "employer_futa", None),
+                    ("employer_sui", "DTRH Unemployment (Employer)", "currency", "PAYSLIP_ITEM", "employer_sui", None),
+                    ("employer_state_program_contributions", "SINOT (Employer)", "currency", "PAYSLIP_ITEM", "employer_state_program_contributions", None),
+                ]),
+            ],
+        )
+
+        print("Seeding Puerto Rico Form 499 R-1B (quarterly Hacienda withholding return, aggregate)...")
+        _seed_template(
+            db, template_key="PR-499R1B", name="Form 499 R-1B - Puerto Rico Quarterly Withholding Return", report_type="PR_499R1B",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_hacienda_ein", "Hacienda Employer Identification Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("employee_count", "Number of Employees", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+                ("withholding", "Wages & Withholding", [
+                    ("total_wages", "Total Wages Paid", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("total_pr_withholding", "Total Puerto Rico Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # service.generate_pr_499r1b independently sums real committed PR
+        # payslips only (never derives from these mapped source_columns
+        # directly) — see that function's own docstring for disclosed gaps
+        # (no deposit-category classification, no prior-period-correction
+        # deltas reflected yet).
+
+        print("Seeding federal Form 941 for Puerto Rico employers (FICA on PR wages, aggregate)...")
+        _seed_template(
+            db, template_key="PR-941", name="Form 941 - Employer's Quarterly Federal Tax Return (Puerto Rico)", report_type="PR_941",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information (Line 1 area)", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_ein", "Employer Identification Number (EIN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("line1_employee_count", "Line 1 - Number of Employees", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+                ("wages_tax", "Wages & Federal Tax (Line 2-3)", [
+                    ("line2_wages", "Line 2 - Wages, Tips, Other Compensation", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("line3_federal_tax_withheld", "Line 3 - Federal Income Tax Withheld", "currency", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — always $0, see generate_pr_941's own docstring
+                ]),
+                ("ss_medicare", "Social Security & Medicare (Line 5a/5c)", [
+                    ("line5a_ss_wages", "Line 5a - Taxable Social Security Wages (col. 1)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("line5a_ss_tax", "Line 5a - Social Security Tax (col. 2, both shares)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("line5c_medicare_wages", "Line 5c - Taxable Medicare Wages (col. 1)", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("line5c_medicare_tax", "Line 5c - Medicare Tax (col. 2, both shares, incl. Additional)", "currency", "PAYSLIP_ITEM", "medicare", "SUM_RUN"),
+                ]),
+                ("totals", "Totals (Line 6/12)", [
+                    ("line6_total_taxes_before_adjustments", "Line 6 - Total Taxes Before Adjustments", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                    ("line12_total_taxes_after_adjustments_and_credits", "Line 12 - Total Taxes After Adjustments and Credits", "currency", "PAYSLIP_ITEM", "social_security", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # Independent from US-941/generate_us_941 — see
+        # generate_pr_941's own docstring (Line 3 always $0: PR federal FIT
+        # applicability is a separate, undetermined employee-level fact).
+
+        print("Seeding federal Form 940 (FUTA-equivalent) for Puerto Rico employers, aggregate/annual...")
+        _seed_template(
+            db, template_key="PR-940", name="Form 940 - Employer's Annual Federal Unemployment (FUTA) Tax Return (Puerto Rico)", report_type="PR_940",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_ein", "Employer Identification Number (EIN)", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("futa", "FUTA-equivalent Wages & Tax", [
+                    ("total_payments", "Total Payments to All Employees", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("futa_taxable_wages", "Total Taxable FUTA-equivalent Wages ($7,000/employee cap)", "currency", "PAYSLIP_ITEM", "employer_futa", "SUM_RUN"),
+                    ("futa_tax_due", "FUTA-equivalent Tax (before deposits)", "currency", "PAYSLIP_ITEM", "employer_futa", "SUM_RUN"),
+                    ("employee_count", "Number of Employees Paid", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+            ],
+        )
+        # Independent from US-940/generate_us_940 — see generate_pr_940's
+        # own docstring.
+
+        print("Seeding Puerto Rico Form 499R-2/W-2PR (annual employee withholding statement, per-employee)...")
+        _seed_template(
+            db, template_key="PR-W2PR", name="Form 499R-2/W-2PR - Withholding Statement", report_type="PR_W2PR",
+            country="PR", reporting_year="2026", document_scope="PER_EMPLOYEE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_hacienda_ein", "Hacienda Employer Identification Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("employee_info", "Employee Information", [
+                    ("employee_name", "Employee Name", "text", "PAYROLL_EMPLOYEE", "name", None),
+                ]),
+                ("box_wages", "Wages & PR Tax Withheld", [
+                    ("box_wages", "Total Wages Paid", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                    ("box_pr_tax_withheld", "Puerto Rico Income Tax Withheld", "currency", "PAYSLIP_ITEM", "tds", "SUM_YTD"),
+                ]),
+                ("box_ss_medicare", "Social Security & Medicare", [
+                    ("box_ss_wages", "Social Security Wages (wage-base capped)", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                    ("box_ss_tax", "Social Security Tax Withheld", "currency", "PAYSLIP_ITEM", "social_security", "SUM_YTD"),
+                    ("box_medicare_wages", "Medicare Wages", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_YTD"),
+                    ("box_medicare_tax", "Medicare Tax Withheld (incl. Additional Medicare)", "currency", "PAYSLIP_ITEM", "medicare", "SUM_YTD"),
+                ]),
+                ("box_sinot", "SINOT", [
+                    ("box_sinot", "SINOT Withheld (Employee)", "currency", "PAYSLIP_ITEM", "state_disability_insurance", "SUM_YTD"),
+                ]),
+            ],
+        )
+        # Independent from US-W2/generate_us_w2 — see generate_pr_w2pr's
+        # own docstring for disclosed gaps (no Act 60 boxes, dependents/
+        # deduction-allowance detail not broken out).
+
+        print("Seeding Puerto Rico DTRH quarterly wage/contribution return (PR-020, aggregate)...")
+        _seed_template(
+            db, template_key="PR-DTRH-QUARTERLY", name="DTRH Quarterly Wage & Contribution Return", report_type="PR_DTRH_QUARTERLY",
+            country="PR", reporting_year="2026", document_scope="AGGREGATE",
+            components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_dtrh_account", "DTRH Employer Account Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("employee_count", "Number of Employees", "number", "PAYSLIP_ITEM", "gross_pay", None),  # placeholder — bespoke-computed
+                ]),
+                ("unemployment", "Unemployment Wages & Tax", [
+                    ("total_wages", "Total Wages Paid", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                    ("unemployment_taxable_wages", "Taxable Unemployment Wages ($7,000/employee cap)", "currency", "PAYSLIP_ITEM", "employer_sui", "SUM_RUN"),
+                    ("unemployment_tax_due", "DTRH Unemployment Tax Due", "currency", "PAYSLIP_ITEM", "employer_sui", "SUM_RUN"),
+                ]),
+                ("sinot", "SINOT Wages & Contributions", [
+                    ("sinot_taxable_wages", "Taxable SINOT Wages ($9,000/employee cap)", "currency", "PAYSLIP_ITEM", "state_disability_insurance", "SUM_RUN"),
+                    ("sinot_employee_contribution", "SINOT Employee Contribution", "currency", "PAYSLIP_ITEM", "state_disability_insurance", "SUM_RUN"),
+                    ("sinot_employer_contribution", "SINOT Employer Contribution", "currency", "PAYSLIP_ITEM", "employer_state_program_contributions", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # Independent from every US report_type — see
+        # generate_pr_dtrh_quarterly's own docstring for the disclosed
+        # this-quarter-only wage-base-capping simplification.
+
         print("Seeding Germany Payroll Summary (aggregate, per payroll run)...")
         # AGGREGATE, run-based — uses the fully generic
         # service.generate_report_from_template directly (no bespoke
@@ -1369,6 +1538,191 @@ def run():
         # would duplicate, not reuse, that existing architecture.
 
         seed_hong_kong(db)
+        # ------------------------------------------------------------------
+        # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) templates.
+        # ------------------------------------------------------------------
+        #
+        # All DRAFT, like every other template here: a Super Admin must
+        # review, Approve, Publish and Activate before an organization can
+        # generate against them.
+        #
+        # The per-head Irish figures (USC, PRSI by sub-class, MyFutureFund,
+        # LPT, the applied RPN) are read through the "PAYSLIP_ITEM_JSON"
+        # data source — ie_calculation_snapshot.<path> — because they are
+        # computed per employee but have no scalar PayslipItem column. They
+        # were being discarded entirely before that column existed, so these
+        # templates are the first thing in the product able to show them.
+        #
+        # NOT seeded: a ROS file-format submission itself. Revenue's
+        # published ROS file format / upload specification is external
+        # evidence not present in this repository, and inventing a field
+        # order or layout for it would be exactly the fabrication this
+        # module's own Germany/ELSTER comments above refuse. When that spec
+        # is available it needs its own transmission path (like DE's ELSTER
+        # subsystem note), not a field-mapped ReportTemplate.
+        _seed_template(
+            db, template_key="IE-ROS-EMP-CERT", name="ROS Employee PAYE Certificate",
+            report_type="IE_ROS_EMPLOYEE_CERT", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # The RPN actually applied is the reason this certificate can
+                # be reconciled against Revenue at all (IE-005/IE-045).
+                ("employee_info", "Employee & RPN Reference", [
+                    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+                    ("rpn_number", "RPN Number", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.rpn.rpn_number", None),
+                    ("paye_basis", "PAYE Basis (RPN / Emergency)", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.basis", None),
+                    ("tax_year", "Irish Tax Year", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.tax_year", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                ]),
+                ("tax", "PAYE", [
+                    ("total_paye", "PAYE Deducted", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                    ("standard_rate_pay", "PAYE Standard-Rate Pay", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.standard_rate_pay", None),
+                    ("higher_rate_pay", "PAYE Higher-Rate Pay", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.higher_rate_pay", None),
+                    ("tax_credit", "PAYE Tax Credit Applied", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.paye.tax_credit_applied", None),
+                ]),
+                ("usc", "Universal Social Charge", [
+                    ("total_usc", "USC Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.usc.amount", "SUM_RUN"),
+                ]),
+                ("prsi", "PRSI", [
+                    ("prsi_subclass", "PRSI Sub-Class", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.subclass", None),
+                    ("prsi_employee", "PRSI (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employee", "SUM_RUN"),
+                    ("prsi_employer", "PRSI (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employer", "SUM_RUN"),
+                    ("prsi_ax_credit", "PRSI AX Tapered Credit", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.ax_credit", None),
+                    ("prsi_weeks", "PRSI Contribution Weeks", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.contribution_weeks", None),
+                ]),
+                ("pension", "PRSC Additional Pension", [
+                    ("employee_prsc", "PRSC (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", "SUM_RUN"),
+                    ("employer_prsc", "PRSC (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_RUN"),
+                ]),
+                ("deductions", "Total Deductions", [
+                    ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", "SUM_RUN"),
+                    ("employee_statutory_total", "Total Employee Statutory Deductions", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.employee_total", "SUM_RUN"),
+                ]),
+                ("ytd", "Year-to-Date", [
+                    ("net_pay", "Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", "SUM_RUN"),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-ROS-PAYROLL", name="ROS Period Payroll Summary",
+            report_type="IE_ROS_PAYROLL", country="IE", reporting_year="2026",
+            document_scope="AGGREGATE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                    ("period_label", "Period", "text", "PAYROLL_RUN", "period_label", None),
+                    ("pay_date", "Pay Date", "date", "PAYROLL_RUN", "pay_date", None),
+                ]),
+                ("earnings", "Earnings", [
+                    ("total_gross_pay", "Total Gross Pay", "currency", "PAYSLIP_ITEM", "gross_pay", "SUM_RUN"),
+                ]),
+                ("tax", "PAYE", [
+                    ("total_paye", "PAYE Deducted", "currency", "PAYSLIP_ITEM", "tds", "SUM_RUN"),
+                ]),
+                ("usc", "Universal Social Charge", [
+                    ("total_usc", "USC Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.usc.amount", "SUM_RUN"),
+                ]),
+                ("prsi", "PRSI", [
+                    ("prsi_employee", "PRSI (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employee", "SUM_RUN"),
+                    ("prsi_employer", "PRSI (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employer", "SUM_RUN"),
+                ]),
+                ("pension", "PRSC Additional Pension", [
+                    ("employee_prsc", "PRSC (Employee)", "currency", "PAYSLIP_ITEM", "employee_pension", "SUM_RUN"),
+                    ("employer_prsc", "PRSC (Employer)", "currency", "PAYSLIP_ITEM", "employer_pension", "SUM_RUN"),
+                ]),
+                ("totals", "Period Totals", [
+                    ("total_deductions", "Total Deductions", "currency", "PAYSLIP_ITEM", "total_deductions", "SUM_RUN"),
+                    ("total_net", "Total Net Pay", "currency", "PAYSLIP_ITEM", "net_pay", "SUM_RUN"),
+                ]),
+            ],
+        )
+        # PRSI, USC, MyFutureFund and LPT are each reported PER EMPLOYEE —
+        # every one of their distinguishing attributes (PRSI sub-class and
+        # weekly reckonable band, the NAERSA-notified MFF status, whether
+        # LPT was instructed on that employee's RPN) is a property of an
+        # individual, and summing any of them across a run is meaningless.
+        # That is also why their currency fields carry no aggregation here,
+        # matching DE-LSTB's own convention for PER_EMPLOYEE templates. The
+        # period-level roll-up is IE-ROS-PAYROLL above, which is AGGREGATE.
+        _seed_template(
+            db, template_key="IE-PRSI-SCHEDULE", name="PRSI Return Schedule",
+            report_type="IE_PRSI_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("prsi", "PRSI by Sub-Class and Band", [
+                    ("prsi_subclass", "PRSI Sub-Class", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.subclass", None),
+                    ("prsi_weekly_reckonable", "PRSI Weekly Reckonable Pay", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.weekly_reckonable", None),
+                    ("prsi_employee", "PRSI (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employee", None),
+                    ("prsi_ax_credit", "PRSI AX Tapered Credit", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.ax_credit", None),
+                    ("prsi_weeks", "PRSI Contribution Weeks", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.contribution_weeks", None),
+                ]),
+                ("totals", "PRSI Totals", [
+                    ("prsi_employer", "PRSI (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.prsi.employer", None),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-USC-SCHEDULE", name="USC Return Schedule",
+            report_type="IE_USC_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("usc", "Universal Social Charge", [
+                    ("total_usc", "USC Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.usc.amount", None),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-MFF-SCHEDULE", name="MyFutureFund Contribution Schedule",
+            report_type="IE_MFF_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                ("myfuturefund", "MyFutureFund Contributions and Status", [
+                    ("mff_status", "NAERSA-notified Status", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.status", None),
+                    ("mff_contributory", "Contributory", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.contributory", None),
+                    ("mff_employee", "MyFutureFund (Employee)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.employee", None),
+                    ("mff_employer", "MyFutureFund (Employer)", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.employer", None),
+                ]),
+                # Informational only. The 0.5% State contribution is
+                # administered by the State/NAERSA and is never deducted from
+                # pay (IE-018) — kept in its own component so it cannot be
+                # mistaken for a payroll deduction or land in a totals block.
+                ("myfuturefund_state", "MyFutureFund State Top-Up (informational — not a deduction)", [
+                    ("mff_state_topup", "State Top-Up", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.myfuturefund.state_topup", None),
+                ]),
+            ],
+        )
+        _seed_template(
+            db, template_key="IE-LPT-SCHEDULE", name="Local Property Tax Deduction Schedule",
+            report_type="IE_LPT_SCHEDULE", country="IE", reporting_year="2026",
+            document_scope="PER_EMPLOYEE", components=[
+                ("employer_info", "Employer Information", [
+                    ("employer_name", "Employer Name", "text", "EMPLOYER_PROFILE", "name", None),
+                    ("employer_tax_no", "Revenue PAYE Reference / Employer Number", "text", "EMPLOYER_PROFILE", "tax_no", None),
+                ]),
+                # LPT is deducted only where Revenue instructed it on the RPN
+                # (IE-003) — both the amount and the "instructed" flag are
+                # carried so a return can show why a head has no LPT line.
+                ("lpt", "Local Property Tax", [
+                    ("lpt_instructed", "Instructed on RPN", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.lpt.instructed", None),
+                    ("lpt_rate_pct", "Instructed Rate %", "text", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.lpt.rate_pct", None),
+                    ("lpt_amount", "LPT Deducted", "currency", "PAYSLIP_ITEM_JSON", "ie_calculation_snapshot.lpt.amount", None),
+                ]),
+            ],
+        )
 
         print("\nDone. All templates are in Draft status — a Super Admin still needs to review, Approve, Publish, and Activate each one before Organizations can generate against it.")
     finally:

@@ -9,11 +9,12 @@ constants, and policy/models.py's column defaults. All of it now lives
 here — DO NOT add a new hardcoded Decimal/threshold/rate anywhere else in
 the payroll module; add it to this file and import it from there.
 
-Plain Python only (Decimal/dict/int) — deliberately zero SQLAlchemy/ORM
-imports, no app.database — so this file stays safely importable from the
-engine layer (which is itself deliberately isolated from the ORM, see
-engine/countries/shared.py's own docstring), the service layer, and the
-policy model layer alike.
+Plain Python only (Decimal/dict/int/date) — deliberately zero
+SQLAlchemy/ORM imports, no app.database — so this file stays safely
+importable from the engine layer (which is itself deliberately isolated
+from the ORM, see engine/countries/shared.py's own docstring), the
+service layer, and the policy model layer alike. `date` is used only by
+row-dated statutory content (Ireland's 1 October 2026 PRSI step change).
 
 Every name below is imported back into its ORIGINAL file under its exact
 original name (e.g. `from .hardcoded_defaults import _US_STANDARD_DEDUCTION`
@@ -26,6 +27,7 @@ since Python's import binding makes an imported name a real attribute of
 the importing module regardless of where it was originally defined.
 """
 
+from datetime import date
 from decimal import Decimal
 
 
@@ -426,6 +428,192 @@ _CONTRIBUTION_RATES_BY_COUNTRY = {
         dict(component_key="db_income_cap", label="Defined Benefit Income Cap",
              employee_share="—", employer_share="—", total="A$131,250",
              flat_amount=Decimal("131250.00"), sort_order=12),
+    ],
+    # Ireland (ZP-IE-ENG-001). Unlike the "AU"/"DE"/"CA" lists above, these
+    # rows are NOT a representative display sample - every one of them is a key
+    # engine/countries/ireland.py actually reads out of rate_map, and the
+    # engine's _Pack.assert_complete() hard-blocks the whole run
+    # (IE_STATUTORY_CONTENT_NOT_CONFIGURED) if any is missing. The values here
+    # mirror the canonical IE_2026_CONTENT catalog in
+    # app/modules/payroll/engine/countries/ireland.py's own test fixture
+    # (backend/tests/test_engine_ireland.py::ie_pack) and must be kept equal
+    # to it.
+    #
+    # PRSI stepped up on 1 October 2026 (IE-003: selected by PAY DATE, never by
+    # earning period), so the six PRSI rate rows carry per-row effective dates
+    # rather than living in two packs. tax_resolver.py already filters
+    # ContributionRate rows by effective_from/effective_to, so a single
+    # IE-2026 pack resolves both windows correctly.
+    "IE": [
+        # --- PAYE (statutory rate, percentage) --------------------------------
+        dict(component_key="ie_tax_standard_pct", label="PAYE Standard Rate",
+             employee_share="20.0%", employer_share="—", total="20.0%",
+             employee_rate_pct=Decimal("20.00"), sort_order=1),
+        dict(component_key="ie_tax_higher_pct", label="PAYE Higher Rate",
+             employee_share="40.0%", employer_share="—", total="40.0%",
+             employee_rate_pct=Decimal("40.00"), sort_order=2),
+        # --- USC (bands are annual; the engine divides them by periods/yr) -----
+        dict(component_key="ie_usc_band1_limit", label="USC Band 1 Annual Threshold",
+             employee_share="—", employer_share="—", total="€12,012",
+             flat_amount=Decimal("12012.00"), sort_order=3),
+        dict(component_key="ie_usc_band1_pct", label="USC Band 1 Rate",
+             employee_share="0.5%", employer_share="—", total="0.5%",
+             employee_rate_pct=Decimal("0.50"), sort_order=4),
+        dict(component_key="ie_usc_band2_limit", label="USC Band 2 Annual Width",
+             employee_share="—", employer_share="—", total="€16,688",
+             flat_amount=Decimal("16688.00"), sort_order=5),
+        dict(component_key="ie_usc_band2_pct", label="USC Band 2 Rate",
+             employee_share="2.0%", employer_share="—", total="2.0%",
+             employee_rate_pct=Decimal("2.00"), sort_order=6),
+        dict(component_key="ie_usc_band3_limit", label="USC Band 3 Annual Width",
+             employee_share="—", employer_share="—", total="€41,344",
+             flat_amount=Decimal("41344.00"), sort_order=7),
+        dict(component_key="ie_usc_band3_pct", label="USC Band 3 Rate",
+             employee_share="3.0%", employer_share="—", total="3.0%",
+             employee_rate_pct=Decimal("3.00"), sort_order=8),
+        dict(component_key="ie_usc_above_pct", label="USC Rate Above All Bands",
+             employee_share="8.0%", employer_share="—", total="8.0%",
+             employee_rate_pct=Decimal("8.00"), sort_order=9),
+        # --- PRSI weekly reckonable-pay band ceilings (Class A only) -----------
+        dict(component_key="ie_prsi_band_a0_max", label="PRSI Class A0 Weekly Ceiling",
+             employee_share="—", employer_share="—", total="€352.00",
+             flat_amount=Decimal("352.00"), sort_order=10),
+        dict(component_key="ie_prsi_band_ax_max", label="PRSI Class AX Weekly Ceiling",
+             employee_share="—", employer_share="—", total="€424.00",
+             flat_amount=Decimal("424.00"), sort_order=11),
+        dict(component_key="ie_prsi_band_al_max", label="PRSI Class AL Weekly Ceiling",
+             employee_share="—", employer_share="—", total="€552.00",
+             flat_amount=Decimal("552.00"), sort_order=12),
+        # --- PRSI A0 - employee share is nil; only the employer pays ----------
+        dict(component_key="ie_prsi_a0_ee_pct", label="PRSI A0 Employee Rate",
+             employee_share="0.0%", employer_share="—", total="0.0%",
+             employee_rate_pct=Decimal("0.00"), sort_order=13),
+        dict(component_key="ie_prsi_a0_er_pct", label="PRSI A0 Employer Rate",
+             employee_share="—", employer_share="9.00%", total="9.00%",
+             employer_rate_pct=Decimal("9.00"), sort_order=14),
+        # --- PRSI AX / AL / A1, in force to 30 September 2026 ----------------
+        dict(component_key="ie_prsi_ax_ee_pct", label="PRSI AX Employee Rate (to 30 Sep 2026)",
+             employee_share="4.2%", employer_share="—", total="4.2%",
+             employee_rate_pct=Decimal("4.20"), sort_order=15,
+             effective_from=date(2026, 1, 1), effective_to=date(2026, 9, 30)),
+        dict(component_key="ie_prsi_ax_er_pct", label="PRSI AX Employer Rate (to 30 Sep 2026)",
+             employee_share="—", employer_share="9.00%", total="9.00%",
+             employer_rate_pct=Decimal("9.00"), sort_order=16,
+             effective_from=date(2026, 1, 1), effective_to=date(2026, 9, 30)),
+        dict(component_key="ie_prsi_al_ee_pct", label="PRSI AL Employee Rate (to 30 Sep 2026)",
+             employee_share="4.2%", employer_share="—", total="4.2%",
+             employee_rate_pct=Decimal("4.20"), sort_order=17,
+             effective_from=date(2026, 1, 1), effective_to=date(2026, 9, 30)),
+        dict(component_key="ie_prsi_al_er_pct", label="PRSI AL Employer Rate (to 30 Sep 2026)",
+             employee_share="—", employer_share="9.00%", total="9.00%",
+             employer_rate_pct=Decimal("9.00"), sort_order=18,
+             effective_from=date(2026, 1, 1), effective_to=date(2026, 9, 30)),
+        dict(component_key="ie_prsi_a1_ee_pct", label="PRSI A1 Employee Rate (to 30 Sep 2026)",
+             employee_share="4.2%", employer_share="—", total="4.2%",
+             employee_rate_pct=Decimal("4.20"), sort_order=19,
+             effective_from=date(2026, 1, 1), effective_to=date(2026, 9, 30)),
+        dict(component_key="ie_prsi_a1_er_pct", label="PRSI A1 Employer Rate (to 30 Sep 2026)",
+             employee_share="—", employer_share="11.25%", total="11.25%",
+             employer_rate_pct=Decimal("11.25"), sort_order=20,
+             effective_from=date(2026, 1, 1), effective_to=date(2026, 9, 30)),
+        # --- PRSI AX / AL / A1, in force from 1 October 2026 (IE-003) --------
+        dict(component_key="ie_prsi_ax_ee_pct", label="PRSI AX Employee Rate (from 1 Oct 2026)",
+             employee_share="4.35%", employer_share="—", total="4.35%",
+             employee_rate_pct=Decimal("4.35"), sort_order=21,
+             effective_from=date(2026, 10, 1)),
+        dict(component_key="ie_prsi_ax_er_pct", label="PRSI AX Employer Rate (from 1 Oct 2026)",
+             employee_share="—", employer_share="9.15%", total="9.15%",
+             employer_rate_pct=Decimal("9.15"), sort_order=22,
+             effective_from=date(2026, 10, 1)),
+        dict(component_key="ie_prsi_al_ee_pct", label="PRSI AL Employee Rate (from 1 Oct 2026)",
+             employee_share="4.35%", employer_share="—", total="4.35%",
+             employee_rate_pct=Decimal("4.35"), sort_order=23,
+             effective_from=date(2026, 10, 1)),
+        dict(component_key="ie_prsi_al_er_pct", label="PRSI AL Employer Rate (from 1 Oct 2026)",
+             employee_share="—", employer_share="9.15%", total="9.15%",
+             employer_rate_pct=Decimal("9.15"), sort_order=24,
+             effective_from=date(2026, 10, 1)),
+        dict(component_key="ie_prsi_a1_ee_pct", label="PRSI A1 Employee Rate (from 1 Oct 2026)",
+             employee_share="4.35%", employer_share="—", total="4.35%",
+             employee_rate_pct=Decimal("4.35"), sort_order=25,
+             effective_from=date(2026, 10, 1)),
+        dict(component_key="ie_prsi_a1_er_pct", label="PRSI A1 Employer Rate (from 1 Oct 2026)",
+             employee_share="—", employer_share="11.40%", total="11.40%",
+             employer_rate_pct=Decimal("11.40"), sort_order=26,
+             effective_from=date(2026, 10, 1)),
+        # --- PRSI AX tapered credit (weekly reckonable pay in (lower, upper]) --
+        dict(component_key="ie_prsi_ax_credit_lower", label="PRSI AX Credit Taper Lower Bound",
+             employee_share="—", employer_share="—", total="€352.01",
+             flat_amount=Decimal("352.01"), sort_order=27),
+        dict(component_key="ie_prsi_ax_credit_max", label="PRSI AX Maximum Credit",
+             employee_share="—", employer_share="—", total="€12.00",
+             flat_amount=Decimal("12.00"), sort_order=28),
+        # --- MyFutureFund (IE-018/IE-020) -------------------------------------
+        dict(component_key="ie_mff_ee_pct", label="MyFutureFund Employee Rate",
+             employee_share="1.5%", employer_share="—", total="1.5%",
+             employee_rate_pct=Decimal("1.50"), sort_order=29),
+        dict(component_key="ie_mff_er_pct", label="MyFutureFund Employer Rate",
+             employee_share="—", employer_share="1.5%", total="1.5%",
+             employer_rate_pct=Decimal("1.50"), sort_order=30),
+        # The 0.5% State contribution is administered by NAERSA, NOT deducted
+        # from pay (IE-018) - the engine reports it separately as
+        # ie_mff_state_topup and never includes it in ie_employee_total.
+        dict(component_key="ie_mff_state_topup_pct", label="MyFutureFund State Contribution (not deducted)",
+             employee_share="— (State pays)", employer_share="—", total="0.5% (State)",
+             employee_rate_pct=Decimal("0.50"), sort_order=31),
+        dict(component_key="ie_mff_earnings_threshold", label="MyFutureFund Annual Earnings Threshold",
+             employee_share="—", employer_share="—", total="€80,000",
+             flat_amount=Decimal("80000.00"), sort_order=32),
+        # --- Local Property Tax (IE-003: deducted only when Revenue instructs) --
+        dict(component_key="ie_lpt_exemption_threshold", label="LPT Annual Exemption Threshold",
+             employee_share="—", employer_share="—", total="€54,000",
+             flat_amount=Decimal("54000.00"), sort_order=33),
+        # --- Emergency PAYE basis (IE-008/IE-031) -----------------------------
+        dict(component_key="ie_emergency_standard_cutoff_initial", label="Emergency Weekly Standard-Rate Cutoff (Initial Week)",
+             employee_share="—", employer_share="—", total="€633.00",
+             flat_amount=Decimal("633.00"), sort_order=34),
+        dict(component_key="ie_emergency_weekly_cutoff_increment", label="Emergency Weekly Cutoff Increment",
+             employee_share="—", employer_share="—", total="€52.00",
+             flat_amount=Decimal("52.00"), sort_order=35),
+        dict(component_key="ie_emergency_weeks_per_increment", label="Emergency Weeks per Cutoff Increment",
+             employee_share="—", employer_share="—", total="1 week",
+             flat_amount=Decimal("1.00"), sort_order=36),
+        dict(component_key="ie_emergency_weekly_tax_credit", label="Emergency Weekly Tax Credit",
+             employee_share="—", employer_share="—", total="€63.46",
+             flat_amount=Decimal("63.46"), sort_order=37),
+        # --- National Minimum Wage by age band (IE-035) -----------------------
+        dict(component_key="ie_nmw_hourly_under_18", label="NMW Hourly — Under 18",
+             employee_share="—", employer_share="—", total="€9.91",
+             flat_amount=Decimal("9.91"), sort_order=38),
+        dict(component_key="ie_nmw_hourly_18", label="NMW Hourly — Age 18",
+             employee_share="—", employer_share="—", total="€11.32",
+             flat_amount=Decimal("11.32"), sort_order=39),
+        dict(component_key="ie_nmw_hourly_19", label="NMW Hourly — Age 19",
+             employee_share="—", employer_share="—", total="€12.74",
+             flat_amount=Decimal("12.74"), sort_order=40),
+        dict(component_key="ie_nmw_hourly_20_plus", label="NMW Hourly — Age 20 and Over",
+             employee_share="—", employer_share="—", total="€14.15",
+             flat_amount=Decimal("14.15"), sort_order=41),
+        # --- Statutory Sick Pay (IE-036) ---------------------------------------
+        dict(component_key="ie_sick_leave_days", label="Sick Leave Benefit Days",
+             employee_share="—", employer_share="—", total="5 days",
+             flat_amount=Decimal("5.00"), sort_order=42),
+        dict(component_key="ie_sick_leave_pct", label="Sick Leave Benefit Rate",
+             employee_share="70.0%", employer_share="—", total="70.0%",
+             employee_rate_pct=Decimal("70.00"), sort_order=43),
+        dict(component_key="ie_sick_leave_daily_cap", label="Sick Leave Daily Cap",
+             employee_share="—", employer_share="—", total="€110.00",
+             flat_amount=Decimal("110.00"), sort_order=44),
+        dict(component_key="ie_sick_leave_service_weeks", label="Sick Leave Service Requirement (Weeks)",
+             employee_share="—", employer_share="—", total="13 weeks",
+             flat_amount=Decimal("13.00"), sort_order=45),
+        # --- Reference single-person figures (IE-005 fallback presentation) ---
+        dict(component_key="ie_reference_standard_band_single", label="Reference Standard-Rate Band (Single)",
+             employee_share="—", employer_share="—", total="€44,000",
+             flat_amount=Decimal("44000.00"), sort_order=46),
+        dict(component_key="ie_reference_credit_single", label="Reference Tax Credit (Single)",
+             employee_share="—", employer_share="—", total="€2,000",
+             flat_amount=Decimal("2000.00"), sort_order=47),
     ],
     "DE": [
         dict(component_key="pension", label="Pension Insurance (Rentenversicherung)",
@@ -3585,3 +3773,117 @@ _POLICY_DEFAULT_GRACE_TIME_MINUTES = 10
 
 # PolicyOvertimeRule default.
 _POLICY_DEFAULT_MINIMUM_OVERTIME_MINUTES = 30
+
+
+# ═════════════════════════════════════════════════════════════════════
+# France (ZP-FR-ENG-001, 2026-09-24) — 2026 statutory content FALLBACKS,
+# consumed by engine/countries/france.py via `rate_map` + this module.
+# Every rate amount explicitly quoted by the spec carries its section
+# reference; the few universally-known standard-regime employer values
+# that the spec deliberately leaves to "authoritative 2026 content"
+# (§5/§9) are flagged PENDING_G1_SIGN_OFF and MUST be source-hash signed
+# by a French payroll specialist at gate G1 before any production France
+# payroll (FR-027). None of these numbers ever beats a configured
+# ContributionRate row.
+# ═════════════════════════════════════════════════════════════════════
+
+# PASS / PMSS (§2, S1): annual €48,060 / monthly €4,005.
+_FR_PASS_ANNUAL = Decimal("48060")
+_FR_PASS_MONTHLY = Decimal("4005")
+_FR_QUADRUPLE_PASS_ANNUAL = Decimal("192240")
+
+# SMIC (§2, S3): 1 Jan 2026 €12.02/h (monthly 1,823.03, annual 21,876.64);
+# revalued 1 Jun 2026 to €12.31/h and €1,867.02/month. The RGDU reference
+# is FROZEN at the 1-Jan value for all of 2026 (décret n° 2026-509 of
+# 12 Jun 2026, BOSS communiqué 5 Jun 2026) — hence the separate frozen
+# annual/hourly constants used by the Relief engine only (FR-024).
+_FR_SMIC_2026_HOURLY_JAN_MAY = Decimal("12.02")
+_FR_SMIC_2026_MONTHLY_JAN_MAY = Decimal("1823.03")
+_FR_SMIC_2026_ANNUAL_FROZEN = Decimal("21876.64")
+_FR_SMIC_2026_HOURLY_FROZEN = Decimal("12.02")
+_FR_SMIC_2026_HOURLY_JUN = Decimal("12.31")
+_FR_SMIC_2026_MONTHLY_JUN = Decimal("1867.02")
+_FR_SMIC_2026_FULLTIME_HOURS = Decimal("151.67")   # 35 h × 52 / 12
+
+# Old-age (§5): capped EE 6.90% / ER 8.55% within PASS; uncapped
+# EE 0.40% / ER 2.11% on the applicable total base.
+_FR_VIEILLESSE_CAPPED_EE = Decimal("6.90")
+_FR_VIEILLESSE_CAPPED_ER = Decimal("8.55")
+_FR_VIEILLESSE_UNCAPPED_EE = Decimal("0.40")
+_FR_VIEILLESSE_UNCAPPED_ER = Decimal("2.11")
+
+# Unemployment / AGS (§2/§8): employer 4.00% / 0.25% within 4×PASS.
+_FR_CHOMAGE_ER = Decimal("4.00")
+_FR_AGS_ER = Decimal("0.25")
+
+# Health (§5 — "loaded from authoritative 2026 content"; standard-regime
+# values well-known but NOT numerically quoted by the spec:
+# PENDING_G1_SIGN_OFF).
+_FR_SANTE_ER_STANDARD = Decimal("13.00")
+_FR_SANTE_ER_REDUCED = Decimal("7.00")               # <11 employees
+_FR_SANTE_REDUCED_2_5_SMIC_BAND = True               # banded: reduced up to 2.5×SMIC, standard above
+
+# Family allowances (§5 — content; do NOT inherit obsolete reduced-rate
+# assumptions per the spec's own warning; PENDING_G1_SIGN_OFF).
+_FR_FAMILLE_ER = Decimal("5.25")
+
+# CSA — employer solidarity-autonomy contribution (content;
+# PENDING_G1_SIGN_OFF).
+_FR_CSA_ER_DEFAULT = Decimal("0.50")
+
+# FNAL (§9/F6, S14): 0.10% within PASS (<50 employees), 0.50% total (50+).
+_FR_FNAL_ER_0P10 = Decimal("0.10")
+_FR_FNAL_ER_0P50 = Decimal("0.50")
+
+# CFP / formation (§9): 0.55% (<11) / 1.00% (11+), within PASS.
+_FR_CFP_ER_0P55 = Decimal("0.55")
+_FR_CFP_ER_1P00 = Decimal("1.00")
+
+# Apprenticeship (§9): 0.59% main share + 0.09% balance, total base,
+# outside Alsace-Moselle.
+_FR_APPRENTISSAGE_ER = Decimal("0.59")
+_FR_APPRENTISSAGE_BALANCE_ER = Decimal("0.09")
+
+# Agirc-Arrco (§7): T1 7.87% (ER 4.72 / EE 3.15) on 0–1 PSS; T2 21.59%
+# (ER 12.95 / EE 8.64) on 1–8 PSS; CEG T1 2.15% (1.29/0.86), CEG T2
+# 2.70% (1.62/1.08); CET 0.35% (0.21/0.14) when remuneration exceeds T1
+# (FR-021); Apec 0.06% (0.036/0.024) up to 4 PSS for cadres.
+_FR_AGIRC_T1_EE = Decimal("3.15")
+_FR_AGIRC_T1_ER = Decimal("4.72")
+_FR_AGIRC_T2_EE = Decimal("8.64")
+_FR_AGIRC_T2_ER = Decimal("12.95")
+_FR_CEG_T1_EE = Decimal("0.86")
+_FR_CEG_T1_ER = Decimal("1.29")
+_FR_CEG_T2_EE = Decimal("1.08")
+_FR_CEG_T2_ER = Decimal("1.62")
+_FR_CET_EE = Decimal("0.14")
+_FR_CET_ER = Decimal("0.21")
+_FR_APEC_EE = Decimal("0.024")
+_FR_APEC_ER = Decimal("0.036")
+
+# CSG / CRDS (§6): CSG 9.20% split 6.80% deductible / 2.40% non-deductible
+# (FR-017); CRDS 0.50%; 98.25% base factor on qualifying salary within the
+# 4×PASS annual boundary (§2/FR-016 — never applied as a universal
+# "98.25% × gross" shortcut).
+_FR_CSG_EE_DEDUCTIBLE = Decimal("6.80")
+_FR_CSG_EE_NONDEDUCTIBLE = Decimal("2.40")
+_FR_CRDS_EE = Decimal("0.50")
+_FR_CSG_BASE_FACTOR_98_25 = Decimal("98.25")
+
+# RGDU (§8, décret n° 2026-509 of 12 Jun 2026): coefficient =
+# Tmin + Tdelta × [(1/2) × (3 × SMIC_annuel / rémunération_annuelle − 1)]^P,
+# P = 1.75; envelope extends to 3×SMIC; Tdelta by FNAL class
+# (0.3781 <50 / 0.3821 50+); 2026 SMIC reference frozen at 1-Jan.
+_FR_RGDU_TMIN = Decimal("0.02")
+_FR_RGDU_TDELTA_FNAL_0P10 = Decimal("0.3781")
+_FR_RGDU_TDELTA_FNAL_0P50 = Decimal("0.3821")
+_FR_RGDU_POWER = Decimal("1.75")
+_FR_RGDU_ELIGIBILITY_MULTIPLE = Decimal("3")
+
+# PAS (§4, S7/S8): short-contract base abatement €748 (2026); apprentice
+# PAS-exemption threshold €21,876 annualised (legally-eligible remuneration
+# only — the resolver confirms conditions, the engine only applies the
+# abatement/exemption). The neutral-grid BRACKETS are authority content
+# selected by service.py Phase 7, never hardcoded here (FR-009/FR-008).
+_FR_PAS_SHORT_CONTRACT_ABATEMENT = Decimal("748")
+_FR_PAS_APPRENTICE_THRESHOLD = Decimal("21876")

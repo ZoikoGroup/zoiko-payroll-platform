@@ -513,6 +513,12 @@ def _pending_decisions(governance: dict) -> list:
     ais = governance.get("aisSubmissionModeSetting") or {}
     hotfix = governance.get("hotfixPolicy") or {}
     scope = governance.get("controlScope") or {}
+    # D3 asks whether these controls widen to EVERY jurisdiction. A country
+    # that opts in under its own specification (Sweden, ZP-SE-ENG-001 §14/§16)
+    # does not decide D3: every set still holds SG and none is platform-wide,
+    # so SG_ONLY stays the value in force and the opt-ins are named.
+    opt_ins = sorted({c for v in scope.values() for c in v} - {"SG"})
+    sg_only = bool(scope) and all("SG" in v for v in scope.values())
     return [
         {"key": "D1", "label": "IR8A / AIS submission mode offered by the product",
          "options": ["EXPORT_ONLY", "API_SUBMISSION", "BOTH"],
@@ -525,11 +531,9 @@ def _pending_decisions(governance: dict) -> list:
          "effectIfDifferent": "SG_HOTFIX_POLICY is a code constant — a recorded different policy needs a reviewed code change",
          "status": BUSINESS_DECISION},
         {"key": "D3", "label": "Scope of the Singapore-only governance controls", "options": ["SG_ONLY", "ALL_COUNTRIES"],
-         "inForce": "SG_ONLY" if _d3_sg_only(scope) else scope,
-         "inForceValue": "SG_ONLY" if _d3_sg_only(scope) else None,
-         # New jurisdictions built fail-closed that opted in from day one (as
-         # SG itself did) — D3 decides whether EXISTING countries join.
-         "dayOneOptIns": sorted({c for v in (scope or {}).values() for c in v} & set(DAY_ONE_OPT_IN_COUNTRIES)),
+         "inForce": (("SG_ONLY" + (f" (plus per-country opt-ins: {', '.join(opt_ins)})" if opt_ins else ""))
+                     if sg_only else scope),
+         "inForceValue": "SG_ONLY" if sg_only else None,
          "effectIfDifferent": "ALL_COUNTRIES widens the opt-in control sets to every jurisdiction — a separate "
                               "cross-jurisdiction change with its own review",
          "status": BUSINESS_DECISION},
@@ -563,17 +567,6 @@ def _external_dependencies(rates: dict, activation: dict, sections: list) -> lis
         deps.append({"key": "gates", "label": "Production gates G1–G8 evidence", "authority": "CPF Board / IRAS / MOM / PDPC / reviewers",
                      "status": EVIDENCE_REQUIRED})
     return deps
-
-
-# Jurisdictions built after Singapore that opt into the stricter pack
-# controls from day one (ZP-HK-ENG-001: Hong Kong). Their presence does not
-# change owner decision D3, which is about extending the controls to the
-# EXISTING jurisdictions (IN / US / UK / ...).
-DAY_ONE_OPT_IN_COUNTRIES = ("HK",)
-
-
-def _d3_sg_only(scope) -> bool:
-    return bool(scope) and all("SG" in v and set(v) <= {"SG", *DAY_ONE_OPT_IN_COUNTRIES} for v in scope.values())
 
 
 def build_statutory_summary(facts: dict) -> dict:

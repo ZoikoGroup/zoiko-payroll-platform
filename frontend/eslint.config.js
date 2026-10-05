@@ -8,7 +8,9 @@ export default [
   { ignores: ["dist", "node_modules"] },
   js.configs.recommended,
   {
-    files: ["**/*.{js,jsx}"],
+    // .mjs included: the plain-Node test scripts under scripts/ run in Node,
+    // so they need globals.node (console, process) as well as globals.browser.
+    files: ["**/*.{js,jsx,mjs}"],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: "module",

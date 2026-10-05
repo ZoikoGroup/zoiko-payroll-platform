@@ -27,7 +27,7 @@ from app.modules.payroll.policy.service import get_active_policy
 
 # The jurisdictions this onboarding flow supports. Kept here, not in the
 # engine, because it's onboarding/reference metadata, not calculation logic.
-SUPPORTED_COUNTRY_CODES = ["IN", "US", "UK", "AU", "DE", "CA"]
+SUPPORTED_COUNTRY_CODES = ["IN", "US", "UK", "AU", "DE", "CA", "FR", "IE"]
 
 ACTIVATION_BLOCKED_MESSAGE = (
     "Enterprise Payroll cannot be enabled until all selected jurisdictions are properly configured."
@@ -37,7 +37,8 @@ ACTIVATION_BLOCKED_MESSAGE = (
 def _country_label(code: str) -> str:
     return {
         "US": "United States", "UK": "United Kingdom", "AU": "Australia",
-        "DE": "Germany", "CA": "Canada", "IN": "India",
+        "DE": "Germany", "CA": "Canada", "IN": "India", "FR": "France",
+        "IE": "Ireland",
     }.get(code, code)
 
 

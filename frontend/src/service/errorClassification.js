@@ -58,3 +58,16 @@ export function describeLoadError(err) {
     networkError,
   };
 }
+
+// Renderable string for whatever a catch-branch stored via describeLoadError()
+// (an object) — or a bare string/anything else a caller may have set. The
+// France compliance tabs used to interpolate the whole describeLoadError
+// object straight into JSX, which React rejects: "Objects are not valid as a
+// React child (found: object with keys {message, errorCode, trace, …})".
+export function loadErrorText(err) {
+  if (typeof err === "string") return err;
+  if (!err) return "Failed to load.";
+  if (err.schemaUnavailable) return "Not available - database migration pending. Contact an administrator.";
+  if (err.networkError) return "Could not reach the backend server. Check your network connection.";
+  return err.message || "Failed to load.";
+}

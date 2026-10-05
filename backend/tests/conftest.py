@@ -69,6 +69,24 @@ def _reset_rollout_switches():
 
 
 @pytest.fixture(autouse=True)
+def _isolated_redis_cache():
+    """Start and end every test with no memoized Redis client and a closed
+    circuit breaker.
+
+    get_redis_client() memoizes its client in a module global, and a
+    connection failure opens a 30s breaker. Neither is undone by
+    monkeypatch: a test that sets REDIS_URL and reaches the cache (e.g. an
+    eager Celery task resolving tax config) would otherwise leave a real
+    client to a dead host, and an open breaker, for every test after it.
+    """
+    from app.core import cache as cache_module
+
+    cache_module.reset_redis_client()
+    yield
+    cache_module.reset_redis_client()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_smtp(monkeypatch):
     """Guarantee no test ever opens a real SMTP connection.
 

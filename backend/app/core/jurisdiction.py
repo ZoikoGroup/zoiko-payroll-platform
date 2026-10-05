@@ -45,6 +45,25 @@ REGISTRATION_COUNTRIES = [
     "Jamaica",
     "Bahamas",
     "Trinidad and Tobago",
+    # Puerto Rico (2026-09-23) — dual-jurisdiction (local Hacienda + an
+    # independently-computed federal-equivalent layer), architecturally a
+    # sibling of the 7 Caribbean entries above, not a US-dependent variant.
+    # See engine/countries/puerto_rico.py's own module docstring.
+    "Puerto Rico",
+    # France (2026-09-24, ZP-FR-ENG-001) — Europe expansion, launch slot #10,
+    # metropolitan private-sector wedge. SIREN/SIRET establishment-aware
+    # collection keys; engine/countries/france.py wired into _COUNTRY_CALC.
+    "France",
+    "Ireland",
+    # Sweden (ZP-SE-ENG-001) — effective-dated country package, priority
+    # market #24. Applicability-first resolution (tax status → tax table/
+    # column → social insurance → age cohort → payment date → income type →
+    # CBA/plan → reporting period) in engine/countries/sweden.py; Draft packs
+    # SE-PAYROLL-2026/2027 seeded by scripts/seed_sweden_canonical_packs.py. Production
+    # registration still requires an Active canonical compliance pack, which
+    # in turn requires the §16/§37 readiness gates (evidence, certification,
+    # four-eyes) — adding the name here never activates Sweden by itself.
+    "Sweden",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -285,6 +304,120 @@ JURISDICTION_TAX_SCHEMAS = {
             },
         ],
     },
+    "PR": {
+        "label": "Hacienda Employer Identification Number (EIN) / SUTA Account",
+        "currency": "USD",
+        "fields": [
+            {
+                "key": "hacienda_ein",
+                "label": "Hacienda Employer Identification Number",
+                "pattern": r"^\d{9}$",
+                "example": "660123456",
+                "primary": True,
+            },
+            {
+                "key": "dtrh_suta_account",
+                "label": "DTRH SUTA Account Number",
+                "pattern": r"^[A-Za-z0-9-]{4,20}$",
+                "example": "SUTA-000123",
+                "primary": False,
+            },
+        ],
+    },
+    # France (2026-09-24, ZP-FR-ENG-001 §11). Primary identifier is the
+    # SIREN, mirrored into tax_no; the SIRET is the establishment-level key
+    # France breaks its calculation on (FR-002) and is stored on the
+    # EmployerFranceProfile / EstablishmentRatePack records, kept here too so
+    # registration never loses it. SIRET = SIREN + 5-digit NAC nic.
+    "FR": {
+        "label": "SIREN / SIRET / TVA intracommunautaire",
+        "currency": "EUR",
+        "fields": [
+            {
+                "key": "siren",
+                "label": "SIREN",
+                "pattern": r"^\d{9}$",
+                "example": "552100554",
+                "primary": True,
+            },
+            {
+                "key": "siret",
+                "label": "SIRET",
+                "pattern": r"^\d{14}$",
+                "example": "55210055400021",
+                "primary": False,
+            },
+            {
+                "key": "vat_intracom",
+                "label": "TVA intracommunautaire",
+                "pattern": r"^FR[0-9]{11}$",
+                "example": "FR23392106162",
+                "primary": False,
+            },
+        ],
+    },
+    "IE": {
+        "label": "Revenue PAYE / PRSI Registration / ROS Sub-User",
+        "currency": "EUR",
+        "fields": [
+            {
+                "key": "paye_registration_number",
+                "label": "Revenue PAYE Registration Number",
+                "pattern": r"^[0-9A-Z]{6,12}$",
+                "example": "1234567",
+                "primary": True,
+            },
+            {
+                "key": "prsi_registration_number",
+                "label": "PRSI Registration Number",
+                "pattern": r"^[0-9A-Z]{6,12}$",
+                "example": "7654321",
+                "primary": False,
+            },
+            {
+                "key": "ros_sub_user_reference",
+                "label": "ROS Sub-User Reference",
+                "pattern": r"^[A-Za-z0-9._-]{3,64}$",
+                "example": "ZOIKO-IE-ROS-01",
+                "primary": False,
+            },
+            {
+                "key": "eircode",
+                "label": "Eircode",
+                "pattern": r"^[A-Z][0-9]{2}\s?[A-Z0-9]{4}$",
+                "example": "D02 AF30",
+                "primary": False,
+            },
+        ],
+    },
+    # Sweden (ZP-SE-ENG-001 §13 "Sweden employer setup" / §11
+    # EmployerRegistration). The organisation number is the primary tax ID
+    # (mirrored into Organization.tax_no like every other country); the tax
+    # account reference is Skatteverket's employer tax-account key used for
+    # AGI settlement (spec §10 "Payment"). Personal identity numbers are
+    # deliberately NOT collected at employer registration (spec §11
+    # EmployerRegistration = org no + tax account; §14 data minimisation):
+    # a worker's personnummer lives only on the employee record, masked.
+    "SE": {
+        "label": "Organisation number / Tax account",
+        "currency": "SEK",
+        "fields": [
+            {
+                "key": "employer_org_number",
+                "label": "Employer organisation number (organisationsnummer)",
+                "pattern": r"^\d{6}-?\d{4}$",
+                "example": "556123-4567",
+                "primary": True,
+            },
+            {
+                "key": "tax_account_reference",
+                "label": "Skatteverket tax account reference",
+                "pattern": r"^[0-9A-Z-]{4,30}$",
+                "example": "5561234567-0001",
+                "primary": False,
+            },
+        ],
+    },
     # Singapore (ZP-SG-ENG-001 §9 Employer Registration panels A–E) — schema
     # only. Deliberately NOT in REGISTRATION_COUNTRIES above: the spec's
     # production gates G1–G8 must be evidenced before any Singapore
@@ -405,6 +538,10 @@ COUNTRY_NAME_TO_CODE = {
     "the bahamas": "BS",
     "trinidad and tobago": "TT",
     "trinidad & tobago": "TT",
+    "puerto rico": "PR",
+    "france": "FR",
+    "ireland": "IE",
+    "sweden": "SE",
     "singapore": "SG",
     "hong kong": "HK",
     "hong kong sar": "HK",
@@ -424,6 +561,10 @@ CODE_TO_COUNTRY_NAME = {
     "JM": "Jamaica",
     "BS": "Bahamas",
     "TT": "Trinidad and Tobago",
+    "PR": "Puerto Rico",
+    "FR": "France",
+    "IE": "Ireland",
+    "SE": "Sweden",
     "SG": "Singapore",
     "HK": "Hong Kong",
 }

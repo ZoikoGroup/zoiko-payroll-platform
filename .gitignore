@@ -19,6 +19,7 @@ docs/extracted/
 frontend/assist_images/
 claude
 claudeignore
+Jur_doc/
 
 # Scratch/diagnostic scripts (read-only analysis, not application code)
 backend/scripts/_audit_*.py

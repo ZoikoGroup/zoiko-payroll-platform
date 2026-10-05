@@ -290,7 +290,10 @@ def test_readiness_lists_the_open_owner_decisions_with_the_value_in_force(db):
     assert set(decisions) == {"D1", "D2", "D3"}
     assert all(d["status"] == "BUSINESS_DECISION_REQUIRED" for d in decisions.values())
     assert decisions["D2"]["inForce"] == service.SG_HOTFIX_POLICY
-    assert decisions["D3"]["inForce"] == "SG_ONLY"
+    # Sweden opts into the same controls under its own spec (ZP-SE-ENG-001);
+    # that is a per-country opt-in, not the ALL_COUNTRIES widening D3 asks about.
+    assert decisions["D3"]["inForceValue"] == "SG_ONLY"
+    assert decisions["D3"]["inForce"].startswith("SG_ONLY")
 
 
 def test_external_dependencies_are_derived_from_the_configuration(db):

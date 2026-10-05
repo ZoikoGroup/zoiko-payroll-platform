@@ -12,6 +12,27 @@ export const REGISTRATION_COUNTRIES = [
   // already does for any country absent from that map.
   "Barbados", "Cayman Islands", "Dominican Republic", "Guyana", "Jamaica",
   "Bahamas", "Trinidad and Tobago",
+  // Puerto Rico (2026-09-23) — dual-jurisdiction, but architecturally a
+  // sibling of the 7 Caribbean entries above (country-level only, no
+  // state/province division), not a US-dependent variant.
+  "Puerto Rico",
+  // France (2026-09-24, ZP-FR-ENG-001) - Europe expansion. Has a real
+  // region list below (18 regions incl. overseas d-partements), unlike the
+  // country-level Caribbean entries.
+  "France",
+  // Ireland (2026-09-25, ZP-IE-ENG-001) - Europe expansion. PAYE, PRSI,
+  // USC, LPT and the national minimum wage are all administered nationally
+  // by Revenue / the Department of Social Protection with no devolved payroll
+  // variation, so no statutory content ever varies by province. The
+  // pre-existing Connacht/Leinster/Munster/Ulster entry in
+  // STATES_BY_COUNTRY below therefore stays purely an address/province
+  // selector. Europe/Dublin is already in TIMEZONES_BY_COUNTRY below.
+  "Ireland",
+  // Sweden (2026-09-30, ZP-SE-ENG-001) — mirrors backend
+  // REGISTRATION_COUNTRIES. Country-level for payroll: the tax table follows
+  // the worker's residence municipality (a worker fact, SE-002), never the
+  // county, so Sweden deliberately has no STATES_BY_COUNTRY entry below.
+  "Sweden",
 ];
 
 const STATES_BY_COUNTRY = {
@@ -95,7 +116,16 @@ const STATES_BY_COUNTRY = {
     "Provence-Alpes-Côte d'Azur", "Guadeloupe", "Martinique", "Guyane",
     "La Réunion", "Mayotte",
   ],
-  "Ireland": ["Connacht", "Leinster", "Munster", "Ulster"],
+  // Ireland deliberately has NO entry (ZP-IE-ENG-001). Connacht,
+  // Leinster, Munster and Ulster are real provinces, but none of PAYE, USC,
+  // PRSI, MyFutureFund, LPT or the NMW is administered by province, and
+  // Revenue's RPN is issued per PPSN nationally. Offering them here would
+  // have implied a statutory state dimension that does not exist, and would
+  // have pushed users toward jurisdiction_state values the Ireland engine
+  // has no rate resolution for. Omitting the key makes
+  // getStatesForCountryName("Ireland") return [] and Ireland resolve as
+  // country-level, matching how every Ireland pack is stored
+  // (jurisdiction_state = NULL).
   "Netherlands": [
     "Drenthe", "Flevoland", "Friesland", "Gelderland", "Groningen", "Limburg",
     "North Brabant", "North Holland", "Overijssel", "South Holland", "Utrecht",
@@ -219,12 +249,9 @@ const STATES_BY_COUNTRY = {
     "Al-Baha", "Al-Jouf", "Asir", "Eastern Province", "Hail", "Jazan", "Madinah",
     "Makkah", "Najran", "Northern Borders", "Qassim", "Riyadh", "Tabuk",
   ],
-  "Sweden": [
-    "Blekinge", "Dalarna", "Gävleborg", "Gotland", "Halland", "Jämtland",
-    "Jönköping", "Kalmar", "Kronoberg", "Norrbotten", "Örebro", "Östergötland",
-    "Skåne", "Södermanland", "Stockholm", "Uppsala", "Värmland", "Västerbotten",
-    "Västernorrland", "Västmanland", "Västra Götaland",
-  ],
+  // Sweden deliberately has NO entry (ZP-SE-ENG-001 SE-002): counties
+  // (län) are not a payroll dimension — the tax table follows the worker's
+  // residence municipality, captured on the employee, never a region here.
   "Thailand": [
     "Amnat Charoen", "Ang Thong", "Ayutthaya", "Bangkok", "Chachoengsao",
     "Chaiyaphum", "Chanthaburi", "Chiang Mai", "Chiang Rai", "Chonburi",
@@ -310,6 +337,7 @@ const TIMEZONES_BY_COUNTRY = {
   "Barbados": ["America/Barbados"],
   "Cayman Islands": ["America/Cayman"],
   "Dominican Republic": ["America/Santo_Domingo"],
+  "Puerto Rico": ["America/Puerto_Rico"],
   "Guyana": ["America/Guyana"],
   "Jamaica": ["America/Jamaica"],
   "Bahamas": ["America/Nassau"],

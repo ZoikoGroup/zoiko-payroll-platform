@@ -862,4 +862,4 @@ def test_every_hkg_table_and_column_is_created_by_the_migration():
         for col in table.columns:
             if col.name.startswith("hkg_") and not name.startswith("hkg_"):
                 assert f"'{col.name}'" in src, f"{name}.{col.name}"
-    assert "down_revision: Union[str, Sequence[str], None] = '445abd6a9083'" in src
+    assert "down_revision: Union[str, Sequence[str], None] = 'e8f1a2b3c4d5'" in src

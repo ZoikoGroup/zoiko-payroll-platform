@@ -268,10 +268,11 @@ def test_f2_other_countries_keep_checker_activation(db):
 
 
 def test_f2_opt_in_is_singapore_only():
+    """F2 is opt-in per country: Singapore, plus Sweden under ZP-SE-ENG-001
+    §14 (four-eyes). No other country is silently widened."""
     from app.modules.payroll.service import _APPROVER_NOT_ACTIVATOR_COUNTRIES
 
-    # Hong Kong (ZP-HK-ENG-001) opted in from day one — still no EXISTING country (owner decision D3).
-    assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == ("SG", "HK")
+    assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == ("SG", "SE", "HK")
 
 
 # ══ F3 — 2026 / 2027 pack effective periods ════════════════════════════════
