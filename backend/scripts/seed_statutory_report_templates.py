@@ -38,10 +38,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.database import SessionLocal
 from app.modules.payroll import service
 from app.modules.payroll.engine.jurisdictions.singapore import statutory_summary as sg_catalog
-from app.modules.payroll.models import ReportTemplate
+from app.modules.payroll.models import ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField
 from app.modules.payroll.schemas import (
     ReportTemplateUpsert, ReportTemplateComponentUpsert, ReportTemplateFieldUpsert, FilingCalendarUpsert,
 )
+
+
+def _same(a, b):
+    return (None if a == "" else a) == (None if b == "" else b)
+
+
+def _existing_template_rows(db, template):
+    """The template's components keyed by component_key, and its fields keyed
+    by (component_id, field_key). Two queries."""
+    components = {c.component_key: c for c in
+                  db.query(ReportTemplateComponent).filter(ReportTemplateComponent.report_template_id == template.id)}
+    fields = {}
+    if components:
+        ids = [c.id for c in components.values()]
+        for f in db.query(ReportTemplateComponentField).filter(ReportTemplateComponentField.component_id.in_(ids)):
+            fields[(f.component_id, f.field_key)] = f
+    return components, fields
 
 
 def _seed_template(db, *, template_key, name, report_type, country, reporting_year, document_scope, components, state=None,
@@ -74,22 +91,46 @@ def _seed_template(db, *, template_key, name, report_type, country, reporting_ye
     if existing is not None and existing.status != "Draft":
         print(f"  SKIP {template_key} v{existing.version} — already {existing.status} (id={existing.id}); not re-seeding.")
         return existing
-
-    template = service.upsert_report_template(
-        db, ReportTemplateUpsert(
-            templateKey=template_key, name=name, reportType=report_type,
-            jurisdictionCountry=country, jurisdictionState=state, reportingYear=reporting_year, documentScope=document_scope,
-            changeSummary="Seeded via scripts/seed_statutory_report_templates.py",
-            description=description, regulatoryAuthority=regulatory_authority, effectiveFrom=effective_from,
-            sourceReferences=source_references,
-        ), actor_id=None,
-    )
-    for sort_order, (component_key, label, fields) in enumerate(components):
-        component = service.upsert_report_component(
-            db, template.id, ReportTemplateComponentUpsert(componentKey=component_key, label=label, sortOrder=sort_order),
-            actor_id=None,
+    # Only rows that are missing or differ from this definition are written.
+    # Each write still goes through the same validated service upsert (Draft-
+    # only editability, component allow-list, field validation, audit), but
+    # an unchanged template / component / field is not re-upserted: doing so
+    # cost one commit plus several round trips per row, so a re-run against a
+    # remote database took minutes per template and wrote an audit row for
+    # every no-op.
+    expected = {"name": name, "report_type": report_type, "jurisdiction_country": country, "jurisdiction_state": state,
+                "reporting_year": reporting_year, "document_scope": document_scope, "description": description,
+                "regulatory_authority": regulatory_authority, "effective_from": effective_from,
+                "source_references": source_references}
+    have_components, have_fields = _existing_template_rows(db, existing) if existing is not None else ({}, {})
+    writes = 0
+    if existing is not None and all(_same(getattr(existing, col), val) for col, val in expected.items()):
+        template = existing
+    else:
+        template = service.upsert_report_template(
+            db, ReportTemplateUpsert(
+                templateKey=template_key, name=name, reportType=report_type,
+                jurisdictionCountry=country, jurisdictionState=state, reportingYear=reporting_year, documentScope=document_scope,
+                changeSummary="Seeded via scripts/seed_statutory_report_templates.py",
+                description=description, regulatoryAuthority=regulatory_authority, effectiveFrom=effective_from,
+                sourceReferences=source_references,
+            ), actor_id=None,
         )
+        writes += 1
+    for sort_order, (component_key, label, fields) in enumerate(components):
+        component = have_components.get(component_key)
+        if component is None or not _same(component.label, label) or component.sort_order != sort_order:
+            component = service.upsert_report_component(
+                db, template.id, ReportTemplateComponentUpsert(componentKey=component_key, label=label, sortOrder=sort_order),
+                actor_id=None,
+            )
+            writes += 1
         for field_sort_order, (field_key, field_label, field_type, data_source_kind, source_column, aggregation) in enumerate(fields):
+            field = have_fields.get((component.id, field_key))
+            if field is not None and field.sort_order == field_sort_order and all(_same(getattr(field, col), val) for col, val in (
+                    ("label", field_label), ("field_type", field_type), ("data_source_kind", data_source_kind),
+                    ("source_column", source_column), ("aggregation", aggregation))):
+                continue
             service.upsert_report_field(
                 db, component.id, ReportTemplateFieldUpsert(
                     fieldKey=field_key, label=field_label, fieldType=field_type,
@@ -97,7 +138,11 @@ def _seed_template(db, *, template_key, name, report_type, country, reporting_ye
                     sortOrder=field_sort_order,
                 ), actor_id=None,
             )
-    print(f"  seeded {template_key} v{template.version} (id={template.id}, status={template.status})")
+            writes += 1
+    if existing is not None and writes == 0:
+        print(f"  unchanged {template_key} v{template.version} (id={template.id}, Draft); already up to date.")
+    else:
+        print(f"  seeded {template_key} v{template.version} (id={template.id}, status={template.status}, {writes} row(s) written)")
     return template
 
 
@@ -1781,7 +1826,7 @@ def seed_hong_kong(db):
         description=_HK_DISCLOSURE, regulatory_authority="Inland Revenue Department (IRD)",
         effective_from=date(2025, 4, 1),
         source_references="IRD PAM (employer) — annual employer's return for the year of assessment ending "
-                          "31 March. Field map computed by service.generate_hong_kong_bir56a; no official "
+                          "31 March. Field map computed by hong_kong_service.generate_hong_kong_bir56a; no official "
                           "BIR56A XML layout is certified (G2).",
         components=[
             _hk_employer,
@@ -1805,7 +1850,7 @@ def seed_hong_kong(db):
         description=_HK_DISCLOSURE + " PER_EMPLOYEE, so the shared certificate PDF renders the employee's own copy.",
         regulatory_authority="Inland Revenue Department (IRD)", effective_from=date(2025, 4, 1),
         source_references="IRD PAM — the employee's annual return for the year of assessment ending 31 March. "
-                          "Field map computed by service.generate_hong_kong_ir56b from the employee's "
+                          "Field map computed by hong_kong_service.generate_hong_kong_ir56b from the employee's "
                           "committed HK payslips and the HK_EARNING_CLASS pack rows.",
         components=[
             _hk_employer,
@@ -1858,7 +1903,7 @@ def seed_hong_kong(db):
             description=_HK_DISCLOSURE, regulatory_authority="Inland Revenue Department (IRD)",
             effective_from=date(2025, 4, 1),
             source_references="IRD PAM — the employee's notification for this event. Field map computed by "
-                              "service.generate_hong_kong_ir56_notification from the reporting case, which "
+                              "hong_kong_service.generate_hong_kong_ir56_notification from the reporting case, which "
                               "hk_service builds from committed payroll.",
             components=_hk_notification_identity + [
                 ("event", _event_label, [
@@ -1881,7 +1926,7 @@ def seed_hong_kong(db):
                                       "deduction — net pay is unchanged and the money stays owed to the employee.",
         regulatory_authority="Inland Revenue Department (IRD)", effective_from=date(2025, 4, 1),
         source_references="IRD PAM 46(e) — the departure notification and the one-month tax-clearance hold. "
-                          "Field map computed by service.generate_hong_kong_ir56_notification.",
+                          "Field map computed by hong_kong_service.generate_hong_kong_ir56_notification.",
         components=_hk_notification_identity + [
             ("event", "Departure Details", [
                 ("form_type", "Form", "text", "PAYSLIP_ITEM", "gross_pay", None),
@@ -1909,7 +1954,7 @@ def seed_hong_kong(db):
                                       "statement is the employer's input to its own eMPF submission.",
         regulatory_authority="MPFA / eMPF platform", effective_from=date(2026, 1, 1),
         source_references="MPFA Mandatory Contributions — Employees. Field map computed by "
-                          "service.generate_hong_kong_empf_remittance from the prepared eMPF submission.",
+                          "hong_kong_service.generate_hong_kong_empf_remittance from the prepared eMPF submission.",
         components=[
             _hk_employer,
             ("contributions", "MPF Contributions", [
@@ -1943,7 +1988,7 @@ def seed_hong_kong(db):
                     "voluntary-contribution subsystem exists.",
         regulatory_authority="MPFA (employee record)", effective_from=date(2026, 1, 1),
         source_references="MPFA Mandatory Contributions — Employees. Field map computed by "
-                          "service.generate_hong_kong_mpf_contribution_record from the employee's committed "
+                          "hong_kong_service.generate_hong_kong_mpf_contribution_record from the employee's committed "
                           "HK payslips, including the statutory pack pinned on each payslip's tax_rule_snapshot.",
         components=[
             _hk_employer,
@@ -1978,8 +2023,8 @@ def seed_hong_kong(db):
                     "final wages, annual leave pay and holiday pay. NOT a filing — nothing is transmitted.",
         regulatory_authority="Labour Department (employee document)", effective_from=date(2026, 1, 1),
         source_references="Labour Department Concise Guide ch.11 (SP / LSP) and Abolition of the MPF Offsetting "
-                          "Arrangement. Field map computed by service.generate_hong_kong_termination_statement "
-                          "from the approved HkgTerminationResult (evidence hash included).",
+                          "Arrangement. Field map computed by hong_kong_service.generate_hong_kong_termination_statement "
+                          "from the approved HongKongTerminationResult (evidence hash included).",
         components=[
             _hk_employer,
             ("employee_info", "Employee Information", [

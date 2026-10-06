@@ -36,6 +36,7 @@ from app.modules.super_admin.schemas import (
     HkConfigRowUpdate,
     HkNewVersionRequest, HkSoftwareApprovalTransition, HkEmpfConfigurationCreate, HkRetentionProposal, HkReasonBody,
     HkServiceRegistryTransition,
+    ServiceRegistryTransition,
     SgServiceRegistryResponse,
     SgServiceRegistryTransition,
     SgEvidenceReview,
@@ -443,6 +444,28 @@ def get_singapore_statutory_summary(
     from app.modules.payroll import service as payroll_service
 
     return payroll_service.get_sg_statutory_summary(db, as_of)
+
+
+@router.get(
+    "/compliance/jurisdictions/{country}/statutory-summary",
+    summary="Read-only: a jurisdiction's statutory configuration / readiness summary (SG, HK) — the per-country URLs "
+            "are aliases; each country's document keeps its own shape",
+)
+def get_jurisdiction_statutory_summary(
+    country: str,
+    as_of: Optional[date] = Query(None, description="Point-in-time date (Singapore; default: today)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.core.exceptions import NotFoundException
+    from app.modules.payroll import jurisdiction_hooks, service as payroll_service
+
+    code = (country or "").upper()
+    if code == "SG":
+        return SgpStatutoryAdminSummaryResponse.model_validate(payroll_service.get_sg_statutory_summary(db, as_of))
+    if jurisdiction_hooks.has_module(code):
+        return jurisdiction_hooks.call(code, "statutory_summary", db)
+    raise NotFoundException("statutory summary", country)
 
 
 @router.get(
@@ -2199,16 +2222,33 @@ def transition_sg_service_registry(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    return _jurisdiction_registry_step(db, "SG", payload.availability, payload.reason, current_user.id)
+
+
+def _jurisdiction_registry_step(db: Session, country: str, availability: str, reason: str, actor_id: int):
     from app.modules.payroll import service as payroll_service
 
-    row = payroll_service.transition_sg_service_registry(db, payload.availability, payload.reason,
-                                                         actor_id=current_user.id)
+    row = payroll_service.transition_jurisdiction_service_registry(db, country, availability, reason, actor_id=actor_id)
     return SgServiceRegistryResponse(country=row.country, availability=row.availability, updatedAt=row.updated_at)
+
+
+@router.post(
+    "/compliance/jurisdictions/{country}/service-registry", response_model=SgServiceRegistryResponse,
+    summary="Governed registry step for a jurisdiction (SG, HK): AVAILABLE (refused unless every readiness requirement "
+            "is met, re-checked server-side) or PLANNED. Audited, reason required. The per-country URLs are aliases.",
+)
+def transition_jurisdiction_service_registry(
+    country: str,
+    payload: ServiceRegistryTransition,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    return _jurisdiction_registry_step(db, country, payload.availability, payload.reason, current_user.id)
 
 
 @router.put(
     "/compliance/source-artifacts/{id}/supersede", response_model=SourceArtifactResponse, response_model_by_alias=True,
-    summary="Singapore gate / decision evidence: mark this artifact superseded by a same-tag replacement (kept, audited)",
+    summary="Singapore / Hong Kong governed evidence: mark this artifact superseded by its replacement (kept, audited)",
 )
 def supersede_source_artifact(
     id: int,
@@ -2218,7 +2258,7 @@ def supersede_source_artifact(
 ):
     from app.modules.payroll import service as payroll_service
 
-    row = payroll_service.supersede_sg_gate_evidence(db, id, payload.replacementId, actor_id=current_user.id)
+    row = payroll_service.supersede_governed_evidence(db, id, payload.replacementId, actor_id=current_user.id)
     return SourceArtifactResponse.model_validate(row).model_copy(update={"hasFile": bool(row.file_path)})
 
 
@@ -3821,9 +3861,9 @@ from app.modules.payroll.schemas import HKCalculationPreviewRequest  # noqa: E40
 @router.get("/compliance/hong-kong/statutory-summary",
             summary="Read-only: Hong Kong packs, sources, release gates G1–G7, certification items and blockers")
 def get_hong_kong_statutory_summary(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    return hk_service.statutory_summary(db)
+    return hong_kong_service.statutory_summary(db)
 
 
 @router.post(
@@ -3836,71 +3876,68 @@ def transition_hk_service_registry(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
-    from app.modules.payroll import hk_governance
-
-    row = hk_governance.transition_hk_service_registry(db, payload.availability, payload.reason, actor_id=current_user.id)
-    return SgServiceRegistryResponse(country=row.country, availability=row.availability, updatedAt=row.updated_at)
+    return _jurisdiction_registry_step(db, "HK", payload.availability, payload.reason, current_user.id)
 
 
 @router.get("/compliance/hong-kong/report-templates/compare",
             summary="Read-only: field / component / metadata diff of two Hong Kong report templates")
 def compare_hong_kong_report_templates(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_governance
+    from app.modules.payroll import hong_kong_service
 
-    return hk_governance.compare_report_templates(db, from_id, to_id)
+    return hong_kong_service.compare_report_templates(db, from_id, to_id)
 
 
 @router.get("/compliance/hong-kong/configuration/versions",
             summary="HK statutory versions with their state (current active / next published / future draft / past / superseded / retired)")
 def hong_kong_configuration_versions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
 
-    return hk_configuration.versions(db)
+    return hong_kong_service.versions(db)
 
 
 @router.get("/compliance/hong-kong/configuration/packs/{pack_row_id}",
             summary="HK statutory configuration of one pack, grouped by domain (value, unit, effective dates, source, hash, consumer)")
 def hong_kong_configuration_domains(pack_row_id: int, current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
 
-    return hk_configuration.domains(db, pack_row_id)
+    return hong_kong_service.domains(db, pack_row_id)
 
 
 @router.get("/compliance/hong-kong/configuration/resolution",
             summary="Why is this version selected? The pack and exact-year templates HK payroll uses on a date")
 def hong_kong_configuration_resolution(on: date = Query(...), current_user=Depends(get_current_super_admin),
                                        db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
 
-    return hk_configuration.explain_resolution(db, on)
+    return hong_kong_service.explain_resolution(db, on)
 
 
 @router.get("/compliance/hong-kong/configuration/compare",
             summary="Row-level diff of two HK statutory versions (rates and slabs)")
 def hong_kong_configuration_compare(from_id: int = Query(..., alias="from"), to_id: int = Query(..., alias="to"),
                                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
 
-    return hk_configuration.compare(db, from_id, to_id)
+    return hong_kong_service.compare(db, from_id, to_id)
 
 
 @router.put("/compliance/hong-kong/configuration/rows/{kind}/{row_id}",
             summary="Governed edit of one HK statutory row (editable packs only; source document + reason required; audited)")
 def hong_kong_configuration_update_row(kind: str, row_id: int, payload: HkConfigRowUpdate,
                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
 
-    return hk_configuration.update_row(db, kind, row_id, payload.model_dump(exclude_none=True), current_user.id)
+    return hong_kong_service.update_row(db, kind, row_id, payload.model_dump(exclude_none=True), current_user.id)
 
 
 @router.post("/compliance/hong-kong/configuration/packs/{pack_row_id}/new-version",
              summary="Create a Draft copy of an HK statutory pack (the change / rollback path — never an in-place edit)")
 def hong_kong_configuration_new_version(pack_row_id: int, payload: HkNewVersionRequest,
                                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
 
-    pack = hk_configuration.new_version(db, pack_row_id, payload.version, payload.reason, current_user.id)
+    pack = hong_kong_service.new_version(db, pack_row_id, payload.version, payload.reason, current_user.id)
     return {"id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status}
 
 
@@ -3909,96 +3946,99 @@ def hong_kong_configuration_new_version(pack_row_id: int, payload: HkNewVersionR
 @router.get("/compliance/hong-kong/ird-software-approval",
             summary="The IRD software-approval register (internal validation is never IRD approval)")
 def hong_kong_ird_software_approval(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.software_approval(db)
+    return hong_kong_service.software_approval(db)
 
 
 @router.post("/compliance/hong-kong/ird-software-approval/transition",
              summary="Record an IRD software-approval step from the IRD's own documents (audited)")
 def hong_kong_ird_software_approval_transition(payload: HkSoftwareApprovalTransition,
                                                current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
     data = payload.model_dump(exclude_none=True)
-    return hk_control.transition_software_approval(db, data.pop("target"), data, current_user.id)
+    return hong_kong_service.transition_software_approval(db, data.pop("target"), data, current_user.id)
 
 
 @router.get("/compliance/hong-kong/empf-configuration",
             summary="eMPF integration configuration versions (statuses only — never secrets)")
 def hong_kong_empf_configuration(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.empf_configurations(db)
+    return hong_kong_service.empf_configurations(db)
 
 
 @router.post("/compliance/hong-kong/empf-configuration",
              summary="Create a DRAFT eMPF configuration version")
 def hong_kong_empf_configuration_create(payload: HkEmpfConfigurationCreate,
                                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.create_empf_configuration(db, payload.model_dump(exclude_none=True), current_user.id)
+    return hong_kong_service.create_empf_configuration(db, payload.model_dump(exclude_none=True), current_user.id)
 
 
 @router.post("/compliance/hong-kong/empf-configuration/{config_id}/activate",
              summary="Activate a DRAFT eMPF configuration (a Super Admin other than its maker)")
 def hong_kong_empf_configuration_activate(config_id: int, payload: HkReasonBody,
                                           current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.activate_empf_configuration(db, config_id, current_user.id, payload.reason)
+    return hong_kong_service.activate_empf_configuration(db, config_id, current_user.id, payload.reason)
 
 
 @router.get("/compliance/hong-kong/retention-policies",
             summary="HK retention policy per record category (BLOCKED_UNDECIDED until D-2 / D-3)")
 def hong_kong_retention_policies(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import retention_service
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.retention_policies(db)
+    return retention_service.retention_policies(db, "HK")
 
 
 @router.post("/compliance/hong-kong/retention-policies",
              summary="Propose a retention period for a category (refused until the owner decisions are recorded)")
 def hong_kong_retention_policy_propose(payload: HkRetentionProposal,
                                        current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import retention_service
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.propose_retention_policy(db, payload.model_dump(), current_user.id)
+    return retention_service.propose_retention_policy(db, "HK", payload.model_dump(), current_user.id)
 
 
 @router.post("/compliance/hong-kong/retention-policies/{policy_id}/approve",
              summary="Approve a proposed retention period (a Super Admin other than its maker)")
 def hong_kong_retention_policy_approve(policy_id: int, current_user=Depends(get_current_super_admin),
                                        db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import retention_service
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.approve_retention_policy(db, policy_id, current_user.id)
+    return retention_service.approve_retention_policy(db, "HK", policy_id, current_user.id)
 
 
 @router.get("/compliance/hong-kong/monitoring",
             summary="HK operational monitoring signals (platform-wide counts only — no employee data)")
 def hong_kong_monitoring(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.monitoring_signals(db)
+    return hong_kong_service.monitoring_signals(db)
 
 
 @router.get("/compliance/hong-kong/readiness-center",
             summary="HK production readiness center — every launch requirement, re-derived from the database")
 def hong_kong_readiness_center(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    return hk_control.readiness_center(db)
+    return hong_kong_service.readiness_center(db)
 
 
 @router.post("/compliance/hong-kong/calculation-preview",
              summary="Read-only: run the production Hong Kong engine against a pack's rows (any status) — writes nothing")
 def preview_hong_kong_calculation(data: HKCalculationPreviewRequest, current_user=Depends(get_current_super_admin),
                                   db: Session = Depends(get_db)):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    return hk_service.preview_calculation(db, data)
+    return hong_kong_service.preview_calculation(db, data)
 
 
 @router.get("/compliance/hong-kong/packs/{pack_row_id}/golden-check",
@@ -4006,11 +4046,11 @@ def preview_hong_kong_calculation(data: HKCalculationPreviewRequest, current_use
 def hong_kong_pack_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
                                 db: Session = Depends(get_db)):
     from app.core.exceptions import NotFoundException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import JurisdictionPack
 
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id,
                                              JurisdictionPack.jurisdiction_country == "HK").first()
     if pack is None:
         raise NotFoundException("Hong Kong pack", pack_row_id)
-    return {"packId": pack.pack_id, "version": pack.version, **hk_service.pack_golden_check(db, pack)}
+    return {"packId": pack.pack_id, "version": pack.version, **hong_kong_service.pack_golden_check(db, pack)}

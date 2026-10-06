@@ -22,7 +22,7 @@ Two independent vector sets guard the Hong Kong statutory content:
 ## Regenerating
 
 Only the **embedded pack rows** of the MPF fixtures are ever regenerated: `context.rate_map`, `context.slabs` and
-`context.hkg_rule_segments`. They mirror the canonical seed so that both runs prove the pack — the embedded-rows run
+`context.hk_rule_segments`. They mirror the canonical seed so that both runs prove the pack — the embedded-rows run
 in every test, and the pack-bound run at activation.
 
 ```

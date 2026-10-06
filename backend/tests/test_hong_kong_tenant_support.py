@@ -22,9 +22,10 @@ from tests.test_hong_kong_e2e import MAKER, CHECKER, hk, _employee, _month, _oth
 
 
 def _readiness(db, org, today=date(2026, 6, 15)):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
-    return service.hk_employer_readiness(db, org.id, today=today)
+    return hong_kong_service.hk_employer_readiness(db, org.id, today=today)
 
 
 def _codes(result, severity=None):
@@ -45,6 +46,7 @@ def test_readiness_reports_the_pack_in_force_and_no_blocks_for_a_complete_employ
 def test_readiness_blocks_exactly_what_the_engine_blocks(db, hk):
     """An employee without a profile version is BLOCKED on readiness AND the
     calculator refuses them — the two can never disagree."""
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
     from app.modules.payroll.engine.jurisdictions.hong_kong.common import HongKongCalculationBlockedError
     from app.modules.payroll.models import PayrollRun
@@ -58,7 +60,7 @@ def test_readiness_blocks_exactly_what_the_engine_blocks(db, hk):
     db.add(run)
     db.commit()
     with pytest.raises(HongKongCalculationBlockedError, match="statutory profile"):
-        values = service._hk_dry_run_trace(db, run, bare, {}, "standard", [], False)
+        values = hong_kong_service._hk_dry_run_trace(db, run, bare, {}, "standard", [], False)
         if values[1] is not None:
             raise values[1]
 
@@ -85,9 +87,9 @@ def test_readiness_without_an_active_pack_is_blocked(db, hk):
 
 
 def test_readiness_surfaces_an_overdue_ir56g_as_a_block(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 6, 30), MAKER.id, identified_on=date(2026, 5, 1))
+    hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 6, 30), MAKER.id, identified_on=date(2026, 5, 1))
     out = _readiness(db, hk.org, today=date(2026, 6, 15))       # deadline 30 May has passed
     assert "HK_IR56G_DUE" in _codes(out, "BLOCK")
 
@@ -102,33 +104,33 @@ def test_readiness_is_tenant_scoped(db, hk):
 
 def test_employee_copy_is_recorded_once_with_evidence(db, hk):
     from app.core.exceptions import BadRequestException, NotFoundException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    case = hk_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id)[0]      # IR56E, status DUE
+    case = hong_kong_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id)[0]      # IR56E, status DUE
     with pytest.raises(BadRequestException, match="no completed form"):
-        hk_service.record_employee_copy_delivered(db, hk.org.id, case.id, "handed over", MAKER.id)
+        hong_kong_service.record_employee_copy_delivered(db, hk.org.id, case.id, "handed over", MAKER.id)
     case.status = "FILED"
     db.commit()
     with pytest.raises(BadRequestException, match="evidence"):
-        hk_service.record_employee_copy_delivered(db, hk.org.id, case.id, "", MAKER.id)
+        hong_kong_service.record_employee_copy_delivered(db, hk.org.id, case.id, "", MAKER.id)
     with pytest.raises(NotFoundException):
-        hk_service.record_employee_copy_delivered(db, _other_org(db, "HKX").id, case.id, "x", MAKER.id)
-    done = hk_service.record_employee_copy_delivered(db, hk.org.id, case.id, "email 2026-06-01", MAKER.id)
-    assert hk_service.serialize_ird_case(done)["employeeCopyDeliveredAt"]
+        hong_kong_service.record_employee_copy_delivered(db, _other_org(db, "HKX").id, case.id, "x", MAKER.id)
+    done = hong_kong_service.record_employee_copy_delivered(db, hk.org.id, case.id, "email 2026-06-01", MAKER.id)
+    assert hong_kong_service.serialize_ird_case(done)["employeeCopyDeliveredAt"]
     with pytest.raises(BadRequestException, match="already recorded"):
-        hk_service.record_employee_copy_delivered(db, hk.org.id, case.id, "again", MAKER.id)
+        hong_kong_service.record_employee_copy_delivered(db, hk.org.id, case.id, "again", MAKER.id)
 
 
 def test_bir56a_has_no_employee_copy(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
-    from app.modules.payroll.models import HkgIrdReportingCase
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase
 
-    cover = HkgIrdReportingCase(organization_id=hk.org.id, form_type="BIR56A", year_of_assessment="2025/26", status="FILED")
+    cover = HongKongIrdReportingCase(organization_id=hk.org.id, form_type="BIR56A", year_of_assessment="2025/26", status="FILED")
     db.add(cover)
     db.commit()
     with pytest.raises(BadRequestException, match="no employee copy"):
-        hk_service.record_employee_copy_delivered(db, hk.org.id, cover.id, "x", MAKER.id)
+        hong_kong_service.record_employee_copy_delivered(db, hk.org.id, cover.id, "x", MAKER.id)
 
 
 # ── D-16 bank routing ───────────────────────────────────────────────────

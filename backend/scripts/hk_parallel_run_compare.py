@@ -53,8 +53,8 @@ def _month_bounds(period: str):
 
 def zoiko_value(db, organization_id: int, row: dict):
     """Zoiko's figure for one template row, or None when it is not mechanically derivable."""
-    from app.modules.payroll import hk_service
-    from app.modules.payroll.models import HkgIrdReportingCase, PayrollEmployee
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase, PayrollEmployee
 
     measure, period, ref = row["measure"], row["period"], row["employee_ref"]
     if measure not in AUTO or ref == "ALL":
@@ -64,19 +64,19 @@ def zoiko_value(db, organization_id: int, row: dict):
     if emp is None:
         return "EMPLOYEE_NOT_FOUND"
     if measure == "ir56b_total":
-        case = (db.query(HkgIrdReportingCase)
-                .filter(HkgIrdReportingCase.organization_id == organization_id, HkgIrdReportingCase.employee_id == emp.id,
-                        HkgIrdReportingCase.form_type == "IR56B", HkgIrdReportingCase.year_of_assessment == period,
-                        HkgIrdReportingCase.status.notin_(("AMENDED", "CANCELLED")))
-                .order_by(HkgIrdReportingCase.id.desc()).first())
+        case = (db.query(HongKongIrdReportingCase)
+                .filter(HongKongIrdReportingCase.organization_id == organization_id, HongKongIrdReportingCase.employee_id == emp.id,
+                        HongKongIrdReportingCase.form_type == "IR56B", HongKongIrdReportingCase.year_of_assessment == period,
+                        HongKongIrdReportingCase.status.notin_(("AMENDED", "CANCELLED")))
+                .order_by(HongKongIrdReportingCase.id.desc()).first())
         return Decimal(case.payload["total"]) if case and case.payload else "NO_IR56B_CASE"
     start, end = _month_bounds(period)
-    pairs = hk_service._committed_hk_payslips(db, organization_id, start, end, employee_id=emp.id)
+    pairs = hong_kong_service._committed_hk_payslips(db, organization_id, start, end, employee_id=emp.id)
     if not pairs:
         return "NO_COMMITTED_PAYSLIP"
     total = Decimal("0")
     for item, _run in pairs:
-        result = (item.hkg_calculation_trace or {}).get("result") or {}
+        result = (item.hk_calculation_trace or {}).get("result") or {}
         if measure == "gross_paid":
             total += Decimal(str(item.gross_pay or 0)) - Decimal(str(getattr(item, "attendance_deduction", None) or 0))
         elif measure == "mpf_employee":

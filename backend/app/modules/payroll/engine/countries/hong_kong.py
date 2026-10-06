@@ -148,7 +148,7 @@ def _period_contribution(params, frequency, ps, pe, relevant_income, start) -> d
 
 
 def calculate(ctx: PayrollContext) -> dict:
-    facts = dict(getattr(ctx, "hkg_worker_facts", None) or {})
+    facts = dict(getattr(ctx, "hk_worker_facts", None) or {})
     if not facts.get("profileId"):
         raise HongKongCalculationBlockedError(
             "statutory_profile", "no Hong Kong statutory profile version is in force for this payroll date")
@@ -195,9 +195,9 @@ def calculate(ctx: PayrollContext) -> dict:
         mpf_trace["accruedPending"] = {"employer": current["employer"], "employee": current["employee"],
                                        "basis": "booked in the period the 60-day condition is met"}
 
-    segments = getattr(ctx, "hkg_rule_segments", None) or {}
+    segments = getattr(ctx, "hk_rule_segments", None) or {}
     smw = minimum_wage.assess(
-        getattr(ctx, "hkg_hours", None) or {}, segments.get("smw_hourly_rate") or [],
+        getattr(ctx, "hk_hours", None) or {}, segments.get("smw_hourly_rate") or [],
         segments.get("smw_hours_record_cap_monthly") or [],
         ob["SMW_WAGES"]["included"], ob["SMW_WAGES"]["review"], ps, pe, frequency,
     )
@@ -227,6 +227,6 @@ def calculate(ctx: PayrollContext) -> dict:
     return dict(
         employee_pension=cents(employee),   # MPF employee mandatory contribution
         employer_pension=cents(employer),   # MPF employer mandatory contribution
-        hkg_calculation_trace=trace,
+        hk_calculation_trace=trace,
         _hk_statutory_profile_id=facts.get("profileId"),
     )
