@@ -1105,7 +1105,7 @@ class HKEmployeeValidation(EmployeeValidationStrategy):
     statutory purposes (IRD IR56 forms, eMPF enrolment — HK-022 data
     minimisation) and masked in every API response (SENSITIVE_FIELDS).
     Statutory FACTS (MPF exemption, residency, departure …) are NOT here:
-    they live on the effective-dated EmployeeStatutoryProfile hkg_* columns."""
+    they live on the effective-dated EmployeeStatutoryProfile hk_* columns."""
     country_code = "HK"
     SENSITIVE_FIELDS = ("hkid", "passport_number")
     duplicate_field = "hkid"

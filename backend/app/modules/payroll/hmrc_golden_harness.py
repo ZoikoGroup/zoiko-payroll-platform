@@ -277,9 +277,9 @@ def build_context(case_context: dict) -> PayrollContext:
         sgp_employment_facts=case_context.get("sgp_employment_facts"),
         # Hong Kong (ZP-HK-ENG-001 §16 fixtures): worker facts, verified hours
         # and the period-overlapping SMW segments countries/hong_kong.py reads.
-        hkg_worker_facts=case_context.get("hkg_worker_facts"),
-        hkg_hours=case_context.get("hkg_hours"),
-        hkg_rule_segments=case_context.get("hkg_rule_segments"),
+        hk_worker_facts=case_context.get("hk_worker_facts"),
+        hk_hours=case_context.get("hk_hours"),
+        hk_rule_segments=case_context.get("hk_rule_segments"),
         # Sweden (ZP-SE-ENG-001 §15 golden payroll): the worker tax/social-
         # insurance profile sweden.py resolves, the youth-threshold month
         # accumulator and the SLP pension-cost base. None elsewhere.

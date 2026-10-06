@@ -1,7 +1,7 @@
 """IRD employer reporting rules (ZP-HK-ENG-001 §7, HK-011; IRD S1 — employer
 obligations; PAM 46(e) — departure).
 
-Pure rules only; the case records live in hkg_ird_reporting_cases.
+Pure rules only; the case records live in payroll_hk_ird_reporting_cases.
 
   BIR56A + IR56B  annual, for the year of assessment ending 31 March; the
                   return is normally issued on the first working day of April

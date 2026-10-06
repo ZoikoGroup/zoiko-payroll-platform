@@ -3,7 +3,7 @@ scripts/register_hk_ird_schema.py
 ---------------------------------
 Register an OFFICIAL IRD electronic schema file (supplied by the IRD) for a
 Hong Kong form and year of assessment — G2 readiness. See
-app/modules/payroll/hk_ird_schema.py. Refuses non-local databases
+app/modules/payroll/hong_kong_service.py. Refuses non-local databases
 (scripts/_local_db_guard); a production registration needs the owner's
 explicit ZOIKO_ALLOW_NONLOCAL_DB_WRITES override.
 
@@ -30,16 +30,16 @@ def main() -> None:
     parser.add_argument("--readiness", action="store_true")
     args = parser.parse_args()
     from app.database import SessionLocal
-    from app.modules.payroll import hk_ird_schema
+    from app.modules.payroll import hong_kong_service
 
     db = SessionLocal()
     try:
         if args.readiness:
-            for row in hk_ird_schema.readiness(db, args.ya):
+            for row in hong_kong_service.readiness(db, args.ya):
                 print(row)
             return
         assert_local_database("register_hk_ird_schema")
-        art = hk_ird_schema.register_schema(db, args.form, args.ya, args.file, source_url=args.url)
+        art = hong_kong_service.register_schema(db, args.form, args.ya, args.file, source_url=args.url)
         print({"artifactId": art.id, "form": args.form, "ya": args.ya, "sha256": art.checksum_sha256})
     finally:
         db.close()
