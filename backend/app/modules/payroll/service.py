@@ -34,7 +34,7 @@ from datetime import datetime, date, timedelta
 from calendar import month_name
 
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func as sa_func, tuple_, or_, and_, case as sa_case, and_ as sa_and_
+from sqlalchemy import func as sa_func, tuple_, or_, and_, case as sa_case, and_ as sa_and_, true
 from sqlalchemy.exc import IntegrityError
 
 from app.modules.payroll.models import (
@@ -1869,6 +1869,9 @@ def get_taxability_classification(
             or_(TaxabilityRule.organization_id.is_(None), TaxabilityRule.organization_id == organization_id),
             or_(TaxabilityRule.effective_from.is_(None), TaxabilityRule.effective_from <= as_of),
             or_(TaxabilityRule.effective_to.is_(None), TaxabilityRule.effective_to >= as_of),
+            # CH Step 5: a Swiss classification governs only once Approved.
+            # Every other country keeps reading its legacy rows (status NULL).
+            (TaxabilityRule.status == "Approved") if country == "CH" else true(),
         )
         .all()
     )
@@ -2006,6 +2009,14 @@ def get_au_taxability_rules_bundle(db: Session, organization_id: int = None, as_
 # this is Super-Admin-owned platform configuration, same trust model as
 # ContributionRate/TaxSlab's canonical rows.
 
+def _refuse_ch_legacy_taxability_write(country: Optional[str]) -> None:
+    # CH classifications are governed (Draft -> Approved, four-eyes, never
+    # edited or deleted): only the /compliance/switzerland/taxability-rules
+    # routes may write them.
+    if (country or "").upper() == "CH":
+        raise BadRequestException("Swiss taxability rules are governed — use /compliance/switzerland/taxability-rules.")
+
+
 def list_taxability_rules(db: Session, country: Optional[str] = None, tax_component: Optional[str] = None) -> List[TaxabilityRule]:
     query = db.query(TaxabilityRule).filter(TaxabilityRule.organization_id.is_(None))
     if country:
@@ -2019,6 +2030,7 @@ def upsert_taxability_rule(
     db: Session, country: str, tax_component: str, earning_type: str, is_taxable: bool,
     state: Optional[str] = None, effective_from=None, effective_to=None,
 ) -> TaxabilityRule:
+    _refuse_ch_legacy_taxability_write(country)
     row = (
         db.query(TaxabilityRule)
         .filter(
@@ -2046,6 +2058,7 @@ def delete_taxability_rule(db: Session, rule_id: int) -> None:
     row = db.query(TaxabilityRule).filter(TaxabilityRule.id == rule_id, TaxabilityRule.organization_id.is_(None)).first()
     if not row:
         raise NotFoundException(f"Taxability rule {rule_id} not found.")
+    _refuse_ch_legacy_taxability_write(row.jurisdiction_country)
     db.delete(row)
     db.commit()
 
@@ -40810,6 +40823,8 @@ def upsert_collective_agreement(db: Session, data, actor_id: Optional[int] = Non
     """Create or edit a Draft agreement version. Refuses a NATIONAL/unknown
     type (spec §44: no Swedish national default CBA) and editing any version
     that has left Draft — a change to released content is a NEW version."""
+    if _normalize_country(data.jurisdictionCountry) == "CH":
+        raise BadRequestException("Swiss wage floors are governed — use /compliance/switzerland/wage-floors.")
     if data.agreementType not in _CBA_TYPES:
         raise BadRequestException(f"agreementType must be one of {list(_CBA_TYPES)} — there is no national "
                                   "default collective agreement (ZP-SE-ENG-001 §9).")
@@ -40874,6 +40889,8 @@ def set_collective_agreement_status(db: Session, agreement_id: int, status: str,
     row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == agreement_id).first()
     if row is None:
         raise NotFoundException("CollectiveAgreement", agreement_id)
+    if row.jurisdiction_country == "CH":
+        raise BadRequestException("Swiss wage floors are governed — use /compliance/switzerland/wage-floors.")
     if status not in _CBA_TRANSITIONS.get(row.status, ()):
         raise BadRequestException(f"Cannot move agreement from {row.status} to {status}.")
     if status == "Approved":

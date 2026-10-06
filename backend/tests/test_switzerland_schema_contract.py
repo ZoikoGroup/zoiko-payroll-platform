@@ -325,8 +325,11 @@ def test_scheme_profile_is_unique_per_scope_and_version(migrated):
 
 
 def test_entity_profile_is_one_per_organization(migrated):
-    """A second entity row for one organization would make the compensation
-    office / FAK assignment ambiguous."""
+    """What 3baddbaa011a itself creates. NOTE: 376bb8637603 (CH Step 5)
+    replaces this with UNIQUE (organization_id, effective_from) — the profile
+    is versioned, and the service keeps versions non-overlapping so the
+    compensation office / FAK assignment is still unambiguous on any date
+    (see test_switzerland_api.py's migration tests)."""
     assert ("organization_id",) in _unique_column_sets(migrated, "payroll_ch_entity_profiles")
 
 

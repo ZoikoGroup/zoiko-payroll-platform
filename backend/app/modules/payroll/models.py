@@ -7758,7 +7758,10 @@ class ChEntityProfile(Base):
     __tablename__ = "payroll_ch_entity_profiles"
 
     id                            = Column(Integer, primary_key=True, index=True)
-    organization_id               = Column(Integer, ForeignKey("organizations.id"), nullable=False, unique=True, index=True)
+    # One row per VERSION (CH Step 5): unique per (organization_id, effective_from),
+    # and switzerland_service keeps versions non-overlapping, so exactly one
+    # profile governs any given date (migration 376bb8637603).
+    organization_id               = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     uid                           = Column(String(15), nullable=True)  # Swiss UID (e.g. CHE-)
     seat_canton                   = Column(String(5), nullable=True)
     canton_registrations          = Column(JSON, nullable=True)
@@ -7777,6 +7780,10 @@ class ChEntityProfile(Base):
     approved_by_id                = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at                    = Column(DateTime(timezone=True), server_default=func.now())
     updated_at                    = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_ch_entity_profile_org_effective_from", "organization_id", "effective_from", unique=True),
+    )
 
     def __repr__(self):
         return f"<ChEntityProfile org={self.organization_id} uid={self.uid} readiness={self.readiness_status}>"
@@ -7847,6 +7854,70 @@ class ChQstTariffRow(Base):
 
     def __repr__(self):
         return f"<ChQstTariffRow file={self.tariff_file_id} {self.tariff_code} children={self.children}>"
+
+
+def _refuse_qst_tariff_row_mutation(mapper, connection, target):
+    # Imported authority rows are frozen: a changed tariff is a NEW file,
+    # never an edit, so historical payslips always replay against the exact
+    # rows they used. (ORM-level guard; switzerland_service has no bulk
+    # update/delete path either.)
+    raise ValueError(f"QST tariff rows are immutable (row {target.id}); import a new tariff file instead")
+
+
+from sqlalchemy import event as _sa_event  # noqa: E402
+
+_sa_event.listen(ChQstTariffRow, "before_update", _refuse_qst_tariff_row_mutation)
+_sa_event.listen(ChQstTariffRow, "before_delete", _refuse_qst_tariff_row_mutation)
+
+
+def _ch_changed_columns(target) -> set:
+    from sqlalchemy import inspect as _sa_inspect
+
+    state = _sa_inspect(target)
+    return {a.key for a in state.attrs if a.history.has_changes()}
+
+
+def _ch_previous_value(target, key):
+    from sqlalchemy import inspect as _sa_inspect
+
+    history = _sa_inspect(target).attrs[key].history
+    return history.deleted[0] if history.deleted else getattr(target, key)
+
+
+def _refuse_released_scheme_mutation(mapper, connection, target):
+    # A LIVE scheme profile is frozen content: the only permitted change is
+    # its retirement (LIVE -> RETIRED); a RETIRED one never changes again.
+    # A changed scheme is a NEW version row.
+    before = _ch_previous_value(target, "status")
+    if before not in ("LIVE", "RETIRED"):
+        return
+    changed = _ch_changed_columns(target) - {"updated_at"}
+    if before == "RETIRED" or changed - {"status"} or (changed and target.status != "RETIRED"):
+        raise ValueError(f"CH scheme profile {target.id} is {before} and immutable; create a new version instead")
+
+
+def _refuse_non_draft_scheme_delete(mapper, connection, target):
+    if target.status != "DRAFT":
+        raise ValueError(f"CH scheme profile {target.id} is {target.status}; only a DRAFT can be deleted")
+
+
+def _refuse_entity_profile_rewrite(mapper, connection, target):
+    # A profile version is never edited: the only change is closing it
+    # (effective_to) when the next version starts.
+    changed = _ch_changed_columns(target) - {"updated_at", "effective_to"}
+    if changed:
+        raise ValueError(f"CH entity profile version {target.id} is immutable ({sorted(changed)}); "
+                         "save a new version instead")
+
+
+def _refuse_entity_profile_delete(mapper, connection, target):
+    raise ValueError(f"CH entity profile version {target.id} cannot be deleted")
+
+
+_sa_event.listen(ChSchemeProfile, "before_update", _refuse_released_scheme_mutation)
+_sa_event.listen(ChSchemeProfile, "before_delete", _refuse_non_draft_scheme_delete)
+_sa_event.listen(ChEntityProfile, "before_update", _refuse_entity_profile_rewrite)
+_sa_event.listen(ChEntityProfile, "before_delete", _refuse_entity_profile_delete)
 
 
 class ChFamilyAllowanceEntitlement(Base):
@@ -7961,3 +8032,29 @@ class ChElmSubmission(Base):
 
     def __repr__(self):
         return f"<ChElmSubmission org={self.organization_id} {self.domain} {self.transport_status}>"
+
+
+class ChIdempotencyRecord(Base):
+    """One processed CH write request, keyed by its Idempotency-Key within a
+    scope ("org:<id>" or "platform"). A retry with the same key and the same
+    body replays the stored response instead of writing twice; the same key
+    with a different body is refused. Written in the SAME transaction as the
+    write it records (switzerland_http.ch_write)."""
+    __tablename__ = "payroll_ch_idempotency_records"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    scope_key       = Column(String(40), nullable=False)
+    idempotency_key = Column(String(100), nullable=False)
+    operation       = Column(String(100), nullable=False)
+    request_sha256  = Column(String(64), nullable=False)
+    response_body   = Column(JSON, nullable=True)
+    actor_id        = Column(Integer, ForeignKey("users.id"), nullable=True)
+    correlation_id  = Column(String(64), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("scope_key", "idempotency_key", name="uq_ch_idempotency_scope_key"),
+    )
+
+    def __repr__(self):
+        return f"<ChIdempotencyRecord {self.scope_key} {self.idempotency_key} {self.operation}>"

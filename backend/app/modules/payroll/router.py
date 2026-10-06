@@ -4987,3 +4987,135 @@ def france_readiness(
     current_user=Depends(get_current_user),
 ):
     return service.get_france_readiness(db, current_user.organization_id, for_period=for_period)
+
+
+# ── Switzerland (CH Step 5) — entity profile + employer scheme assignments ──
+# org_admin / payroll_admin. Every write needs an Idempotency-Key header
+# (X-Correlation-ID optional, echoed) and is committed through ch_write so
+# the write, its audit entry and its idempotency record are one transaction.
+from app.modules.payroll.switzerland_http import ChWriteContext, ch_write, ch_write_headers  # noqa: E402
+from app.modules.payroll.switzerland_schemas import (  # noqa: E402
+    ChEntityProfileUpsert, ChReasonBody, ChSchemeCreate, ChSchemeUpdate,
+)
+
+
+def _ch_org(current_user) -> int:
+    if current_user.organization_id is None:
+        raise BadRequestException("Switzerland employer settings need an organization context.")
+    return current_user.organization_id
+
+
+@payroll_router.get("/switzerland/entity-profile", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="CH employer profile in force (readiness re-derived now) plus every version")
+def get_ch_entity_profile(on: Optional[date] = Query(None), db: Session = Depends(get_db),
+                          current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_entity_profile(db, _ch_org(current_user), on)
+
+
+@payroll_router.put("/switzerland/entity-profile",
+                    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                    summary="Save a NEW CH employer-profile version (the previous one is closed; readiness is "
+                            "computed server-side)")
+def save_ch_entity_profile(payload: ChEntityProfileUpsert, ctx: ChWriteContext = Depends(ch_write_headers),
+                           db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation="entity_profile.save", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.save_entity_profile(
+                        db, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.get("/switzerland/schemes", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="The employer's own CH scheme profiles plus the platform catalog")
+def list_ch_schemes(scheme_type: Optional[str] = Query(None, alias="schemeType"),
+                    status_filter: Optional[str] = Query(None, alias="status"),
+                    db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.list_schemes(db, _ch_org(current_user), scheme_type=scheme_type, status=status_filter)
+
+
+@payroll_router.get("/switzerland/schemes/{scheme_id}", dependencies=[Depends(get_current_payroll_operator)],
+                    summary="One CH scheme profile (own or catalog)")
+def get_ch_scheme(scheme_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    return switzerland_service.get_scheme(db, scheme_id, _ch_org(current_user))
+
+
+@payroll_router.post("/switzerland/schemes",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Create a DRAFT CH scheme profile version (rules validated per scheme type)")
+def create_ch_scheme(payload: ChSchemeCreate, ctx: ChWriteContext = Depends(ch_write_headers),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation="scheme.create", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.create_scheme(
+                        db, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.put("/switzerland/schemes/{scheme_id}",
+                    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                    summary="Edit a DRAFT CH scheme profile (APPROVED / LIVE / RETIRED versions are immutable)")
+def update_ch_scheme(scheme_id: int, payload: ChSchemeUpdate, ctx: ChWriteContext = Depends(ch_write_headers),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.update:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json", exclude_unset=True),
+                    perform=lambda: switzerland_service.update_scheme(
+                        db, scheme_id, org_id, payload, current_user.id, ctx.correlation_id))
+
+
+@payroll_router.delete("/switzerland/schemes/{scheme_id}",
+                       dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                       summary="Delete an unreferenced DRAFT CH scheme profile")
+def delete_ch_scheme(scheme_id: int, ctx: ChWriteContext = Depends(ch_write_headers),
+                     db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.delete:{scheme_id}", actor_id=current_user.id,
+                    request={}, perform=lambda: switzerland_service.delete_scheme(
+                        db, scheme_id, org_id, current_user.id, correlation_id=ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/schemes/{scheme_id}/approve",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Approve a DRAFT CH scheme (a user other than its author / editors)")
+def approve_ch_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
+                      ctx: ChWriteContext = Depends(ch_write_headers),
+                      db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.approve:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.approve_scheme(
+                        db, scheme_id, org_id, current_user.id, payload.reason, ctx.correlation_id))
+
+
+@payroll_router.post("/switzerland/schemes/{scheme_id}/activate",
+                     dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
+                     summary="Activate an APPROVED CH scheme (a user other than its approver); overlapping LIVE "
+                             "versions of the same scheme code are RETIRED")
+def activate_ch_scheme(scheme_id: int, payload: Optional[ChReasonBody] = None,
+                       ctx: ChWriteContext = Depends(ch_write_headers),
+                       db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import switzerland_service
+
+    payload = payload or ChReasonBody()
+    org_id = _ch_org(current_user)
+    return ch_write(db, ctx, organization_id=org_id, operation=f"scheme.activate:{scheme_id}", actor_id=current_user.id,
+                    request=payload.model_dump(mode="json"),
+                    perform=lambda: switzerland_service.activate_scheme(
+                        db, scheme_id, org_id, current_user.id, payload.reason, ctx.correlation_id))
