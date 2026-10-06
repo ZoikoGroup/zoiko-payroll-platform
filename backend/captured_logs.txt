@@ -1,0 +1,21 @@
+  [info] [email] SMTP_HOST not configured. Mock sending email to ravurirugvedh1@gmail.com | subject='[STAGING → ravurirugvedh1@gmail.com] Welcome to Zoiko Payroll' | template=employee_created.html
+  [debug] [email] Body content:
+[STAGING → ravurirugvedh1@gmail.com] Welcome to Zoiko Payroll
+body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}@media only screen and (max-width:600px){.zk-outer{padding:12px 8px !important;}.zk-px{padding-left:20px !important;padding-right:20px !important;}.zk-brand{display:block !important;width:100% !important;}.zk-badge{display:inline-block !important;width:auto !important;margin-top:12px !important;text-align:left !important;}.zk-btn{display:block !important;text-align:center !important;}.zk-h1{font-size:20px !important;line-height:1.3 !important;}}
+
+{{preheader}}
+
+Zoiko Payroll
+
+{{heading}}
+Hello Test User,
+
+Your employee record is now active in Zoiko Payroll. The details below are the
+values your administrator registered for you during the current pay run.
+
+Contact your payroll administrator if anything looks incorrect.
+
+Security Advisory
+Zoiko Payroll will never ask you to send your password, multifactor authentication code, bank details, tax identifiers or payroll files by email.
+
+&copy; 2026 Zoiko Payroll Inc.

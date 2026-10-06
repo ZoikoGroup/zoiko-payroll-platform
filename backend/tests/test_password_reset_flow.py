@@ -260,3 +260,23 @@ def test_payroll_admin_full_cycle_including_unverified_invite_account(db, organi
 
 def _extract_token(link: str) -> str:
     return link.split("token=", 1)[1]
+
+
+def test_reset_link_base_prefers_request_origin_over_frontend_url(monkeypatch):
+    from app.modules.auth import service
+    from app.modules.auth.models import SecurityActionPurpose
+
+    monkeypatch.delenv("ACTION_BASE_URL", raising=False)
+    link = service._action_link(SecurityActionPurpose.RESET, "tok", "https://payroll.example.com/")
+    assert link == "https://payroll.example.com/reset-password?token=tok"
+
+
+def test_trusted_request_origin_rejects_unlisted_origin():
+    from types import SimpleNamespace
+    from app.config import settings
+    from app.modules.auth.router import _trusted_request_origin
+
+    evil = SimpleNamespace(headers={"origin": "https://evil.example"})
+    good = SimpleNamespace(headers={"origin": settings.FRONTEND_URL})
+    assert _trusted_request_origin(evil) is None
+    assert _trusted_request_origin(good) == settings.FRONTEND_URL.rstrip("/")
