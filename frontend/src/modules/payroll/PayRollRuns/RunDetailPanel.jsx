@@ -409,6 +409,16 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
             <>
               <RunStatusTimeline run={detail || run} />
 
+              {detail?.attendanceOverrideReason && (
+                <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 mb-5 text-[13px] text-foreground">
+                  <strong>Run with incomplete attendance (admin override).</strong> Employees without attendance were paid as present for those days.
+                  <span className="block text-foreground-muted mt-1">
+                    Reason: {detail.attendanceOverrideReason}
+                    {detail.attendanceOverrideAt && ` · ${fmtDate(detail.attendanceOverrideAt)}`}
+                  </span>
+                </div>
+              )}
+
               <div className="bg-surface-muted rounded-[18px] p-5 mb-5">
                 <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-4">Run Information</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

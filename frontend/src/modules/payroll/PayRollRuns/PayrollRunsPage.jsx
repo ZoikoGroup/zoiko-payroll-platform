@@ -8,12 +8,13 @@ import {
   fetchRuns,
   createRun,
   getEmployeesWithAttendance,
-  getAttendanceRecords,
+  getAttendanceReadiness,
   previewPayrollRun,
   CALCULATION_MODE_LABELS,
 } from "../../../service/payrollService";
 import { getCurrencyForJurisdiction, formatCurrency } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
+import { ATTENDANCE_OVERRIDE_MIN_REASON } from "./AttendanceReadinessPanel";
 
 const WIZARD_STEPS = [
   { id: 1, label: "Configure", icon: FileText },
@@ -57,6 +58,14 @@ export default function PayrollRunsPage() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  // Attendance gate (see AttendanceReadinessPanel / backend
+  // check_attendance_readiness): checked when the Calculate step opens and
+  // again by the server when the run is created.
+  const [attendanceReadiness, setAttendanceReadiness] = useState(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [readinessError, setReadinessError] = useState("");
+  const [overrideEnabled, setOverrideEnabled] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
 
   // Sourced from the shared, once-per-session PayrollSetupContext instead of
   // this page's own independent fetchComplianceData()/getActivePolicy() calls.
@@ -119,6 +128,34 @@ export default function PayrollRunsPage() {
     }
   }, [jurisdictionCountry, wizardConfig.periodStart, wizardConfig.periodEnd, calculationMode, addToast]);
 
+  const loadReadiness = useCallback(async (empIds) => {
+    if (!wizardConfig.periodStart || !wizardConfig.periodEnd || !empIds?.length) return;
+    setReadinessLoading(true);
+    setReadinessError("");
+    try {
+      const data = await getAttendanceReadiness(wizardConfig.periodStart, wizardConfig.periodEnd, empIds);
+      setAttendanceReadiness(data);
+    } catch (err) {
+      setAttendanceReadiness(null);
+      setReadinessError(err?.message || "the server did not respond");
+    } finally {
+      setReadinessLoading(false);
+    }
+  }, [wizardConfig.periodStart, wizardConfig.periodEnd]);
+
+  const resetReadiness = () => {
+    setAttendanceReadiness(null);
+    setReadinessError("");
+    setOverrideEnabled(false);
+    setOverrideReason("");
+  };
+
+  const attendanceBlocked = Boolean(attendanceReadiness && !attendanceReadiness.ready);
+  const overrideValid = overrideEnabled && overrideReason.trim().length >= ATTENDANCE_OVERRIDE_MIN_REASON;
+  // Next is allowed only once the check has actually come back clean (or
+  // with a valid override) — a failed or pending check never lets it through.
+  const canProceedPastAttendance = Boolean(attendanceReadiness) && (!attendanceBlocked || overrideValid);
+
   const startWizard = async () => {
     // Validate active-employee eligibility immediately on click, before the
     // wizard (and its date-selection step) ever opens — previously this only
@@ -134,6 +171,7 @@ export default function PayrollRunsPage() {
       }
       setEmployees(list);
       setSelectedEmployees(list.map((e) => e.id));
+      resetReadiness();
       setView("wizard");
       setWizardStep(1);
     } catch {
@@ -157,11 +195,17 @@ export default function PayrollRunsPage() {
         employeeIds: selectedEmployees,
         totals,
         calculationMode,
+        ...(attendanceBlocked && overrideValid ? { attendanceOverrideReason: overrideReason.trim() } : {}),
       });
       const id = newRun?.id ?? newRun?._id ?? newRun?.runId;
       if (id) setCreatedRunId(id);
-    } catch {
-      addToast?.("Failed to create payroll run. Please try again.", "error");
+    } catch (err) {
+      if (err?.errorCode === "ATTENDANCE_INCOMPLETE" && err.trace) {
+        // Server-side gate disagreed with the last check (attendance changed
+        // in between) — show its fresh report.
+        setAttendanceReadiness(err.trace);
+      }
+      addToast?.(err?.message || "Failed to create payroll run. Please try again.", "error");
       return;
     }
     if (wizardStep < 4) setWizardStep((s) => s + 1);
@@ -169,18 +213,13 @@ export default function PayrollRunsPage() {
 
   const nextStep = async () => {
     if (wizardStep === 2) {
-      try {
-        const attRecords = await getAttendanceRecords({
-          startDate: wizardConfig.periodStart,
-          endDate: wizardConfig.periodEnd,
-        });
-        const hasAttendance = Array.isArray(attRecords) && attRecords.length > 0;
-        if (!hasAttendance) {
-          addToast?.("No attendance records found for the selected period. Please record attendance before creating a payroll run.", "error");
-          return;
-        }
-      } catch {
-        addToast?.("Unable to verify attendance records. Please try again.", "error");
+      if (!canProceedPastAttendance) {
+        addToast?.(
+          attendanceBlocked
+            ? "Attendance sheet incomplete — payroll can't run. Record the missing attendance or use the admin override with a reason."
+            : "Attendance hasn't been verified for this period yet. Re-check attendance and try again.",
+          "error"
+        );
         return;
       }
       setShowConfirmModal(true);
@@ -195,6 +234,7 @@ export default function PayrollRunsPage() {
       setSelectedEmployees([]);
       setCreatedRunId(null);
       setPreviewData(null);
+      resetReadiness();
       loadRuns();
     }
   };
@@ -209,6 +249,7 @@ export default function PayrollRunsPage() {
   };
 
   const recalculate = async () => {
+    loadReadiness(selectedEmployees);
     await loadPreview(selectedEmployees);
     addToast?.("Payroll data refreshed from server.", "success");
   };
@@ -313,7 +354,7 @@ export default function PayrollRunsPage() {
               </button>
             ) : (
               <button
-                onClick={() => { setView("list"); setWizardStep(0); setEmployees([]); setSelectedEmployees([]); setPreviewData(null); }}
+                onClick={() => { setView("list"); setWizardStep(0); setEmployees([]); setSelectedEmployees([]); setPreviewData(null); resetReadiness(); }}
                 className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-error hover:text-error"
               >
                 Cancel
@@ -367,6 +408,18 @@ export default function PayrollRunsPage() {
               onRecalculate={recalculate}
               onLoadPreview={loadPreview}
               fmtCurrency={fmtCurrency}
+              attendance={{
+                readiness: attendanceReadiness,
+                loading: readinessLoading,
+                error: readinessError,
+                onLoad: loadReadiness,
+                onRefresh: () => loadReadiness(selectedEmployees),
+                overrideEnabled,
+                setOverrideEnabled,
+                overrideReason,
+                setOverrideReason,
+                canProceed: canProceedPastAttendance,
+              }}
             />
           )}
         </div>
@@ -385,9 +438,16 @@ export default function PayrollRunsPage() {
               </div>
               <h3 className="text-lg font-bold text-foreground">Confirm Payroll Run</h3>
             </div>
-            <p className="text-[13px] text-foreground-muted mb-4">
-              Please ensure all <strong>attendance records</strong> have been recorded for the selected period before creating the payroll run. Missing attendance data may result in incorrect calculations.
-            </p>
+            {attendanceBlocked ? (
+              <p className="text-[13px] text-error mb-4">
+                <strong>Attendance override:</strong> {attendanceReadiness?.incompleteEmployees} employee(s) have missing attendance and will be paid as present for those days.
+                Reason recorded: <em>{overrideReason.trim()}</em>
+              </p>
+            ) : (
+              <p className="text-[13px] text-foreground-muted mb-4">
+                Attendance is complete for every employee in this run for the selected period.
+              </p>
+            )}
             <p className="text-[13px] text-foreground-muted mb-6">
               <strong>Note:</strong> Only <strong>Active Employees</strong> will be included in this payroll run.
             </p>

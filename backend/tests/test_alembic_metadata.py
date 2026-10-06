@@ -142,7 +142,10 @@ def test_alembic_heads_is_single_head():
     # per organization + effective_from instead of per organization) and
     # payroll_ch_idempotency_records; single child of 3baddbaa011a, so no new
     # branchpoint.
-    assert heads == ["376bb8637603"]
+    # c5981cbcbe13 (2026-10-06, attendance gate): payroll_policies attendance
+    # settings + payroll_runs attendance override audit; single child of
+    # 376bb8637603, so no new branchpoint.
+    assert heads == ["c5981cbcbe13"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -154,7 +157,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["376bb8637603"]
+    assert list(script.get_heads()) == ["c5981cbcbe13"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -185,7 +188,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 176   # + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
+    assert len(revs) == 177   # + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support)
 
 
 def test_germany_head_chain_wiring_is_intact():

@@ -27249,6 +27249,10 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
             detail="This employee doesn't have a payslip in this run yet — add them to the run instead of recalculating.",
         )
 
+    # Same attendance gate as run creation — skipped when the run was
+    # created under a recorded override.
+    enforce_attendance_readiness(db, organization_id, run.period_start, run.period_end, [employee.id], run=run)
+
     calculation_mode = _resolve_run_calc_inputs(db, run, organization_id)
     org_opted_in = _org_uses_canonical_tax_pack(db, organization_id)
     country, rate_map, slabs, resolved_pack, _state, state_rate_map, state_slabs, employer_tax_profiles, reciprocity, locality_rate, poe_reason, poe_result = _resolve_employee_calc_inputs(
@@ -31204,6 +31208,182 @@ def bulk_delete_employees(db: Session, data: BulkDeleteRequest, organization_id:
 
 # ── Payroll Runs ────────────────────────────────────────────────────────
 
+# ── Attendance gate (2026-10-06 fix plan, Phase 1) ─────────────────────────
+# Payroll is deduct-on-absence (_count_unpaid_leave_days): a day with no
+# attendance row is silently paid as present. So a run must not start until
+# every in-scope employee has a row (any status — present/absent/leave) for
+# every expected working day of the period. Expected = days the employee was
+# employed in the period, minus the policy's weekly off days and the org's
+# holidays. Approved leave already writes attendance rows
+# (_sync_leave_to_attendance), so leave days count as recorded.
+_ATTENDANCE_DEFAULT_WEEKLY_OFF_DAYS = (5, 6)   # Sat, Sun — Python weekday()
+_ATTENDANCE_REPORT_MAX_EMPLOYEES = 500
+_ATTENDANCE_REPORT_MAX_DATES = 62
+_ATTENDANCE_OVERRIDE_MIN_REASON = 10
+
+
+def _attendance_policy_settings(db: Session, organization_id: int) -> dict:
+    from app.modules.payroll.policy.service import get_active_policy
+    policy = get_active_policy(db, organization_id)
+    required = getattr(policy, "attendance_required", None)
+    employment_types = getattr(policy, "attendance_required_employment_types", None)
+    off_days = getattr(policy, "attendance_weekly_off_days", None)
+    if isinstance(off_days, list) and all(isinstance(d, int) and 0 <= d <= 6 for d in off_days):
+        weekly_off = sorted(set(off_days))
+    else:
+        weekly_off = list(_ATTENDANCE_DEFAULT_WEEKLY_OFF_DAYS)
+    return {
+        "required": True if required is None else bool(required),
+        "employmentTypes": list(employment_types) if isinstance(employment_types, list) and employment_types else None,
+        "weeklyOffDays": weekly_off,
+    }
+
+
+def check_attendance_readiness(db: Session, organization_id: int, period_start, period_end,
+                               employee_ids: Optional[List[int]] = None) -> dict:
+    """Read-only per-employee attendance coverage report for a pay period.
+
+    employee_ids None = every Active employee (what a full run generates for).
+    `ready` is False only when the org's policy requires attendance AND at
+    least one in-scope employee is missing an expected day. The report is
+    JSON-safe (dates as ISO strings) — it doubles as the
+    AttendanceIncompleteException trace."""
+    settings = _attendance_policy_settings(db, organization_id)
+    report = {
+        "required": settings["required"],
+        "ready": True,
+        "periodStart": period_start.isoformat() if period_start else None,
+        "periodEnd": period_end.isoformat() if period_end else None,
+        "weeklyOffDays": settings["weeklyOffDays"],
+        "employmentTypes": settings["employmentTypes"],
+        "totalEmployees": 0,
+        "exemptEmployees": 0,
+        "completeEmployees": 0,
+        "incompleteEmployees": 0,
+        "missing": [],
+        "missingTruncated": False,
+    }
+    if not period_start or not period_end or period_end < period_start:
+        return report
+
+    query = db.query(PayrollEmployee).filter(PayrollEmployee.organization_id == organization_id)
+    if employee_ids is not None:
+        if not employee_ids:
+            return report
+        query = query.filter(PayrollEmployee.id.in_(list(employee_ids)))
+    else:
+        query = query.filter(PayrollEmployee.status == EmployeeStatus.ACTIVE)
+    employees = query.order_by(PayrollEmployee.name).all()
+    report["totalEmployees"] = len(employees)
+    if not employees:
+        return report
+
+    holiday_countries: Dict[date, set] = {}
+    for h_date, h_country in db.query(PayrollHoliday.date, PayrollHoliday.country).filter(
+        PayrollHoliday.organization_id == organization_id,
+        PayrollHoliday.date >= period_start,
+        PayrollHoliday.date <= period_end,
+    ).all():
+        holiday_countries.setdefault(h_date, set()).add((h_country or "").strip().upper())
+
+    recorded: Dict[int, set] = {}
+    for emp_id, rec_date in db.query(PayrollAttendanceRecord.employee_id, PayrollAttendanceRecord.date).filter(
+        PayrollAttendanceRecord.organization_id == organization_id,
+        PayrollAttendanceRecord.employee_id.in_([e.id for e in employees]),
+        PayrollAttendanceRecord.date >= period_start,
+        PayrollAttendanceRecord.date <= period_end,
+    ).all():
+        recorded.setdefault(emp_id, set()).add(rec_date)
+
+    org_country = (_resolve_org_country(db, organization_id) or "").strip().upper()
+    weekly_off = set(settings["weeklyOffDays"])
+    in_scope_types = set(settings["employmentTypes"]) if settings["employmentTypes"] else None
+
+    missing_rows = []
+    for emp in employees:
+        if in_scope_types is not None and (emp.employment_type or "") not in in_scope_types:
+            report["exemptEmployees"] += 1
+            continue
+        start = max(period_start, emp.date_of_joining) if emp.date_of_joining else period_start
+        end = min(period_end, emp.date_of_leaving) if emp.date_of_leaving else period_end
+        emp_country = (emp.country_code or org_country or "").strip().upper()
+        expected = []
+        day = start
+        while day <= end:
+            if day.weekday() not in weekly_off:
+                countries = holiday_countries.get(day)
+                is_holiday = bool(countries) and ("" in countries or not emp_country or emp_country in countries)
+                if not is_holiday:
+                    expected.append(day)
+            day += timedelta(days=1)
+        have = recorded.get(emp.id, set())
+        missing = [d for d in expected if d not in have]
+        if not missing:
+            report["completeEmployees"] += 1
+            continue
+        missing_rows.append({
+            "employeeId": emp.id,
+            "employeeName": emp.name,
+            "employeeCode": emp.employee_code,
+            "expectedDays": len(expected),
+            "recordedDays": len(expected) - len(missing),
+            "missingDays": len(missing),
+            "missingDates": [d.isoformat() for d in missing[:_ATTENDANCE_REPORT_MAX_DATES]],
+        })
+
+    missing_rows.sort(key=lambda r: (-r["missingDays"], r["employeeName"] or ""))
+    report["incompleteEmployees"] = len(missing_rows)
+    report["missing"] = missing_rows[:_ATTENDANCE_REPORT_MAX_EMPLOYEES]
+    report["missingTruncated"] = len(missing_rows) > _ATTENDANCE_REPORT_MAX_EMPLOYEES
+    report["ready"] = not (settings["required"] and missing_rows)
+    return report
+
+
+def enforce_attendance_readiness(db: Session, organization_id: int, period_start, period_end,
+                                 employee_ids: Optional[List[int]] = None, *,
+                                 override_reason: Optional[str] = None,
+                                 run: Optional[PayrollRun] = None) -> Optional[str]:
+    """Raise AttendanceIncompleteException unless attendance is complete.
+
+    Returns the override reason when the operator deliberately proceeds with
+    incomplete attendance (the caller records it on the run via
+    _record_attendance_override), else None. A run that already carries an
+    override keeps honouring it for later generate/recalculate calls."""
+    from app.core.exceptions import AttendanceIncompleteException
+
+    if run is not None and getattr(run, "attendance_override_reason", None):
+        return None
+    report = check_attendance_readiness(db, organization_id, period_start, period_end, employee_ids)
+    if report["ready"]:
+        return None
+    reason = (override_reason or "").strip()
+    if reason:
+        if len(reason) < _ATTENDANCE_OVERRIDE_MIN_REASON:
+            raise BadRequestException(
+                f"An attendance override reason must be at least {_ATTENDANCE_OVERRIDE_MIN_REASON} characters."
+            )
+        return reason
+    count = report["incompleteEmployees"]
+    raise AttendanceIncompleteException(
+        f"Attendance is incomplete for {count} employee(s) in this pay period. Payroll can't run until "
+        "attendance is recorded for every working day, or an admin overrides with a reason.",
+        trace=report,
+    )
+
+
+def _record_attendance_override(db: Session, run: PayrollRun, reason: str, actor_id: Optional[int]) -> None:
+    """Persist the override audit on the run. log_activity commits it."""
+    from datetime import timezone as _tz
+    run.attendance_override_reason = reason
+    run.attendance_override_by = actor_id
+    run.attendance_override_at = datetime.now(_tz.utc)
+    log_activity(
+        db, run.organization_id,
+        f"Payroll run '{run.period_label}' proceeded with incomplete attendance (override). Reason: {reason}",
+        ActivityStatus.INFO, actor_id=actor_id,
+    )
+
+
 def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, organization_id: int = None) -> PayrollRun:
     # Resolve and store the calculation mode on the run for auditing
     calculation_mode = _resolve_calculation_mode(db, organization_id, data.calculation_mode)
@@ -31251,17 +31431,15 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
                 detail=f"Payroll Run for this payroll period already exists. See run '{existing_run.period_label}' (ID {existing_run.id}).",
             )
 
-        att_count = db.query(PayrollAttendanceRecord).filter(
-            PayrollAttendanceRecord.organization_id == organization_id,
-            PayrollAttendanceRecord.employee_id.in_(new_employee_ids),
-            PayrollAttendanceRecord.date >= data.period_start,
-            PayrollAttendanceRecord.date <= data.period_end,
-        ).count()
-        if att_count == 0:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail="No attendance records found for the selected period and employees. Please record attendance before creating a payroll run.",
-            )
+        # Per-employee attendance gate (replaces the old "any record at all
+        # across every selected employee" count, which let one employee's
+        # attendance carry everyone else's run).
+        override = enforce_attendance_readiness(
+            db, organization_id, data.period_start, data.period_end, list(new_employee_ids),
+            override_reason=data.attendance_override_reason, run=existing_run,
+        )
+        if override:
+            _record_attendance_override(db, existing_run, override, created_by)
 
         run = generate_payslips_for_run(db, existing_run, organization_id, employee_ids=list(new_employee_ids))
         log_activity(
@@ -31272,18 +31450,15 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
         return run
 
     # ── No run exists for this period yet — create a fresh one ──
-    if data.employeeIds:
-        att_count = db.query(PayrollAttendanceRecord).filter(
-            PayrollAttendanceRecord.organization_id == organization_id,
-            PayrollAttendanceRecord.employee_id.in_(data.employeeIds),
-            PayrollAttendanceRecord.date >= data.period_start,
-            PayrollAttendanceRecord.date <= data.period_end,
-        ).count()
-        if att_count == 0:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail="No attendance records found for the selected period and employees. Please record attendance before creating a payroll run.",
-            )
+    # Attendance gate only when payslips are generated now; a bare Draft run
+    # is gated later by the generate-payslips endpoint instead.
+    override = None
+    if data.auto_generate_payslips:
+        override = enforce_attendance_readiness(
+            db, organization_id, data.period_start, data.period_end,
+            list(data.employeeIds) if data.employeeIds else None,
+            override_reason=data.attendance_override_reason,
+        )
 
     # Upfront jurisdiction-config guard — refuse to create the run row at
     # all if this org's country has opted into fail-fast validation and
@@ -31304,7 +31479,8 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
             bad_key = readiness["missingKeys"][0]["key"] if readiness["missingKeys"] else "tax slabs"
             raise MissingComplianceConfigurationError(bad_key, org_country, organization_id)
 
-    payload = data.model_dump(exclude={"auto_generate_payslips", "schedule", "employeeIds", "totals", "calculation_mode"})
+    payload = data.model_dump(exclude={"auto_generate_payslips", "schedule", "employeeIds", "totals", "calculation_mode",
+                                       "attendance_override_reason"})
     run = PayrollRun(created_by=created_by, calculation_mode=calculation_mode, **payload)
     if organization_id is not None:
         run.organization_id = organization_id
@@ -31313,6 +31489,8 @@ def create_payroll_run(db: Session, created_by: int, data: PayrollRunCreate, org
     db.add(run)
     db.commit()
     db.refresh(run)
+    if override:
+        _record_attendance_override(db, run, override, created_by)
 
     if data.auto_generate_payslips:
         run = generate_payslips_for_run(db, run, organization_id, employee_ids=data.employeeIds)
@@ -34889,9 +35067,18 @@ def bulk_save_attendance(db: Session, data: BulkAttendanceRequest, organization_
             _maybe_remove_leave_request(db, rec.leave_request_id, organization_id)
             rec.leave_request_id = None
 
+    # Ids are assigned by the flush above; read them before commit expires
+    # the objects, then reload everything in a few batched queries instead of
+    # one db.refresh() round trip per row (thousands of rows on a bulk save
+    # against a remote database used to run past the proxy timeout).
+    result_ids = [r.id for r in results]
     db.commit()
-    for r in results:
-        db.refresh(r)
+    fresh: dict[int, PayrollAttendanceRecord] = {}
+    for i in range(0, len(result_ids), 1000):
+        chunk = result_ids[i:i + 1000]
+        for row in db.query(PayrollAttendanceRecord).filter(PayrollAttendanceRecord.id.in_(chunk)).all():
+            fresh[row.id] = row
+    results = [fresh[i] for i in result_ids if i in fresh]
 
     # ── 4. Batch-enrich employee details (single query instead of N) ──
     all_emp_ids = list({r.employee_id for r in results})

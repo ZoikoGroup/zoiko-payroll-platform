@@ -52,7 +52,7 @@ import os
 import uuid
 from datetime import date
 from typing import Optional, List
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
@@ -75,7 +75,7 @@ from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
     IrelandRpnSnapshotUpsert, IrelandRpnSnapshotResponse,
-    PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse,
+    PayrollRunCreate, PayrollRunUpdate, PayrollRunResponse, GeneratePayslipsRequest, AttendanceReadinessResponse, AttendanceReadinessRequest,
     PayrollRunPreviewRequest, PayrollRunPreviewResponse,
     PayslipItemCreate, PayslipItemResponse,
     CompanyDetailsUpdate, ComplianceDataResponse,
@@ -1217,6 +1217,7 @@ def add_item(
 def generate_run_payslips(
     run_id: int,
     async_dispatch: bool = Query(False, description="Dispatch asynchronously via Celery chord if configured"),
+    data: Optional[GeneratePayslipsRequest] = Body(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1228,6 +1229,15 @@ def generate_run_payslips(
     run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
     if run.status != PayrollStatus.DRAFT.value:
         raise BadRequestException(f"Payslips can only be generated for DRAFT runs (current status: {run.status})")
+
+    # Attendance gate — before either dispatch path, so the Celery route is
+    # covered too. Generation targets every Active employee (employee_ids None).
+    override = service.enforce_attendance_readiness(
+        db, current_user.organization_id, run.period_start, run.period_end, None,
+        override_reason=data.attendance_override_reason if data else None, run=run,
+    )
+    if override:
+        service._record_attendance_override(db, run, override, current_user.id)
 
     if async_dispatch and settings.REDIS_URL:
         from app.tasks.payroll_tasks import generate_payslips_for_run_task
@@ -2312,6 +2322,21 @@ def bulk_save_attendance(
     current_user=Depends(get_current_user),
 ):
     return service.bulk_save_attendance(db, data, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/attendance/readiness", response_model=AttendanceReadinessResponse,
+    summary="Per-employee attendance coverage for a pay period (read-only pre-run check)",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def attendance_readiness(
+    data: AttendanceReadinessRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.check_attendance_readiness(
+        db, current_user.organization_id, data.period_start, data.period_end, data.employee_ids,
+    )
 
 
 @payroll_router.get(

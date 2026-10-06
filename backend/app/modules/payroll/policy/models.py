@@ -100,6 +100,16 @@ class PayrollPolicy(Base):
     # for the new export pipeline, not a provider enable/disable flag.
     bank_export_format = Column(String(10), default="csv", nullable=False)   # csv | xlsx | txt | pdf
 
+    # Attendance gate (see payroll/service.py check_attendance_readiness):
+    # when on, a payroll run is refused until every in-scope employee has an
+    # attendance record (any status) for every expected working day of the
+    # period. Employment types: null = every employee, else a list of
+    # EmploymentType values (e.g. ["Part-time", "Contract"]). Weekly off
+    # days: Python weekday numbers (Mon=0 … Sun=6); null = Sat+Sun.
+    attendance_required = Column(Boolean, default=True, server_default="true", nullable=False)
+    attendance_required_employment_types = Column(JSON, nullable=True)
+    attendance_weekly_off_days = Column(JSON, nullable=True)
+
     # Enterprise onboarding status — see app/modules/payroll/enterprise/.
     # Independent of `calculation_mode`: calculation_mode only flips to
     # "enterprise" once activation succeeds; enterprise_status tracks

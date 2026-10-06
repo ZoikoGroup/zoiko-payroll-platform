@@ -885,6 +885,9 @@ class PayrollRunCreate(BaseModel):
     # If true (default), payslip items are generated for every Active
     # employee in the org as soon as the run is created.
     auto_generate_payslips: bool = True
+    # Proceed despite incomplete attendance — recorded on the run and in the
+    # activity log. Ignored when attendance is complete.
+    attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1008,6 +1011,10 @@ class PayrollRunResponse(BaseModel):
     authorizedAt:          Optional[datetime] = Field(None, validation_alias="authorized_at", serialization_alias="authorizedAt")
     paidBy:                Optional[str] = Field(None, validation_alias="paid_by_name", serialization_alias="paidBy")
     processedAt:           Optional[datetime] = Field(None, validation_alias="processed_at", serialization_alias="processedAt")
+    # Set only when the run was deliberately created with incomplete
+    # attendance (see service.enforce_attendance_readiness).
+    attendanceOverrideReason: Optional[str] = Field(None, validation_alias="attendance_override_reason", serialization_alias="attendanceOverrideReason")
+    attendanceOverrideAt:  Optional[datetime] = Field(None, validation_alias="attendance_override_at", serialization_alias="attendanceOverrideAt")
     approvalStatus:        str = ""
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -1019,6 +1026,48 @@ class PayrollRunResponse(BaseModel):
         }
         self.approvalStatus = "Approved" if self.status in approved_states else "Pending"
         return self
+
+
+class GeneratePayslipsRequest(BaseModel):
+    """Optional body for POST /runs/{id}/generate-payslips."""
+    attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AttendanceReadinessMissing(BaseModel):
+    employeeId:    int
+    employeeName:  Optional[str] = None
+    employeeCode:  Optional[str] = None
+    expectedDays:  int
+    recordedDays:  int
+    missingDays:   int
+    missingDates:  List[str] = Field(default_factory=list)
+
+
+class AttendanceReadinessResponse(BaseModel):
+    """Per-employee attendance coverage for a pay period (see
+    service.check_attendance_readiness)."""
+    required:            bool
+    ready:               bool
+    periodStart:         Optional[str] = None
+    periodEnd:           Optional[str] = None
+    weeklyOffDays:       List[int] = Field(default_factory=list)
+    employmentTypes:     Optional[List[str]] = None
+    totalEmployees:      int = 0
+    exemptEmployees:     int = 0
+    completeEmployees:   int = 0
+    incompleteEmployees: int = 0
+    missing:             List[AttendanceReadinessMissing] = Field(default_factory=list)
+    missingTruncated:    bool = False
+
+
+class AttendanceReadinessRequest(BaseModel):
+    period_start: date = Field(..., alias="periodStart")
+    period_end:   date = Field(..., alias="periodEnd")
+    employee_ids: Optional[List[int]] = Field(None, alias="employeeIds")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 # ── Payslip Items ──────────────────────────────────────────────────────

@@ -1383,6 +1383,14 @@ class PayrollRun(Base):
     # so historical runs always know which mode was active.
     calculation_mode = Column(String(20), nullable=True, default="standard")
 
+    # Attendance gate override (see service.enforce_attendance_readiness):
+    # set only when an operator deliberately ran payroll with incomplete
+    # attendance and gave a reason. NULL for every normal run. Once set,
+    # later generate/recalculate calls on this run honour the same override.
+    attendance_override_reason = Column(Text, nullable=True)
+    attendance_override_by     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    attendance_override_at     = Column(DateTime(timezone=True), nullable=True)
+
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
     updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
