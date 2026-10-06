@@ -119,36 +119,36 @@ def test_available_is_refused_over_http_while_gates_are_missing_and_the_refusal_
 
 
 def test_available_only_when_every_requirement_is_met_then_suspension_is_always_allowed(db, hk):
-    from app.modules.payroll import hk_governance
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import TaxConfigurationAudit
 
     row = _registry(db)
     on = date(2026, 1, 15)                                       # YA 2025/26 + calendar 2026: the seeded template years
     _all_gates(db)
-    readiness = hk_governance.activation_readiness(db, on)
+    readiness = hong_kong_service.activation_readiness(db, on)
     assert not readiness["canOpen"] and any(r["key"].startswith("TEMPLATE_") and not r["met"]
                                             for r in readiness["requirements"])
     _activate_all_templates(db)
-    readiness = hk_governance.activation_readiness(db, on)
+    readiness = hong_kong_service.activation_readiness(db, on)
     assert not readiness["canOpen"] and [r["key"] for r in readiness["requirements"] if not r["met"]] == [
         "PRODUCTION_VERIFICATION"]                                     # production evidence is mandatory too
     _artifact(db, "HK-PRODUCTION-VERIFICATION")                        # TEST-ONLY evidence row
-    readiness = hk_governance.activation_readiness(db, on)
+    readiness = hong_kong_service.activation_readiness(db, on)
     assert readiness["canOpen"], [r for r in readiness["requirements"] if not r["met"]]
     with pytest.raises(Exception, match="reason"):
-        hk_governance.transition_hk_service_registry(db, "AVAILABLE", "", actor_id=SA_A.id, as_of=on)
-    hk_governance.transition_hk_service_registry(db, "AVAILABLE", "owner launch decision (test)", actor_id=SA_A.id, as_of=on)
+        hong_kong_service.transition_hk_service_registry(db, "AVAILABLE", "", actor_id=SA_A.id, as_of=on)
+    hong_kong_service.transition_hk_service_registry(db, "AVAILABLE", "owner launch decision (test)", actor_id=SA_A.id, as_of=on)
     db.refresh(row)
     assert row.availability == "AVAILABLE"
     with pytest.raises(Exception, match="already AVAILABLE"):
-        hk_governance.transition_hk_service_registry(db, "AVAILABLE", "again", actor_id=SA_A.id, as_of=on)
-    hk_governance.transition_hk_service_registry(db, "PLANNED", "emergency suspension (test)", actor_id=SA_B.id)
+        hong_kong_service.transition_hk_service_registry(db, "AVAILABLE", "again", actor_id=SA_A.id, as_of=on)
+    hong_kong_service.transition_hk_service_registry(db, "PLANNED", "emergency suspension (test)", actor_id=SA_B.id)
     db.refresh(row)
     assert row.availability == "PLANNED"
-    hk_governance.transition_hk_service_registry(db, "AVAILABLE", "re-open after incident (test)", actor_id=SA_A.id, as_of=on)
+    hong_kong_service.transition_hk_service_registry(db, "AVAILABLE", "re-open after incident (test)", actor_id=SA_A.id, as_of=on)
     db.refresh(row)
     assert row.availability == "AVAILABLE"                              # re-open re-checks every requirement
-    hk_governance.transition_hk_service_registry(db, "PLANNED", "close again (test)", actor_id=SA_A.id)
+    hong_kong_service.transition_hk_service_registry(db, "PLANNED", "close again (test)", actor_id=SA_A.id)
     changes = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "jurisdiction_service_registry",
                                                       TaxConfigurationAudit.action == "status_change")
                .order_by(TaxConfigurationAudit.id).all())
@@ -158,14 +158,14 @@ def test_available_only_when_every_requirement_is_met_then_suspension_is_always_
 
 def test_registry_refuses_unknown_targets_and_unidentified_actors(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_governance
+    from app.modules.payroll import hong_kong_service
 
     _registry(db)
     with pytest.raises(BadRequestException, match="identified Super Admin"):
-        hk_governance.transition_hk_service_registry(db, "AVAILABLE", "x", actor_id=None)
+        hong_kong_service.transition_hk_service_registry(db, "AVAILABLE", "x", actor_id=None)
     for target in ("ACTIVE", "LIMITED_AVAILABILITY", ""):
         with pytest.raises(BadRequestException, match="can only be"):
-            hk_governance.transition_hk_service_registry(db, target, "x", actor_id=SA_A.id)
+            hong_kong_service.transition_hk_service_registry(db, target, "x", actor_id=SA_A.id)
 
 
 # ── W2 template activation evidence ────────────────────────────────────
@@ -269,7 +269,7 @@ def test_summary_shows_activation_readiness_and_template_coverage(db, hk):
 # ── W5 XML adversarial vectors ─────────────────────────────────────────
 
 def test_xml_adversarial_vectors_are_refused_without_crashing(tmp_path, monkeypatch):
-    from app.modules.payroll import hk_ird_schema
+    from app.modules.payroll import hong_kong_service
 
     xsd = tmp_path / "t.xsd"            # SYNTHETIC test-only schema — not an IRD schema
     xsd.write_text('<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="R" type="xs:string"/></xs:schema>')
@@ -283,16 +283,16 @@ def test_xml_adversarial_vectors_are_refused_without_crashing(tmp_path, monkeypa
         "nested entities": b'<?xml version="1.0"?><!DOCTYPE R [<!ENTITY a "1"><!ENTITY b "&a;&a;">]><R>&b;</R>',
     }
     for name, payload in vectors.items():
-        errors = hk_ird_schema.validate(payload, str(xsd))
+        errors = hong_kong_service.validate(payload, str(xsd))
         assert errors and not any("TOP-SECRET" in e for e in errors), name
         assert errors == doctype or errors[0].startswith("not well-formed"), (name, errors)
-    assert hk_ird_schema.validate(b"<R><unclosed></R>", str(xsd))[0].startswith("not well-formed")       # malformed
+    assert hong_kong_service.validate(b"<R><unclosed></R>", str(xsd))[0].startswith("not well-formed")       # malformed
     deep = b"<R>" + b"<a>" * 5000 + b"</a>" * 5000 + b"</R>"
-    assert hk_ird_schema.validate(deep, str(xsd))                                                     # deeply nested: errors, no crash
+    assert hong_kong_service.validate(deep, str(xsd))                                                     # deeply nested: errors, no crash
     bad_encoding = b'<?xml version="1.0" encoding="UTF-8"?><R>\xff\xfe\xfa</R>'
-    assert hk_ird_schema.validate(bad_encoding, str(xsd))[0].startswith("not well-formed")         # invalid encoding
-    monkeypatch.setattr(hk_ird_schema, "MAX_XML_BYTES", 64)
-    assert "limit" in hk_ird_schema.validate(b"<R>" + b"x" * 100 + b"</R>", str(xsd))[0]           # oversized
+    assert hong_kong_service.validate(bad_encoding, str(xsd))[0].startswith("not well-formed")         # invalid encoding
+    monkeypatch.setattr(hong_kong_service, "MAX_XML_BYTES", 64)
+    assert "limit" in hong_kong_service.validate(b"<R>" + b"x" * 100 + b"</R>", str(xsd))[0]           # oversized
 
 
 # ── W6 historical replay ───────────────────────────────────────────────
@@ -318,7 +318,7 @@ def test_a_later_pack_change_never_changes_a_replay_of_an_earlier_period(db, hk)
 # ── certification-readiness program ────────────────────────────────────
 
 def test_readiness_refuses_an_active_template_without_an_independent_approval(db, hk):
-    from app.modules.payroll import hk_governance
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import ReportTemplate
 
     _all_gates(db)
@@ -327,22 +327,22 @@ def test_readiness_refuses_an_active_template_without_an_independent_approval(db
     t = db.query(ReportTemplate).filter(ReportTemplate.report_type == "HK_IR56B").one()
     t.approved_by_id = t.updated_by_id = 101                           # status set outside the governed path, self-approved
     db.commit()
-    readiness = hk_governance.activation_readiness(db, date(2026, 1, 15))
+    readiness = hong_kong_service.activation_readiness(db, date(2026, 1, 15))
     req = next(r for r in readiness["requirements"] if r["key"] == "TEMPLATE_HK_IR56B")
     assert readiness["canOpen"] is False and req["met"] is False and req["detail"] == "independent approval missing"
 
 
 def test_owner_decisions_and_external_dependencies_are_visible_and_need_reviewed_evidence(db, hk):
-    from app.modules.payroll import hk_governance
+    from app.modules.payroll import hong_kong_service
 
-    decisions = {d["key"]: d for d in hk_governance.owner_decisions(db)}
+    decisions = {d["key"]: d for d in hong_kong_service.owner_decisions(db)}
     assert len(decisions) == 14 and all(d["state"] == "OPEN" for d in decisions.values())
     assert decisions["D-1"]["blocksLaunch"] and not decisions["D-12"]["blocksLaunch"]
     _artifact(db, "HK-DECISION-D-1", uploader=101, reviewer=101)        # self-reviewed: not recorded
-    assert {d["key"]: d for d in hk_governance.owner_decisions(db)}["D-1"]["state"] == "SUBMITTED"
+    assert {d["key"]: d for d in hong_kong_service.owner_decisions(db)}["D-1"]["state"] == "SUBMITTED"
     _artifact(db, "HK-DECISION-D-1", uploader=101, reviewer=202)
-    assert {d["key"]: d for d in hk_governance.owner_decisions(db)}["D-1"]["state"] == "RECORDED"
-    deps = hk_governance.external_dependencies(db)
+    assert {d["key"]: d for d in hong_kong_service.owner_decisions(db)}["D-1"]["state"] == "RECORDED"
+    deps = hong_kong_service.external_dependencies(db)
     assert [d["key"] for d in deps] == [f"X-{i}" for i in range(1, 11)]
     assert all(d["gateState"] == "EVIDENCE_REQUIRED" for d in deps)
     with _http(db, SA_A) as c:
@@ -351,19 +351,19 @@ def test_owner_decisions_and_external_dependencies_are_visible_and_need_reviewed
 
 
 def test_template_content_hash_is_stable_and_changes_with_content(db):
-    from app.modules.payroll import hk_governance
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import ReportTemplate, ReportTemplateComponentField
     from scripts.seed_statutory_report_templates import seed_hong_kong
 
     seed_hong_kong(db)
     t = db.query(ReportTemplate).filter(ReportTemplate.report_type == "HK_IR56B").one()
-    h1 = hk_governance.template_content_hash(db, t)
-    assert h1 == hk_governance.template_content_hash(db, t) and len(h1) == 64
+    h1 = hong_kong_service.template_content_hash(db, t)
+    assert h1 == hong_kong_service.template_content_hash(db, t) and len(h1) == 64
     f = db.query(ReportTemplateComponentField).filter(ReportTemplateComponentField.field_key == "ird_salary_wages").first()
     f.label = "changed"
     db.commit()
-    assert hk_governance.template_content_hash(db, t) != h1
-    cmp = hk_governance.compare_report_templates(db, t.id, t.id)
+    assert hong_kong_service.template_content_hash(db, t) != h1
+    cmp = hong_kong_service.compare_report_templates(db, t.id, t.id)
     assert cmp["from"]["contentHash"] == cmp["to"]["contentHash"]
 
 

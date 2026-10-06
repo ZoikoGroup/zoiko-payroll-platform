@@ -101,6 +101,16 @@ class SgDecisionCreate(BaseModel):
     reason: str
 
 
+class ServiceRegistryTransition(BaseModel):
+    """The owner's governed registry step for one jurisdiction — AVAILABLE
+    (opens onboarding; refused unless every readiness requirement is met,
+    re-derived server-side) or PLANNED (closes / suspends it). The reason is
+    the change record."""
+    model_config = ConfigDict(extra="forbid")
+    availability: str
+    reason: str
+
+
 class SgServiceRegistryTransition(BaseModel):
     """Phase 6.10: the owner's Singapore registry step — AVAILABLE (opens
     onboarding, gated server-side) or PLANNED (closes it). The reason is the

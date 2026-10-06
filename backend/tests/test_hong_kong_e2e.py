@@ -118,21 +118,21 @@ def _other_org(db, code):
 def test_e2e_runs_60_day_catch_up_pack_switch_no_withholding(db, hk):
     runs = {m: _month(db, hk.org, m) for m in (1, 2, 3, 4)}
     jan, feb, mar, apr = (_item(db, runs[m], hk.emp) for m in (1, 2, 3, 4))
-    assert jan.hkg_calculation_trace["mpf"]["coverage"]["status"] == "PENDING_60_DAY"
+    assert jan.hk_calculation_trace["mpf"]["coverage"]["status"] == "PENDING_60_DAY"
     assert (jan.employee_pension, jan.employer_pension) == (0, 0)
-    assert jan.hkg_calculation_trace["workerFacts"]["preJoiningUnpaidDays"] == 15
+    assert jan.hk_calculation_trace["workerFacts"]["preJoiningUnpaidDays"] == 15
     # March: employer 5% from the FIRST day (Jan's pro-rated RI + Feb + Mar); employee from March only.
-    jan_ri = D(jan.hkg_calculation_trace["mpf"]["currentPeriod"]["relevantIncome"])
+    jan_ri = D(jan.hk_calculation_trace["mpf"]["currentPeriod"]["relevantIncome"])
     assert mar.employer_pension == (jan_ri * D("0.05")).quantize(D("0.01")) + D("1000") + D("1000")
     assert mar.employee_pension == D("1000.00")
-    assert [c["payslipId"] for c in mar.hkg_calculation_trace["mpf"]["catchUp"]] == [jan.id, feb.id]
-    assert (apr.employee_pension, apr.employer_pension, apr.hkg_calculation_trace["mpf"]["catchUp"]) == (1000, 1000, [])
+    assert [c["payslipId"] for c in mar.hk_calculation_trace["mpf"]["catchUp"]] == [jan.id, feb.id]
+    assert (apr.employee_pension, apr.employer_pension, apr.hk_calculation_trace["mpf"]["catchUp"]) == (1000, 1000, [])
     # Effective dating: Jan–Mar = YA 2025/26 pack, April = YA 2026/27 pack.
     p25, p26 = hk.packs
     assert {jan.tax_policy_pack_id, feb.tax_policy_pack_id, mar.tax_policy_pack_id} == {p25.id}
     assert apr.tax_policy_pack_id == p26.id
     for item in (jan, feb, mar, apr):
-        assert item.tds == 0 and item.hkg_calculation_trace["salariesTax"]["withholding"] == "NONE"
+        assert item.tds == 0 and item.hk_calculation_trace["salariesTax"]["withholding"] == "NONE"
         assert item.employee_statutory_profile_id is not None
 
 
@@ -140,28 +140,28 @@ def test_final_period_is_unpaid_after_the_termination_date(db, hk):
     """D-13: the joiner side already leaves pre-joining days unpaid; the leaver
     side must be symmetric, or a mid-month leaver is paid for a month they
     never worked. The convention is the platform's own 30-day month."""
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 2, 28))
     full = _month(db, hk.org, 2)
     full_net = _item(db, full, hk.emp).net_pay
 
-    hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 2, 18), actor_id=MAKER.id)
+    hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 2, 18), actor_id=MAKER.id)
     db.query(type(hk.emp)).filter(type(hk.emp).id == hk.emp.id).update({"date_of_leaving": date(2026, 2, 18)})
     db.commit()
     final = _month(db, hk.org, 2)
     item = _item(db, final, hk.emp)
-    facts = item.hkg_calculation_trace["workerFacts"]
+    facts = item.hk_calculation_trace["workerFacts"]
     assert facts["postLeavingUnpaidDays"] == 10          # 19–28 Feb, the days after termination
     assert facts["finalPeriodTerminationDate"] == "2026-02-18"
     expected_absence = (D(item.gross_pay) / D(30)).quantize(D("0.01")) * D(10)
     assert item.net_pay == D(item.gross_pay) - expected_absence - D(item.employee_pension)
     assert item.net_pay < full_net
-    absence = [line for obligation in item.hkg_calculation_trace["classification"].values()
+    absence = [line for obligation in item.hk_calculation_trace["classification"].values()
                for line in obligation["lines"] if line.get("component") == "unpaid_absence"]
     assert absence and D(absence[0]["amount"]) == -expected_absence
     # 34 days of employment is under 60, so the leaver attracts no MPF at all.
-    assert item.hkg_calculation_trace["mpf"]["coverage"]["status"] == "NOT_COVERED_LEFT_BEFORE_60_DAYS"
+    assert item.hk_calculation_trace["mpf"]["coverage"]["status"] == "NOT_COVERED_LEFT_BEFORE_60_DAYS"
 
 
 def test_payroll_snapshot_is_reproducible_and_keeps_its_profile_version(db, hk):
@@ -182,7 +182,7 @@ def test_payroll_snapshot_is_reproducible_and_keeps_its_profile_version(db, hk):
 def test_mpf_exempt_profile_version_applies_from_its_effective_date(db, hk):
     _profile(db, hk.emp, hk.org.id, "2026-05-01", hkgMpfExemptionCode="EXEMPT_ORSO", hkgMpfExemptionEvidenceRef="ORSO-1")
     may = _item(db, _month(db, hk.org, 5), hk.emp)
-    assert may.hkg_calculation_trace["mpf"]["coverage"]["status"] == "EXEMPT" and may.employer_pension == 0
+    assert may.hk_calculation_trace["mpf"]["coverage"]["status"] == "EXEMPT" and may.employer_pension == 0
 
 
 def test_payroll_blocks_without_active_pack(db, hk):
@@ -213,11 +213,11 @@ def test_profile_versions_are_append_only_with_carry_forward(db, hk):
     v2 = _profile(db, hk.emp, hk.org.id, "2026-07-01", hkgExpectedDepartureDate="2026-12-31")
     history = service.list_employee_statutory_profile_history(db, hk.emp.id, hk.org.id)
     v1 = history[-1]
-    assert v1.effective_to == date(2026, 6, 30) and v1.hkg_expected_departure_date is None     # history intact
-    assert v2.hkg_likely_chargeable is True and v2.hkg_expected_departure_date == date(2026, 12, 31)  # carried forward
+    assert v1.effective_to == date(2026, 6, 30) and v1.hk_expected_departure_date is None     # history intact
+    assert v2.hk_likely_chargeable is True and v2.hk_expected_departure_date == date(2026, 12, 31)  # carried forward
     # D-19: a keyed, versioned token ("v2:" + HMAC-SHA256), never the raw identifier.
-    assert v2.hkg_identity_token.startswith("v2:") and len(v2.hkg_identity_token) == 67
-    assert "A123456" not in v2.hkg_identity_token
+    assert v2.hk_identity_token.startswith("v2:") and len(v2.hk_identity_token) == 67
+    assert "A123456" not in v2.hk_identity_token
 
 
 def test_frozen_pre_transition_wage_cannot_change_in_a_later_version(db, organization):
@@ -229,15 +229,15 @@ def test_frozen_pre_transition_wage_cannot_change_in_a_later_version(db, organiz
     with pytest.raises(BadRequestException, match="frozen"):
         _profile(db, emp, organization.id, "2026-01-01", hkgPreTransitionMonthlyWage="30000",
                  hkgPreTransitionEvidenceRef="X")
-    assert _profile(db, emp, organization.id, "2026-01-01").hkg_pre_transition_monthly_wage == D("24000")
+    assert _profile(db, emp, organization.id, "2026-01-01").hk_pre_transition_monthly_wage == D("24000")
 
 
 @pytest.mark.parametrize("fields,match", [
-    ({"hkgMpfExemptionCode": "EXEMPT_EVERYTHING"}, "hkg_mpf_exemption_code"),
+    ({"hkgMpfExemptionCode": "EXEMPT_EVERYTHING"}, "hk_mpf_exemption_code"),
     ({"hkgMpfExemptionCode": "EXEMPT_ORSO"}, "evidence"),
     ({"hkgContractualWeeklyHours": "200"}, "168"),
     ({"hkgPreTransitionMonthlyWage": "20000"}, "HK-017"),
-    ({"hkgEmploymentRelationship": "FREELANCE"}, "hkg_employment_relationship"),
+    ({"hkgEmploymentRelationship": "FREELANCE"}, "hk_employment_relationship"),
 ])
 def test_profile_validation(db, hk, fields, match):
     from app.core.exceptions import BadRequestException
@@ -250,39 +250,39 @@ def test_profile_validation(db, hk, fields, match):
 
 def test_case_i_ir56g_hold_bank_export_ledger_and_four_eyes_release(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service, service
-    from app.modules.payroll.models import HkgTaxClearanceHoldLine, PayslipItem
+    from app.modules.payroll import hong_kong_service, service
+    from app.modules.payroll.models import HongKongTaxClearanceHoldLine, PayslipItem
 
     _month(db, hk.org, 5)
-    hold = hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
                                          identified_on=date(2026, 6, 26))          # 35 days ahead
     assert (hold.state, hold.filing_deadline) == ("DEPARTURE_IDENTIFIED", date(2026, 6, 30))
-    hold = hk_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 28), "IR56G-REF-1", MAKER.id)
+    hold = hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 28), "IR56G-REF-1", MAKER.id)
     assert hold.state == "IR56G_FILED_HOLD_ACTIVE" and hold.statutory_hold_expiry == date(2026, 7, 28)
     june = _month(db, hk.org, 6)
     item = _item(db, june, hk.emp)
-    treatment = hk_service.payment_treatment(db, hk.org.id, june, [item])
+    treatment = hong_kong_service.payment_treatment(db, hk.org.id, june, [item])
     assert treatment[item.id][0] == "HELD"
-    lines = db.query(HkgTaxClearanceHoldLine).filter(HkgTaxClearanceHoldLine.hold_id == hold.id).all()
+    lines = db.query(HongKongTaxClearanceHoldLine).filter(HongKongTaxClearanceHoldLine.hold_id == hold.id).all()
     assert [(l.payslip_item_id, l.amount) for l in lines] == [(item.id, item.net_pay)]
     assert db.query(PayslipItem).get(item.id).net_pay == item.net_pay        # a legal hold, NOT a deduction
     with pytest.raises(BadRequestException, match="no active hold|basis"):
-        hk_service.request_hold_release(db, hk.org.id, hold.id, "BECAUSE", None, "x", MAKER.id)
-    hk_service.request_hold_release(db, hk.org.id, hold.id, "LETTER_OF_RELEASE", "LOR-77", "letter.pdf", MAKER.id)
+        hong_kong_service.request_hold_release(db, hk.org.id, hold.id, "BECAUSE", None, "x", MAKER.id)
+    hong_kong_service.request_hold_release(db, hk.org.id, hold.id, "LETTER_OF_RELEASE", "LOR-77", "letter.pdf", MAKER.id)
     with pytest.raises(BadRequestException, match="four-eyes"):
-        hk_service.approve_hold_release(db, hk.org.id, hold.id, MAKER.id)
-    hold = hk_service.approve_hold_release(db, hk.org.id, hold.id, CHECKER.id)
+        hong_kong_service.approve_hold_release(db, hk.org.id, hold.id, MAKER.id)
+    hold = hong_kong_service.approve_hold_release(db, hk.org.id, hold.id, CHECKER.id)
     assert hold.state == "LETTER_OF_RELEASE_RECEIVED" and hold.released_amount == item.net_pay
-    assert hk_service.payment_treatment(db, hk.org.id, june, [item]) == {}
-    assert hk_service.close_hold(db, hk.org.id, hold.id, CHECKER.id).state == "CASE_CLOSED"
+    assert hong_kong_service.payment_treatment(db, hk.org.id, june, [item]) == {}
+    assert hong_kong_service.close_hold(db, hk.org.id, hold.id, CHECKER.id).state == "CASE_CLOSED"
 
 
 def test_bank_export_leaves_out_held_payslips(db, hk, monkeypatch):
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
 
-    hold = hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id,
                                          identified_on=date(2026, 6, 1))
-    hk_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
     june = _month(db, hk.org, 6)
     other = _employee(db, hk.org.id, "HK2", date_of_joining=date(2025, 1, 1))
     _profile(db, other, hk.org.id, "2025-01-01")
@@ -297,114 +297,114 @@ def test_bank_export_leaves_out_held_payslips(db, hk, monkeypatch):
 
 def test_changed_departure_keeps_holding_until_release(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    hold = hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id, identified_on=date(2026, 6, 1))
-    hk_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 7, 31), MAKER.id, identified_on=date(2026, 6, 1))
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 6, 20), "REF", MAKER.id)
     _month(db, hk.org, 6)
     with pytest.raises(BadRequestException, match="evidence"):
-        hk_service.change_departure(db, hk.org.id, hold.id, "cancelled", None, MAKER.id)
-    hold = hk_service.change_departure(db, hk.org.id, hold.id, "trip cancelled", "email.pdf", MAKER.id)
+        hong_kong_service.change_departure(db, hk.org.id, hold.id, "cancelled", None, MAKER.id)
+    hold = hong_kong_service.change_departure(db, hk.org.id, hold.id, "trip cancelled", "email.pdf", MAKER.id)
     assert hold.state == "DEPARTURE_CANCELLED_OR_CHANGED"
     with pytest.raises(BadRequestException, match="still holds money"):
-        hk_service.close_hold(db, hk.org.id, hold.id, MAKER.id)
+        hong_kong_service.close_hold(db, hk.org.id, hold.id, MAKER.id)
 
 
 def test_ir56g_not_required_for_frequent_traveller(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     _profile(db, hk.emp, hk.org.id, "2026-05-01", hkgFrequentTravelExempt=True)
     with pytest.raises(BadRequestException, match="frequent"):
-        hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
+        hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
 
 
 # ── IRD reporting (cases J, amendments, reconciliation) ─────────────────
 
 def test_annual_return_from_committed_payroll_reconciles_and_files_four_eyes(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     for m in (1, 2, 3):
         _month(db, hk.org, m)
     _month(db, hk.org, 4)                                 # YA 2026/27 — must not be in the 2025/26 return
-    out = hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
     emp_row = out["employees"][0]
     assert emp_row["status"] == "PREPARED" and emp_row["validationErrors"] == []
-    case = hk_service._case(db, hk.org.id, emp_row["caseId"])
+    case = hong_kong_service._case(db, hk.org.id, emp_row["caseId"])
     assert (case.income_period_start, case.income_period_end) == (date(2026, 1, 16), date(2026, 3, 31))
     # Jan: HK$20,000 − 15 unpaid days × 666.67 = 9,999.95; Feb + Mar 20,000 each.
     assert D(case.payload["total"]) == D(out["reportedTotal"]) == D(out["committedPayrollGross"]) == D("49999.95")
-    hk_service.transition_ird_case(db, hk.org.id, case.id, "VALIDATED", MAKER.id)
+    hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "VALIDATED", MAKER.id)
     with pytest.raises(BadRequestException, match="four-eyes"):
-        hk_service.transition_ird_case(db, hk.org.id, case.id, "FILED", MAKER.id, filing_reference="ER-2026-1", submission=INTERNAL_FILING)
-    hk_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id, filing_reference="ER-2026-1", submission=INTERNAL_FILING)
+        hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "FILED", MAKER.id, filing_reference="ER-2026-1", submission=INTERNAL_FILING)
+    hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id, filing_reference="ER-2026-1", submission=INTERNAL_FILING)
     payload_hash = case.payload_hash
-    again = hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
+    again = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
     assert again["employees"][0]["status"] == "FILED" and case.payload_hash == payload_hash   # never regenerated
-    amendment = hk_service.amend_ird_case(db, hk.org.id, case.id, "late bonus", MAKER.id)
+    amendment = hong_kong_service.amend_ird_case(db, hk.org.id, case.id, "late bonus", MAKER.id)
     db.refresh(case)
     assert (case.status, case.payload_hash, amendment.amends_case_id, amendment.status) == (
-        "AMENDED", payload_hash, case.id, "PREPARED")
+        "FILED", payload_hash, case.id, "PREPARED")                     # superseded only when the replacement is filed
 
 
 def test_case_j_ir56b_suppressed_after_prior_ir56f(db, hk):
-    from app.modules.payroll import hk_service
-    from app.modules.payroll.models import HkgIrdReportingCase
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase
 
     for m in (1, 2, 3):
         _month(db, hk.org, m)
-    db.add(HkgIrdReportingCase(organization_id=hk.org.id, employee_id=hk.emp.id, form_type="IR56F",
+    db.add(HongKongIrdReportingCase(organization_id=hk.org.id, employee_id=hk.emp.id, form_type="IR56F",
                                year_of_assessment="2025/26", event_date=date(2026, 3, 31), status="FILED",
                                income_period_start=date(2025, 4, 1), income_period_end=date(2026, 3, 31)))
     db.commit()
-    out = hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
     row = out["employees"][0]
     assert row["status"] == "SUPPRESSED" and "twice" in row["message"]
 
 
 def test_uncommitted_runs_are_not_reported(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import PayrollStatus
 
     _month(db, hk.org, 3, status=PayrollStatus.DRAFT)
-    assert hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)["employees"] == []
+    assert hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)["employees"] == []
 
 
 def test_ir56e_event_case_from_profile_facts(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    cases = hk_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id)
+    cases = hong_kong_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id)
     assert [(c.form_type, c.due_date) for c in cases] == [("IR56E", date(2026, 4, 16))]
-    assert hk_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id) == []          # idempotent
+    assert hong_kong_service.create_event_cases(db, hk.org.id, hk.emp.id, MAKER.id) == []          # idempotent
 
 
 # ── eMPF (rejected row never rewrites payroll) ──────────────────────────
 
 def test_empf_batch_partial_rejection_does_not_touch_payroll(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     run = _month(db, hk.org, 4)
     before = _item(db, run, hk.emp).employee_pension
-    sub = hk_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
+    sub = hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
     assert sub.status == "VALIDATED" and sub.totals["employees"] == 1 and sub.contribution_day == date(2026, 5, 10)
     assert "A123456(3)" not in str(sub.rows)                                      # identifiers masked
     with pytest.raises(BadRequestException, match="four-eyes"):
-        hk_service.transition_empf_submission(db, hk.org.id, sub.id, "SUBMITTED", MAKER.id, submission_reference="E-1")
-    hk_service.transition_empf_submission(db, hk.org.id, sub.id, "SUBMITTED", CHECKER.id, submission_reference="E-1")
+        hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "SUBMITTED", MAKER.id, submission_reference="E-1")
+    hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "SUBMITTED", CHECKER.id, submission_reference="E-1")
     with pytest.raises(BadRequestException, match="PARTIAL"):
-        hk_service.transition_empf_submission(db, hk.org.id, sub.id, "ACCEPTED", CHECKER.id,
+        hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "ACCEPTED", CHECKER.id,
                                               row_outcomes=[{"payslipId": 1, "status": "ACCEPTED"},
                                                             {"payslipId": 2, "status": "REJECTED"}])
-    sub = hk_service.transition_empf_submission(db, hk.org.id, sub.id, "PARTIAL", CHECKER.id,
+    sub = hong_kong_service.transition_empf_submission(db, hk.org.id, sub.id, "PARTIAL", CHECKER.id,
                                                 row_outcomes=[{"payslipId": 1, "status": "ACCEPTED"},
                                                               {"payslipId": 2, "status": "REJECTED"}])
     assert sub.status == "PARTIAL" and _item(db, run, hk.emp).employee_pension == before
 
 
 def test_empf_validation_flags_missing_identity_and_employer_account(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import CompanyComplianceDetails
 
     hk.emp.compliance_fields = {}
@@ -412,7 +412,7 @@ def test_empf_validation_flags_missing_identity_and_employer_account(db, hk):
     comp.tax_identifiers = {}
     db.commit()
     _month(db, hk.org, 4)
-    sub = hk_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
+    sub = hong_kong_service.prepare_empf_submission(db, hk.org.id, "2026-04", MAKER.id)
     assert sub.status == "PREPARED" and any("eMPF employer account" in e for e in sub.validation_errors)
     assert any("HKID" in e for e in sub.validation_errors)
 
@@ -421,86 +421,86 @@ def test_empf_validation_flags_missing_identity_and_employer_account(db, hk):
 
 def test_average_wage_from_committed_payroll_shorter_period_and_override_four_eyes(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     for m in (1, 2, 3, 4):
         _month(db, hk.org, m)
-    snap = hk_service.calculate_average_wage(db, hk.org.id, hk.emp.id, "ANNUAL_LEAVE", date(2026, 5, 10), [], MAKER.id)
+    snap = hong_kong_service.calculate_average_wage(db, hk.org.id, hk.emp.id, "ANNUAL_LEAVE", date(2026, 5, 10), [], MAKER.id)
     assert (snap.lookback_start, snap.lookback_end, snap.total_days) == (date(2026, 1, 16), date(2026, 4, 30), 105)
     assert snap.result["shorterEmploymentPeriod"] is True and len(snap.included_rows) == 4
     assert snap.total_wages == D("69999.95")                       # Jan 9,999.95 (pro-rated) + Feb–Apr
     with pytest.raises(BadRequestException, match="evidence"):
-        hk_service.request_average_wage_override(db, hk.org.id, snap.id, "700", "", None, MAKER.id)
-    hk_service.request_average_wage_override(db, hk.org.id, snap.id, "700", "court order", "ORDER-1", MAKER.id)
+        hong_kong_service.request_average_wage_override(db, hk.org.id, snap.id, "700", "", None, MAKER.id)
+    hong_kong_service.request_average_wage_override(db, hk.org.id, snap.id, "700", "court order", "ORDER-1", MAKER.id)
     with pytest.raises(BadRequestException, match="four-eyes"):
-        hk_service.approve_average_wage_override(db, hk.org.id, snap.id, MAKER.id)
-    snap = hk_service.approve_average_wage_override(db, hk.org.id, snap.id, CHECKER.id)
-    eff = hk_service.effective_average(snap)
+        hong_kong_service.approve_average_wage_override(db, hk.org.id, snap.id, MAKER.id)
+    snap = hong_kong_service.approve_average_wage_override(db, hk.org.id, snap.id, CHECKER.id)
+    eff = hong_kong_service.effective_average(snap)
     assert eff["averageDailyWage"] == "700.0000" and eff["calculatedAverageDailyWage"] == snap.result["averageDailyWage"]
 
 
 def test_average_wage_blocks_on_uncertified_eo_classification(db, hk, monkeypatch):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
 
     monkeypatch.setattr(service, "_sum_attendance_extras", lambda *a, **k: D("3000"))   # additional compensation
     for m in (2, 3):
         _month(db, hk.org, m)
     with pytest.raises(BadRequestException, match="not certified"):
-        hk_service.calculate_average_wage(db, hk.org.id, hk.emp.id, "SICKNESS", date(2026, 4, 2), [], MAKER.id)
+        hong_kong_service.calculate_average_wage(db, hk.org.id, hk.emp.id, "SICKNESS", date(2026, 4, 2), [], MAKER.id)
 
 
 def test_annual_leave_entitlement_through_the_service(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     for m in (1, 2, 3, 4):
         _month(db, hk.org, m)
-    hk_service.record_work_hours(db, hk.org.id, hk.emp.id,
+    hong_kong_service.record_work_hours(db, hk.org.id, hk.emp.id,
                                  [{"date": d.isoformat(), "hours": "8"}
                                   for d in (date(2026, 1, 16) + timedelta(days=i) for i in range(115)) if d.weekday() < 5],
                                  MAKER.id)
-    snap = hk_service.calculate_average_wage(db, hk.org.id, hk.emp.id, "ANNUAL_LEAVE", date(2026, 5, 10), [], MAKER.id)
-    out = hk_service.calculate_entitlement(db, hk.org.id, hk.emp.id, "ANNUAL_LEAVE_PAY",
+    snap = hong_kong_service.calculate_average_wage(db, hk.org.id, hk.emp.id, "ANNUAL_LEAVE", date(2026, 5, 10), [], MAKER.id)
+    out = hong_kong_service.calculate_entitlement(db, hk.org.id, hk.emp.id, "ANNUAL_LEAVE_PAY",
                                            {"averageWageSnapshotId": snap.id, "days": "3", "date": "2026-05-10"})
     assert D(out["amount"]) == (D(snap.result["averageDailyWage"]) * 3).quantize(D("0.01"))
 
 
 def test_work_hours_are_append_only(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
-    from app.modules.payroll.models import HkgWorkHours
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongWorkHours
 
-    hk_service.record_work_hours(db, hk.org.id, hk.emp.id, [{"date": "2026-02-02", "hours": "8"}], MAKER.id)
+    hong_kong_service.record_work_hours(db, hk.org.id, hk.emp.id, [{"date": "2026-02-02", "hours": "8"}], MAKER.id)
     with pytest.raises(BadRequestException, match="reason"):
-        hk_service.record_work_hours(db, hk.org.id, hk.emp.id, [{"date": "2026-02-02", "hours": "9"}], MAKER.id)
-    hk_service.record_work_hours(db, hk.org.id, hk.emp.id, [{"date": "2026-02-02", "hours": "9"}], MAKER.id, "timesheet fix")
-    rows = db.query(HkgWorkHours).filter(HkgWorkHours.employee_id == hk.emp.id).order_by(HkgWorkHours.id).all()
+        hong_kong_service.record_work_hours(db, hk.org.id, hk.emp.id, [{"date": "2026-02-02", "hours": "9"}], MAKER.id)
+    hong_kong_service.record_work_hours(db, hk.org.id, hk.emp.id, [{"date": "2026-02-02", "hours": "9"}], MAKER.id, "timesheet fix")
+    rows = db.query(HongKongWorkHours).filter(HongKongWorkHours.employee_id == hk.emp.id).order_by(HongKongWorkHours.id).all()
     assert [(r.hours, r.superseded_by_id is not None) for r in rows] == [(D("8"), True), (D("9"), False)]
-    assert hk_service.hours_map(db, hk.emp.id, date(2026, 2, 1), date(2026, 2, 28)) == {"2026-02-02": "9.00"}
+    assert hong_kong_service.hours_map(db, hk.emp.id, date(2026, 2, 1), date(2026, 2, 28)) == {"2026-02-02": "9.00"}
 
 
 # ── Termination (case K) ────────────────────────────────────────────────
 
 def test_case_k_termination_through_the_service_with_frozen_wage_and_four_eyes(db, organization, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     emp = _employee(db, hk.org.id, "HKK", date_of_joining=date(2015, 5, 1))
     _profile(db, emp, hk.org.id, "2015-05-01", hkgContractualWeeklyHours="44", hkgPreTransitionMonthlyWage="24000",
              hkgPreTransitionWageBasis="LAST_FULL_MONTH", hkgPreTransitionEvidenceRef="PAYSLIP-2025-04")
-    row = hk_service.calculate_termination(db, hk.org.id, emp.id, {
+    row = hong_kong_service.calculate_termination(db, hk.org.id, emp.id, {
         "terminationDate": "2027-03-31", "reason": "REDUNDANCY", "postTransitionWage": "30000",
         "offsets": [{"type": "EMPLOYER_MANDATORY_MPF", "amount": "500000"}]}, MAKER.id)
     r = row.result
     assert r["paymentType"] == "SP" and r["portions"]["preTransition"]["wage"] == "24000.00"
     assert row.net_statutory_payment == D(r["portions"]["postTransition"]["amount"])   # mandatory offset hits pre only
     with pytest.raises(BadRequestException, match="frozen"):
-        hk_service.calculate_termination(db, hk.org.id, emp.id, {
+        hong_kong_service.calculate_termination(db, hk.org.id, emp.id, {
             "terminationDate": "2027-03-31", "reason": "REDUNDANCY", "postTransitionWage": "30000",
             "preTransitionWage": "40000"}, MAKER.id)
     with pytest.raises(BadRequestException, match="four-eyes"):
-        hk_service.approve_termination(db, hk.org.id, row.id, MAKER.id)
-    assert hk_service.approve_termination(db, hk.org.id, row.id, CHECKER.id).status == "APPROVED"
+        hong_kong_service.approve_termination(db, hk.org.id, row.id, MAKER.id)
+    assert hong_kong_service.approve_termination(db, hk.org.id, row.id, CHECKER.id).status == "APPROVED"
 
 
 # ── Super Admin lifecycle / activation gates ────────────────────────────
@@ -517,17 +517,17 @@ def _specialist_verified(db, pack, actor_id):
     """TEST-ONLY stand-in for the G1 specialist's confirmation, recorded the
     production way: every row that is not SOURCED is re-linked (governed edit,
     Draft pack) to a reviewed, hashed source. Values are unchanged."""
-    from app.modules.payroll import hk_configuration
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import SourceArtifact
 
     src = SourceArtifact(agency="HK specialist (TEST)", title="TEST verified statutory source", form_number="HK-TEST-VERIFIED",
                          checksum_sha256="1" * 64, file_path="verified.pdf", created_by_id=MAKER.id, reviewer_id=CHECKER.id)
     db.add(src)
     db.commit()
-    for d in hk_configuration.domains(db, pack.id)["domains"]:
+    for d in hong_kong_service.domains(db, pack.id)["domains"]:
         for r in d["rows"]:
             if r["status"] != "SOURCED":
-                hk_configuration.update_row(db, r["kind"], r["id"], {"reason": "TEST specialist verification",
+                hong_kong_service.update_row(db, r["kind"], r["id"], {"reason": "TEST specialist verification",
                                                                      "sourceDocumentId": src.id,
                                                                      "specialistVerified": True}, actor_id)
 
@@ -581,7 +581,7 @@ def test_hk_hotfix_activation_is_refused_and_audited(db):
 
 def test_hk_gate_evidence_needs_an_uploaded_document_and_a_second_reviewer(db):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
     from app.modules.payroll.models import SourceArtifact
 
     art = SourceArtifact(agency="x", title="G1", form_number="HK-GATE-G1", created_by_id=MAKER.id)
@@ -593,16 +593,16 @@ def test_hk_gate_evidence_needs_an_uploaded_document_and_a_second_reviewer(db):
     db.commit()
     with pytest.raises(BadRequestException, match="different"):
         service.mark_source_artifact_reviewed(db, art.id, MAKER.id)
-    assert hk_service.gate_state(db, "G1") == "SUBMITTED"
+    assert hong_kong_service.gate_state(db, "G1") == "SUBMITTED"
     service.mark_source_artifact_reviewed(db, art.id, CHECKER.id)
-    assert hk_service.gate_state(db, "G1") == "PASS"
+    assert hong_kong_service.gate_state(db, "G1") == "PASS"
 
 
 def test_statutory_summary_lists_gates_blockers_and_g1_items(db):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     _draft_packs(db)
-    s = hk_service.statutory_summary(db)
+    s = hong_kong_service.statutory_summary(db)
     assert [g["gate"] for g in s["gates"]] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
     assert all(g["state"] == "EVIDENCE_REQUIRED" for g in s["gates"])
     assert s["serviceRegistry"] == "PLANNED" and s["certificationItems"]
@@ -622,12 +622,12 @@ def test_onboarding_into_hk_is_blocked_while_planned_or_unregistered(db):
 
 
 def test_super_admin_preview_runs_engine_on_draft_pack_and_writes_nothing(db):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import PayslipItem
     from app.modules.payroll.schemas import HKCalculationPreviewRequest
 
     _draft_packs(db)
-    out = hk_service.preview_calculation(db, HKCalculationPreviewRequest(
+    out = hong_kong_service.preview_calculation(db, HKCalculationPreviewRequest(
         payDate=date(2026, 6, 30), gross="45000", dateOfBirth=date(1990, 1, 1), dateOfJoining=date(2024, 1, 1)))
     assert (out["status"], out["packStatus"], out["mpfEmployee"], out["incomeTaxWithheld"]) == ("CALCULATED", "Draft", "1500.00", "0")
     assert db.query(PayslipItem).count() == 0
@@ -637,42 +637,43 @@ def test_super_admin_preview_runs_engine_on_draft_pack_and_writes_nothing(db):
 
 def test_tenant_isolation_across_hk_operations(db, hk):
     from app.core.exceptions import BadRequestException, NotFoundException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     other = _other_org(db, "OTHERHK")
-    hold = hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
     with pytest.raises(NotFoundException):
-        hk_service._hold(db, other.id, hold.id)
+        hong_kong_service._hold(db, other.id, hold.id)
     with pytest.raises(NotFoundException):
-        hk_service.identify_departure(db, other.id, hk.emp.id, date(2026, 9, 30), MAKER.id)
+        hong_kong_service.identify_departure(db, other.id, hk.emp.id, date(2026, 9, 30), MAKER.id)
     with pytest.raises(NotFoundException):
-        hk_service.calculate_average_wage(db, other.id, hk.emp.id, "SICKNESS", date(2026, 5, 1), [], MAKER.id)
+        hong_kong_service.calculate_average_wage(db, other.id, hk.emp.id, "SICKNESS", date(2026, 5, 1), [], MAKER.id)
     for m in (1, 2, 3):
         _month(db, hk.org, m)
-    assert hk_service.generate_annual_return(db, other.id, "2025/26", MAKER.id)["employees"] == []
+    assert hong_kong_service.generate_annual_return(db, other.id, "2025/26", MAKER.id)["employees"] == []
     sg = _employee(db, hk.org.id, "SG1", country_code="SG")
     with pytest.raises(BadRequestException, match="not a Hong Kong employee"):
-        hk_service.record_work_hours(db, hk.org.id, sg.id, [{"date": "2026-02-02", "hours": "8"}], MAKER.id)
+        hong_kong_service.record_work_hours(db, hk.org.id, sg.id, [{"date": "2026-02-02", "hours": "8"}], MAKER.id)
 
 
 def _hours(db, org, emp, start, end, per_day=8):
     """Verified daily hours (weekdays only) so continuous contract and the
     minimum-wage test can be evaluated from records, not assumptions."""
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     entries = [{"date": (start + timedelta(days=i)).isoformat(), "hours": D(per_day)}
                for i in range((end - start).days + 1)
                if (start + timedelta(days=i)).weekday() < 5]
-    hk_service.record_work_hours(db, org.id, emp.id, entries, MAKER.id)
+    hong_kong_service.record_work_hours(db, org.id, emp.id, entries, MAKER.id)
     return entries
 
 
 def test_preflight_on_a_calculated_run_is_clear_and_names_the_pack(db, hk):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 3, 31))
     run = _month(db, hk.org, 3)                      # period ends 31 Mar, paid 31 Mar
-    out = service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 3, 31))
+    out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 3, 31))
     assert out["employeeCount"] == 1 and out["calculated"] == 1
     assert out["pack"].startswith(hk.packs[0].pack_id)
     assert out["wagePeriodEnd"] == "2026-03-31"
@@ -682,24 +683,26 @@ def test_preflight_on_a_calculated_run_is_clear_and_names_the_pack(db, hk):
 
 
 def test_preflight_blocks_when_continuity_cannot_be_determined(db, hk):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     # No recorded hours and no contractual weekly hours: continuity is NEVER assumed.
     run = _month(db, hk.org, 3)
-    out = service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 3, 31))
+    out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 3, 31))
     assert out["status"] == "BLOCKED"
     blocked = {c["code"]: c for c in out["checks"] if c["severity"] == "BLOCK"}
     assert blocked["EO_CC_UNDETERMINED"]["employeeId"] == hk.emp.id
 
 
 def test_preflight_blocks_a_late_run_and_a_leaver(db, hk):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 2, 28))
     run = _month(db, hk.org, 2)
     hk.emp.date_of_leaving = date(2026, 2, 20)
     db.commit()
-    out = service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 2, 28))
+    out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 2, 28))
     assert out["status"] == "BLOCKED"
     assert "EO_TERMINATION_WAGES_DUE_IMMEDIATELY" in {c["code"] for c in out["checks"]}
 
@@ -707,7 +710,7 @@ def test_preflight_blocks_a_late_run_and_a_leaver(db, hk):
 def test_preflight_dry_runs_an_uncalculated_run_and_reports_the_ir56g_hold(db, hk):
     import calendar
 
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
     from app.modules.payroll.models import PayrollRun
 
     _hours(db, hk.org, hk.emp, date(2026, 1, 16), date(2026, 4, 30))
@@ -716,11 +719,11 @@ def test_preflight_dry_runs_an_uncalculated_run_and_reports_the_ir56g_hold(db, h
                      period_end=date(2026, 4, last), pay_date=date(2026, 4, last))
     db.add(run)
     db.commit()
-    out = service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 4, 30))
+    out = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 4, 30))
     assert out["calculated"] == 0 and not [c for c in out["checks"] if c["severity"] == "BLOCK"], out["checks"]
     # A departure on the last day of the period: IR56G due, so final payment is held.
-    hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 4, last), actor_id=MAKER.id)
-    held = service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 4, 30))
+    hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 4, last), actor_id=MAKER.id)
+    held = hong_kong_service.hk_payroll_preflight(db, hk.org.id, run.id, today=date(2026, 4, 30))
     assert "IR56G_NOT_YET_FILED" in {c["code"] for c in held["checks"]}
 
 
@@ -823,13 +826,13 @@ def test_api_validation_and_operator_role_over_http(db, hk):
 
 
 def test_audit_trail_for_profile_hold_and_filing(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll.models import TaxConfigurationAudit
 
-    hold = hk_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
-    hk_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 8, 20), "REF", MAKER.id)
+    hold = hong_kong_service.identify_departure(db, hk.org.id, hk.emp.id, date(2026, 9, 30), MAKER.id, identified_on=date(2026, 6, 1))
+    hong_kong_service.record_ir56g_filed(db, hk.org.id, hold.id, date(2026, 8, 20), "REF", MAKER.id)
     types = {a.entity_type for a in db.query(TaxConfigurationAudit).all()}
-    assert {"employee_statutory_profile", "hkg_tax_clearance_hold", "jurisdiction_pack"} <= types
+    assert {"employee_statutory_profile", "hk_tax_clearance_hold", "jurisdiction_pack"} <= types
 
 
 # ── Payslip presentation / report fields ────────────────────────────────
@@ -849,17 +852,38 @@ def test_payslip_labels_mpf_and_never_income_tax_withheld(db, hk):
 
 # ── Migration ───────────────────────────────────────────────────────────
 
-def test_every_hkg_table_and_column_is_created_by_the_migration():
+def test_every_hk_table_and_column_is_created_by_the_migration():
+    """Every Hong Kong table / column of the ORM is created by the migration
+    chain: cd62503afe26 (production) creates it under its original hkg_ name
+    and 2d0cdeeeecc4 renames it to the platform convention (payroll_hk_* tables,
+    hk_* columns, and the three shared records-governance tables)."""
+    import importlib.util
+
     from app.database import Base
     import app.modules.payroll.models  # noqa: F401
 
-    src = (Path(__file__).parents[1] / "alembic/versions/cd62503afe26_hong_kong_statutory_foundation.py").read_text(encoding="utf8")
+    versions = Path(__file__).parents[1] / "alembic/versions"
+    foundation = (versions / "cd62503afe26_hong_kong_statutory_foundation.py").read_text(encoding="utf8")
+    spec = importlib.util.spec_from_file_location("hk_convergence", versions / "2d0cdeeeecc4_hong_kong_workflow_uniqueness.py")
+    convergence = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(convergence)
+    renamed_tables = {new: old for old, new in convergence._TABLE_RENAMES}
+    renamed_columns = {(table, new): old for table, old, new in convergence._COLUMN_RENAMES}
+    shared = set(convergence._SHARED_TABLES.values())
+    checked = 0
     for name, table in Base.metadata.tables.items():
-        if name.startswith("hkg_"):
-            assert f"'{name}'" in src, name
+        if name.startswith("payroll_hk_") or name in shared:
+            old = renamed_tables[name]                                  # every HK / shared table is renamed
+            assert f"'{old}'" in foundation, old
             for col in table.columns:
-                assert f"'{col.name}'" in src, f"{name}.{col.name}"
+                if name in shared and col.name == "jurisdiction_country":
+                    continue                                            # added by 2d0cdeeeecc4
+                assert f"'{col.name}'" in foundation, f"{name}.{col.name}"
+            checked += 1
         for col in table.columns:
-            if col.name.startswith("hkg_") and not name.startswith("hkg_"):
-                assert f"'{col.name}'" in src, f"{name}.{col.name}"
-    assert "down_revision: Union[str, Sequence[str], None] = '917a54ed2347'" in src
+            if col.name.startswith("hk_") and not (name.startswith("payroll_hk_") or name in shared):
+                assert f"'{renamed_columns[(name, col.name)]}'" in foundation, f"{name}.{col.name}"
+                checked += 1
+    assert checked == 13 + 24 + 1, checked                              # 13 tables + 24 profile columns + trace
+    assert "down_revision: Union[str, Sequence[str], None] = '917a54ed2347'" in foundation
+    assert convergence.down_revision == "cd62503afe26"

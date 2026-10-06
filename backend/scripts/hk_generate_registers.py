@@ -29,7 +29,7 @@ db = sessionmaker(bind=engine)()
 
 from scripts.seed_hong_kong_canonical_pack import seed_hong_kong_all  # noqa: E402
 from scripts.seed_statutory_report_templates import seed_hong_kong  # noqa: E402
-from app.modules.payroll import hk_configuration, hk_governance  # noqa: E402
+from app.modules.payroll import hong_kong_service# noqa: E402
 from app.modules.payroll.models import ReportTemplate, SourceArtifact  # noqa: E402
 
 packs = seed_hong_kong_all(db)
@@ -50,7 +50,7 @@ lineage = ["# HK CONFIGURATION LINEAGE REGISTER\n", GEN,
 consumers = defaultdict(lambda: {"keys": set(), "packs": set(), "rows": 0})
 status_count = defaultdict(int)
 for pack in packs:
-    out = hk_configuration.domains(db, pack.id)
+    out = hong_kong_service.domains(db, pack.id)
     lineage.append(f"\n## {pack.pack_id} v{pack.version} — YA {pack.tax_year} ({out['pack']['effectiveFrom']} → "
                    f"{out['pack']['effectiveTo']}), seeded status {pack.status}, {out['total']} values, "
                    f"unmapped {len(out['unmapped'])}\n")
@@ -88,11 +88,11 @@ ver = ["# HK CONFIGURATION VERSION REGISTER\n", GEN,
        "every version as Draft; activation is gated (G1 + pack-bound golden + four-eyes). Production has no HK "
        "pack at all: the HK migration has never been applied there.\n\n"
        "| Pack | Version | YA | Effective | Seeded status | State today | Approved by |\n|---|---|---|---|---|---|---|\n"]
-for v in hk_configuration.versions(db, date.today()):
+for v in hong_kong_service.versions(db, date.today()):
     ver.append(f"| {v['packId']} | {v['version']} | {v['yearOfAssessment']} | {v['effectiveFrom']} → {v['effectiveTo']} | "
                f"{v['status']} | {v['versionState']} | {esc(v['approvedById'])} |\n")
 ver.append("\n## Year-on-year differences (2025 → 2026)\n\n")
-diff = hk_configuration.compare(db, packs[0].id, packs[1].id)
+diff = hong_kong_service.compare(db, packs[0].id, packs[1].id)
 ver.append(f"{len(diff['changed'])} changed · {len(diff['added'])} added · {len(diff['removed'])} removed · "
            f"{diff['unchanged']} unchanged.\n\n| Domain | Item | Field | 2025/26 | 2026/27 |\n|---|---|---|---|---|\n")
 for c in diff["changed"]:
@@ -114,16 +114,16 @@ tpl = ["# HK REPORT TEMPLATE VERSION REGISTER\n", GEN,
 for t in db.query(ReportTemplate).filter(ReportTemplate.jurisdiction_country == "HK").order_by(
         ReportTemplate.report_type, ReportTemplate.reporting_year, ReportTemplate.version):
     tpl.append(f"| {esc(t.template_key)} | {t.report_type} | {t.reporting_year} | {t.version} | {t.status} | "
-               f"{esc(t.source_document_id)} | `{hk_governance.template_content_hash(db, t)[:16]}…` |\n")
+               f"{esc(t.source_document_id)} | `{hong_kong_service.template_content_hash(db, t)[:16]}…` |\n")
 tpl.append("\n## Coverage (current and next period)\n\n| Report type | Year key | Period | Active template |\n|---|---|---|---|\n")
-for cov in hk_governance.template_coverage(db):
+for cov in hong_kong_service.template_coverage(db):
     tpl.append(f"| {cov['reportType']} | {cov['yearKey']} | {cov['period']} | {esc(cov['active'])} |\n")
 open(os.path.join(OUT, "HK_REPORT_TEMPLATE_VERSION_REGISTER.md"), "w", encoding="utf8").write("".join(tpl))
 
 # ── source evidence register ──
 used = defaultdict(int)
 for pack in packs:
-    for d in hk_configuration.domains(db, pack.id)["domains"]:
+    for d in hong_kong_service.domains(db, pack.id)["domains"]:
         for r in d["rows"]:
             if r["source"]:
                 used[r["source"]["id"]] += 1

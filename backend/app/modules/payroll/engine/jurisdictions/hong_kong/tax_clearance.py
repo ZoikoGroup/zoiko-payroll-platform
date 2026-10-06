@@ -3,7 +3,7 @@ IRD PAM 46(e), SourceArtifact ird_pam46e).
 
 The hold is a LEGAL HOLD STATE, never a deduction or a negative earning: the
 held money remains owed to the employee on each payslip (net pay unchanged)
-and is traced line by line (hkg_tax_clearance_hold_lines) until released.
+and is traced line by line (payroll_hk_tax_clearance_hold_lines) until released.
 
 Official rule (PAM 46(e)): file IR56G not later than 1 month before the
 expected departure date, and "withhold all moneys payable to that employee

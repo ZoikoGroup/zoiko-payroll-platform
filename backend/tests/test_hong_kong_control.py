@@ -22,77 +22,77 @@ SIGNED = {"authorizedSigner": "Director (test)"}
 
 
 def _validated_ir56b(db, hk):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     for m in (1, 2, 3):
         _month(db, hk.org, m)
-    out = hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
-    case = hk_service._case(db, hk.org.id, out["employees"][0]["caseId"])
-    hk_service.transition_ird_case(db, hk.org.id, case.id, "VALIDATED", MAKER.id)
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
+    case = hong_kong_service._case(db, hk.org.id, out["employees"][0]["caseId"])
+    hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "VALIDATED", MAKER.id)
     return case
 
 
 def _approve_software(db, forms=("BIR56A", "IR56B"), expires=None):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    hk_control.transition_software_approval(db, "APPLICATION_PREPARED", {
+    hong_kong_service.transition_software_approval(db, "APPLICATION_PREPARED", {
         "reason": "TEST", "formsCovered": list(forms), "specificationVersion": "TEST-SPEC"}, SA_A.id)
-    hk_control.transition_software_approval(db, "APPLICATION_SUBMITTED", {
+    hong_kong_service.transition_software_approval(db, "APPLICATION_SUBMITTED", {
         "reason": "TEST", "applicationReference": "TEST-APP-1"}, SA_A.id)
-    hk_control.transition_software_approval(db, "TEST_DATA_SUBMITTED", {"reason": "TEST"}, SA_A.id)
+    hong_kong_service.transition_software_approval(db, "TEST_DATA_SUBMITTED", {"reason": "TEST"}, SA_A.id)
     letter = _artifact(db, "HK-IRD-SOFTWARE-APPROVAL-TEST")
-    return hk_control.transition_software_approval(db, "APPROVAL_RECEIVED", {
+    return hong_kong_service.transition_software_approval(db, "APPROVAL_RECEIVED", {
         "reason": "TEST", "approvalReference": "TEST-APPROVAL", "approvalDocumentId": letter.id,
         "approvalReceivedOn": date.today().isoformat(), "expiresOn": expires}, SA_B.id)
 
 
 def test_software_approval_register_lifecycle_and_evidence_rules(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    view = hk_control.software_approval(db)
+    view = hong_kong_service.software_approval(db)
     assert view["status"] == "NOT_APPLIED" and view["dataFileSubmissionPermitted"] is False
-    assert hk_control.software_approval_refusal(db, "IR56B", date.today())
+    assert hong_kong_service.software_approval_refusal(db, "IR56B", date.today())
     with pytest.raises(BadRequestException, match="cannot move from NOT_APPLIED to APPROVAL_RECEIVED"):
-        hk_control.transition_software_approval(db, "APPROVAL_RECEIVED", {"reason": "x"}, SA_A.id)
+        hong_kong_service.transition_software_approval(db, "APPROVAL_RECEIVED", {"reason": "x"}, SA_A.id)
     with pytest.raises(BadRequestException, match="formsCovered"):
-        hk_control.transition_software_approval(db, "APPLICATION_PREPARED", {"reason": "x", "formsCovered": ["IR56M"],
+        hong_kong_service.transition_software_approval(db, "APPLICATION_PREPARED", {"reason": "x", "formsCovered": ["IR56M"],
                                                                              "specificationVersion": "s"}, SA_A.id)
     with pytest.raises(BadRequestException, match="reason"):
-        hk_control.transition_software_approval(db, "APPLICATION_PREPARED", {"formsCovered": ["IR56B"]}, SA_A.id)
-    hk_control.transition_software_approval(db, "APPLICATION_PREPARED", {
+        hong_kong_service.transition_software_approval(db, "APPLICATION_PREPARED", {"formsCovered": ["IR56B"]}, SA_A.id)
+    hong_kong_service.transition_software_approval(db, "APPLICATION_PREPARED", {
         "reason": "TEST", "formsCovered": ["IR56B"], "specificationVersion": "TEST-SPEC"}, SA_A.id)
-    hk_control.transition_software_approval(db, "APPLICATION_SUBMITTED", {"reason": "TEST", "applicationReference": "A"}, SA_A.id)
-    hk_control.transition_software_approval(db, "TEST_DATA_SUBMITTED", {"reason": "TEST"}, SA_A.id)
+    hong_kong_service.transition_software_approval(db, "APPLICATION_SUBMITTED", {"reason": "TEST", "applicationReference": "A"}, SA_A.id)
+    hong_kong_service.transition_software_approval(db, "TEST_DATA_SUBMITTED", {"reason": "TEST"}, SA_A.id)
     self_reviewed = _artifact(db, "HK-IRD-SOFTWARE-APPROVAL-TEST", uploader=101, reviewer=101)
     good = _artifact(db, "HK-IRD-SOFTWARE-APPROVAL-TEST")
     base = {"reason": "TEST", "approvalReference": "R", "approvalReceivedOn": date.today().isoformat()}
     with pytest.raises(BadRequestException, match="other than its uploader"):
-        hk_control.transition_software_approval(db, "APPROVAL_RECEIVED", {**base, "approvalDocumentId": self_reviewed.id}, SA_B.id)
+        hong_kong_service.transition_software_approval(db, "APPROVAL_RECEIVED", {**base, "approvalDocumentId": self_reviewed.id}, SA_B.id)
     with pytest.raises(BadRequestException, match="other than the one who prepared"):
-        hk_control.transition_software_approval(db, "APPROVAL_RECEIVED", {**base, "approvalDocumentId": good.id}, SA_A.id)
+        hong_kong_service.transition_software_approval(db, "APPROVAL_RECEIVED", {**base, "approvalDocumentId": good.id}, SA_A.id)
     with pytest.raises(BadRequestException, match="future"):
-        hk_control.transition_software_approval(db, "APPROVAL_RECEIVED", {
+        hong_kong_service.transition_software_approval(db, "APPROVAL_RECEIVED", {
             **base, "approvalReceivedOn": (date.today() + timedelta(days=1)).isoformat(), "approvalDocumentId": good.id}, SA_B.id)
-    out = hk_control.transition_software_approval(db, "APPROVAL_RECEIVED", {
+    out = hong_kong_service.transition_software_approval(db, "APPROVAL_RECEIVED", {
         **base, "approvalDocumentId": good.id, "expiresOn": (date.today() + timedelta(days=30)).isoformat()}, SA_B.id)
     assert out["status"] == "APPROVAL_RECEIVED" and out["documentSha256"] == "0" * 64
-    assert hk_control.software_approval_refusal(db, "IR56B", date.today()) is None
-    assert "does not cover BIR56A" in hk_control.software_approval_refusal(db, "BIR56A", date.today())
+    assert hong_kong_service.software_approval_refusal(db, "IR56B", date.today()) is None
+    assert "does not cover BIR56A" in hong_kong_service.software_approval_refusal(db, "BIR56A", date.today())
     later = date.today() + timedelta(days=31)
-    assert hk_control.software_approval(db, later)["status"] == "APPROVAL_EXPIRED"         # expiry never ignored
-    assert "APPROVAL_EXPIRED" in hk_control.software_approval_refusal(db, "IR56B", later)
-    hk_control.transition_software_approval(db, "APPROVAL_REVOKED", {"reason": "TEST revoked"}, SA_A.id)
-    assert hk_control.software_approval_refusal(db, "IR56B", date.today())
+    assert hong_kong_service.software_approval(db, later)["status"] == "APPROVAL_EXPIRED"         # expiry never ignored
+    assert "APPROVAL_EXPIRED" in hong_kong_service.software_approval_refusal(db, "IR56B", later)
+    hong_kong_service.transition_software_approval(db, "APPROVAL_REVOKED", {"reason": "TEST revoked"}, SA_A.id)
+    assert hong_kong_service.software_approval_refusal(db, "IR56B", date.today())
 
 
 def test_filing_records_how_the_employer_submitted_and_never_claims_ird_approval(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     case = _validated_ir56b(db, hk)
-    assert hk_service.xml_lifecycle_state(db, case) == "VALIDATED"          # internal validation != submittable
-    file = lambda sub: hk_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id,  # noqa: E731
+    assert hong_kong_service.xml_lifecycle_state(db, case) == "VALIDATED"          # internal validation != submittable
+    file = lambda sub: hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id,  # noqa: E731
                                                       filing_reference="F-1", submission=sub)
     with pytest.raises(BadRequestException, match="submission mode is required"):
         file(None)
@@ -107,98 +107,101 @@ def test_filing_records_how_the_employer_submitted_and_never_claims_ird_approval
     with pytest.raises(BadRequestException, match="future"):
         file({"submissionMode": "INTERNAL_PREPARATION_ONLY", "submittedOn": (date.today() + timedelta(days=2)).isoformat(), **SIGNED})
     _approve_software(db)
-    assert hk_service.xml_lifecycle_state(db, case) == "READY_FOR_EXTERNAL_SUBMISSION"
+    assert hong_kong_service.xml_lifecycle_state(db, case) == "READY_FOR_EXTERNAL_SUBMISSION"
     file({"submissionMode": "ONLINE_MODE", "transactionReference": "T-1", **SIGNED})
-    out = hk_service.serialize_ird_case(case)
+    out = hong_kong_service.serialize_ird_case(case)
     assert (out["submissionMode"], out["transactionReference"], out["authorizedSigner"]) == ("ONLINE_MODE", "T-1", "Director (test)")
     assert out["xmlLifecycleState"] == "SUBMITTED_EXTERNALLY" and out["uploadedById"] == CHECKER.id
     assert out["amendmentType"] == "ORIGINAL"
-    history = hk_service.ird_case_history(db, hk.org.id, case.id)
+    history = hong_kong_service.ird_case_history(db, hk.org.id, case.id)
     assert history[-1]["to"] == "FILED"
     with pytest.raises(BadRequestException, match="SUPPLEMENTARY returns are not supported"):
-        hk_service.amend_ird_case(db, hk.org.id, case.id, "TEST", MAKER.id, amendment_type="SUPPLEMENTARY")
+        hong_kong_service.amend_ird_case(db, hk.org.id, case.id, "TEST", MAKER.id, amendment_type="SUPPLEMENTARY")
     with pytest.raises(BadRequestException, match="REPLACEMENT or SUPPLEMENTARY"):
-        hk_service.amend_ird_case(db, hk.org.id, case.id, "TEST", MAKER.id, amendment_type="ADDITIONAL")
-    amendment = hk_service.amend_ird_case(db, hk.org.id, case.id, "TEST late bonus", MAKER.id)
-    assert amendment.amendment_type == "REPLACEMENT" and hk_service.xml_lifecycle_state(db, case) == "SUPERSEDED"
-    assert hk_service.xml_lifecycle_state(db, amendment) == "DRAFT"
+        hong_kong_service.amend_ird_case(db, hk.org.id, case.id, "TEST", MAKER.id, amendment_type="ADDITIONAL")
+    amendment = hong_kong_service.amend_ird_case(db, hk.org.id, case.id, "TEST late bonus", MAKER.id)
+    # Corrected lifecycle: the filed original stays in force (AMENDMENT_REQUIRED)
+    # until its replacement is filed; it is superseded only then.
+    assert amendment.amendment_type == "REPLACEMENT" and hong_kong_service.xml_lifecycle_state(db, case) == "AMENDMENT_REQUIRED"
+    assert hong_kong_service.xml_lifecycle_state(db, amendment) == "DRAFT"
 
 
 def test_ir56b_first_prepared_after_the_cover_was_filed_is_additional(db, hk):
-    from app.modules.payroll import hk_service
-    from app.modules.payroll.models import HkgIrdReportingCase
+    from app.modules.payroll import hong_kong_service
+    from app.modules.payroll.models import HongKongIrdReportingCase
 
-    out = hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)        # no payroll yet: cover only
-    cover = db.get(HkgIrdReportingCase, out["bir56aCaseId"])
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)        # no payroll yet: cover only
+    cover = db.get(HongKongIrdReportingCase, out["bir56aCaseId"])
     cover.status, cover.validation_errors = "FILED", []                                 # TEST: the cover is already filed
     db.commit()
     for m in (1, 2, 3):
         _month(db, hk.org, m)
-    out = hk_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
-    late = db.get(HkgIrdReportingCase, out["employees"][0]["caseId"])
+    out = hong_kong_service.generate_annual_return(db, hk.org.id, "2025/26", MAKER.id)
+    late = db.get(HongKongIrdReportingCase, out["employees"][0]["caseId"])
     assert late.form_type == "IR56B" and late.amendment_type == "ADDITIONAL"
 
 
 def test_empf_configuration_holds_no_secrets_and_activates_four_eyes(db, hk):
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    assert hk_control.empf_configurations(db)["active"] is None
+    assert hong_kong_service.empf_configurations(db)["active"] is None
     base = {"submissionMethod": "EMPF_PORTAL_MANUAL", "environment": "PRODUCTION", "reason": "TEST"}
     for bad in ({"endpointReference": "https://user:pw@empf.example"}, {"formatVersion": "password=abc"},
                 {"endpointReference": "-----BEGIN PRIVATE KEY-----"}):
         with pytest.raises(BadRequestException, match="secret"):
-            hk_control.create_empf_configuration(db, {**base, **bad}, SA_A.id)
+            hong_kong_service.create_empf_configuration(db, {**base, **bad}, SA_A.id)
     with pytest.raises(BadRequestException, match="credentialStatus"):
-        hk_control.create_empf_configuration(db, {**base, "credentialStatus": "abc123"}, SA_A.id)
+        hong_kong_service.create_empf_configuration(db, {**base, "credentialStatus": "abc123"}, SA_A.id)
     with pytest.raises(BadRequestException, match="certification evidence"):
-        hk_control.create_empf_configuration(db, {**base, "submissionMethod": "EMPF_API"}, SA_A.id)
-    v1 = hk_control.create_empf_configuration(db, base, SA_A.id)
+        hong_kong_service.create_empf_configuration(db, {**base, "submissionMethod": "EMPF_API"}, SA_A.id)
+    v1 = hong_kong_service.create_empf_configuration(db, base, SA_A.id)
     assert v1["status"] == "DRAFT" and v1["certificationStatus"] == "NOT_CERTIFIED" and v1["version"] == 1
     with pytest.raises(BadRequestException, match="other than its maker"):
-        hk_control.activate_empf_configuration(db, v1["id"], SA_A.id, "TEST")
-    hk_control.activate_empf_configuration(db, v1["id"], SA_B.id, "TEST")
+        hong_kong_service.activate_empf_configuration(db, v1["id"], SA_A.id, "TEST")
+    hong_kong_service.activate_empf_configuration(db, v1["id"], SA_B.id, "TEST")
     evidence = _artifact(db, "HK-EMPF-CERTIFICATION-TEST")
-    v2 = hk_control.create_empf_configuration(db, {**base, "submissionMethod": "EMPF_API", "certificationEvidenceId": evidence.id,
+    v2 = hong_kong_service.create_empf_configuration(db, {**base, "submissionMethod": "EMPF_API", "certificationEvidenceId": evidence.id,
                                                    "credentialStatus": "CONFIGURED_IN_SECRET_STORE"}, SA_A.id)
     assert v2["certificationStatus"] == "CERTIFIED" and v2["version"] == 2
-    hk_control.activate_empf_configuration(db, v2["id"], SA_B.id, "TEST")
-    view = hk_control.empf_configurations(db)
+    hong_kong_service.activate_empf_configuration(db, v2["id"], SA_B.id, "TEST")
+    view = hong_kong_service.empf_configurations(db)
     assert view["active"]["version"] == 2 and [v["status"] for v in view["versions"]] == ["ACTIVE", "SUPERSEDED"]
     with pytest.raises(BadRequestException, match="only a DRAFT"):
-        hk_control.activate_empf_configuration(db, v1["id"], SA_B.id, "TEST")
+        hong_kong_service.activate_empf_configuration(db, v1["id"], SA_B.id, "TEST")
 
 
 def test_retention_is_blocked_until_the_owner_decides_and_then_four_eyes(db, hk):
+    from app.modules.payroll import retention_service
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    view = hk_control.retention_policies(db)
+    view = retention_service.retention_policies(db, "HK")
     assert all(c["state"] == "BLOCKED_UNDECIDED" and not c["purgePermitted"] for c in view["categories"])
-    assert "D-2" in hk_control.purge_refusal(db, "PAYROLL_RECORDS")
+    assert "D-2" in retention_service.purge_refusal(db, "HK", "PAYROLL_RECORDS")
     proposal = {"recordCategory": "PAYROLL_RECORDS", "retentionYears": 7, "endOfRetention": "DELETE",
                 "legalBasis": "TEST basis", "reason": "TEST"}
     with pytest.raises(BadRequestException, match="D-2"):
-        hk_control.propose_retention_policy(db, proposal, SA_A.id)
+        retention_service.propose_retention_policy(db, "HK", proposal, SA_A.id)
     _artifact(db, "HK-DECISION-D-2")
     with pytest.raises(BadRequestException, match="D-3"):
-        hk_control.propose_retention_policy(db, proposal, SA_A.id)
+        retention_service.propose_retention_policy(db, "HK", proposal, SA_A.id)
     _artifact(db, "HK-DECISION-D-3")
     with pytest.raises(BadRequestException, match="whole number"):
-        hk_control.propose_retention_policy(db, {**proposal, "retentionYears": 0}, SA_A.id)
-    draft = hk_control.propose_retention_policy(db, proposal, SA_A.id)
-    assert hk_control.purge_refusal(db, "PAYROLL_RECORDS")                         # a DRAFT never permits a purge
+        retention_service.propose_retention_policy(db, "HK", {**proposal, "retentionYears": 0}, SA_A.id)
+    draft = retention_service.propose_retention_policy(db, "HK", proposal, SA_A.id)
+    assert retention_service.purge_refusal(db, "HK", "PAYROLL_RECORDS")                         # a DRAFT never permits a purge
     with pytest.raises(BadRequestException, match="other than its maker"):
-        hk_control.approve_retention_policy(db, draft["id"], SA_A.id)
-    hk_control.approve_retention_policy(db, draft["id"], SA_B.id)
-    assert hk_control.purge_refusal(db, "PAYROLL_RECORDS") is None
-    assert hk_control.purge_refusal(db, "MPF_RECORDS")                              # other categories stay blocked
+        retention_service.approve_retention_policy(db, "HK", draft["id"], SA_A.id)
+    retention_service.approve_retention_policy(db, "HK", draft["id"], SA_B.id)
+    assert retention_service.purge_refusal(db, "HK", "PAYROLL_RECORDS") is None
+    assert retention_service.purge_refusal(db, "HK", "MPF_RECORDS")                              # other categories stay blocked
 
 
 def test_readiness_center_is_derived_and_not_production_ready(db, hk):
-    from app.modules.payroll import hk_control
+    from app.modules.payroll import hong_kong_service
 
-    out = hk_control.readiness_center(db)
+    out = hong_kong_service.readiness_center(db)
     assert out["productionReady"] is False and out["classification"].startswith("NOT PRODUCTION READY")
     keys = {i["key"]: i for i in out["items"]}
     for k in ("GATE_G1", "GATE_G7", "ACTIVE_PACK", "GOLDEN", "IRD_SOFTWARE_APPROVAL", "EMPF_CONFIGURATION",
@@ -241,7 +244,7 @@ def test_parallel_run_comparison_is_read_only_and_never_explains_a_variance(db, 
     from scripts.hk_parallel_run_compare import compare
 
     item = _item(db, _month(db, hk.org, 5, year=2026), hk.emp)
-    trace = item.hkg_calculation_trace["result"]
+    trace = item.hk_calculation_trace["result"]
     base = {"cycle": "1", "period": "2026-05", "employee_ref": hk.emp.employee_code, "category": "within MPF levels",
             "tolerance": "0.00"}
     rows = [
@@ -269,13 +272,13 @@ def test_one_version_through_the_whole_lifecycle_with_every_gate(db, hk):
     window starts later (NEXT_PUBLISHED); an Active version is never edited in
     place; the replaced version stays readable and pinned for its own payroll."""
     from app.core.exceptions import BadRequestException
-    from app.modules.payroll import hk_configuration, service
+    from app.modules.payroll import hong_kong_service, service
     from app.modules.payroll.models import ContributionRate, JurisdictionPack
 
     old = hk.packs[1]
     before = _item(db, _month(db, hk.org, 5, year=2026), hk.emp)
     assert service.run_golden_test_certification(db, jurisdiction_country="HK", actor_id=SA_B.id).status == "PASS"
-    draft = hk_configuration.new_version(db, old.id, "1.1", "TEST lifecycle", SA_A.id)
+    draft = hong_kong_service.new_version(db, old.id, "1.1", "TEST lifecycle", SA_A.id)
     for status in ("In Review", "QA"):
         service.set_jurisdiction_pack_status(db, draft.id, status, actor_id=SA_A.id)
         assert db.get(JurisdictionPack, draft.id).status == status
@@ -299,12 +302,12 @@ def test_one_version_through_the_whole_lifecycle_with_every_gate(db, hk):
     db.rollback()
     service.set_jurisdiction_pack_status(db, draft.id, "Active", actor_id=SA_A.id)      # activator ≠ approver
     assert db.get(JurisdictionPack, draft.id).status == "Active"
-    states = {(v["packId"], v["version"]): v["versionState"] for v in hk_configuration.versions(db, date(2026, 6, 1))}
+    states = {(v["packId"], v["version"]): v["versionState"] for v in hong_kong_service.versions(db, date(2026, 6, 1))}
     assert states[("HK-PAYROLL-2026", "1.1")] == "CURRENT_ACTIVE" and states[("HK-PAYROLL-2026", "1.0")] == "SUPERSEDED"
     rate = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == draft.id,
                                               ContributionRate.component_key == "mpf_employee_rate").one())
     with pytest.raises(BadRequestException, match="no\\s+longer editable"):            # immutable once Active
-        hk_configuration.update_row(db, "rate", rate.id, {"employeeRatePct": "0.06", "reason": "x",
+        hong_kong_service.update_row(db, "rate", rate.id, {"employeeRatePct": "0.06", "reason": "x",
                                                           "sourceDocumentId": _artifact(db, "HK-SRC").id}, SA_A.id)
     db.rollback()
     with pytest.raises(BadRequestException, match="cannot move directly"):             # no Active → Draft
@@ -315,23 +318,23 @@ def test_one_version_through_the_whole_lifecycle_with_every_gate(db, hk):
     db.rollback()
     assert db.get(JurisdictionPack, before.tax_policy_pack_id).id == old.id             # history keeps its pack
     service.set_jurisdiction_pack_status(db, hk.packs[0].id, "Retired", actor_id=SA_A.id)
-    assert hk_configuration.versions(db, date(2026, 6, 1))[0]["versionState"] == "RETIRED"
+    assert hong_kong_service.versions(db, date(2026, 6, 1))[0]["versionState"] == "RETIRED"
     with pytest.raises(BadRequestException, match="final"):
         service.set_jurisdiction_pack_status(db, hk.packs[0].id, "Active", actor_id=SA_A.id)
 
 
 def test_monitoring_signals_count_overdue_obligations_without_employee_data(db, hk):
-    from app.modules.payroll import hk_control, hk_service
+    from app.modules.payroll import hong_kong_service
 
-    calm = hk_control.monitoring_signals(db, date(2026, 1, 1))
+    calm = hong_kong_service.monitoring_signals(db, date(2026, 1, 1))
     assert calm["alerts"] == 0 and {s["key"] for s in calm["signals"]} >= {"IRD_OVERDUE", "EMPF_PAST_CONTRIBUTION_DAY",
                                                                             "IR56G_DEADLINE_PASSED", "LEGAL_HOLDS_ACTIVE"}
     case = _validated_ir56b(db, hk)                                     # due 2026-05-01 (pack timing)
-    late = hk_control.monitoring_signals(db, case.due_date + timedelta(days=1))
+    late = hong_kong_service.monitoring_signals(db, case.due_date + timedelta(days=1))
     overdue = next(s for s in late["signals"] if s["key"] == "IRD_OVERDUE")
     assert overdue["value"] >= 1 and overdue["alert"] is True and late["alerts"] >= 1
     assert all(set(s) == {"key", "label", "value", "threshold", "alert"} for s in late["signals"])   # counts only
-    hk_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id, filing_reference="F-M",
+    hong_kong_service.transition_ird_case(db, hk.org.id, case.id, "FILED", CHECKER.id, filing_reference="F-M",
                                    submission={"submissionMode": "INTERNAL_PREPARATION_ONLY", **SIGNED})
-    after = hk_control.monitoring_signals(db, case.due_date + timedelta(days=1))
+    after = hong_kong_service.monitoring_signals(db, case.due_date + timedelta(days=1))
     assert next(s for s in after["signals"] if s["key"] == "IRD_OVERDUE")["value"] == overdue["value"] - 1

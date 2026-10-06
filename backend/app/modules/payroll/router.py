@@ -364,9 +364,9 @@ def _log_hk_profile_view(db, current_user, employee_id, profile, request) -> Non
         return
     rows = profile if isinstance(profile, list) else [profile]
     if any((getattr(p, "country_code", None) or "").upper() == "HK" for p in rows):
-        from app.modules.payroll import hk_privacy
+        from app.modules.payroll import retention_service
 
-        hk_privacy.record_access(db, current_user.organization_id, current_user.id, "VIEW_STATUTORY_PROFILE",
+        retention_service.record_access(db, "HK", current_user.organization_id, current_user.id, "VIEW_STATUTORY_PROFILE",
                                  "employee_statutory_profile", resource_id=getattr(rows[0], "id", None),
                                  employee_id=employee_id, request=request)
 
@@ -2049,9 +2049,9 @@ def download_bank_transfer_file(
     file_bytes, content_type, _ext, filename = service.generate_bank_transfer_file(
         db, run_id, current_user.organization_id, actor_id=current_user.id, format_override=format,
     )
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.log_payslip_access(db, current_user.organization_id, current_user.id,
+    retention_service.log_payslip_access(db, current_user.organization_id, current_user.id,
                                   [i.id for i in service.get_payslips_for_run(db, run_id, current_user.organization_id)],
                                   "DOWNLOAD_BANK_FILE", request=request, run_id=run_id)          # HK only
     return StreamingResponse(
@@ -2082,9 +2082,9 @@ def download_run_payslips(
             safe_name = (item.employee_name or f"employee_{item.employee_id}").replace(" ", "_")
             zf.writestr(f"payslip_{safe_name}_{item.id}.pdf", pdf_bytes)
     zip_buf.seek(0)
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.log_payslip_access(db, current_user.organization_id, current_user.id, [i.id for i in items],
+    retention_service.log_payslip_access(db, current_user.organization_id, current_user.id, [i.id for i in items],
                                   "DOWNLOAD_PAYSLIPS_ZIP", request=request, run_id=run_id)       # HK only
 
     label = (run.period_label or f"run_{run_id}").replace(" ", "_")
@@ -2138,9 +2138,9 @@ def download_payslip(
     current_user=Depends(get_current_user),
 ):
     pdf_bytes = service.generate_payslip_pdf_bytes(db, payslip_id, current_user.organization_id)
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.log_payslip_access(db, current_user.organization_id, current_user.id, [payslip_id],
+    retention_service.log_payslip_access(db, current_user.organization_id, current_user.id, [payslip_id],
                                   "DOWNLOAD_PAYSLIP", request=request)                            # HK only
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -2784,9 +2784,9 @@ def get_generated_report(
     current_user=Depends(get_current_user),
 ):
     report = service.get_generated_report(db, current_user.organization_id, generated_report_id)
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
+    retention_service.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
                                    "VIEW_REPORT", request=request)                                  # HK only
     return report
 
@@ -2830,9 +2830,9 @@ def download_report_certificate(
     current_user=Depends(get_current_user),
 ):
     pdf_bytes = service.generate_report_certificate_pdf_bytes(db, current_user.organization_id, generated_report_id, employee_id)
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
+    retention_service.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
                                    "DOWNLOAD_CERTIFICATE", employee_id=employee_id, request=request)   # HK only
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -2865,9 +2865,9 @@ def download_report_certificates_zip(
             safe_name = (entry.get("employeeName") or f"employee_{entry['employeeId']}").replace(" ", "_")
             zf.writestr(f"certificate_{safe_name}_{entry['employeeId']}.pdf", pdf_bytes)
     zip_buf.seek(0)
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
+    retention_service.log_report_download(db, current_user.organization_id, current_user.id, generated_report_id,
                                    "DOWNLOAD_CERTIFICATES_ZIP", request=request)                    # HK only
 
     return StreamingResponse(
@@ -3064,14 +3064,14 @@ def generate_us_940(
 @payroll_router.post(
     "/hong-kong/reports/bir56a", response_model=GeneratedReportResponse, response_model_by_alias=True,
     summary="Generate a Hong Kong BIR56A annual employer's return for a year of assessment",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_hong_kong_bir56a(
     data: HongKongBir56aGenerateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_hong_kong_bir56a(
+    return hong_kong_service.generate_hong_kong_bir56a(
         db, current_user.organization_id, data.report_template_id, data.year_of_assessment,
         actor_id=current_user.id,
     )
@@ -3080,14 +3080,14 @@ def generate_hong_kong_bir56a(
 @payroll_router.post(
     "/hong-kong/reports/ir56b", response_model=GeneratedReportResponse, response_model_by_alias=True,
     summary="Generate a Hong Kong IR56B per-employee annual return (also the employee's copy)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_hong_kong_ir56b(
     data: HongKongIr56bGenerateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_hong_kong_ir56b(
+    return hong_kong_service.generate_hong_kong_ir56b(
         db, current_user.organization_id, data.report_template_id, data.employee_id, data.year_of_assessment,
         actor_id=current_user.id,
     )
@@ -3096,14 +3096,14 @@ def generate_hong_kong_ir56b(
 @payroll_router.post(
     "/hong-kong/reports/ir56-notification", response_model=GeneratedReportResponse, response_model_by_alias=True,
     summary="Generate a Hong Kong IR56E / IR56F / IR56G employee notification from its reporting case",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_hong_kong_ir56_notification(
     data: HongKongIr56NotificationGenerateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_hong_kong_ir56_notification(
+    return hong_kong_service.generate_hong_kong_ir56_notification(
         db, current_user.organization_id, data.report_template_id, data.case_id,
         actor_id=current_user.id,
     )
@@ -3112,14 +3112,14 @@ def generate_hong_kong_ir56_notification(
 @payroll_router.post(
     "/hong-kong/reports/empf-remittance", response_model=GeneratedReportResponse, response_model_by_alias=True,
     summary="Generate a Hong Kong eMPF remittance statement for a prepared contribution-period submission",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_hong_kong_empf_remittance(
     data: HongKongEmpfRemittanceGenerateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_hong_kong_empf_remittance(
+    return hong_kong_service.generate_hong_kong_empf_remittance(
         db, current_user.organization_id, data.report_template_id, data.submission_id,
         actor_id=current_user.id,
     )
@@ -3129,14 +3129,14 @@ def generate_hong_kong_empf_remittance(
     "/hong-kong/reports/mpf-contribution-record", response_model=GeneratedReportResponse,
     response_model_by_alias=True,
     summary="Generate an employee's Hong Kong MPF contribution record for one contribution period (HK-010)",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_hong_kong_mpf_contribution_record(
     data: HongKongMpfContributionRecordGenerateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_hong_kong_mpf_contribution_record(
+    return hong_kong_service.generate_hong_kong_mpf_contribution_record(
         db, current_user.organization_id, data.report_template_id, data.employee_id,
         data.contribution_period, actor_id=current_user.id,
     )
@@ -3146,14 +3146,14 @@ def generate_hong_kong_mpf_contribution_record(
     "/hong-kong/reports/termination-statement", response_model=GeneratedReportResponse,
     response_model_by_alias=True,
     summary="Generate the employee's Hong Kong termination statement from an APPROVED termination calculation",
-    dependencies=[Depends(get_current_payroll_operator)],
+    dependencies=[Depends(get_current_payroll_operator), Depends(require_writeable_workspace())],
 )
 def generate_hong_kong_termination_statement(
     data: HongKongTerminationStatementGenerateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.generate_hong_kong_termination_statement(
+    return hong_kong_service.generate_hong_kong_termination_statement(
         db, current_user.organization_id, data.report_template_id, data.termination_result_id,
         actor_id=current_user.id,
     )
@@ -3747,7 +3747,7 @@ def get_hk_payroll_preflight(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.hk_payroll_preflight(db, current_user.organization_id, run_id)
+    return hong_kong_service.hk_payroll_preflight(db, current_user.organization_id, run_id)
 
 
 @payroll_router.get(
@@ -3756,7 +3756,7 @@ def get_hk_payroll_preflight(
     dependencies=[Depends(get_current_payroll_operator)],
 )
 def get_hk_employer_readiness(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return service.hk_employer_readiness(db, current_user.organization_id)
+    return hong_kong_service.hk_employer_readiness(db, current_user.organization_id)
 
 
 @payroll_router.post(
@@ -4285,8 +4285,8 @@ def dashboard_breakdowns(
 # statutory calculation itself runs inside the normal payroll run; these
 # endpoints cover hours evidence, IR56G holds, IRD reporting, eMPF batches,
 # Employment Ordinance entitlements and termination. Four-eyes approvals
-# are enforced in hk_service (approver != preparer).
-from app.modules.payroll import hk_service  # noqa: E402
+# are enforced in hong_kong_service (approver != preparer).
+from app.modules.payroll import hong_kong_service# noqa: E402
 from app.modules.payroll.schemas import (  # noqa: E402
     HKAnnualReturnRequest, HKAverageWageOverrideRequest, HKAverageWageRequest, HKDepartureChangeRequest,
     HKDepartureRequest, HKEmpfPrepareRequest, HKEmpfTransitionRequest, HKEntitlementRequest, HKIr56gFiledRequest,
@@ -4302,7 +4302,7 @@ _HK_WRITE = [Depends(get_current_payroll_operator), Depends(require_writeable_wo
                      summary="Record verified daily hours (append-only; a correction supersedes)")
 def hk_record_work_hours(employee_id: int, data: HKWorkHoursRequest, db: Session = Depends(get_db),
                          current_user=Depends(get_current_user)):
-    rows = hk_service.record_work_hours(db, current_user.organization_id, employee_id,
+    rows = hong_kong_service.record_work_hours(db, current_user.organization_id, employee_id,
                                         [e.model_dump() for e in data.entries], current_user.id, data.reason)
     return [{"id": r.id, "date": r.work_date.isoformat(), "hours": str(r.hours), "source": r.source} for r in rows]
 
@@ -4311,91 +4311,91 @@ def hk_record_work_hours(employee_id: int, data: HKWorkHoursRequest, db: Session
                     summary="Continuous-contract status on a date (4-18 before / 4-week 17-68 from 18 Jan 2026)")
 def hk_continuous_contract(employee_id: int, as_of: date = Query(...), db: Session = Depends(get_db),
                            current_user=Depends(get_current_user)):
-    return hk_service.continuous_contract(db, current_user.organization_id, employee_id, as_of)
+    return hong_kong_service.continuous_contract(db, current_user.organization_id, employee_id, as_of)
 
 
 @payroll_router.get("/hong-kong/tax-clearance", dependencies=_HK_READ, summary="List IR56G tax-clearance cases")
 def hk_list_holds(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.modules.payroll.models import HkgTaxClearanceHold
+    from app.modules.payroll.models import HongKongTaxClearanceHold
 
-    holds = db.query(HkgTaxClearanceHold).filter(HkgTaxClearanceHold.organization_id == current_user.organization_id).all()
-    return [hk_service.serialize_hold(db, h) for h in holds]
+    holds = db.query(HongKongTaxClearanceHold).filter(HongKongTaxClearanceHold.organization_id == current_user.organization_id).all()
+    return [hong_kong_service.serialize_hold(db, h) for h in holds]
 
 
 @payroll_router.post("/hong-kong/tax-clearance", dependencies=_HK_WRITE, summary="Identify a departure (IR56G case)")
 def hk_identify_departure(data: HKDepartureRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    hold = hk_service.identify_departure(db, current_user.organization_id, data.employeeId, data.expectedDepartureDate,
+    hold = hong_kong_service.identify_departure(db, current_user.organization_id, data.employeeId, data.expectedDepartureDate,
                                          current_user.id, data.identifiedOn, data.returnDate)
-    return hk_service.serialize_hold(db, hold)
+    return hong_kong_service.serialize_hold(db, hold)
 
 
 @payroll_router.post("/hong-kong/tax-clearance/{hold_id}/filed", dependencies=_HK_WRITE,
                      summary="Record the IR56G filing; the legal hold becomes active")
 def hk_ir56g_filed(hold_id: int, data: HKIr56gFiledRequest, db: Session = Depends(get_db),
                    current_user=Depends(get_current_user)):
-    hold = hk_service.record_ir56g_filed(db, current_user.organization_id, hold_id, data.filedOn, data.filingReference,
+    hold = hong_kong_service.record_ir56g_filed(db, current_user.organization_id, hold_id, data.filedOn, data.filingReference,
                                          current_user.id)
-    return hk_service.serialize_hold(db, hold)
+    return hong_kong_service.serialize_hold(db, hold)
 
 
 @payroll_router.post("/hong-kong/tax-clearance/{hold_id}/release-request", dependencies=_HK_WRITE,
                      summary="Request release of held money (letter of release / statutory period elapsed) with evidence")
 def hk_release_request(hold_id: int, data: HKReleaseRequest, db: Session = Depends(get_db),
                        current_user=Depends(get_current_user)):
-    hold = hk_service.request_hold_release(db, current_user.organization_id, hold_id, data.basis, data.reference,
+    hold = hong_kong_service.request_hold_release(db, current_user.organization_id, hold_id, data.basis, data.reference,
                                            data.evidenceRef, current_user.id)
-    return hk_service.serialize_hold(db, hold)
+    return hong_kong_service.serialize_hold(db, hold)
 
 
 @payroll_router.post("/hong-kong/tax-clearance/{hold_id}/release-approve", dependencies=_HK_WRITE,
                      summary="Approve a release (a different operator from the requester)")
 def hk_release_approve(hold_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    hold = hk_service.approve_hold_release(db, current_user.organization_id, hold_id, current_user.id)
-    return hk_service.serialize_hold(db, hold)
+    hold = hong_kong_service.approve_hold_release(db, current_user.organization_id, hold_id, current_user.id)
+    return hong_kong_service.serialize_hold(db, hold)
 
 
 @payroll_router.post("/hong-kong/tax-clearance/{hold_id}/change", dependencies=_HK_WRITE,
                      summary="Departure cancelled / changed: evidence required; an active hold is never silently cleared")
 def hk_departure_change(hold_id: int, data: HKDepartureChangeRequest, db: Session = Depends(get_db),
                         current_user=Depends(get_current_user)):
-    hold = hk_service.change_departure(db, current_user.organization_id, hold_id, data.reason, data.evidenceRef,
+    hold = hong_kong_service.change_departure(db, current_user.organization_id, hold_id, data.reason, data.evidenceRef,
                                        current_user.id, data.newDepartureDate)
-    return hk_service.serialize_hold(db, hold)
+    return hong_kong_service.serialize_hold(db, hold)
 
 
 @payroll_router.post("/hong-kong/tax-clearance/{hold_id}/close", dependencies=_HK_WRITE, summary="Close a case")
 def hk_close_hold(hold_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return hk_service.serialize_hold(db, hk_service.close_hold(db, current_user.organization_id, hold_id, current_user.id))
+    return hong_kong_service.serialize_hold(db, hong_kong_service.close_hold(db, current_user.organization_id, hold_id, current_user.id))
 
 
 @payroll_router.get("/hong-kong/ird/cases", dependencies=_HK_READ, summary="List IRD reporting cases")
 def hk_list_ird_cases(year_of_assessment: Optional[str] = Query(None), db: Session = Depends(get_db),
                       current_user=Depends(get_current_user)):
-    from app.modules.payroll.models import HkgIrdReportingCase
+    from app.modules.payroll.models import HongKongIrdReportingCase
 
-    q = db.query(HkgIrdReportingCase).filter(HkgIrdReportingCase.organization_id == current_user.organization_id)
+    q = db.query(HongKongIrdReportingCase).filter(HongKongIrdReportingCase.organization_id == current_user.organization_id)
     if year_of_assessment:
-        q = q.filter(HkgIrdReportingCase.year_of_assessment == year_of_assessment)
-    return [hk_service.serialize_ird_case(c) for c in q.order_by(HkgIrdReportingCase.id).all()]
+        q = q.filter(HongKongIrdReportingCase.year_of_assessment == year_of_assessment)
+    return [hong_kong_service.serialize_ird_case(c) for c in q.order_by(HongKongIrdReportingCase.id).all()]
 
 
 @payroll_router.get("/hong-kong/ird/cases/{case_id}/history", dependencies=_HK_READ,
                     summary="An IRD case's filing history (filings, rejections with the filed evidence, re-filings)")
 def hk_ird_case_history(case_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return hk_service.ird_case_history(db, current_user.organization_id, case_id)
+    return hong_kong_service.ird_case_history(db, current_user.organization_id, case_id)
 
 
 @payroll_router.post("/hong-kong/ird/employees/{employee_id}/event-cases", dependencies=_HK_WRITE,
                      summary="Create due IR56E / IR56F cases from the employee's effective statutory facts")
 def hk_ird_event_cases(employee_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    rows = hk_service.create_event_cases(db, current_user.organization_id, employee_id, current_user.id)
-    return [hk_service.serialize_ird_case(c) for c in rows]
+    rows = hong_kong_service.create_event_cases(db, current_user.organization_id, employee_id, current_user.id)
+    return [hong_kong_service.serialize_ird_case(c) for c in rows]
 
 
 @payroll_router.post("/hong-kong/ird/annual-return", dependencies=_HK_WRITE,
                      summary="Prepare BIR56A + IR56B for a year of assessment (ending 31 March) from committed payroll")
 def hk_ird_annual_return(data: HKAnnualReturnRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return hk_service.generate_annual_return(db, current_user.organization_id, data.yearOfAssessment, current_user.id)
+    return hong_kong_service.generate_annual_return(db, current_user.organization_id, data.yearOfAssessment, current_user.id)
 
 
 @payroll_router.post("/hong-kong/ird/cases/{case_id}/transition", dependencies=_HK_WRITE,
@@ -4404,15 +4404,15 @@ def hk_ird_transition(case_id: int, data: HKIrdTransitionRequest, db: Session = 
                       current_user=Depends(get_current_user)):
     submission = {k: getattr(data, k) for k in ("submissionMode", "authorizedSigner", "transactionReference",
                                                 "controlListReference", "submittedOn")}
-    case = hk_service.transition_ird_case(db, current_user.organization_id, case_id, data.target, current_user.id,
+    case = hong_kong_service.transition_ird_case(db, current_user.organization_id, case_id, data.target, current_user.id,
                                           data.filingReference, data.receiptReference, submission=submission)
-    return hk_service.serialize_ird_case(case)
+    return hong_kong_service.serialize_ird_case(case)
 
 
 @payroll_router.post("/hong-kong/ird/cases/{case_id}/amend", dependencies=_HK_WRITE,
                      summary="Amend a filed case: creates a linked replacement; filed evidence is never overwritten")
 def hk_ird_amend(case_id: int, data: HKIrdAmendRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return hk_service.serialize_ird_case(hk_service.amend_ird_case(db, current_user.organization_id, case_id, data.reason,
+    return hong_kong_service.serialize_ird_case(hong_kong_service.amend_ird_case(db, current_user.organization_id, case_id, data.reason,
                                                                    current_user.id, amendment_type=data.amendmentType))
 
 
@@ -4420,7 +4420,7 @@ def hk_ird_amend(case_id: int, data: HKIrdAmendRequest, db: Session = Depends(ge
                      summary="Record that the employee was given their copy of the IR56B / E / F / G (once, with evidence)")
 def hk_ird_employee_copy(case_id: int, data: HKEmployeeCopyRequest, db: Session = Depends(get_db),
                          current_user=Depends(get_current_user)):
-    return hk_service.serialize_ird_case(hk_service.record_employee_copy_delivered(
+    return hong_kong_service.serialize_ird_case(hong_kong_service.record_employee_copy_delivered(
         db, current_user.organization_id, case_id, data.evidenceRef, current_user.id))
 
 
@@ -4428,26 +4428,26 @@ def hk_ird_employee_copy(case_id: int, data: HKEmployeeCopyRequest, db: Session 
                      summary="Request a linked correction of a COMMITTED Hong Kong payslip (maker; D-14)")
 def hk_request_correction(payslip_id: int, data: HKCorrectionRequest, db: Session = Depends(get_db),
                           current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_corrections
+    from app.modules.payroll import hong_kong_service
 
-    return hk_corrections.serialize(hk_corrections.request_correction(
+    return hong_kong_service.serialize(hong_kong_service.request_correction(
         db, current_user.organization_id, payslip_id, data.reason, current_user.id))
 
 
 @payroll_router.get("/hong-kong/corrections", dependencies=_HK_READ, summary="List Hong Kong payroll corrections")
 def hk_list_corrections(employee_id: Optional[int] = Query(None), db: Session = Depends(get_db),
                         current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_corrections
+    from app.modules.payroll import hong_kong_service
 
-    return hk_corrections.list_corrections(db, current_user.organization_id, employee_id)
+    return hong_kong_service.list_corrections(db, current_user.organization_id, employee_id)
 
 
 @payroll_router.post("/hong-kong/corrections/{correction_id}/approve", dependencies=_HK_WRITE,
                      summary="Approve a Hong Kong payroll correction (checker ≠ requester); applies its consequences")
 def hk_approve_correction(correction_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_corrections
+    from app.modules.payroll import hong_kong_service
 
-    return hk_corrections.serialize(hk_corrections.approve_correction(
+    return hong_kong_service.serialize(hong_kong_service.approve_correction(
         db, current_user.organization_id, correction_id, current_user.id))
 
 
@@ -4455,53 +4455,53 @@ def hk_approve_correction(correction_id: int, db: Session = Depends(get_db), cur
                      summary="Reject / withdraw a Hong Kong payroll correction (its record is kept)")
 def hk_reject_correction(correction_id: int, data: HKReasonRequest, db: Session = Depends(get_db),
                          current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_corrections
+    from app.modules.payroll import hong_kong_service
 
-    return hk_corrections.serialize(hk_corrections.reject_correction(
+    return hong_kong_service.serialize(hong_kong_service.reject_correction(
         db, current_user.organization_id, correction_id, data.reason, current_user.id))
 
 
 @payroll_router.get("/hong-kong/legal-holds", dependencies=_HK_READ, summary="List Hong Kong legal holds")
 def hk_list_legal_holds(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    return hk_privacy.list_legal_holds(db, current_user.organization_id)
+    return retention_service.list_legal_holds(db, "HK", current_user.organization_id)
 
 
 @payroll_router.post("/hong-kong/legal-holds", dependencies=_HK_WRITE,
                      summary="Place a legal hold on Hong Kong records (organisation-wide or one employee)")
 def hk_place_legal_hold(data: HKLegalHoldRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.place_legal_hold(db, current_user.organization_id, data.employeeId, data.reason, data.reference,
+    retention_service.place_legal_hold(db, "HK", current_user.organization_id, data.employeeId, data.reason, data.reference,
                                 current_user.id)
-    return hk_privacy.list_legal_holds(db, current_user.organization_id)
+    return retention_service.list_legal_holds(db, "HK", current_user.organization_id)
 
 
 @payroll_router.post("/hong-kong/legal-holds/{hold_id}/release", dependencies=_HK_WRITE,
                      summary="Release a legal hold (a different user from the one who placed it)")
 def hk_release_legal_hold(hold_id: int, data: HKReasonRequest, db: Session = Depends(get_db),
                           current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    hk_privacy.release_legal_hold(db, current_user.organization_id, hold_id, data.reason, current_user.id)
-    return hk_privacy.list_legal_holds(db, current_user.organization_id)
+    retention_service.release_legal_hold(db, "HK", current_user.organization_id, hold_id, data.reason, current_user.id)
+    return retention_service.list_legal_holds(db, "HK", current_user.organization_id)
 
 
 @payroll_router.get("/hong-kong/access-events", dependencies=_HK_READ,
                     summary="Hong Kong statutory-data access log (downloads and statutory-profile views)")
 def hk_access_events(employee_id: Optional[int] = Query(None), limit: int = Query(200, ge=1, le=1000),
                      db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.modules.payroll import hk_privacy
+    from app.modules.payroll import retention_service
 
-    return hk_privacy.list_access_events(db, current_user.organization_id, employee_id, limit)
+    return retention_service.list_access_events(db, "HK", current_user.organization_id, employee_id, limit)
 
 
 @payroll_router.post("/hong-kong/employees/{employee_id}/average-wage", dependencies=_HK_WRITE,
                      summary="Compute and freeze a 12-month average-wage snapshot from committed payroll")
 def hk_average_wage(employee_id: int, data: HKAverageWageRequest, db: Session = Depends(get_db),
                     current_user=Depends(get_current_user)):
-    snap = hk_service.calculate_average_wage(db, current_user.organization_id, employee_id, data.benefitType,
+    snap = hong_kong_service.calculate_average_wage(db, current_user.organization_id, employee_id, data.benefitType,
                                              data.referenceDate, data.disregarded, current_user.id, data.overtimeConstant)
     return {"id": snap.id, "status": snap.status, **snap.result}
 
@@ -4509,21 +4509,21 @@ def hk_average_wage(employee_id: int, data: HKAverageWageRequest, db: Session = 
 @payroll_router.get("/hong-kong/employees/{employee_id}/average-wage-snapshots", dependencies=_HK_READ,
                     summary="List an employee's average-wage snapshots and their override state")
 def hk_average_wage_snapshots(employee_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return hk_service.list_average_wage_snapshots(db, current_user.organization_id, employee_id)
+    return hong_kong_service.list_average_wage_snapshots(db, current_user.organization_id, employee_id)
 
 
 @payroll_router.get("/hong-kong/termination-results", dependencies=_HK_READ,
                     summary="List Hong Kong termination calculations (for four-eyes approval and statements)")
 def hk_termination_results(employee_id: Optional[int] = Query(None), db: Session = Depends(get_db),
                            current_user=Depends(get_current_user)):
-    return hk_service.list_termination_results(db, current_user.organization_id, employee_id)
+    return hong_kong_service.list_termination_results(db, current_user.organization_id, employee_id)
 
 
 @payroll_router.post("/hong-kong/average-wage/{snapshot_id}/override-request", dependencies=_HK_WRITE,
                      summary="Request a controlled average-wage override (reason + evidence)")
 def hk_average_override_request(snapshot_id: int, data: HKAverageWageOverrideRequest, db: Session = Depends(get_db),
                                 current_user=Depends(get_current_user)):
-    snap = hk_service.request_average_wage_override(db, current_user.organization_id, snapshot_id, data.averageDailyWage,
+    snap = hong_kong_service.request_average_wage_override(db, current_user.organization_id, snapshot_id, data.averageDailyWage,
                                                     data.reason, data.evidenceRef, current_user.id)
     return {"id": snap.id, "status": snap.status, "overrideRequested": str(snap.override_average_daily_wage)}
 
@@ -4531,8 +4531,8 @@ def hk_average_override_request(snapshot_id: int, data: HKAverageWageOverrideReq
 @payroll_router.post("/hong-kong/average-wage/{snapshot_id}/override-approve", dependencies=_HK_WRITE,
                      summary="Approve an average-wage override (different operator)")
 def hk_average_override_approve(snapshot_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    snap = hk_service.approve_average_wage_override(db, current_user.organization_id, snapshot_id, current_user.id)
-    return {"id": snap.id, "status": snap.status, **hk_service.effective_average(snap)}
+    snap = hong_kong_service.approve_average_wage_override(db, current_user.organization_id, snapshot_id, current_user.id)
+    return {"id": snap.id, "status": snap.status, **hong_kong_service.effective_average(snap)}
 
 
 @payroll_router.post("/hong-kong/employees/{employee_id}/entitlements", dependencies=_HK_READ,
@@ -4540,14 +4540,14 @@ def hk_average_override_approve(snapshot_id: int, db: Session = Depends(get_db),
 def hk_entitlement(employee_id: int, data: HKEntitlementRequest, db: Session = Depends(get_db),
                    current_user=Depends(get_current_user)):
     payload = data.model_dump(exclude_none=True)
-    return hk_service.calculate_entitlement(db, current_user.organization_id, employee_id, payload.pop("benefit"), payload)
+    return hong_kong_service.calculate_entitlement(db, current_user.organization_id, employee_id, payload.pop("benefit"), payload)
 
 
 @payroll_router.post("/hong-kong/employees/{employee_id}/termination", dependencies=_HK_WRITE,
                      summary="Termination calculator: SP/LSP with the 1 May 2025 MPF-offset transition split")
 def hk_termination(employee_id: int, data: HKTerminationRequest, db: Session = Depends(get_db),
                    current_user=Depends(get_current_user)):
-    row = hk_service.calculate_termination(db, current_user.organization_id, employee_id,
+    row = hong_kong_service.calculate_termination(db, current_user.organization_id, employee_id,
                                            data.model_dump(exclude_none=True, mode="json"), current_user.id)
     return {"id": row.id, "status": row.status, "employeeId": row.employee_id, **row.result}
 
@@ -4555,7 +4555,7 @@ def hk_termination(employee_id: int, data: HKTerminationRequest, db: Session = D
 @payroll_router.post("/hong-kong/termination/{result_id}/approve", dependencies=_HK_WRITE,
                      summary="Approve a termination calculation (different operator)")
 def hk_termination_approve(result_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    row = hk_service.approve_termination(db, current_user.organization_id, result_id, current_user.id)
+    row = hong_kong_service.approve_termination(db, current_user.organization_id, result_id, current_user.id)
     return {"id": row.id, "status": row.status}
 
 
@@ -4571,23 +4571,23 @@ def _hk_empf_view(sub) -> dict:
 @payroll_router.post("/hong-kong/empf/submissions", dependencies=_HK_WRITE,
                      summary="Prepare + validate an eMPF remittance batch (no transmission; no certified interface)")
 def hk_empf_prepare(data: HKEmpfPrepareRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    sub = hk_service.prepare_empf_submission(db, current_user.organization_id, data.contributionPeriod, current_user.id)
+    sub = hong_kong_service.prepare_empf_submission(db, current_user.organization_id, data.contributionPeriod, current_user.id)
     return _hk_empf_view(sub)
 
 
 @payroll_router.get("/hong-kong/empf/submissions", dependencies=_HK_READ, summary="List eMPF submissions")
 def hk_empf_list(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.modules.payroll.models import HkgEmpfSubmission
+    from app.modules.payroll.models import HongKongEmpfSubmission
 
-    return [_hk_empf_view(s) for s in db.query(HkgEmpfSubmission)
-            .filter(HkgEmpfSubmission.organization_id == current_user.organization_id).order_by(HkgEmpfSubmission.id)]
+    return [_hk_empf_view(s) for s in db.query(HongKongEmpfSubmission)
+            .filter(HongKongEmpfSubmission.organization_id == current_user.organization_id).order_by(HongKongEmpfSubmission.id)]
 
 
 @payroll_router.post("/hong-kong/empf/submissions/{submission_id}/transition", dependencies=_HK_WRITE,
                      summary="Record an eMPF submission / outcome / settlement from the operator's eMPF evidence")
 def hk_empf_transition(submission_id: int, data: HKEmpfTransitionRequest, db: Session = Depends(get_db),
                        current_user=Depends(get_current_user)):
-    sub = hk_service.transition_empf_submission(db, current_user.organization_id, submission_id, data.target,
+    sub = hong_kong_service.transition_empf_submission(db, current_user.organization_id, submission_id, data.target,
                                                 current_user.id, data.submissionReference, data.rowOutcomes,
                                                 data.settlementReference)
     return _hk_empf_view(sub)
@@ -4596,7 +4596,7 @@ def hk_empf_transition(submission_id: int, data: HKEmpfTransitionRequest, db: Se
 @payroll_router.post("/hong-kong/salaries-tax/estimate", dependencies=_HK_READ,
                      summary="INFORMATIONAL Salaries Tax estimate: never withheld from pay")
 def hk_salaries_tax_estimate(data: HKSalariesTaxEstimateRequest, db: Session = Depends(get_db)):
-    return hk_service.salaries_tax_estimate(db, data.yearOfAssessment, data.income, data.deductions, data.allowances,
+    return hong_kong_service.salaries_tax_estimate(db, data.yearOfAssessment, data.income, data.deductions, data.allowances,
                                              data.deductionClaims, data.elections)
 
 

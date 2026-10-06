@@ -39,6 +39,35 @@ def _tables_created_by_migrations():
     return created
 
 
+def _tables_renamed_by_migrations():
+    """(old, new) pairs a migration renames — a literal ``rename_table('old',
+    'new')`` call or a literal ``('old', 'new')`` pair in a ``_TABLE_RENAMES``
+    tuple (2d0cdeeeecc4, the Hong Kong convergence)."""
+    pairs = set()
+    for path in _VERSIONS_DIR.glob("*.py"):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        pairs |= set(re.findall(r"rename_table\(\s*['\"]([A-Za-z0-9_]+)['\"]\s*,\s*['\"]([A-Za-z0-9_]+)['\"]", text))
+        block = re.search(r"_TABLE_RENAMES\s*=\s*\((.*?)\n\)", text, re.S)
+        if block:
+            pairs |= set(re.findall(r"\(\s*'([A-Za-z0-9_]+)'\s*,\s*'([A-Za-z0-9_]+)'\s*\)", block.group(1)))
+    return pairs
+
+
+def _tables_created_or_renamed_by_migrations():
+    """A renamed table counts only when the table it was renamed FROM is itself
+    created by a migration (followed transitively)."""
+    created = _tables_created_by_migrations()
+    renames = _tables_renamed_by_migrations()
+    changed = True
+    while changed:
+        changed = False
+        for old, new in renames:
+            if old in created and new not in created:
+                created.add(new)
+                changed = True
+    return created
+
+
 def _tables_dropped_by_migrations():
     dropped = set()
     for path in _VERSIONS_DIR.glob("*.py"):
@@ -58,7 +87,7 @@ def _model_tables():
 
 
 def test_every_model_table_has_a_create_table_migration():
-    missing = _model_tables() - _tables_created_by_migrations() - LEGACY_TABLES_WITHOUT_CREATE_TABLE
+    missing = _model_tables() - _tables_created_or_renamed_by_migrations() - LEGACY_TABLES_WITHOUT_CREATE_TABLE
     assert not missing, (
         "Model tables with no Alembic create_table migration (add a migration "
         f"under alembic/versions/ and commit it): {sorted(missing)}"

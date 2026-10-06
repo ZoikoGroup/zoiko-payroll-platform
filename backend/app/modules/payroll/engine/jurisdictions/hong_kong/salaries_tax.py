@@ -198,8 +198,16 @@ def estimate(*, year_of_assessment: str, rate_map: dict, slabs: list, income: De
     prog_tax, prog_lines = _band_tax(nci, progressive)
     std_tax, std_lines = _band_tax(net_income, standard)
     tax = min(prog_tax, std_tax)
+    # The one-off reduction is legislated year by year: no rows for a year of
+    # assessment means none was legislated (reduction 0, stated in the output).
+    # Exactly one of the two rows is a broken configuration, never "no
+    # reduction" — refused.
     reduction = ZERO
     red_rate, red_cap = (rate_map or {}).get("hk_tax_reduction_rate"), (rate_map or {}).get("hk_tax_reduction_cap")
+    if (red_rate is None) != (red_cap is None):
+        missing = "hk_tax_reduction_cap" if red_cap is None else "hk_tax_reduction_rate"
+        raise HongKongCalculationBlockedError(
+            missing, "the one-off Salaries Tax reduction is half-configured (rate and cap are configured together)")
     if red_rate is not None and red_cap is not None:
         reduction = min(cents(tax * dec(red_rate.employee_rate_pct)), dec(red_cap.flat_amount))
     return {
@@ -215,5 +223,8 @@ def estimate(*, year_of_assessment: str, rate_map: dict, slabs: list, income: De
         "standardRate": {"tax": str(std_tax), "tiers": std_lines},
         "basisApplied": "PROGRESSIVE" if prog_tax <= std_tax else "STANDARD_RATE",
         "taxBeforeReduction": str(tax), "taxReduction": str(cents(reduction)),
+        "taxReductionBasis": ("PACK_ROWS — hk_tax_reduction_rate / hk_tax_reduction_cap" if red_rate is not None
+                              else "NONE CONFIGURED for this year of assessment (one-off reductions are legislated "
+                                   "year by year)"),
         "estimatedTax": str(cents(tax - reduction)),
     }

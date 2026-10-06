@@ -178,10 +178,20 @@ def generate_password(
     return service.generate_random_password(db, current_user.id)
 
 
+def _trusted_request_origin(request: Request):
+    """The SPA origin that submitted the form, used so emailed reset links point
+    at the site the user is actually on. Only honoured when it is in the CORS
+    allowlist (blocks Origin-header link poisoning)."""
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    allowed = {o.strip().rstrip("/") for o in settings.PAYROLL_CORS_ORIGINS.split(",") if o.strip()}
+    allowed.add(settings.FRONTEND_URL.rstrip("/"))
+    return origin if origin and origin in allowed else None
+
+
 @router.post("/forgot-password", response_model=SuccessResponse, summary="Request password reset link")
 @limiter.limit("5/minute")
 def forgot_password(request: Request, data: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    return service.request_password_reset(db, data.email)
+    return service.request_password_reset(db, data.email, base_url=_trusted_request_origin(request))
 
 
 def _invite_claimed_page(temp_password: str) -> HTMLResponse:

@@ -14,13 +14,13 @@
     "period_end": "2026-06-30",
     "gross": "20000",
     "date_of_birth": "1960-01-01",
-    "hkg_worker_facts": {
+    "hk_worker_facts": {
       "profileId": 1,
       "dateOfBirth": "1960-01-01",
       "dateOfJoining": "2024-01-01"
     },
-    "hkg_hours": {},
-    "hkg_rule_segments": {
+    "hk_hours": {},
+    "hk_rule_segments": {
       "smw_hourly_rate": [
         {
           "from": "2026-05-01",

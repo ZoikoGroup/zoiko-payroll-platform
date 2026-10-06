@@ -62,7 +62,7 @@ def _calc(db, gross="20000", pay=date(2026, 6, 30), ps=None, pe=None, freq="Mont
     f = {"profileId": 1, "dateOfJoining": "2024-01-01", **(facts or {})}
     ctx = PayrollContext(gross=D(gross), basic=kw.pop("basic", D(gross)), country="HK", rate_map=rate_map, slabs=slabs,
                          pay_date=pay, period_start=ps, period_end=pe, pay_frequency=freq, date_of_birth=dob,
-                         hkg_worker_facts=f, hkg_hours=hours or {}, hkg_rule_segments=rule_segments(rows, ps, pe), **kw)
+                         hk_worker_facts=f, hk_hours=hours or {}, hk_rule_segments=rule_segments(rows, ps, pe), **kw)
     return calculate_payroll(ctx, "standard")
 
 
@@ -101,7 +101,7 @@ def test_no_separate_hk_runtime_the_calculator_is_one_module_in_the_shared_dispa
 def test_architecture_lock_normal_payroll_never_withholds_salaries_tax(db, packs, gross):
     r = _calc(db, gross)
     assert r.tds == 0 and r.federal_income_tax == 0 and r.state_income_tax == 0
-    assert r.hkg_calculation_trace["salariesTax"]["withholding"] == "NONE"
+    assert r.hk_calculation_trace["salariesTax"]["withholding"] == "NONE"
     assert r.net_pay == D(gross) - r.employee_pension
 
 
@@ -122,11 +122,11 @@ def test_golden_vectors_embedded_rows(path):
 
 
 def test_golden_vectors_reproduce_from_each_packs_own_rows(db, packs):
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
     total = 0
     for pack in packs:
-        check = hk_service.pack_golden_check(db, pack)
+        check = hong_kong_service.pack_golden_check(db, pack)
         assert check["failures"] == [], check
         total += check["casesInWindow"]
     assert total == len(list(GOLDEN.glob("*.json"))) >= 11
@@ -140,7 +140,7 @@ def test_case_a_b_c_threshold_branches_from_pack_rows(db, packs):
                                   ("30000", "WITHIN_LEVELS", "1500", "1500"), ("30000.01", "ABOVE_MAXIMUM", "1500", "1500"),
                                   ("45000", "ABOVE_MAXIMUM", "1500", "1500")):
         r = _calc(db, gross)
-        assert r.hkg_calculation_trace["mpf"]["currentPeriod"]["branch"] == branch
+        assert r.hk_calculation_trace["mpf"]["currentPeriod"]["branch"] == branch
         assert (r.employee_pension, r.employer_pension) == (D(ee), D(er)), gross
 
 
@@ -151,7 +151,7 @@ def test_mpf_employer_still_pays_5_percent_below_minimum_and_employee_nil(db, pa
 
 def test_non_monthly_daily_levels_times_days(db, packs):
     r = _calc(db, "1500", pay=date(2026, 6, 14), ps=date(2026, 6, 1), pe=date(2026, 6, 14), freq="Fortnightly")
-    cp = r.hkg_calculation_trace["mpf"]["currentPeriod"]
+    cp = r.hk_calculation_trace["mpf"]["currentPeriod"]
     assert (D(cp["minLevel"]), D(cp["maxLevel"])) == (D("3920"), D("14000"))       # 280×14, 1,000×14
     assert cp["branch"] == "BELOW_MINIMUM" and r.employee_pension == 0 and r.employer_pension == D("75.00")
 
@@ -177,12 +177,12 @@ def test_case_e_catch_up_is_never_booked_twice(db, packs):
         {"payslipId": 2, "periodStart": "2026-02-01", "periodEnd": "2026-02-28", "relevantIncome": "20000",
          "coverageStatus": "PENDING_60_DAY", "caughtUp": True}]}
     r = _calc(db, pay=date(2026, 4, 30), facts=facts)
-    assert r.hkg_calculation_trace["mpf"]["catchUp"] == [] and r.employer_pension == D("1000.00")
+    assert r.hk_calculation_trace["mpf"]["catchUp"] == [] and r.employer_pension == D("1000.00")
 
 
 def test_case_f_leaver_before_60_days_records_employment_duration_evidence(db, packs):
     r = _calc(db, pay=date(2026, 2, 28), facts={"dateOfJoining": "2026-01-16", "terminationDate": "2026-02-28"})
-    cov = r.hkg_calculation_trace["mpf"]["coverage"]
+    cov = r.hk_calculation_trace["mpf"]["coverage"]
     assert cov["status"] == "NOT_COVERED_LEFT_BEFORE_60_DAYS" and cov["employmentDays"] == 44
 
 
@@ -208,7 +208,7 @@ def test_mpf_inbound_13_month_rule(db, packs):
     base = {"mpfExemptionCode": "EXEMPT_INBOUND", "mpfExemptionEvidenceRef": "VISA-1", "enteredForEmployment": True,
             "arrivalDate": "2026-01-10"}
     ok = _calc(db, facts={**base, "permissionToStayUntil": "2027-01-31"})
-    assert ok.hkg_calculation_trace["mpf"]["coverage"]["status"] == "EXEMPT" and ok.employer_pension == 0
+    assert ok.hk_calculation_trace["mpf"]["coverage"]["status"] == "EXEMPT" and ok.employer_pension == 0
     with pytest.raises(HongKongCalculationBlockedError, match="13 months"):
         _calc(db, facts={**base, "permissionToStayUntil": "2027-06-30"})
     overseas = _calc(db, facts={"mpfExemptionCode": "EXEMPT_INBOUND", "mpfExemptionEvidenceRef": "SCHEME-1",
@@ -218,7 +218,7 @@ def test_mpf_inbound_13_month_rule(db, packs):
 
 def test_mpf_coverage_never_inferred_from_part_time_status(db, packs):
     r = _calc(db, "8000", employment_type="Part-time")
-    assert r.hkg_calculation_trace["mpf"]["coverage"]["status"] == "COVERED" and r.employee_pension == D("400.00")
+    assert r.hk_calculation_trace["mpf"]["coverage"]["status"] == "COVERED" and r.employee_pension == D("400.00")
 
 
 def test_age_boundary_inside_period_blocks(db, packs):
@@ -261,10 +261,10 @@ def test_unclassified_earning_component_blocks_mpf(db, packs):
 def test_one_earning_classified_per_obligation(db, packs):
     """HK-006: additional compensation counts for MPF, is REVIEW for EO wages / SMW, and is reported to the IRD."""
     r = _calc(db, "25000", basic=D("20000"), additional_compensation=D("5000"))
-    cls = r.hkg_calculation_trace["classification"]
+    cls = r.hk_calculation_trace["classification"]
     assert D(cls["MPF_RI"]["included"]) == D("25000") and D(cls["EO_WAGES"]["review"]) == D("5000")
     assert D(cls["SMW_WAGES"]["review"]) == D("5000")
-    assert r.hkg_calculation_trace["ird"]["reportable"]["UNMAPPED_REQUIRES_CLASSIFICATION"] == "5000.00"
+    assert r.hk_calculation_trace["ird"]["reportable"]["UNMAPPED_REQUIRES_CLASSIFICATION"] == "5000.00"
 
 
 # ── Minimum wage (golden case G) ────────────────────────────────────────
@@ -273,7 +273,7 @@ def test_case_g_wage_period_crossing_1_may_2026_splits_rates(db, packs):
     days = {(date(2026, 4, 16) + timedelta(days=i)).isoformat(): "8" for i in range(30)}
     r = _calc(db, "10000", pay=date(2026, 5, 15), ps=date(2026, 4, 16), pe=date(2026, 5, 15),
               hours={"days": days, "complete": True})
-    smw = r.hkg_calculation_trace["minimumWage"]
+    smw = r.hk_calculation_trace["minimumWage"]
     rates = {s["rate"]: D(s["hours"]) for s in smw["segments"]}
     assert rates == {"42.10": D("120"), "43.10": D("120")}
     assert D(smw["minimumDue"]) == D("120") * D("42.10") + D("120") * D("43.10") == D("10224.00")
@@ -285,24 +285,24 @@ def test_smw_historical_rate_resolves_from_the_2025_pack(db, packs):
     days = {(date(2025, 4, 1) + timedelta(days=i)).isoformat(): "8" for i in range(30)}
     r = _calc(db, "12000", pay=date(2025, 4, 30), ps=date(2025, 4, 1), pe=date(2025, 4, 30),
               hours={"days": days, "complete": True})
-    smw = r.hkg_calculation_trace["minimumWage"]
+    smw = r.hk_calculation_trace["minimumWage"]
     assert [s["rate"] for s in smw["segments"]] == ["40.00"] and D(smw["minimumDue"]) == D("9600.00")
 
 
 def test_17600_is_a_record_keeping_trigger_not_a_monthly_minimum_wage(db, packs):
     r = _calc(db, "15000")
-    smw = r.hkg_calculation_trace["minimumWage"]
+    smw = r.hk_calculation_trace["minimumWage"]
     assert smw["hoursRecord"]["required"] is True and D(smw["hoursRecord"]["monthlyCap"]) == D("17600")
     assert smw["status"] == "HOURS_NOT_RECORDED"                   # never a "BREACH" for being under 17,600
-    assert _calc(db, "18000").hkg_calculation_trace["minimumWage"]["hoursRecord"]["required"] is False
+    assert _calc(db, "18000").hk_calculation_trace["minimumWage"]["hoursRecord"]["required"] is False
     april = _calc(db, "17300", pay=date(2025, 6, 30))
-    assert D(april.hkg_calculation_trace["minimumWage"]["hoursRecord"]["monthlyCap"]) == D("17200")
+    assert D(april.hk_calculation_trace["minimumWage"]["hoursRecord"]["monthlyCap"]) == D("17200")
 
 
 def test_smw_compliant_with_countable_wages(db, packs):
     days = {(date(2026, 6, 1) + timedelta(days=i)).isoformat(): "8" for i in range(30)}
     r = _calc(db, "15000", hours={"days": days, "complete": True})
-    assert r.hkg_calculation_trace["minimumWage"]["status"] == "COMPLIANT"
+    assert r.hk_calculation_trace["minimumWage"]["status"] == "COMPLIANT"
 
 
 # ── Continuous contract (golden case H) ─────────────────────────────────
@@ -986,13 +986,13 @@ def test_preflight_continuous_contract_is_never_assumed():
 def test_preflight_reports_the_engines_own_minimum_wage_and_mpf_assessment(db, packs):
     from app.modules.payroll.engine.jurisdictions.hong_kong import preflight as pf
 
-    trace = _calc(db, gross="8000", pay=date(2026, 6, 30), hours={"2026-06-01": D("200")}).hkg_calculation_trace
+    trace = _calc(db, gross="8000", pay=date(2026, 6, 30), hours={"2026-06-01": D("200")}).hk_calculation_trace
     smw_checks = pf.minimum_wage_checks(_emp(), trace["minimumWage"])
     assert "SMW_HOURS_RECORD" in {c["code"] for c in smw_checks}
     # A covered month with no exception says nothing about MPF (parity with SG).
     assert pf.mpf_checks(_emp(), trace["mpf"]) == []
     # Below the minimum level the employer still contributes and the operator is told.
-    low = _calc(db, gross="6000", pay=date(2026, 6, 30), hours={"2026-06-01": D("200")}).hkg_calculation_trace
+    low = _calc(db, gross="6000", pay=date(2026, 6, 30), hours={"2026-06-01": D("200")}).hk_calculation_trace
     codes = {c["code"] for c in pf.mpf_checks(_emp(), low["mpf"])}
     assert "MPF_BELOW_MINIMUM" in codes
     assert all(c["employeeId"] == 1 for c in pf.mpf_checks(_emp(), low["mpf"]))
@@ -1003,12 +1003,12 @@ def test_preflight_reports_the_60_day_rule_and_a_catch_up(db, packs):
 
     facts = {"dateOfJoining": date(2026, 6, 1).isoformat(), "dateOfBirth": "1990-01-01"}
     pending = _calc(db, gross="9000", pay=date(2026, 6, 30), facts=facts,
-                    hours={"2026-06-01": D("200")}).hkg_calculation_trace
+                    hours={"2026-06-01": D("200")}).hk_calculation_trace
     codes = {c["code"] for c in pf.mpf_checks(_emp(), pending["mpf"])}
     assert "MPF_60_DAY_NOT_MET" in codes
     mature = _calc(db, gross="9000", pay=date(2026, 6, 30),
                    facts={"dateOfJoining": "2024-01-01", "dateOfBirth": "1990-01-01"},
-                   hours={"2026-06-01": D("200")}).hkg_calculation_trace
+                   hours={"2026-06-01": D("200")}).hk_calculation_trace
     catch_up = {**mature["mpf"], "catchUp": [{"payslipId": 1, "employee": "100.00", "employer": "100.00"}]}
     assert {c["code"] for c in pf.mpf_checks(_emp(), catch_up)} == {"MPF_CATCH_UP"}
 

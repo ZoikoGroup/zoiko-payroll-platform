@@ -1,0 +1,3804 @@
+{
+ "__recorded_on__": "2026-10-05",
+ "hk_activation_evidence_refusal": {
+  "audits": [],
+  "result": "HK-PAYROLL-2026 v1.0 still holds values that are not source-verified: 1 SOURCE_HASH_REQUIRED (eo_week_start_day); 27 UNVERIFIED — G1 (HK_EARNING_CLASS, eo_average_wage_days_per_year, eo_overtime_aw_test_share_pct, mpf_partial_month_threshold_basis). Link each to a reviewed, hashed source in a Draft version before activating."
+ },
+ "hk_activation_readiness": {
+  "audits": [],
+  "result": {
+   "asOf": "2026-10-01",
+   "canOpen": false,
+   "met": 1,
+   "registry": "PLANNED",
+   "requirements": [
+    {
+     "detail": "PASS",
+     "key": "GATE_G1",
+     "label": "G1 evidence accepted (HK-GATE-G1)",
+     "met": true
+    },
+    {
+     "detail": "SUBMITTED",
+     "key": "GATE_G2",
+     "label": "G2 evidence accepted (HK-GATE-G2)",
+     "met": false
+    },
+    {
+     "detail": "SUBMITTED",
+     "key": "GATE_G3",
+     "label": "G3 evidence accepted (HK-GATE-G3)",
+     "met": false
+    },
+    {
+     "detail": "EVIDENCE_REQUIRED",
+     "key": "GATE_G4",
+     "label": "G4 evidence accepted (HK-GATE-G4)",
+     "met": false
+    },
+    {
+     "detail": "EVIDENCE_REQUIRED",
+     "key": "GATE_G5",
+     "label": "G5 evidence accepted (HK-GATE-G5)",
+     "met": false
+    },
+    {
+     "detail": "EVIDENCE_REQUIRED",
+     "key": "GATE_G6",
+     "label": "G6 evidence accepted (HK-GATE-G6)",
+     "met": false
+    },
+    {
+     "detail": "EVIDENCE_REQUIRED",
+     "key": "GATE_G7",
+     "label": "G7 evidence accepted (HK-GATE-G7)",
+     "met": false
+    },
+    {
+     "detail": "none in force on 2026-10-01",
+     "key": "ACTIVE_PACK",
+     "label": "an Active HK rule pack in force today",
+     "met": false
+    },
+    {
+     "detail": "no pack in force",
+     "key": "GOLDEN",
+     "label": "the in-force pack reproduces its golden vectors",
+     "met": false
+    },
+    {
+     "detail": "EVIDENCE_REQUIRED",
+     "key": "PRODUCTION_VERIFICATION",
+     "label": "production read-only verification and restore rehearsal recorded (HK-PRODUCTION-VERIFICATION)",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_BIR56A",
+     "label": "BIR56A 2026/27: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_IR56B",
+     "label": "IR56B 2026/27: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_IR56E",
+     "label": "IR56E 2026/27: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_IR56F",
+     "label": "IR56F 2026/27: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_IR56G",
+     "label": "IR56G 2026/27: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_EMPF_REMITTANCE",
+     "label": "EMPF REMITTANCE 2026: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_MPF_CONTRIBUTION_RECORD",
+     "label": "MPF CONTRIBUTION RECORD 2026: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    },
+    {
+     "detail": "no Active template",
+     "key": "TEMPLATE_HK_TERMINATION_STATEMENT",
+     "label": "TERMINATION STATEMENT 2026: an Active template with reviewed source evidence and an independent approval",
+     "met": false
+    }
+   ],
+   "total": 18
+  }
+ },
+ "hk_gate_state": {
+  "G1": "PASS",
+  "G2": "SUBMITTED",
+  "G3": "SUBMITTED",
+  "G4": "EVIDENCE_REQUIRED"
+ },
+ "hk_golden_check": {
+  "audits": [],
+  "result": {
+   "casesInWindow": 7,
+   "failures": [],
+   "passed": 7
+  }
+ },
+ "hk_preview": {
+  "audits": [],
+  "result": {
+   "incomeTaxWithheld": "0",
+   "mpfEmployee": "1500.00",
+   "mpfEmployer": "1500.00",
+   "netPay": "43500.00",
+   "packId": "HK-PAYROLL-2026",
+   "packStatus": "Draft",
+   "packVersion": "1.0",
+   "status": "CALCULATED",
+   "trace": {
+    "classification": {
+     "EO_WAGES": {
+      "excluded": "0.00",
+      "included": "45000.00",
+      "lines": [
+       {
+        "amount": "45000.00",
+        "component": "basic",
+        "ref": {
+         "rule": "HKCLS-2026/27-basic-EO_WAGES [G1]",
+         "ruleType": "HK_EARNING_CLASS"
+        },
+        "treatment": "INCLUDED"
+       }
+      ],
+      "review": "0.00"
+     },
+     "IRD": {
+      "excluded": "0.00",
+      "included": "45000.00",
+      "lines": [
+       {
+        "amount": "45000.00",
+        "component": "basic",
+        "ref": {
+         "rule": "HKCLS-2026/27-basic-IRD [G1]",
+         "ruleType": "HK_EARNING_CLASS"
+        },
+        "treatment": "INCLUDED"
+       }
+      ],
+      "review": "0.00"
+     },
+     "MPF_RI": {
+      "excluded": "0.00",
+      "included": "45000.00",
+      "lines": [
+       {
+        "amount": "45000.00",
+        "component": "basic",
+        "ref": {
+         "rule": "HKCLS-2026/27-basic-MPF_RI [G1]",
+         "ruleType": "HK_EARNING_CLASS"
+        },
+        "treatment": "INCLUDED"
+       }
+      ],
+      "review": "0.00"
+     },
+     "SMW_WAGES": {
+      "excluded": "0.00",
+      "included": "45000.00",
+      "lines": [
+       {
+        "amount": "45000.00",
+        "component": "basic",
+        "ref": {
+         "rule": "HKCLS-2026/27-basic-SMW_WAGES [G1]",
+         "ruleType": "HK_EARNING_CLASS"
+        },
+        "treatment": "INCLUDED"
+       }
+      ],
+      "review": "0.00"
+     }
+    },
+    "country": "HK",
+    "engine": "HK-2026.1",
+    "ird": {
+     "basis": "accumulated by payment date into the year of assessment ending 31 March (HK-011)",
+     "reportable": {
+      "UNMAPPED": "45000.00"
+     },
+     "yearOfAssessment": "2026/27"
+    },
+    "minimumWage": {
+     "countableWages": "45000.00",
+     "detail": "no verified hours for the period — the minimum-wage test cannot be evaluated",
+     "hoursRecord": {
+      "basis": "wages payable for the wage period below the monthly monetary cap → total hours worked must be recorded (a record-keeping threshold, NOT a monthly minimum wage)",
+      "capChangedInPeriod": false,
+      "capRef": {
+       "componentKey": "smw_hours_record_cap_monthly",
+       "effectiveFrom": "2026-05-01",
+       "packId": 2,
+       "rowId": 141,
+       "sourceDocumentId": 9
+      },
+      "monthlyCap": "17600.00",
+      "required": false
+     },
+     "status": "HOURS_NOT_RECORDED",
+     "wagesNeedingClassification": "0.00"
+    },
+    "mpf": {
+     "catchUp": [],
+     "contributionDay": "2026-07-10",
+     "contributionDayNote": "statutory extension for non-working / suspension days is not applied (disclosed)",
+     "coverage": {
+      "ageAtPeriodEnd": 36,
+      "ageAtPeriodStart": 36,
+      "employmentStart": "2024-01-01",
+      "exemptionCode": "NONE",
+      "firstContributionDay": "2024-03-10",
+      "reason": "regular employee from 2024-01-01 (60th day 2024-02-29)",
+      "sixtyDayDate": "2024-02-29",
+      "status": "COVERED"
+     },
+     "currentPeriod": {
+      "branch": "ABOVE_MAXIMUM",
+      "employee": "1500.00",
+      "employeeBasis": "MANDATORY",
+      "employer": "1500.00",
+      "maxLevel": "30000.00",
+      "minLevel": "7100.00",
+      "relevantIncome": "45000.00"
+     },
+     "employee": "1500.00",
+     "employer": "1500.00",
+     "refs": {
+      "mpf_contribution_day": {
+       "componentKey": "mpf_contribution_day"
+      },
+      "mpf_employee_holiday_days": {
+       "componentKey": "mpf_employee_holiday_days"
+      },
+      "mpf_employee_rate": {
+       "componentKey": "mpf_employee_rate"
+      },
+      "mpf_employer_rate": {
+       "componentKey": "mpf_employer_rate"
+      },
+      "mpf_inbound_exempt_months": {
+       "componentKey": "mpf_inbound_exempt_months"
+      },
+      "mpf_max_relevant_income_daily": {
+       "componentKey": "mpf_max_relevant_income_daily"
+      },
+      "mpf_max_relevant_income_monthly": {
+       "componentKey": "mpf_max_relevant_income_monthly"
+      },
+      "mpf_min_relevant_income_daily": {
+       "componentKey": "mpf_min_relevant_income_daily"
+      },
+      "mpf_min_relevant_income_monthly": {
+       "componentKey": "mpf_min_relevant_income_monthly"
+      },
+      "mpf_partial_month_threshold_basis": {
+       "componentKey": "mpf_partial_month_threshold_basis"
+      },
+      "mpf_regular_employee_days": {
+       "componentKey": "mpf_regular_employee_days"
+      },
+      "mpf_regular_employee_max_age": {
+       "componentKey": "mpf_regular_employee_max_age"
+      },
+      "mpf_regular_employee_min_age": {
+       "componentKey": "mpf_regular_employee_min_age"
+      }
+     },
+     "rounding": "half-up to the cent (G1 certification item)",
+     "thresholdBasis": "MONTHLY"
+    },
+    "period": {
+     "end": "2026-06-30",
+     "payDate": "2026-06-30",
+     "payFrequency": "Monthly",
+     "start": "2026-06-01"
+    },
+    "profileId": "PREVIEW",
+    "result": {
+     "employerCost": "46500.00",
+     "gross": "45000.00",
+     "mpfEmployee": "1500.00",
+     "mpfEmployer": "1500.00",
+     "netPay": "43500.00"
+    },
+    "salariesTax": {
+     "basis": "Hong Kong Salaries Tax is assessed by the IRD on the employee — no payroll withholding. An IR56G departure hold is a payment control, not a deduction.",
+     "withholding": "NONE"
+    },
+    "workerFacts": {
+     "dateOfBirth": "1990-01-01",
+     "dateOfJoining": "2024-01-01",
+     "profileId": "PREVIEW"
+    }
+   },
+   "writes": "NONE"
+  }
+ },
+ "hk_registry_transition": {
+  "already": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:PLANNED",
+      "result": "REFUSED",
+      "unmet": []
+     },
+     "old": {
+      "availability": null,
+      "country": "HK"
+     },
+     "reason": "There is no Hong Kong registry row — seed it (PLANNED); it is never created here."
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "There is no Hong Kong registry row — seed it (PLANNED); it is never created here."
+  },
+  "bad_target": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:LIMITED_AVAILABILITY",
+      "result": "REFUSED",
+      "unmet": []
+     },
+     "old": {
+      "availability": null,
+      "country": "HK"
+     },
+     "reason": "Hong Kong availability can only be AVAILABLE or PLANNED."
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "Hong Kong availability can only be AVAILABLE or PLANNED."
+  },
+  "no_actor": {
+   "audits": [],
+   "error": "BadRequestException",
+   "message": "A registry change needs an identified Super Admin."
+  },
+  "no_reason": {
+   "audits": [],
+   "error": "BadRequestException",
+   "message": "A registry change needs the owner's reason (it is the change record)."
+  },
+  "unmet": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:AVAILABLE",
+      "result": "REFUSED",
+      "unmet": []
+     },
+     "old": {
+      "availability": null,
+      "country": "HK"
+     },
+     "reason": "There is no Hong Kong registry row — seed it (PLANNED); it is never created here."
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "There is no Hong Kong registry row — seed it (PLANNED); it is never created here."
+  }
+ },
+ "hk_statutory_summary": {
+  "audits": [],
+  "result": {
+   "activationReadiness": {
+    "asOf": "2026-10-05",
+    "canOpen": false,
+    "met": 1,
+    "registry": "PLANNED",
+    "requirements": [
+     {
+      "detail": "PASS",
+      "key": "GATE_G1",
+      "label": "G1 evidence accepted (HK-GATE-G1)",
+      "met": true
+     },
+     {
+      "detail": "SUBMITTED",
+      "key": "GATE_G2",
+      "label": "G2 evidence accepted (HK-GATE-G2)",
+      "met": false
+     },
+     {
+      "detail": "SUBMITTED",
+      "key": "GATE_G3",
+      "label": "G3 evidence accepted (HK-GATE-G3)",
+      "met": false
+     },
+     {
+      "detail": "EVIDENCE_REQUIRED",
+      "key": "GATE_G4",
+      "label": "G4 evidence accepted (HK-GATE-G4)",
+      "met": false
+     },
+     {
+      "detail": "EVIDENCE_REQUIRED",
+      "key": "GATE_G5",
+      "label": "G5 evidence accepted (HK-GATE-G5)",
+      "met": false
+     },
+     {
+      "detail": "EVIDENCE_REQUIRED",
+      "key": "GATE_G6",
+      "label": "G6 evidence accepted (HK-GATE-G6)",
+      "met": false
+     },
+     {
+      "detail": "EVIDENCE_REQUIRED",
+      "key": "GATE_G7",
+      "label": "G7 evidence accepted (HK-GATE-G7)",
+      "met": false
+     },
+     {
+      "detail": "none in force on 2026-10-05",
+      "key": "ACTIVE_PACK",
+      "label": "an Active HK rule pack in force today",
+      "met": false
+     },
+     {
+      "detail": "no pack in force",
+      "key": "GOLDEN",
+      "label": "the in-force pack reproduces its golden vectors",
+      "met": false
+     },
+     {
+      "detail": "EVIDENCE_REQUIRED",
+      "key": "PRODUCTION_VERIFICATION",
+      "label": "production read-only verification and restore rehearsal recorded (HK-PRODUCTION-VERIFICATION)",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_BIR56A",
+      "label": "BIR56A 2026/27: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_IR56B",
+      "label": "IR56B 2026/27: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_IR56E",
+      "label": "IR56E 2026/27: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_IR56F",
+      "label": "IR56F 2026/27: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_IR56G",
+      "label": "IR56G 2026/27: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_EMPF_REMITTANCE",
+      "label": "EMPF REMITTANCE 2026: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_MPF_CONTRIBUTION_RECORD",
+      "label": "MPF CONTRIBUTION RECORD 2026: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     },
+     {
+      "detail": "no Active template",
+      "key": "TEMPLATE_HK_TERMINATION_STATEMENT",
+      "label": "TERMINATION STATEMENT 2026: an Active template with reviewed source evidence and an independent approval",
+      "met": false
+     }
+    ],
+    "total": 18
+   },
+   "architecture": {
+    "calculator": "engine/countries/hong_kong.py via the shared StandardStrategy",
+    "ir56gHold": "LEGAL_HOLD (payment control, not a deduction)",
+    "payrollWithholding": "NONE — Salaries Tax is employee-assessed (no PAYE)"
+   },
+   "certificationItems": [
+    "HK-PAYROLL-2025: mpf_partial_month_threshold_basis",
+    "HK-PAYROLL-2025: eo_week_start_day",
+    "HK-PAYROLL-2025: eo_average_wage_days_per_year",
+    "HK-PAYROLL-2025: eo_overtime_aw_test_share_pct",
+    "HK-PAYROLL-2025: HKCLS-2025/26-basic-EO_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-basic-MPF_RI [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-basic-SMW_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-basic-IRD [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-hra-EO_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-hra-MPF_RI [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-hra-SMW_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-hra-IRD [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-special_allowance-EO_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-special_allowance-MPF_RI [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-special_allowance-SMW_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-special_allowance-IRD [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-named_allowances-EO_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-named_allowances-MPF_RI [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-named_allowances-SMW_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-named_allowances-IRD [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-overtime-EO_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-overtime-MPF_RI [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-overtime-SMW_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-overtime-IRD [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-EO_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-MPF_RI [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-SMW_WAGES [G1]",
+    "HK-PAYROLL-2025: HKCLS-2025/26-additional_compensation-IRD [G1]",
+    "HK-PAYROLL-2026: mpf_partial_month_threshold_basis",
+    "HK-PAYROLL-2026: eo_week_start_day",
+    "HK-PAYROLL-2026: eo_average_wage_days_per_year",
+    "HK-PAYROLL-2026: eo_overtime_aw_test_share_pct",
+    "HK-PAYROLL-2026: HKCLS-2026/27-basic-EO_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-basic-MPF_RI [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-basic-SMW_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-basic-IRD [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-hra-EO_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-hra-MPF_RI [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-hra-SMW_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-hra-IRD [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-special_allowance-EO_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-special_allowance-MPF_RI [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-special_allowance-SMW_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-special_allowance-IRD [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-named_allowances-EO_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-named_allowances-MPF_RI [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-named_allowances-SMW_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-named_allowances-IRD [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-overtime-EO_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-overtime-MPF_RI [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-overtime-SMW_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-overtime-IRD [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-additional_compensation-EO_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-additional_compensation-MPF_RI [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-additional_compensation-SMW_WAGES [G1]",
+    "HK-PAYROLL-2026: HKCLS-2026/27-additional_compensation-IRD [G1]"
+   ],
+   "country": "HK",
+   "externalBlockers": [
+    "IRD XML schemas / sample files for BIR56A, IR56B/E/F/G not archived — e-filing export gated (G2)",
+    "No certified eMPF interface or test credentials — submissions recorded from operator evidence only (G2)",
+    "Hong Kong specialist certification of [G1] rows (earning classification, week start, partial-month MPF basis)",
+    "Parallel payroll cycles (G3), PDPO / privacy review (G5), operations runbooks (G6), launch approvals (G7)",
+    "Industry Scheme (construction/catering casual), domestic helpers, ORSO scheme rules — out of launch scope",
+    "Bilingual English / Traditional Chinese statutory output not validated"
+   ],
+   "externalDependencies": [
+    {
+     "gate": "G1",
+     "gateState": "PASS",
+     "key": "X-1",
+     "label": "HK payroll / statutory specialist certification"
+    },
+    {
+     "gate": "G2",
+     "gateState": "SUBMITTED",
+     "key": "X-2",
+     "label": "IRD schemas, samples, test submission"
+    },
+    {
+     "gate": "G2",
+     "gateState": "SUBMITTED",
+     "key": "X-3",
+     "label": "eMPF onboarding and certification"
+    },
+    {
+     "gate": "G3",
+     "gateState": "SUBMITTED",
+     "key": "X-4",
+     "label": "Parallel payroll cycles (real data)"
+    },
+    {
+     "gate": "G5",
+     "gateState": "EVIDENCE_REQUIRED",
+     "key": "X-5",
+     "label": "Independent penetration test"
+    },
+    {
+     "gate": "G5",
+     "gateState": "EVIDENCE_REQUIRED",
+     "key": "X-6",
+     "label": "Privacy counsel review"
+    },
+    {
+     "gate": "G6",
+     "gateState": "EVIDENCE_REQUIRED",
+     "key": "X-7",
+     "label": "Runbook approval"
+    },
+    {
+     "gate": "G7",
+     "gateState": "EVIDENCE_REQUIRED",
+     "key": "X-8",
+     "label": "Approved production snapshot (restore rehearsal)"
+    },
+    {
+     "gate": "G7",
+     "gateState": "EVIDENCE_REQUIRED",
+     "key": "X-9",
+     "label": "Read-only production facts"
+    },
+    {
+     "gate": "G7",
+     "gateState": "EVIDENCE_REQUIRED",
+     "key": "X-10",
+     "label": "Launch approvals"
+    }
+   ],
+   "gates": [
+    {
+     "evidenceTag": "HK-GATE-G1",
+     "gate": "G1",
+     "requirement": "Statutory content — Hong Kong specialist signs wage, MPF, Employment Ordinance and IRD mappings",
+     "state": "PASS"
+    },
+    {
+     "evidenceTag": "HK-GATE-G2",
+     "gate": "G2",
+     "requirement": "Authority conformance — current IRD XML schemas / test files and eMPF workflows pass end-to-end",
+     "state": "SUBMITTED"
+    },
+    {
+     "evidenceTag": "HK-GATE-G3",
+     "gate": "G3",
+     "requirement": "Parallel payroll — two representative parallel cycles with no unexplained material variance",
+     "state": "SUBMITTED"
+    },
+    {
+     "evidenceTag": "HK-GATE-G4",
+     "gate": "G4",
+     "requirement": "Edge cases — 60-day MPF, contribution holiday, non-monthly, 468 rule, SMW crossover, departure hold, SP/LSP",
+     "state": "EVIDENCE_REQUIRED"
+    },
+    {
+     "evidenceTag": "HK-GATE-G5",
+     "gate": "G5",
+     "requirement": "Security / privacy — PDPO / HR privacy review, privileged access, retention, encryption, audit",
+     "state": "EVIDENCE_REQUIRED"
+    },
+    {
+     "evidenceTag": "HK-GATE-G6",
+     "gate": "G6",
+     "requirement": "Operations — filing / payment responsibilities, maker-checker, reconciliation, runbooks approved",
+     "state": "EVIDENCE_REQUIRED"
+    },
+    {
+     "evidenceTag": "HK-GATE-G7",
+     "gate": "G7",
+     "requirement": "Launch authority — Product, Engineering, QA, Payroll Ops, Security/Privacy, local reviewer approve",
+     "state": "EVIDENCE_REQUIRED"
+    }
+   ],
+   "ownerDecisions": [
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-1",
+     "key": "D-1",
+     "label": "eMPF submission interface at launch",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-2",
+     "key": "D-2",
+     "label": "Retention period per data category",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-3",
+     "key": "D-3",
+     "label": "Deletion vs anonymisation at end of retention",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-4",
+     "key": "D-4",
+     "label": "Encryption at rest",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-5",
+     "key": "D-5",
+     "label": "Production HK identity-token secret",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-6",
+     "key": "D-6",
+     "label": "Bilingual output a launch requirement",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-7",
+     "key": "D-7",
+     "label": "Launch-scope exclusions",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-8",
+     "key": "D-8",
+     "label": "HK payroll-run approval four-eyes",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-9",
+     "key": "D-9",
+     "label": "Legal-hold policy",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-10",
+     "key": "D-10",
+     "label": "Privileged (assisted) access policy",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": true,
+     "evidenceTag": "HK-DECISION-D-11",
+     "key": "D-11",
+     "label": "Future-year template publication owner",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": false,
+     "evidenceTag": "HK-DECISION-D-12",
+     "key": "D-12",
+     "label": "Per-value reviewer columns (shared platform)",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": false,
+     "evidenceTag": "HK-DECISION-D-13",
+     "key": "D-13",
+     "label": "Platform-wide template compare (shared platform)",
+     "state": "OPEN"
+    },
+    {
+     "artifactId": null,
+     "blocksLaunch": false,
+     "evidenceTag": "HK-DECISION-D-14",
+     "key": "D-14",
+     "label": "Audit correlation id (shared platform)",
+     "state": "OPEN"
+    }
+   ],
+   "packs": [
+    {
+     "approvedById": null,
+     "contributionRates": 83,
+     "effectiveFrom": "2025-04-01",
+     "effectiveTo": "2026-03-31",
+     "g1CertificationRows": 28,
+     "id": 1,
+     "packId": "HK-PAYROLL-2025",
+     "status": "Draft",
+     "taxSlabs": 69,
+     "unsourcedRows": [],
+     "version": "1.0",
+     "yearOfAssessment": "2025/26"
+    },
+    {
+     "approvedById": null,
+     "contributionRates": 81,
+     "effectiveFrom": "2026-04-01",
+     "effectiveTo": "2027-03-31",
+     "g1CertificationRows": 28,
+     "id": 2,
+     "packId": "HK-PAYROLL-2026",
+     "status": "Draft",
+     "taxSlabs": 70,
+     "unsourcedRows": [],
+     "version": "1.0",
+     "yearOfAssessment": "2026/27"
+    }
+   ],
+   "serviceRegistry": "PLANNED",
+   "sources": [
+    {
+     "agency": "Inland Revenue Department",
+     "id": 1,
+     "reviewed": false,
+     "sha256": "357f13eb3f93bfaff98e8027e0974aef08abc683e561ca9959e488d517969152",
+     "title": "PAM 61(e) Allowances, Deductions and Tax Rate Table (Aug 2026)",
+     "unverified": false,
+     "url": "https://www.ird.gov.hk/eng/pdf/pam61e.pdf"
+    },
+    {
+     "agency": "Inland Revenue Department",
+     "id": 4,
+     "reviewed": false,
+     "sha256": "f3c47471346d6b50b7596049ad3b37fc5b065889fafecc3ae77c1a4c1788e9a0",
+     "title": "Employers — BIR56A/IR56B, IR56E/F/G obligations",
+     "unverified": false,
+     "url": "https://www.ird.gov.hk/eng/tax/ere.htm"
+    },
+    {
+     "agency": "Inland Revenue Department",
+     "id": 5,
+     "reviewed": false,
+     "sha256": "fee4eaa115d6f4b0b0846696eabe7d6e9056ab9eb2ce5632b8f86624111dc808",
+     "title": "PAM 46(e) You or your employee is going to leave Hong Kong",
+     "unverified": false,
+     "url": "https://www.ird.gov.hk/eng/pdf/pam46e.pdf"
+    },
+    {
+     "agency": "Mandatory Provident Fund Schemes Authority",
+     "id": 6,
+     "reviewed": false,
+     "sha256": "97b6c8c42685fc848dd1584453aada7d9cc1c2afe2399ed11e9947014449f35c",
+     "title": "Mandatory Contributions — Employees",
+     "unverified": false,
+     "url": "https://www.mpfa.org.hk/en/mpf-system/mandatory-contributions/employees"
+    },
+    {
+     "agency": "Mandatory Provident Fund Schemes Authority",
+     "id": 7,
+     "reviewed": false,
+     "sha256": "175f278de736e6c1f502ae8d4bb1364a20a02df2c6a1a15a41ef9a0b7a797599",
+     "title": "MPF Coverage (regular employees, exempt persons)",
+     "unverified": false,
+     "url": "https://www.mpfa.org.hk/en/mpf-system/mpf-coverage"
+    },
+    {
+     "agency": "HKSAR Government (ISD)",
+     "id": 9,
+     "reviewed": false,
+     "sha256": "25f1e8b7485aa32e069c0dbaf392764b51995b2e47dbc8eff71f6d3df871333f",
+     "title": "New SMW rate of $43.1 per hour takes effect today (1 May 2026)",
+     "unverified": false,
+     "url": "https://www.info.gov.hk/gia/general/202605/01/P2026043000261.htm"
+    },
+    {
+     "agency": "HKSAR Government (ISD)",
+     "id": 10,
+     "reviewed": false,
+     "sha256": "f0125621b0b89ea78d51f4c383d00e4e24617010581a87bf359e83e464c857e8",
+     "title": "New SMW rate of $42.1 per hour takes effect today (1 May 2025)",
+     "unverified": false,
+     "url": "https://www.info.gov.hk/gia/general/202505/01/P2025042900231.htm"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 11,
+     "reviewed": false,
+     "sha256": "abe141556c48541f662de599298e43f6474a98e8e72ed8990cd018583c9c6b88",
+     "title": "Revise the 'Continuous Contract' Requirement (Employment (Amendment) Ordinance 2025)",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/news/EAO2025.htm"
+    },
+    {
+     "agency": "Inland Revenue Department",
+     "id": 12,
+     "reviewed": false,
+     "sha256": "cfaca97642542753892a2143ed875f978b6c58d0234a3122ded873a06243eddc",
+     "title": "Increasing ceiling amount for concessionary deductions allowable for home loan interest and domestic rent",
+     "unverified": false,
+     "url": "https://www.ird.gov.hk/eng/tax/adc.htm"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 13,
+     "reviewed": false,
+     "sha256": "b92a44121ad8d0f10b671cb43d9431d553cbd399011071d5d3635917b00f1e67",
+     "title": "Education Tool on New 'Continuous Contract' Requirement (Note 1: the 468 rule does not apply to the first three weeks of a new employment)",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/labour/Continuous_Contract_EduTool.htm"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 14,
+     "reviewed": false,
+     "sha256": "c328c40a98d9bf24963f2cac3636bba802b2d82200a196794744c2ade826536f",
+     "title": "Concise Guide to the Employment Ordinance — Ch.1 Application (continuous contract)",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/01.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 15,
+     "reviewed": false,
+     "sha256": "dd61788183c75fca935308466a13dcf1450e00769a7f9a10257b565f5c1aff99",
+     "title": "Concise Guide — Ch.3 Wages",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/03.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 16,
+     "reviewed": false,
+     "sha256": "9cc70ff9e4fdc62a9eeda51239a794c010b6c978b07b2ceda0c79deeae3058b0",
+     "title": "Concise Guide — Ch.4 Rest Days, Holidays and Leave",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/04.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 17,
+     "reviewed": false,
+     "sha256": "f368735f9f77240a4854c55574e82a36ded3df023d380310b93eed83d6ffee22",
+     "title": "Concise Guide — Ch.5 Sickness Allowance",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/05.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 18,
+     "reviewed": false,
+     "sha256": "23988131d3fd53ab16057f5a93ffe967a23a3c5e0f2904fbcf0100cf62dc4150",
+     "title": "Concise Guide — Ch.6 Maternity Protection",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/06.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 19,
+     "reviewed": false,
+     "sha256": "bb4ada8c1ac3c472c69c577d3d27b84b8ed972668149fe0f2922e40ff6bea0e2",
+     "title": "Concise Guide — Ch.7 Paternity Leave",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/07.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 20,
+     "reviewed": false,
+     "sha256": "ef8fe29153964c3a4b9c8905d813fba18cc95d236a937fef262a9c29121037b0",
+     "title": "Concise Guide — Ch.11 Severance Payment and Long Service Payment",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/11.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 21,
+     "reviewed": false,
+     "sha256": "dc9e32d8be3f5f48be21969621b090d9859782efefdf257f42e273edde3d6595",
+     "title": "Concise Guide — Appendix 1: 12-Month Average Wages",
+     "unverified": false,
+     "url": "https://www.labour.gov.hk/eng/public/wcp/ConciseGuide/Appendix1.pdf"
+    },
+    {
+     "agency": "Labour Department",
+     "id": 25,
+     "reviewed": false,
+     "sha256": "4c40afaa941fd852fc8fcf476c6729afcfe3981eb9557c17a888bf388e1f3c10",
+     "title": "Abolition of MPF Offsetting — employment commencing before 1 May 2025",
+     "unverified": false,
+     "url": "https://www.op.labour.gov.hk/en/before-1-may.html"
+    },
+    {
+     "agency": "Hong Kong specialist (G1) — pending",
+     "id": 27,
+     "reviewed": false,
+     "sha256": null,
+     "title": "[UNVERIFIED — G1] Employment Ordinance Cap. 57 s.2 definition of 'week' (continuous contract)",
+     "unverified": true,
+     "url": "https://www.elegislation.gov.hk/hk/cap57"
+    }
+   ],
+   "specification": "ZP-HK-ENG-001 v1.0",
+   "templateCoverage": [
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_BIR56A",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026/27",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_BIR56A",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027/28",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_IR56B",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026/27",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_IR56B",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027/28",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_IR56E",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026/27",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_IR56E",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027/28",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_IR56F",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026/27",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_IR56F",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027/28",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_IR56G",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026/27",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_IR56G",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027/28",
+     "yearKind": "YA"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_EMPF_REMITTANCE",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026",
+     "yearKind": "CALENDAR"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_EMPF_REMITTANCE",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027",
+     "yearKind": "CALENDAR"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_MPF_CONTRIBUTION_RECORD",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026",
+     "yearKind": "CALENDAR"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_MPF_CONTRIBUTION_RECORD",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027",
+     "yearKind": "CALENDAR"
+    },
+    {
+     "active": null,
+     "period": "current",
+     "reportType": "HK_TERMINATION_STATEMENT",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2026",
+     "yearKind": "CALENDAR"
+    },
+    {
+     "active": null,
+     "period": "next",
+     "reportType": "HK_TERMINATION_STATEMENT",
+     "state": "MISSING",
+     "versions": [],
+     "yearKey": "2027",
+     "yearKind": "CALENDAR"
+    }
+   ]
+  }
+ },
+ "sg_activation_evidence_refusal": {
+  "audits": [],
+  "result": "Singapore packs need gate G1 (CPF content certification) evidence ACCEPTED before they can go Active — G1 is EVIDENCE_REQUIRED. Record the signed independent comparison as SG-GATE-G1; a different Super Admin reviews it."
+ },
+ "sg_four_eyes": {
+  "audits": [
+   {
+    "action": "refused",
+    "actor": 101,
+    "entity": "sgp_ir21_case",
+    "new": {
+     "attempted": "approve",
+     "result": "REFUSED"
+    },
+    "old": {
+     "status": "PREPARED"
+    },
+    "reason": "TEST self-approval refused"
+   }
+  ],
+  "error": "BadRequestException",
+  "message": "TEST self-approval refused"
+ },
+ "sg_gate_state": {
+  "G1": "UNDER_REVIEW",
+  "G2": "UNDER_REVIEW",
+  "G3": "UNDER_REVIEW",
+  "G4": "SUBMITTED",
+  "G5": null
+ },
+ "sg_golden_check": {
+  "audits": [],
+  "result": {
+   "casesInWindow": 35,
+   "failures": [],
+   "passed": 35
+  }
+ },
+ "sg_preview": {
+  "audits": [],
+  "result": {
+   "blocked": false,
+   "pack": {
+    "id": 1,
+    "packId": "SG-PAYROLL-2026",
+    "status": "Draft",
+    "version": "1.2"
+   },
+   "payDate": "2026-01-31",
+   "readOnly": true,
+   "result": {
+    "employeeCpf": "2800",
+    "employerCpf": "2380",
+    "fwl": "0",
+    "gross": "21000",
+    "netPay": "18200.00",
+    "sdl": "11.25",
+    "shg": "0.00",
+    "tds": "0",
+    "totalDeductions": "2800.00"
+   },
+   "trace": {
+    "cohort": "SC_SPR3",
+    "cpf": {
+     "additionalWages": {
+      "allocations": [
+       {
+        "amount": "6000.00",
+        "employeeRatePct": "20.0000",
+        "kind": "CURRENT",
+        "rule": "CPF-2026-SC_SPR3-AGE_LE_55-FULL",
+        "sourceMonth": "2026-01",
+        "totalRatePct": "37.0000"
+       }
+      ],
+      "annualOwUsed": "96000.00",
+      "annualWageCeiling": "102000.00",
+      "awCeiling": "6000.00",
+      "awCeilingRemaining": "6000.00",
+      "awPaid": "12000",
+      "awSubjectThisPayment": "6000.00",
+      "ceilingBasis": "ESTIMATED",
+      "estimatedMonthsRemaining": 11,
+      "excess": null,
+      "ledgerEntry": {
+       "awPaid": "12000",
+       "awSubjected": "6000.00",
+       "eePct": "20.0000",
+       "formulaType": "FULL",
+       "month": "2026-01",
+       "rule": "CPF-2026-SC_SPR3-AGE_LE_55-FULL",
+       "ruleRef": {
+        "packId": 1,
+        "rowId": 4,
+        "rule": "CPF-2026-SC_SPR3-AGE_LE_55-FULL",
+        "sourceDocumentId": 1
+       },
+       "totalPct": "37.0000"
+      },
+      "owSubjectThisMonth": "8000.00",
+      "shortfallAwSubject": "0",
+      "ytdAwPaidBefore": "0",
+      "ytdAwSubjectBefore": "0",
+      "ytdOwSubjectBefore": "0"
+     },
+     "ageBand": "AGE_LE_55",
+     "ageBandRule": "MONTH_AFTER_BIRTHDAY",
+     "annualCeilingRef": {
+      "componentKey": "cpf_annual_wage_ceiling",
+      "packId": 1,
+      "rowId": 2,
+      "sourceDocumentId": 3
+     },
+     "cohort": "SC_SPR3",
+     "employeeRatePct": "20.0000",
+     "employerRatePct": "17.0000",
+     "formulaType": "FULL",
+     "owActual": "9000",
+     "owCeiling": "8000.00",
+     "owCeilingRef": {
+      "componentKey": "cpf_ow_ceiling_monthly",
+      "packId": 1,
+      "rowId": 1,
+      "sourceDocumentId": 1
+     },
+     "owSubject": "8000.00",
+     "rounding": {
+      "employee": "2800",
+      "employeeRaw": "2800.000000",
+      "employer": "2380",
+      "method": "total to nearest dollar (half up); employee share rounded down; employer = total − employee; OW and all AW chunks of the month summed before rounding",
+      "total": "5180",
+      "totalRaw": "5180.000000"
+     },
+     "rule": "CPF-2026-SC_SPR3-AGE_LE_55-FULL",
+     "ruleRef": {
+      "packId": 1,
+      "rowId": 4,
+      "rule": "CPF-2026-SC_SPR3-AGE_LE_55-FULL",
+      "sourceDocumentId": 1
+     },
+     "specClarification": "ZP-SG-ENG-001 SG-007 ('S$102,000 minus year-to-date OW subject to CPF') is implemented per the official CPF Board AW-ceiling method (Option A, approved 2026-09-23): estimated ceiling at each AW payment using the current OW for the remaining months of employment, final ceiling on actual OW in December or the last month of employment, shortfall at each AW payment's own contribution rates.",
+     "wagesSubjectThisMonth": "14000.00"
+    },
+    "effectiveResidency": "SC",
+    "engine": "SG-2026.10",
+    "fwl": {
+     "status": "NOT_APPLICABLE"
+    },
+    "incompleteMonth": {
+     "status": "COMPLETE_MONTH"
+    },
+    "inputs": {
+     "additionalWages": "12000",
+     "contributionArrangement": null,
+     "dateOfLeaving": null,
+     "employmentClass": "STANDARD",
+     "employmentClassBasis": "NOT_RECORDED_TREATED_AS_STANDARD",
+     "employmentType": "Full-time",
+     "gross": "21000",
+     "irasClassification": {
+      "additional_compensation": {
+       "amount": "12000",
+       "category": "iras_bonus",
+       "source": "default"
+      },
+      "basic": {
+       "amount": "9000",
+       "category": "iras_gross_salary",
+       "source": "default"
+      }
+     },
+     "nonCpfWages": "0",
+     "ordinaryWages": "9000",
+     "residencyStatus": "SC",
+     "shgFunds": "NONE",
+     "sprEffectiveDate": null,
+     "wageClassification": {
+      "additional_compensation": {
+       "amount": "12000",
+       "class": "AW",
+       "eaGrossRate": "EXCLUDED",
+       "pwmBasis": "EXCLUDED",
+       "source": "default"
+      },
+      "basic": {
+       "amount": "9000",
+       "class": "OW",
+       "eaGrossRate": "INCLUDED",
+       "pwmBasis": "BASIC_AND_GROSS",
+       "source": "default"
+      }
+     },
+     "workPass": "NONE"
+    },
+    "ir21": {
+     "detail": "Singapore Citizen",
+     "status": "NOT_REQUIRED"
+    },
+    "iras": {
+     "basis": "Form IR8A items per IRAS explanatory notes (YA2027); amounts as paid in this payslip",
+     "totals": {
+      "iras_bonus": "12000",
+      "iras_gross_salary": "9000"
+     },
+     "unclassified": "0"
+    },
+    "lqs": {
+     "detail": "Employer foreign-workforce status not supplied",
+     "status": "NOT_EVALUATED"
+    },
+    "result": {
+     "employeeCpf": "2800",
+     "employeeDeductions": "2800.00",
+     "employerCost": "23391.25",
+     "employerCpf": "2380",
+     "fwl": "0",
+     "netPay": "18200.00",
+     "sdl": "11.25",
+     "shg": "0.00"
+    },
+    "sdl": {
+     "amount": "11.25",
+     "base": "21000",
+     "employerAggregateRounding": "Applied to the employer's monthly total in the SG_SDL_MONTHLY statutory output (CPF Board SDL page, step 2: rounded down to the nearest dollar) — not per payslip",
+     "maxRef": {
+      "componentKey": "sdl_max_monthly",
+      "packId": 1,
+      "rowId": 7,
+      "sourceDocumentId": 5
+     },
+     "minRef": {
+      "componentKey": "sdl_min_monthly",
+      "packId": 1,
+      "rowId": 6,
+      "sourceDocumentId": 5
+     },
+     "rateRef": {
+      "componentKey": "sdl",
+      "packId": 1,
+      "rowId": 5,
+      "sourceDocumentId": 5
+     },
+     "treatment": "EMPLOYER_COST"
+    },
+    "shg": {
+     "funds": {},
+     "total": "0.00",
+     "treatment": "EMPLOYEE_DEDUCTION"
+    },
+    "wageMonth": "2026-01",
+    "wageMonthBasis": {
+     "detail": "no payroll period supplied",
+     "rule": "PAY_DATE_MONTH"
+    }
+   }
+  }
+ },
+ "sg_registry_transition": {
+  "already": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:PLANNED",
+      "result": "REFUSED",
+      "unmet": []
+     },
+     "old": {
+      "availability": "PLANNED",
+      "country": "SG"
+     },
+     "reason": "Singapore is already PLANNED."
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "Singapore is already PLANNED."
+  },
+  "bad_target": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:LIMITED_AVAILABILITY",
+      "result": "REFUSED",
+      "unmet": []
+     },
+     "old": {
+      "availability": null,
+      "country": "SG"
+     },
+     "reason": "Singapore availability can only be AVAILABLE or PLANNED — LIMITED_AVAILABILITY is not a governed Singapore state."
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "Singapore availability can only be AVAILABLE or PLANNED — LIMITED_AVAILABILITY is not a governed Singapore state."
+  },
+  "no_actor": {
+   "audits": [],
+   "error": "BadRequestException",
+   "message": "A registry change needs an identified Super Admin."
+  },
+  "no_reason": {
+   "audits": [],
+   "error": "BadRequestException",
+   "message": "A registry change needs the owner's reason (it is the change record)."
+  },
+  "no_row": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:AVAILABLE",
+      "result": "REFUSED",
+      "unmet": []
+     },
+     "old": {
+      "availability": null,
+      "country": "SG"
+     },
+     "reason": "There is no Singapore registry row — seed it (python -m scripts.seed_singapore_canonical_pack creates it as PLANNED); it is never created here."
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "There is no Singapore registry row — seed it (python -m scripts.seed_singapore_canonical_pack creates it as PLANNED); it is never created here."
+  },
+  "unmet": {
+   "audits": [
+    {
+     "action": "refused",
+     "actor": 101,
+     "entity": "jurisdiction_service_registry",
+     "new": {
+      "attempted": "availability:AVAILABLE",
+      "result": "REFUSED",
+      "unmet": [
+       "pack_active",
+       "golden_vectors",
+       "templates_active",
+       "configuration",
+       "migration",
+       "gate_G1",
+       "gate_G2",
+       "gate_G3",
+       "gate_G4",
+       "gate_G5",
+       "gate_G6",
+       "gate_G7",
+       "gate_G8",
+       "decision_D1",
+       "decision_D2",
+       "decision_D3",
+       "deployment_signoff"
+      ]
+     },
+     "old": {
+      "availability": "PLANNED",
+      "country": "SG"
+     },
+     "reason": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['2d0cdeeeecc4']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
+    }
+   ],
+   "error": "BadRequestException",
+   "message": "Singapore cannot be made AVAILABLE — 17 requirement(s) unmet: An Active Singapore statutory pack is in force (no pack v—); Latest Singapore golden-vector run is PASS (No SG golden-vector run recorded in this database); Every Singapore report template has an Active version (Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE); Statutory configuration complete (CPF: NOT_CONFIGURED, SDL: NOT_CONFIGURED, SHG: NOT_CONFIGURED, FWL: NOT_CONFIGURED, LQS: NOT_CONFIGURED, PWM: NOT_CONFIGURED, IRAS (AIS / IR8A): NOT_CONFIGURED, IR21: NOT_CONFIGURED); Database at the code's Alembic head (database [] vs code ['2d0cdeeeecc4']); G1 CPF content certification: evidence accepted (EVIDENCE_REQUIRED); G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted (EVIDENCE_REQUIRED); G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted (BUSINESS_DECISION_REQUIRED); G4 IR21 tax clearance: evidence accepted (EVIDENCE_REQUIRED); G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted (EVIDENCE_REQUIRED); G6 Labour pay (Employment Act): evidence accepted (EVIDENCE_REQUIRED); G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted (EVIDENCE_REQUIRED); G8 Two-cycle parallel payroll and AIS simulation: evidence accepted (EVIDENCE_REQUIRED); D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D2 Singapore hotfix policy: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); D3 Scope of the Singapore-only governance controls: decision recorded, and in force (BUSINESS_DECISION_REQUIRED); Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT) (EVIDENCE_REQUIRED)"
+  }
+ },
+ "sg_statutory_summary": {
+  "audits": [],
+  "result": {
+   "activationReadiness": {
+    "aisSubmissionModeSetting": {
+     "optionStates": {
+      "DIRECT_API": "EXTERNAL_INTEGRATION_REQUIRED",
+      "EXPORT_ONLY": "READY"
+     },
+     "options": [
+      "EXPORT_ONLY",
+      "DIRECT_API"
+     ],
+     "setting": "Company compliance → IRAS AIS submission mode"
+    },
+    "deploymentSignoff": {
+     "blockingReason": "No evidence recorded",
+     "evidenceRecorded": null,
+     "evidenceTag": "SG-OPS-DEPLOYMENT",
+     "nextAction": "Register a Source Evidence artifact with form number SG-OPS-DEPLOYMENT and upload the signed document",
+     "requiredArtifact": "Deploy-owner sign-off: runbook A6/A7 and B–D complete, production runtime verified (deployed commit, service healthy, database at head, drift check clean)",
+     "reviewedBy": null,
+     "status": "EVIDENCE_REQUIRED",
+     "submittedArtifactId": null
+    },
+    "externalDependencies": [
+     {
+      "authority": "IRAS",
+      "key": "ais_api",
+      "label": "IRAS AIS-API 2.0 (APEX onboarding, Corppass, credentials, sandbox, specification)",
+      "status": "EXTERNAL_INTEGRATION_REQUIRED"
+     },
+     {
+      "authority": "MOM",
+      "key": "fwl_s_pass_end_day_basis",
+      "label": "Whether the pass EXPIRY day is levied (S Pass / Work Permit) — cancellation is sourced (MOM: levy stops 1 day before cancellation)",
+      "status": "EXTERNAL_DATA_REQUIRED"
+     },
+     {
+      "authority": "CPF Board",
+      "key": "cpf_leap_day_birthday_basis",
+      "label": "Whether a 29 February birthday is observed on 28 February or 1 March in a non-leap year (decides the month a 55/60/65/70 CPF age band starts) — those two months are BLOCKED",
+      "status": "EXTERNAL_DATA_REQUIRED"
+     },
+     {
+      "authority": "MOM",
+      "key": "lqs_quota",
+      "label": "Foreign-worker quota tables (dependency ratios, headcount rules)",
+      "status": "EXTERNAL_DATA_REQUIRED"
+     },
+     {
+      "authority": "MOM",
+      "key": "unpublished_values",
+      "label": "Values MOM has not published: the Work Permit levy before 24 Sep 2026 outside construction (no effective date is stated for the current rates) — pack rows stay BLOCKED, never defaulted",
+      "status": "EXTERNAL_DATA_REQUIRED"
+     },
+     {
+      "authority": "CPF Board / IRAS / MOM / PDPC / reviewers",
+      "key": "gates",
+      "label": "Production gates G1–G8 evidence",
+      "status": "EVIDENCE_REQUIRED"
+     }
+    ],
+    "pendingDecisions": [
+     {
+      "blockingReason": "No decision recorded — the value in force is the product default",
+      "decidedAt": null,
+      "decisionMakerId": null,
+      "effectIfDifferent": "API_SUBMISSION / BOTH need the IRAS AIS-API 2.0 integration (external onboarding; not built)",
+      "evidenceRecorded": [],
+      "evidenceTag": "SG-DECISION-D1",
+      "inForce": "EXPORT_ONLY (built); per-organisation setting options: EXPORT_ONLY, DIRECT_API",
+      "inForceValue": "EXPORT_ONLY",
+      "key": "D1",
+      "label": "IR8A / AIS submission mode offered by the product",
+      "nextAction": "Record the decision (selected option + reason), upload the signed memo; a second Super Admin accepts it",
+      "options": [
+       "EXPORT_ONLY",
+       "API_SUBMISSION",
+       "BOTH"
+      ],
+      "reason": null,
+      "recordedValue": null,
+      "reviewStatus": "EVIDENCE_REQUIRED",
+      "reviewedAt": null,
+      "reviewerId": null,
+      "status": "BUSINESS_DECISION_REQUIRED"
+     },
+     {
+      "blockingReason": "No decision recorded — the value in force is the product default",
+      "decidedAt": null,
+      "decisionMakerId": null,
+      "effectIfDifferent": "SG_HOTFIX_POLICY is a code constant — a recorded different policy needs a reviewed code change",
+      "evidenceRecorded": [],
+      "evidenceTag": "SG-DECISION-D2",
+      "inForce": "RESTRICTED",
+      "inForceValue": "RESTRICTED",
+      "key": "D2",
+      "label": "Singapore hotfix policy",
+      "nextAction": "Record the decision (selected option + reason), upload the signed memo; a second Super Admin accepts it",
+      "options": [
+       "RESTRICTED",
+       "PROHIBITED",
+       "FOLLOW_UP_REQUIRED"
+      ],
+      "reason": null,
+      "recordedValue": null,
+      "reviewStatus": "EVIDENCE_REQUIRED",
+      "reviewedAt": null,
+      "reviewerId": null,
+      "status": "BUSINESS_DECISION_REQUIRED"
+     },
+     {
+      "blockingReason": "No decision recorded — the value in force is the product default",
+      "decidedAt": null,
+      "decisionMakerId": null,
+      "effectIfDifferent": "ALL_COUNTRIES widens the opt-in control sets to every jurisdiction — a separate cross-jurisdiction change with its own review",
+      "evidenceRecorded": [],
+      "evidenceTag": "SG-DECISION-D3",
+      "inForce": "SG_ONLY (plus per-country opt-ins: HK, SE)",
+      "inForceValue": "SG_ONLY",
+      "key": "D3",
+      "label": "Scope of the Singapore-only governance controls",
+      "nextAction": "Record the decision (selected option + reason), upload the signed memo; a second Super Admin accepts it",
+      "options": [
+       "SG_ONLY",
+       "ALL_COUNTRIES"
+      ],
+      "reason": null,
+      "recordedValue": null,
+      "reviewStatus": "EVIDENCE_REQUIRED",
+      "reviewedAt": null,
+      "reviewerId": null,
+      "status": "BUSINESS_DECISION_REQUIRED"
+     }
+    ],
+    "productionGates": [
+     {
+      "authority": "Independent reviewer; CPF Board sources",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "Signed independent comparison report",
+      "evidenceTag": "SG-GATE-G1",
+      "expiryDate": null,
+      "key": "G1",
+      "label": "CPF content certification",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G1 and upload the signed document",
+      "notes": null,
+      "owner": "Statutory compliance owner",
+      "requiredArtifact": "Signed independent comparison report",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "An independent reviewer signs that CPF rates, ceilings, age bands, OW/AW treatment and the golden vectors match CPF Board publications"
+     },
+     {
+      "authority": "CPF Board (EZPay / Corppass)",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "CPF acknowledgement and payment reconciliation",
+      "evidenceTag": "SG-GATE-G2",
+      "expiryDate": null,
+      "key": "G2",
+      "label": "CPF operations (EZPay file, payment, reconciliation)",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G2 and upload the signed document",
+      "notes": null,
+      "owner": "Employer payroll operations",
+      "requiredArtifact": "CPF acknowledgement and payment reconciliation",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "A CPF acknowledgement of a real submission, reconciled to the payroll register with zero unexplained variance"
+     },
+     {
+      "authority": "IRAS",
+      "blockingReason": "Owner decision D1 not recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "Signed submission-mode decision; acknowledged original and modification",
+      "evidenceTag": "SG-GATE-G3",
+      "expiryDate": null,
+      "key": "G3",
+      "label": "IRAS AIS (YA2027 model, route, amendments)",
+      "nextAction": "Record decision D1 (AIS submission mode) first",
+      "notes": null,
+      "owner": "Product owner",
+      "requiredArtifact": "Signed submission-mode decision; acknowledged original and modification",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "BUSINESS_DECISION_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "D1 recorded, then IRAS acknowledges an original and an amended submission (or export upload)"
+     },
+     {
+      "authority": "IRAS",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "Guidance review; acknowledged filing",
+      "evidenceTag": "SG-GATE-G4",
+      "expiryDate": null,
+      "key": "G4",
+      "label": "IR21 tax clearance",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G4 and upload the signed document",
+      "notes": null,
+      "owner": "Statutory compliance owner",
+      "requiredArtifact": "Guidance review; acknowledged filing",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "Compliance review of the IR21 workspace against IRAS guidance plus one acknowledged IR21"
+     },
+     {
+      "authority": "MOM",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "Levy-bill reconciliation; published values",
+      "evidenceTag": "SG-GATE-G5",
+      "expiryDate": null,
+      "key": "G5",
+      "label": "Foreign workforce (levy billing, LQS / PWM)",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G5 and upload the signed document",
+      "notes": null,
+      "owner": "Statutory compliance owner",
+      "requiredArtifact": "Levy-bill reconciliation; published values",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "A MOM levy bill reconciled to computed FWL; the MOM data items resolved or formally scoped out"
+     },
+     {
+      "authority": "MOM / counsel",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "Legal review memo",
+      "evidenceTag": "SG-GATE-G6",
+      "expiryDate": null,
+      "key": "G6",
+      "label": "Labour pay (Employment Act)",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G6 and upload the signed document",
+      "notes": null,
+      "owner": "Legal and compliance owner",
+      "requiredArtifact": "Legal review memo",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "Counsel signs a memo on the Employment Act pay, overtime and deduction rules the product applies"
+     },
+     {
+      "authority": "PDPC framework (DPO)",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "DPO sign-off; security review; recovery test",
+      "evidenceTag": "SG-GATE-G7",
+      "expiryDate": null,
+      "key": "G7",
+      "label": "Security / privacy (PDPA, NRIC/FIN)",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G7 and upload the signed document",
+      "notes": null,
+      "owner": "DPO and security owner",
+      "requiredArtifact": "DPO sign-off; security review; recovery test",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "DPO signs; security review has no open high findings; the backup-restore rehearsal is evidenced"
+     },
+     {
+      "authority": "Design-partner employer",
+      "blockingReason": "No evidence recorded",
+      "evidenceRecorded": null,
+      "evidenceRequired": "Parallel-run reconciliation report",
+      "evidenceTag": "SG-GATE-G8",
+      "expiryDate": null,
+      "key": "G8",
+      "label": "Two-cycle parallel payroll and AIS simulation",
+      "nextAction": "Register a Source Evidence artifact with form number SG-GATE-G8 and upload the signed document",
+      "notes": null,
+      "owner": "Implementation lead",
+      "requiredArtifact": "Parallel-run reconciliation report",
+      "reviewDate": null,
+      "reviewedBy": null,
+      "status": "EVIDENCE_REQUIRED",
+      "submittedArtifactId": null,
+      "validationCriteria": "Two consecutive cycles reconcile against the incumbent payroll, with an AIS simulation"
+     }
+    ],
+    "pwm": {
+     "lastSeeded": "<ts>",
+     "latestRetrieved": "<ts>",
+     "rows": 6132,
+     "schedules": 84,
+     "sourceDocuments": 6
+    },
+    "readinessDashboard": [
+     {
+      "basis": "internal",
+      "evidence": "Internal engineering evidence (full suite + PostgreSQL rehearsals, docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md) — not re-run at runtime, not regulator certification",
+      "key": "engineering",
+      "label": "Engineering",
+      "status": "PASS"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "CPF: CONFIGURED, SDL: CONFIGURED, SHG: CONFIGURED, FWL: CONFIGURED, LQS: CONFIGURED, PWM: CONFIGURED, IRAS (AIS / IR8A): CONFIGURED, IR21: CONFIGURED",
+      "key": "configuration",
+      "label": "Configuration",
+      "status": "PASS"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "This readiness view is served from the backend summary",
+      "key": "super_admin",
+      "label": "Super Admin",
+      "status": "PASS"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "0 of 11 present, 0 Active",
+      "key": "report_templates",
+      "label": "Report templates",
+      "status": "BLOCKED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "IR8A employment income extract: TEMPLATE_MISSING; IR21 tax clearance: TEMPLATE_MISSING; CPF EZPay contribution file: TEMPLATE_MISSING — a generator renders only an Active template",
+      "key": "generators",
+      "label": "Generators",
+      "status": "BLOCKED"
+     },
+     {
+      "basis": "internal",
+      "evidence": "Internal engineering evidence (full suite + PostgreSQL rehearsals, docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md) — not re-run at runtime, not regulator certification; external review is gate G7",
+      "key": "security",
+      "label": "Security",
+      "status": "PASS"
+     },
+     {
+      "basis": "internal",
+      "evidence": "Internal engineering evidence (full suite + PostgreSQL rehearsals, docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md) — not re-run at runtime, not regulator certification",
+      "key": "tenant_isolation",
+      "label": "Tenant isolation",
+      "status": "PASS"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "Every Singapore table / column present",
+      "key": "database",
+      "label": "Database",
+      "status": "PASS"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "database [] vs code ['2d0cdeeeecc4']",
+      "key": "migration",
+      "label": "Migration",
+      "status": "BLOCKED"
+     },
+     {
+      "basis": "owner",
+      "evidence": "Deploy-owner review of scripts/deploy_migrate.sh and execution of docs/SINGAPORE_PRODUCTION_ACTIVATION_RUNBOOK.md — sign-off evidence SG-OPS-DEPLOYMENT: EVIDENCE_REQUIRED",
+      "key": "deployment",
+      "label": "Deployment",
+      "status": "EXTERNAL_REQUIRED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "No SG golden-vector run recorded in this database",
+      "key": "testing",
+      "label": "Testing",
+      "status": "BLOCKED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "G1: EVIDENCE_REQUIRED, G2: EVIDENCE_REQUIRED, G3: BUSINESS_DECISION_REQUIRED, G4: EVIDENCE_REQUIRED, G5: EVIDENCE_REQUIRED, G6: EVIDENCE_REQUIRED, G7: EVIDENCE_REQUIRED, G8: EVIDENCE_REQUIRED",
+      "key": "external_evidence",
+      "label": "External evidence",
+      "status": "EXTERNAL_REQUIRED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "D1: BUSINESS_DECISION_REQUIRED, D2: BUSINESS_DECISION_REQUIRED, D3: BUSINESS_DECISION_REQUIRED",
+      "key": "business_decisions",
+      "label": "Business decisions",
+      "status": "BUSINESS_DECISION_REQUIRED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "fwl_s_pass_end_day_basis, cpf_leap_day_birthday_basis, lqs_quota, unpublished_values",
+      "key": "external_data",
+      "label": "External data",
+      "status": "EXTERNAL_REQUIRED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "IRAS AIS-API 2.0 (APEX onboarding, Corppass, credentials, sandbox, specification)",
+      "key": "external_integrations",
+      "label": "External integrations",
+      "status": "EXTERNAL_REQUIRED"
+     },
+     {
+      "basis": "runtime",
+      "evidence": "Blocked by: Report templates; Generators; Migration; Deployment; Testing; External evidence; Business decisions; External data; External integrations; no Active Singapore statutory pack; service registry PLANNED",
+      "key": "production_activation",
+      "label": "Production activation",
+      "status": "BLOCKED"
+     }
+    ],
+    "registryTransition": {
+     "availableAllowed": false,
+     "current": "PLANNED",
+     "note": "Server-derived. Making Singapore AVAILABLE opens onboarding to every prospective Singapore employer (there is no pilot / allow-list mode); PLANNED closes it again.",
+     "plannedAllowed": false,
+     "requirements": [
+      {
+       "detail": "SG-PAYROLL-2026 v1.2 Draft",
+       "key": "pack_active",
+       "label": "An Active Singapore statutory pack is in force",
+       "met": false
+      },
+      {
+       "detail": "No SG golden-vector run recorded in this database",
+       "key": "golden_vectors",
+       "label": "Latest Singapore golden-vector run is PASS",
+       "met": false
+      },
+      {
+       "detail": "Not Active: SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE",
+       "key": "templates_active",
+       "label": "Every Singapore report template has an Active version",
+       "met": false
+      },
+      {
+       "detail": "CPF: CONFIGURED, SDL: CONFIGURED, SHG: CONFIGURED, FWL: CONFIGURED, LQS: CONFIGURED, PWM: CONFIGURED, IRAS (AIS / IR8A): CONFIGURED, IR21: CONFIGURED",
+       "key": "configuration",
+       "label": "Statutory configuration complete",
+       "met": true
+      },
+      {
+       "detail": "Every Singapore table / column present",
+       "key": "database",
+       "label": "Every Singapore table / column present",
+       "met": true
+      },
+      {
+       "detail": "database [] vs code ['2d0cdeeeecc4']",
+       "key": "migration",
+       "label": "Database at the code's Alembic head",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G1",
+       "label": "G1 CPF content certification: evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G2",
+       "label": "G2 CPF operations (EZPay file, payment, reconciliation): evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "BUSINESS_DECISION_REQUIRED",
+       "key": "gate_G3",
+       "label": "G3 IRAS AIS (YA2027 model, route, amendments): evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G4",
+       "label": "G4 IR21 tax clearance: evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G5",
+       "label": "G5 Foreign workforce (levy billing, LQS / PWM): evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G6",
+       "label": "G6 Labour pay (Employment Act): evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G7",
+       "label": "G7 Security / privacy (PDPA, NRIC/FIN): evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "gate_G8",
+       "label": "G8 Two-cycle parallel payroll and AIS simulation: evidence accepted",
+       "met": false
+      },
+      {
+       "detail": "BUSINESS_DECISION_REQUIRED",
+       "key": "decision_D1",
+       "label": "D1 IR8A / AIS submission mode offered by the product: decision recorded, and in force",
+       "met": false
+      },
+      {
+       "detail": "BUSINESS_DECISION_REQUIRED",
+       "key": "decision_D2",
+       "label": "D2 Singapore hotfix policy: decision recorded, and in force",
+       "met": false
+      },
+      {
+       "detail": "BUSINESS_DECISION_REQUIRED",
+       "key": "decision_D3",
+       "label": "D3 Scope of the Singapore-only governance controls: decision recorded, and in force",
+       "met": false
+      },
+      {
+       "detail": "EVIDENCE_REQUIRED",
+       "key": "deployment_signoff",
+       "label": "Deploy-owner sign-off accepted (SG-OPS-DEPLOYMENT)",
+       "met": false
+      },
+      {
+       "detail": "0 awaiting review",
+       "key": "no_unreviewed_hotfix",
+       "label": "No Singapore hotfix awaiting its review",
+       "met": true
+      }
+     ],
+     "targets": [
+      "AVAILABLE",
+      "PLANNED"
+     ],
+     "unmet": 16
+    },
+    "reportTemplates": {
+     "Active": 0,
+     "Approved": 0,
+     "Draft": 0,
+     "Published": 0,
+     "Review": 0,
+     "Superseded": 0,
+     "total": 0
+    },
+    "serviceAvailability": {
+     "availability": "PLANNED",
+     "filingResponsibility": "NOT_OFFERED",
+     "paymentExecutionResponsibility": "NOT_OFFERED",
+     "remittanceResponsibility": "NOT_OFFERED"
+    },
+    "statutoryPack": {
+     "activation": "NOT_ACTIVE",
+     "activationGates": [
+      {
+       "key": "distinct_approver",
+       "met": false
+      },
+      {
+       "key": "source_evidence_linked",
+       "met": true
+      },
+      {
+       "key": "effective_from_set",
+       "met": true
+      },
+      {
+       "key": "latest_golden_run_pass",
+       "met": false
+      },
+      {
+       "key": "g1_evidence_accepted",
+       "met": false
+      },
+      {
+       "key": "pack_reproduces_golden_vectors",
+       "met": false
+      },
+      {
+       "key": "effective_from_first_of_month",
+       "met": true
+      }
+     ],
+     "approval": {
+      "approvedById": null,
+      "distinctFromLastEditor": false
+     },
+     "audit": {
+      "byAction": {
+       "create": 1
+      },
+      "entries": 1,
+      "hotfixActivations": 0,
+      "lastEntryAt": "<ts>",
+      "refused": 0,
+      "unreviewedHotfixes": 0
+     },
+     "effectiveFrom": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+     "hotfixPolicy": {
+      "current": "RESTRICTED",
+      "options": [
+       "RESTRICTED",
+       "PROHIBITED",
+       "FOLLOW_UP_REQUIRED"
+      ],
+      "unreviewedHotfixes": 0
+     },
+     "lastEditedById": null,
+     "packGoldenCheck": {
+      "casesInWindow": 35,
+      "failures": [
+       {
+        "case": "cpf_2026_age57_ow_5000_december",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_55_60): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_55_60, total wages 5000.00)"
+       },
+       {
+        "case": "cpf_age_55_month_after_birthday",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf_age_band_semantics): employee is at a CPF age-band boundary this wage month and no authoritative age-band rule is configured"
+       },
+       {
+        "case": "cpf_low_wage_phase_in_600",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 600)"
+       },
+       {
+        "case": "cpf_spr1_graduated_6000",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SPR1_GG:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SPR1_GG, age band AGE_LE_55, total wages 6000)"
+       },
+       {
+        "case": "cpf_spr2_full_employer_6000",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SPR2_FG:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SPR2_FG, age band AGE_LE_55, total wages 6000)"
+       },
+       {
+        "case": "cpfb_ex1_january_aw_estimated_ceiling",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 21000)"
+       },
+       {
+        "case": "cpfb_ex2_february_ow_below_ceiling",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 9500)"
+       },
+       {
+        "case": "cpfb_ex6_last_month_shortfall",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 10000)"
+       },
+       {
+        "case": "cpfb_ex9_july_aw_after_leaving",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 62372.64)"
+       },
+       {
+        "case": "cpfb_ex9_june_last_month_shortfall_decimal_aw",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 10000)"
+       },
+       {
+        "case": "f1_citizen_le55_ow_6000",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 6000.00)"
+       },
+       {
+        "case": "f2_citizen_le55_ow_10000_ceiling",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 10000.00)"
+       },
+       {
+        "case": "f3_annual_aw_ceiling",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 28000.00)"
+       },
+       {
+        "case": "f4_foreign_employment_pass",
+        "error": "MissingComplianceConfigurationError: No statutory configuration found for 'sdl' (SG) — configure it under Super Admin > Compliance before running payroll for this jurisdiction."
+       },
+       {
+        "case": "im_a_full_month",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 6000)"
+       },
+       {
+        "case": "im_b_joiner_mid_month",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 3000.00)"
+       },
+       {
+        "case": "im_c_leaver_mid_month",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 2727.27)"
+       },
+       {
+        "case": "im_e_joiner_plus_no_pay",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 2454.55)"
+       },
+       {
+        "case": "im_f_leaver_plus_no_pay",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 2181.82)"
+       },
+       {
+        "case": "im_g_joiner_cpf_ceiling_on_payable",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 6545.45)"
+       },
+       {
+        "case": "im_h_joiner_sdl_floor_low_wage",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 290.91)"
+       },
+       {
+        "case": "im_i_joiner_shg_band_on_payable",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 1500.00)"
+       },
+       {
+        "case": "im_joiner_5_5_day_week",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 3375.00)"
+       },
+       {
+        "case": "im_joiner_first_working_day_full_salary",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 6000)"
+       },
+       {
+        "case": "im_joiner_on_weekend",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 3272.73)"
+       },
+       {
+        "case": "im_k_joiner_aw_not_prorated",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 4000.00)"
+       },
+       {
+        "case": "im_l_joiner_overtime_ow_not_prorated",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 3200.00)"
+       },
+       {
+        "case": "im_leaver_6_day_week",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 2769.23)"
+       },
+       {
+        "case": "mixed_ow_aw_noncpf_june",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 9300)"
+       },
+       {
+        "case": "no_pay_leave_10_days",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 3272.73)"
+       },
+       {
+        "case": "part4_overtime_is_ow",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 4188.82)"
+       },
+       {
+        "case": "shg_instructed_amount",
+        "error": "SingaporeCalculationBlockedError: Singapore calculation blocked (cpf:SC_SPR3:AGE_LE_55): CPF rate unavailable for employee cohort — authoritative CPF rule required (cohort SC_SPR3, age band AGE_LE_55, total wages 6000.00)"
+       },
+       {
+        "case": "wp_services_tier2_basic_full_month",
+        "error": "MissingComplianceConfigurationError: No statutory configuration found for 'sdl' (SG) — configure it under Super Admin > Compliance before running payroll for this jurisdiction."
+       },
+       {
+        "case": "wp_services_tier2_basic_partial_month",
+        "error": "MissingComplianceConfigurationError: No statutory configuration found for 'sdl' (SG) — configure it under Super Admin > Compliance before running payroll for this jurisdiction."
+       },
+       {
+        "case": "wp_services_tier2_cancelled_mid_month",
+        "error": "MissingComplianceConfigurationError: No statutory configuration found for 'sdl' (SG) — configure it under Super Admin > Compliance before running payroll for this jurisdiction."
+       }
+      ],
+      "passed": 0
+     },
+     "packId": "SG-PAYROLL-2026",
+     "source": {
+      "agency": "CPF Board",
+      "id": 1,
+      "reviewed": false,
+      "title": "CPF Contribution Rate Tables from 1 January 2026 (Tables 1–5)",
+      "url": "https://www.cpf.gov.sg/content/dam/web/employer/employer-obligations/documents/CPFcontributionratesfrom1Jan2026.pdf"
+     },
+     "sourceHash": "7ab21a34bd830be773b5bf39020f590d61e744fb7df6c91922352cef82789496",
+     "status": "Draft",
+     "version": "1.2"
+    }
+   },
+   "activePack": null,
+   "asOf": "2026-10-01",
+   "certification": "Internal engineering configuration summary only — not a CPF Board, IRAS, MOM or PDPC approval or certification.",
+   "jurisdiction": "SG",
+   "packs": [
+    {
+     "approvedById": null,
+     "createdById": null,
+     "effectiveFrom": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "id": 1,
+     "packId": "SG-PAYROLL-2026",
+     "sourceDocumentId": 1,
+     "status": "Draft",
+     "taxYear": "2026",
+     "updatedAt": null,
+     "updatedById": null,
+     "version": "1.2"
+    }
+   ],
+   "sections": [
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "inForce": false,
+     "key": "pack",
+     "label": "Statutory Pack",
+     "missing": [
+      "activePack"
+     ],
+     "notes": [
+      "No Active Singapore pack on 2026-10-01 — SG-PAYROLL-2026 v1.2 is Draft; its values are shown for review only and are not in force."
+     ],
+     "sources": [],
+     "status": "BLOCKED",
+     "values": {
+      "activePack": null,
+      "valuesFromActivePack": false,
+      "valuesFromPack": {
+       "approvedById": null,
+       "createdById": null,
+       "effectiveFrom": "2026-01-01",
+       "effectiveTo": "2026-12-31",
+       "id": 1,
+       "packId": "SG-PAYROLL-2026",
+       "sourceDocumentId": 1,
+       "status": "Draft",
+       "taxYear": "2026",
+       "updatedAt": null,
+       "updatedById": null,
+       "version": "1.2"
+      },
+      "versions": [
+       {
+        "approvedById": null,
+        "createdById": null,
+        "effectiveFrom": "2026-01-01",
+        "effectiveTo": "2026-12-31",
+        "id": 1,
+        "packId": "SG-PAYROLL-2026",
+        "sourceDocumentId": 1,
+        "status": "Draft",
+        "taxYear": "2026",
+        "updatedAt": null,
+        "updatedById": null,
+        "version": "1.2"
+       }
+      ]
+     }
+    },
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "cpf",
+     "label": "CPF",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "The AW ceiling is not a stored value: it is derived per employee as the annual wage ceiling less the total OW subject to CPF for the year (see the annualWageCeiling row label).",
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "CPF Board",
+       "id": 1,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "7ab21a34bd830be773b5bf39020f590d61e744fb7df6c91922352cef82789496",
+       "title": "CPF Contribution Rate Tables from 1 January 2026 (Tables 1–5)",
+       "url": "https://www.cpf.gov.sg/content/dam/web/employer/employer-obligations/documents/CPFcontributionratesfrom1Jan2026.pdf"
+      },
+      {
+       "agency": "CPF Board",
+       "id": 2,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "c8c94a62178d7dc3edb960fb3686ba351eedfcfbe12f8675c0ead3b402fd080e",
+       "title": "How much CPF contributions to pay (age-group rule; SPR year definition)",
+       "url": "https://www.cpf.gov.sg/employer/employer-obligations/how-much-cpf-contributions-to-pay"
+      },
+      {
+       "agency": "CPF Board",
+       "id": 3,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "3a5795e639edfb9b0af2969982bd98dfb4a0967b646e5b6f77da1c9cc95f9c18",
+       "title": "What payments attract CPF contributions (OW/AW, OW ceiling, AW ceiling formula)",
+       "url": "https://www.cpf.gov.sg/employer/employer-obligations/what-payments-attract-cpf-contributions"
+      },
+      {
+       "agency": "CPF Board",
+       "id": 14,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "30b1e542a76a9cf580848bd39e5c1a8251d3afc50d04d00983207cad9486bc48",
+       "title": "Enforcement and penalties for non-compliance (due date last day of the month; enforcement after the 14th)",
+       "url": "https://www.cpf.gov.sg/employer/compliance-and-rectifications/enforcement-and-penalties-for-non-compliance"
+      }
+     ],
+     "sourcesReviewed": "0/4",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "ageBandSemantics": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": null,
+       "label": "CPF age-group change: from the first day of the month after the 55th/60th/65th/70th birthday",
+       "sourceDocumentId": 2,
+       "textValue": "MONTH_AFTER_BIRTHDAY"
+      },
+      "annualWageCeiling": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "102000.00",
+       "label": "CPF annual wage ceiling (AW ceiling = this − total OW subject to CPF for the year)",
+       "sourceDocumentId": 3,
+       "textValue": null
+      },
+      "cohorts": [
+       "SC_SPR3",
+       "SPR1_FF",
+       "SPR1_FG",
+       "SPR1_GG",
+       "SPR2_FF",
+       "SPR2_FG",
+       "SPR2_GG"
+      ],
+      "enforcementDayFollowingMonth": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "14.00",
+       "label": "CPF enforcement: unpaid after this day of the following month",
+       "sourceDocumentId": 14,
+       "textValue": null
+      },
+      "owCeilingMonthly": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "8000.00",
+       "label": "CPF Ordinary Wage ceiling (monthly)",
+       "sourceDocumentId": 1,
+       "textValue": null
+      },
+      "rateBands": 140
+     }
+    },
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "sdl",
+     "label": "SDL",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "CPF Board",
+       "id": 5,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "2801e71d024a570c7d156c0cebb67509ffec44b91e2c99fa865c0cc453314c96",
+       "title": "Skills Development Levy",
+       "url": "https://www.cpf.gov.sg/employer/employer-obligations/skills-development-levy"
+      }
+     ],
+     "sourcesReviewed": "0/1",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "maximumMonthly": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "11.25",
+       "label": "SDL maximum per employee (monthly)",
+       "sourceDocumentId": 5,
+       "textValue": null
+      },
+      "minimumMonthly": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "2.00",
+       "label": "SDL minimum per employee (monthly)",
+       "sourceDocumentId": 5,
+       "textValue": null
+      },
+      "rate": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": "0.0025",
+       "flatAmount": null,
+       "label": "Skills Development Levy (employer cost)",
+       "sourceDocumentId": 5,
+       "textValue": null
+      }
+     }
+    },
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "shg",
+     "label": "SHG",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "CPF Board",
+       "id": 6,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "fd7c2768f1da797f17d1896567d71e42fffd6b3733aba4ab9bf89d267fd36595",
+       "title": "Contributions to self-help groups (CDAC / ECF / MBMF / SINDA rates and eligibility)",
+       "url": "https://www.cpf.gov.sg/employer/employer-obligations/contributions-to-self-help-groups"
+      }
+     ],
+     "sourcesReviewed": "0/1",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "fundBands": 28,
+      "fundCount": 4,
+      "funds": [
+       "CDAC",
+       "ECF",
+       "MBMF",
+       "SINDA"
+      ]
+     }
+    },
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "fwl",
+     "label": "FWL",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "The EXPIRY end-day rule is not published by MOM (fwl_s_pass_end_day_basis / fwl_work_permit_end_day_basis not seeded) — a pass EXPIRING mid-month, or ending with no recorded end reason, stays BLOCKED. A CANCELLED pass uses the MOM-sourced cancellation rule.",
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "MOM",
+       "id": 9,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "4916192e09c3f20ec56fdf5e6994cebc6cb27b77d55a0d0026080de662e392ad",
+       "title": "S Pass quota and levy requirements (levy harmonised to $650 since 1 Sep 2025)",
+       "url": "https://www.mom.gov.sg/passes-and-permits/s-pass/quota-and-levy/levy-and-quota-requirements"
+      },
+      {
+       "agency": "MOM",
+       "id": 20,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "a89efb7d8ac2b4fe9c0ed25cd8074afc8c44de16000833ddab14d65bb491eb31",
+       "title": "Paying the foreign worker levy (by the 17th of the following month)",
+       "url": "https://www.mom.gov.sg/passes-and-permits/work-permit-for-foreign-worker/foreign-worker-levy/paying-the-levy"
+      },
+      {
+       "agency": "MOM",
+       "id": 54,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "5c71ac70d3b9d764320cc261d8987e36d2e6009bc95a5f549d0c7c3e3a3e704b",
+       "title": "Cancel an S Pass — \"When levy stops: 1 day before cancellation\"",
+       "url": "https://www.mom.gov.sg/passes-and-permits/s-pass/cancel-a-pass"
+      },
+      {
+       "agency": "MOM",
+       "id": 55,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "2bc8e148258cde0041feec1f08c87c5acb9b2d24fe008f5175189b7700a52d11",
+       "title": "Cancel a Work Permit — \"Your worker's levy will be charged until 1 day before the pass cancellation\"",
+       "url": "https://www.mom.gov.sg/passes-and-permits/work-permit-for-foreign-worker/cancel-a-work-permit"
+      }
+     ],
+     "sourcesReviewed": "0/4",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "paymentDueDay": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "17.00",
+       "label": "Foreign worker levy: pay by this day of the following month (or the next working day)",
+       "sourceDocumentId": 20,
+       "textValue": null
+      },
+      "sPassCancellationEndDayBasis": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": null,
+       "label": "S Pass levy end day on CANCELLATION (levy stops 1 day before)",
+       "sourceDocumentId": 54,
+       "textValue": "EXCLUSIVE"
+      },
+      "sPassEndDayBasis": null,
+      "sPassMonthly": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "650.00",
+       "label": "Foreign Worker Levy — S Pass (monthly, employer cost)",
+       "sourceDocumentId": 9,
+       "textValue": null
+      },
+      "workPermitCancellationEndDayBasis": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": null,
+       "label": "Work Permit levy end day on CANCELLATION (levy stops 1 day before)",
+       "sourceDocumentId": 55,
+       "textValue": "EXCLUSIVE"
+      },
+      "workPermitLevyRows": 25
+     }
+    },
+    {
+     "capabilities": {
+      "quotaComputation": "NOT_IMPLEMENTED"
+     },
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "lqs",
+     "label": "LQS",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "The LQS floor is evaluated per employee (payroll engine and the SG-LQS-COMPLIANCE report). The MOM foreign-worker quota (local qualifying headcount, part-time weighting, sector dependency ratio ceilings) is NOT IMPLEMENTED — EXTERNAL DATA REQUIRED: MOM's sector quota tables and headcount rules as sourced reference data, and a decision whether Zoiko should compute quota at all.",
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "MOM",
+       "id": 7,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "60f08866d40056429d79e70f1bda97ad7fd7cd9d3d212b0ae99b98430ec07429",
+       "title": "Local Qualifying Salary",
+       "url": "https://www.mom.gov.sg/employment-practices/progressive-wage-model/local-qualifying-salary"
+      },
+      {
+       "agency": "MOM",
+       "id": 8,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "2a98b39e30b111daacf944712a9eb3fdae18192f0a864c79c8b6cd265ed502fa",
+       "title": "Factsheet: Lower-Wage Workers Policy Announcements at COS 2026 (LQS raised from $1,600 to $1,800 from 1 July 2026)",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/press-releases/2026/factsheet-on-lower-wage-workers-03032026.pdf"
+      }
+     ],
+     "sourcesReviewed": "0/2",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "fullTimeMonthly": {
+       "effectiveFrom": "2026-07-01",
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "1800.00",
+       "label": "Local Qualifying Salary — full-time (monthly)",
+       "sourceDocumentId": 8,
+       "textValue": null
+      },
+      "partTimeHourly": {
+       "effectiveFrom": "2026-07-01",
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "10.50",
+       "label": "Local Qualifying Salary — part-time (hourly)",
+       "sourceDocumentId": 7,
+       "textValue": null
+      }
+     }
+    },
+    {
+     "capabilities": {
+      "retailThreeMonthAveraging": "IMPLEMENTED"
+     },
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "pwm",
+     "label": "PWM",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "Overtime gross requirements are statutory reference data in sgp_pwm_overtime_schedules (tenant-independent, read-only); they are not pack rows and are not copied into payslips.",
+      "Retail 3-month averaging (MOM Tripartite Cluster for Retail report, Aug 2025, Annex D) is evaluated by SG-PWM-COMPLIANCE for a retail shortfall, from each month's own payslip (recorded job level, gross wages, overtime hours). Months it cannot evaluate (part-time, an incomplete month other than the first, a payslip calculated before the per-month classification was recorded) leave the shortfall flagged — never assumed met.",
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "MOM",
+       "id": 43,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "06a843079369d58a103748967099d410f1c857c954350765b69ddc191e6794b3",
+       "title": "Total PWM Gross Wage Requirement for overtime hours — Occupational PWs, 1 Mar 2023 – 30 Jun 2026",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/employment-practices/pwm/gross-wage-requirements-ot-opw.pdf"
+      },
+      {
+       "agency": "MOM",
+       "id": 44,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "f7a6a5808a6ebd33486e0feac093f83577e7ab305843132c0244f7eabf65fd88",
+       "title": "Total PWM Gross Wage Requirement for overtime hours — Occupational PWs, from 1 Jul 2026 (NWC 2025/2026)",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/employment-practices/pwm/item-1--nwc-20252026-guidelines-opw-ot-hours.pdf"
+      },
+      {
+       "agency": "MOM",
+       "id": 45,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "2573b18755c5eee969d912ec6836d073d56f21bf88764524182e0c3f6e5511e5",
+       "title": "Food services PWM gross wage requirements for overtime hours, 1 Mar 2023 – 30 Jun 2026",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/employment-practices/pwm/gross-wage-requirements-ot-fs_2023.pdf"
+      },
+      {
+       "agency": "MOM",
+       "id": 46,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "08b210c92e6503e687e761e4737cea2b3bee1234b0a0940124acacd4d5f71113",
+       "title": "Food services PWM gross wage requirements for overtime hours, from 1 Jul 2026 (TCF 16 Mar 2026)",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/employment-practices/pwm/gross-wage-requirements-ot-fs.pdf"
+      },
+      {
+       "agency": "MOM",
+       "id": 47,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "744935ec56d8b19087e5d3489d83230b6373fe786810c04e6b131a3524904fe5",
+       "title": "Retail PWM gross wage requirements for overtime hours, 1 Sep 2022 – 31 Aug 2025",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/employment-practices/pwm/gross-wage-requirements-ot-retail-pwm.pdf"
+      },
+      {
+       "agency": "MOM",
+       "id": 48,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "c011590a95a3947682486ccf6b813f93da5bbdb7d49cd83531c60ad517f4e10b",
+       "title": "Retail PWM gross wage requirements for overtime hours, from 1 Sep 2025 (TCR 11 Aug 2025)",
+       "url": "https://www.mom.gov.sg/-/media/mom/documents/employment-practices/pwm/tcr-recommendations-report-ot-wages-250811.pdf"
+      }
+     ],
+     "sourcesReviewed": "0/6",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "floorRows": 62,
+      "overtimeRateRows": 11,
+      "overtimeSchedule": {
+       "activeRows": 6132,
+       "lastSeededAt": "<ts>",
+       "latestRetrievedAt": "<ts>",
+       "overtimeHoursMax": 72,
+       "overtimeHoursMin": 0,
+       "rowsEffectiveOnDate": 1168,
+       "schedules": 84,
+       "sectors": [
+        "FOOD_SERVICES",
+        "OPW_ADMIN",
+        "OPW_DRIVER",
+        "RETAIL"
+       ],
+       "sourceDocumentIds": [
+        43,
+        44,
+        45,
+        46,
+        47,
+        48
+       ],
+       "totalRows": 6132,
+       "windows": [
+        {
+         "effectiveFrom": "2022-09-01",
+         "effectiveTo": "2023-08-31",
+         "rows": 219
+        },
+        {
+         "effectiveFrom": "2023-03-01",
+         "effectiveTo": "2024-02-29",
+         "rows": 511
+        },
+        {
+         "effectiveFrom": "2023-03-01",
+         "effectiveTo": "2024-06-30",
+         "rows": 292
+        },
+        {
+         "effectiveFrom": "2023-09-01",
+         "effectiveTo": "2024-08-31",
+         "rows": 219
+        },
+        {
+         "effectiveFrom": "2024-03-01",
+         "effectiveTo": "2025-02-28",
+         "rows": 511
+        },
+        {
+         "effectiveFrom": "2024-07-01",
+         "effectiveTo": "2025-06-30",
+         "rows": 292
+        },
+        {
+         "effectiveFrom": "2024-09-01",
+         "effectiveTo": "2025-08-31",
+         "rows": 219
+        },
+        {
+         "effectiveFrom": "2025-03-01",
+         "effectiveTo": "2026-06-30",
+         "rows": 511
+        },
+        {
+         "effectiveFrom": "2025-07-01",
+         "effectiveTo": "2026-06-30",
+         "rows": 292
+        },
+        {
+         "effectiveFrom": "2025-09-01",
+         "effectiveTo": "2026-08-31",
+         "rows": 219
+        },
+        {
+         "effectiveFrom": "2026-07-01",
+         "effectiveTo": "2027-06-30",
+         "rows": 949
+        },
+        {
+         "effectiveFrom": "2026-09-01",
+         "effectiveTo": "2027-08-31",
+         "rows": 219
+        },
+        {
+         "effectiveFrom": "2027-07-01",
+         "effectiveTo": "2028-06-30",
+         "rows": 949
+        },
+        {
+         "effectiveFrom": "2027-09-01",
+         "effectiveTo": "2028-08-31",
+         "rows": 219
+        },
+        {
+         "effectiveFrom": "2028-07-01",
+         "effectiveTo": "2029-06-30",
+         "rows": 511
+        }
+       ]
+      }
+     }
+    },
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "iras",
+     "label": "IRAS (AIS / IR8A)",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "IR8A is an EXPORT_READY extract keyed into myTax Portal by the employer; no AIS-API submission is built (EXTERNAL INTEGRATION REQUIRED — see Statutory operations).",
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "IRAS",
+       "id": 10,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "69e5e7151931e99ae5905e6d191024930a9fc00e91ccf0d892722a32a5b9695e",
+       "title": "Join the Auto-Inclusion Scheme (AIS) for Employment Income (5+ employees; YA2027 by 1 Mar 2027)",
+       "url": "https://www.iras.gov.sg/taxes/individual-income-tax/employers/auto-inclusion-scheme-(ais)-for-employment-income/join-the-auto-inclusion-scheme-(ais)-for-employment-income"
+      },
+      {
+       "agency": "IRAS",
+       "id": 40,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "b4c26f777cd2933321775fdacc5df1d2530d06f5b6dcec2c19bb0479566fecc3",
+       "title": "Record Keeping Requirements (companies: at least 5 years from the relevant YA)",
+       "url": "https://www.iras.gov.sg/taxes/corporate-income-tax/basics-of-corporate-income-tax/record-keeping-requirements"
+      }
+     ],
+     "sourcesReviewed": "0/2",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "aisFilingCalendar": {
+       "dueDate": "2027-03-01",
+       "periodLabel": "YA2027 (2026 income) — AIS / IR8A, Appendix 8A/8B",
+       "status": "Draft"
+      },
+      "aisMandatoryEmployeeThreshold": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "5.00",
+       "label": "IRAS AIS mandatory threshold (employees)",
+       "sourceDocumentId": 10,
+       "textValue": null
+      },
+      "aisSubmissionMode": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": null,
+       "label": "IRAS AIS submission mode",
+       "sourceDocumentId": null,
+       "textValue": "EXPORT_ONLY"
+      },
+      "retentionYearsFromYa": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "5.00",
+       "label": "IRAS business records — minimum years from the relevant YA",
+       "sourceDocumentId": 40,
+       "textValue": null
+      }
+     }
+    },
+    {
+     "configurationStatus": "CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "ir21",
+     "label": "IR21",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "DRAFT",
+     "missing": [],
+     "notes": [
+      "IR21 cases are per organization (sgp_ir21_cases) and are not shown here.",
+      "Values are from SG-PAYROLL-2026 v1.2 (Draft) — not in force until a Singapore pack is Active."
+     ],
+     "sources": [
+      {
+       "agency": "IRAS",
+       "id": 11,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "8b2fd2a8dc37d21d493cd30500452f0efd71951d5d9ccb778fabb674acb82680",
+       "title": "Tax Clearance for Employees (IR21) — notify at least one month in advance; departure > 3 months",
+       "url": "https://www.iras.gov.sg/taxes/individual-income-tax/employers/tax-clearance-for-foreign-spr-employees-(ir21)/tax-clearance-for-employees"
+      }
+     ],
+     "sourcesReviewed": "0/1",
+     "status": "BLOCKED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "departureTriggerMonths": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "3.00",
+       "label": "IR21 trigger: departure longer than (months)",
+       "sourceDocumentId": 11,
+       "textValue": null
+      },
+      "filingLeadMonths": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "1.00",
+       "label": "IR21 filing: at least (months) before cessation/departure",
+       "sourceDocumentId": 11,
+       "textValue": null
+      }
+     }
+    },
+    {
+     "configurationStatus": "NOT_CONFIGURED",
+     "configured": false,
+     "effectiveDate": "2026-01-01",
+     "effectiveTo": "2026-12-31",
+     "inForce": false,
+     "key": "ezpay",
+     "label": "CPF EZPay",
+     "lastRetrievedAt": "<ts>",
+     "lifecycleState": "NOT_CONFIGURED",
+     "missing": [
+      "template"
+     ],
+     "notes": [
+      "The employer uploads the file through CPF EZPay (Corppass); no direct CPF Board API is claimed."
+     ],
+     "sources": [
+      {
+       "agency": "CPF Board",
+       "id": 14,
+       "retrievedAt": "<ts>",
+       "reviewed": false,
+       "sha256": "30b1e542a76a9cf580848bd39e5c1a8251d3afc50d04d00983207cad9486bc48",
+       "title": "Enforcement and penalties for non-compliance (due date last day of the month; enforcement after the 14th)",
+       "url": "https://www.cpf.gov.sg/employer/compliance-and-rectifications/enforcement-and-penalties-for-non-compliance"
+      }
+     ],
+     "sourcesReviewed": "0/1",
+     "status": "NOT_CONFIGURED",
+     "validationState": "EXTERNAL_VALIDATION_REQUIRED",
+     "values": {
+      "enforcementDayFollowingMonth": {
+       "effectiveFrom": null,
+       "effectiveTo": null,
+       "employerRatePct": null,
+       "flatAmount": "14.00",
+       "label": "CPF enforcement: unpaid after this day of the following month",
+       "sourceDocumentId": 14,
+       "textValue": null
+      },
+      "template": null
+     }
+    },
+    {
+     "configured": false,
+     "effectiveDate": null,
+     "key": "reportTemplates",
+     "label": "Reporting",
+     "missing": [
+      "SG-IR8A",
+      "SG-SDL-MONTHLY",
+      "SG-CPF-EZPAY",
+      "SG-PAYROLL-REGISTER",
+      "SG-PAYROLL-SUMMARY",
+      "SG-CPF-CONTRIBUTION",
+      "SG-SHG-MONTHLY",
+      "SG-FWL-MONTHLY",
+      "SG-PWM-COMPLIANCE",
+      "SG-IR21-REGISTER",
+      "SG-LQS-COMPLIANCE"
+     ],
+     "notes": [
+      "Classification is Zoiko's own; no template is certified by CPF Board, IRAS, MOM or PDPC."
+     ],
+     "sources": [],
+     "status": "NOT_CONFIGURED",
+     "values": {
+      "active": 0,
+      "expected": 11,
+      "generatorTypes": 11,
+      "present": 0,
+      "statusCounts": {
+       "Active": 0,
+       "Approved": 0,
+       "Draft": 0,
+       "Published": 0,
+       "Review": 0,
+       "Superseded": 0
+      },
+      "templates": [
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "EXPORT_READY",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "POST /api/payroll/singapore/reports/ir8a",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "IR8A — Employment Income Data Extract (AIS)",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": "IRAS",
+        "reportType": "SG_IR8A",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-IR8A",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "SUBMISSION_SUPPORT",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "POST /api/payroll/singapore/reports/sdl",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Skills Development Levy — Monthly Employer Total",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": "CPF Board (SDL collection)",
+        "reportType": "SG_SDL_MONTHLY",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-SDL-MONTHLY",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "EXPORT_READY",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "POST /api/payroll/singapore/reports/cpf-ezpay",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "CPF EZPay Contribution File (FTP specification)",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": "CPF Board",
+        "reportType": "SG_CPF_EZPAY",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-CPF-EZPAY",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "INTERNAL_REPORT",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "GENERIC_TEMPLATE",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Singapore Payroll Register",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": null,
+        "reportType": "SG_PAYROLL_REGISTER",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-PAYROLL-REGISTER",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "INTERNAL_REPORT",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "GENERIC_TEMPLATE",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Singapore Payroll Summary",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": null,
+        "reportType": "SG_PAYROLL_SUMMARY",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-PAYROLL-SUMMARY",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "SUBMISSION_SUPPORT",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "GENERIC_TEMPLATE",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "CPF Contribution Report",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": "CPF Board",
+        "reportType": "SG_CPF_CONTRIBUTION",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-CPF-CONTRIBUTION",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "SUBMISSION_SUPPORT",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "GENERIC_TEMPLATE",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Self-Help Group Contributions — Monthly",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": "CPF Board (SHG collection)",
+        "reportType": "SG_SHG_MONTHLY",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-SHG-MONTHLY",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "INTERNAL_REPORT",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "GENERIC_TEMPLATE",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Foreign Worker Levy — Monthly Reconciliation",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": null,
+        "reportType": "SG_FWL_MONTHLY",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-FWL-MONTHLY",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "STATUTORY_WORKSPACE",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "POST /api/payroll/singapore/reports/pwm-compliance",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Progressive Wage Model Compliance Workspace",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": null,
+        "reportType": "SG_PWM_COMPLIANCE",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-PWM-COMPLIANCE",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "STATUTORY_WORKSPACE",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "POST /api/payroll/singapore/reports/ir21-register",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "IR21 Tax Clearance Register",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": null,
+        "reportType": "SG_IR21_REGISTER",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-IR21-REGISTER",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       },
+       {
+        "activeVersion": null,
+        "activeVersionId": null,
+        "allowedNextStatuses": null,
+        "approvedAt": null,
+        "approvedById": null,
+        "auditEntries": null,
+        "classification": "STATUTORY_WORKSPACE",
+        "description": null,
+        "documentScope": null,
+        "editable": null,
+        "effectiveFrom": null,
+        "effectiveTo": null,
+        "externalValidation": "EXTERNAL_VALIDATION_REQUIRED",
+        "generatable": false,
+        "generator": "POST /api/payroll/singapore/reports/lqs-compliance",
+        "id": null,
+        "lastStatusChangeAt": null,
+        "name": "Local Qualifying Salary Compliance Workspace",
+        "officialCertification": false,
+        "present": false,
+        "previousVersionId": null,
+        "regulatoryAuthority": null,
+        "regulatoryAuthorityCatalog": null,
+        "reportType": "SG_LQS_COMPLIANCE",
+        "source": null,
+        "sourceDocumentId": null,
+        "sourceReferences": null,
+        "status": null,
+        "templateKey": "SG-LQS-COMPLIANCE",
+        "updatedAt": null,
+        "version": null,
+        "versionCount": null
+       }
+      ],
+      "unexpectedTemplateKeys": []
+     }
+    },
+    {
+     "configured": false,
+     "effectiveDate": null,
+     "key": "operations",
+     "label": "Statutory operations",
+     "missing": [
+      "ir8a",
+      "ir21",
+      "cpf_ezpay"
+     ],
+     "notes": [
+      "No operation is certified by, or submitted to, IRAS or CPF Board by Zoiko; the external step is always the employer's."
+     ],
+     "sources": [],
+     "status": "PARTIAL",
+     "values": {
+      "items": [
+       {
+        "controls": [
+         "Active template only",
+         "Payslips' pinned statutory pack recorded",
+         "NRIC/FIN masked (last 4)",
+         "IRAS whole-dollar rounding (income down, deductions up)",
+         "Up to 200 records per myTax Portal submission",
+         "Filing recorded by a different operator from the preparer (refusals audited)",
+         "One acknowledged original per year; revision / amendment of an acknowledged original"
+        ],
+        "externalDependency": "IRAS acknowledgement (manual); IRAS-validated YA2027 field mapping (G3)",
+        "generator": "POST /api/payroll/singapore/reports/ir8a",
+        "key": "ir8a",
+        "label": "IR8A employment income extract",
+        "lifecycle": {
+         "Generated": [
+          "SUBMITTED_MANUALLY"
+         ],
+         "SUBMITTED_MANUALLY": [
+          "ACKNOWLEDGED",
+          "REJECTED",
+          "UNKNOWN"
+         ],
+         "UNKNOWN": [
+          "ACKNOWLEDGED",
+          "REJECTED"
+         ]
+        },
+        "state": "TEMPLATE_MISSING",
+        "submissionChannel": "The employer keys the extract into IRAS myTax Portal and records IRAS's reference here",
+        "template": null,
+        "templateKey": "SG-IR8A"
+       },
+       {
+        "controls": [],
+        "credentialsConfigured": false,
+        "externalDependency": "EXTERNAL INTEGRATION REQUIRED: IRAS APEX onboarding, Corppass authorisation, API credentials in a secrets store, sandbox access and the AIS-API 2.0 specification; submission-mode decision (export only / API / both) is open",
+        "generator": "Not built",
+        "integrationPrerequisites": [
+         {
+          "item": "Owner decision D1 selects API_SUBMISSION or BOTH",
+          "key": "d1_decision",
+          "owner": "Product owner",
+          "status": "BUSINESS_DECISION_REQUIRED"
+         },
+         {
+          "item": "IRAS APEX API-consumer onboarding for the AIS-API 2.0 service",
+          "key": "apex_onboarding",
+          "owner": "Product owner with IRAS",
+          "status": "EXTERNAL_INTEGRATION_REQUIRED"
+         },
+         {
+          "item": "IRAS AIS-API 2.0 specification (payload schema, validation and error codes) registered as a source artifact",
+          "key": "specification",
+          "owner": "Product owner with IRAS",
+          "status": "EXTERNAL_DATA_REQUIRED"
+         },
+         {
+          "item": "APEX client credentials held in a secrets store (never in the database or the repository)",
+          "key": "credentials",
+          "owner": "Deploy / security owner",
+          "status": "EXTERNAL_INTEGRATION_REQUIRED"
+         },
+         {
+          "item": "Corppass authorisation by each employer for Zoiko to submit on its behalf",
+          "key": "corppass",
+          "owner": "Each employer",
+          "status": "EXTERNAL_INTEGRATION_REQUIRED"
+         },
+         {
+          "item": "IRAS sandbox access and a passing sandbox submission (original + amendment)",
+          "key": "sandbox",
+          "owner": "Implementation lead with IRAS",
+          "status": "EXTERNAL_INTEGRATION_REQUIRED"
+         }
+        ],
+        "key": "ais_api",
+        "label": "IRAS AIS-API 2.0 direct submission",
+        "lifecycle": null,
+        "state": "EXTERNAL_INTEGRATION_REQUIRED",
+        "submissionChannel": "Not built",
+        "template": null,
+        "templateKey": "SG-IR8A"
+       },
+       {
+        "controls": [
+         "Hold on the employee's monies while DRAFT, FILED, CLEARED, EXCEPTION, RECONCILE_FIRST",
+         "Distinct approver to move to CANCELLED, EXEMPT, RELEASED (refusals audited)",
+         "Held payslips excluded from the bank file",
+         "Filed cases excluded from the IR8A extract",
+         "Case view carries no NRIC / bank details; register masks NRIC/FIN",
+         "Tenant-scoped case access"
+        ],
+        "externalDependency": "IRAS clearance directive (manual); IR21 guidance review (G4)",
+        "generator": "POST /api/payroll/singapore/reports/ir21-register",
+        "key": "ir21",
+        "label": "IR21 tax clearance",
+        "lifecycle": {
+         "CANCELLED": [],
+         "CLEARED": [
+          "EXCEPTION",
+          "RELEASED"
+         ],
+         "DRAFT": [
+          "CANCELLED",
+          "EXEMPT",
+          "FILED"
+         ],
+         "EXCEPTION": [
+          "CANCELLED",
+          "FILED"
+         ],
+         "EXEMPT": [],
+         "FILED": [
+          "CANCELLED",
+          "CLEARED",
+          "EXCEPTION",
+          "EXEMPT"
+         ],
+         "RECONCILE_FIRST": [
+          "DRAFT",
+          "FILED"
+         ],
+         "RELEASED": []
+        },
+        "state": "TEMPLATE_MISSING",
+        "submissionChannel": "The employer files Form IR21 on myTax Portal and records the filing / IRAS directive here",
+        "template": null,
+        "templateKey": "SG-IR21-REGISTER"
+       },
+       {
+        "controls": [
+         "Fixed-length 150-byte records, ASCII only; trailer count / total checked",
+         "Distinct, identified approver before download (refusals audited)",
+         "File never stored — rebuilt on download and verified against its SHA-256; every download audited",
+         "CPF account numbers masked in the stored summary"
+        ],
+        "externalDependency": "CPF Board acceptance and payment reconciliation (G2); no CPF Board API is used",
+        "generator": "POST /api/payroll/singapore/reports/cpf-ezpay",
+        "key": "cpf_ezpay",
+        "label": "CPF EZPay contribution file",
+        "lifecycle": {
+         "APPROVED": [
+          "SUBMITTED"
+         ],
+         "PREPARED": [
+          "APPROVED"
+         ],
+         "SUBMITTED": [
+          "ACCEPTED",
+          "REJECTED",
+          "UNKNOWN"
+         ],
+         "UNKNOWN": [
+          "ACCEPTED",
+          "REJECTED"
+         ]
+        },
+        "state": "TEMPLATE_MISSING",
+        "submissionChannel": "The employer uploads the file through CPF EZPay (Corppass) and records CPF Board's outcome here",
+        "template": null,
+        "templateKey": "SG-CPF-EZPAY"
+       },
+       {
+        "controls": [
+         "The per-employee LQS floor is evaluated (engine + SG-LQS-COMPLIANCE)",
+         "No quota / dependency-ratio figure is produced anywhere"
+        ],
+        "externalDependency": "EXTERNAL DATA REQUIRED: MOM sector dependency-ratio ceilings, local qualifying headcount and part-time weighting rules as sourced reference data (pack rows 'lqs_quota__*'), plus a decision whether Zoiko computes quota",
+        "generator": "Not built",
+        "key": "lqs_quota",
+        "label": "LQS foreign-worker quota",
+        "lifecycle": null,
+        "state": "EXTERNAL_DATA_REQUIRED",
+        "submissionChannel": "Not applicable (MOM computes the employer's quota)",
+        "template": null,
+        "templateKey": null
+       }
+      ]
+     }
+    },
+    {
+     "configured": false,
+     "effectiveDate": null,
+     "key": "readiness",
+     "label": "Readiness",
+     "missing": [],
+     "notes": [],
+     "sources": [],
+     "status": "BLOCKED",
+     "values": {
+      "items": [
+       {
+        "evidence": "No Active pack — values shown are from SG-PAYROLL-2026 v1.2 (Draft), not in force",
+        "key": "active_pack",
+        "label": "Active Singapore tax pack on the date",
+        "status": "BLOCKED"
+       },
+       {
+        "evidence": "CPF: BLOCKED, SDL: BLOCKED, SHG: BLOCKED, FWL: BLOCKED, LQS: BLOCKED, PWM: BLOCKED, IRAS (AIS / IR8A): BLOCKED, IR21: BLOCKED, CPF EZPay: NOT_CONFIGURED",
+        "key": "statutory_sections",
+        "label": "Statutory sections configured",
+        "status": "REVIEW"
+       },
+       {
+        "evidence": "0 of 44 linked source artifacts reviewed",
+        "key": "source_evidence",
+        "label": "Source evidence reviewed",
+        "status": "REVIEW"
+       },
+       {
+        "evidence": "0 of 11 present; missing SG-IR8A, SG-SDL-MONTHLY, SG-CPF-EZPAY, SG-PAYROLL-REGISTER, SG-PAYROLL-SUMMARY, SG-CPF-CONTRIBUTION, SG-SHG-MONTHLY, SG-FWL-MONTHLY, SG-PWM-COMPLIANCE, SG-IR21-REGISTER, SG-LQS-COMPLIANCE",
+        "key": "report_templates",
+        "label": "Singapore report templates present",
+        "status": "REVIEW"
+       },
+       {
+        "evidence": "No run recorded",
+        "key": "golden_vectors",
+        "label": "Latest Singapore golden-vector certification run",
+        "status": "REVIEW"
+       },
+       {
+        "evidence": "No gate evidence is recorded in Zoiko; external evidence is required.",
+        "key": "production_gates",
+        "label": "ZP-SG-ENG-001 §18 production gates G1–G8",
+        "status": "BLOCKED"
+       },
+       {
+        "evidence": "PLANNED — onboarding closed until the owner makes Singapore AVAILABLE after G1–G8",
+        "key": "service_registry",
+        "label": "Singapore service registry",
+        "status": "BLOCKED"
+       }
+      ]
+     }
+    }
+   ],
+   "valuesFromActivePack": false,
+   "valuesFromPack": {
+    "approvedById": null,
+    "createdById": null,
+    "effectiveFrom": "2026-01-01",
+    "effectiveTo": "2026-12-31",
+    "id": 1,
+    "packId": "SG-PAYROLL-2026",
+    "sourceDocumentId": 1,
+    "status": "Draft",
+    "taxYear": "2026",
+    "updatedAt": null,
+    "updatedById": null,
+    "version": "1.2"
+   }
+  }
+ }
+}

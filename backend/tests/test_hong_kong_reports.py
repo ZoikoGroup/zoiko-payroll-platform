@@ -131,7 +131,7 @@ def _hk_payslip(db, org_id, employee, pay_date, gross="20000", relevant_income=N
     # The real trace shape the HK engine writes (engine/countries/hong_kong.py
     # build_mpf_trace): "period" is TOP level; "mpf" carries coverage,
     # currentPeriod, catchUp and the period's employer/employee totals; a
-    # contributing month is COVERED. hk_service's eMPF pass matches a
+    # contributing month is COVERED. hong_kong_service's eMPF pass matches a
     # contribution month against trace["period"]["end"] and reads the totals off
     # trace["mpf"]["employer"] / ["employee"].
     trace = {
@@ -146,7 +146,7 @@ def _hk_payslip(db, org_id, employee, pay_date, gross="20000", relevant_income=N
     }
     item = PayslipItem(payroll_run_id=run.id, employee_id=employee.id, organization_id=org_id,
                        employee_name=employee.name, country_code=country, gross_pay=D(gross),
-                       net_pay=D(gross), hkg_calculation_trace=trace,
+                       net_pay=D(gross), hk_calculation_trace=trace,
                        tax_policy_pack_id=pack.id if pack else None,
                        tax_rule_snapshot={"packId": pack.id, "version": getattr(pack, "version", None)}
                        if pack else None,
@@ -186,20 +186,20 @@ def _seeded(db, template_key, status="Active"):
 
 
 def _annual_return(db, org_id, ya=YA):
-    """Run hk_service's statutory annual-return pass, which is what builds the
+    """Run hong_kong_service's statutory annual-return pass, which is what builds the
     BIR56A cover case and the per-employee IR56B cases every HK report then
     renders. The reports REPRESENT that pass's outcome; they never re-derive it."""
-    from app.modules.payroll import hk_service
+    from app.modules.payroll import hong_kong_service
 
-    return hk_service.generate_annual_return(db, org_id, ya, None)
+    return hong_kong_service.generate_annual_return(db, org_id, ya, None)
 
 
 def _ir56_case(db, org_id, employee, form_type, event_date, status="DUE", ya=YA):
     from app.modules.payroll.engine.jurisdictions.hong_kong import ird as hk_ird
-    from app.modules.payroll.hk_service import reporting_timing
-    from app.modules.payroll.models import HkgIrdReportingCase
+    from app.modules.payroll.hong_kong_service import reporting_timing
+    from app.modules.payroll.models import HongKongIrdReportingCase
 
-    case = HkgIrdReportingCase(organization_id=org_id, employee_id=employee.id, form_type=form_type,
+    case = HongKongIrdReportingCase(organization_id=org_id, employee_id=employee.id, form_type=form_type,
                                year_of_assessment=ya, event_date=event_date,
                                due_date=hk_ird.due_date(form_type, reporting_timing(db, event_date),
                                                         event_date=event_date, ya=ya),
@@ -364,48 +364,51 @@ def test_payroll_operator_dependency_denies_non_operators(role, org):
 # ── template gates ────────────────────────────────────────────────────────
 
 def test_bir56a_refuses_draft_wrong_type_and_foreign_jurisdiction_templates(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
     draft = _template(db, "HK-BIR56A-D", "HK_BIR56A", status="Draft")
     with pytest.raises(BadRequestException, match="not Active"):
-        service.generate_hong_kong_bir56a(db, organization.id, draft.id, YA)
+        hong_kong_service.generate_hong_kong_bir56a(db, organization.id, draft.id, YA)
 
     wrong = _template(db, "HK-OTHER", "HK_IR56B")
     with pytest.raises(BadRequestException, match="not one of"):
-        service.generate_hong_kong_bir56a(db, organization.id, wrong.id, YA)
+        hong_kong_service.generate_hong_kong_bir56a(db, organization.id, wrong.id, YA)
 
     foreign = _template(db, "UK-FAKE", "HK_BIR56A", country="UK")
     with pytest.raises(BadRequestException, match="'UK' template"):
-        service.generate_hong_kong_bir56a(db, organization.id, foreign.id, YA)
+        hong_kong_service.generate_hong_kong_bir56a(db, organization.id, foreign.id, YA)
 
 
 @pytest.mark.parametrize("ya", ["2025-26", "2025", "2025/2026", "25/26", "", "not-a-ya"])
 def test_bir56a_rejects_anything_that_is_not_a_hong_kong_year_of_assessment(db, organization, ya):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
     t = _template(db, "HK-BIR56A-YA", "HK_BIR56A")
     with pytest.raises(BadRequestException):
-        service.generate_hong_kong_bir56a(db, organization.id, t.id, ya)
+        hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, ya)
 
 
 def test_mpf_contribution_record_requires_a_calendar_month(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
     t = _template(db, "HK-MPF-REC-P", "HK_MPF_CONTRIBUTION_RECORD", scope="PER_EMPLOYEE")
     for bad in ["2026", "2026-05-31", "202605", "2026-5", ""]:
         with pytest.raises(BadRequestException, match="expected a calendar month"):
-            service.generate_hong_kong_mpf_contribution_record(
+            hong_kong_service.generate_hong_kong_mpf_contribution_record(
                 db, organization.id, t.id, 1, bad)
 
 
 # ── HK-BIR56A ──────────────────────────────────────────────────────────────
 
 def test_bir56a_reconciles_to_committed_payroll_and_links_only_the_cover_case(db, organization):
-    from app.modules.payroll import hk_service, service
-    from app.modules.payroll.models import HkgIrdReportingCase
+    from app.modules.payroll import hong_kong_service, service
+    from app.modules.payroll.models import HongKongIrdReportingCase
 
     _active_pack(db, organization)
     _employer(db, organization)
@@ -413,7 +416,7 @@ def test_bir56a_reconciles_to_committed_payroll_and_links_only_the_cover_case(db
     _hk_payslip(db, organization.id, emp, date(2026, 3, 31), gross="20000")
     t = _seeded(db, "HK-BIR56A")
 
-    report = service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
+    report = hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
 
     assert report.report_type == "HK_BIR56A"
     assert report.jurisdiction_country == "HK"
@@ -424,20 +427,21 @@ def test_bir56a_reconciles_to_committed_payroll_and_links_only_the_cover_case(db
     assert report.reconciliation["reportedTotal"] == report.reconciliation["committedPayrollGross"]
 
     # The statutory pass ran, and the COVER case points at the report...
-    cover = (db.query(HkgIrdReportingCase)
-             .filter(HkgIrdReportingCase.form_type == "BIR56A",
-                     HkgIrdReportingCase.year_of_assessment == YA).one())
+    cover = (db.query(HongKongIrdReportingCase)
+             .filter(HongKongIrdReportingCase.form_type == "BIR56A",
+                     HongKongIrdReportingCase.year_of_assessment == YA).one())
     assert cover.generated_report_id == report.id
     # ...but the per-employee IR56B case is NOT hijacked by the aggregate cover.
     # It must stay free for its own per-employee report to claim.
-    ir56b = (db.query(HkgIrdReportingCase)
-             .filter(HkgIrdReportingCase.form_type == "IR56B",
-                     HkgIrdReportingCase.employee_id == emp.id).one())
+    ir56b = (db.query(HongKongIrdReportingCase)
+             .filter(HongKongIrdReportingCase.form_type == "IR56B",
+                     HongKongIrdReportingCase.employee_id == emp.id).one())
     assert ir56b.generated_report_id is None
     assert ir56b.reported_income["FE_INCOME_EMPLOYMENTS"] == "20000.00"
 
 
 def test_bir56a_discloses_the_internal_layout_and_claims_no_transmission(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _active_pack(db, organization)
@@ -446,7 +450,7 @@ def test_bir56a_discloses_the_internal_layout_and_claims_no_transmission(db, org
     _hk_payslip(db, organization.id, emp, date(2026, 3, 31), gross="15000")
     t = _seeded(db, "HK-BIR56A")
 
-    gaps = " ".join(service.generate_hong_kong_bir56a(db, organization.id, t.id, YA).rendered_data["knownGaps"])
+    gaps = " ".join(hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, YA).rendered_data["knownGaps"])
     assert "not the IRD" in gaps
     assert "not archived in this build" in gaps
     assert "nothing is transmitted" in gaps
@@ -454,6 +458,7 @@ def test_bir56a_discloses_the_internal_layout_and_claims_no_transmission(db, org
 
 
 def test_bir56a_is_regenerable_evidence_not_an_overwrite(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
     from app.modules.payroll.models import GeneratedReport
 
@@ -463,8 +468,8 @@ def test_bir56a_is_regenerable_evidence_not_an_overwrite(db, organization):
     _hk_payslip(db, organization.id, emp, date(2026, 3, 31), gross="20000")
     t = _seeded(db, "HK-BIR56A")
 
-    first = service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
-    second = service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
+    first = hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
+    second = hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
 
     assert second.id != first.id
     db.refresh(first)
@@ -478,6 +483,7 @@ def test_bir56a_is_regenerable_evidence_not_an_overwrite(db, organization):
 # ── HK-IR56B ───────────────────────────────────────────────────────────────
 
 def test_ir56b_is_a_per_employee_report_with_a_masked_identity_and_a_case_link(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _active_pack(db, organization)
@@ -488,7 +494,7 @@ def test_ir56b_is_a_per_employee_report_with_a_masked_identity_and_a_case_link(d
     _annual_return(db, organization.id)          # builds the IR56B case
     t = _seeded(db, "HK-IR56B")
 
-    report = service.generate_hong_kong_ir56b(db, organization.id, t.id, emp.id, YA)
+    report = hong_kong_service.generate_hong_kong_ir56b(db, organization.id, t.id, emp.id, YA)
 
     assert report.report_type == "HK_IR56B"
     assert report.employee_id == emp.id          # the shared "all reports for this employee" query works
@@ -505,14 +511,15 @@ def test_ir56b_is_a_per_employee_report_with_a_masked_identity_and_a_case_link(d
     assert "MASKED" in " ".join(report.rendered_data["knownGaps"])
 
     # The case is the filing tracker and points at the report.
-    from app.modules.payroll.models import HkgIrdReportingCase
-    case = (db.query(HkgIrdReportingCase)
-            .filter(HkgIrdReportingCase.form_type == "IR56B",
-                    HkgIrdReportingCase.employee_id == emp.id).one())
+    from app.modules.payroll.models import HongKongIrdReportingCase
+    case = (db.query(HongKongIrdReportingCase)
+            .filter(HongKongIrdReportingCase.form_type == "IR56B",
+                    HongKongIrdReportingCase.employee_id == emp.id).one())
     assert case.generated_report_id == report.id
 
 
 def test_ir56b_refuses_a_suppressed_employee_and_another_tenants_employee(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import BadRequestException, NotFoundException
     from app.modules.organizations.models import Organization
     from app.modules.payroll import service
@@ -524,19 +531,19 @@ def test_ir56b_refuses_a_suppressed_employee_and_another_tenants_employee(db, or
     _annual_return(db, organization.id)
     t = _seeded(db, "HK-IR56B")
 
-    from app.modules.payroll.models import HkgIrdReportingCase
-    case = (db.query(HkgIrdReportingCase)
-            .filter(HkgIrdReportingCase.form_type == "IR56B",
-                    HkgIrdReportingCase.employee_id == emp.id).one())
+    from app.modules.payroll.models import HongKongIrdReportingCase
+    case = (db.query(HongKongIrdReportingCase)
+            .filter(HongKongIrdReportingCase.form_type == "IR56B",
+                    HongKongIrdReportingCase.employee_id == emp.id).one())
     case.status, case.suppression_reason = "SUPPRESSED", "IR56F already reported the employee"
     db.commit()
     with pytest.raises(BadRequestException, match="SUPPRESSED"):
-        service.generate_hong_kong_ir56b(db, organization.id, t.id, emp.id, YA)
+        hong_kong_service.generate_hong_kong_ir56b(db, organization.id, t.id, emp.id, YA)
 
     # An employee with no prepared case at all is a clear 400, not an empty report.
     other_emp = _employee(db, organization.id, "HK-NO-CASE")
     with pytest.raises(BadRequestException, match="No IR56B has been prepared"):
-        service.generate_hong_kong_ir56b(db, organization.id, t.id, other_emp.id, YA)
+        hong_kong_service.generate_hong_kong_ir56b(db, organization.id, t.id, other_emp.id, YA)
 
     # A different tenant's employee id is a 404, never a cross-tenant read.
     other = Organization(organization_name="Other Org", organization_code="HK-OTHER")
@@ -544,10 +551,11 @@ def test_ir56b_refuses_a_suppressed_employee_and_another_tenants_employee(db, or
     db.commit()
     stranger = _employee(db, other.id, "HK-STRANGER")
     with pytest.raises(NotFoundException):
-        service.generate_hong_kong_ir56b(db, organization.id, t.id, stranger.id, YA)
+        hong_kong_service.generate_hong_kong_ir56b(db, organization.id, t.id, stranger.id, YA)
 
 
 def test_ir56b_reports_no_tax_component_and_only_committed_payslips(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _active_pack(db, organization)
@@ -561,7 +569,7 @@ def test_ir56b_reports_no_tax_component_and_only_committed_payslips(db, organiza
     _annual_return(db, organization.id)
     t = _seeded(db, "HK-IR56B")
 
-    values = service.generate_hong_kong_ir56b(
+    values = hong_kong_service.generate_hong_kong_ir56b(
         db, organization.id, t.id, emp.id, YA).rendered_data["employees"][0]["values"]
     assert values["mpf_employer_total"] == 1000.0
     assert "tax" not in values
@@ -573,6 +581,7 @@ def test_ir56b_reports_no_tax_component_and_only_committed_payslips(db, organiza
                                                    ("IR56F", "HK_IR56F"),
                                                    ("IR56G", "HK_IR56G")])
 def test_ir56_notification_renders_its_case_matching_template_and_links_it(db, organization, form_type, report_type):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _active_pack(db, organization)
@@ -581,7 +590,7 @@ def test_ir56_notification_renders_its_case_matching_template_and_links_it(db, o
     case = _ir56_case(db, organization.id, emp, form_type, date(2025, 6, 2))
     t = _seeded(db, f"HK-{form_type}")
 
-    report = service.generate_hong_kong_ir56_notification(db, organization.id, t.id, case.id)
+    report = hong_kong_service.generate_hong_kong_ir56_notification(db, organization.id, t.id, case.id)
 
     assert report.report_type == report_type
     assert report.employee_id == emp.id
@@ -592,6 +601,7 @@ def test_ir56_notification_renders_its_case_matching_template_and_links_it(db, o
 
 
 def test_ir56_notification_refuses_a_mismatched_template_and_a_non_notification_case(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
@@ -601,18 +611,18 @@ def test_ir56_notification_refuses_a_mismatched_template_and_a_non_notification_
     e_case = _ir56_case(db, organization.id, emp, "IR56E", date(2025, 6, 2))
     f_template = _template(db, "HK-IR56F-M", "HK_IR56F", scope="PER_EMPLOYEE")
     with pytest.raises(BadRequestException, match="must be reported on a HK_IR56E template"):
-        service.generate_hong_kong_ir56_notification(db, organization.id, f_template.id, e_case.id)
+        hong_kong_service.generate_hong_kong_ir56_notification(db, organization.id, f_template.id, e_case.id)
 
     b_case = _ir56_case(db, organization.id, emp, "IR56B", date(2026, 3, 31))
     e_template = _template(db, "HK-IR56E-M", "HK_IR56E", scope="PER_EMPLOYEE")
     with pytest.raises(BadRequestException, match="not an employee notification"):
-        service.generate_hong_kong_ir56_notification(db, organization.id, e_template.id, b_case.id)
+        hong_kong_service.generate_hong_kong_ir56_notification(db, organization.id, e_template.id, b_case.id)
 
 
 def test_ir56g_reports_the_tax_clearance_hold_as_a_hold_not_a_deduction(db, organization):
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
     from app.modules.payroll.engine.jurisdictions.hong_kong import tax_clearance as hk_tc
-    from app.modules.payroll.models import HkgTaxClearanceHold, HkgTaxClearanceHoldLine
+    from app.modules.payroll.models import HongKongTaxClearanceHold, HongKongTaxClearanceHoldLine
 
     _active_pack(db, organization)
     _employer(db, organization)
@@ -622,25 +632,25 @@ def test_ir56g_reports_the_tax_clearance_hold_as_a_hold_not_a_deduction(db, orga
     t = _seeded(db, "HK-IR56G")
 
     # No hold exists yet, so the hold block is empty rather than zero-fabricated.
-    values = service.generate_hong_kong_ir56_notification(
+    values = hong_kong_service.generate_hong_kong_ir56_notification(
         db, organization.id, t.id, case.id).rendered_data["employees"][0]["values"]
     assert values["hold_state"] is None
     assert values["amount_withheld"] is None
 
     # A hold in a HOLDING state, with a real held-ledger line, is reported as the
     # withheld amount.
-    hold = HkgTaxClearanceHold(organization_id=organization.id, employee_id=emp.id, ird_case_id=case.id,
+    hold = HongKongTaxClearanceHold(organization_id=organization.id, employee_id=emp.id, ird_case_id=case.id,
                                state=hk_tc.HOLDING_STATES[0], expected_departure_date=date(2026, 2, 28),
                                identified_on=date(2026, 1, 28), filing_deadline=date(2026, 1, 28),
                                filed_date=date(2026, 1, 28), statutory_hold_expiry=date(2026, 2, 28))
     db.add(hold)
     db.commit()
     db.refresh(hold)
-    db.add(HkgTaxClearanceHoldLine(hold_id=hold.id, organization_id=organization.id,
+    db.add(HongKongTaxClearanceHoldLine(hold_id=hold.id, organization_id=organization.id,
                                    payslip_item_id=item.id, amount=D("20000")))
     db.commit()
 
-    data = service.generate_hong_kong_ir56_notification(
+    data = hong_kong_service.generate_hong_kong_ir56_notification(
         db, organization.id, t.id, case.id).rendered_data
     values = data["employees"][0]["values"]
     assert values["hold_state"] in hk_tc.HOLDING_STATES
@@ -653,6 +663,7 @@ def test_ir56g_reports_the_tax_clearance_hold_as_a_hold_not_a_deduction(db, orga
 
 
 def test_ir56_notification_is_tenant_isolated(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import NotFoundException
     from app.modules.organizations.models import Organization
     from app.modules.payroll import service
@@ -668,29 +679,29 @@ def test_ir56_notification_is_tenant_isolated(db, organization):
     t = _template(db, "HK-IR56E-TEN", "HK_IR56E", scope="PER_EMPLOYEE")
 
     with pytest.raises(NotFoundException):
-        service.generate_hong_kong_ir56_notification(db, organization.id, t.id, case.id)
+        hong_kong_service.generate_hong_kong_ir56_notification(db, organization.id, t.id, case.id)
 
 
 # ── HK-EMPF-REMITTANCE ────────────────────────────────────────────────────
 
 def test_empf_remittance_represents_the_submission_and_links_it(db, organization):
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
 
     _active_pack(db, organization)
     _employer(db, organization)
     emp = _employee(db, organization.id, "HK-EMPF-1")
     _hk_payslip(db, organization.id, emp, date(2026, 5, 29), gross="20000",
                 relevant_income="20000", employer_pension="1000", employee_pension="0")
-    submission = hk_service.prepare_empf_submission(db, organization.id, MPF_PERIOD, None)
+    submission = hong_kong_service.prepare_empf_submission(db, organization.id, MPF_PERIOD, None)
     t = _seeded(db, "HK-EMPF-REMITTANCE")
 
-    report = service.generate_hong_kong_empf_remittance(db, organization.id, t.id, submission.id)
+    report = hong_kong_service.generate_hong_kong_empf_remittance(db, organization.id, t.id, submission.id)
 
     assert report.report_type == "HK_EMPF_REMITTANCE"
     assert report.rendered_data["period"]["contributionPeriod"] == MPF_PERIOD
     assert report.rendered_data["totals"] == submission.totals
     assert report.rendered_data["employees"][0]["relevantIncome"] == "20000"
-    # The identity on the remittance line is the ALREADY-MASKED value hk_service
+    # The identity on the remittance line is the ALREADY-MASKED value hong_kong_service
     # persisted; the unmasked HKID is not re-derived here.
     assert report.rendered_data["employees"][0]["hkid"] != "Z1234567"
     assert "Z1234567" not in str(report.rendered_data)
@@ -714,16 +725,16 @@ def test_empf_remittance_is_tenant_isolated(db, organization):
     _employer(db, other)
     stranger = _employee(db, other.id, "HK-EMPF-NOT-MINE")
     _hk_payslip(db, other.id, stranger, date(2026, 5, 29), gross="20000")
-    from app.modules.payroll import hk_service
-    submission = hk_service.prepare_empf_submission(db, other.id, MPF_PERIOD, None)
+    from app.modules.payroll import hong_kong_service
+    submission = hong_kong_service.prepare_empf_submission(db, other.id, MPF_PERIOD, None)
     t = _template(db, "HK-EMPF-TEN", "HK_EMPF_REMITTANCE")
 
     with pytest.raises(NotFoundException):
-        service.generate_hong_kong_empf_remittance(db, organization.id, t.id, submission.id)
+        hong_kong_service.generate_hong_kong_empf_remittance(db, organization.id, t.id, submission.id)
 
 
 def test_empf_excludes_draft_and_non_hong_kong_payslips(db, organization):
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
 
     _active_pack(db, organization)
     _employer(db, organization)
@@ -733,10 +744,10 @@ def test_empf_excludes_draft_and_non_hong_kong_payslips(db, organization):
                 employer_pension="9000", run_status="DRAFT")
     _hk_payslip(db, organization.id, emp, date(2026, 5, 30), gross="88000",
                 employer_pension="8000", country="US")
-    submission = hk_service.prepare_empf_submission(db, organization.id, MPF_PERIOD, None)
+    submission = hong_kong_service.prepare_empf_submission(db, organization.id, MPF_PERIOD, None)
     t = _seeded(db, "HK-EMPF-REMITTANCE")
 
-    totals = service.generate_hong_kong_empf_remittance(
+    totals = hong_kong_service.generate_hong_kong_empf_remittance(
         db, organization.id, t.id, submission.id).rendered_data["totals"]
     assert totals["employees"] == 1
     assert D(totals["relevantIncome"]) == D("20000.00")
@@ -747,6 +758,7 @@ def test_ird_reconciliation_excludes_another_jurisdictions_payslip_for_the_same_
     for the same employee, in the same year of assessment, even one carrying an
     HK-shaped trace, never enters the BIR56A / IR56B totals or their reconciliation
     to committed payroll."""
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _active_pack(db, organization)
@@ -757,7 +769,7 @@ def test_ird_reconciliation_excludes_another_jurisdictions_payslip_for_the_same_
     _hk_payslip(db, organization.id, emp, date(2026, 3, 31), gross="66000", country="SG")
     t = _seeded(db, "HK-BIR56A")
 
-    report = service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
+    report = hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
 
     assert report.reconciliation["status"] == "Reconciled"
     assert D(report.reconciliation["reportedTotal"]) == D("20000")
@@ -768,7 +780,7 @@ def test_empf_reports_no_voluntary_contribution_amount(db, organization):
     """Voluntary MPF is out of the first release (D-B): the report structure can
     carry it later, but nothing today may present a voluntary amount as if it
     were a real figure."""
-    from app.modules.payroll import hk_service, service
+    from app.modules.payroll import hong_kong_service, service
 
     _active_pack(db, organization)
     _employer(db, organization)
@@ -777,10 +789,10 @@ def test_empf_reports_no_voluntary_contribution_amount(db, organization):
     # employee contributes nil, and there is no voluntary amount anywhere.
     _hk_payslip(db, organization.id, emp, date(2026, 5, 29), gross="5000", relevant_income="5000",
                 employer_pension="250", employee_pension="0")
-    submission = hk_service.prepare_empf_submission(db, organization.id, MPF_PERIOD, None)
+    submission = hong_kong_service.prepare_empf_submission(db, organization.id, MPF_PERIOD, None)
     t = _seeded(db, "HK-EMPF-REMITTANCE")
 
-    data = service.generate_hong_kong_empf_remittance(
+    data = hong_kong_service.generate_hong_kong_empf_remittance(
         db, organization.id, t.id, submission.id).rendered_data
     assert data["totals"]["employeeMandatory"] == "0.00"
     assert D(data["totals"]["employerMandatory"]) == D("250.00")
@@ -791,6 +803,7 @@ def test_empf_reports_no_voluntary_contribution_amount(db, organization):
 # ── HK-MPF-CONTRIBUTION-RECORD (HK-010) ────────────────────────────────────
 
 def test_mpf_contribution_record_is_the_employees_own_period_record(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.modules.payroll import service
 
     _active_pack(db, organization)
@@ -802,7 +815,7 @@ def test_mpf_contribution_record_is_the_employees_own_period_record(db, organiza
                 employer_pension="1000", employee_pension="0")   # the month BEFORE, not in scope
     t = _seeded(db, "HK-MPF-CONTRIBUTION-RECORD")
 
-    report = service.generate_hong_kong_mpf_contribution_record(
+    report = hong_kong_service.generate_hong_kong_mpf_contribution_record(
         db, organization.id, t.id, emp.id, MPF_PERIOD)
 
     assert report.employee_id == emp.id
@@ -818,6 +831,7 @@ def test_mpf_contribution_record_is_the_employees_own_period_record(db, organiza
 
 
 def test_mpf_contribution_record_refuses_a_month_with_no_committed_hk_payroll(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
@@ -827,11 +841,12 @@ def test_mpf_contribution_record_refuses_a_month_with_no_committed_hk_payroll(db
     t = _seeded(db, "HK-MPF-CONTRIBUTION-RECORD")
 
     with pytest.raises(BadRequestException, match="no committed Hong Kong payroll"):
-        service.generate_hong_kong_mpf_contribution_record(
+        hong_kong_service.generate_hong_kong_mpf_contribution_record(
             db, organization.id, t.id, emp.id, "2026-11")      # the template's own year, no payroll
 
 
 def test_mpf_contribution_record_is_tenant_isolated(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import NotFoundException
     from app.modules.organizations.models import Organization
     from app.modules.payroll import service
@@ -847,7 +862,7 @@ def test_mpf_contribution_record_is_tenant_isolated(db, organization):
     t = _template(db, "HK-MPF-REC-TEN", "HK_MPF_CONTRIBUTION_RECORD", scope="PER_EMPLOYEE")
 
     with pytest.raises(NotFoundException):
-        service.generate_hong_kong_mpf_contribution_record(
+        hong_kong_service.generate_hong_kong_mpf_contribution_record(
             db, organization.id, t.id, stranger.id, MPF_PERIOD)
 
 
@@ -885,6 +900,7 @@ def test_generic_generator_requires_an_active_hong_kong_template(db, organizatio
 
 
 def test_hk_generators_write_reports_a_tenant_cannot_see_across_orgs(db, organization):
+    from app.modules.payroll import hong_kong_service
     from app.core.exceptions import NotFoundException
     from app.modules.organizations.models import Organization
     from app.modules.payroll import service
@@ -894,7 +910,7 @@ def test_hk_generators_write_reports_a_tenant_cannot_see_across_orgs(db, organiz
     emp = _employee(db, organization.id, "HK-SCOPE")
     _hk_payslip(db, organization.id, emp, date(2026, 3, 31), gross="20000")
     t = _seeded(db, "HK-BIR56A")
-    report = service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
+    report = hong_kong_service.generate_hong_kong_bir56a(db, organization.id, t.id, YA)
 
     other = Organization(organization_name="Other Org 5", organization_code="HK-OTHER-5")
     db.add(other)

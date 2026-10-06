@@ -7,7 +7,7 @@ Employment Ordinance obligation is unmet) and §7/§8 (IRD reporting readiness).
 
 Pure: every statutory decision comes from the calculation engine or from the
 pure rule modules — this file evaluates NO rate and NO threshold of its own.
-It reads the persisted / dry-run `hkg_calculation_trace` and the pack's
+It reads the persisted / dry-run `hk_calculation_trace` and the pack's
 `rate_map` (already resolved by the service) and turns them into operator
 checks, exactly like the Singapore preflight does.
 

@@ -1,13 +1,13 @@
 """
 scripts/regenerate_hk_golden_fixtures.py
 -----------------------------------------
-Re-embeds the PACK ROWS (rate_map / slabs / hkg_rule_segments) of every Hong
+Re-embeds the PACK ROWS (rate_map / slabs / hk_rule_segments) of every Hong
 Kong golden vector from the canonical seed, after a seed change.
 
 THE EXPECTED FIGURES ARE NEVER TOUCHED. Each fixture's ``description``,
 ``source`` and ``expected`` block is read back and written out verbatim; only
-the ``context.rate_map`` / ``context.slabs`` / ``context.hkg_rule_segments``
-blocks are replaced, exactly as hk_service._pack_rows_for_golden builds them
+the ``context.rate_map`` / ``context.slabs`` / ``context.hk_rule_segments``
+blocks are replaced, exactly as hong_kong_service._pack_rows_for_golden builds them
 for the pack-bound check. If a case cannot be re-seeded it is left alone and
 reported, so a failed run never silently weakens a golden vector.
 
@@ -28,14 +28,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import SessionLocal, initialize_database  # noqa: E402
-from app.modules.payroll.hk_service import _pack_rows_for_golden  # noqa: E402
+from app.modules.payroll.hong_kong_service import _pack_rows_for_golden  # noqa: E402
 from app.modules.payroll.models import JurisdictionPack  # noqa: E402
 from scripts._local_db_guard import assert_local_database  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "hk_golden"
 # Written back unchanged on every run — the independent verification content.
 PRESERVED = ("description", "source", "pack", "expected")
-EMBEDDED = ("rate_map", "slabs", "hkg_rule_segments")
+EMBEDDED = ("rate_map", "slabs", "hk_rule_segments")
 
 
 def regenerate(db, write: bool) -> int:
@@ -59,8 +59,8 @@ def regenerate(db, write: bool) -> int:
                   date.fromisoformat(ctx.get("period_end") or pay.isoformat()))
         rate_map, slabs, segments = _pack_rows_for_golden(db, pack, pay, period)
         before = {k: ctx.get(k) for k in EMBEDDED}
-        ctx["rate_map"], ctx["slabs"], ctx["hkg_rule_segments"] = rate_map, slabs, segments
-        if before == {"rate_map": rate_map, "slabs": slabs, "hkg_rule_segments": segments}:
+        ctx["rate_map"], ctx["slabs"], ctx["hk_rule_segments"] = rate_map, slabs, segments
+        if before == {"rate_map": rate_map, "slabs": slabs, "hk_rule_segments": segments}:
             print(f"  ok   {path.stem}: embedded rows already current")
             continue
         changed += 1
